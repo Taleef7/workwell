@@ -1,0 +1,31 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node
+**/node_modules/
+**/.next/
+**/out/
+**/dist/
+
+# Java / Gradle
+**/build/
+**/.gradle/
+*.class
+
+# Logs and temp
+*.log
+*.tmp
+
+# Local tool artifacts
+.playwright-mcp/
+.graphify_uncached.txt
+
+# Environment files
+.env
+.env.*
+
+# Generated analysis artifacts
+graphify-out/
