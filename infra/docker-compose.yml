@@ -9,15 +9,23 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workwell -d workwell"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   hapi-fhir:
     image: hapiproject/hapi:latest
     ports:
       - "8081:8080"
+    environment:
+      hapi.fhir.fhir_version: R4
 
   backend:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: infra/backend.Dockerfile
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/workwell
       SPRING_DATASOURCE_USERNAME: workwell
@@ -25,11 +33,13 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   frontend:
     build:
-      context: ../frontend
+      context: ..
+      dockerfile: infra/frontend.Dockerfile
     ports:
       - "3000:3000"
     depends_on:
