@@ -2,9 +2,11 @@ import Link from "next/link";
 
 const nav = [
   { href: "/programs", label: "Programs" },
+  { href: "/worklist", label: "Worklist" },
   { href: "/measures", label: "Measures" },
-  { href: "/runs", label: "Runs" },
-  { href: "/cases", label: "Cases" }
+  { href: "/studio", label: "Studio" },
+  { href: "/runs", label: "Test Runs" },
+  { href: "/admin", label: "Admin" }
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
