@@ -10,7 +10,7 @@ Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) work
 ## Read before any task
 `@docs/SPIKE_PLAN.md` is canonical: scope, 16-day schedule, per-spike acceptance, daily rhythm, hard risks, rollback rules. Always confirm which spike is active before starting work.
 
-`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it.
+`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contanins the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway

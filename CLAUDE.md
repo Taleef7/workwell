@@ -8,7 +8,7 @@
 ## Read first, every session
 `@docs/SPIKE_PLAN.md` is the canonical scope, schedule, daily rhythm, risks, rollback rules. If anything here conflicts with the spike plan, the plan wins. Always check the schedule table to confirm which spike we're in before starting work.
 
-`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it.
+`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contanins the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21 + Spring Boot 3.x + Gradle Kotlin DSL + PostgreSQL 16 + Flyway

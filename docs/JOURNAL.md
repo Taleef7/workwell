@@ -1,124 +1,89 @@
 # Journal
 
-## 2026-04-29
+## 2026-05-02
 
-Planning baseline completed in `docs/PROJECT_PLAN.md`; scaffold landed in commit `53e65cf`; spike plan documented in `docs/superpowers/plans/2026-04-29-cqf-fhir-cr-spike.md`; open risks captured around Phase 2 integration depth, Missing Data vs Overdue branching, and AI guardrail enforcement.
+### D1 - Plan + Provision (completed)
+
+**Goals set**
+- Finalize canonical sprint docs and archive legacy planning docs.
+- Prepare deploy targets (Neon, Fly.io, Vercel) without doing the D2 deployment.
+- Close ADR-002 on `evidence_json` shape to unblock S1.
+
+**What shipped today**
+- Archived legacy plan files under `docs/archive/`, including `PROJECT_PLAN_v1.md` with top note:
+  - "Archived May 2, 2026. Replaced by docs/SPIKE_PLAN.md."
+- Canonical sprint docs are now in place:
+  - `docs/SPIKE_PLAN.md`
+  - `docs/DEPLOY.md`
+  - `AGENTS.md` and `CLAUDE.md` updated to point to `SPIKE_PLAN.md` as source of truth.
+- Added root `.env.example` with all deployment variables from `docs/DEPLOY.md`:
+  - `DATABASE_URL`
+  - `DATABASE_URL_DIRECT`
+  - `ANTHROPIC_API_KEY`
+  - `SPRING_PROFILES_ACTIVE`
+  - `NEXT_PUBLIC_API_BASE_URL`
+  - `NEXT_PUBLIC_APP_NAME`
+- Added `backend/fly.toml` with D1 baseline:
+  - app: `workwell-measure-studio-api`
+  - region: `ord`
+  - memory: `512mb`
+  - healthcheck: `/actuator/health`
+  - JVM opts: `-Xmx384m -Xss256k`
+- Closed ADR-002 in `docs/DECISIONS.md` with accepted shape:
+  - `evidence_json = { expressionResults, evaluatedResource }`
+  - `rule_path[]` derived at render time (not persisted)
+
+**Sub-spike / verification evidence**
+- Re-ran CQF ADR probe test in spike repo:
+  - `../workwell-spike-cqf`: `./gradlew.bat test --tests com.workwell.spike.DualEvaluationCostSubSpikeTest`
+  - Result: `BUILD SUCCESSFUL`
+- Backend tests in this repo were green in D1 verification sweep:
+  - `backend\gradlew.bat test` -> `BUILD SUCCESSFUL`
+
+**Provisioning status (end of D1)**
+- Fly:
+  - Authenticated and app created with `flyctl launch --no-deploy`.
+  - Current staged secret: `SPRING_PROFILES_ACTIVE=prod`.
+  - No app deploy performed (correct for D1).
+- Vercel:
+  - Git repository now connected (confirmed in project Git settings).
+  - Preview deployment failure observed on PR branch due to project root mismatch.
+  - Exact error: "No Next.js version detected".
+  - Root cause: Vercel building from repo root while Next.js app lives in `frontend/`.
+  - Required fix: set Vercel project Root Directory to `frontend` and redeploy.
+- Neon:
+  - CLI provisioning created a project defaulting to PostgreSQL 17.
+  - This conflicts with locked stack requirement (PostgreSQL 16).
+  - DB secrets pointing to PG17 were intentionally not kept as final runtime configuration.
+
+**What surprised**
+- Neon CLI default behavior is PG17 unless PG version is explicitly controlled through supported path.
+- Vercel integration succeeded, but monorepo root detection still caused preview build failure.
+- CQF processor two-step path remains the best evidence-friendly path and did not require a second full evaluation in the measured probe.
+
+**Risk status**
+- ADR-002 risk: closed.
+- Vercel preview build risk: open until Root Directory is set to `frontend`.
+- Database version compliance risk: open until Neon PG16 target is created/selected.
+
+**Plan for D2 (S0 walking skeleton only)**
+- Do not add scope beyond S0.
+- Complete infra readiness first:
+  - Ensure Vercel Root Directory = `frontend` and preview deploy succeeds.
+  - Ensure Neon target is PostgreSQL 16.
+  - Set final Fly DB secrets (`DATABASE_URL`, `DATABASE_URL_DIRECT`) from compliant PG16 Neon target.
+  - Add `ANTHROPIC_API_KEY` only if AI surface is exercised in S0 path.
+- Then execute S0 end-to-end:
+  - Backend `/api/eval` on Fly
+  - Frontend call from Vercel
+  - Health checks and demoable round-trip
+
+---
 
 ## 2026-05-01
 
-### cqf-fhir-cr Risk Spike â€” COMPLETED
+CQF/FHIR de-risking and ADR-002 probes completed in `../workwell-spike-cqf` with passing test evidence and documented transfer notes in `docs/CQF_FHIR_CR_REFERENCE.md`.
 
-**What changed:** Executed full `R4MeasureService` evaluation spike in `../workwell-spike-cqf/`. CQL measure (`HasRecentProcedure`) evaluated against two synthetic patients in `InMemoryFhirRepository`. Results verified correct: compliant patient numerator=1, non-compliant patient numerator=0. `evaluatedResource` list in MeasureReport traces which Procedure drove the decision.
+## 2026-04-29
 
-**Versions confirmed working:**
-- `org.opencds.cqf.fhir:cqf-fhir-cr:3.26.0` (latest stable; NOT 4.x â€” Maven Central UI was misleading)
-- `cqf-fhir-cql:3.26.0`, `cqf-fhir-utility:3.26.0` (same version track)
-- HAPI FHIR 8.4.0 (transitive â€” higher than plan expected)
-
-**Plan corrections discovered:**
-1. Entry point is `R4MeasureService`, not `R4MeasureProcessor` â€” simpler constructor, simpler evaluate() signature
-2. `org.opencds.cqf.fhir.api.Repository` deprecated â†’ use `ca.uhn.fhir.repository.IRepository`
-3. `Library.content.setData()` takes raw bytes (not pre-base64) â€” double-encoding silently breaks CQL parsing
-4. `InMemoryFhirRepository.update()` preserves resource ids; `.create()` assigns new ids and breaks patient lookup
-5. Three mandatory runtime extras: `hapi-fhir-caching-caffeine`, `eclipse.persistence.moxy`, `fhirContext.setValidationSupport()`
-6. `evaluatedResource` in MeasureReport = free `evidence_json` data â€” no custom extraction needed
-
-**Bonus finding:** `measureScore` (0.0â€“1.0) computed automatically for proportion measures.
-
-**Re-run:** `cd ../workwell-spike-cqf && ./gradlew run`
-
-**Why:** De-risk Phase 2 (Week 5â€“7) before internship. Full findings â†’ `../workwell-spike-cqf/SPIKE_REPORT.md`.
-
-**Risks remaining:**
-- HAPI 8.4.0 vs Spring Boot 3.3.5 â€” check version compat before Week 5 (expect forced resolution needed)
-- `cqf-fhir-cr-hapi` (HAPI JPA repository wrapper) not yet tested â€” 15-min sub-spike before Week 5
-- All 4 demo measures not validated â€” only "has recent Procedure" pattern tested
-- Not load-tested at 200+ employees Ã— 4 measures
-
-## 2026-05-18
-- What changed:
-- Why:
-- Verification:
-- Risks/next:
-
-### cqf-fhir-cr-hapi Sub-spike - COMPLETED (2026-05-01)
-
-**What changed:** Ran a JPA-path sub-spike in `../workwell-spike-cqf/` to verify `cqf-fhir-cr-hapi` and confirm wiring compatibility with `R4MeasureService`.
-
-**Findings:**
-- Maven Central artifact exists: `org.opencds.cqf.fhir:cqf-fhir-cr-hapi` (latest `4.6.0`; `3.26.0` available on same coordinate line).
-- On the `3.26.0` line, `RepositoryConfig` constructs `HapiFhirRepository`, and `HapiFhirRepository` implements `ca.uhn.fhir.repository.IRepository`.
-- Proof executed on HAPI JPA test harness (`BaseJpaR4Test`) with `HapiFhirRepository` + same `HasRecentProcedure` measure:
-  - `patient-with-procedure` numerator=1
-  - `patient-without-procedure` numerator=0
-
-**Verification:** `cd ../workwell-spike-cqf && ./gradlew test --tests com.workwell.spike.HapiJpaPathSubSpikeTest`
-
-**Risks/next:**
-- No Phase 2 pivot needed for repository interface compatibility.
-- Version policy still needs decision before integration (`3.26.0` line vs latest `4.6.0` line).
-
-### CQF reference extraction + ADR-002 define-results probe (2026-05-01)
-
-**What changed:** Added `docs/CQF_FHIR_CR_REFERENCE.md` as a load-bearing Week 5 reference extracted from spike artifacts (`../workwell-spike-cqf/SPIKE_REPORT.md`, `SPIKE_NOTES.md`) and refreshed with current Maven metadata.
-
-**Captured in reference doc:**
-- Confirmed coordinates: `org.opencds.cqf.fhir:cqf-fhir-cr` and `org.opencds.cqf.fhir:cqf-fhir-cr-hapi`
-- Compatible pin: `3.26.0`; latest noted: `4.6.0`
-- Minimal real wiring snippet for `R4MeasureService` + required runtime deps
-- 6 plan corrections table (`Plan assumed` vs `Reality`)
-- JPA bridge confirmation (`RepositoryConfig` -> `HapiFhirRepository implements IRepository`)
-- Exact classpath gotcha symptom and exact dependency exclusion fix
-
-**ADR-002 probe result (important):**
-- `R4MeasureService.evaluate(...)` alone does not expose a define map on `MeasureReport`.
-- `R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)` exposes per-subject `EvaluationResult.expressionResults` (define/value pairs).
-- Probe output included:
-  - `EXPR_KEYS=[Denominator, Initial Population, Numerator, Patient]`
-  - `EXPR_VALUE=Numerator => true`
-
-**Why:** Prevent Week 5 re-discovery churn, especially the model-provider classpath conflict and evidence-shape uncertainty.
-
-### ADR-002 dual-evaluation cost probe (2026-05-01)
-
-**What changed:** Ran a focused sub-spike in `../workwell-spike-cqf/` to answer whether `MeasureReport` and define-level `expressionResults` can be produced in one call, or if this implies double evaluation cost.
-
-**Verified behavior (`cqf-fhir-cr:3.26.0`):**
-- `R4MeasureService.evaluate(...)` returns only `MeasureReport`.
-- `R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)` returns only `CompositeEvaluationResultsPerMeasure`.
-- No single public method returns both artifacts together.
-
-**Important nuance (cost):**
-- Processor path can still avoid a second full CQL execution:
-  1. `evaluateMeasureWithCqlEngine(...)` (heavy eval, yields expression map)
-  2. `evaluateMeasure(..., compositeResults)` (report materialization from captured results)
-- Rough single-patient timing from probe test:
-  - `serviceEvaluateMs=5`
-  - `engineEvalMs=2`
-  - `reportBuildFromCompositeMs=0`
-
-**Evidence artifact:** `../workwell-spike-cqf/src/test/java/com/workwell/spike/DualEvaluationCostSubSpikeTest.java` and `../workwell-spike-cqf/SPIKE_REPORT.md` section `Sub-spike: dual-evaluation cost`.
-
-**Decision impact:** ADR-002 remains **Proposed** for now (not one-call-both). Week 5 can choose simpler `R4MeasureService` baseline or processor two-step path based on real run-load context.
-- 2026-05-01: ADR-002 promoted to **Accepted** with composite two-step pipeline as canonical; Project Plan risk marked closed and Why Flagged scope updated to structured-first, AI-optional.
-- 2026-05-01: Brief B/C reconciliation applied to scaffold and docs (backend/infra/frontend deltas plus ARCHITECTURE, DATA_MODEL, AI_GUARDRAILS, and ADR-001 alignment updates).
-- 2026-05-01: Diagnosed backend build blocker: original failure was non-Testcontainers `BackendApplicationTests` hitting `localhost:5432`; wired Postgres 16 Testcontainers + dynamic datasource override, then isolated remaining failure to Docker API client/provider mismatch (not Flyway/V001 SQL).
-
-## 2026-05-02
-
-## 2026-05-02 — Pre-internship close-out
-
-Resolved local ./gradlew clean build on Windows. Root cause:
-Testcontainers BOM 1.20.6 hardcoded Docker API v1.32, which
-Docker Engine 29.4.1 (API v1.54) rejected with HTTP 400. Fix:
-bump BOM to 1.21.4 (upstream issue testcontainers-java#11235).
-BackendApplicationTests.contextLoads now passes locally with a
-live postgres testcontainer. CI on Ubuntu was already green;
-this closes the local-test-loop gap.
-
-Pre-internship deliverables complete: backend skeleton (Spring
-Boot 3.3.5, Java 21), Flyway migrations (V001), JPA wiring,
-Testcontainers integration test passing locally and in CI,
-OpenAPI scaffolding via springdoc, MapStruct mappers
-configured. Project ready for Week 1.
-
+Initial planning baseline and scaffolding completed.
