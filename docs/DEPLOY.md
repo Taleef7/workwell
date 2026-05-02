@@ -63,7 +63,7 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 1. Import GitHub repo, root directory `frontend/`
 2. Framework: Next.js (auto-detected)
 3. Env vars:
-   - `NEXT_PUBLIC_API_BASE_URL` = Fly app URL (e.g., `https://workwell-backend.fly.dev`)
+   - `NEXT_PUBLIC_API_BASE_URL` = Fly app URL (e.g., `https://workwell-measure-studio-api.fly.dev`)
    - `NEXT_PUBLIC_APP_NAME` = `WorkWell Measure Studio`
 4. D1 stops after project connection and env configuration. First deploy from `main` happens during D2/S0.
 
