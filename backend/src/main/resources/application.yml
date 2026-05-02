@@ -1,9 +1,9 @@
 spring:
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}
+    url: jdbc:${DATABASE_URL:postgresql://localhost:5432/workwell}
   flyway:
     enabled: true
-    url: ${DATABASE_URL_DIRECT:${spring.datasource.url}}
+    url: jdbc:${DATABASE_URL_DIRECT:${DATABASE_URL:postgresql://localhost:5432/workwell}}
 management:
   endpoints:
     web:
