@@ -1,3 +1,5 @@
+Archived May 2, 2026. Replaced by docs/SPIKE_PLAN.md.
+
 Compressing inline — applying caveman rules directly to the provided text, preserving all code blocks, URLs, headings, and file paths exactly.
 
 # WorkWell Measure Studio — Summer 2026 Project Plan

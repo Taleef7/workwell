@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-05-02
+
+### D1 - Plan + Provision
+
+**Goals set:** Archive the old project plan, make `docs/SPIKE_PLAN.md` canonical, prepare deploy target configuration for Neon/Fly/Vercel, and close ADR-002 so S1 can rely on a concrete `evidence_json` shape.
+
+**What shipped:**
+- Archived `docs/PROJECT_PLAN.md` into `docs/archive/PROJECT_PLAN_v1.md` with an explicit replacement note.
+- Confirmed `CLAUDE.md` and `AGENTS.md` point agents to `@docs/SPIKE_PLAN.md` first and warn against acting on the archived plan.
+- Added root `.env.example` covering every variable listed in `docs/DEPLOY.md` and adjusted `.gitignore` so the template is committable while real env files stay ignored.
+- Created Fly app `workwell-measure-studio-api` in `ord` with `shared-cpu-1x` / `512mb`, no deploy, no Fly Postgres, and valid `backend/fly.toml`.
+- Staged Fly `SPRING_PROFILES_ACTIVE=prod`; intentionally removed the Neon DB secrets after discovering the created Neon project was PostgreSQL 17 instead of the required PostgreSQL 16. `ANTHROPIC_API_KEY` remains pending because no local key was available.
+- Created/linked Vercel project `workwell-measure-studio` locally for `frontend/` and set Production + Development env vars.
+- Closed ADR-002 with the processor two-step evidence path: `expressionResults` plus `evaluatedResource`.
+
+**What surprised:**
+- `R4MeasureService.evaluate(...)` stays clean but only returns `MeasureReport`; define-level traceability needs the lower-level processor composite result.
+- Neon CLI created the project on PostgreSQL 17 by default; Context7 says the CLI cannot choose another version, so the PG17 project is not the final compliant database target for this PostgreSQL 16 stack.
+- Vercel CLI could not connect the GitHub repo to the project (`Project "workwell-measure-studio" does not have a connected Git repository`), so Preview env vars and auto-deploy still need dashboard/GitHub-app authorization.
+
+**Plan for D2:**
+- Start S0 only after deploy accounts are ready: Spring Boot `/api/eval`, Next.js page calling it, Neon wired, then first actual Fly/Vercel deploy from `main`.
+
 ## 2026-04-29
 
 Planning baseline completed in `docs/PROJECT_PLAN.md`; scaffold landed in commit `53e65cf`; spike plan documented in `docs/superpowers/plans/2026-04-29-cqf-fhir-cr-spike.md`; open risks captured around Phase 2 integration depth, Missing Data vs Overdue branching, and AI guardrail enforcement.
