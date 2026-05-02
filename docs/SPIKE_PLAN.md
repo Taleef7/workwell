@@ -2,7 +2,7 @@
 
 **Window:** May 2 – May 17, 2026
 **Goal:** Ship full MVP scope, deployed and demoable, before internship starts May 18.
-**Replaces:** `docs/archive/PROJECT_PLAN_v1.md` (archived, do not act on)
+**Canonical plan:** `docs/SPIKE_PLAN.md` is the active execution plan; any legacy `PROJECT_PLAN` / `PROJECT_PLAN_v1` references are obsolete and should not be used for current work.
 **Author:** Taleef Tamsal
 
 ---
