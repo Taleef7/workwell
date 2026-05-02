@@ -14,7 +14,7 @@
 
 ## ADR-002: evidence_json shape and define-level traceability
 
-- **Date:** 2026-05-02
+- **Date:** 2026-05-01
 - **Status:** Accepted
 - **Context:** For "Explain Why Flagged", we need to decide whether to keep raw `evaluatedResource` evidence only, add explicit `rule_path[]`, or derive rule path automatically from CQL define results. D1 rechecked this against the repository CQF reference in `docs/CQF_FHIR_CR_REFERENCE.md`, which is the durable source of truth for `cqf-fhir-cr` behavior used by this ADR.
 - **Decision:** Adopt the processor two-step composite flow as the canonical run pipeline:
