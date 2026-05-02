@@ -805,7 +805,8 @@ workwell-measure-studio/
 ### Phase 4 — AI + MCP layer (Weeks 11–12, Jul 27–Aug 7)
 **Goal:** AI surfaces visible in demo; MCP shows safe agent access.
 
-**Scope discipline:** three AI surfaces, no more. All draft-only, never auto-decide.
+
+**Scope note update (ADR-002 accepted):** Why Flagged is now structured-first, AI-optional.
 
 **Week 11 — AI authoring + explainability**
 - "AI Draft Spec" button (Screenshot 5): paste OSHA text → Claude returns structured `spec_json` draft → author reviews and accepts
@@ -1021,7 +1022,7 @@ No need to wait. Useful pre-work in priority order:
 ### Additional risks to watch
 | Risk | Mitigation |
 |------|-----------|
-| **Phase 2 Week 6 integration depth** — wiring `cqf-fhir-cr` to produce `MeasureReport` from real `MeasureVersion` against real FHIR data always surprises | Allocate explicit spike at start of Week 6; verify 4 demo measures run before building infrastructure around them. Slip slips Phase 3 by week — don't compress Phase 2. |
+| **Phase 2 Week 6 integration depth** � wiring `cqf-fhir-cr` to produce `MeasureReport` from real `MeasureVersion` against real FHIR data always surprises | **Closed � ADR-002 accepted, run pipeline architecture decided.** Canonical flow is `evaluateMeasureWithCqlEngine(...)` -> `evaluateMeasure(..., compositeResults)` with probe evidence showing lower cost than direct service path (`combinedMs=2` vs `serviceEvaluateMs=5`). Remaining Week 5 confirmation: validate this same composite flow under JPA-backed repository in main backend integration. |
 | **Missing Data vs Overdue branching** — hardest correctness call | Make explicit branch in CQL with separate `define` block; cover both cases in test fixtures from day one |
 | **Time-zone & date math in CQL** — "within last 365 days" depends on "today" | Pin `Measurement Period` as explicit parameter passed to every run; never rely on system clock inside CQL |
 | **Synthea regeneration breaks determinism** | Generate once, commit bundles as fixtures, load from disk in demo mode |
