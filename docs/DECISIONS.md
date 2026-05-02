@@ -14,9 +14,9 @@
 
 ## ADR-002: evidence_json shape and define-level traceability
 
-- **Date:** 2026-05-01
+- **Date:** 2026-05-02
 - **Status:** Accepted
-- **Context:** For "Explain Why Flagged", we need to decide whether to keep raw `evaluatedResource` evidence only, add explicit `rule_path[]`, or derive rule path automatically from CQL define results.
+- **Context:** For "Explain Why Flagged", we need to decide whether to keep raw `evaluatedResource` evidence only, add explicit `rule_path[]`, or derive rule path automatically from CQL define results. D1 rechecked this against `../workwell-spike-cqf/` and Context7 docs for `cqf-fhir-cr`.
 - **Decision:** Adopt the processor two-step composite flow as the canonical run pipeline:
   1. `R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)` to compute `CompositeEvaluationResultsPerMeasure` (including define-level `expressionResults`).
   2. `R4MeasureProcessor.evaluateMeasure(..., compositeResults)` to materialize the standard `MeasureReport` from the same computed results.
