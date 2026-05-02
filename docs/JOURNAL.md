@@ -102,3 +102,23 @@ Planning baseline completed in `docs/PROJECT_PLAN.md`; scaffold landed in commit
 **Decision impact:** ADR-002 remains **Proposed** for now (not one-call-both). Week 5 can choose simpler `R4MeasureService` baseline or processor two-step path based on real run-load context.
 - 2026-05-01: ADR-002 promoted to **Accepted** with composite two-step pipeline as canonical; Project Plan risk marked closed and Why Flagged scope updated to structured-first, AI-optional.
 - 2026-05-01: Brief B/C reconciliation applied to scaffold and docs (backend/infra/frontend deltas plus ARCHITECTURE, DATA_MODEL, AI_GUARDRAILS, and ADR-001 alignment updates).
+- 2026-05-01: Diagnosed backend build blocker: original failure was non-Testcontainers `BackendApplicationTests` hitting `localhost:5432`; wired Postgres 16 Testcontainers + dynamic datasource override, then isolated remaining failure to Docker API client/provider mismatch (not Flyway/V001 SQL).
+
+## 2026-05-02
+
+## 2026-05-02 — Pre-internship close-out
+
+Resolved local ./gradlew clean build on Windows. Root cause:
+Testcontainers BOM 1.20.6 hardcoded Docker API v1.32, which
+Docker Engine 29.4.1 (API v1.54) rejected with HTTP 400. Fix:
+bump BOM to 1.21.4 (upstream issue testcontainers-java#11235).
+BackendApplicationTests.contextLoads now passes locally with a
+live postgres testcontainer. CI on Ubuntu was already green;
+this closes the local-test-loop gap.
+
+Pre-internship deliverables complete: backend skeleton (Spring
+Boot 3.3.5, Java 21), Flyway migrations (V001), JPA wiring,
+Testcontainers integration test passing locally and in CI,
+OpenAPI scaffolding via springdoc, MapStruct mappers
+configured. Project ready for Week 1.
+
