@@ -33,4 +33,3 @@ primary_region = 'ord'
   memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 512
