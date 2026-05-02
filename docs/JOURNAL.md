@@ -78,6 +78,32 @@
   - Frontend call from Vercel
   - Health checks and demoable round-trip
 
+### D2 prep progress (resumed)
+
+**What shipped in code**
+- Added backend stub-auth security config to allow sprint-phase unauthenticated API access:
+  - `backend/src/main/java/com/workwell/config/SecurityConfig.java`
+- Added S0 walking-skeleton endpoint:
+  - `POST /api/eval` in `backend/src/main/java/com/workwell/web/EvalController.java`
+  - Accepts `patientBundle` + `cqlLibrary`, returns placeholder outcome + evidence payload shape.
+- Added endpoint test:
+  - `backend/src/test/java/com/workwell/web/EvalControllerTest.java`
+- Replaced placeholder "Test Runs" UI with an S0 API probe page:
+  - `frontend/app/(dashboard)/runs/page.tsx`
+  - Button posts sample payload to `${NEXT_PUBLIC_API_BASE_URL}/api/eval` and renders response/error.
+
+**Verification run**
+- Backend:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+- Frontend:
+  - `npm run lint` -> success
+  - `npm run build` -> success
+
+**Still pending outside repo code**
+- Vercel project setting: Root Directory must be `frontend`.
+- Neon runtime target must be PostgreSQL 16 before final Fly DB secret wiring.
+- Deployed S0 validation on live URLs (Fly `/actuator/health`, Vercel `/runs` probe).
+
 ---
 
 ## 2026-05-01

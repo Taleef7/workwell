@@ -85,6 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D1 (Sat May 2, 2026) — provision deploy targets (Vercel/Fly/Neon), commit SPIKE_PLAN.md / DEPLOY.md / AGENTS.md / updated CLAUDE.md, archive PROJECT_PLAN.md, close ADR-002 via 20-min sub-spike on cqf-fhir-cr per-define evaluation surface.
+**Today:** D2 prep (Sat May 2, 2026) - begin S0 walking skeleton execution: ship /api/eval, wire frontend probe, and line up Fly + Vercel + Neon PG16 verification.
 
-**Next:** D2 (Sun May 3) — S0 walking skeleton, deployed end-to-end.
+**Next:** D2 (Sun May 3, 2026) - finish deployed end-to-end S0 verification, then move to D3 S1a Audiogram vertical.
+
