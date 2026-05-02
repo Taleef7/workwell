@@ -29,3 +29,10 @@ Thumbs.db
 
 # Generated analysis artifacts
 graphify-out/
+v0 protoype screenshots/
+.serena/
+.codex/
+backend/build-log.txt
+docs/WorkWell Studio Summer 2026 Doc.pdf
+backend/src/test/resources/logback-test.xml
+
