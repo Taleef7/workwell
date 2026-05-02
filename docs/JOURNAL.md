@@ -6,34 +6,34 @@ Planning baseline completed in `docs/PROJECT_PLAN.md`; scaffold landed in commit
 
 ## 2026-05-01
 
-### cqf-fhir-cr Risk Spike — COMPLETED
+### cqf-fhir-cr Risk Spike â€” COMPLETED
 
 **What changed:** Executed full `R4MeasureService` evaluation spike in `../workwell-spike-cqf/`. CQL measure (`HasRecentProcedure`) evaluated against two synthetic patients in `InMemoryFhirRepository`. Results verified correct: compliant patient numerator=1, non-compliant patient numerator=0. `evaluatedResource` list in MeasureReport traces which Procedure drove the decision.
 
 **Versions confirmed working:**
-- `org.opencds.cqf.fhir:cqf-fhir-cr:3.26.0` (latest stable; NOT 4.x — Maven Central UI was misleading)
+- `org.opencds.cqf.fhir:cqf-fhir-cr:3.26.0` (latest stable; NOT 4.x â€” Maven Central UI was misleading)
 - `cqf-fhir-cql:3.26.0`, `cqf-fhir-utility:3.26.0` (same version track)
-- HAPI FHIR 8.4.0 (transitive — higher than plan expected)
+- HAPI FHIR 8.4.0 (transitive â€” higher than plan expected)
 
 **Plan corrections discovered:**
-1. Entry point is `R4MeasureService`, not `R4MeasureProcessor` — simpler constructor, simpler evaluate() signature
-2. `org.opencds.cqf.fhir.api.Repository` deprecated → use `ca.uhn.fhir.repository.IRepository`
-3. `Library.content.setData()` takes raw bytes (not pre-base64) — double-encoding silently breaks CQL parsing
+1. Entry point is `R4MeasureService`, not `R4MeasureProcessor` â€” simpler constructor, simpler evaluate() signature
+2. `org.opencds.cqf.fhir.api.Repository` deprecated â†’ use `ca.uhn.fhir.repository.IRepository`
+3. `Library.content.setData()` takes raw bytes (not pre-base64) â€” double-encoding silently breaks CQL parsing
 4. `InMemoryFhirRepository.update()` preserves resource ids; `.create()` assigns new ids and breaks patient lookup
 5. Three mandatory runtime extras: `hapi-fhir-caching-caffeine`, `eclipse.persistence.moxy`, `fhirContext.setValidationSupport()`
-6. `evaluatedResource` in MeasureReport = free `evidence_json` data — no custom extraction needed
+6. `evaluatedResource` in MeasureReport = free `evidence_json` data â€” no custom extraction needed
 
-**Bonus finding:** `measureScore` (0.0–1.0) computed automatically for proportion measures.
+**Bonus finding:** `measureScore` (0.0â€“1.0) computed automatically for proportion measures.
 
 **Re-run:** `cd ../workwell-spike-cqf && ./gradlew run`
 
-**Why:** De-risk Phase 2 (Week 5–7) before internship. Full findings → `../workwell-spike-cqf/SPIKE_REPORT.md`.
+**Why:** De-risk Phase 2 (Week 5â€“7) before internship. Full findings â†’ `../workwell-spike-cqf/SPIKE_REPORT.md`.
 
 **Risks remaining:**
-- HAPI 8.4.0 vs Spring Boot 3.3.5 — check version compat before Week 5 (expect forced resolution needed)
-- `cqf-fhir-cr-hapi` (HAPI JPA repository wrapper) not yet tested — 15-min sub-spike before Week 5
-- All 4 demo measures not validated — only "has recent Procedure" pattern tested
-- Not load-tested at 200+ employees × 4 measures
+- HAPI 8.4.0 vs Spring Boot 3.3.5 â€” check version compat before Week 5 (expect forced resolution needed)
+- `cqf-fhir-cr-hapi` (HAPI JPA repository wrapper) not yet tested â€” 15-min sub-spike before Week 5
+- All 4 demo measures not validated â€” only "has recent Procedure" pattern tested
+- Not load-tested at 200+ employees Ã— 4 measures
 
 ## 2026-05-18
 - What changed:
@@ -106,7 +106,7 @@ Planning baseline completed in `docs/PROJECT_PLAN.md`; scaffold landed in commit
 
 ## 2026-05-02
 
-## 2026-05-02 � Pre-internship close-out
+## 2026-05-02 — Pre-internship close-out
 
 Resolved local ./gradlew clean build on Windows. Root cause:
 Testcontainers BOM 1.20.6 hardcoded Docker API v1.32, which
