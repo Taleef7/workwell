@@ -84,15 +84,18 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel | Backend URL for fetch calls |
 | `NEXT_PUBLIC_APP_NAME` | Vercel | App display name |
 
-`.env.example` at repo root mirrors this list (without values). CI verifies both deploys have all vars set.
+`.env.example` at repo root mirrors this list (without values). At present, env vars must be verified manually before deploy; the existing CI workflow does not validate deployment secrets or Vercel env configuration.
 
 ## CI/CD
 
-GitHub Actions workflow `.github/workflows/deploy.yml`:
+GitHub Actions workflow `.github/workflows/ci.yml` currently:
 
-- Push to `main` → tests run → Fly deploy + Vercel deploy in parallel (Vercel auto-deploys, but Action gates on tests)
-- PR → tests run only, no deploy
-- Manual dispatch → deploy without test gate (emergency rollback)
+- Runs the backend build
+- Runs frontend lint
+- Does not deploy Fly.io or Vercel
+- Does not gate deploys or validate deployment env vars
+
+Deployments are currently performed outside this workflow (for example, via Fly CLI and Vercel's own deployment flow).
 
 ## Health checks
 
