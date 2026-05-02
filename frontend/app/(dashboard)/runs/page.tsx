@@ -20,7 +20,10 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalResponse | null>(null);
 
-  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE_URL ?? "", []);
+  const apiBase = useMemo(() => {
+    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+    return raw.trim().replace(/\/+$/, "");
+  }, []);
 
   async function runEvalProbe() {
     setLoading(true);
@@ -28,14 +31,15 @@ export default function RunsPage() {
     setResult(null);
 
     try {
-      const response = await fetch(`${apiBase}/api/eval`, {
+      const requestUrl = `${apiBase}/api/eval`;
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(samplePayload)
       });
 
       if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+        throw new Error(`Request failed: ${response.status} (${requestUrl})`);
       }
 
       const data = (await response.json()) as EvalResponse;
