@@ -1,10 +1,9 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/workwell
-    username: workwell
-    password: workwell
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}
   flyway:
     enabled: true
+    url: ${DATABASE_URL_DIRECT:${spring.datasource.url}}
 management:
   endpoints:
     web:
