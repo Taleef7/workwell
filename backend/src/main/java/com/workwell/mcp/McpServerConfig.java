@@ -14,6 +14,7 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.function.RouterFunction;
@@ -22,6 +23,9 @@ import org.springframework.web.servlet.function.ServerResponse;
 @Configuration
 public class McpServerConfig {
     private static final String MESSAGE_ENDPOINT = "/mcp/message";
+    private static final Pattern UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    );
 
     @Bean
     WebMvcSseServerTransportProvider mcpTransportProvider(ObjectMapper objectMapper) {
@@ -73,14 +77,16 @@ public class McpServerConfig {
                     String status = args.get("status") == null ? "open" : args.get("status").toString();
                     UUID measureId = null;
                     if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
-                        measureId = UUID.fromString(args.get("measureId").toString());
+                        String rawMeasureId = args.get("measureId").toString().trim();
+                        // Backward-compatible fallback for clients still sending human labels in measureId.
+                        if (UUID_PATTERN.matcher(rawMeasureId).matches()) {
+                            measureId = UUID.fromString(rawMeasureId);
+                        } else {
+                            measureId = lookupMeasureIdByName(measureService, rawMeasureId);
+                        }
                     } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
                         String requestedMeasureName = args.get("measureName").toString().trim();
-                        measureId = measureService.listMeasures().stream()
-                                .filter(m -> m.name().equalsIgnoreCase(requestedMeasureName))
-                                .findFirst()
-                                .map(MeasureService.MeasureCatalogItem::id)
-                                .orElseThrow(() -> new IllegalArgumentException("Measure not found: " + requestedMeasureName));
+                        measureId = lookupMeasureIdByName(measureService, requestedMeasureName);
                     }
                     var summaries = caseFlowService.listCases(status, measureId);
                     return new CallToolResult(toJson(objectMapper, summaries), false);
@@ -100,9 +106,17 @@ public class McpServerConfig {
         );
 
         return McpServer.sync(transportProvider)
-                .serverInfo("workwell-mcp", "1.0.0")
+                .serverInfo("workwell-mcp", "1.0.1")
                 .tools(getCaseSpec, listCasesSpec, getRunSummarySpec)
                 .build();
+    }
+
+    private UUID lookupMeasureIdByName(MeasureService measureService, String requestedMeasureName) {
+        return measureService.listMeasures().stream()
+                .filter(m -> m.name().equalsIgnoreCase(requestedMeasureName))
+                .findFirst()
+                .map(MeasureService.MeasureCatalogItem::id)
+                .orElseThrow(() -> new IllegalArgumentException("Measure not found: " + requestedMeasureName));
     }
 
     private String stringArg(Map<String, Object> args, String key) {
