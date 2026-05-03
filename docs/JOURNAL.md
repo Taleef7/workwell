@@ -29,6 +29,15 @@
 - This slice establishes the S1a authored-measure/run/evidence path with deterministic seeded outcomes.
 - Persistence and case detail integration remain for next S1a steps.
 
+**Fix + redeploy**
+- Live `/api/runs/audiogram` initially failed because the seeded missing-data patient produced a `null` evidence value and `Map.of(...)` rejected it.
+- Updated evidence assembly to use null-safe `LinkedHashMap` payloads.
+- Added a direct service test for the seeded run to guard against the same regression.
+- Redeployed Fly backend and verified live success:
+  - `POST https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`
+  - `OPTIONS https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`
+  - Returned summary counts: `1 / 1 / 1 / 1 / 1` across compliant, due soon, overdue, missing data, excluded
+
 ## 2026-05-02
 
 ### D1 - Plan + Provision (completed)

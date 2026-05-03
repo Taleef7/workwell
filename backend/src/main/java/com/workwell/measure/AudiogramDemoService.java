@@ -2,7 +2,7 @@ package com.workwell.measure;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -64,20 +64,34 @@ public class AudiogramDemoService {
                 patient.patientId(),
                 outcome,
                 reason,
-                Map.of(
-                        "expressionResults", List.of(
-                                Map.of("define", "In Hearing Conservation Program", "result", patient.inHearingProgram()),
-                                Map.of("define", "Has Active Waiver", "result", patient.hasActiveWaiver()),
-                                Map.of("define", "Days Since Last Audiogram", "result", patient.daysSinceAudiogram())
-                        ),
-                        "evaluatedResource", Map.of(
-                                "patientId", patient.patientId(),
-                                "daysSinceLastAudiogram", patient.daysSinceAudiogram(),
-                                "hasActiveWaiver", patient.hasActiveWaiver(),
-                                "measurementWindowDays", 365
-                        )
-                )
+                buildEvidenceJson(patient)
         );
+    }
+
+    private Map<String, Object> buildEvidenceJson(AudiogramPatient patient) {
+        List<Map<String, Object>> expressionResults = List.of(
+                expressionResult("In Hearing Conservation Program", patient.inHearingProgram()),
+                expressionResult("Has Active Waiver", patient.hasActiveWaiver()),
+                expressionResult("Days Since Last Audiogram", patient.daysSinceAudiogram())
+        );
+
+        Map<String, Object> evaluatedResource = new LinkedHashMap<>();
+        evaluatedResource.put("patientId", patient.patientId());
+        evaluatedResource.put("daysSinceLastAudiogram", patient.daysSinceAudiogram());
+        evaluatedResource.put("hasActiveWaiver", patient.hasActiveWaiver());
+        evaluatedResource.put("measurementWindowDays", 365);
+
+        Map<String, Object> evidenceJson = new LinkedHashMap<>();
+        evidenceJson.put("expressionResults", expressionResults);
+        evidenceJson.put("evaluatedResource", evaluatedResource);
+        return evidenceJson;
+    }
+
+    private Map<String, Object> expressionResult(String define, Object result) {
+        Map<String, Object> expressionResult = new LinkedHashMap<>();
+        expressionResult.put("define", define);
+        expressionResult.put("result", result);
+        return expressionResult;
     }
 
     public record AudiogramDemoRun(

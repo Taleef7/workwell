@@ -85,7 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical started with seeded 5-patient run endpoint (`/api/runs/audiogram`), authored `audiogram.cql`, and dashboard run summary/evidence rendering on `/runs`.
+**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical is live with seeded 5-patient run endpoint (`/api/runs/audiogram`), authored `audiogram.cql`, and dashboard run summary/evidence rendering on `/runs`.
 
 **Next:** Complete remaining S1a acceptance: persist outcomes with `evidence_json` and surface case/detail flow for Why Flagged.
 
