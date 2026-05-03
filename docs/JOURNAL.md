@@ -95,6 +95,14 @@
   - The core S4b loop (open case -> outreach action -> rerun verification -> case closure + audit chain) is now live and test-backed.
   - Ready to re-evaluate completed scope against SPIKE_PLAN acceptance and pick the next highest-risk gap.
 
+**Advisor checkpoint package**
+- Added `docs/advisor_update.md` as a comprehensive status handoff for external advisor review.
+- Document includes:
+  - spike-by-spike Done/Partial/Missing matrix against `docs/SPIKE_PLAN.md`
+  - execution evidence from `docs/JOURNAL.md` and deploy checks
+  - issue log, risk assessment, and recommended next execution sequence
+  - explicit advisor feedback prompts for scope/risk decisions
+
 ## 2026-05-02
 
 ### D1 - Plan + Provision (completed)
