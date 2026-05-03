@@ -24,21 +24,23 @@ Persisted evidence payload shape:
 
 ```json
 {
-  "expressionResults": {
-    "Initial Population": true,
-    "Denominator": true,
-    "Numerator": false
-  },
-  "evaluatedResource": [
-    "Procedure/abc123",
-    "Condition/def456"
-  ]
+  "expressionResults": [
+    { "define": "In Hearing Conservation Program", "result": true },
+    { "define": "Has Active Waiver", "result": false },
+    { "define": "Days Since Last Audiogram", "result": 120 }
+  ],
+  "evaluatedResource": {
+    "patientId": "patient-001",
+    "daysSinceLastAudiogram": 120,
+    "hasActiveWaiver": false,
+    "measurementWindowDays": 365
+  }
 }
 ```
 
 Interpretation rules:
-- `expressionResults` stores define-level outputs from CQL evaluation.
-- `evaluatedResource` stores the concrete references used in the computed MeasureReport.
+- `expressionResults` stores define-level outputs from CQL evaluation as an ordered array.
+- `evaluatedResource` stores the concrete resource and scalar context used in the computed MeasureReport.
 - This payload is canonical for Why Flagged rendering and audit defensibility.
 
 ## rule_path[] Contract

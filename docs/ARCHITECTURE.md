@@ -19,7 +19,7 @@ Why this is the default:
 ## Backend Domain Package Layout
 - `com.workwell.measure`: measure catalog and version lifecycle.
 - `com.workwell.compile`: CQL compile/validate APIs.
-- `com.workwell.run`: run orchestration and outcome persistence.
+- `com.workwell.run`: run orchestration, outcome persistence, and latest-run readback.
 - `com.workwell.caseflow`: idempotent case upsert and case state transitions.
 - `com.workwell.audit`: append-only audit event publishing and query.
 - `com.workwell.valueset`: value set registry and resolvability checks.

@@ -15,6 +15,10 @@
 - Added S1a run endpoint:
   - `POST /api/runs/audiogram`
   - File: `backend/src/main/java/com/workwell/web/EvalController.java`
+- Added DB-backed persistence and readback for seeded runs:
+  - `runs`, `outcomes`, `audit_events` rows are written through `RunPersistenceService`
+  - `GET /api/runs/audiogram/latest` reads the latest persisted run
+  - File: `backend/src/main/java/com/workwell/run/RunPersistenceService.java`
 - Added baseline authored CQL resource for Annual Audiogram:
   - File: `backend/src/main/resources/measures/audiogram.cql`
 - Expanded dashboard run page to execute and render the S1a vertical response, including run summary and per-patient evidence payloads:
@@ -27,7 +31,7 @@
 
 **Notes**
 - This slice establishes the S1a authored-measure/run/evidence path with deterministic seeded outcomes.
-- Persistence and case detail integration remain for next S1a steps.
+- Persistence is now live for seeded Audiogram runs; case detail integration remains for next S1a steps.
 
 **Fix + redeploy**
 - Live `/api/runs/audiogram` initially failed because the seeded missing-data patient produced a `null` evidence value and `Map.of(...)` rejected it.
@@ -37,6 +41,10 @@
   - `POST https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`
   - `OPTIONS https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`
   - Returned summary counts: `1 / 1 / 1 / 1 / 1` across compliant, due soon, overdue, missing data, excluded
+
+**Current status**
+- Backend and frontend both verify locally after persistence wiring.
+- Ready to push the DB-backed run path live and confirm the latest-run readback in the browser.
 
 ## 2026-05-02
 

@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.run.RunPersistenceService;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
+import static java.util.Optional.of;
 
 @WebMvcTest(EvalController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -27,6 +29,9 @@ class EvalControllerTest {
 
     @MockBean
     private AudiogramDemoService audiogramDemoService;
+
+    @MockBean
+    private RunPersistenceService runPersistenceService;
 
     @Test
     void returnsStubEvaluationPayload() throws Exception {
@@ -72,5 +77,24 @@ class EvalControllerTest {
                 .andExpect(jsonPath("$.runId").value("run-123"))
                 .andExpect(jsonPath("$.measureName").value("AnnualAudiogramCompleted"))
                 .andExpect(jsonPath("$.outcomes[0].patientId").value("patient-001"));
+    }
+
+    @Test
+    void returnsLatestAudiogramRunFromPersistence() throws Exception {
+        when(runPersistenceService.loadLatestAudiogramRun()).thenReturn(of(
+                new AudiogramDemoService.AudiogramDemoRun(
+                        "run-456",
+                        "AnnualAudiogramCompleted",
+                        "1.0.0",
+                        "2026-05-04",
+                        new AudiogramDemoService.RunSummary(1, 1, 1, 1, 1),
+                        List.of()
+                )
+        ));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/runs/audiogram/latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value("run-456"))
+                .andExpect(jsonPath("$.measureVersion").value("1.0.0"));
     }
 }

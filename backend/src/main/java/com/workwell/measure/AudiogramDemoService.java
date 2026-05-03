@@ -1,16 +1,23 @@
 package com.workwell.measure;
 
-import java.time.Instant;
+import com.workwell.run.RunPersistenceService;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AudiogramDemoService {
+    private final RunPersistenceService runPersistenceService;
+
+    public AudiogramDemoService(RunPersistenceService runPersistenceService) {
+        this.runPersistenceService = runPersistenceService;
+    }
 
     public AudiogramDemoRun run() {
+        UUID runId = UUID.randomUUID();
         List<AudiogramPatient> patients = List.of(
                 new AudiogramPatient("patient-001", 120, false, true),
                 new AudiogramPatient("patient-002", 350, false, true),
@@ -27,14 +34,16 @@ public class AudiogramDemoService {
         long missingData = outcomes.stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
         long excluded = outcomes.stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
 
-        return new AudiogramDemoRun(
-                "run-" + Instant.now().toEpochMilli(),
+        AudiogramDemoRun run = new AudiogramDemoRun(
+                runId.toString(),
                 "AnnualAudiogramCompleted",
                 "1.0.0",
                 LocalDate.now().toString(),
                 new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
                 outcomes
         );
+        runPersistenceService.persistAudiogramRun(run);
+        return run;
     }
 
     private AudiogramOutcome evaluate(AudiogramPatient patient) {

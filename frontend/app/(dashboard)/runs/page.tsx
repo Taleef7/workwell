@@ -40,6 +40,7 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalResponse | null>(null);
   const [audiogramRun, setAudiogramRun] = useState<AudiogramRunResponse | null>(null);
+  const [savedRun, setSavedRun] = useState<AudiogramRunResponse | null>(null);
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -51,6 +52,7 @@ export default function RunsPage() {
     setError(null);
     setResult(null);
     setAudiogramRun(null);
+    setSavedRun(null);
 
     try {
       const requestUrl = `${apiBase}/api/eval`;
@@ -78,6 +80,7 @@ export default function RunsPage() {
     setError(null);
     setResult(null);
     setAudiogramRun(null);
+    setSavedRun(null);
 
     try {
       const requestUrl = `${apiBase}/api/runs/audiogram`;
@@ -92,6 +95,27 @@ export default function RunsPage() {
 
       const data = (await response.json()) as AudiogramRunResponse;
       setAudiogramRun(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadLatestAudiogramRun() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const requestUrl = `${apiBase}/api/runs/audiogram/latest`;
+      const response = await fetch(requestUrl);
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status} (${requestUrl})`);
+      }
+
+      const data = (await response.json()) as AudiogramRunResponse | null;
+      setSavedRun(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -123,6 +147,13 @@ export default function RunsPage() {
       >
         {loading ? "Running..." : "Run S1a Audiogram Vertical"}
       </button>
+      <button
+        className="ml-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        onClick={loadLatestAudiogramRun}
+        disabled={loading || !apiBase}
+      >
+        {loading ? "Loading..." : "Load Latest Saved Audiogram"}
+      </button>
 
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
       {result ? (
@@ -143,6 +174,19 @@ export default function RunsPage() {
           </p>
           <pre className="overflow-x-auto rounded-md border border-slate-200 bg-white p-3 text-xs">
             {JSON.stringify(audiogramRun.outcomes, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+      {savedRun ? (
+        <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm">
+          <p className="font-medium">
+            Saved copy: {savedRun.measureName} v{savedRun.measureVersion} - run {savedRun.runId}
+          </p>
+          <p className="text-emerald-800">
+            Loaded from the database-backed latest run endpoint.
+          </p>
+          <pre className="overflow-x-auto rounded-md border border-emerald-200 bg-white p-3 text-xs">
+            {JSON.stringify(savedRun.summary, null, 2)}
           </pre>
         </div>
       ) : null}
