@@ -2,6 +2,7 @@ package com.workwell.web;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import com.workwell.measure.AudiogramDemoService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @Validated
 public class EvalController {
+    private final AudiogramDemoService audiogramDemoService;
+
+    public EvalController(AudiogramDemoService audiogramDemoService) {
+        this.audiogramDemoService = audiogramDemoService;
+    }
 
     @PostMapping("/api/eval")
     public EvalResponse eval(@Valid @RequestBody EvalRequest request) {
@@ -36,6 +42,11 @@ public class EvalController {
                         "cqlLength", request.cqlLibrary().length()
                 )
         );
+    }
+
+    @PostMapping("/api/runs/audiogram")
+    public AudiogramDemoService.AudiogramDemoRun runAudiogram() {
+        return audiogramDemoService.run();
     }
 
     public record EvalRequest(

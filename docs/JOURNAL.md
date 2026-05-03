@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-05-03
+
+### D3 - S1a Audiogram vertical (progress)
+
+**Goals set**
+- Start S1a by replacing placeholder run flow with a real measure-specific vertical slice.
+- Keep changes within backend/frontend ownership boundaries and preserve ADR-002 evidence shape.
+
+**What shipped**
+- Added seeded Audiogram demo evaluator service for 5 synthetic patients with outcome buckets:
+  - `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`
+  - File: `backend/src/main/java/com/workwell/measure/AudiogramDemoService.java`
+- Added S1a run endpoint:
+  - `POST /api/runs/audiogram`
+  - File: `backend/src/main/java/com/workwell/web/EvalController.java`
+- Added baseline authored CQL resource for Annual Audiogram:
+  - File: `backend/src/main/resources/measures/audiogram.cql`
+- Expanded dashboard run page to execute and render the S1a vertical response, including run summary and per-patient evidence payloads:
+  - File: `frontend/app/(dashboard)/runs/page.tsx`
+
+**Verification**
+- Backend tests: `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+- Frontend lint: `npm run lint` -> success
+- Frontend production build: `npm run build` -> success
+
+**Notes**
+- This slice establishes the S1a authored-measure/run/evidence path with deterministic seeded outcomes.
+- Persistence and case detail integration remain for next S1a steps.
+
 ## 2026-05-02
 
 ### D1 - Plan + Provision (completed)

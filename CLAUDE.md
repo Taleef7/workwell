@@ -85,7 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D2 complete (Sun May 3, 2026) - S0 walking skeleton verified end-to-end on production Vercel + Fly + Neon PG16, including browser probe success on `/runs`.
+**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical started with seeded 5-patient run endpoint (`/api/runs/audiogram`), authored `audiogram.cql`, and dashboard run summary/evidence rendering on `/runs`.
 
-**Next:** D3 (Mon May 4, 2026) - start S1a Audiogram vertical: authored measure path, run pipeline wiring, and persisted outcome + evidence surface.
+**Next:** Complete remaining S1a acceptance: persist outcomes with `evidence_json` and surface case/detail flow for Why Flagged.
 
