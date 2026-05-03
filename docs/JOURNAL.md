@@ -2,6 +2,17 @@
 
 ## 2026-05-03
 
+### External advisor handoff refreshed
+
+- Rewrote `docs/advisor_update.md` into a clean, comprehensive status packet for external advisor review.
+- Included:
+  - shipped scope through Step 6,
+  - latest MCP validation evidence from Claude Code,
+  - production smoke snapshot,
+  - explicit agent recommendations for D16 demo-freeze strategy,
+  - targeted clarifying questions for advisor guidance on final sequencing and risk tolerance.
+- Intent: accelerate advisor feedback loop and lock final pre-D16 execution posture without scope creep.
+
 ### MCP validation confirmed (Claude Code + production smoke)
 
 - Claude Code MCP validation now passes end-to-end with real data:
