@@ -2,6 +2,28 @@
 
 ## 2026-05-03
 
+### D16 readiness sign-off (production walkthrough)
+
+- Completed end-to-end live walkthrough aligned to `docs/DEMO_SCRIPT.md` on production backend + frontend.
+- Confirmed clickable frontend shell routes for demo navigation:
+  - `/measures`, `/studio`, `/runs`, `/cases`, `/programs`, `/worklist` all return `200` on `https://frontend-seven-eta-24.vercel.app`.
+- Case lifecycle demo loop executed live on an open Audiogram overdue case:
+  - `POST /api/cases/{caseId}/actions/outreach` -> case remained `OPEN`
+  - `POST /api/cases/{caseId}/rerun-to-verify` -> case transitioned `CLOSED` with `COMPLIANT`
+  - Case timeline tail includes `CASE_OUTREACH_SENT`, `CASE_RERUN_VERIFIED`, `CASE_CLOSED`
+
+Timestamped endpoint checklist (`2026-05-03T20:00:00-04:00`):
+- `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+- `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `200` with 2 active measures (`TB Surveillance`, `Audiogram`)
+- `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open` -> `200`, no `patient-*` rows
+- `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open&measureId=<audiogram-id>` -> `200`, clean filtered list
+- `POST https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`; `GET /api/runs/{id}` -> `200` (`totalEvaluated=15`)
+- `POST https://workwell-measure-studio-api.fly.dev/api/runs/tb-surveillance` -> `200`; TB case detail `nextAction` confirms TB-specific copy
+- `GET https://workwell-measure-studio-api.fly.dev/api/audit-events/export?format=csv` -> `200`
+- MCP Layer 1 validation: confirmed via Claude Code with live responses (open Audiogram cases + latest run summary)
+
+- Readiness decision: operational demo flow is stable and sign-off ready for D16 with bug-fix-only posture.
+
 ### D16 pre-freeze bugfix pass (TB copy, legacy clutter, placeholder routes)
 
 - Fixed TB next-action copy bug in caseflow action generation:
