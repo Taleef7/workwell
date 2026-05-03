@@ -19,6 +19,11 @@ Supporting tables in the same baseline include `value_sets`, `measure_value_set_
 
 This is the non-negotiable invariant that prevents duplicate worklist cases on reruns for the same evaluation scope.
 
+Case lifecycle rules used by the seeded Audiogram slice:
+- `DUE_SOON`, `OVERDUE`, and `MISSING_DATA` outcomes create or refresh open cases.
+- `COMPLIANT` and `EXCLUDED` outcomes do not create new active cases; if a matching case already exists, it is closed on rerun.
+- The `audit_events` table holds the per-case timeline that powers the Why Flagged detail view.
+
 ## evidence_json Contract (ADR-002)
 Persisted evidence payload shape:
 

@@ -3,6 +3,7 @@ package com.workwell.run;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.caseflow.CaseFlowService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -20,115 +21,142 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.FileCopyUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class RunPersistenceService {
+    private static final Logger log = LoggerFactory.getLogger(RunPersistenceService.class);
     private static final String MEASURE_NAME = "AnnualAudiogramCompleted";
     private static final String MEASURE_VERSION = "1.0.0";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final CaseFlowService caseFlowService;
 
-    public RunPersistenceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public RunPersistenceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, CaseFlowService caseFlowService) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.caseFlowService = caseFlowService;
     }
 
     @Transactional
     public void persistAudiogramRun(AudiogramDemoService.AudiogramDemoRun run) {
-        UUID measureId = ensureMeasure();
-        UUID measureVersionId = ensureMeasureVersion(measureId);
-        List<UUID> employeeIds = ensureEmployees(run.outcomes());
+        String stage = "start";
+        try {
+            stage = "ensure-measure";
+            UUID measureId = ensureMeasure();
+            stage = "ensure-measure-version";
+            UUID measureVersionId = ensureMeasureVersion(measureId);
+            stage = "ensure-employees";
+            List<UUID> employeeIds = ensureEmployees(run.outcomes());
 
-        UUID runId = UUID.fromString(run.runId());
-        Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
-        Instant completedAt = startedAt.plusSeconds(60);
-        String evaluationPeriod = run.evaluationDate();
+            UUID runId = UUID.fromString(run.runId());
+            Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
+            Instant completedAt = startedAt.plusSeconds(60);
+            String evaluationPeriod = run.evaluationDate();
 
-        jdbcTemplate.update(
-                "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ps -> {
-                    ps.setObject(1, runId);
-                    ps.setString(2, "measure");
-                    ps.setObject(3, measureVersionId);
-                    ps.setString(4, "demo");
-                    ps.setString(5, "manual");
-                    ps.setString(6, "completed");
-                    ps.setString(7, "system");
-                    ps.setObject(8, Timestamp.from(startedAt));
-                    ps.setObject(9, Timestamp.from(completedAt));
-                    ps.setInt(10, run.outcomes().size());
-                    ps.setLong(11, run.summary().compliant());
-                    ps.setLong(12, run.summary().dueSoon() + run.summary().overdue() + run.summary().missingData() + run.summary().excluded());
-                    ps.setLong(13, 60_000L);
-                    ps.setObject(14, Timestamp.from(startedAt));
-                    ps.setObject(15, Timestamp.from(completedAt));
-                }
-        );
-
-        jdbcTemplate.update(
-                "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
-                runId,
-                "INFO",
-                "Seeded audiogram run persisted with " + run.outcomes().size() + " outcomes."
-        );
-
-        for (int i = 0; i < run.outcomes().size(); i++) {
-            AudiogramDemoService.AudiogramOutcome outcome = run.outcomes().get(i);
-            UUID outcomeId = UUID.randomUUID();
-            UUID employeeId = employeeIds.get(i);
-
+            stage = "insert-run";
             jdbcTemplate.update(
-                    "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     ps -> {
-                        ps.setObject(1, outcomeId);
-                        ps.setObject(2, runId);
-                        ps.setObject(3, employeeId);
-                        ps.setObject(4, measureVersionId);
-                        ps.setString(5, evaluationPeriod);
-                        ps.setString(6, outcome.outcome());
-                        ps.setString(7, toJsonb(outcome.evidenceJson()));
-                        ps.setObject(8, Timestamp.from(Instant.now()));
+                        ps.setObject(1, runId);
+                        ps.setString(2, "measure");
+                        ps.setObject(3, measureVersionId);
+                        ps.setString(4, "demo");
+                        ps.setString(5, "manual");
+                        ps.setString(6, "completed");
+                        ps.setString(7, "system");
+                        ps.setObject(8, Timestamp.from(startedAt));
+                        ps.setObject(9, Timestamp.from(completedAt));
+                        ps.setInt(10, run.outcomes().size());
+                        ps.setLong(11, run.summary().compliant());
+                        ps.setLong(12, run.summary().dueSoon() + run.summary().overdue() + run.summary().missingData() + run.summary().excluded());
+                        ps.setLong(13, 60_000L);
+                        ps.setObject(14, Timestamp.from(startedAt));
+                        ps.setObject(15, Timestamp.from(completedAt));
                     }
             );
 
+            stage = "insert-run-log";
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Seeded audiogram run persisted with " + run.outcomes().size() + " outcomes."
+            );
+
+            stage = "insert-outcomes";
+            for (int i = 0; i < run.outcomes().size(); i++) {
+                AudiogramDemoService.AudiogramOutcome outcome = run.outcomes().get(i);
+                UUID outcomeId = UUID.randomUUID();
+                UUID employeeId = employeeIds.get(i);
+
+                jdbcTemplate.update(
+                        "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
+                        ps -> {
+                            ps.setObject(1, outcomeId);
+                            ps.setObject(2, runId);
+                            ps.setObject(3, employeeId);
+                            ps.setObject(4, measureVersionId);
+                            ps.setString(5, evaluationPeriod);
+                            ps.setString(6, outcome.outcome());
+                            ps.setString(7, toJsonb(outcome.evidenceJson()));
+                            ps.setObject(8, Timestamp.from(Instant.now()));
+                        }
+                );
+
+                insertAuditEvent(
+                        "OUTCOME_PERSISTED",
+                        "outcome",
+                        outcomeId,
+                        "system",
+                        runId,
+                        null,
+                        measureVersionId,
+                        Map.of(
+                                "patientId", outcome.patientId(),
+                                "status", outcome.outcome(),
+                                "summary", outcome.summary()
+                        )
+                );
+            }
+
+            stage = "upsert-cases";
+            caseFlowService.upsertAudiogramCases(
+                    runId,
+                    measureVersionId,
+                    evaluationPeriod,
+                    employeeIds,
+                    run.outcomes()
+            );
+
+            stage = "insert-run-audit";
             insertAuditEvent(
-                    "OUTCOME_PERSISTED",
-                    "outcome",
-                    outcomeId,
+                    "RUN_PERSISTED",
+                    "run",
+                    runId,
                     "system",
                     runId,
                     null,
                     measureVersionId,
                     Map.of(
-                            "patientId", outcome.patientId(),
-                            "status", outcome.outcome(),
-                            "summary", outcome.summary()
+                            "measureName", run.measureName(),
+                            "measureVersion", run.measureVersion(),
+                            "evaluationDate", run.evaluationDate(),
+                            "summary", Map.of(
+                                    "compliant", run.summary().compliant(),
+                                    "dueSoon", run.summary().dueSoon(),
+                                    "overdue", run.summary().overdue(),
+                                    "missingData", run.summary().missingData(),
+                                    "excluded", run.summary().excluded()
+                            )
                     )
             );
+        } catch (RuntimeException ex) {
+            log.error("Failed to persist audiogram run at stage {}: {}", stage, ex.getMessage(), ex);
+            throw ex;
         }
-
-        insertAuditEvent(
-                "RUN_PERSISTED",
-                "run",
-                runId,
-                "system",
-                runId,
-                null,
-                measureVersionId,
-                Map.of(
-                        "measureName", run.measureName(),
-                        "measureVersion", run.measureVersion(),
-                        "evaluationDate", run.evaluationDate(),
-                        "summary", Map.of(
-                                "compliant", run.summary().compliant(),
-                                "dueSoon", run.summary().dueSoon(),
-                                "overdue", run.summary().overdue(),
-                                "missingData", run.summary().missingData(),
-                                "excluded", run.summary().excluded()
-                        )
-                )
-        );
     }
 
     public Optional<AudiogramDemoService.AudiogramDemoRun> loadLatestAudiogramRun() {

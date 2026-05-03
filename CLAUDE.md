@@ -85,7 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical now persists seeded runs/outcomes/audit rows and exposes latest-run readback from the database.
+**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical now persists seeded runs/outcomes/cases/audit rows, exposes latest-run readback, and renders the caseflow detail surface.
 
-**Next:** Deploy the persistence patch, confirm the live `/runs` latest-run readback, then start the Why Flagged/case-detail slice.
+**Next:** Deploy the caseflow patch, confirm the live `/cases` and `/cases/[id]` views, then move on to rerun-to-verify / case closure behavior.
 

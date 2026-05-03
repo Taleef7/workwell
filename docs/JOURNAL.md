@@ -46,6 +46,21 @@
 - Backend and frontend both verify locally after persistence wiring.
 - Ready to push the DB-backed run path live and confirm the latest-run readback in the browser.
 
+**Caseflow / Why Flagged**
+- Wired seeded Audiogram outcomes into the `cases` table for non-compliant statuses:
+  - `DUE_SOON`, `OVERDUE`, `MISSING_DATA` create or refresh open cases.
+  - `COMPLIANT` and `EXCLUDED` close an existing case if one is already present.
+- Added read APIs for:
+  - `GET /api/cases`
+  - `GET /api/cases/{id}`
+- Added frontend case views:
+  - `/cases` list page
+  - `/cases/[id]` detail page with structured evidence, metadata, and audit timeline
+- Verification completed after the change:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+  - `npm run lint` -> success
+  - `npm run build` -> success
+
 ## 2026-05-02
 
 ### D1 - Plan + Provision (completed)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 type EvalResponse = {
@@ -188,6 +189,12 @@ export default function RunsPage() {
           <pre className="overflow-x-auto rounded-md border border-emerald-200 bg-white p-3 text-xs">
             {JSON.stringify(savedRun.summary, null, 2)}
           </pre>
+          <Link
+            href="/cases"
+            className="inline-flex rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+          >
+            Open Cases
+          </Link>
         </div>
       ) : null}
     </section>

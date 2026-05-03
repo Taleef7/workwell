@@ -1,0 +1,417 @@
+package com.workwell.caseflow;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.measure.AudiogramDemoService;
+import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+public class CaseFlowService {
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
+
+    public CaseFlowService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+    }
+
+    public void upsertAudiogramCases(
+            UUID runId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            List<UUID> employeeIds,
+            List<AudiogramDemoService.AudiogramOutcome> outcomes
+    ) {
+        for (int i = 0; i < outcomes.size(); i++) {
+            UUID employeeId = employeeIds.get(i);
+            AudiogramDemoService.AudiogramOutcome outcome = outcomes.get(i);
+            if (requiresOpenCase(outcome.outcome())) {
+                upsertOpenCase(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
+            } else {
+                closeExistingCaseIfNeeded(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
+            }
+        }
+    }
+
+    public List<CaseSummary> listCases() {
+        String sql = """
+                SELECT c.id AS case_id,
+                       e.external_id AS employee_id,
+                       e.name AS employee_name,
+                       m.name AS measure_name,
+                       mv.version AS measure_version,
+                       c.evaluation_period,
+                       c.status,
+                       c.priority,
+                       c.current_outcome_status,
+                       c.last_run_id,
+                       c.updated_at
+                FROM cases c
+                JOIN employees e ON c.employee_id = e.id
+                JOIN measure_versions mv ON c.measure_version_id = mv.id
+                JOIN measures m ON mv.measure_id = m.id
+                ORDER BY c.updated_at DESC
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new CaseSummary(
+                (UUID) rs.getObject("case_id"),
+                rs.getString("employee_id"),
+                rs.getString("employee_name"),
+                rs.getString("measure_name"),
+                rs.getString("measure_version"),
+                rs.getString("evaluation_period"),
+                rs.getString("status"),
+                rs.getString("priority"),
+                rs.getString("current_outcome_status"),
+                (UUID) rs.getObject("last_run_id"),
+                rs.getTimestamp("updated_at").toInstant()
+        ));
+    }
+
+    public Optional<CaseDetail> loadCase(UUID caseId) {
+        String sql = """
+                SELECT c.id AS case_id,
+                       e.external_id AS employee_id,
+                       e.name AS employee_name,
+                       m.name AS measure_name,
+                       mv.version AS measure_version,
+                       c.evaluation_period,
+                       c.status,
+                       c.priority,
+                       c.assignee,
+                       c.next_action,
+                       c.current_outcome_status,
+                       c.last_run_id,
+                       c.created_at,
+                       c.updated_at,
+                       c.closed_at,
+                       o.evidence_json,
+                       o.status AS outcome_status,
+                       o.evaluated_at AS outcome_evaluated_at
+                FROM cases c
+                JOIN employees e ON c.employee_id = e.id
+                JOIN measure_versions mv ON c.measure_version_id = mv.id
+                JOIN measures m ON mv.measure_id = m.id
+                LEFT JOIN outcomes o ON o.run_id = c.last_run_id
+                    AND o.employee_id = c.employee_id
+                    AND o.measure_version_id = c.measure_version_id
+                    AND o.evaluation_period = c.evaluation_period
+                WHERE c.id = ?
+                """;
+
+        try {
+            return jdbcTemplate.query(sql, rs -> {
+                if (!rs.next()) {
+                    return Optional.<CaseDetail>empty();
+                }
+
+                UUID resolvedCaseId = (UUID) rs.getObject("case_id");
+                List<AuditEvent> timeline = loadCaseTimeline(resolvedCaseId);
+                String evidenceJson = rs.getString("evidence_json");
+
+                return Optional.of(new CaseDetail(
+                        resolvedCaseId,
+                        rs.getString("employee_id"),
+                        rs.getString("employee_name"),
+                        rs.getString("measure_name"),
+                        rs.getString("measure_version"),
+                        rs.getString("evaluation_period"),
+                        rs.getString("status"),
+                        rs.getString("priority"),
+                        rs.getString("assignee"),
+                        rs.getString("next_action"),
+                        rs.getString("current_outcome_status"),
+                        (UUID) rs.getObject("last_run_id"),
+                        toInstant(rs.getObject("created_at")),
+                        toInstant(rs.getObject("updated_at")),
+                        toInstant(rs.getObject("closed_at")),
+                        evidenceJson == null ? Map.of() : readJson(evidenceJson),
+                        rs.getString("outcome_status"),
+                        outcomeSummaryFor(rs.getString("outcome_status")),
+                        toInstant(rs.getObject("outcome_evaluated_at")),
+                        timeline
+                ));
+            }, caseId);
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private void upsertOpenCase(
+            UUID runId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            UUID employeeId,
+            AudiogramDemoService.AudiogramOutcome outcome
+    ) {
+        Optional<UUID> existingCaseId = findCaseId(employeeId, measureVersionId, evaluationPeriod);
+        UUID caseId = existingCaseId.orElseGet(UUID::randomUUID);
+        boolean created = existingCaseId.isEmpty();
+        String priority = priorityFor(outcome.outcome());
+        String nextAction = nextActionFor(outcome.outcome());
+
+        if (created) {
+            jdbcTemplate.update(
+                    "INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)",
+                    ps -> {
+                        ps.setObject(1, caseId);
+                        ps.setObject(2, employeeId);
+                        ps.setObject(3, measureVersionId);
+                        ps.setString(4, evaluationPeriod);
+                        ps.setString(5, "OPEN");
+                        ps.setString(6, priority);
+                        ps.setNull(7, java.sql.Types.VARCHAR);
+                        ps.setString(8, nextAction);
+                        ps.setString(9, outcome.outcome());
+                        ps.setObject(10, runId);
+                    }
+            );
+        } else {
+            jdbcTemplate.update(
+                    "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NULL WHERE id = ?",
+                    "OPEN",
+                    priority,
+                    nextAction,
+                    outcome.outcome(),
+                    runId,
+                    caseId
+            );
+        }
+
+        insertAuditEvent(
+                created ? "CASE_CREATED" : "CASE_UPDATED",
+                "case",
+                caseId,
+                "system",
+                runId,
+                caseId,
+                measureVersionId,
+                casePayload(outcome, priority, nextAction)
+        );
+    }
+
+    private void closeExistingCaseIfNeeded(
+            UUID runId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            UUID employeeId,
+            AudiogramDemoService.AudiogramOutcome outcome
+    ) {
+        Optional<UUID> existingCaseId = findCaseId(employeeId, measureVersionId, evaluationPeriod);
+        if (existingCaseId.isEmpty()) {
+            return;
+        }
+
+        UUID caseId = existingCaseId.get();
+        jdbcTemplate.update(
+                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
+                "CLOSED",
+                "LOW",
+                "No follow-up needed after compliant or excluded rerun.",
+                outcome.outcome(),
+                runId,
+                caseId
+        );
+
+        insertAuditEvent(
+                "CASE_CLOSED",
+                "case",
+                caseId,
+                "system",
+                runId,
+                caseId,
+                measureVersionId,
+                casePayload(outcome, "LOW", "No follow-up needed after compliant or excluded rerun.")
+        );
+    }
+
+    private Optional<UUID> findCaseId(UUID employeeId, UUID measureVersionId, String evaluationPeriod) {
+        try {
+            return Optional.ofNullable(jdbcTemplate.queryForObject(
+                    "SELECT id FROM cases WHERE employee_id = ? AND measure_version_id = ? AND evaluation_period = ?",
+                    UUID.class,
+                    employeeId,
+                    measureVersionId,
+                    evaluationPeriod
+            ));
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private List<AuditEvent> loadCaseTimeline(UUID caseId) {
+        String sql = """
+                SELECT event_type,
+                       actor,
+                       occurred_at,
+                       payload_json
+                FROM audit_events
+                WHERE ref_case_id = ?
+                ORDER BY occurred_at ASC, id ASC
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new AuditEvent(
+                rs.getString("event_type"),
+                rs.getString("actor"),
+                rs.getTimestamp("occurred_at").toInstant(),
+                rs.getString("payload_json") == null ? Map.of() : readJson(rs.getString("payload_json"))
+        ), caseId);
+    }
+
+    private boolean requiresOpenCase(String outcome) {
+        return switch (outcome) {
+            case "DUE_SOON", "OVERDUE", "MISSING_DATA" -> true;
+            default -> false;
+        };
+    }
+
+    private String priorityFor(String outcome) {
+        return switch (outcome) {
+            case "OVERDUE" -> "HIGH";
+            case "MISSING_DATA" -> "MEDIUM";
+            case "DUE_SOON" -> "MEDIUM";
+            default -> "LOW";
+        };
+    }
+
+    private String nextActionFor(String outcome) {
+        return switch (outcome) {
+            case "OVERDUE" -> "Escalate audiogram follow-up immediately.";
+            case "MISSING_DATA" -> "Collect the missing audiogram documentation.";
+            case "DUE_SOON" -> "Schedule the annual audiogram before the due date.";
+            default -> "No action required.";
+        };
+    }
+
+    private Map<String, Object> casePayload(AudiogramDemoService.AudiogramOutcome outcome, String priority, String nextAction) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("patientId", outcome.patientId());
+        payload.put("status", outcome.outcome());
+        payload.put("summary", outcome.summary());
+        payload.put("priority", priority);
+        payload.put("nextAction", nextAction);
+        return payload;
+    }
+
+    private void insertAuditEvent(
+            String eventType,
+            String entityType,
+            UUID entityId,
+            String actor,
+            UUID refRunId,
+            UUID refCaseId,
+            UUID refMeasureVersionId,
+            Map<String, Object> payload
+    ) {
+        jdbcTemplate.update(
+                "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)",
+                ps -> {
+                    ps.setString(1, eventType);
+                    ps.setString(2, entityType);
+                    ps.setObject(3, entityId);
+                    ps.setString(4, actor);
+                    ps.setObject(5, refRunId);
+                    ps.setObject(6, refCaseId);
+                    ps.setObject(7, refMeasureVersionId);
+                    ps.setString(8, toJsonb(payload));
+                }
+        );
+    }
+
+    private String toJsonb(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Unable to serialise JSON payload", ex);
+        }
+    }
+
+    private Map<String, Object> readJson(String json) {
+        try {
+            return objectMapper.readValue(json, Map.class);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to parse JSON payload", ex);
+        }
+    }
+
+    private Instant toInstant(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        throw new IllegalStateException("Unexpected timestamp value type: " + value.getClass());
+    }
+
+    private String outcomeSummaryFor(String outcome) {
+        return switch (outcome) {
+            case "COMPLIANT" -> "Audiogram completed within compliant window.";
+            case "DUE_SOON" -> "Audiogram nearing annual compliance deadline.";
+            case "OVERDUE" -> "Audiogram is outside annual compliance window.";
+            case "MISSING_DATA" -> "No completed audiogram date found.";
+            case "EXCLUDED" -> "Active waiver document found.";
+            default -> "Unknown status.";
+        };
+    }
+
+    public record CaseSummary(
+            UUID caseId,
+            String employeeId,
+            String employeeName,
+            String measureName,
+            String measureVersion,
+            String evaluationPeriod,
+            String status,
+            String priority,
+            String currentOutcomeStatus,
+            UUID lastRunId,
+            Instant updatedAt
+    ) {
+    }
+
+    public record CaseDetail(
+            UUID caseId,
+            String employeeId,
+            String employeeName,
+            String measureName,
+            String measureVersion,
+            String evaluationPeriod,
+            String status,
+            String priority,
+            String assignee,
+            String nextAction,
+            String currentOutcomeStatus,
+            UUID lastRunId,
+            Instant createdAt,
+            Instant updatedAt,
+            Instant closedAt,
+            Map<String, Object> evidenceJson,
+            String outcomeStatus,
+            String outcomeSummary,
+            Instant outcomeEvaluatedAt,
+            List<AuditEvent> timeline
+    ) {
+    }
+
+    public record AuditEvent(
+            String eventType,
+            String actor,
+            Instant occurredAt,
+            Map<String, Object> payload
+    ) {
+    }
+}

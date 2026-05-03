@@ -20,7 +20,7 @@ Why this is the default:
 - `com.workwell.measure`: measure catalog and version lifecycle.
 - `com.workwell.compile`: CQL compile/validate APIs.
 - `com.workwell.run`: run orchestration, outcome persistence, and latest-run readback.
-- `com.workwell.caseflow`: idempotent case upsert and case state transitions.
+- `com.workwell.caseflow`: idempotent case upsert, case state transitions, and Why Flagged readback.
 - `com.workwell.audit`: append-only audit event publishing and query.
 - `com.workwell.valueset`: value set registry and resolvability checks.
 - `com.workwell.mcp`: read-only MCP server tools for measure/run/case retrieval.
