@@ -75,6 +75,8 @@ public class CaseFlowService {
             sql.append(" AND m.id = ?");
             params.add(measureId);
         }
+        sql.append(" AND m.name <> 'AnnualAudiogramCompleted'");
+        sql.append(" AND e.external_id NOT LIKE 'patient-%'");
         sql.append(" ORDER BY c.updated_at DESC");
 
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
@@ -292,7 +294,7 @@ public class CaseFlowService {
         UUID caseId = existingCaseId.orElseGet(UUID::randomUUID);
         boolean created = existingCaseId.isEmpty();
         String priority = priorityFor(outcome.outcome());
-        String nextAction = nextActionFor(outcome.outcome());
+        String nextAction = nextActionFor(outcome.outcome(), measureVersionId);
 
         if (created) {
             jdbcTemplate.update(
@@ -519,11 +521,28 @@ public class CaseFlowService {
         };
     }
 
-    private String nextActionFor(String outcome) {
+    private String nextActionFor(String outcome, UUID measureVersionId) {
+        String measureName = jdbcTemplate.queryForObject(
+                """
+                        SELECT m.name
+                        FROM measure_versions mv
+                        JOIN measures m ON mv.measure_id = m.id
+                        WHERE mv.id = ?
+                        """,
+                String.class,
+                measureVersionId
+        );
+        boolean isTb = "TB Surveillance".equalsIgnoreCase(measureName);
         return switch (outcome) {
-            case "OVERDUE" -> "Escalate audiogram follow-up immediately.";
-            case "MISSING_DATA" -> "Collect the missing audiogram documentation.";
-            case "DUE_SOON" -> "Schedule the annual audiogram before the due date.";
+            case "OVERDUE" -> isTb
+                    ? "Escalate TB screening follow-up immediately."
+                    : "Escalate audiogram follow-up immediately.";
+            case "MISSING_DATA" -> isTb
+                    ? "Collect the missing TB screening documentation."
+                    : "Collect the missing audiogram documentation.";
+            case "DUE_SOON" -> isTb
+                    ? "Schedule the annual TB screening before the due date."
+                    : "Schedule the annual audiogram before the due date.";
             default -> "No action required.";
         };
     }

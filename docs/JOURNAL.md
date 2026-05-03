@@ -2,6 +2,29 @@
 
 ## 2026-05-03
 
+### D16 pre-freeze bugfix pass (TB copy, legacy clutter, placeholder routes)
+
+- Fixed TB next-action copy bug in caseflow action generation:
+  - TB open-case actions now use TB-specific language:
+    - `Schedule the annual TB screening before the due date.`
+    - `Escalate TB screening follow-up immediately.`
+    - `Collect the missing TB screening documentation.`
+- Clarified verification detail:
+  - Existing TB cases created before the fix retained old text.
+  - After triggering a fresh TB run in production (`runId=6793de66-b547-445e-8bcf-90fff6b621ec`), TB case detail now shows corrected TB-specific `nextAction`.
+- Removed legacy demo clutter from list surfaces:
+  - Measure list now excludes legacy `AnnualAudiogramCompleted`.
+  - Case list now excludes legacy placeholder employees (`patient-*`) and the legacy measure line.
+- Replaced placeholder frontend routes to avoid blank-page demo risk:
+  - `/programs` now provides navigation cards to live demo surfaces (`/measures`, `/runs`).
+  - `/worklist` now routes users directly to live cases via CTA (`/cases`).
+- Production verification:
+  - `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> 2 measures (`TB Surveillance`, `Audiogram`)
+  - `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open` -> no `patient-*` rows
+  - `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open&measureId=<tb-id>` + case detail -> TB-specific `nextAction` confirmed
+  - Frontend redeployed and aliased: `https://frontend-seven-eta-24.vercel.app`
+
 ### External advisor handoff refreshed
 
 - Rewrote `docs/advisor_update.md` into a clean, comprehensive status packet for external advisor review.

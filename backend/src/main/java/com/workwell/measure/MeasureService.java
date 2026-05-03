@@ -49,6 +49,7 @@ public class MeasureService {
                     ORDER BY created_at DESC
                     LIMIT 1
                 ) mv ON TRUE
+                WHERE m.name <> 'AnnualAudiogramCompleted'
                 ORDER BY last_updated DESC, m.name ASC
                 """;
 
