@@ -2,6 +2,218 @@
 
 ## 2026-05-03
 
+### Advisor sync - post-review execution reset
+
+- Advisor review completed. Progress confirmed through S1 (Audiogram vertical) and early S4 backend (case lifecycle + audit chain).
+- S2 (catalog/authoring) confirmed as the highest-priority remaining spike.
+- Decision: rerun-to-verify remains demo-simulated for all measures through D16. Do not generalize the evaluator this sprint.
+- Decision: S5 MCP scope is limited to Layer 1 only - three read-only tools (`get_case`, `list_cases`, `get_run_summary`) wrapping existing API endpoints. AI explain and write tools are post-D16.
+- Decision: S6 video/walkthrough production is deferred until a stable live demo exists. Written demo script is sufficient for D16.
+- Revised execution priority order is now recorded in `docs/SPIKE_PLAN.md` and supersedes prior task ordering.
+
+### Step 0 checkpoint (docs-first update complete)
+
+- Updated `docs/JOURNAL.md` and `docs/SPIKE_PLAN.md` per advisor instructions before implementation changes.
+- Added explicit S2 thin-vertical scope note and revised priority order with deferred items.
+- Production checkpoint:
+  - `2026-05-02T23:58:38-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+
+### Step 1 progress - S2 thin vertical implemented locally
+
+- Implemented backend Measure APIs:
+  - `GET /api/measures`
+  - `POST /api/measures`
+  - `GET /api/measures/{id}`
+  - `PUT /api/measures/{id}/spec`
+  - `PUT /api/measures/{id}/cql`
+  - `POST /api/measures/{id}/cql/compile`
+  - `POST /api/measures/{id}/status`
+- Seeded Audiogram as catalog-visible Active `v1.0` in service-level seed guard.
+- Implemented frontend S2 UI:
+  - `/measures` table with status pills and create flow
+  - `/studio/[id]` with Spec tab, CQL tab + compile gate, lifecycle action buttons
+  - Save Draft success toast behavior on Spec save
+- Local verification:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+  - `frontend npm run lint` -> success
+  - `frontend npm run build` -> success
+- Deployment state:
+  - Frontend production deployed: `https://frontend-seven-eta-24.vercel.app`
+  - Backend deploy currently blocked on this machine because `flyctl` is not installed (`flyctl` command not found).
+- Production checkpoint evidence:
+  - `2026-05-02T23:58:38-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-02T23:58:38-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `404` (expected until backend deployment with Step 1 code)
+
+### Step 1 deployment checkpoint (completed)
+
+- Backend deployed via Fly after `flyctl` install.
+- Production checkpoint:
+  - `2026-05-03T00:17:01-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T00:19:48-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `200`
+- Frontend production deployed and aliased:
+  - `https://frontend-seven-eta-24.vercel.app`
+
+### Step 2 — S3 audit + minimum generalization refactor
+
+Audit answers:
+
+- Which classes/methods in `AudiogramDemoService` and `RunPersistenceService` were hardcoded to Audiogram fixtures?
+  - `AudiogramDemoService.run()` hardcoded Audiogram patient fixture list and Audiogram-specific measure name/version.
+  - `RunPersistenceService.persistAudiogramRun(...)`, `loadLatestAudiogramRun()`, `loadOutcomesForRun(...)`, and seed helpers (`ensureMeasure*`) were coupled to Audiogram types/constants and patient-id naming.
+- Does `CaseFlowService` reference any Audiogram-specific types or IDs?
+  - Before refactor: yes, method signatures used `AudiogramDemoService.AudiogramOutcome`, and several message strings/templates were Audiogram-specific.
+  - After refactor: shared case upsert path now uses generic `DemoOutcome` model and no longer depends on Audiogram Java types/IDs.
+- Can a second measure seeded run be added by implementing a new `DemoService` + registering it, without modifying `CaseFlowService` or `RunPersistenceService`?
+  - Yes. `RunPersistenceService` now exposes `persistDemoRun(DemoRunPayload)` and `CaseFlowService` accepts generic outcome models (`upsertCases(...)`), so a second measure service can plug into the same run/case/audit infrastructure.
+
+Minimum changes applied:
+
+- Added shared run models:
+  - `backend/src/main/java/com/workwell/run/DemoRunModels.java`
+- Refactored shared persistence to generic payload:
+  - `RunPersistenceService.persistDemoRun(...)` added and used by existing Audiogram path.
+- Refactored shared case upsert path to generic outcomes:
+  - `CaseFlowService.upsertCases(...)` now accepts shared `DemoOutcome`.
+- Kept simulation pattern in place (no generalized evaluator introduced).
+
+Verification + deployment checkpoint:
+
+- Local backend verification:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+- Production checkpoint:
+  - `2026-05-03T00:23:51-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T00:23:51-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `200`
+  - `2026-05-03T00:23:51-04:00` `POST https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200`
+
+### Step 3 — S4 worklist filter cleanup + audit-linkage verification
+
+Implemented:
+
+- Backend case filters:
+  - `GET /api/cases?status=open|closed|all` (default `open`)
+  - `GET /api/cases?measureId=<measure-id>` (optional, combinable with status)
+- Frontend `/cases` filter controls:
+  - `Status` dropdown (Open / Closed / All), default Open
+  - `Measure` dropdown (populated from active measures)
+  - Re-fetch on filter changes
+
+Audit chain linkage verification (Audiogram path):
+
+- Code-path inspection confirms required run/case linkage for the demo lifecycle chain:
+  - `CASE_CREATED` / `CASE_UPDATED` include `ref_run_id` and `ref_case_id`
+  - `CASE_OUTREACH_SENT` includes `ref_run_id` and `ref_case_id`
+  - `CASE_RERUN_VERIFIED` includes `ref_run_id` and `ref_case_id`
+  - `CASE_CLOSED` includes `ref_run_id` and `ref_case_id`
+- No additional linkage fix was required for the specified chain.
+
+Verification + deployment checkpoint:
+
+- Local verification:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+  - `frontend npm run lint` -> success
+  - `frontend npm run build` -> success
+- Production deploy:
+  - Backend deployed on Fly
+  - Frontend deployed and aliased to `https://frontend-seven-eta-24.vercel.app`
+- Production checkpoint:
+  - `2026-05-03T00:28:21-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T00:28:21-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open` -> `200` (3 cases)
+  - `2026-05-03T00:28:21-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open&measureId=<active-id>` -> `200` (filter path verified)
+
+### Step 4 — S6 early (TB seed + synthetic dataset expansion)
+
+Implemented:
+
+- Added shared synthetic employee catalog with ~50 employees across required roles/sites:
+  - Roles represented: `Maintenance Tech`, `Nurse`, `Welder`, `Office Staff`, `Industrial Hygienist`, `Clinic Staff`
+  - Sites represented: `Plant A`, `Plant B`, `Clinic`
+- Extended run persistence seeding to maintain the synthetic employee roster in `employees` and upsert profile fields (name, role, site).
+- Expanded Audiogram simulation to a larger seeded cohort with mixed outcomes and persisted case generation through existing run/case/audit pipeline.
+- Added `TBSurveillanceDemoService` and registered:
+  - `POST /api/runs/tb-surveillance`
+- Added TB measure seed in catalog as Active:
+  - `TB Surveillance` version `v1.3`
+- Aligned Audiogram demo run metadata to:
+  - `Audiogram` version `v1.0`
+
+TB run distribution validation:
+
+- Production TB run response currently returns:
+  - `outcomes=10`
+  - `compliant=5`
+  - `dueSoon=1`
+  - `overdue=2`
+  - `missingData=1`
+  - `excluded=1`
+- This satisfies the target mix for demo credibility and keeps run simulation per-measure (no generalized evaluator introduced).
+
+Verification + deployment checkpoint:
+
+- Local backend verification:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+- Production checkpoint:
+  - `2026-05-03T01:04:54-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T01:04:54-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> includes Active `Audiogram` and Active `TB Surveillance`
+  - `2026-05-03T01:04:54-04:00` `POST https://workwell-measure-studio-api.fly.dev/api/runs/tb-surveillance` -> `200`
+
+### Step 5 — S5 MCP Layer 1 read tools
+
+Implemented MCP Layer 1 as read-only tools only:
+
+- `get_case`
+  - Input: `caseId: string`
+  - Returns full case detail payload from existing caseflow read path.
+- `list_cases`
+  - Input: `status?: string` (default `open`), `measureId?: string`
+  - Returns case summaries using existing filtered case listing path.
+- `get_run_summary`
+  - Input: `runId: string`
+  - Added supporting endpoint: `GET /api/runs/{id}` for run metadata + outcome counts by status.
+
+Implementation notes:
+
+- Added MCP Java SDK dependencies and Spring WebMVC SSE transport wiring.
+- MCP server config:
+  - `backend/src/main/java/com/workwell/mcp/McpServerConfig.java`
+- New run summary endpoint:
+  - `backend/src/main/java/com/workwell/web/RunController.java`
+
+Validation status:
+
+- Programmatic MCP transport validation completed:
+  - `GET /sse` returns MCP endpoint event with session-scoped message route.
+  - MCP initialize and message POST handshake return success status.
+- Full Claude Desktop interactive validation is pending in this environment (no direct Claude Desktop UI session available from this runtime).
+
+Deployment checkpoint:
+
+- `2026-05-03T01:19:02-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+- `2026-05-03T01:19:02-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/runs/{id}` -> `200`
+- `2026-05-03T01:19:02-04:00` `GET https://workwell-measure-studio-api.fly.dev/sse` -> MCP endpoint advertised
+
+### Step 6 — S6 final (audit export + demo script)
+
+Implemented:
+
+- Audit trail CSV export endpoint:
+  - `GET /api/audit-events/export?format=csv`
+  - Columns: `timestamp,eventType,caseId,runId,measureName,employeeId,actor,detail`
+- Frontend export control:
+  - Added **Export CSV** button on `/cases` to trigger browser download.
+- Added written demo script:
+  - `docs/DEMO_SCRIPT.md`
+
+Local verification:
+
+- `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+- `frontend npm run lint` -> success
+- `frontend npm run build` -> success
+
+Production checkpoint:
+
+- `2026-05-03T01:19:02-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+- `2026-05-03T01:19:02-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/audit-events/export?format=csv` -> `200` (`text/csv`)
+
 ### D3 - S1a Audiogram vertical (progress)
 
 **Goals set**

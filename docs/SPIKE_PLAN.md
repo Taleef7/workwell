@@ -20,6 +20,23 @@ By end of D16 (May 17), Doug can:
 
 All MVP scope from the original plan ships. Nothing deferred.
 
+## Advisor superseding update (2026-05-03)
+
+The execution order below supersedes prior open task ordering for D16 delivery:
+
+1. S2 — Measure Catalog + Authoring (thin vertical)
+2. S3 — Generalization audit + second measure parameterization
+3. S4 — Worklist filter cleanup (status + measure minimum)
+4. S6 — Seed second measure (TB Surveillance) + ~50 employee dataset
+5. S5 — MCP Layer 1 read tools only
+6. S5 — AI explain (stretch, only if time remains after MCP tools)
+7. S6 — Audit export + demo script
+
+Deferred post-D16:
+- S6 video/walkthrough production
+- S5 AI write tools, draft spec AI
+- S3 full generalized evaluator
+
 - **Authoring:** Catalog + versioning, Spec tab, CQL editor + compile gate, value sets, tests tab, approval/release.
 - **Execution:** Manual run orchestrator, run logs, run summary, per-employee outcomes with evidence payload, deterministic rerun.
 - **Operations:** Idempotent case upsert, case detail with Why Flagged, simulated outreach action, rerun-to-verify, full audit trail.
@@ -89,6 +106,11 @@ Goal: Tickets 1, 2, 3.
 - Spec tab: name, description, policy ref, eligibility, exclusions, compliance window, role/site filters
 - CQL editor (Monaco) with compile button, status (Compiled/Warnings/Errors), dependency list, value set list
 - Cannot Approve unless compile passes
+
+Advisor thin-vertical note:
+- Thin vertical only.
+- Skip: value set CRUD, test fixtures runner, clone/version-bump UI.
+- Audiogram should already exist in seed data as Active so demo does not depend on authoring end-to-end completion.
 
 ### S3 — Run pipeline + outcomes (D7–8)
 

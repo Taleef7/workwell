@@ -1,248 +1,303 @@
 # Advisor Update - WorkWell Measure Studio
 
 Date: 2026-05-03  
-Author: Execution update prepared for external advisor review  
-Canonical plan references: `docs/SPIKE_PLAN.md`, `docs/JOURNAL.md`, `docs/DEPLOY.md`, `CLAUDE.md`
+Author: Codex execution report (post-advisor instruction set)  
+Scope: Full overwrite with comprehensive status through Step 6
+
+Canonical references:
+- `docs/JOURNAL.md`
+- `docs/SPIKE_PLAN.md`
+- `docs/DEPLOY.md`
+- `docs/DEMO_SCRIPT.md`
 
 ## 1) Executive Summary
 
-This sprint is actively executing against the 16-day plan (May 2 to May 17, 2026) with real deployed progress, not only scaffolding.  
-The project has moved from plan/provisioning and S0 walking skeleton into a substantial vertical slice that already includes:
+Advisor-directed sequencing was followed and executed in order from Step 0 through Step 6, with production deployment checkpoints after each stage.
 
-- Seeded Audiogram run execution
-- Persistent outcomes with `evidence_json`
-- Case creation and case detail reads
-- Simulated outreach action
-- Rerun-to-verify closure behavior
-- Audit timeline linkage
-- Live deployment verification on Fly + Vercel
+Completed and deployed:
+- Step 0: docs realignment (`JOURNAL`, `SPIKE_PLAN`)
+- Step 1: S2 thin vertical authoring surface (catalog, create flow, spec, cql compile gate, lifecycle transitions)
+- Step 2: S3 focused generalization audit + minimum shared refactor for measure-specific demo services
+- Step 3: S4 worklist filter cleanup (status + measure) and audit-linkage verification
+- Step 4: S6 early seeding (TB Surveillance + expanded synthetic workforce)
+- Step 5: S5 MCP Layer 1 read tools (`get_case`, `list_cases`, `get_run_summary`) + transport exposure
+- Step 6: S6 final items (audit CSV export + written demo script)
 
-In practical terms: the core operational loop expected in S4b (open case -> action -> rerun -> close + audit trail) now works in production for the seeded Audiogram path.
+Current state: deployed backend/frontend are demo-capable for the requested D16 storyline without adding deferred scope.
 
-## 2) Plan Context and Delivery Intent
+---
 
-The current sprint north star (from `SPIKE_PLAN.md`) is to deliver a complete MVP demoable flow by D16, with explicit emphasis on:
+## 2) What Was Updated First (Step 0)
 
-- Deterministic measure execution
-- Idempotent case handling
-- Explainability and audit defensibility
-- AI assistance constrained by guardrails
-- MCP read-tool integration
+### `docs/JOURNAL.md`
+Added 2026-05-03 advisor-sync entry documenting:
+- S1 + early S4 progress confirmation
+- S2 as top remaining priority
+- Explicit decisions:
+  - rerun-to-verify remains simulated through D16
+  - no generalized evaluator this sprint
+  - S5 reduced to MCP Layer 1 read-only
+  - S6 video deferred; written script acceptable
 
-No scope cuts are planned in the canonical sprint plan.  
-Therefore, current execution strategy is:
+### `docs/SPIKE_PLAN.md`
+Added superseding priority block and thin-vertical S2 note:
+- Priority order updated per advisor sequence
+- Explicit post-D16 deferrals listed
+- S2 note added to skip value set CRUD / fixtures runner / clone-version UI
 
-1. Ship one fully integrated vertical path first (Audiogram).
-2. Prove correctness-critical invariants early (idempotency + audit chain).
-3. Reuse the working vertical architecture to scale to remaining spikes.
+---
 
-## 3) Checkpoint Matrix (Done / Partial / Missing vs SPIKE_PLAN)
+## 3) Step-by-Step Delivery Details
 
-### D1 - Plan + Provision
-Status: Done  
-Evidence:
-- Core docs and governance files created/updated.
-- ADR-002 evidence shape closed.
-- Fly/Vercel/Neon provisioning work completed with documented caveats in journal.
+## Step 1 - S2 Thin Vertical (Catalog + Authoring)
 
-### S0 - Walking Skeleton (D2)
-Status: Done  
-Evidence:
-- `POST /api/eval` implemented and deployed.
-- Frontend `/runs` probe calls backend successfully in production.
-- CORS/preflight issues resolved and documented.
-- Live health + probe checks completed.
+### Backend implemented
+- `GET /api/measures`
+- `POST /api/measures`
+- `GET /api/measures/{id}`
+- `PUT /api/measures/{id}/spec`
+- `PUT /api/measures/{id}/cql`
+- `POST /api/measures/{id}/cql/compile`
+- `POST /api/measures/{id}/status`
 
-### S1 - Audiogram Vertical (D3-D4)
-Status: Mostly Done  
-Evidence:
-- Audiogram CQL resource present.
-- Seeded 5-patient run implemented with all 5 outcome categories represented in run summary.
-- Outcomes persisted with `evidence_json`.
-- `/cases/[id]` Why Flagged detail rendered with structured evidence.
-- Evidence shape aligned with ADR-002.
+### Frontend implemented
+- `/measures` table with required columns and status pill colors
+- Create Measure form (name, policyRef, owner) -> redirects to `/studio/[id]`
+- `/studio/[id]` with:
+  - Spec tab + Save Draft
+  - CQL tab + compile button + compile state
+  - lifecycle action buttons (Draft->Approved->Active->Deprecated)
 
-Open edge:
-- The full S1b polish standard is partially subjective ("surface clean"), but core functional acceptance is met.
+### Seed behavior
+- Audiogram appears as Active (`v1.0`) in catalog seed logic.
 
-### S2 - Catalog + Spec + CQL editor (D5-D6)
-Status: Not Started (functional)  
-Current state:
-- Placeholder/early routes exist (`/measures`, `/studio`), but acceptance-level CRUD/versioning/spec/compile gate is not yet implemented.
+### Verification
+- Local:
+  - `backend\gradlew.bat test` passed
+  - `frontend npm run lint` passed
+  - `frontend npm run build` passed
+- Production checkpoint:
+  - health endpoint UP
+  - `/api/measures` returned 200 after deploy
 
-### S3 - Run pipeline + outcomes (D7-D8)
-Status: Partial  
-What is done:
-- Run persistence, logs, outcome persistence, and summary handling exist for the seeded Audiogram path.
-What is missing:
-- Generalized "Run Measures Now" scope orchestration (program/site/measure).
-- Broader deterministic rerun proof across non-seeded measure workflows.
+---
 
-### S4 - Worklist + Cases (D9-D10)
-Status: Partial to Strong Partial (backend-heavy progress already made early)  
-Done:
-- Idempotent case key contract enforced by DB uniqueness.
-- No duplicate case creation on rerun verified by integration tests.
-- Case list + detail APIs and UI views implemented.
-- Action endpoint: outreach simulation implemented with `case_actions` + audit events.
-- Rerun-to-verify endpoint implemented, closes case with compliant verification outcome.
-- Audit chain entries present for case lifecycle and actions.
-Missing / weak:
-- Worklist filtering by status/priority/assignee/measure/site is not implemented yet.
-- Action model is intentionally narrow (single simulated action) and still demo-level.
+## Step 2 - S3 Audit + Minimum Generalization Changes
 
-### S5 - AI + MCP (D11-D12)
-Status: Not Started  
-Missing:
-- Explain Why Flagged Anthropic integration
-- Draft Spec Anthropic integration
-- AI call logging/fallback UX
-- MCP server tool implementation and Claude Desktop validation
+### Audit answers (advisor prompt)
+1. `AudiogramDemoService.run()` and multiple methods in `RunPersistenceService` were Audiogram-coupled (fixture IDs, hardcoded naming, outcome types, method signatures).
+2. `CaseFlowService` had Audiogram type coupling via `AudiogramDemoService.AudiogramOutcome` signatures and some Audiogram-specific action text.
+3. Yes, after refactor: a second measure can plug in through a new service without modifying shared run/case/audit infrastructure.
 
-### S6 - Seed + Polish + Demo (D13-D15)
-Status: Not Started  
-Missing:
-- 4 seeded measures (currently Audiogram only)
-- ~50 employee synthetic dataset
-- Audit trail dedicated view polish + CSV export
-- Demo script and walkthrough video
+### Refactor applied
+- Added shared models:
+  - `backend/src/main/java/com/workwell/run/DemoRunModels.java`
+- Shared run persistence path:
+  - `RunPersistenceService.persistDemoRun(DemoRunPayload)`
+- Shared case upsert path:
+  - `CaseFlowService.upsertCases(...)` uses generic `DemoOutcome`
 
-### Overall D16 Definition-of-Done Outlook (as of 2026-05-03)
-Current position:
-- Real early momentum on run/case/audit mechanics.
-- Significant remaining work on authoring experience, AI, MCP, dataset breadth, and demo packaging.
+### Guardrail preserved
+- No generalized evaluator was introduced.
+- Per-measure simulation pattern remains intact.
 
-## 4) What Has Been Implemented (Code-Level Summary)
+### Verification
+- Local backend tests passed
+- Production checkpoint passed (health + key endpoints)
 
-Backend modules currently active:
-- `com.workwell.web`
-  - `EvalController` (`/api/eval`, `/api/runs/audiogram`, `/api/runs/audiogram/latest`)
-  - `CaseController` (`/api/cases`, `/api/cases/{id}`, outreach action, rerun-to-verify)
-- `com.workwell.measure`
-  - `AudiogramDemoService` for seeded deterministic-like patient outcomes
-- `com.workwell.run`
-  - `RunPersistenceService` for `runs`, `outcomes`, `run_logs`, and linked audit records
-- `com.workwell.caseflow`
-  - `CaseFlowService` for case upsert, close behavior, timeline loading, outreach and rerun verification flow
-- `com.workwell.config`
-  - `SecurityConfig` adjusted for sprint stub-auth and cross-origin flow
+---
 
-Frontend routes actively implemented:
-- `/runs` (run trigger/probe + result rendering)
-- `/cases` (case list)
-- `/cases/[id]` (detail, evidence display, timeline, action buttons)
+## Step 3 - S4 Worklist Filter Cleanup
 
-Schema baseline includes required core entities:
-- `measures`, `measure_versions`, `runs`, `outcomes`, `cases`, `case_actions`, `audit_events` (+ supporting tables)
+### Backend
+Updated `GET /api/cases` to support optional/combinable filters:
+- `status=open|closed|all` (default `open`)
+- `measureId=<uuid>`
 
-## 5) Deployment and Production Verification Snapshot
+### Frontend
+Updated `/cases` UI with:
+- Status dropdown (Open / Closed / All)
+- Measure dropdown (active measures)
+- re-fetch on filter changes
+- default open view
 
-Backend:
-- URL: `https://workwell-measure-studio-api.fly.dev`
-- Health verified: `/actuator/health` -> `UP`
+### Audit-linkage review
+Checked lifecycle chain linkage for Audiogram path:
+- `CASE_CREATED/UPDATED/CLOSED`, `CASE_OUTREACH_SENT`, `CASE_RERUN_VERIFIED` all include run/case references in the audit event write path.
+- No additional linkage hotfix required.
 
-Frontend:
-- Latest production deployment observed:
-  - `https://frontend-5wx93gznt-taleef7s-projects.vercel.app`
-  - Alias observed during deploy flow: `https://frontend-seven-eta-24.vercel.app`
+### Verification
+- Local backend/frontend checks passed
+- Production checkpoint passed (`/api/cases` filters returning 200)
 
-Live checkpoint evidence already recorded in journal:
-- `POST /api/runs/audiogram` returned run id
-- `GET /api/cases` returned active case list
-- `POST /api/cases/{id}/actions/outreach` updated action guidance
-- `POST /api/cases/{id}/rerun-to-verify` closed case with compliant status
-- Follow-up detail read showed closure timestamp and timeline
+---
 
-## 6) Commit History (Recent, High-Signal)
+## Step 4 - S6 Early: TB Measure + Dataset Expansion
 
-Recent commits on `main` (most relevant):
-- `5e46943` feat(caseflow): add outreach and rerun-to-verify closure loop [S4]
-- `47dbabb` feat(caseflow): persist audiogram cases and why flagged views [S1]
-- `0891031` feat(run): persist audiogram outcomes and readback [S1]
-- `8562132` fix(audiogram): handle null evidence in seeded run [S1]
-- `eb21c83` feat(audiogram): add S1a seeded vertical run flow [S1]
-- `c2db079` docs(s0): finalize D2 journal and deploy notes [S0]
-- `b672d8f` fix(frontend): normalize API base URL for eval probe [S0]
-- `a62c4d3` fix(api): allow CORS preflight for eval probe [S0]
-- `5d31344` feat(s0): add eval skeleton endpoint and frontend probe [S0]
+### Dataset expansion
+Added synthetic catalog of ~50 employees across required roles/sites:
+- Roles: Maintenance Tech, Nurse, Welder, Office Staff, Industrial Hygienist, Clinic Staff
+- Sites: Plant A, Plant B, Clinic
 
-Interpretation:
-- Strong delivery trend toward correctness-first operational backend behavior.
-- Progress has intentionally jumped ahead on parts of S4 while S2/S5/S6 are still open.
+### TB Surveillance
+Implemented:
+- `TBSurveillanceDemoService`
+- endpoint: `POST /api/runs/tb-surveillance`
+- measure seed: `TB Surveillance` Active `v1.3`
 
-## 7) Issues Encountered and How They Were Resolved
+### Audiogram alignment
+- Audiogram demo run metadata aligned to `Audiogram` `v1.0`
+- Both Audiogram and TB appear Active in catalog.
 
-1. CORS/preflight failures between Vercel frontend and Fly backend
-- Impact: `/runs` probe and browser API calls failed despite backend endpoint availability.
-- Resolution: security/CORS config update + frontend API base normalization.
-- Outcome: production browser-to-backend round-trip works.
+### Outcome distribution check
+Production TB run currently returns:
+- Compliant: 5
+- Due Soon: 1
+- Overdue: 2
+- Missing Data: 1
+- Excluded: 1
+(total 10 TB-eligible records)
 
-2. Null-safe evidence payload bug in seeded run
-- Impact: run persistence failure when a missing-data value entered `Map.of(...)`.
-- Resolution: switched to null-safe mutable payload construction.
-- Outcome: run endpoint stabilized; regression test added.
+This is within requested demo-mix intent.
 
-3. Fly deployment context mismatch (`COPY backend/ ./` not found)
-- Impact: deploy failed when executed from `backend/` working directory.
-- Resolution: deploy from repository root with `--config backend/fly.toml`.
-- Outcome: successful image build and deployment.
+### Verification
+- Local backend tests passed
+- Production checkpoint passed (health + measure presence + TB run endpoint)
 
-4. CLI availability friction (Fly alias/path)
-- Impact: `fly` / `flyctl` not found in shell path initially.
-- Resolution: use explicit binary path (`C:\Users\talee\.fly\bin\flyctl.exe`) and proceed.
-- Outcome: no blocker to deployment after path workaround.
+---
 
-## 8) Risk and Gap Assessment (Advisor-Focused)
+## Step 5 - S5 MCP Layer 1 (Read Tools Only)
 
-### High Risk (schedule-critical)
-- S2 authoring surface not delivered yet (catalog/versioning/spec/editor/compile gate).
-- S5 AI + MCP not started; both are planned as dedicated spikes but are technically non-trivial.
-- S6 demo packaging items (multi-measure seeding, exports, video/script) still untouched.
+### Implemented tools
+In MCP server config:
+- `get_case(caseId)`
+- `list_cases(status?, measureId?)`
+- `get_run_summary(runId)`
 
-### Medium Risk
-- Current implementation is heavily Audiogram-specific; needs clear generalization path.
-- Worklist filtering and richer operations UX are not yet at acceptance level.
+### Supporting API
+Added:
+- `GET /api/runs/{id}` to return run metadata + outcome counts by status
 
-### Low Risk / Mitigated
-- Basic deploy pipeline to Fly/Vercel is operational.
-- Core case idempotency and audit link behaviors now exist and are test-backed.
+### MCP transport
+Configured Spring WebMVC MCP SSE transport.
+Observed runtime behavior:
+- `GET /sse` returns session endpoint event including `/mcp/message?...`
 
-## 9) Recommended Next Sequence (Execution Plan from Here)
+### Validation status
+- Transport/handshake validation from this execution environment succeeded.
+- Full manual Claude Desktop interactive session remains a user-side validation step.
 
-1. Complete S2 immediately (highest dependency pressure)
-- Measure catalog CRUD + version lifecycle
-- Spec tab schema and state handling
-- CQL editor + compile gate enforcement
+No MCP write tools or AI integration added.
 
-2. Consolidate S3 abstraction
-- Lift run orchestration from Audiogram-only path to reusable measure-run path
-- Preserve current persistence/audit scaffolding
+---
 
-3. Finish S4 acceptance cleanup
-- Add worklist filters and tighten UI semantics
-- Validate audit chain completeness against acceptance checklist
+## Step 6 - S6 Final: Audit Export + Demo Script
 
-4. Execute S5 with strict guardrails
-- Implement AI explain/draft with explicit no-compliance-decision boundaries
-- Add call logging, fallback UX, and cost/rate limit controls
-- Build MCP read tools and run Claude Desktop proof
+### Audit export
+Added:
+- `GET /api/audit-events/export?format=csv`
+- CSV includes:
+  - `timestamp,eventType,caseId,runId,measureName,employeeId,actor,detail`
 
-5. Execute S6 polish and demo readiness
-- Seed remaining 3 measures + expand employee dataset
-- Add export surfaces and demo script/video package
+### Frontend export trigger
+Added **Export CSV** button on `/cases` to download `audit-events.csv`.
 
-## 10) Requested Advisor Feedback
+### Demo script
+Created:
+- `docs/DEMO_SCRIPT.md`
 
-Please provide targeted review on:
+Covers requested walkthrough flow:
+- catalog display
+- create draft measure
+- spec/cql/lifecycle surface
+- run + summary
+- filtered worklist
+- outreach + rerun-to-verify
+- CSV export
+- MCP demo prompts
 
-- Whether S2 should be implemented as a thin but complete vertical (recommended) vs breadth-first UI scaffolding.
-- Whether case rerun-to-verify should remain demo-simulated for now or be integrated into a generalized evaluator earlier.
-- Suggested minimum viable architecture for S5 MCP implementation that can be completed within sprint constraints without destabilizing S6.
-- Any scope-risk reordering you recommend to protect D16 demo certainty.
+---
 
-## 11) Current Bottom Line
+## 4) Key Files Added/Changed (High-Signal)
 
-The project is no longer at "scaffold-only" stage.  
-A live, test-backed compliance operations loop exists for the first seeded measure (Audiogram), including case lifecycle transitions and audit evidence.  
-The biggest remaining delivery risk is breadth: converting this working vertical into the full planned product surface (S2 through S6) within the remaining sprint window.
+### Added
+- `backend/src/main/java/com/workwell/run/DemoRunModels.java`
+- `backend/src/main/java/com/workwell/measure/SyntheticEmployeeCatalog.java`
+- `backend/src/main/java/com/workwell/measure/TBSurveillanceDemoService.java`
+- `backend/src/main/java/com/workwell/web/RunController.java`
+- `backend/src/main/java/com/workwell/mcp/McpServerConfig.java`
+- `backend/src/main/java/com/workwell/web/AuditController.java`
+- `backend/src/main/java/com/workwell/audit/AuditExportService.java`
+- `frontend/app/(dashboard)/studio/[id]/page.tsx`
+- `docs/DEMO_SCRIPT.md`
+
+### Updated (selected)
+- `backend/src/main/java/com/workwell/measure/MeasureService.java`
+- `backend/src/main/java/com/workwell/run/RunPersistenceService.java`
+- `backend/src/main/java/com/workwell/caseflow/CaseFlowService.java`
+- `backend/src/main/java/com/workwell/web/CaseController.java`
+- `backend/src/main/java/com/workwell/web/EvalController.java`
+- `frontend/app/(dashboard)/measures/page.tsx`
+- `frontend/app/(dashboard)/cases/page.tsx`
+- `backend/build.gradle.kts`
+- `docs/JOURNAL.md`
+- `docs/SPIKE_PLAN.md`
+
+---
+
+## 5) Deployment + Checkpoint Evidence Summary
+
+Across steps, production checkpoints were repeatedly run and logged.
+Final-state confirmation includes:
+- `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+- `GET /api/measures` -> Active Audiogram + Active TB Surveillance visible
+- `POST /api/runs/tb-surveillance` -> `200` with mixed outcomes
+- `GET /api/runs/{id}` -> `200`
+- `GET /api/cases?status=open` and with `measureId` filter -> `200`
+- `GET /api/audit-events/export?format=csv` -> `200` (`text/csv`)
+- `GET /sse` -> MCP endpoint advertisement event present
+
+Frontend production alias remains:
+- `https://frontend-seven-eta-24.vercel.app`
+
+---
+
+## 6) Scope Guard Compliance
+
+Not implemented (intentionally deferred per advisor):
+- Value set CRUD/import UI
+- test fixtures runner/tests tab UI
+- AI Draft Spec / Anthropic integration
+- MCP write tools
+- full generalized evaluator
+- advanced worklist filters (assignee/priority/site)
+- demo video production
+
+---
+
+## 7) Open Items / Risks
+
+1. Manual Claude Desktop MCP proof is still needed for advisor's exact phrasing:
+   - “Show me all open Audiogram cases”
+   - “Get the summary of the latest run.”
+
+2. Current `docs/SPIKE_PLAN.md` still contains legacy sections elsewhere in file; superseding advisor section exists, but full-file cleanup for consistency is recommended.
+
+3. Some demo strings and route labels still reflect earlier naming in places (`S0`, legacy copy), though functionality is correct.
+
+---
+
+## 8) Bottom Line
+
+The advisor-directed execution plan has been carried through implementation and deployment end-to-end for Steps 0-6, with production checkpoints after each stage and comprehensive journaling.
+
+The system now has:
+- thin authoring vertical,
+- reusable simulated run/case/audit pipeline,
+- second seeded measure (TB),
+- expanded synthetic workforce,
+- worklist filtering,
+- MCP Layer 1 read tooling,
+- audit CSV export,
+- and a finalized written demo script.
 
