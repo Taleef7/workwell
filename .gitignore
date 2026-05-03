@@ -36,4 +36,5 @@ v0 protoype screenshots/
 backend/build-log.txt
 docs/WorkWell Studio Summer 2026 Doc.pdf
 backend/src/test/resources/logback-test.xml
-
+.tmp_eval_payload.json
+.vercel

@@ -104,6 +104,38 @@
 - Neon runtime target must be PostgreSQL 16 before final Fly DB secret wiring.
 - Deployed S0 validation on live URLs (Fly `/actuator/health`, Vercel `/runs` probe).
 
+### D2 - S0 walking skeleton (completed)
+
+**Infra completion**
+- Neon PG16 project created and selected for runtime (`workwell-measure-studio-pg16`).
+- Fly secrets set with JDBC-form `DATABASE_URL` and `DATABASE_URL_DIRECT` values from PG16 target.
+- Backend deployed to Fly and verified healthy on:
+  - `https://workwell-measure-studio-api.fly.dev/actuator/health`
+- Vercel root directory locked to `frontend` and production alias confirmed:
+  - `https://workwell-measure-studio.vercel.app`
+
+**What shipped after D2 prep**
+- Backend CORS handling enabled in spring security to allow browser preflight from Vercel frontend.
+  - File: `backend/src/main/java/com/workwell/config/SecurityConfig.java`
+- Frontend eval probe hardened by normalizing `NEXT_PUBLIC_API_BASE_URL` and surfacing the full request URL on failure.
+  - File: `frontend/app/(dashboard)/runs/page.tsx`
+
+**Production verification evidence**
+- Preflight check from Vercel origin to Fly eval endpoint:
+  - `OPTIONS /api/eval` -> `200`, `Access-Control-Allow-Origin` returned correctly.
+- Direct API eval check:
+  - `POST https://workwell-measure-studio-api.fly.dev/api/eval` -> `200` with expected placeholder payload.
+- Browser check on production frontend:
+  - `/runs` "Run Eval Probe" now renders successful JSON response (COMPLIANT placeholder outcome).
+
+**Commits applied during D2 completion**
+- `a62c4d3` `fix(api): allow CORS preflight for eval probe [S0]`
+- `b672d8f` `fix(frontend): normalize API base URL for eval probe [S0]`
+
+**Result**
+- S0 acceptance met: deployed patient/CQL eval probe round-trip works end-to-end across Vercel + Fly + Neon.
+  - Ready to move into D3/S1a Audiogram vertical.
+
 ---
 
 ## 2026-05-01

@@ -85,7 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D2 prep (Sat May 2, 2026) - begin S0 walking skeleton execution: ship /api/eval, wire frontend probe, and line up Fly + Vercel + Neon PG16 verification.
+**Today:** D2 complete (Sun May 3, 2026) - S0 walking skeleton verified end-to-end on production Vercel + Fly + Neon PG16, including browser probe success on `/runs`.
 
-**Next:** D2 (Sun May 3, 2026) - finish deployed end-to-end S0 verification, then move to D3 S1a Audiogram vertical.
+**Next:** D3 (Mon May 4, 2026) - start S1a Audiogram vertical: authored measure path, run pipeline wiring, and persisted outcome + evidence surface.
 

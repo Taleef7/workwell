@@ -174,3 +174,13 @@ Vercel subdomain `workwell-measure-studio.vercel.app` is fine for the demo. If b
 2. Vercel: Settings → Domains → add, follow DNS instructions
 3. Fly: `fly certs add api.<your-domain>`, follow DNS instructions
 4. Update `NEXT_PUBLIC_API_BASE_URL` to new backend domain
+
+## D2 notes (S0)
+
+- Confirm the active Vercel project is `workwell-measure-studio`.
+- Confirm Vercel Root Directory is `frontend`.
+- For the S0 `/runs` probe, validate preflight before debugging POST:
+  - `OPTIONS https://workwell-measure-studio-api.fly.dev/api/eval`
+  - Expect `200` plus `Access-Control-Allow-Origin`.
+- If probe UI shows `404` while direct POST works, check CORS/security config and redeploy Fly backend.
+- Keep `NEXT_PUBLIC_API_BASE_URL` as origin-only (for example `https://workwell-measure-studio-api.fly.dev`), with no `/api` suffix and no trailing whitespace.
