@@ -20,8 +20,11 @@ public class CaseController {
     }
 
     @GetMapping("/api/cases")
-    public List<CaseFlowService.CaseSummary> listCases() {
-        return caseFlowService.listCases();
+    public List<CaseFlowService.CaseSummary> listCases(
+            @RequestParam(name = "status", defaultValue = "open") String status,
+            @RequestParam(name = "measureId", required = false) UUID measureId
+    ) {
+        return caseFlowService.listCases(status, measureId);
     }
 
     @GetMapping("/api/cases/{caseId}")

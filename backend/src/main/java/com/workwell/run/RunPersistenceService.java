@@ -3,7 +3,10 @@ package com.workwell.run;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.SyntheticEmployeeCatalog;
 import com.workwell.caseflow.CaseFlowService;
+import com.workwell.run.DemoRunModels.DemoOutcome;
+import com.workwell.run.DemoRunModels.DemoRunPayload;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -27,8 +30,8 @@ import org.slf4j.LoggerFactory;
 @Service
 public class RunPersistenceService {
     private static final Logger log = LoggerFactory.getLogger(RunPersistenceService.class);
-    private static final String MEASURE_NAME = "AnnualAudiogramCompleted";
-    private static final String MEASURE_VERSION = "1.0.0";
+    private static final String MEASURE_NAME = "Audiogram";
+    private static final String MEASURE_VERSION = "v1.0";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -42,13 +45,42 @@ public class RunPersistenceService {
 
     @Transactional
     public void persistAudiogramRun(AudiogramDemoService.AudiogramDemoRun run) {
+        List<DemoOutcome> outcomes = run.outcomes().stream()
+                .map(outcome -> new DemoOutcome(
+                        outcome.patientId(),
+                        outcome.patientId(),
+                        "demo",
+                        "demo",
+                        outcome.outcome(),
+                        outcome.summary(),
+                        outcome.evidenceJson()
+                ))
+                .toList();
+        persistDemoRun(new DemoRunPayload(
+                run.runId(),
+                run.measureName(),
+                run.measureVersion(),
+                run.evaluationDate(),
+                outcomes
+        ));
+    }
+
+    @Transactional
+    public void persistDemoRun(DemoRunPayload run) {
         String stage = "start";
         try {
+            long compliant = run.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+            long dueSoon = run.outcomes().stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
+            long overdue = run.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+            long missingData = run.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+            long excluded = run.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+
             stage = "ensure-measure";
-            UUID measureId = ensureMeasure();
+            UUID measureId = ensureMeasure(run.measureName());
             stage = "ensure-measure-version";
-            UUID measureVersionId = ensureMeasureVersion(measureId);
+            UUID measureVersionId = ensureMeasureVersion(measureId, run.measureVersion(), run.measureName());
             stage = "ensure-employees";
+            seedSyntheticEmployees();
             List<UUID> employeeIds = ensureEmployees(run.outcomes());
 
             UUID runId = UUID.fromString(run.runId());
@@ -70,8 +102,8 @@ public class RunPersistenceService {
                         ps.setObject(8, Timestamp.from(startedAt));
                         ps.setObject(9, Timestamp.from(completedAt));
                         ps.setInt(10, run.outcomes().size());
-                        ps.setLong(11, run.summary().compliant());
-                        ps.setLong(12, run.summary().dueSoon() + run.summary().overdue() + run.summary().missingData() + run.summary().excluded());
+                        ps.setLong(11, compliant);
+                        ps.setLong(12, dueSoon + overdue + missingData + excluded);
                         ps.setLong(13, 60_000L);
                         ps.setObject(14, Timestamp.from(startedAt));
                         ps.setObject(15, Timestamp.from(completedAt));
@@ -88,7 +120,7 @@ public class RunPersistenceService {
 
             stage = "insert-outcomes";
             for (int i = 0; i < run.outcomes().size(); i++) {
-                AudiogramDemoService.AudiogramOutcome outcome = run.outcomes().get(i);
+                DemoOutcome outcome = run.outcomes().get(i);
                 UUID outcomeId = UUID.randomUUID();
                 UUID employeeId = employeeIds.get(i);
 
@@ -115,7 +147,7 @@ public class RunPersistenceService {
                         null,
                         measureVersionId,
                         Map.of(
-                                "patientId", outcome.patientId(),
+                                "subjectId", outcome.subjectId(),
                                 "status", outcome.outcome(),
                                 "summary", outcome.summary()
                         )
@@ -123,7 +155,7 @@ public class RunPersistenceService {
             }
 
             stage = "upsert-cases";
-            caseFlowService.upsertAudiogramCases(
+            caseFlowService.upsertCases(
                     runId,
                     measureVersionId,
                     evaluationPeriod,
@@ -145,11 +177,11 @@ public class RunPersistenceService {
                             "measureVersion", run.measureVersion(),
                             "evaluationDate", run.evaluationDate(),
                             "summary", Map.of(
-                                    "compliant", run.summary().compliant(),
-                                    "dueSoon", run.summary().dueSoon(),
-                                    "overdue", run.summary().overdue(),
-                                    "missingData", run.summary().missingData(),
-                                    "excluded", run.summary().excluded()
+                                    "compliant", compliant,
+                                    "dueSoon", dueSoon,
+                                    "overdue", overdue,
+                                    "missingData", missingData,
+                                    "excluded", excluded
                             )
                     )
             );
@@ -204,6 +236,56 @@ public class RunPersistenceService {
         }
     }
 
+    public Optional<RunSummaryResponse> loadRunById(UUID runId) {
+        String sql = """
+                SELECT r.id AS run_id,
+                       r.started_at,
+                       r.completed_at,
+                       r.status,
+                       r.trigger_type,
+                       r.scope_type,
+                       r.total_evaluated,
+                       r.compliant,
+                       r.non_compliant,
+                       m.name AS measure_name,
+                       mv.version AS measure_version
+                FROM runs r
+                LEFT JOIN measure_versions mv ON r.scope_id = mv.id
+                LEFT JOIN measures m ON mv.measure_id = m.id
+                WHERE r.id = ?
+                """;
+        try {
+            Map<String, Object> row = jdbcTemplate.queryForMap(sql, runId);
+            List<Map<String, Object>> counts = jdbcTemplate.query(
+                    """
+                            SELECT status, COUNT(*) AS cnt
+                            FROM outcomes
+                            WHERE run_id = ?
+                            GROUP BY status
+                            """,
+                    (rs, rowNum) -> Map.of(
+                            "status", rs.getString("status"),
+                            "count", rs.getLong("cnt")
+                    ),
+                    runId
+            );
+            return Optional.of(new RunSummaryResponse(
+                    row.get("run_id").toString(),
+                    (String) row.get("measure_name"),
+                    (String) row.get("measure_version"),
+                    row.get("status") == null ? "" : row.get("status").toString(),
+                    row.get("trigger_type") == null ? "" : row.get("trigger_type").toString(),
+                    row.get("scope_type") == null ? "" : row.get("scope_type").toString(),
+                    row.get("started_at") == null ? null : ((Timestamp) row.get("started_at")).toInstant(),
+                    row.get("completed_at") == null ? null : ((Timestamp) row.get("completed_at")).toInstant(),
+                    row.get("total_evaluated") == null ? 0 : ((Number) row.get("total_evaluated")).longValue(),
+                    counts
+            ));
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
     private List<AudiogramDemoService.AudiogramOutcome> loadOutcomesForRun(UUID runId) {
         String sql = """
                 SELECT o.employee_id, o.status, o.evidence_json
@@ -232,14 +314,14 @@ public class RunPersistenceService {
         return jdbcTemplate.queryForObject("SELECT external_id FROM employees WHERE id = ?", String.class, employeeId);
     }
 
-    private UUID ensureMeasure() {
+    private UUID ensureMeasure(String measureName) {
         try {
-            return jdbcTemplate.queryForObject("SELECT id FROM measures WHERE name = ?", UUID.class, MEASURE_NAME);
+            return jdbcTemplate.queryForObject("SELECT id FROM measures WHERE name = ?", UUID.class, measureName);
         } catch (EmptyResultDataAccessException ex) {
             UUID measureId = UUID.randomUUID();
             jdbcTemplate.update("INSERT INTO measures (id, name, policy_ref, owner, tags) VALUES (?, ?, ?, ?, ?)", ps -> {
                 ps.setObject(1, measureId);
-                ps.setString(2, MEASURE_NAME);
+                ps.setString(2, measureName);
                 ps.setString(3, "OSHA 29 CFR 1910.95");
                 ps.setString(4, "WorkWell Studio");
                 ps.setNull(5, java.sql.Types.ARRAY);
@@ -248,19 +330,19 @@ public class RunPersistenceService {
         }
     }
 
-    private UUID ensureMeasureVersion(UUID measureId) {
+    private UUID ensureMeasureVersion(UUID measureId, String version, String measureName) {
         try {
             return jdbcTemplate.queryForObject(
                     "SELECT id FROM measure_versions WHERE measure_id = ? AND version = ?",
                     UUID.class,
                     measureId,
-                    MEASURE_VERSION
+                    version
             );
         } catch (EmptyResultDataAccessException ex) {
             UUID measureVersionId = UUID.randomUUID();
             String cqlText = loadCqlText();
             Map<String, Object> specJson = Map.of(
-                    "measureName", MEASURE_NAME,
+                    "measureName", measureName,
                     "policyRef", "OSHA 29 CFR 1910.95",
                     "complianceWindowDays", 365
             );
@@ -269,7 +351,7 @@ public class RunPersistenceService {
                     ps -> {
                         ps.setObject(1, measureVersionId);
                         ps.setObject(2, measureId);
-                        ps.setString(3, MEASURE_VERSION);
+                        ps.setString(3, version);
                         ps.setString(4, "Active");
                         ps.setString(5, toJsonb(specJson));
                         ps.setString(6, cqlText);
@@ -284,16 +366,16 @@ public class RunPersistenceService {
         }
     }
 
-    private List<UUID> ensureEmployees(List<AudiogramDemoService.AudiogramOutcome> outcomes) {
+    private List<UUID> ensureEmployees(List<DemoOutcome> outcomes) {
         List<UUID> employeeIds = new ArrayList<>();
-        for (AudiogramDemoService.AudiogramOutcome outcome : outcomes) {
-            UUID employeeId = ensureEmployee(outcome.patientId());
+        for (DemoOutcome outcome : outcomes) {
+            UUID employeeId = ensureEmployee(outcome.subjectId(), outcome.subjectName(), outcome.role(), outcome.site());
             employeeIds.add(employeeId);
         }
         return employeeIds;
     }
 
-    private UUID ensureEmployee(String externalId) {
+    private UUID ensureEmployee(String externalId, String name, String role, String site) {
         try {
             return jdbcTemplate.queryForObject("SELECT id FROM employees WHERE external_id = ?", UUID.class, externalId);
         } catch (EmptyResultDataAccessException ex) {
@@ -303,13 +385,34 @@ public class RunPersistenceService {
                     ps -> {
                         ps.setObject(1, employeeId);
                         ps.setString(2, externalId);
-                        ps.setString(3, externalId);
-                        ps.setString(4, "demo");
-                        ps.setString(5, "demo");
+                        ps.setString(3, name);
+                        ps.setString(4, role);
+                        ps.setString(5, site);
                         ps.setBoolean(6, true);
                     }
             );
             return employeeId;
+        }
+    }
+
+    private void seedSyntheticEmployees() {
+        for (SyntheticEmployeeCatalog.EmployeeProfile employee : SyntheticEmployeeCatalog.allEmployees()) {
+            try {
+                UUID id = jdbcTemplate.queryForObject(
+                        "SELECT id FROM employees WHERE external_id = ?",
+                        UUID.class,
+                        employee.externalId()
+                );
+                jdbcTemplate.update(
+                        "UPDATE employees SET name = ?, role = ?, site = ?, active = TRUE WHERE id = ?",
+                        employee.name(),
+                        employee.role(),
+                        employee.site(),
+                        id
+                );
+            } catch (EmptyResultDataAccessException ex) {
+                ensureEmployee(employee.externalId(), employee.name(), employee.role(), employee.site());
+            }
         }
     }
 
@@ -363,5 +466,19 @@ public class RunPersistenceService {
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to read audiogram CQL resource", ex);
         }
+    }
+
+    public record RunSummaryResponse(
+            String runId,
+            String measureName,
+            String measureVersion,
+            String status,
+            String triggerType,
+            String scopeType,
+            Instant startedAt,
+            Instant completedAt,
+            long totalEvaluated,
+            List<Map<String, Object>> outcomeCounts
+    ) {
     }
 }

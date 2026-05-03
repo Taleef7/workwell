@@ -31,7 +31,7 @@ class CaseControllerTest {
     @Test
     void listsCases() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.listCases()).thenReturn(List.of(
+        when(caseFlowService.listCases("open", null)).thenReturn(List.of(
                 new CaseFlowService.CaseSummary(
                         caseId,
                         "patient-003",

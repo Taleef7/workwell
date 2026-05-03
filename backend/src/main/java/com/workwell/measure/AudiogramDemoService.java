@@ -1,6 +1,8 @@
 package com.workwell.measure;
 
 import com.workwell.run.RunPersistenceService;
+import com.workwell.run.DemoRunModels.DemoOutcome;
+import com.workwell.run.DemoRunModels.DemoRunPayload;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,11 +21,21 @@ public class AudiogramDemoService {
     public AudiogramDemoRun run() {
         UUID runId = UUID.randomUUID();
         List<AudiogramPatient> patients = List.of(
-                new AudiogramPatient("patient-001", 120, false, true),
-                new AudiogramPatient("patient-002", 350, false, true),
-                new AudiogramPatient("patient-003", 420, false, true),
-                new AudiogramPatient("patient-004", null, false, true),
-                new AudiogramPatient("patient-005", 600, true, true)
+                new AudiogramPatient("emp-001", 120, false, true),
+                new AudiogramPatient("emp-002", 350, false, true),
+                new AudiogramPatient("emp-003", 420, false, true),
+                new AudiogramPatient("emp-004", null, false, true),
+                new AudiogramPatient("emp-005", 600, true, true),
+                new AudiogramPatient("emp-006", 200, false, true),
+                new AudiogramPatient("emp-007", 362, false, true),
+                new AudiogramPatient("emp-008", 480, false, true),
+                new AudiogramPatient("emp-009", null, false, true),
+                new AudiogramPatient("emp-010", 700, true, true),
+                new AudiogramPatient("emp-011", 340, false, true),
+                new AudiogramPatient("emp-012", 366, false, true),
+                new AudiogramPatient("emp-013", 40, false, true),
+                new AudiogramPatient("emp-014", 371, false, true),
+                new AudiogramPatient("emp-015", null, false, true)
         );
 
         List<AudiogramOutcome> outcomes = patients.stream().map(this::evaluate).toList();
@@ -36,13 +48,31 @@ public class AudiogramDemoService {
 
         AudiogramDemoRun run = new AudiogramDemoRun(
                 runId.toString(),
-                "AnnualAudiogramCompleted",
-                "1.0.0",
+                "Audiogram",
+                "v1.0",
                 LocalDate.now().toString(),
                 new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
                 outcomes
         );
-        runPersistenceService.persistAudiogramRun(run);
+        List<DemoOutcome> payloadOutcomes = outcomes.stream().map(outcome -> {
+            SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(outcome.patientId());
+            return new DemoOutcome(
+                    outcome.patientId(),
+                    employee.name(),
+                    employee.role(),
+                    employee.site(),
+                    outcome.outcome(),
+                    outcome.summary(),
+                    outcome.evidenceJson()
+            );
+        }).toList();
+        runPersistenceService.persistDemoRun(new DemoRunPayload(
+                run.runId(),
+                run.measureName(),
+                run.measureVersion(),
+                run.evaluationDate(),
+                payloadOutcomes
+        ));
         return run;
     }
 
@@ -85,7 +115,11 @@ public class AudiogramDemoService {
         );
 
         Map<String, Object> evaluatedResource = new LinkedHashMap<>();
+        SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(patient.patientId());
         evaluatedResource.put("patientId", patient.patientId());
+        evaluatedResource.put("employeeName", employee.name());
+        evaluatedResource.put("role", employee.role());
+        evaluatedResource.put("site", employee.site());
         evaluatedResource.put("daysSinceLastAudiogram", patient.daysSinceAudiogram());
         evaluatedResource.put("hasActiveWaiver", patient.hasActiveWaiver());
         evaluatedResource.put("measurementWindowDays", 365);

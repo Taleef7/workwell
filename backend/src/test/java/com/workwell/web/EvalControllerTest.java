@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.RunPersistenceService;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,9 @@ class EvalControllerTest {
 
     @MockBean
     private AudiogramDemoService audiogramDemoService;
+
+    @MockBean
+    private TBSurveillanceDemoService tbSurveillanceDemoService;
 
     @MockBean
     private RunPersistenceService runPersistenceService;
@@ -56,8 +60,8 @@ class EvalControllerTest {
         when(audiogramDemoService.run()).thenReturn(
                 new AudiogramDemoService.AudiogramDemoRun(
                         "run-123",
-                        "AnnualAudiogramCompleted",
-                        "1.0.0",
+                        "Audiogram",
+                        "v1.0",
                         "2026-05-04",
                         new AudiogramDemoService.RunSummary(1, 1, 1, 1, 1),
                         List.of(
@@ -75,7 +79,7 @@ class EvalControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.runId").value("run-123"))
-                .andExpect(jsonPath("$.measureName").value("AnnualAudiogramCompleted"))
+                .andExpect(jsonPath("$.measureName").value("Audiogram"))
                 .andExpect(jsonPath("$.outcomes[0].patientId").value("patient-001"));
     }
 
@@ -84,8 +88,8 @@ class EvalControllerTest {
         when(runPersistenceService.loadLatestAudiogramRun()).thenReturn(of(
                 new AudiogramDemoService.AudiogramDemoRun(
                         "run-456",
-                        "AnnualAudiogramCompleted",
-                        "1.0.0",
+                        "Audiogram",
+                        "v1.0",
                         "2026-05-04",
                         new AudiogramDemoService.RunSummary(1, 1, 1, 1, 1),
                         List.of()
@@ -95,6 +99,6 @@ class EvalControllerTest {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/runs/audiogram/latest"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value("run-456"))
-                .andExpect(jsonPath("$.measureVersion").value("1.0.0"));
+                .andExpect(jsonPath("$.measureVersion").value("v1.0"));
     }
 }

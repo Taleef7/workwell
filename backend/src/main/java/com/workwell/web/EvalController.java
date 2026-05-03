@@ -3,6 +3,7 @@ package com.workwell.web;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.RunPersistenceService;
 import java.time.Instant;
 import java.util.List;
@@ -18,10 +19,16 @@ import org.springframework.web.bind.annotation.RestController;
 @Validated
 public class EvalController {
     private final AudiogramDemoService audiogramDemoService;
+    private final TBSurveillanceDemoService tbSurveillanceDemoService;
     private final RunPersistenceService runPersistenceService;
 
-    public EvalController(AudiogramDemoService audiogramDemoService, RunPersistenceService runPersistenceService) {
+    public EvalController(
+            AudiogramDemoService audiogramDemoService,
+            TBSurveillanceDemoService tbSurveillanceDemoService,
+            RunPersistenceService runPersistenceService
+    ) {
         this.audiogramDemoService = audiogramDemoService;
+        this.tbSurveillanceDemoService = tbSurveillanceDemoService;
         this.runPersistenceService = runPersistenceService;
     }
 
@@ -52,6 +59,11 @@ public class EvalController {
     @PostMapping("/api/runs/audiogram")
     public AudiogramDemoService.AudiogramDemoRun runAudiogram() {
         return audiogramDemoService.run();
+    }
+
+    @PostMapping("/api/runs/tb-surveillance")
+    public TBSurveillanceDemoService.TBDemoRun runTbSurveillance() {
+        return tbSurveillanceDemoService.run();
     }
 
     @GetMapping("/api/runs/audiogram/latest")

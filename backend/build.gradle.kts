@@ -20,6 +20,8 @@ repositories {
 extra["testcontainersVersion"] = "1.21.4"
 
 dependencies {
+	implementation("io.modelcontextprotocol.sdk:mcp:0.10.0")
+	implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.10.0")
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-security")

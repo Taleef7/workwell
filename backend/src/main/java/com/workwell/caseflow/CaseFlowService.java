@@ -2,7 +2,7 @@ package com.workwell.caseflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.workwell.measure.AudiogramDemoService;
+import com.workwell.run.DemoRunModels.DemoOutcome;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,16 +25,16 @@ public class CaseFlowService {
         this.objectMapper = objectMapper;
     }
 
-    public void upsertAudiogramCases(
+    public void upsertCases(
             UUID runId,
             UUID measureVersionId,
             String evaluationPeriod,
             List<UUID> employeeIds,
-            List<AudiogramDemoService.AudiogramOutcome> outcomes
+            List<DemoOutcome> outcomes
     ) {
         for (int i = 0; i < outcomes.size(); i++) {
             UUID employeeId = employeeIds.get(i);
-            AudiogramDemoService.AudiogramOutcome outcome = outcomes.get(i);
+            DemoOutcome outcome = outcomes.get(i);
             if (requiresOpenCase(outcome.outcome())) {
                 upsertOpenCase(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
             } else {
@@ -43,8 +43,8 @@ public class CaseFlowService {
         }
     }
 
-    public List<CaseSummary> listCases() {
-        String sql = """
+    public List<CaseSummary> listCases(String statusFilter, UUID measureId) {
+        StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
                        e.external_id AS employee_id,
                        e.name AS employee_name,
@@ -60,10 +60,24 @@ public class CaseFlowService {
                 JOIN employees e ON c.employee_id = e.id
                 JOIN measure_versions mv ON c.measure_version_id = mv.id
                 JOIN measures m ON mv.measure_id = m.id
-                ORDER BY c.updated_at DESC
-                """;
+                WHERE 1=1
+                """);
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new CaseSummary(
+        List<Object> params = new ArrayList<>();
+        if (!"all".equalsIgnoreCase(statusFilter)) {
+            if ("closed".equalsIgnoreCase(statusFilter)) {
+                sql.append(" AND c.status = 'CLOSED'");
+            } else {
+                sql.append(" AND c.status = 'OPEN'");
+            }
+        }
+        if (measureId != null) {
+            sql.append(" AND m.id = ?");
+            params.add(measureId);
+        }
+        sql.append(" ORDER BY c.updated_at DESC");
+
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
                 (UUID) rs.getObject("case_id"),
                 rs.getString("employee_id"),
                 rs.getString("employee_name"),
@@ -75,7 +89,7 @@ public class CaseFlowService {
                 rs.getString("current_outcome_status"),
                 (UUID) rs.getObject("last_run_id"),
                 rs.getTimestamp("updated_at").toInstant()
-        ));
+        ), params.toArray());
     }
 
     public Optional<CaseDetail> loadCase(UUID caseId) {
@@ -272,7 +286,7 @@ public class CaseFlowService {
             UUID measureVersionId,
             String evaluationPeriod,
             UUID employeeId,
-            AudiogramDemoService.AudiogramOutcome outcome
+            DemoOutcome outcome
     ) {
         Optional<UUID> existingCaseId = findCaseId(employeeId, measureVersionId, evaluationPeriod);
         UUID caseId = existingCaseId.orElseGet(UUID::randomUUID);
@@ -325,7 +339,7 @@ public class CaseFlowService {
             UUID measureVersionId,
             String evaluationPeriod,
             UUID employeeId,
-            AudiogramDemoService.AudiogramOutcome outcome
+            DemoOutcome outcome
     ) {
         Optional<UUID> existingCaseId = findCaseId(employeeId, measureVersionId, evaluationPeriod);
         if (existingCaseId.isEmpty()) {
@@ -514,9 +528,9 @@ public class CaseFlowService {
         };
     }
 
-    private Map<String, Object> casePayload(AudiogramDemoService.AudiogramOutcome outcome, String priority, String nextAction) {
+    private Map<String, Object> casePayload(DemoOutcome outcome, String priority, String nextAction) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("patientId", outcome.patientId());
+        payload.put("subjectId", outcome.subjectId());
         payload.put("status", outcome.outcome());
         payload.put("summary", outcome.summary());
         payload.put("priority", priority);
