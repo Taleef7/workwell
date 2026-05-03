@@ -20,7 +20,7 @@ Why this is the default:
 - `com.workwell.measure`: measure catalog and version lifecycle.
 - `com.workwell.compile`: CQL compile/validate APIs.
 - `com.workwell.run`: run orchestration, outcome persistence, and latest-run readback.
-- `com.workwell.caseflow`: idempotent case upsert, case state transitions, and Why Flagged readback.
+- `com.workwell.caseflow`: idempotent case upsert, case state transitions, simulated outreach action logging, rerun-to-verify closure flow, and Why Flagged readback.
 - `com.workwell.audit`: append-only audit event publishing and query.
 - `com.workwell.valueset`: value set registry and resolvability checks.
 - `com.workwell.mcp`: read-only MCP server tools for measure/run/case retrieval.
@@ -37,3 +37,9 @@ No split is planned in MVP unless a specific bottleneck forces it.
 - Sequence diagram for the full run pipeline (`evaluateMeasureWithCqlEngine -> evaluateMeasure(compositeResults)` plus outcome/case writes).
 - Interface contracts between `run` and `caseflow` modules (event payload schema).
 - Deployment topology decision for demo vs pilot (single host vs container platform).
+
+## Current Caseflow API Surface (S4 trajectory)
+- `GET /api/cases`
+- `GET /api/cases/{id}`
+- `POST /api/cases/{id}/actions/outreach` (simulated outreach action; audit logged)
+- `POST /api/cases/{id}/rerun-to-verify` (case-level verification rerun; closes case when verified compliant)

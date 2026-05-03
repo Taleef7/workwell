@@ -85,7 +85,7 @@ Doc PR ships with code PR. Always.
 
 Update before each session.
 
-**Today:** D3 in progress (Mon May 4, 2026) - S1a Audiogram vertical now persists seeded runs/outcomes/cases/audit rows, exposes latest-run readback, and renders the caseflow detail surface.
+**Today:** D3 in progress (Mon May 4, 2026) - Audiogram vertical now includes live case action flow (`outreach` + `rerun-to-verify`) with production verification of case closure and audit timeline linkage.
 
-**Next:** Deploy the caseflow patch, confirm the live `/cases` and `/cases/[id]` views, then move on to rerun-to-verify / case closure behavior.
+**Next:** Re-evaluate progress versus SPIKE_PLAN acceptance checkpoints and start the next highest-risk slice.
 

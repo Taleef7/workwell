@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 type AuditEvent = {
@@ -41,7 +41,8 @@ export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState<"outreach" | "rerun" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = useMemo(() => {
@@ -49,28 +50,54 @@ export default function CaseDetailPage() {
     return raw.trim().replace(/\/+$/, "");
   }, []);
 
-  useEffect(() => {
-    async function loadCase() {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await fetch(`${apiBase}/api/cases/${caseId}`);
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        const data = (await response.json()) as CaseDetail;
-        setCaseDetail(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setLoading(false);
+  const loadCase = useEffectEvent(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}`);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
       }
+      const data = (await response.json()) as CaseDetail;
+      setCaseDetail(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
     }
+  });
 
+  useEffect(() => {
     if (apiBase && caseId) {
-      void loadCase();
+      const timer = setTimeout(() => {
+        void loadCase();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [apiBase, caseId]);
+
+  async function runAction(action: "outreach" | "rerun") {
+    if (!apiBase || !caseId) {
+      return;
+    }
+
+    setActing(action);
+    setError(null);
+    const endpoint = action === "outreach" ? "actions/outreach" : "rerun-to-verify";
+
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/${endpoint}`, {
+        method: "POST"
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const updated = (await response.json()) as CaseDetail;
+      setCaseDetail(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setActing(null);
+    }
+  }
 
   return (
     <section className="space-y-6">
@@ -120,6 +147,24 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Next action</p>
                 <p className="mt-2 text-sm text-amber-950">{caseDetail.nextAction}</p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void runAction("outreach")}
+                    disabled={acting !== null || caseDetail.status === "CLOSED"}
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runAction("rerun")}
+                    disabled={acting !== null || caseDetail.status === "CLOSED"}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
+                  </button>
+                </div>
               </div>
             </div>
 

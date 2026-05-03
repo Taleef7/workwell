@@ -147,6 +147,126 @@ public class CaseFlowService {
         }
     }
 
+    public Optional<CaseDetail> sendOutreach(UUID caseId, String actor) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+
+        CaseContext existing = context.get();
+        String nextAction = "Wait for employee follow-up, then rerun to verify closure.";
+        jdbcTemplate.update(
+                "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW() WHERE id = ?",
+                "OPEN",
+                nextAction,
+                caseId
+        );
+
+        Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("channel", "SIMULATED_EMAIL");
+        actionPayload.put("template", "audiogram-reminder-v1");
+        actionPayload.put("deliveryStatus", "QUEUED");
+        actionPayload.put("note", "Demo outreach recorded without external delivery.");
+        insertCaseAction(caseId, "OUTREACH_SENT", actor, actionPayload);
+
+        Map<String, Object> auditPayload = new LinkedHashMap<>();
+        auditPayload.put("caseStatus", "OPEN");
+        auditPayload.put("nextAction", nextAction);
+        auditPayload.put("outcomeStatus", existing.currentOutcomeStatus());
+        auditPayload.put("action", actionPayload);
+        insertAuditEvent(
+                "CASE_OUTREACH_SENT",
+                "case",
+                caseId,
+                actor,
+                existing.lastRunId(),
+                caseId,
+                existing.measureVersionId(),
+                auditPayload
+        );
+
+        return loadCase(caseId);
+    }
+
+    public Optional<CaseDetail> rerunToVerify(UUID caseId, String actor) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+
+        CaseContext existing = context.get();
+        UUID verificationRunId = createVerificationRun(existing.measureVersionId(), actor);
+        String evaluationPeriod = existing.evaluationPeriod();
+
+        Map<String, Object> verifiedEvidence = new LinkedHashMap<>();
+        verifiedEvidence.put("source", "rerun-to-verify");
+        verifiedEvidence.put("priorOutcomeStatus", existing.currentOutcomeStatus());
+        verifiedEvidence.put("verifiedStatus", "COMPLIANT");
+        verifiedEvidence.put("verifiedAt", Instant.now().toString());
+        verifiedEvidence.put("note", "Demo verification run marked employee as compliant after outreach.");
+
+        insertOutcome(
+                verificationRunId,
+                existing.employeeId(),
+                existing.measureVersionId(),
+                evaluationPeriod,
+                "COMPLIANT",
+                verifiedEvidence
+        );
+
+        insertCaseAction(
+                caseId,
+                "RERUN_TO_VERIFY",
+                actor,
+                Map.of(
+                        "priorOutcomeStatus", existing.currentOutcomeStatus(),
+                        "verifiedStatus", "COMPLIANT",
+                        "runId", verificationRunId
+                )
+        );
+
+        jdbcTemplate.update(
+                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
+                "CLOSED",
+                "LOW",
+                "No follow-up needed after compliant verification rerun.",
+                "COMPLIANT",
+                verificationRunId,
+                caseId
+        );
+
+        insertAuditEvent(
+                "CASE_RERUN_VERIFIED",
+                "case",
+                caseId,
+                actor,
+                verificationRunId,
+                caseId,
+                existing.measureVersionId(),
+                Map.of(
+                        "priorOutcomeStatus", existing.currentOutcomeStatus(),
+                        "verifiedStatus", "COMPLIANT",
+                        "evaluationPeriod", evaluationPeriod
+                )
+        );
+
+        insertAuditEvent(
+                "CASE_CLOSED",
+                "case",
+                caseId,
+                actor,
+                verificationRunId,
+                caseId,
+                existing.measureVersionId(),
+                Map.of(
+                        "status", "COMPLIANT",
+                        "summary", "Case closed by rerun-to-verify after outreach."
+                )
+        );
+
+        return loadCase(caseId);
+    }
+
     private void upsertOpenCase(
             UUID runId,
             UUID measureVersionId,
@@ -247,6 +367,107 @@ public class CaseFlowService {
         } catch (EmptyResultDataAccessException ex) {
             return Optional.empty();
         }
+    }
+
+    private Optional<CaseContext> loadCaseContext(UUID caseId) {
+        try {
+            return Optional.ofNullable(jdbcTemplate.queryForObject(
+                    """
+                            SELECT id, employee_id, measure_version_id, evaluation_period, current_outcome_status, last_run_id
+                            FROM cases
+                            WHERE id = ?
+                            """,
+                    (rs, rowNum) -> new CaseContext(
+                            (UUID) rs.getObject("id"),
+                            (UUID) rs.getObject("employee_id"),
+                            (UUID) rs.getObject("measure_version_id"),
+                            rs.getString("evaluation_period"),
+                            rs.getString("current_outcome_status"),
+                            (UUID) rs.getObject("last_run_id")
+                    ),
+                    caseId
+            ));
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private UUID createVerificationRun(UUID measureVersionId, String actor) {
+        UUID runId = UUID.randomUUID();
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+                "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ps -> {
+                    ps.setObject(1, runId);
+                    ps.setString(2, "case");
+                    ps.setObject(3, measureVersionId);
+                    ps.setString(4, "demo");
+                    ps.setString(5, "manual");
+                    ps.setString(6, "completed");
+                    ps.setString(7, actor);
+                    ps.setObject(8, java.sql.Timestamp.from(now));
+                    ps.setObject(9, java.sql.Timestamp.from(now.plusSeconds(5)));
+                    ps.setInt(10, 1);
+                    ps.setInt(11, 1);
+                    ps.setInt(12, 0);
+                    ps.setLong(13, 5_000L);
+                    ps.setObject(14, java.sql.Timestamp.from(now));
+                    ps.setObject(15, java.sql.Timestamp.from(now.plusSeconds(5)));
+                }
+        );
+        jdbcTemplate.update(
+                "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                runId,
+                "INFO",
+                "Case-level rerun-to-verify executed."
+        );
+        return runId;
+    }
+
+    private void insertOutcome(
+            UUID runId,
+            UUID employeeId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            String status,
+            Map<String, Object> evidence
+    ) {
+        UUID outcomeId = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, NOW())",
+                outcomeId,
+                runId,
+                employeeId,
+                measureVersionId,
+                evaluationPeriod,
+                status,
+                toJsonb(evidence)
+        );
+
+        insertAuditEvent(
+                "OUTCOME_PERSISTED",
+                "outcome",
+                outcomeId,
+                "system",
+                runId,
+                null,
+                measureVersionId,
+                Map.of(
+                        "status", status,
+                        "source", "case-rerun-verify"
+                )
+        );
+    }
+
+    private void insertCaseAction(UUID caseId, String actionType, String actor, Map<String, Object> payload) {
+        jdbcTemplate.update(
+                "INSERT INTO case_actions (id, case_id, action_type, payload_json, performed_by) VALUES (?, ?, ?, ?::jsonb, ?)",
+                UUID.randomUUID(),
+                caseId,
+                actionType,
+                toJsonb(payload),
+                actor
+        );
     }
 
     private List<AuditEvent> loadCaseTimeline(UUID caseId) {
@@ -412,6 +633,16 @@ public class CaseFlowService {
             String actor,
             Instant occurredAt,
             Map<String, Object> payload
+    ) {
+    }
+
+    private record CaseContext(
+            UUID caseId,
+            UUID employeeId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            String currentOutcomeStatus,
+            UUID lastRunId
     ) {
     }
 }

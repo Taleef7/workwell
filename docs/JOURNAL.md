@@ -61,6 +61,40 @@
   - `npm run lint` -> success
   - `npm run build` -> success
 
+**Case action + rerun-to-verify loop**
+- Added case action API endpoints:
+  - `POST /api/cases/{id}/actions/outreach`
+  - `POST /api/cases/{id}/rerun-to-verify`
+- Added backend case lifecycle behavior for S4b:
+  - Outreach action writes `case_actions` plus `CASE_OUTREACH_SENT` audit event.
+  - Rerun-to-verify writes a case-scoped verification run, persists a compliant verification outcome, records action/audit events, and closes the case.
+- Added UI controls on `/cases/[id]`:
+  - `Send outreach`
+  - `Rerun to verify`
+  - Page refreshes with updated status and audit timeline after each action.
+- Verification after this slice:
+  - `backend\\gradlew.bat test` -> `BUILD SUCCESSFUL`
+  - `npm run lint` -> success
+  - `npm run build` -> success
+
+**Deploy + live checkpoint verification**
+- Backend deployed to Fly using repo-root context with backend config:
+  - `flyctl deploy --config backend/fly.toml`
+  - Live URL: `https://workwell-measure-studio-api.fly.dev`
+- Frontend deployed to Vercel production:
+  - Deployment: `https://frontend-5wx93gznt-taleef7s-projects.vercel.app`
+  - Active alias observed: `https://frontend-seven-eta-24.vercel.app`
+- Live API verification evidence:
+  - `GET /actuator/health` -> `UP`
+  - `POST /api/runs/audiogram` -> returned run id `79d87735-81b7-42dc-86b2-bf200a196890`
+  - `GET /api/cases` -> `3` cases
+  - `POST /api/cases/d99266b2-0cb8-47b9-a329-c7ccc89ea00e/actions/outreach` -> next action updated to follow-up + rerun guidance
+  - `POST /api/cases/d99266b2-0cb8-47b9-a329-c7ccc89ea00e/rerun-to-verify` -> case transitioned to `CLOSED` with `COMPLIANT`
+  - `GET /api/cases/d99266b2-0cb8-47b9-a329-c7ccc89ea00e` -> `closedAt` present and timeline length `5`
+- Checkpoint readout:
+  - The core S4b loop (open case -> outreach action -> rerun verification -> case closure + audit chain) is now live and test-backed.
+  - Ready to re-evaluate completed scope against SPIKE_PLAN acceptance and pick the next highest-risk gap.
+
 ## 2026-05-02
 
 ### D1 - Plan + Provision (completed)

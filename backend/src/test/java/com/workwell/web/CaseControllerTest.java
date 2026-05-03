@@ -2,6 +2,7 @@ package com.workwell.web;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -106,5 +107,87 @@ class CaseControllerTest {
                 .andExpect(jsonPath("$.outcomeStatus").value("OVERDUE"))
                 .andExpect(jsonPath("$.evidenceJson.evaluatedResource.patientId").value("patient-003"))
                 .andExpect(jsonPath("$.timeline[0].eventType").value("CASE_CREATED"));
+    }
+
+    @Test
+    void sendsOutreachAction() throws Exception {
+        UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        when(caseFlowService.sendOutreach(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-003",
+                        "patient-003",
+                        "AnnualAudiogramCompleted",
+                        "1.0.0",
+                        "2026-05-04",
+                        "OPEN",
+                        "HIGH",
+                        null,
+                        "Wait for employee follow-up, then rerun to verify closure.",
+                        "OVERDUE",
+                        UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:15:00Z"),
+                        null,
+                        Map.of(),
+                        "OVERDUE",
+                        "Audiogram is outside annual compliance window.",
+                        Instant.parse("2026-05-04T12:00:10Z"),
+                        List.of(
+                                new CaseFlowService.AuditEvent(
+                                        "CASE_OUTREACH_SENT",
+                                        "case-manager",
+                                        Instant.parse("2026-05-04T12:15:00Z"),
+                                        Map.of("channel", "SIMULATED_EMAIL")
+                                )
+                        )
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions/outreach", caseId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value(caseId.toString()))
+                .andExpect(jsonPath("$.nextAction").value("Wait for employee follow-up, then rerun to verify closure."));
+    }
+
+    @Test
+    void rerunsCaseToVerifyClosure() throws Exception {
+        UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        when(caseFlowService.rerunToVerify(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-003",
+                        "patient-003",
+                        "AnnualAudiogramCompleted",
+                        "1.0.0",
+                        "2026-05-04",
+                        "CLOSED",
+                        "LOW",
+                        null,
+                        "No follow-up needed after compliant verification rerun.",
+                        "COMPLIANT",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:18:00Z"),
+                        Instant.parse("2026-05-04T12:18:00Z"),
+                        Map.of(),
+                        "COMPLIANT",
+                        "Audiogram completed within compliant window.",
+                        Instant.parse("2026-05-04T12:18:00Z"),
+                        List.of(
+                                new CaseFlowService.AuditEvent(
+                                        "CASE_CLOSED",
+                                        "case-manager",
+                                        Instant.parse("2026-05-04T12:18:00Z"),
+                                        Map.of("status", "COMPLIANT")
+                                )
+                        )
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/rerun-to-verify", caseId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.currentOutcomeStatus").value("COMPLIANT"));
     }
 }

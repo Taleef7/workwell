@@ -23,6 +23,8 @@ Case lifecycle rules used by the seeded Audiogram slice:
 - `DUE_SOON`, `OVERDUE`, and `MISSING_DATA` outcomes create or refresh open cases.
 - `COMPLIANT` and `EXCLUDED` outcomes do not create new active cases; if a matching case already exists, it is closed on rerun.
 - The `audit_events` table holds the per-case timeline that powers the Why Flagged detail view.
+- `case_actions` stores operator actions (for current MVP: `OUTREACH_SENT`, `RERUN_TO_VERIFY`) with JSON payloads and performer/timestamp metadata.
+- Case-level rerun verification persists a dedicated run row and a verification outcome row before case closure, preserving run/case linkage in `audit_events`.
 
 ## evidence_json Contract (ADR-002)
 Persisted evidence payload shape:
