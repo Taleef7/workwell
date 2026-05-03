@@ -471,3 +471,6 @@ CQF/FHIR de-risking and ADR-002 probes completed in `../workwell-spike-cqf` with
 ## 2026-04-29
 
 Initial planning baseline and scaffolding completed.
+
+- MCP schema-compat deploy checkpoint:
+  - 2026-05-03T13:53:42.1028589-04:00 GET https://workwell-measure-studio-api.fly.dev/actuator/health -> UP
