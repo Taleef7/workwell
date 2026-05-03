@@ -32,6 +32,9 @@ Post-delivery hotfix (same day):
   - This resolves the UUID-only friction for prompts like:
     - "Show me all open Audiogram cases"
     - "Get the summary of the latest run"
+- Validation confirmed after fix:
+  - Claude Code returned 10 open Audiogram cases and latest-run counts (`3/3/4/3/2`, total `15`) from real backend data.
+  - Additional stale-schema compatibility shipped: if a client sends `measureId: \"Audiogram\"`, the server now treats it as a name fallback instead of failing UUID parse.
 
 ---
 
@@ -258,6 +261,26 @@ Covers requested walkthrough flow:
 Across steps, production checkpoints were repeatedly run and logged.
 Final-state confirmation includes:
 - `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+
+Latest smoke pass (post-MCP hardening):
+- `GET /api/measures` -> `200`
+- `GET /api/cases?status=open` -> `200`
+- `GET /api/cases?status=open&measureId=<audiogram-id>` -> `200`
+- `POST /api/runs/audiogram` -> `200` and subsequent `GET /api/runs/{id}` -> `200`
+- `POST /api/runs/tb-surveillance` -> `200`
+- `GET /api/audit-events/export?format=csv` -> `200`
+- `GET /sse` with `Accept: text/event-stream` -> `200`
+
+---
+
+## 6) Next Backlog Action (Non-Deferred)
+
+- Core advisor-sequenced build scope is now implemented and validated through S6 deliverables.
+- Remaining immediate non-deferred focus is demo freeze execution:
+  - runbook rehearsal using `docs/DEMO_SCRIPT.md`
+  - final UI/flow bug-only fixes
+  - final D16 readiness checkpoint logging
+- Deferred items remain deferred (no expansion into AI write tools, generalized evaluator, or video production before stable demo freeze).
 - `GET /api/measures` -> Active Audiogram + Active TB Surveillance visible
 - `POST /api/runs/tb-surveillance` -> `200` with mixed outcomes
 - `GET /api/runs/{id}` -> `200`

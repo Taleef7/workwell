@@ -2,6 +2,24 @@
 
 ## 2026-05-03
 
+### MCP validation confirmed (Claude Code + production smoke)
+
+- Claude Code MCP validation now passes end-to-end with real data:
+  - Prompt equivalent: "Show me all open Audiogram cases" returned 10 open Audiogram cases.
+  - Prompt equivalent: "Get the summary of the latest run" returned run summary with counts:
+    - `COMPLIANT=3`, `DUE_SOON=3`, `OVERDUE=4`, `MISSING_DATA=3`, `EXCLUDED=2`, `totalEvaluated=15`.
+- This confirms stale-schema fallback works (`measureId=\"Audiogram\"`) and latest-run default behavior works (`get_run_summary` without `runId`).
+- Production smoke pass rerun after validation:
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `200` (Audiogram Active `v1.0`, TB Surveillance Active `v1.3`)
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open` -> `200` (17 open)
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open&measureId=4ae5d865-3d64-4a17-905d-f1b315a037e2` -> `200` (10 open Audiogram)
+  - `2026-05-03T02:36:00-04:00` `POST https://workwell-measure-studio-api.fly.dev/api/runs/audiogram` -> `200` (`runId=f7e73f4a-cc22-4be1-b417-9420040e0fd4`)
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/runs/f7e73f4a-cc22-4be1-b417-9420040e0fd4` -> `200` (`totalEvaluated=15`)
+  - `2026-05-03T02:36:00-04:00` `POST https://workwell-measure-studio-api.fly.dev/api/runs/tb-surveillance` -> `200` (`runId=5cc29869-8abf-4f66-9a09-2bdeee32751d`)
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/audit-events/export?format=csv` -> `200`
+  - `2026-05-03T02:36:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/sse` with `Accept: text/event-stream` -> `200` (stream endpoint reachable)
+
 ### MCP usability hotfix (Claude prompt compatibility)
 
 - User validation surfaced MCP input friction: `list_cases` required `measureId` UUID and `get_run_summary` required explicit `runId`, which blocked natural-language prompt execution in Claude Code.
