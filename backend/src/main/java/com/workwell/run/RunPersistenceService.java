@@ -286,6 +286,21 @@ public class RunPersistenceService {
         }
     }
 
+    public Optional<RunSummaryResponse> loadLatestRun() {
+        try {
+            UUID runId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM runs ORDER BY started_at DESC LIMIT 1",
+                    UUID.class
+            );
+            if (runId == null) {
+                return Optional.empty();
+            }
+            return loadRunById(runId);
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
     private List<AudiogramDemoService.AudiogramOutcome> loadOutcomesForRun(UUID runId) {
         String sql = """
                 SELECT o.employee_id, o.status, o.evidence_json

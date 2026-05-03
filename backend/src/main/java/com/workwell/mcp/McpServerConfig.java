@@ -3,6 +3,7 @@ package com.workwell.mcp;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
+import com.workwell.measure.MeasureService;
 import com.workwell.run.RunPersistenceService;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
@@ -37,7 +38,8 @@ public class McpServerConfig {
             WebMvcSseServerTransportProvider transportProvider,
             ObjectMapper objectMapper,
             CaseFlowService caseFlowService,
-            RunPersistenceService runPersistenceService
+            RunPersistenceService runPersistenceService,
+            MeasureService measureService
     ) {
         Tool getCase = new Tool(
                 "get_case",
@@ -46,13 +48,13 @@ public class McpServerConfig {
         );
         Tool listCases = new Tool(
                 "list_cases",
-                "List case summaries with optional status and measureId filters",
-                "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\",\"enum\":[\"open\",\"closed\",\"all\"]},\"measureId\":{\"type\":\"string\"}}}"
+                "List case summaries with optional status and measure filter (measureId or measureName)",
+                "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\",\"enum\":[\"open\",\"closed\",\"all\"]},\"measureId\":{\"type\":\"string\"},\"measureName\":{\"type\":\"string\"}}}"
         );
         Tool getRunSummary = new Tool(
                 "get_run_summary",
-                "Get run metadata and outcome counts by runId",
-                "{\"type\":\"object\",\"properties\":{\"runId\":{\"type\":\"string\"}},\"required\":[\"runId\"]}"
+                "Get run metadata and outcome counts by runId. If runId is omitted, returns latest run.",
+                "{\"type\":\"object\",\"properties\":{\"runId\":{\"type\":\"string\"}}}"
         );
 
         McpServerFeatures.SyncToolSpecification getCaseSpec = new McpServerFeatures.SyncToolSpecification(
@@ -69,9 +71,17 @@ public class McpServerConfig {
                 listCases,
                 (exchange, args) -> {
                     String status = args.get("status") == null ? "open" : args.get("status").toString();
-                    UUID measureId = args.get("measureId") == null || args.get("measureId").toString().isBlank()
-                            ? null
-                            : UUID.fromString(args.get("measureId").toString());
+                    UUID measureId = null;
+                    if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                        measureId = UUID.fromString(args.get("measureId").toString());
+                    } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
+                        String requestedMeasureName = args.get("measureName").toString().trim();
+                        measureId = measureService.listMeasures().stream()
+                                .filter(m -> m.name().equalsIgnoreCase(requestedMeasureName))
+                                .findFirst()
+                                .map(MeasureService.MeasureCatalogItem::id)
+                                .orElseThrow(() -> new IllegalArgumentException("Measure not found: " + requestedMeasureName));
+                    }
                     var summaries = caseFlowService.listCases(status, measureId);
                     return new CallToolResult(toJson(objectMapper, summaries), false);
                 }
@@ -80,9 +90,11 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification getRunSummarySpec = new McpServerFeatures.SyncToolSpecification(
                 getRunSummary,
                 (exchange, args) -> {
-                    String runId = stringArg(args, "runId");
-                    var summary = runPersistenceService.loadRunById(UUID.fromString(runId))
-                            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+                    var summary = args.get("runId") == null || args.get("runId").toString().isBlank()
+                            ? runPersistenceService.loadLatestRun()
+                                    .orElseThrow(() -> new IllegalArgumentException("No runs found"))
+                            : runPersistenceService.loadRunById(UUID.fromString(args.get("runId").toString()))
+                                    .orElseThrow(() -> new IllegalArgumentException("Run not found: " + args.get("runId")));
                     return new CallToolResult(toJson(objectMapper, summary), false);
                 }
         );

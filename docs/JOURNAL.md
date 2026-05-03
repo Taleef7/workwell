@@ -2,6 +2,17 @@
 
 ## 2026-05-03
 
+### MCP usability hotfix (Claude prompt compatibility)
+
+- User validation surfaced MCP input friction: `list_cases` required `measureId` UUID and `get_run_summary` required explicit `runId`, which blocked natural-language prompt execution in Claude Code.
+- Applied backend MCP compatibility update:
+  - `list_cases` now supports either `measureId` **or** `measureName` (case-insensitive lookup through measure catalog).
+  - `get_run_summary` now accepts optional `runId`; when omitted, it returns the latest persisted run.
+  - Added `RunPersistenceService.loadLatestRun()` to back the latest-run path.
+- Production checkpoint:
+  - `2026-05-03T02:06:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+  - `2026-05-03T02:06:00-04:00` `GET https://workwell-measure-studio-api.fly.dev/api/measures` -> `200`
+
 ### Advisor sync - post-review execution reset
 
 - Advisor review completed. Progress confirmed through S1 (Audiogram vertical) and early S4 backend (case lifecycle + audit chain).

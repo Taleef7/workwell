@@ -25,6 +25,14 @@ Completed and deployed:
 
 Current state: deployed backend/frontend are demo-capable for the requested D16 storyline without adding deferred scope.
 
+Post-delivery hotfix (same day):
+- MCP prompt-compatibility fix shipped after Claude Code validation feedback:
+  - `list_cases` now accepts `measureName` in addition to `measureId`.
+  - `get_run_summary` now returns latest run when `runId` is omitted.
+  - This resolves the UUID-only friction for prompts like:
+    - "Show me all open Audiogram cases"
+    - "Get the summary of the latest run"
+
 ---
 
 ## 2) What Was Updated First (Step 0)
