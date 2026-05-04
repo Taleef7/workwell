@@ -148,6 +148,16 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Deployment + production checkpoint:
+- Commit pushed: `f9e0ed2` (`feat(caseflow): expand worklist filters across api and ui [S4]`)
+- Backend redeployed: `https://workwell-measure-studio-api.fly.dev`
+- Frontend redeployed + aliased: `https://frontend-seven-eta-24.vercel.app`
+- Timestamped production smoke check (`2026-05-04T01:11:34-04:00`):
+  - `GET /api/cases?status=open&priority=HIGH` -> `200` (`highOpenCount=11`)
+  - `GET /api/cases?status=all&site=Clinic` -> `200` (`clinicCasesCount=8`)
+  - `GET /api/cases?status=all&assignee=unassigned` -> `200` (`unassignedCasesCount=28`)
+  - `GET https://frontend-seven-eta-24.vercel.app/cases` -> `200`
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
