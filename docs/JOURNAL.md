@@ -203,6 +203,20 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Production stabilization follow-through:
+- Initial deployment surfaced a regression on case detail (`GET /api/cases/{id}` -> `500`).
+- Root cause: timeline SQL referenced `case_actions.created_at`, but schema uses `performed_at`.
+- Additional hardening applied:
+  - normalized union sort-key typing (`id::text`) for mixed audit/case-action streams
+  - made timeline payload parsing resilient to non-object JSON payloads
+- Final fix commits:
+  - `88ee989` (`fix(caseflow): use performed_at for case action timeline [S4]`)
+  - plus prior timeline hardening commits in same slice
+- Timestamped production verification (`2026-05-04T02:08:47-04:00`):
+  - `GET /api/cases?status=open` -> `200`
+  - `GET /api/cases/{id}` -> `200` (`timelineCount=15`, `timelineSources=audit_event,case_action`)
+  - `GET https://frontend-seven-eta-24.vercel.app/cases/{id}` -> `200`
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
