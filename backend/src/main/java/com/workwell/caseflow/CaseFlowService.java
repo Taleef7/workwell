@@ -598,7 +598,7 @@ public class CaseFlowService {
                            occurred_at,
                            payload_json,
                            'audit_event' AS timeline_source,
-                           id
+                           id::text AS sort_key
                     FROM audit_events
                     WHERE ref_case_id = ?
                     UNION ALL
@@ -607,11 +607,11 @@ public class CaseFlowService {
                            created_at AS occurred_at,
                            payload_json,
                            'case_action' AS timeline_source,
-                           id
+                           id::text AS sort_key
                     FROM case_actions
                     WHERE case_id = ?
                 ) timeline
-                ORDER BY occurred_at ASC, id ASC
+                ORDER BY occurred_at ASC, sort_key ASC
                 """;
 
         return jdbcTemplate.query(sql, rs -> {
