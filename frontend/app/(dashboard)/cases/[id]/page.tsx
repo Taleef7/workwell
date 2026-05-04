@@ -52,6 +52,9 @@ export default function CaseDetailPage() {
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"outreach" | "rerun" | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+  const [assigneeInput, setAssigneeInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = useMemo(() => {
@@ -67,6 +70,7 @@ export default function CaseDetailPage() {
       }
       const data = (await response.json()) as CaseDetail;
       setCaseDetail(data);
+      setAssigneeInput(data.assignee ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -105,6 +109,39 @@ export default function CaseDetailPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setActing(null);
+    }
+  }
+
+  async function assignCase() {
+    if (!apiBase || !caseId) return;
+    setAssigning(true);
+    setError(null);
+    try {
+      const assigneeParam = assigneeInput.trim() ? `?assignee=${encodeURIComponent(assigneeInput.trim())}` : "";
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/assign${assigneeParam}`, { method: "POST" });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      const updated = (await response.json()) as CaseDetail;
+      setCaseDetail(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function escalateCase() {
+    if (!apiBase || !caseId) return;
+    setEscalating(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/escalate`, { method: "POST" });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      const updated = (await response.json()) as CaseDetail;
+      setCaseDetail(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setEscalating(false);
     }
   }
 
@@ -156,6 +193,25 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Next action</p>
                 <p className="mt-2 text-sm text-amber-950">{caseDetail.nextAction}</p>
+                <div className="mt-4 grid gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Assignee</label>
+                  <div className="flex gap-2">
+                    <input
+                      className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900"
+                      value={assigneeInput}
+                      onChange={(e) => setAssigneeInput(e.target.value)}
+                      placeholder="e.g. supervisor-a"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void assignCase()}
+                      disabled={assigning}
+                      className="rounded-xl border border-amber-400 bg-white px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {assigning ? "Assigning..." : "Assign"}
+                    </button>
+                  </div>
+                </div>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     type="button"
@@ -164,6 +220,14 @@ export default function CaseDetailPage() {
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void escalateCase()}
+                    disabled={escalating}
+                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-900 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:bg-rose-100 disabled:text-rose-400"
+                  >
+                    {escalating ? "Escalating..." : "Escalate"}
                   </button>
                   <button
                     type="button"

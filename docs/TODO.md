@@ -60,7 +60,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 ### P2 - Operations Maturity
 
 - [x] Expand worklist filters to full target set: status, priority, assignee, measure, site.
-- [ ] Add basic assignment/escalation flow.
+- [x] Add basic assignment/escalation flow.
 - [ ] Improve case timeline/evidence consistency and clarity.
 
 ### P2 - AI Surfaces (Guardrailed)
@@ -87,5 +87,5 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Recommended Next Implementation Batch
 
-1. Add basic assignment/escalation flow.
-2. Improve case timeline/evidence consistency and clarity.
+1. Improve case timeline/evidence consistency and clarity.
+2. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).

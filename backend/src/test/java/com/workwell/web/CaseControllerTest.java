@@ -194,4 +194,70 @@ class CaseControllerTest {
                 .andExpect(jsonPath("$.status").value("RESOLVED"))
                 .andExpect(jsonPath("$.currentOutcomeStatus").value("COMPLIANT"));
     }
+
+    @Test
+    void assignsCase() throws Exception {
+        UUID caseId = UUID.fromString("aaaaaaaa-1111-1111-1111-111111111111");
+        when(caseFlowService.assignCase(caseId, "supervisor-a", "case-manager")).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-003",
+                        "patient-003",
+                        "AnnualAudiogramCompleted",
+                        "1.0.0",
+                        "2026-05-04",
+                        "OPEN",
+                        "HIGH",
+                        "supervisor-a",
+                        "Escalate audiogram follow-up immediately.",
+                        "OVERDUE",
+                        UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:20:00Z"),
+                        null,
+                        Map.of(),
+                        "OVERDUE",
+                        "Audiogram is outside annual compliance window.",
+                        Instant.parse("2026-05-04T12:00:10Z"),
+                        List.of()
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/assign", caseId).param("assignee", "supervisor-a"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignee").value("supervisor-a"));
+    }
+
+    @Test
+    void escalatesCase() throws Exception {
+        UUID caseId = UUID.fromString("bbbbbbbb-1111-1111-1111-111111111111");
+        when(caseFlowService.escalateCase(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-004",
+                        "patient-004",
+                        "TB Surveillance",
+                        "1.3.0",
+                        "2026-05-04",
+                        "OPEN",
+                        "HIGH",
+                        "supervisor-b",
+                        "Escalated to supervisor queue for immediate handling.",
+                        "OVERDUE",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:30:00Z"),
+                        null,
+                        Map.of(),
+                        "OVERDUE",
+                        "TB screening is outside annual compliance window.",
+                        Instant.parse("2026-05-04T12:00:10Z"),
+                        List.of()
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/escalate", caseId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nextAction").value("Escalated to supervisor queue for immediate handling."));
+    }
 }

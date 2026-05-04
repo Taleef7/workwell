@@ -301,6 +301,68 @@ public class CaseFlowService {
         return loadCase(caseId);
     }
 
+    public Optional<CaseDetail> assignCase(UUID caseId, String assignee, String actor) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+        String normalizedAssignee = assignee == null || assignee.isBlank() ? null : assignee.trim();
+        CaseContext existing = context.get();
+        jdbcTemplate.update(
+                "UPDATE cases SET assignee = ?, updated_at = NOW() WHERE id = ?",
+                normalizedAssignee,
+                caseId
+        );
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("assignee", normalizedAssignee == null ? "unassigned" : normalizedAssignee);
+        payload.put("previousAssignee", "unknown");
+        insertCaseAction(caseId, "ASSIGNED", actor, payload);
+        insertAuditEvent(
+                "CASE_ASSIGNED",
+                "case",
+                caseId,
+                actor,
+                existing.lastRunId(),
+                caseId,
+                existing.measureVersionId(),
+                payload
+        );
+        return loadCase(caseId);
+    }
+
+    public Optional<CaseDetail> escalateCase(UUID caseId, String actor) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+        CaseContext existing = context.get();
+        String escalationAction = "Escalated to supervisor queue for immediate handling.";
+        jdbcTemplate.update(
+                "UPDATE cases SET priority = ?, status = ?, next_action = ?, updated_at = NOW() WHERE id = ?",
+                "HIGH",
+                "OPEN",
+                escalationAction,
+                caseId
+        );
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("priority", "HIGH");
+        payload.put("status", "OPEN");
+        payload.put("nextAction", escalationAction);
+        payload.put("reason", "Manual escalation requested");
+        insertCaseAction(caseId, "ESCALATED", actor, payload);
+        insertAuditEvent(
+                "CASE_ESCALATED",
+                "case",
+                caseId,
+                actor,
+                existing.lastRunId(),
+                caseId,
+                existing.measureVersionId(),
+                payload
+        );
+        return loadCase(caseId);
+    }
+
     private void upsertOpenCase(
             UUID runId,
             UUID measureVersionId,

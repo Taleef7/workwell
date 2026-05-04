@@ -158,6 +158,24 @@ Deployment + production checkpoint:
   - `GET /api/cases?status=all&assignee=unassigned` -> `200` (`unassignedCasesCount=28`)
   - `GET https://frontend-seven-eta-24.vercel.app/cases` -> `200`
 
+### Assignment + escalation flow (P2 operations maturity)
+
+- Added backend case actions:
+  - `POST /api/cases/{caseId}/assign?assignee=<name>`
+  - `POST /api/cases/{caseId}/escalate`
+- Action behavior:
+  - Assign updates `cases.assignee`, records `case_actions` row (`ASSIGNED`), emits `CASE_ASSIGNED`.
+  - Escalate sets `priority=HIGH`, keeps `status=OPEN`, updates next action text, records `case_actions` row (`ESCALATED`), emits `CASE_ESCALATED`.
+- Added frontend controls on case detail page:
+  - Assignee input + Assign button
+  - Escalate button
+- Added controller tests for assign/escalate endpoints.
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape

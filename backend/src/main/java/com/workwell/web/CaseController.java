@@ -53,4 +53,23 @@ public class CaseController {
         return caseFlowService.rerunToVerify(caseId, actor)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
+
+    @PostMapping("/api/cases/{caseId}/assign")
+    public CaseFlowService.CaseDetail assignCase(
+            @PathVariable UUID caseId,
+            @RequestParam(name = "assignee", required = false) String assignee,
+            @RequestParam(name = "actor", defaultValue = "case-manager") String actor
+    ) {
+        return caseFlowService.assignCase(caseId, assignee, actor)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
+    }
+
+    @PostMapping("/api/cases/{caseId}/escalate")
+    public CaseFlowService.CaseDetail escalateCase(
+            @PathVariable UUID caseId,
+            @RequestParam(name = "actor", defaultValue = "case-manager") String actor
+    ) {
+        return caseFlowService.escalateCase(caseId, actor)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
+    }
 }
