@@ -2,6 +2,22 @@
 
 ## 2026-05-03
 
+### Production consistency fix (advisor escalation: data-level cleanup)
+
+- External validation continued to report stale public responses (`3` measures including `AnnualAudiogramCompleted`) despite app-level filtering checks from our side.
+- To remove dependence on machine/region/code-path behavior, applied direct database cleanup against production data:
+  - Legacy measure version rows for `AnnualAudiogramCompleted` set to `Deprecated` (no remaining `Active` versions).
+  - Legacy placeholder open cases (`employee external_id LIKE 'patient-%'`) set to `CLOSED` with `closed_at=NOW()`.
+- Post-change data assertions:
+  - `active_legacy_versions=0`
+  - `open_legacy_cases=0`
+
+Timestamped production checkpoint (`2026-05-03T20:40:00-04:00`):
+- `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `UP`
+- `GET https://workwell-measure-studio-api.fly.dev/api/measures?cb=<timestamp>` -> `200`, returns exactly 2 active measures (`TB Surveillance`, `Audiogram`)
+- `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open&cb=<timestamp>` -> `200`, `open_count=13`, `legacy_rows=0`
+- Response trace sample: `fly-request-id: 01KQR6W1V49NHKNZ0HQCYYXKG4-ord`
+
 ### D16 readiness sign-off (production walkthrough)
 
 - Completed end-to-end live walkthrough aligned to `docs/DEMO_SCRIPT.md` on production backend + frontend.
