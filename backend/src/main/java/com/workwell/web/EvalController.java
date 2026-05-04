@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
@@ -42,11 +43,17 @@ public class EvalController {
     }
 
     @PostMapping("/api/eval")
-    public EvalResponse eval(@Valid @RequestBody EvalRequest request) {
+    public EvalResponse eval(
+            @RequestHeader(name = "X-WorkWell-Internal", required = false) String internalHeader,
+            @Valid @RequestBody EvalRequest request
+    ) {
+        if (!"true".equalsIgnoreCase(internalHeader)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Endpoint not found");
+        }
         Map<String, String> patientBundle = request.patientBundle() == null ? Map.of() : request.patientBundle();
         String patientId = patientBundle.getOrDefault("id", "unknown");
         String evaluationId = "eval-" + Instant.now().toEpochMilli();
-        String summary = "S0 placeholder evaluation completed for patient " + patientId + ".";
+        String summary = "Internal compatibility evaluation completed for patient " + patientId + ".";
 
         return new EvalResponse(
                 evaluationId,

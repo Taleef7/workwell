@@ -52,12 +52,28 @@ class EvalControllerTest {
                 """;
 
         mockMvc.perform(post("/api/eval")
+                        .header("X-WorkWell-Internal", "true")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.outcome").value("COMPLIANT"))
                 .andExpect(jsonPath("$.evaluatedResource.patientBundleId").value("patient-001"))
                 .andExpect(jsonPath("$.expressionResults[0].define").value("S0-Stub-Define"));
+    }
+
+    @Test
+    void blocksEvalProbeWithoutInternalHeader() throws Exception {
+        String payload = """
+                {
+                  "patientBundle": { "id": "patient-001" },
+                  "cqlLibrary": "library Stub version '1.0.0'"
+                }
+                """;
+
+        mockMvc.perform(post("/api/eval")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isNotFound());
     }
 
     @Test

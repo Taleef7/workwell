@@ -1,21 +1,23 @@
 # WorkWell Measure Studio
 
-WorkWell Measure Studio is a Spring Boot + Next.js monorepo scaffold for Summer 2026.
-The current implementation focus is backend foundation, evaluation plumbing, and CI stability.
+Spring Boot + Next.js monorepo for occupational-health compliance operations:
+author measures, run evaluations, manage cases, and maintain an audit trail.
 
-## Current Status
+## Current Scope
 
-- Backend scaffold in place (`Spring Boot 3.3.5`, `Java 21`)
-- Database migration baseline present (`Flyway V001`)
-- JPA wiring and OpenAPI scaffolding configured
-- MapStruct mapper setup configured
-- Testcontainers-backed backend context test wired for local + CI
+- Measures catalog + Studio (Spec, CQL, Value Sets, Tests)
+- Lifecycle transitions: `Draft -> Approved -> Active -> Deprecated`
+- Compile gate + test-fixture validation gate before activation
+- Manual measure runs (`Audiogram`, `TB Surveillance`, and `All Programs`)
+- Case worklist, case detail, outreach action, rerun-to-verify
+- Audit trail + CSV export
+- MCP Layer 1 read tools
 
-## Repository Layout
+## Tech Stack
 
-- `backend/` - Spring Boot service
-- `frontend/` - Next.js app scaffold
-- `docs/` - plan, journal, architecture, and research notes
+- Backend: Java 21, Spring Boot 3.x, Gradle, PostgreSQL 16, Flyway
+- Frontend: Next.js App Router, TypeScript
+- Infra: Fly.io (backend), Vercel (frontend), Neon Postgres
 
 ## Local Development
 
@@ -23,24 +25,41 @@ The current implementation focus is backend foundation, evaluation plumbing, and
 
 ```bash
 cd backend
-./gradlew build
+./gradlew.bat test
+./gradlew.bat bootRun
 ```
 
 ### Frontend
 
 ```bash
 cd frontend
-pnpm install
-pnpm lint
+npm install
+npm run lint
+npm run build
+npm run dev
 ```
 
-## CI
+## API Highlights
 
-GitHub Actions runs a two-job pipeline:
+- `GET /api/measures`
+- `GET /api/measures/{id}`
+- `PUT /api/measures/{id}/spec`
+- `POST /api/measures/{id}/cql/compile`
+- `PUT /api/measures/{id}/tests`
+- `POST /api/measures/{id}/tests/validate`
+- `GET /api/value-sets`
+- `POST /api/value-sets`
+- `POST /api/runs/audiogram`
+- `POST /api/runs/tb-surveillance`
+- `POST /api/runs/manual`
+- `GET /api/cases`
+- `GET /api/cases/{id}`
+- `POST /api/cases/{id}/actions/outreach`
+- `POST /api/cases/{id}/rerun-to-verify`
+- `GET /api/audit-events/export?format=csv`
 
-- `backend`: Java setup + `./gradlew build`
-- `frontend`: Node setup + `pnpm install --frozen-lockfile` + `pnpm lint`
+## Notes
 
-## Project Plan
-
-See `docs/PROJECT_PLAN.md` for roadmap, scope, and architectural constraints.
+- `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
+- Canonical execution plan: `docs/SPIKE_PLAN.md`.
+- Active execution backlog: `docs/TODO.md`.

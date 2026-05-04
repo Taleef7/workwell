@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-05-04
+
+### Release governance polish: activation readiness UX + richer lifecycle audit payloads
+
+- Completed approval/release UX improvements in Studio:
+  - Added backend readiness endpoint: `GET /api/measures/{id}/activation-readiness`
+  - Added "Activation Readiness" summary panel on `/studio/[id]` for `Approved` measures.
+  - Activation button now uses explicit readiness state and shows the first blocker inline when activation is blocked.
+  - Transition success toast now confirms resulting status.
+- Completed lifecycle audit payload enrichment:
+  - `MEASURE_VERSION_STATUS_CHANGED` now includes:
+    - `compileStatus`
+    - `valueSetCount`
+    - `testFixtureCount`
+    - `testValidationPassed`
+    - `activationBlockers`
+- Added integration test coverage to verify richer transition audit payload fields are written.
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape

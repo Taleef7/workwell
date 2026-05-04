@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -43,6 +44,29 @@ public class MeasureController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Measure not found");
         }
         return detail;
+    }
+
+    @GetMapping("/api/value-sets")
+    public List<MeasureService.ValueSetRef> listValueSets() {
+        return measureService.listValueSets();
+    }
+
+    @PostMapping("/api/value-sets")
+    public Map<String, String> createValueSet(@Valid @RequestBody CreateValueSetRequest request) {
+        UUID id = measureService.createValueSet(request.oid(), request.name(), request.version());
+        return Map.of("id", id.toString());
+    }
+
+    @PostMapping("/api/measures/{id}/value-sets/{valueSetId}")
+    public Map<String, String> attachValueSet(@PathVariable UUID id, @PathVariable UUID valueSetId) {
+        measureService.attachValueSet(id, valueSetId);
+        return Map.of("status", "linked");
+    }
+
+    @DeleteMapping("/api/measures/{id}/value-sets/{valueSetId}")
+    public Map<String, String> detachValueSet(@PathVariable UUID id, @PathVariable UUID valueSetId) {
+        measureService.detachValueSet(id, valueSetId);
+        return Map.of("status", "unlinked");
     }
 
     @PutMapping("/api/measures/{id}/spec")
@@ -86,6 +110,22 @@ public class MeasureController {
         }
     }
 
+    @PutMapping("/api/measures/{id}/tests")
+    public Map<String, String> updateTests(@PathVariable UUID id, @RequestBody TestsUpdateRequest request) {
+        measureService.updateTests(id, request.fixtures() == null ? List.of() : request.fixtures());
+        return Map.of("status", "saved");
+    }
+
+    @PostMapping("/api/measures/{id}/tests/validate")
+    public MeasureService.TestValidationResult validateTests(@PathVariable UUID id) {
+        return measureService.validateTests(id);
+    }
+
+    @GetMapping("/api/measures/{id}/activation-readiness")
+    public MeasureService.ActivationReadiness activationReadiness(@PathVariable UUID id) {
+        return measureService.activationReadiness(id);
+    }
+
     public record CreateMeasureRequest(
             @NotBlank String name,
             @NotBlank String policyRef,
@@ -114,6 +154,18 @@ public class MeasureController {
 
     public record StatusUpdateRequest(
             @NotBlank String targetStatus
+    ) {
+    }
+
+    public record CreateValueSetRequest(
+            @NotBlank String oid,
+            @NotBlank String name,
+            String version
+    ) {
+    }
+
+    public record TestsUpdateRequest(
+            List<MeasureService.TestFixture> fixtures
     ) {
     }
 

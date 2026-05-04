@@ -75,6 +75,7 @@ public class MeasureService {
         spec.put("exclusions", List.of());
         spec.put("complianceWindow", "");
         spec.put("requiredDataElements", List.of());
+        spec.put("testFixtures", List.of());
 
         jdbcTemplate.update(
                 "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
@@ -142,6 +143,7 @@ public class MeasureService {
             Map<String, Object> eligibility = readMap(specJson.get("eligibilityCriteria"));
             List<Map<String, String>> exclusions = readExclusions(specJson.get("exclusions"));
             List<String> requiredDataElements = readStringList(specJson.get("requiredDataElements"));
+            List<TestFixture> testFixtures = readTestFixtures(specJson.get("testFixtures"));
 
             return new MeasureDetail(
                     (UUID) rs.getObject("id"),
@@ -162,7 +164,9 @@ public class MeasureService {
                     stringOrEmpty(specJson.get("complianceWindow")),
                     requiredDataElements,
                     rs.getString("cql_text") == null ? "" : rs.getString("cql_text"),
-                    rs.getString("compile_status") == null ? "ERROR" : rs.getString("compile_status")
+                    rs.getString("compile_status") == null ? "ERROR" : rs.getString("compile_status"),
+                    listAttachedValueSets((UUID) rs.getObject("id")),
+                    testFixtures
             );
         }, id);
     }
@@ -180,6 +184,7 @@ public class MeasureService {
         spec.put("exclusions", request.exclusions());
         spec.put("complianceWindow", request.complianceWindow());
         spec.put("requiredDataElements", request.requiredDataElements());
+        spec.put("testFixtures", loadTestFixtures(id));
 
         jdbcTemplate.update(
                 "UPDATE measure_versions SET spec_json = ?::jsonb WHERE id = ?",
@@ -218,12 +223,17 @@ public class MeasureService {
                 String.class,
                 measureVersionId
         );
+        List<ValueSetRef> attachedValueSets = listAttachedValueSets(id);
+        List<String> warnings = new ArrayList<>();
+        if (attachedValueSets.isEmpty()) {
+            warnings.add("No value sets are attached to this measure version.");
+        }
 
         CompileResponse response;
         if (cqlText == null || cqlText.trim().isEmpty() || !cqlText.toLowerCase().contains("define")) {
-            response = new CompileResponse("ERROR", List.of(), List.of("CQL body is empty or invalid"));
+            response = new CompileResponse("ERROR", warnings, List.of("CQL body is empty or invalid"));
         } else {
-            response = new CompileResponse("COMPILED", List.of(), List.of());
+            response = new CompileResponse("COMPILED", warnings, List.of());
         }
 
         jdbcTemplate.update(
@@ -234,6 +244,135 @@ public class MeasureService {
         );
         jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
         return response;
+    }
+
+    public List<ValueSetRef> listValueSets() {
+        String sql = """
+                SELECT id, oid, name, version, last_resolved_at
+                FROM value_sets
+                ORDER BY name ASC, oid ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new ValueSetRef(
+                (UUID) rs.getObject("id"),
+                rs.getString("oid"),
+                rs.getString("name"),
+                rs.getString("version"),
+                toInstant(rs.getObject("last_resolved_at"))
+        ));
+    }
+
+    public UUID createValueSet(String oid, String name, String version) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO value_sets (id, oid, name, version, codes_json, last_resolved_at) VALUES (?, ?, ?, ?, ?::jsonb, NOW())",
+                id,
+                oid,
+                name,
+                version == null || version.isBlank() ? "unspecified" : version,
+                "[]"
+        );
+        return id;
+    }
+
+    public void attachValueSet(UUID measureId, UUID valueSetId) {
+        UUID measureVersionId = latestMeasureVersionId(measureId);
+        jdbcTemplate.update(
+                "INSERT INTO measure_value_set_links (measure_version_id, value_set_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                measureVersionId,
+                valueSetId
+        );
+        insertAuditEvent(
+                "MEASURE_VALUE_SET_LINKED",
+                measureVersionId,
+                "system",
+                Map.of("measureId", measureId.toString(), "valueSetId", valueSetId.toString())
+        );
+    }
+
+    public void detachValueSet(UUID measureId, UUID valueSetId) {
+        UUID measureVersionId = latestMeasureVersionId(measureId);
+        jdbcTemplate.update(
+                "DELETE FROM measure_value_set_links WHERE measure_version_id = ? AND value_set_id = ?",
+                measureVersionId,
+                valueSetId
+        );
+        insertAuditEvent(
+                "MEASURE_VALUE_SET_UNLINKED",
+                measureVersionId,
+                "system",
+                Map.of("measureId", measureId.toString(), "valueSetId", valueSetId.toString())
+        );
+    }
+
+    public void updateTests(UUID id, List<TestFixture> fixtures) {
+        UUID measureVersionId = latestMeasureVersionId(id);
+        Map<String, Object> spec = new LinkedHashMap<>(readJsonMap(jdbcTemplate.queryForObject(
+                "SELECT spec_json::text FROM measure_versions WHERE id = ?",
+                String.class,
+                measureVersionId
+        )));
+        spec.put("testFixtures", fixtures == null ? List.of() : fixtures);
+        jdbcTemplate.update(
+                "UPDATE measure_versions SET spec_json = ?::jsonb WHERE id = ?",
+                toJson(spec),
+                measureVersionId
+        );
+        insertAuditEvent(
+                "MEASURE_VERSION_DRAFT_SAVED",
+                measureVersionId,
+                "system",
+                Map.of("field", "tests", "measureId", id.toString(), "fixtureCount", fixtures == null ? 0 : fixtures.size())
+        );
+    }
+
+    public TestValidationResult validateTests(UUID id) {
+        List<TestFixture> fixtures = loadTestFixtures(id);
+        if (fixtures.isEmpty()) {
+            return new TestValidationResult(false, List.of("At least one test fixture is required before activation."));
+        }
+        List<String> failures = new ArrayList<>();
+        for (int i = 0; i < fixtures.size(); i++) {
+            TestFixture fixture = fixtures.get(i);
+            if (fixture.fixtureName() == null || fixture.fixtureName().isBlank()) {
+                failures.add("Fixture " + (i + 1) + " must include fixtureName.");
+            }
+            if (fixture.employeeExternalId() == null || fixture.employeeExternalId().isBlank()) {
+                failures.add("Fixture " + (i + 1) + " must include employeeExternalId.");
+            }
+            if (!List.of("COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED").contains(fixture.expectedOutcome())) {
+                failures.add("Fixture " + (i + 1) + " has unsupported expectedOutcome: " + fixture.expectedOutcome());
+            }
+        }
+        return new TestValidationResult(failures.isEmpty(), failures);
+    }
+
+    public ActivationReadiness activationReadiness(UUID id) {
+        UUID measureVersionId = latestMeasureVersionId(id);
+        String compileStatus = jdbcTemplate.queryForObject(
+                "SELECT compile_status FROM measure_versions WHERE id = ?",
+                String.class,
+                measureVersionId
+        );
+        List<ValueSetRef> attachedValueSets = listAttachedValueSets(id);
+        List<TestFixture> fixtures = loadTestFixtures(id);
+        TestValidationResult testValidationResult = validateTests(id);
+        boolean compilePassed = "COMPILED".equalsIgnoreCase(compileStatus);
+        boolean ready = compilePassed && testValidationResult.passed();
+        List<String> blockers = new ArrayList<>();
+        if (!compilePassed) {
+            blockers.add("Compile status must be COMPILED.");
+        }
+        if (!testValidationResult.passed()) {
+            blockers.addAll(testValidationResult.failures());
+        }
+        return new ActivationReadiness(
+                ready,
+                compileStatus == null ? "ERROR" : compileStatus,
+                fixtures.size(),
+                attachedValueSets.size(),
+                testValidationResult.passed(),
+                blockers
+        );
     }
 
     public String transitionStatus(UUID id, String targetStatus) {
@@ -255,6 +394,12 @@ public class MeasureService {
         if ("Approved".equals(currentStatus) && "Active".equals(targetStatus) && !"COMPILED".equals(compileStatus)) {
             throw new IllegalArgumentException("Measure cannot be activated until CQL compile status is COMPILED");
         }
+        ActivationReadiness readiness = activationReadiness(id);
+        if ("Approved".equals(currentStatus) && "Active".equals(targetStatus)) {
+            if (!readiness.ready()) {
+                throw new IllegalArgumentException("Measure cannot be activated until test fixtures pass validation");
+            }
+        }
 
         jdbcTemplate.update(
                 "UPDATE measure_versions SET status = ?, activated_at = CASE WHEN ? = 'Active' THEN NOW() ELSE activated_at END WHERE id = ?",
@@ -270,7 +415,12 @@ public class MeasureService {
                 Map.of(
                         "measureId", id.toString(),
                         "fromStatus", currentStatus,
-                        "toStatus", targetStatus
+                        "toStatus", targetStatus,
+                        "compileStatus", readiness.compileStatus(),
+                        "valueSetCount", readiness.valueSetCount(),
+                        "testFixtureCount", readiness.testFixtureCount(),
+                        "testValidationPassed", readiness.testValidationPassed(),
+                        "activationBlockers", readiness.activationBlockers()
                 )
         );
         return targetStatus;
@@ -286,6 +436,40 @@ public class MeasureService {
         } catch (EmptyResultDataAccessException ex) {
             throw new IllegalArgumentException("Measure not found: " + measureId);
         }
+    }
+
+    private List<ValueSetRef> listAttachedValueSets(UUID measureId) {
+        UUID measureVersionId = latestMeasureVersionId(measureId);
+        String sql = """
+                SELECT vs.id, vs.oid, vs.name, vs.version, vs.last_resolved_at
+                FROM measure_value_set_links l
+                JOIN value_sets vs ON vs.id = l.value_set_id
+                WHERE l.measure_version_id = ?
+                ORDER BY vs.name ASC, vs.oid ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new ValueSetRef(
+                (UUID) rs.getObject("id"),
+                rs.getString("oid"),
+                rs.getString("name"),
+                rs.getString("version"),
+                toInstant(rs.getObject("last_resolved_at"))
+        ), measureVersionId);
+    }
+
+    private List<TestFixture> loadTestFixtures(UUID measureId) {
+        String specJson = jdbcTemplate.queryForObject(
+                """
+                SELECT mv.spec_json::text
+                FROM measure_versions mv
+                WHERE mv.measure_id = ?
+                ORDER BY mv.created_at DESC
+                LIMIT 1
+                """,
+                String.class,
+                measureId
+        );
+        Map<String, Object> parsed = readJsonMap(specJson);
+        return readTestFixtures(parsed.get("testFixtures"));
     }
 
     private void ensureAudiogramSeed() {
@@ -327,6 +511,7 @@ public class MeasureService {
         spec.put("exclusions", List.of(Map.of("label", "Waiver", "criteriaText", "Valid audiogram waiver on file")));
         spec.put("complianceWindow", "Annual");
         spec.put("requiredDataElements", List.of("Last audiogram date", "Role", "Site", "Program enrollment"));
+        spec.put("testFixtures", List.of());
 
         jdbcTemplate.update(
                 "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
@@ -383,6 +568,7 @@ public class MeasureService {
         spec.put("exclusions", List.of(Map.of("label", "Medical Exemption", "criteriaText", "Valid exemption documented")));
         spec.put("complianceWindow", "Annual");
         spec.put("requiredDataElements", List.of("Last TB screening date", "Role", "Site", "Exemption status"));
+        spec.put("testFixtures", List.of());
 
         jdbcTemplate.update(
                 "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
@@ -472,6 +658,25 @@ public class MeasureService {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    private List<TestFixture> readTestFixtures(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<TestFixture> result = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                result.add(new TestFixture(
+                        stringOrEmpty(map.get("fixtureName")),
+                        stringOrEmpty(map.get("employeeExternalId")),
+                        stringOrEmpty(map.get("expectedOutcome")),
+                        stringOrEmpty(map.get("notes"))
+                ));
+            }
+        }
+        return result;
+    }
+
     private Instant toInstant(Object value) {
         if (value instanceof Timestamp timestamp) {
             return timestamp.toInstant();
@@ -532,7 +737,9 @@ public class MeasureService {
             String complianceWindow,
             List<String> requiredDataElements,
             String cqlText,
-            String compileStatus
+            String compileStatus,
+            List<ValueSetRef> valueSets,
+            List<TestFixture> testFixtures
     ) {
     }
 
@@ -549,6 +756,39 @@ public class MeasureService {
             String status,
             List<String> warnings,
             List<String> errors
+    ) {
+    }
+
+    public record ValueSetRef(
+            UUID id,
+            String oid,
+            String name,
+            String version,
+            Instant lastResolvedAt
+    ) {
+    }
+
+    public record TestFixture(
+            String fixtureName,
+            String employeeExternalId,
+            String expectedOutcome,
+            String notes
+    ) {
+    }
+
+    public record TestValidationResult(
+            boolean passed,
+            List<String> failures
+    ) {
+    }
+
+    public record ActivationReadiness(
+            boolean ready,
+            String compileStatus,
+            int testFixtureCount,
+            int valueSetCount,
+            boolean testValidationPassed,
+            List<String> activationBlockers
     ) {
     }
 }
