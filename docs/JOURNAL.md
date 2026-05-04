@@ -123,6 +123,15 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Deployment + production checkpoint:
+- Commit pushed: `ec7c794` (`feat(run): add data freshness indicators to run summaries [S3]`)
+- Backend redeployed: `https://workwell-measure-studio-api.fly.dev`
+- Frontend redeployed + aliased: `https://frontend-seven-eta-24.vercel.app`
+- Timestamped production smoke check (`2026-05-04T00:47:59-04:00`):
+  - `GET /api/runs?limit=1` -> `200`
+  - `GET /api/runs/{id}` -> includes `dataFreshAsOf` and `dataFreshnessMinutes` (`30`)
+  - `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
