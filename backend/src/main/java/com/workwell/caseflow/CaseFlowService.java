@@ -605,7 +605,7 @@ public class CaseFlowService {
                     UNION ALL
                     SELECT action_type AS event_type,
                            performed_by AS actor,
-                           created_at AS occurred_at,
+                           performed_at AS occurred_at,
                            payload_json,
                            'case_action' AS timeline_source,
                            id::text AS sort_key
