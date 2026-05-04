@@ -6,10 +6,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.MeasureService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.RunPersistenceService;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,9 @@ class EvalControllerTest {
 
     @MockBean
     private RunPersistenceService runPersistenceService;
+
+    @MockBean
+    private MeasureService measureService;
 
     @Test
     void returnsStubEvaluationPayload() throws Exception {
@@ -100,5 +105,57 @@ class EvalControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value("run-456"))
                 .andExpect(jsonPath("$.measureVersion").value("v1.0"));
+    }
+
+    @Test
+    void runsAllProgramsScopeUsingActiveMeasureVersions() throws Exception {
+        UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        when(runPersistenceService.loadActiveMeasureScopes()).thenReturn(List.of(
+                new com.workwell.run.DemoRunModels.ActiveMeasureScope(
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                        "Audiogram",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                        "Active"
+                ),
+                new com.workwell.run.DemoRunModels.ActiveMeasureScope(
+                        UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+                        "TB Surveillance",
+                        UUID.fromString("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+                        "Active"
+                )
+        ));
+        when(audiogramDemoService.buildPayload(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(java.time.LocalDate.class)
+        )).thenReturn(new com.workwell.run.DemoRunModels.DemoRunPayload(
+                "run-1",
+                "Audiogram",
+                "v1.0",
+                "2026-05-04",
+                List.of()
+        ));
+        when(tbSurveillanceDemoService.buildPayload(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(java.time.LocalDate.class)
+        )).thenReturn(new com.workwell.run.DemoRunModels.DemoRunPayload(
+                "run-1",
+                "TB Surveillance",
+                "v1.3",
+                "2026-05-04",
+                List.of()
+        ));
+        when(runPersistenceService.persistAllProgramsRun(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("All Programs"),
+                org.mockito.ArgumentMatchers.anyList()
+        )).thenReturn(runId);
+
+        mockMvc.perform(post("/api/runs/manual")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scope\":\"All Programs\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.scope").value("All Programs"))
+                .andExpect(jsonPath("$.activeMeasuresExecuted").value(2));
     }
 }

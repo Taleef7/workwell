@@ -3,6 +3,7 @@ package com.workwell.measure;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +21,33 @@ public class AudiogramDemoService {
 
     public AudiogramDemoRun run() {
         UUID runId = UUID.randomUUID();
+        DemoRunPayload payload = buildPayload(runId.toString(), LocalDate.now());
+        List<AudiogramOutcome> outcomes = payload.outcomes().stream()
+                .map(outcome -> new AudiogramOutcome(
+                        outcome.subjectId(),
+                        outcome.outcome(),
+                        outcome.summary(),
+                        outcome.evidenceJson()
+                ))
+                .toList();
+        long compliant = outcomes.stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+        long dueSoon = outcomes.stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
+        long overdue = outcomes.stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+        long missingData = outcomes.stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+        long excluded = outcomes.stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+        AudiogramDemoRun run = new AudiogramDemoRun(
+                payload.runId(),
+                payload.measureName(),
+                payload.measureVersion(),
+                payload.evaluationDate(),
+                new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
+                outcomes
+        );
+        runPersistenceService.persistDemoRun(payload);
+        return run;
+    }
+
+    public DemoRunPayload buildPayload(String runId, LocalDate evaluationDate) {
         List<AudiogramPatient> patients = List.of(
                 new AudiogramPatient("emp-001", 120, false, true),
                 new AudiogramPatient("emp-002", 350, false, true),
@@ -38,26 +66,11 @@ public class AudiogramDemoService {
                 new AudiogramPatient("emp-015", null, false, true)
         );
 
-        List<AudiogramOutcome> outcomes = patients.stream().map(this::evaluate).toList();
-
-        long compliant = outcomes.stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
-        long dueSoon = outcomes.stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
-        long overdue = outcomes.stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
-        long missingData = outcomes.stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
-        long excluded = outcomes.stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
-
-        AudiogramDemoRun run = new AudiogramDemoRun(
-                runId.toString(),
-                "Audiogram",
-                "v1.0",
-                LocalDate.now().toString(),
-                new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
-                outcomes
-        );
-        List<DemoOutcome> payloadOutcomes = outcomes.stream().map(outcome -> {
-            SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(outcome.patientId());
+        List<DemoOutcome> payloadOutcomes = patients.stream().map(patient -> {
+            AudiogramOutcome outcome = evaluate(patient, evaluationDate);
+            SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(patient.patientId());
             return new DemoOutcome(
-                    outcome.patientId(),
+                    patient.patientId(),
                     employee.name(),
                     employee.role(),
                     employee.site(),
@@ -66,17 +79,16 @@ public class AudiogramDemoService {
                     outcome.evidenceJson()
             );
         }).toList();
-        runPersistenceService.persistDemoRun(new DemoRunPayload(
-                run.runId(),
-                run.measureName(),
-                run.measureVersion(),
-                run.evaluationDate(),
+        return new DemoRunPayload(
+                runId,
+                "Audiogram",
+                "v1.0",
+                evaluationDate.toString(),
                 payloadOutcomes
-        ));
-        return run;
+        );
     }
 
-    private AudiogramOutcome evaluate(AudiogramPatient patient) {
+    private AudiogramOutcome evaluate(AudiogramPatient patient, LocalDate evaluationDate) {
         String outcome;
         String reason;
         if (patient.hasActiveWaiver()) {
@@ -103,11 +115,11 @@ public class AudiogramDemoService {
                 patient.patientId(),
                 outcome,
                 reason,
-                buildEvidenceJson(patient)
+                buildEvidenceJson(patient, outcome, evaluationDate)
         );
     }
 
-    private Map<String, Object> buildEvidenceJson(AudiogramPatient patient) {
+    private Map<String, Object> buildEvidenceJson(AudiogramPatient patient, String outcome, LocalDate evaluationDate) {
         List<Map<String, Object>> expressionResults = List.of(
                 expressionResult("In Hearing Conservation Program", patient.inHearingProgram()),
                 expressionResult("Has Active Waiver", patient.hasActiveWaiver()),
@@ -124,9 +136,22 @@ public class AudiogramDemoService {
         evaluatedResource.put("hasActiveWaiver", patient.hasActiveWaiver());
         evaluatedResource.put("measurementWindowDays", 365);
 
+        Map<String, Object> whyFlagged = new LinkedHashMap<>();
+        whyFlagged.put("last_exam_date", patient.daysSinceAudiogram() == null
+                ? null
+                : evaluationDate.minusDays(patient.daysSinceAudiogram()).toString());
+        whyFlagged.put("compliance_window_days", 365);
+        whyFlagged.put("days_overdue", patient.daysSinceAudiogram() == null ? null : Math.max(patient.daysSinceAudiogram() - 365, 0));
+        whyFlagged.put("role_eligible", patient.inHearingProgram());
+        whyFlagged.put("site_eligible", true);
+        whyFlagged.put("waiver_status", patient.hasActiveWaiver() ? "active" : "none");
+        whyFlagged.put("generated_at", Instant.now().toString());
+        whyFlagged.put("outcome_status", outcome);
+
         Map<String, Object> evidenceJson = new LinkedHashMap<>();
         evidenceJson.put("expressionResults", expressionResults);
         evidenceJson.put("evaluatedResource", evaluatedResource);
+        evidenceJson.put("why_flagged", whyFlagged);
         return evidenceJson;
     }
 

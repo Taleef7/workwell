@@ -36,11 +36,13 @@ class CaseControllerTest {
                         caseId,
                         "patient-003",
                         "patient-003",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "AnnualAudiogramCompleted",
                         "1.0.0",
                         "2026-05-04",
                         "OPEN",
                         "HIGH",
+                        null,
                         "OVERDUE",
                         UUID.fromString("22222222-2222-2222-2222-222222222222"),
                         Instant.parse("2026-05-04T12:00:00Z")
@@ -161,7 +163,7 @@ class CaseControllerTest {
                         "AnnualAudiogramCompleted",
                         "1.0.0",
                         "2026-05-04",
-                        "CLOSED",
+                        "RESOLVED",
                         "LOW",
                         null,
                         "No follow-up needed after compliant verification rerun.",
@@ -176,7 +178,7 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:18:00Z"),
                         List.of(
                                 new CaseFlowService.AuditEvent(
-                                        "CASE_CLOSED",
+                                        "CASE_RESOLVED",
                                         "case-manager",
                                         Instant.parse("2026-05-04T12:18:00Z"),
                                         Map.of("status", "COMPLIANT")
@@ -187,7 +189,7 @@ class CaseControllerTest {
 
         mockMvc.perform(post("/api/cases/{caseId}/rerun-to-verify", caseId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.status").value("RESOLVED"))
                 .andExpect(jsonPath("$.currentOutcomeStatus").value("COMPLIANT"));
     }
 }

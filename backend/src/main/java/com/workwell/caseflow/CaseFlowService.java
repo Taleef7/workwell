@@ -48,11 +48,13 @@ public class CaseFlowService {
                 SELECT c.id AS case_id,
                        e.external_id AS employee_id,
                        e.name AS employee_name,
+                       c.measure_version_id,
                        m.name AS measure_name,
                        mv.version AS measure_version,
                        c.evaluation_period,
                        c.status,
                        c.priority,
+                       c.assignee,
                        c.current_outcome_status,
                        c.last_run_id,
                        c.updated_at
@@ -66,7 +68,7 @@ public class CaseFlowService {
         List<Object> params = new ArrayList<>();
         if (!"all".equalsIgnoreCase(statusFilter)) {
             if ("closed".equalsIgnoreCase(statusFilter)) {
-                sql.append(" AND c.status = 'CLOSED'");
+                sql.append(" AND c.status IN ('CLOSED', 'RESOLVED')");
             } else {
                 sql.append(" AND c.status = 'OPEN'");
             }
@@ -75,19 +77,20 @@ public class CaseFlowService {
             sql.append(" AND m.id = ?");
             params.add(measureId);
         }
-        sql.append(" AND m.name <> 'AnnualAudiogramCompleted'");
-        sql.append(" AND e.external_id NOT LIKE 'patient-%'");
+        sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
 
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
                 (UUID) rs.getObject("case_id"),
                 rs.getString("employee_id"),
                 rs.getString("employee_name"),
+                (UUID) rs.getObject("measure_version_id"),
                 rs.getString("measure_name"),
                 rs.getString("measure_version"),
                 rs.getString("evaluation_period"),
                 rs.getString("status"),
                 rs.getString("priority"),
+                rs.getString("assignee"),
                 rs.getString("current_outcome_status"),
                 (UUID) rs.getObject("last_run_id"),
                 rs.getTimestamp("updated_at").toInstant()
@@ -243,7 +246,8 @@ public class CaseFlowService {
 
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
-                "CLOSED",
+                // MVP choice: compliant reruns move OPEN cases to RESOLVED.
+                "RESOLVED",
                 "LOW",
                 "No follow-up needed after compliant verification rerun.",
                 "COMPLIANT",
@@ -267,7 +271,7 @@ public class CaseFlowService {
         );
 
         insertAuditEvent(
-                "CASE_CLOSED",
+                "CASE_RESOLVED",
                 "case",
                 caseId,
                 actor,
@@ -290,39 +294,37 @@ public class CaseFlowService {
             UUID employeeId,
             DemoOutcome outcome
     ) {
-        Optional<UUID> existingCaseId = findCaseId(employeeId, measureVersionId, evaluationPeriod);
-        UUID caseId = existingCaseId.orElseGet(UUID::randomUUID);
-        boolean created = existingCaseId.isEmpty();
         String priority = priorityFor(outcome.outcome());
         String nextAction = nextActionFor(outcome.outcome(), measureVersionId);
-
-        if (created) {
-            jdbcTemplate.update(
-                    "INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)",
-                    ps -> {
-                        ps.setObject(1, caseId);
-                        ps.setObject(2, employeeId);
-                        ps.setObject(3, measureVersionId);
-                        ps.setString(4, evaluationPeriod);
-                        ps.setString(5, "OPEN");
-                        ps.setString(6, priority);
-                        ps.setNull(7, java.sql.Types.VARCHAR);
-                        ps.setString(8, nextAction);
-                        ps.setString(9, outcome.outcome());
-                        ps.setObject(10, runId);
-                    }
-            );
-        } else {
-            jdbcTemplate.update(
-                    "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NULL WHERE id = ?",
-                    "OPEN",
-                    priority,
-                    nextAction,
-                    outcome.outcome(),
-                    runId,
-                    caseId
-            );
-        }
+        UUID candidateCaseId = UUID.randomUUID();
+        Map<String, Object> upserted = jdbcTemplate.queryForMap(
+                """
+                        INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)
+                        ON CONFLICT (employee_id, measure_version_id, evaluation_period)
+                        DO UPDATE SET
+                            status = EXCLUDED.status,
+                            priority = EXCLUDED.priority,
+                            next_action = EXCLUDED.next_action,
+                            current_outcome_status = EXCLUDED.current_outcome_status,
+                            last_run_id = EXCLUDED.last_run_id,
+                            updated_at = NOW(),
+                            closed_at = NULL
+                        RETURNING id, (xmax = 0) AS created
+                        """,
+                candidateCaseId,
+                employeeId,
+                measureVersionId,
+                evaluationPeriod,
+                "OPEN",
+                priority,
+                null,
+                nextAction,
+                outcome.outcome(),
+                runId
+        );
+        UUID caseId = (UUID) upserted.get("id");
+        boolean created = Boolean.TRUE.equals(upserted.get("created"));
 
         insertAuditEvent(
                 created ? "CASE_CREATED" : "CASE_UPDATED",
@@ -351,23 +353,23 @@ public class CaseFlowService {
         UUID caseId = existingCaseId.get();
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
-                "CLOSED",
+                "RESOLVED",
                 "LOW",
-                "No follow-up needed after compliant or excluded rerun.",
+                "Resolved by compliant rerun.",
                 outcome.outcome(),
                 runId,
                 caseId
         );
 
         insertAuditEvent(
-                "CASE_CLOSED",
+                "CASE_RESOLVED",
                 "case",
                 caseId,
                 "system",
                 runId,
                 caseId,
                 measureVersionId,
-                casePayload(outcome, "LOW", "No follow-up needed after compliant or excluded rerun.")
+                casePayload(outcome, "LOW", "Resolved by compliant rerun.")
         );
     }
 
@@ -436,6 +438,26 @@ public class CaseFlowService {
                 runId,
                 "INFO",
                 "Case-level rerun-to-verify executed."
+        );
+        insertAuditEvent(
+                "RUN_STARTED",
+                "run",
+                runId,
+                actor,
+                runId,
+                null,
+                measureVersionId,
+                Map.of("scope", "case", "source", "rerun-to-verify")
+        );
+        insertAuditEvent(
+                "RUN_COMPLETED",
+                "run",
+                runId,
+                actor,
+                runId,
+                null,
+                measureVersionId,
+                Map.of("scope", "case", "source", "rerun-to-verify", "totalEvaluated", 1, "compliant", 1)
         );
         return runId;
     }
@@ -626,11 +648,13 @@ public class CaseFlowService {
             UUID caseId,
             String employeeId,
             String employeeName,
+            UUID measureVersionId,
             String measureName,
             String measureVersion,
             String evaluationPeriod,
             String status,
             String priority,
+            String assignee,
             String currentOutcomeStatus,
             UUID lastRunId,
             Instant updatedAt

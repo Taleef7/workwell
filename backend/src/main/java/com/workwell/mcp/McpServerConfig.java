@@ -1,6 +1,7 @@
 package com.workwell.mcp;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.measure.MeasureService;
@@ -12,6 +13,7 @@ import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -67,7 +69,19 @@ public class McpServerConfig {
                     String caseId = stringArg(args, "caseId");
                     var detail = caseFlowService.loadCase(UUID.fromString(caseId))
                             .orElseThrow(() -> new IllegalArgumentException("Case not found: " + caseId));
-                    return new CallToolResult(toJson(objectMapper, detail), false);
+                    Map<String, Object> payload = objectMapper.convertValue(detail, new TypeReference<Map<String, Object>>() {
+                    });
+                    Object evidencePayload = payload.get("evidenceJson");
+                    payload.put("evidence_payload", evidencePayload == null ? Map.of() : evidencePayload);
+                    if (evidencePayload instanceof Map<?, ?> evidenceMap) {
+                        Object whyFlagged = evidenceMap.containsKey("why_flagged")
+                                ? evidenceMap.get("why_flagged")
+                                : Map.of();
+                        payload.put("why_flagged", whyFlagged);
+                    } else {
+                        payload.put("why_flagged", Map.of());
+                    }
+                    return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
 
@@ -89,7 +103,24 @@ public class McpServerConfig {
                         measureId = lookupMeasureIdByName(measureService, requestedMeasureName);
                     }
                     var summaries = caseFlowService.listCases(status, measureId);
-                    return new CallToolResult(toJson(objectMapper, summaries), false);
+                    List<Map<String, Object>> payload = summaries.stream().map(summary -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("case_id", summary.caseId());
+                        row.put("employee_id", summary.employeeId());
+                        row.put("employee_name", summary.employeeName());
+                        row.put("measure_name", summary.measureName());
+                        row.put("measure_version", summary.measureVersion());
+                        row.put("measure_version_id", summary.measureVersionId());
+                        row.put("evaluation_period", summary.evaluationPeriod());
+                        row.put("status", summary.status());
+                        row.put("priority", summary.priority());
+                        row.put("assignee", summary.assignee() == null ? "" : summary.assignee());
+                        row.put("current_outcome_status", summary.currentOutcomeStatus());
+                        row.put("last_run_id", summary.lastRunId());
+                        row.put("updated_at", summary.updatedAt());
+                        return row;
+                    }).toList();
+                    return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
 
@@ -101,7 +132,18 @@ public class McpServerConfig {
                                     .orElseThrow(() -> new IllegalArgumentException("No runs found"))
                             : runPersistenceService.loadRunById(UUID.fromString(args.get("runId").toString()))
                                     .orElseThrow(() -> new IllegalArgumentException("Run not found: " + args.get("runId")));
-                    return new CallToolResult(toJson(objectMapper, summary), false);
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("run_id", summary.runId());
+                    payload.put("scope", summary.scopeType());
+                    payload.put("total_cases", summary.totalCases());
+                    payload.put("compliant_count", summary.compliantCount());
+                    payload.put("non_compliant_count", summary.nonCompliantCount());
+                    payload.put("pass_rate", summary.passRate());
+                    payload.put("duration", summary.durationMs());
+                    payload.put("outcome_counts", summary.outcomeCounts());
+                    payload.put("started_at", summary.startedAt());
+                    payload.put("completed_at", summary.completedAt());
+                    return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
 

@@ -2,9 +2,10 @@ package com.workwell.run;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.caseflow.CaseFlowService;
 import com.workwell.measure.AudiogramDemoService;
 import com.workwell.measure.SyntheticEmployeeCatalog;
-import com.workwell.caseflow.CaseFlowService;
+import com.workwell.run.DemoRunModels.ActiveMeasureScope;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import java.io.IOException;
@@ -18,20 +19,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.FileCopyUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Service
 public class RunPersistenceService {
     private static final Logger log = LoggerFactory.getLogger(RunPersistenceService.class);
     private static final String MEASURE_NAME = "Audiogram";
-    private static final String MEASURE_VERSION = "v1.0";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -67,128 +67,167 @@ public class RunPersistenceService {
 
     @Transactional
     public void persistDemoRun(DemoRunPayload run) {
+        persistSingleMeasureRun(run, "measure", "demo", "manual", "system");
+    }
+
+    @Transactional
+    public UUID persistAllProgramsRun(String runId, String scopeLabel, List<DemoRunPayload> measureRuns) {
+        if (measureRuns.isEmpty()) {
+            throw new IllegalArgumentException("No active measures found to execute.");
+        }
+
         String stage = "start";
         try {
-            long compliant = run.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
-            long dueSoon = run.outcomes().stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
-            long overdue = run.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
-            long missingData = run.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
-            long excluded = run.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
-
-            stage = "ensure-measure";
-            UUID measureId = ensureMeasure(run.measureName());
-            stage = "ensure-measure-version";
-            UUID measureVersionId = ensureMeasureVersion(measureId, run.measureVersion(), run.measureName());
-            stage = "ensure-employees";
             seedSyntheticEmployees();
-            List<UUID> employeeIds = ensureEmployees(run.outcomes());
-
-            UUID runId = UUID.fromString(run.runId());
-            Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
+            UUID persistedRunId = UUID.fromString(runId);
+            Instant startedAt = LocalDate.parse(measureRuns.get(0).evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
             Instant completedAt = startedAt.plusSeconds(60);
-            String evaluationPeriod = run.evaluationDate();
+            String evaluationPeriod = measureRuns.get(0).evaluationDate();
+
+            long totalEvaluated = measureRuns.stream().mapToLong(payload -> payload.outcomes().size()).sum();
+            long compliant = measureRuns.stream()
+                    .flatMap(payload -> payload.outcomes().stream())
+                    .filter(outcome -> "COMPLIANT".equals(outcome.outcome()))
+                    .count();
+            long nonCompliant = totalEvaluated - compliant;
 
             stage = "insert-run";
             jdbcTemplate.update(
                     "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     ps -> {
-                        ps.setObject(1, runId);
-                        ps.setString(2, "measure");
-                        ps.setObject(3, measureVersionId);
-                        ps.setString(4, "demo");
+                        ps.setObject(1, persistedRunId);
+                        ps.setString(2, "all_programs");
+                        ps.setNull(3, java.sql.Types.OTHER);
+                        ps.setString(4, scopeLabel);
                         ps.setString(5, "manual");
                         ps.setString(6, "completed");
                         ps.setString(7, "system");
                         ps.setObject(8, Timestamp.from(startedAt));
                         ps.setObject(9, Timestamp.from(completedAt));
-                        ps.setInt(10, run.outcomes().size());
+                        ps.setLong(10, totalEvaluated);
                         ps.setLong(11, compliant);
-                        ps.setLong(12, dueSoon + overdue + missingData + excluded);
+                        ps.setLong(12, nonCompliant);
                         ps.setLong(13, 60_000L);
                         ps.setObject(14, Timestamp.from(startedAt));
                         ps.setObject(15, Timestamp.from(completedAt));
                     }
             );
 
+            insertAuditEvent(
+                    "RUN_STARTED",
+                    "run",
+                    persistedRunId,
+                    "system",
+                    persistedRunId,
+                    null,
+                    null,
+                    Map.of(
+                            "scope", scopeLabel,
+                            "activeMeasures", measureRuns.stream().map(DemoRunPayload::measureName).toList()
+                    )
+            );
+
             stage = "insert-run-log";
             jdbcTemplate.update(
                     "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
-                    runId,
+                    persistedRunId,
                     "INFO",
-                    "Seeded audiogram run persisted with " + run.outcomes().size() + " outcomes."
+                    "Manual all-programs run persisted with " + totalEvaluated + " outcomes across " + measureRuns.size() + " measures."
             );
 
-            stage = "insert-outcomes";
-            for (int i = 0; i < run.outcomes().size(); i++) {
-                DemoOutcome outcome = run.outcomes().get(i);
-                UUID outcomeId = UUID.randomUUID();
-                UUID employeeId = employeeIds.get(i);
+            for (DemoRunPayload payload : measureRuns) {
+                stage = "ensure-measure";
+                UUID measureId = ensureMeasure(payload.measureName());
+                stage = "ensure-measure-version";
+                UUID measureVersionId = ensureMeasureVersion(measureId, payload.measureVersion(), payload.measureName());
+                List<UUID> employeeIds = ensureEmployees(payload.outcomes());
 
-                jdbcTemplate.update(
-                        "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
-                        ps -> {
-                            ps.setObject(1, outcomeId);
-                            ps.setObject(2, runId);
-                            ps.setObject(3, employeeId);
-                            ps.setObject(4, measureVersionId);
-                            ps.setString(5, evaluationPeriod);
-                            ps.setString(6, outcome.outcome());
-                            ps.setString(7, toJsonb(outcome.evidenceJson()));
-                            ps.setObject(8, Timestamp.from(Instant.now()));
-                        }
-                );
+                stage = "insert-outcomes";
+                for (int i = 0; i < payload.outcomes().size(); i++) {
+                    DemoOutcome outcome = payload.outcomes().get(i);
+                    UUID outcomeId = UUID.randomUUID();
+                    UUID employeeId = employeeIds.get(i);
 
-                insertAuditEvent(
-                        "OUTCOME_PERSISTED",
-                        "outcome",
-                        outcomeId,
-                        "system",
-                        runId,
-                        null,
+                    jdbcTemplate.update(
+                            "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
+                            ps -> {
+                                ps.setObject(1, outcomeId);
+                                ps.setObject(2, persistedRunId);
+                                ps.setObject(3, employeeId);
+                                ps.setObject(4, measureVersionId);
+                                ps.setString(5, evaluationPeriod);
+                                ps.setString(6, outcome.outcome());
+                                ps.setString(7, toJsonb(outcome.evidenceJson()));
+                                ps.setObject(8, Timestamp.from(Instant.now()));
+                            }
+                    );
+
+                    insertAuditEvent(
+                            "OUTCOME_PERSISTED",
+                            "outcome",
+                            outcomeId,
+                            "system",
+                            persistedRunId,
+                            null,
+                            measureVersionId,
+                            Map.of(
+                                    "subjectId", outcome.subjectId(),
+                                    "status", outcome.outcome(),
+                                    "summary", outcome.summary()
+                            )
+                    );
+                }
+
+                stage = "upsert-cases";
+                caseFlowService.upsertCases(
+                        persistedRunId,
                         measureVersionId,
-                        Map.of(
-                                "subjectId", outcome.subjectId(),
-                                "status", outcome.outcome(),
-                                "summary", outcome.summary()
-                        )
+                        evaluationPeriod,
+                        employeeIds,
+                        payload.outcomes()
                 );
             }
 
-            stage = "upsert-cases";
-            caseFlowService.upsertCases(
-                    runId,
-                    measureVersionId,
-                    evaluationPeriod,
-                    employeeIds,
-                    run.outcomes()
-            );
-
-            stage = "insert-run-audit";
             insertAuditEvent(
-                    "RUN_PERSISTED",
+                    "RUN_COMPLETED",
                     "run",
-                    runId,
+                    persistedRunId,
                     "system",
-                    runId,
+                    persistedRunId,
                     null,
-                    measureVersionId,
+                    null,
                     Map.of(
-                            "measureName", run.measureName(),
-                            "measureVersion", run.measureVersion(),
-                            "evaluationDate", run.evaluationDate(),
-                            "summary", Map.of(
-                                    "compliant", compliant,
-                                    "dueSoon", dueSoon,
-                                    "overdue", overdue,
-                                    "missingData", missingData,
-                                    "excluded", excluded
-                            )
+                            "scope", scopeLabel,
+                            "evaluationDate", evaluationPeriod,
+                            "totalEvaluated", totalEvaluated,
+                            "compliant", compliant,
+                            "nonCompliant", nonCompliant
                     )
             );
+            return persistedRunId;
         } catch (RuntimeException ex) {
-            log.error("Failed to persist audiogram run at stage {}: {}", stage, ex.getMessage(), ex);
+            log.error("Failed to persist all-programs run at stage {}: {}", stage, ex.getMessage(), ex);
             throw ex;
         }
+    }
+
+    public List<ActiveMeasureScope> loadActiveMeasureScopes() {
+        String sql = """
+                SELECT DISTINCT m.id,
+                                m.name,
+                                mv.id AS measure_version_id,
+                                mv.status
+                FROM measures m
+                JOIN measure_versions mv ON mv.measure_id = m.id
+                WHERE mv.status = 'Active'
+                ORDER BY m.name ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new ActiveMeasureScope(
+                (UUID) rs.getObject("id"),
+                rs.getString("name"),
+                (UUID) rs.getObject("measure_version_id"),
+                rs.getString("status")
+        ));
     }
 
     public Optional<AudiogramDemoService.AudiogramDemoRun> loadLatestAudiogramRun() {
@@ -244,6 +283,7 @@ public class RunPersistenceService {
                        r.status,
                        r.trigger_type,
                        r.scope_type,
+                       r.duration_ms,
                        r.total_evaluated,
                        r.compliant,
                        r.non_compliant,
@@ -269,16 +309,32 @@ public class RunPersistenceService {
                     ),
                     runId
             );
+            long totalEvaluated = row.get("total_evaluated") == null ? 0 : ((Number) row.get("total_evaluated")).longValue();
+            long compliantCount = row.get("compliant") == null ? 0 : ((Number) row.get("compliant")).longValue();
+            long nonCompliantCount = row.get("non_compliant") == null ? 0 : ((Number) row.get("non_compliant")).longValue();
+            long totalCases = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM cases WHERE last_run_id = ?",
+                    Long.class,
+                    runId
+            );
+            long durationMs = row.get("duration_ms") == null ? 0 : ((Number) row.get("duration_ms")).longValue();
+            double passRate = totalEvaluated == 0 ? 0.0d : (compliantCount * 100.0d) / totalEvaluated;
+
             return Optional.of(new RunSummaryResponse(
                     row.get("run_id").toString(),
-                    (String) row.get("measure_name"),
-                    (String) row.get("measure_version"),
+                    row.get("measure_name") == null ? "All Programs" : row.get("measure_name").toString(),
+                    row.get("measure_version") == null ? "" : row.get("measure_version").toString(),
                     row.get("status") == null ? "" : row.get("status").toString(),
                     row.get("trigger_type") == null ? "" : row.get("trigger_type").toString(),
                     row.get("scope_type") == null ? "" : row.get("scope_type").toString(),
                     row.get("started_at") == null ? null : ((Timestamp) row.get("started_at")).toInstant(),
                     row.get("completed_at") == null ? null : ((Timestamp) row.get("completed_at")).toInstant(),
-                    row.get("total_evaluated") == null ? 0 : ((Number) row.get("total_evaluated")).longValue(),
+                    totalEvaluated,
+                    totalCases,
+                    compliantCount,
+                    nonCompliantCount,
+                    passRate,
+                    durationMs,
                     counts
             ));
         } catch (EmptyResultDataAccessException ex) {
@@ -411,6 +467,7 @@ public class RunPersistenceService {
     }
 
     private void seedSyntheticEmployees() {
+        // Option A seed policy: legacy patient-* rows and emp-* rows are both valid demo employees for walkthrough data.
         for (SyntheticEmployeeCatalog.EmployeeProfile employee : SyntheticEmployeeCatalog.allEmployees()) {
             try {
                 UUID id = jdbcTemplate.queryForObject(
@@ -428,6 +485,152 @@ public class RunPersistenceService {
             } catch (EmptyResultDataAccessException ex) {
                 ensureEmployee(employee.externalId(), employee.name(), employee.role(), employee.site());
             }
+        }
+    }
+
+    private void persistSingleMeasureRun(
+            DemoRunPayload run,
+            String scopeType,
+            String site,
+            String triggerType,
+            String actor
+    ) {
+        String stage = "start";
+        try {
+            long compliant = run.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+            long dueSoon = run.outcomes().stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
+            long overdue = run.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+            long missingData = run.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+            long excluded = run.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+
+            stage = "ensure-measure";
+            UUID measureId = ensureMeasure(run.measureName());
+            stage = "ensure-measure-version";
+            UUID measureVersionId = ensureMeasureVersion(measureId, run.measureVersion(), run.measureName());
+            stage = "ensure-employees";
+            seedSyntheticEmployees();
+            List<UUID> employeeIds = ensureEmployees(run.outcomes());
+
+            UUID runId = UUID.fromString(run.runId());
+            Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
+            Instant completedAt = startedAt.plusSeconds(60);
+            String evaluationPeriod = run.evaluationDate();
+
+            stage = "insert-run";
+            jdbcTemplate.update(
+                    "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ps -> {
+                        ps.setObject(1, runId);
+                        ps.setString(2, scopeType);
+                        ps.setObject(3, measureVersionId);
+                        ps.setString(4, site);
+                        ps.setString(5, triggerType);
+                        ps.setString(6, "completed");
+                        ps.setString(7, actor);
+                        ps.setObject(8, Timestamp.from(startedAt));
+                        ps.setObject(9, Timestamp.from(completedAt));
+                        ps.setInt(10, run.outcomes().size());
+                        ps.setLong(11, compliant);
+                        ps.setLong(12, dueSoon + overdue + missingData + excluded);
+                        ps.setLong(13, 60_000L);
+                        ps.setObject(14, Timestamp.from(startedAt));
+                        ps.setObject(15, Timestamp.from(completedAt));
+                    }
+            );
+
+            insertAuditEvent(
+                    "RUN_STARTED",
+                    "run",
+                    runId,
+                    actor,
+                    runId,
+                    null,
+                    measureVersionId,
+                    Map.of(
+                            "measureName", run.measureName(),
+                            "measureVersion", run.measureVersion(),
+                            "scopeType", scopeType
+                    )
+            );
+
+            stage = "insert-run-log";
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Seeded " + run.measureName() + " run persisted with " + run.outcomes().size() + " outcomes."
+            );
+
+            stage = "insert-outcomes";
+            for (int i = 0; i < run.outcomes().size(); i++) {
+                DemoOutcome outcome = run.outcomes().get(i);
+                UUID outcomeId = UUID.randomUUID();
+                UUID employeeId = employeeIds.get(i);
+
+                jdbcTemplate.update(
+                        "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
+                        ps -> {
+                            ps.setObject(1, outcomeId);
+                            ps.setObject(2, runId);
+                            ps.setObject(3, employeeId);
+                            ps.setObject(4, measureVersionId);
+                            ps.setString(5, evaluationPeriod);
+                            ps.setString(6, outcome.outcome());
+                            ps.setString(7, toJsonb(outcome.evidenceJson()));
+                            ps.setObject(8, Timestamp.from(Instant.now()));
+                        }
+                );
+
+                insertAuditEvent(
+                        "OUTCOME_PERSISTED",
+                        "outcome",
+                        outcomeId,
+                        actor,
+                        runId,
+                        null,
+                        measureVersionId,
+                        Map.of(
+                                "subjectId", outcome.subjectId(),
+                                "status", outcome.outcome(),
+                                "summary", outcome.summary()
+                        )
+                );
+            }
+
+            stage = "upsert-cases";
+            caseFlowService.upsertCases(
+                    runId,
+                    measureVersionId,
+                    evaluationPeriod,
+                    employeeIds,
+                    run.outcomes()
+            );
+
+            stage = "insert-run-audit";
+            insertAuditEvent(
+                    "RUN_COMPLETED",
+                    "run",
+                    runId,
+                    actor,
+                    runId,
+                    null,
+                    measureVersionId,
+                    Map.of(
+                            "measureName", run.measureName(),
+                            "measureVersion", run.measureVersion(),
+                            "evaluationDate", run.evaluationDate(),
+                            "summary", Map.of(
+                                    "compliant", compliant,
+                                    "dueSoon", dueSoon,
+                                    "overdue", overdue,
+                                    "missingData", missingData,
+                                    "excluded", excluded
+                            )
+                    )
+            );
+        } catch (RuntimeException ex) {
+            log.error("Failed to persist demo run at stage {}: {}", stage, ex.getMessage(), ex);
+            throw ex;
         }
     }
 
@@ -493,6 +696,11 @@ public class RunPersistenceService {
             Instant startedAt,
             Instant completedAt,
             long totalEvaluated,
+            long totalCases,
+            long compliantCount,
+            long nonCompliantCount,
+            double passRate,
+            long durationMs,
             List<Map<String, Object>> outcomeCounts
     ) {
     }

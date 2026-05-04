@@ -49,7 +49,7 @@ public class MeasureService {
                     ORDER BY created_at DESC
                     LIMIT 1
                 ) mv ON TRUE
-                WHERE m.name <> 'AnnualAudiogramCompleted'
+                WHERE mv.status = 'Active'
                 ORDER BY last_updated DESC, m.name ASC
                 """;
 
@@ -187,6 +187,12 @@ public class MeasureService {
                 measureVersionId
         );
         jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+        insertAuditEvent(
+                "MEASURE_VERSION_DRAFT_SAVED",
+                measureVersionId,
+                "system",
+                Map.of("field", "spec", "measureId", id.toString())
+        );
     }
 
     public void updateCql(UUID id, String cqlText) {
@@ -197,6 +203,12 @@ public class MeasureService {
                 measureVersionId
         );
         jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+        insertAuditEvent(
+                "MEASURE_VERSION_DRAFT_SAVED",
+                measureVersionId,
+                "system",
+                Map.of("field", "cql", "measureId", id.toString())
+        );
     }
 
     public CompileResponse compileCql(UUID id) {
@@ -251,6 +263,16 @@ public class MeasureService {
                 measureVersionId
         );
         jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+        insertAuditEvent(
+                "MEASURE_VERSION_STATUS_CHANGED",
+                measureVersionId,
+                "system",
+                Map.of(
+                        "measureId", id.toString(),
+                        "fromStatus", currentStatus,
+                        "toStatus", targetStatus
+                )
+        );
         return targetStatus;
     }
 
@@ -462,6 +484,18 @@ public class MeasureService {
 
     private String stringOrEmpty(Object value) {
         return value == null ? "" : value.toString();
+    }
+
+    private void insertAuditEvent(String eventType, UUID measureVersionId, String actor, Map<String, Object> payload) {
+        jdbcTemplate.update(
+                "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?::jsonb)",
+                eventType,
+                "measure_version",
+                measureVersionId,
+                actor,
+                measureVersionId,
+                toJson(payload)
+        );
     }
 
     public record MeasureCatalogItem(

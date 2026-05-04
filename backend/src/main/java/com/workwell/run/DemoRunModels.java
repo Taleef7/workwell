@@ -26,4 +26,12 @@ public final class DemoRunModels {
             List<DemoOutcome> outcomes
     ) {
     }
+
+    public record ActiveMeasureScope(
+            java.util.UUID measureId,
+            String measureName,
+            java.util.UUID measureVersionId,
+            String status
+    ) {
+    }
 }

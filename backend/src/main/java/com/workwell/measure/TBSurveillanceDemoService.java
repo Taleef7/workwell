@@ -3,6 +3,7 @@ package com.workwell.measure;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import com.workwell.run.RunPersistenceService;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +21,33 @@ public class TBSurveillanceDemoService {
 
     public TBDemoRun run() {
         UUID runId = UUID.randomUUID();
+        DemoRunPayload payload = buildPayload(runId.toString(), LocalDate.now());
+        List<TBOutcome> outcomes = payload.outcomes().stream()
+                .map(outcome -> new TBOutcome(
+                        outcome.subjectId(),
+                        outcome.outcome(),
+                        outcome.summary(),
+                        outcome.evidenceJson()
+                ))
+                .toList();
+        long compliant = outcomes.stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+        long dueSoon = outcomes.stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
+        long overdue = outcomes.stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+        long missingData = outcomes.stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+        long excluded = outcomes.stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+        TBDemoRun run = new TBDemoRun(
+                payload.runId(),
+                payload.measureName(),
+                payload.measureVersion(),
+                payload.evaluationDate(),
+                new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
+                outcomes
+        );
+        runPersistenceService.persistDemoRun(payload);
+        return run;
+    }
+
+    public DemoRunPayload buildPayload(String runId, LocalDate evaluationDate) {
         List<TBCandidate> candidates = List.of(
                 new TBCandidate("emp-041", 120, false),
                 new TBCandidate("emp-042", 240, false),
@@ -33,26 +61,11 @@ public class TBSurveillanceDemoService {
                 new TBCandidate("emp-050", 600, true)
         );
 
-        List<TBOutcome> outcomes = candidates.stream().map(this::evaluate).toList();
-        long compliant = outcomes.stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
-        long dueSoon = outcomes.stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
-        long overdue = outcomes.stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
-        long missingData = outcomes.stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
-        long excluded = outcomes.stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
-
-        TBDemoRun run = new TBDemoRun(
-                runId.toString(),
-                "TB Surveillance",
-                "v1.3",
-                LocalDate.now().toString(),
-                new RunSummary(compliant, dueSoon, overdue, missingData, excluded),
-                outcomes
-        );
-
-        List<DemoOutcome> payloadOutcomes = outcomes.stream().map(outcome -> {
-            SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(outcome.subjectId());
+        List<DemoOutcome> payloadOutcomes = candidates.stream().map(candidate -> {
+            TBOutcome outcome = evaluate(candidate, evaluationDate);
+            SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(candidate.subjectId());
             return new DemoOutcome(
-                    outcome.subjectId(),
+                    candidate.subjectId(),
                     employee.name(),
                     employee.role(),
                     employee.site(),
@@ -61,18 +74,16 @@ public class TBSurveillanceDemoService {
                     outcome.evidenceJson()
             );
         }).toList();
-
-        runPersistenceService.persistDemoRun(new DemoRunPayload(
-                run.runId(),
-                run.measureName(),
-                run.measureVersion(),
-                run.evaluationDate(),
+        return new DemoRunPayload(
+                runId,
+                "TB Surveillance",
+                "v1.3",
+                evaluationDate.toString(),
                 payloadOutcomes
-        ));
-        return run;
+        );
     }
 
-    private TBOutcome evaluate(TBCandidate candidate) {
+    private TBOutcome evaluate(TBCandidate candidate, LocalDate evaluationDate) {
         String outcome;
         String reason;
         if (candidate.hasMedicalExemption()) {
@@ -91,10 +102,10 @@ public class TBSurveillanceDemoService {
             outcome = "OVERDUE";
             reason = "TB screening is outside the annual compliance window.";
         }
-        return new TBOutcome(candidate.subjectId(), outcome, reason, buildEvidence(candidate));
+        return new TBOutcome(candidate.subjectId(), outcome, reason, buildEvidence(candidate, outcome, evaluationDate));
     }
 
-    private Map<String, Object> buildEvidence(TBCandidate candidate) {
+    private Map<String, Object> buildEvidence(TBCandidate candidate, String outcome, LocalDate evaluationDate) {
         SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(candidate.subjectId());
         Map<String, Object> evaluated = new LinkedHashMap<>();
         evaluated.put("subjectId", employee.externalId());
@@ -105,14 +116,27 @@ public class TBSurveillanceDemoService {
         evaluated.put("measurementWindowDays", 365);
         evaluated.put("hasMedicalExemption", candidate.hasMedicalExemption());
 
-        return Map.of(
-                "expressionResults", List.of(
-                        expressionResult("TB Eligible Role", true),
-                        expressionResult("Clinic Site", true),
-                        expressionResult("Days Since Last TB Screen", candidate.daysSinceTbScreen())
-                ),
-                "evaluatedResource", evaluated
-        );
+        Map<String, Object> whyFlagged = new LinkedHashMap<>();
+        whyFlagged.put("last_exam_date", candidate.daysSinceTbScreen() == null
+                ? null
+                : evaluationDate.minusDays(candidate.daysSinceTbScreen()).toString());
+        whyFlagged.put("compliance_window_days", 365);
+        whyFlagged.put("days_overdue", candidate.daysSinceTbScreen() == null ? null : Math.max(candidate.daysSinceTbScreen() - 365, 0));
+        whyFlagged.put("role_eligible", true);
+        whyFlagged.put("site_eligible", true);
+        whyFlagged.put("waiver_status", candidate.hasMedicalExemption() ? "active" : "none");
+        whyFlagged.put("generated_at", Instant.now().toString());
+        whyFlagged.put("outcome_status", outcome);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("expressionResults", List.of(
+                expressionResult("TB Eligible Role", true),
+                expressionResult("Clinic Site", true),
+                expressionResult("Days Since Last TB Screen", candidate.daysSinceTbScreen())
+        ));
+        payload.put("evaluatedResource", evaluated);
+        payload.put("why_flagged", whyFlagged);
+        return payload;
     }
 
     private Map<String, Object> expressionResult(String define, Object result) {
