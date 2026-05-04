@@ -619,12 +619,12 @@ public class CaseFlowService {
             while (rs.next()) {
                 Map<String, Object> payload = rs.getString("payload_json") == null
                         ? new LinkedHashMap<>()
-                        : new LinkedHashMap<>(readJson(rs.getString("payload_json")));
+                        : new LinkedHashMap<>(readJsonPayload(rs.getString("payload_json")));
                 payload.put("timelineSource", rs.getString("timeline_source"));
                 timeline.add(new AuditEvent(
                         rs.getString("event_type"),
                         rs.getString("actor"),
-                        rs.getTimestamp("occurred_at").toInstant(),
+                        toInstant(rs.getObject("occurred_at")),
                         payload
                 ));
             }
@@ -720,6 +720,22 @@ public class CaseFlowService {
     private Map<String, Object> readJson(String json) {
         try {
             return objectMapper.readValue(json, Map.class);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to parse JSON payload", ex);
+        }
+    }
+
+    private Map<String, Object> readJsonPayload(String json) {
+        try {
+            Object decoded = objectMapper.readValue(json, Object.class);
+            if (decoded instanceof Map<?, ?> map) {
+                Map<String, Object> payload = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    payload.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+                return payload;
+            }
+            return new LinkedHashMap<>(Map.of("value", decoded));
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to parse JSON payload", ex);
         }
