@@ -59,6 +59,14 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Deployment + production checkpoint:
+- Commit pushed: `ac0a88d` (`feat(run): add scheduled all-program run backbone [S3]`)
+- Backend redeployed to Fly: `https://workwell-measure-studio-api.fly.dev`
+- Timestamped smoke check (`2026-05-04T00:33:15-04:00`):
+  - `GET /actuator/health` -> `UP`
+  - `GET /api/measures` -> `200` (`measureCount=2`)
+  - `POST /api/runs/manual` with `{"scope":"All Programs"}` -> `200` (`runId=bc058da6-adea-4f74-a745-9f9dd34d7a66`, `activeMeasuresExecuted=2`)
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
