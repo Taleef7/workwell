@@ -61,7 +61,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 - [x] Expand worklist filters to full target set: status, priority, assignee, measure, site.
 - [x] Add basic assignment/escalation flow.
-- [ ] Improve case timeline/evidence consistency and clarity.
+- [x] Improve case timeline/evidence consistency and clarity.
 
 ### P2 - AI Surfaces (Guardrailed)
 
@@ -87,8 +87,8 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Recommended Next Implementation Batch
 
-1. Improve case timeline/evidence consistency and clarity.
-2. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
+1. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
+2. Implement AI Draft Spec flow with human-apply guardrails.
 
 ## Latest Verified Checkpoint
 

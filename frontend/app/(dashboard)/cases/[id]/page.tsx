@@ -261,6 +261,16 @@ export default function CaseDetailPage() {
 
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-semibold text-slate-900">why_flagged</p>
+                {caseDetail.evidenceJson.why_flagged ? (
+                  <dl className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+                    <Row label="Last exam date" value={caseDetail.evidenceJson.why_flagged.last_exam_date ?? "None"} />
+                    <Row label="Window (days)" value={String(caseDetail.evidenceJson.why_flagged.compliance_window_days)} />
+                    <Row label="Days overdue" value={String(caseDetail.evidenceJson.why_flagged.days_overdue ?? 0)} />
+                    <Row label="Role eligible" value={caseDetail.evidenceJson.why_flagged.role_eligible ? "Yes" : "No"} />
+                    <Row label="Site eligible" value={caseDetail.evidenceJson.why_flagged.site_eligible ? "Yes" : "No"} />
+                    <Row label="Waiver status" value={caseDetail.evidenceJson.why_flagged.waiver_status} />
+                  </dl>
+                ) : null}
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
                   {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
                 </pre>
@@ -294,7 +304,7 @@ export default function CaseDetailPage() {
                   <div key={`${event.eventType}-${event.occurredAt}`} className="rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-slate-900">{event.eventType}</p>
+                        <p className="text-sm font-semibold text-slate-900">{formatEventType(event.eventType)}</p>
                         <p className="text-xs text-slate-500">{event.actor}</p>
                       </div>
                       <p className="text-xs text-slate-500">{new Date(event.occurredAt).toLocaleString()}</p>
@@ -311,6 +321,14 @@ export default function CaseDetailPage() {
       ) : null}
     </section>
   );
+}
+
+function formatEventType(eventType: string) {
+  return eventType
+    .toLowerCase()
+    .split("_")
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
 }
 
 function Info({ label, value }: { label: string; value: string }) {

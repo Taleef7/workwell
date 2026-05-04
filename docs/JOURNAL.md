@@ -187,6 +187,22 @@ Deployment + production checkpoint:
   - `POST /api/cases/{caseId}/escalate?actor=codex-smoke` -> `200` (`status=OPEN`, `priority=HIGH`)
   - `GET https://frontend-seven-eta-24.vercel.app/cases/{caseId}` -> `200`
 
+### Case timeline/evidence consistency pass (P2 operations maturity)
+
+- Improved assignment action evidence consistency:
+  - Assignment payload now records real `previousAssignee` instead of `"unknown"`.
+- Improved case timeline completeness:
+  - Case detail timeline now merges both `audit_events` and `case_actions`, ordered chronologically.
+  - Timeline payload entries now include `timelineSource` (`audit_event` or `case_action`) for clearer provenance.
+- Improved case-detail evidence clarity:
+  - Added structured quick-read fields for `why_flagged` in UI (last exam date, window, overdue days, eligibility, waiver status).
+  - Timeline event labels are now human-readable (for example `CASE_ESCALATED` -> `Case Escalated`).
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape

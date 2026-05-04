@@ -315,7 +315,7 @@ public class CaseFlowService {
         );
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("assignee", normalizedAssignee == null ? "unassigned" : normalizedAssignee);
-        payload.put("previousAssignee", "unknown");
+        payload.put("previousAssignee", existing.assignee() == null ? "unassigned" : existing.assignee());
         insertCaseAction(caseId, "ASSIGNED", actor, payload);
         insertAuditEvent(
                 "CASE_ASSIGNED",
@@ -467,7 +467,7 @@ public class CaseFlowService {
         try {
             return Optional.ofNullable(jdbcTemplate.queryForObject(
                     """
-                            SELECT id, employee_id, measure_version_id, evaluation_period, current_outcome_status, last_run_id
+                            SELECT id, employee_id, measure_version_id, evaluation_period, current_outcome_status, last_run_id, assignee
                             FROM cases
                             WHERE id = ?
                             """,
@@ -477,7 +477,8 @@ public class CaseFlowService {
                             (UUID) rs.getObject("measure_version_id"),
                             rs.getString("evaluation_period"),
                             rs.getString("current_outcome_status"),
-                            (UUID) rs.getObject("last_run_id")
+                            (UUID) rs.getObject("last_run_id"),
+                            rs.getString("assignee")
                     ),
                     caseId
             ));
@@ -589,18 +590,46 @@ public class CaseFlowService {
                 SELECT event_type,
                        actor,
                        occurred_at,
-                       payload_json
-                FROM audit_events
-                WHERE ref_case_id = ?
+                       payload_json,
+                       timeline_source
+                FROM (
+                    SELECT event_type,
+                           actor,
+                           occurred_at,
+                           payload_json,
+                           'audit_event' AS timeline_source,
+                           id
+                    FROM audit_events
+                    WHERE ref_case_id = ?
+                    UNION ALL
+                    SELECT action_type AS event_type,
+                           performed_by AS actor,
+                           created_at AS occurred_at,
+                           payload_json,
+                           'case_action' AS timeline_source,
+                           id
+                    FROM case_actions
+                    WHERE case_id = ?
+                ) timeline
                 ORDER BY occurred_at ASC, id ASC
                 """;
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new AuditEvent(
-                rs.getString("event_type"),
-                rs.getString("actor"),
-                rs.getTimestamp("occurred_at").toInstant(),
-                rs.getString("payload_json") == null ? Map.of() : readJson(rs.getString("payload_json"))
-        ), caseId);
+        return jdbcTemplate.query(sql, rs -> {
+            List<AuditEvent> timeline = new ArrayList<>();
+            while (rs.next()) {
+                Map<String, Object> payload = rs.getString("payload_json") == null
+                        ? new LinkedHashMap<>()
+                        : new LinkedHashMap<>(readJson(rs.getString("payload_json")));
+                payload.put("timelineSource", rs.getString("timeline_source"));
+                timeline.add(new AuditEvent(
+                        rs.getString("event_type"),
+                        rs.getString("actor"),
+                        rs.getTimestamp("occurred_at").toInstant(),
+                        payload
+                ));
+            }
+            return timeline;
+        }, caseId, caseId);
     }
 
     private boolean requiresOpenCase(String outcome) {
@@ -776,7 +805,8 @@ public class CaseFlowService {
             UUID measureVersionId,
             String evaluationPeriod,
             String currentOutcomeStatus,
-            UUID lastRunId
+            UUID lastRunId,
+            String assignee
     ) {
     }
 }
