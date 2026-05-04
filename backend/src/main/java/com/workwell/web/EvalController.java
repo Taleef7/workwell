@@ -3,16 +3,13 @@ package com.workwell.web;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import com.workwell.measure.AudiogramDemoService;
-import com.workwell.measure.MeasureService;
 import com.workwell.measure.TBSurveillanceDemoService;
-import com.workwell.run.DemoRunModels.DemoRunPayload;
+import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,18 +25,18 @@ public class EvalController {
     private final AudiogramDemoService audiogramDemoService;
     private final TBSurveillanceDemoService tbSurveillanceDemoService;
     private final RunPersistenceService runPersistenceService;
-    private final MeasureService measureService;
+    private final AllProgramsRunService allProgramsRunService;
 
     public EvalController(
             AudiogramDemoService audiogramDemoService,
             TBSurveillanceDemoService tbSurveillanceDemoService,
             RunPersistenceService runPersistenceService,
-            MeasureService measureService
+            AllProgramsRunService allProgramsRunService
     ) {
         this.audiogramDemoService = audiogramDemoService;
         this.tbSurveillanceDemoService = tbSurveillanceDemoService;
         this.runPersistenceService = runPersistenceService;
-        this.measureService = measureService;
+        this.allProgramsRunService = allProgramsRunService;
     }
 
     @PostMapping("/api/eval")
@@ -91,25 +88,7 @@ public class EvalController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only scope 'All Programs' is supported for MVP.");
         }
 
-        // Ensure default demo measures are present before resolving active run scope.
-        measureService.listMeasures();
-        UUID runId = UUID.randomUUID();
-        LocalDate evaluationDate = LocalDate.now();
-        List<DemoRunPayload> payloads = runPersistenceService.loadActiveMeasureScopes().stream()
-                .map(scopeRow -> switch (scopeRow.measureName()) {
-                    case "Audiogram" -> audiogramDemoService.buildPayload(runId.toString(), evaluationDate);
-                    case "TB Surveillance" -> tbSurveillanceDemoService.buildPayload(runId.toString(), evaluationDate);
-                    default -> null;
-                })
-                .filter(payload -> payload != null)
-                .toList();
-        UUID persistedRunId = runPersistenceService.persistAllProgramsRun(runId.toString(), "All Programs", payloads);
-        return new ManualRunResponse(
-                persistedRunId.toString(),
-                "All Programs",
-                payloads.size(),
-                payloads.stream().map(DemoRunPayload::measureName).toList()
-        );
+        return allProgramsRunService.runAllPrograms("All Programs", "system");
     }
 
     @GetMapping("/api/runs/audiogram/latest")

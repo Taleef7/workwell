@@ -53,7 +53,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ### P2 - Execution Maturity
 
-- [ ] Add scheduled run backbone (`@Scheduled` cron + persisted run registration).
+- [x] Add scheduled run backbone (`@Scheduled` cron + persisted run registration).
 - [ ] Expand run history/log visibility (status, duration, failure reasons, filtering).
 - [ ] Add/standardize data freshness indicators in run summaries.
 
@@ -87,5 +87,5 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Recommended Next Implementation Batch
 
-1. Begin scheduled run backbone (`@Scheduled` cron + persisted run registration).
-2. Expand run history/log visibility (status, duration, failure reasons, filtering).
+1. Expand run history/log visibility (status, duration, failure reasons, filtering).
+2. Add/standardize data freshness indicators in run summaries.

@@ -2,6 +2,24 @@
 
 ## 2026-05-04
 
+### Studio measure-load hotfix + deploy/push checkpoint
+
+- Fixed the reported `Failed to load measure (400)` issue when opening a measure from `/measures`:
+  - Root cause: client-side dynamic route parameter handling in `/studio/[id]` was not robust in the current Next.js setup, causing invalid IDs to be sent to `/api/measures/{id}`.
+  - Fix: switched Studio page to `useParams()` + normalized `measureId` usage across all API calls + guard for missing IDs.
+- Deployment + push completed:
+  - Commit: `015057f` (`feat(measure): value sets, test gates, and studio readiness polish [S2]`)
+  - Backend deployed: `https://workwell-measure-studio-api.fly.dev`
+  - Frontend deployed + aliased: `https://frontend-seven-eta-24.vercel.app`
+  - Pushed to GitHub `main`.
+- Production smoke verification (`2026-05-04T00:28:26-04:00`):
+  - `GET /actuator/health` -> `UP`
+  - `GET /api/measures` -> `200` (`measureCount=2`)
+  - `GET /api/measures/{id}` using live id -> `200` (`detailName=TB Surveillance`, `detailStatus=Active`)
+  - `GET /api/cases?status=open` -> `200` (`openCases=23`)
+  - `GET https://frontend-seven-eta-24.vercel.app/measures` -> `200`
+  - `GET https://frontend-seven-eta-24.vercel.app/studio/{id}` -> `200`
+
 ### Release governance polish: activation readiness UX + richer lifecycle audit payloads
 
 - Completed approval/release UX improvements in Studio:
@@ -17,6 +35,24 @@
     - `testValidationPassed`
     - `activationBlockers`
 - Added integration test coverage to verify richer transition audit payload fields are written.
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+### Scheduled run backbone (P2 execution maturity)
+
+- Added shared all-program run orchestrator service:
+  - `backend/src/main/java/com/workwell/run/AllProgramsRunService.java`
+  - `POST /api/runs/manual` now delegates to this shared service.
+- Added scheduled trigger service:
+  - `backend/src/main/java/com/workwell/run/ScheduledRunService.java`
+  - Cron task calls all-program run path and persists outcomes/cases/audit via existing infrastructure.
+  - Safe default posture: scheduler is disabled unless explicitly enabled.
+- Added scheduler configuration:
+  - `workwell.scheduler.enabled` from `WORKWELL_SCHEDULER_ENABLED` (default `false`)
+  - `workwell.scheduler.cron` from `WORKWELL_SCHEDULER_CRON` (default `0 0 6 * * *`)
 
 Verification checkpoints (local):
 - `backend\\gradlew.bat test` -> PASS

@@ -9,3 +9,8 @@ management:
     web:
       exposure:
         include: health
+
+workwell:
+  scheduler:
+    enabled: ${WORKWELL_SCHEDULER_ENABLED:false}
+    cron: ${WORKWELL_SCHEDULER_CRON:0 0 6 * * *}
