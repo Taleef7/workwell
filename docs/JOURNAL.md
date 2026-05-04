@@ -2,6 +2,62 @@
 
 ## 2026-05-03
 
+### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
+
+- Completed critical status-source cleanup:
+  - Removed legacy name-based filtering hacks for `AnnualAudiogramCompleted`.
+  - Enforced `measure_versions.status` as the source of truth for active measure scope.
+  - Added explicit active-scope query in run persistence:
+    - `SELECT DISTINCT m.id, m.name, mv.id AS measure_version_id, mv.status FROM measures m JOIN measure_versions mv ON mv.measure_id = m.id WHERE mv.status = 'Active'`.
+- Added manual all-programs run endpoint:
+  - `POST /api/runs/manual` with scope `"All Programs"`.
+  - Endpoint now resolves active measure versions via the active-scope query and persists a run with `scope_type='all_programs'`.
+- Case upsert idempotency hardening:
+  - Replaced split insert/update logic with a single `INSERT ... ON CONFLICT (employee_id, measure_version_id, evaluation_period) DO UPDATE`.
+  - Confirmed case write path is now deterministic for reruns over the same key.
+- Compliant rerun closure behavior aligned to spec:
+  - Chosen state: `RESOLVED` (documented in code comment).
+  - Compliant reruns now transition open cases to resolved state and emit `CASE_RESOLVED`.
+- Seed strategy decision for `patient-*` rows:
+  - Selected Option A.
+  - Removed `patient-*` exclusion filter from case list path.
+  - Added code comment documenting legacy `patient-*` + `emp-*` rows as valid demo records.
+- MCP tools wired to explicit live payload contracts:
+  - `list_cases` now returns status, priority, assignee, and `measure_version_id`.
+  - `get_run_summary` now returns `total_cases`, `compliant_count`, `non_compliant_count`, `pass_rate`, and `duration`.
+  - `get_case` now exposes full evidence payload plus extracted `why_flagged`.
+- Evidence payload structured:
+  - Demo run engines now persist `why_flagged` object with:
+    - `last_exam_date`, `compliance_window_days`, `days_overdue`, `role_eligible`, `site_eligible`, `waiver_status` (+ outcome metadata).
+- Audit coverage added:
+  - `MEASURE_VERSION_DRAFT_SAVED` on spec/CQL draft edits.
+  - `MEASURE_VERSION_STATUS_CHANGED` on lifecycle transitions (including activation).
+  - `RUN_STARTED` and `RUN_COMPLETED` on run flows (measure runs + case rerun verification + all-program runs).
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests \"com.workwell.web.CaseControllerTest\" --tests \"com.workwell.web.EvalControllerTest\"` -> PASS
+- `backend\\gradlew.bat test` -> FAIL on environment-level Docker/Testcontainers availability (`DockerClientProviderStrategy`), not on compile.
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+Follow-up verification after Docker restore:
+- `backend\\gradlew.bat test` -> PASS (all tests green once Docker/Testcontainers were available).
+- Fresh DB smoke issue found and fixed:
+  - Initial `/api/runs/manual` on empty DB returned `500` (`No active measures found to execute`).
+  - Fix applied in `EvalController`: call `measureService.listMeasures()` before resolving active measure scope so default active seeds are present.
+- Smoke re-run against containerized backend + postgres:
+  - `POST /api/runs/manual` now succeeds on fresh DB without needing a prior `/api/measures` call.
+  - Sample result: `activeMeasuresExecuted=2`, `totalEvaluated=25`, `totalCases=14`, `passRate=32.0`.
+
+Git closeout:
+- Grouped final changes into logical commits (backend+tests, frontend, docs) with spike-tagged commit messages.
+- Verified no extra temp/runtime artifacts remained after Docker smoke runs.
+- Final local checks remained green before closeout:
+  - `backend\\gradlew.bat test`
+  - `frontend npm run lint`
+  - `frontend npm run build`
+
 ### Production consistency fix (advisor escalation: data-level cleanup)
 
 - External validation continued to report stale public responses (`3` measures including `AnnualAudiogramCompleted`) despite app-level filtering checks from our side.
