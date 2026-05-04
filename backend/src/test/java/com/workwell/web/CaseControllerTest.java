@@ -31,11 +31,12 @@ class CaseControllerTest {
     @Test
     void listsCases() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.listCases("open", null)).thenReturn(List.of(
+        when(caseFlowService.listCases("open", null, null, null, null)).thenReturn(List.of(
                 new CaseFlowService.CaseSummary(
                         caseId,
                         "patient-003",
                         "patient-003",
+                        "Plant A",
                         UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "AnnualAudiogramCompleted",
                         "1.0.0",
@@ -52,6 +53,7 @@ class CaseControllerTest {
         mockMvc.perform(get("/api/cases"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].caseId").value(caseId.toString()))
+                .andExpect(jsonPath("$[0].site").value("Plant A"))
                 .andExpect(jsonPath("$[0].priority").value("HIGH"))
                 .andExpect(jsonPath("$[0].currentOutcomeStatus").value("OVERDUE"));
     }

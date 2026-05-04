@@ -43,11 +43,12 @@ public class CaseFlowService {
         }
     }
 
-    public List<CaseSummary> listCases(String statusFilter, UUID measureId) {
+    public List<CaseSummary> listCases(String statusFilter, UUID measureId, String priority, String assignee, String site) {
         StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
                        e.external_id AS employee_id,
                        e.name AS employee_name,
+                       e.site AS employee_site,
                        c.measure_version_id,
                        m.name AS measure_name,
                        mv.version AS measure_version,
@@ -77,6 +78,18 @@ public class CaseFlowService {
             sql.append(" AND m.id = ?");
             params.add(measureId);
         }
+        if (priority != null && !priority.isBlank()) {
+            sql.append(" AND LOWER(c.priority) = LOWER(?)");
+            params.add(priority);
+        }
+        if (assignee != null && !assignee.isBlank()) {
+            sql.append(" AND LOWER(COALESCE(c.assignee, 'unassigned')) = LOWER(?)");
+            params.add(assignee);
+        }
+        if (site != null && !site.isBlank()) {
+            sql.append(" AND LOWER(COALESCE(e.site, '')) = LOWER(?)");
+            params.add(site);
+        }
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
 
@@ -84,6 +97,7 @@ public class CaseFlowService {
                 (UUID) rs.getObject("case_id"),
                 rs.getString("employee_id"),
                 rs.getString("employee_name"),
+                rs.getString("employee_site"),
                 (UUID) rs.getObject("measure_version_id"),
                 rs.getString("measure_name"),
                 rs.getString("measure_version"),
@@ -648,6 +662,7 @@ public class CaseFlowService {
             UUID caseId,
             String employeeId,
             String employeeName,
+            String site,
             UUID measureVersionId,
             String measureName,
             String measureVersion,

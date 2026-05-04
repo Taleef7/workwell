@@ -7,6 +7,7 @@ type CaseSummary = {
   caseId: string;
   employeeId: string;
   employeeName: string;
+  site: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
@@ -32,6 +33,9 @@ export default function CasesPage() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("open");
   const [measureFilter, setMeasureFilter] = useState<string>("");
+  const [priorityFilter, setPriorityFilter] = useState<string>("");
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("");
+  const [siteFilter, setSiteFilter] = useState<string>("");
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -60,6 +64,15 @@ export default function CasesPage() {
       if (measureFilter) {
         params.set("measureId", measureFilter);
       }
+      if (priorityFilter) {
+        params.set("priority", priorityFilter);
+      }
+      if (assigneeFilter) {
+        params.set("assignee", assigneeFilter);
+      }
+      if (siteFilter) {
+        params.set("site", siteFilter);
+      }
       const response = await fetch(`${apiBase}/api/cases?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
@@ -71,7 +84,7 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, measureFilter, statusFilter]);
+  }, [apiBase, assigneeFilter, measureFilter, priorityFilter, siteFilter, statusFilter]);
 
   useEffect(() => {
     if (apiBase) {
@@ -159,6 +172,50 @@ export default function CasesPage() {
             ))}
           </select>
         </label>
+        <label className="text-sm text-slate-600">
+          Priority{" "}
+          <select
+            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+          >
+            <option value="">All Priorities</option>
+            <option value="HIGH">HIGH</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="LOW">LOW</option>
+          </select>
+        </label>
+        <label className="text-sm text-slate-600">
+          Assignee{" "}
+          <select
+            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+          >
+            <option value="">All Assignees</option>
+            <option value="unassigned">Unassigned</option>
+            {[...new Set(cases.map((item) => item.assignee).filter((item): item is string => Boolean(item)))].map((assignee) => (
+              <option key={assignee} value={assignee}>
+                {assignee}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm text-slate-600">
+          Site{" "}
+          <select
+            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
+            value={siteFilter}
+            onChange={(e) => setSiteFilter(e.target.value)}
+          >
+            <option value="">All Sites</option>
+            {[...new Set(cases.map((item) => item.site).filter(Boolean))].map((site) => (
+              <option key={site} value={site}>
+                {site}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {loading ? <p className="text-sm text-slate-600">Loading cases...</p> : null}
@@ -182,6 +239,7 @@ export default function CasesPage() {
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
                 <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
                 <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
+                <p className="mt-1 text-xs text-slate-500">{item.site}</p>
               </div>
               <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{item.priority}</span>
             </div>

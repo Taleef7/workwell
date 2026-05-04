@@ -129,8 +129,24 @@ Deployment + production checkpoint:
 - Frontend redeployed + aliased: `https://frontend-seven-eta-24.vercel.app`
 - Timestamped production smoke check (`2026-05-04T00:47:59-04:00`):
   - `GET /api/runs?limit=1` -> `200`
-  - `GET /api/runs/{id}` -> includes `dataFreshAsOf` and `dataFreshnessMinutes` (`30`)
-  - `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+- `GET /api/runs/{id}` -> includes `dataFreshAsOf` and `dataFreshnessMinutes` (`30`)
+- `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+
+### Worklist filter expansion (P2 operations maturity)
+
+- Expanded backend case list filters:
+  - Existing: `status`, `measureId`
+  - Added: `priority`, `assignee`, `site`
+- Expanded frontend `/cases` filter controls:
+  - `Status`, `Measure`, `Priority`, `Assignee`, `Site`
+  - Query-string filter wiring to backend API
+- Added `site` field to case summary payload and surfaced site in case cards.
+- Updated MCP case listing integration call-site for new case-list method signature.
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
 
 ## 2026-05-03
 

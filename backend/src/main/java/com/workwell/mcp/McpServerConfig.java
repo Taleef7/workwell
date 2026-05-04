@@ -102,12 +102,13 @@ public class McpServerConfig {
                         String requestedMeasureName = args.get("measureName").toString().trim();
                         measureId = lookupMeasureIdByName(measureService, requestedMeasureName);
                     }
-                    var summaries = caseFlowService.listCases(status, measureId);
+                    var summaries = caseFlowService.listCases(status, measureId, null, null, null);
                     List<Map<String, Object>> payload = summaries.stream().map(summary -> {
                         Map<String, Object> row = new LinkedHashMap<>();
                         row.put("case_id", summary.caseId());
                         row.put("employee_id", summary.employeeId());
                         row.put("employee_name", summary.employeeName());
+                        row.put("site", summary.site());
                         row.put("measure_name", summary.measureName());
                         row.put("measure_version", summary.measureVersion());
                         row.put("measure_version_id", summary.measureVersionId());

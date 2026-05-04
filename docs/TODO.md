@@ -59,7 +59,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ### P2 - Operations Maturity
 
-- [ ] Expand worklist filters to full target set: status, priority, assignee, measure, site.
+- [x] Expand worklist filters to full target set: status, priority, assignee, measure, site.
 - [ ] Add basic assignment/escalation flow.
 - [ ] Improve case timeline/evidence consistency and clarity.
 
@@ -87,5 +87,5 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Recommended Next Implementation Batch
 
-1. Expand worklist filters to full target set: status, priority, assignee, measure, site.
-2. Add basic assignment/escalation flow.
+1. Add basic assignment/escalation flow.
+2. Improve case timeline/evidence consistency and clarity.

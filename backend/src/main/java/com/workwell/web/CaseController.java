@@ -22,9 +22,12 @@ public class CaseController {
     @GetMapping("/api/cases")
     public List<CaseFlowService.CaseSummary> listCases(
             @RequestParam(name = "status", defaultValue = "open") String status,
-            @RequestParam(name = "measureId", required = false) UUID measureId
+            @RequestParam(name = "measureId", required = false) UUID measureId,
+            @RequestParam(name = "priority", required = false) String priority,
+            @RequestParam(name = "assignee", required = false) String assignee,
+            @RequestParam(name = "site", required = false) String site
     ) {
-        return caseFlowService.listCases(status, measureId);
+        return caseFlowService.listCases(status, measureId, priority, assignee, site);
     }
 
     @GetMapping("/api/cases/{caseId}")
