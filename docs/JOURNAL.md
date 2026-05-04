@@ -176,6 +176,17 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Deployment + production checkpoint:
+- Commit pushed: `46849b5` (`feat(caseflow): add assignment and escalation actions [S4]`)
+- Backend redeployed: `https://workwell-measure-studio-api.fly.dev`
+- Frontend redeployed + aliased: `https://frontend-seven-eta-24.vercel.app`
+- Timestamped production smoke check (`2026-05-04T01:48:47-04:00`):
+  - `GET /actuator/health` -> `UP`
+  - `GET /api/cases?status=open` -> `200` (`openCaseCount=27`, `caseId=c6d79a2f-8f86-4d48-ac91-06f21d478ccb`)
+  - `POST /api/cases/{caseId}/assign?assignee=QA%20Lead&actor=codex-smoke` -> `200` (`status=OPEN`, `assignee=QA Lead`)
+  - `POST /api/cases/{caseId}/escalate?actor=codex-smoke` -> `200` (`status=OPEN`, `priority=HIGH`)
+  - `GET https://frontend-seven-eta-24.vercel.app/cases/{caseId}` -> `200`
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape

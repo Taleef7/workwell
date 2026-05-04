@@ -89,3 +89,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 1. Improve case timeline/evidence consistency and clarity.
 2. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
+
+## Latest Verified Checkpoint
+
+- 2026-05-04 01:48 - Assignment/escalation flow is deployed and production-smoke verified (`/api/cases/{id}/assign`, `/api/cases/{id}/escalate`, and `/cases/{id}` UI).
