@@ -75,7 +75,9 @@ class RunControllerTest {
                         17L,
                         32.0d,
                         60000L,
-                        List.of(Map.of("status", "OVERDUE", "count", 4L))
+                        List.of(Map.of("status", "OVERDUE", "count", 4L)),
+                        Instant.parse("2026-05-04T00:00:59Z"),
+                        15L
                 )
         ));
 
@@ -101,4 +103,3 @@ class RunControllerTest {
                 .andExpect(jsonPath("$[0].level").value("INFO"));
     }
 }
-

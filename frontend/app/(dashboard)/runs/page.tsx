@@ -32,6 +32,8 @@ type RunSummary = {
   passRate: number;
   durationMs: number;
   outcomeCounts: Array<{ status: string; count: number }>;
+  dataFreshAsOf: string | null;
+  dataFreshnessMinutes: number;
 };
 
 type RunLogEntry = {
@@ -224,6 +226,12 @@ export default function RunsPage() {
               <p className="text-xs text-slate-600">Evaluated: {selectedRun.totalEvaluated}</p>
               <p className="text-xs text-slate-600">Cases: {selectedRun.totalCases}</p>
               <p className="text-xs text-slate-600">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>
+              <p className="text-xs text-slate-600">
+                Data Freshness: {selectedRun.dataFreshnessMinutes >= 0 ? `${selectedRun.dataFreshnessMinutes} min old` : "unknown"}
+              </p>
+              <p className="text-xs text-slate-600">
+                Data Fresh As Of: {selectedRun.dataFreshAsOf ? new Date(selectedRun.dataFreshAsOf).toLocaleString() : "-"}
+              </p>
               <div>
                 <p className="text-xs font-semibold text-slate-700">Outcome Counts</p>
                 <ul className="text-xs text-slate-600">
@@ -260,4 +268,3 @@ export default function RunsPage() {
     </section>
   );
 }
-

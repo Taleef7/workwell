@@ -106,7 +106,22 @@ Production deployment + hotfix checkpoint:
   - `GET /api/runs?limit=5` -> `200` (`runCount=5`)
   - `GET /api/runs/{id}` -> `200` (`status=completed`)
   - `GET /api/runs/{id}/logs?limit=5` -> `200` (`logCount=1`)
-  - `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+- `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+
+### Data freshness indicators (P2 execution maturity)
+
+- Added standardized freshness fields to run summary responses:
+  - `dataFreshAsOf`: latest `outcomes.evaluated_at` timestamp for the run
+  - `dataFreshnessMinutes`: age in minutes from `dataFreshAsOf` to now
+- Frontend `/runs` detail panel now surfaces:
+  - "Data Freshness: X min old"
+  - "Data Fresh As Of: <timestamp>"
+- Controller test fixture updated to include freshness fields in run summary payload.
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
 
 ## 2026-05-03
 

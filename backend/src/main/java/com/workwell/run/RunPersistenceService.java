@@ -14,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -319,6 +320,12 @@ public class RunPersistenceService {
             );
             long durationMs = row.get("duration_ms") == null ? 0 : ((Number) row.get("duration_ms")).longValue();
             double passRate = totalEvaluated == 0 ? 0.0d : (compliantCount * 100.0d) / totalEvaluated;
+            Instant dataFreshAsOf = jdbcTemplate.queryForObject(
+                    "SELECT MAX(evaluated_at) FROM outcomes WHERE run_id = ?",
+                    Instant.class,
+                    runId
+            );
+            long dataFreshnessMinutes = dataFreshAsOf == null ? -1L : ChronoUnit.MINUTES.between(dataFreshAsOf, Instant.now());
 
             return Optional.of(new RunSummaryResponse(
                     row.get("run_id").toString(),
@@ -335,7 +342,9 @@ public class RunPersistenceService {
                     nonCompliantCount,
                     passRate,
                     durationMs,
-                    counts
+                    counts,
+                    dataFreshAsOf,
+                    dataFreshnessMinutes
             ));
         } catch (EmptyResultDataAccessException ex) {
             return Optional.empty();
@@ -765,7 +774,9 @@ public class RunPersistenceService {
             long nonCompliantCount,
             double passRate,
             long durationMs,
-            List<Map<String, Object>> outcomeCounts
+            List<Map<String, Object>> outcomeCounts,
+            Instant dataFreshAsOf,
+            long dataFreshnessMinutes
     ) {
     }
 
