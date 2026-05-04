@@ -92,6 +92,22 @@ Verification checkpoints (local):
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
 
+Production deployment + hotfix checkpoint:
+- Commits pushed:
+  - `ebee7db` (`feat(run): expand run history and logs visibility [S3]`)
+  - `443102c` (`fix(run): harden run list filtering and complete run visibility [S3]`)
+- Backend redeployed: `https://workwell-measure-studio-api.fly.dev`
+- Frontend redeployed + aliased: `https://frontend-seven-eta-24.vercel.app`
+- Live issue discovered and fixed immediately:
+  - Initial `GET /api/runs` returned `500` due to nullable filter SQL handling.
+  - Fixed by switching to dynamic SQL condition construction (only bind `LOWER(?)` clauses when filters are present).
+- Timestamped production smoke check (`2026-05-04T00:44:07-04:00`):
+  - `GET /actuator/health` -> `UP`
+  - `GET /api/runs?limit=5` -> `200` (`runCount=5`)
+  - `GET /api/runs/{id}` -> `200` (`status=completed`)
+  - `GET /api/runs/{id}/logs?limit=5` -> `200` (`logCount=1`)
+  - `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+
 ## 2026-05-03
 
 ### End-of-day closeout: status-source bugfix, run scope hardening, idempotency, MCP live-shape
