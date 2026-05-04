@@ -28,8 +28,17 @@ type CaseDetail = {
   updatedAt: string;
   closedAt: string | null;
   evidenceJson: {
-    expressionResults: Array<Record<string, unknown>>;
-    evaluatedResource: Record<string, unknown>;
+    expressionResults?: Array<Record<string, unknown>>;
+    evaluatedResource?: Record<string, unknown>;
+    why_flagged?: {
+      last_exam_date: string | null;
+      compliance_window_days: number;
+      days_overdue: number | null;
+      role_eligible: boolean;
+      site_eligible: boolean;
+      waiver_status: string;
+      outcome_status?: string;
+    };
   };
   outcomeStatus: string;
   outcomeSummary: string;
@@ -172,7 +181,7 @@ export default function CaseDetailPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Why Flagged</p>
               <h4 className="mt-2 text-xl font-semibold">Structured evidence trail</h4>
               <div className="mt-4 space-y-3">
-                {caseDetail.evidenceJson.expressionResults.map((row, index) => (
+                {(caseDetail.evidenceJson.expressionResults ?? []).map((row, index) => (
                   <div
                     key={`${String(row.define ?? index)}-${index}`}
                     className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
@@ -187,9 +196,16 @@ export default function CaseDetailPage() {
               </div>
 
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">why_flagged</p>
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
+                  {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
+                </pre>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-semibold text-slate-900">Evaluated resource</p>
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
-                  {JSON.stringify(caseDetail.evidenceJson.evaluatedResource, null, 2)}
+                  {JSON.stringify(caseDetail.evidenceJson.evaluatedResource ?? {}, null, 2)}
                 </pre>
               </div>
             </div>

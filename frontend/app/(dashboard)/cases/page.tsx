@@ -7,11 +7,13 @@ type CaseSummary = {
   caseId: string;
   employeeId: string;
   employeeName: string;
+  measureVersionId: string;
   measureName: string;
   measureVersion: string;
   evaluationPeriod: string;
   status: string;
   priority: string;
+  assignee: string | null;
   currentOutcomeStatus: string;
   lastRunId: string;
   updatedAt: string;
