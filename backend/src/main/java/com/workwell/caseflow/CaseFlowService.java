@@ -591,7 +591,8 @@ public class CaseFlowService {
                        actor,
                        occurred_at,
                        payload_json,
-                       timeline_source
+                       timeline_source,
+                       sort_key
                 FROM (
                     SELECT event_type,
                            actor,
