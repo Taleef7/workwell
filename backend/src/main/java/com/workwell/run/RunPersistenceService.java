@@ -357,6 +357,68 @@ public class RunPersistenceService {
         }
     }
 
+    public List<RunListItem> listRuns(String status, String scopeType, String triggerType, int limit) {
+        String sql = """
+                SELECT r.id AS run_id,
+                       r.status,
+                       r.scope_type,
+                       r.trigger_type,
+                       r.started_at,
+                       r.completed_at,
+                       r.duration_ms,
+                       r.total_evaluated,
+                       r.compliant,
+                       r.non_compliant,
+                       m.name AS measure_name
+                FROM runs r
+                LEFT JOIN measure_versions mv ON r.scope_id = mv.id
+                LEFT JOIN measures m ON mv.measure_id = m.id
+                WHERE (? IS NULL OR LOWER(r.status) = LOWER(?))
+                  AND (? IS NULL OR LOWER(r.scope_type) = LOWER(?))
+                  AND (? IS NULL OR LOWER(r.trigger_type) = LOWER(?))
+                ORDER BY r.started_at DESC
+                LIMIT ?
+                """;
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new RunListItem(
+                        rs.getObject("run_id").toString(),
+                        rs.getString("measure_name") == null ? "All Programs" : rs.getString("measure_name"),
+                        rs.getString("status") == null ? "" : rs.getString("status"),
+                        rs.getString("scope_type") == null ? "" : rs.getString("scope_type"),
+                        rs.getString("trigger_type") == null ? "" : rs.getString("trigger_type"),
+                        rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toInstant(),
+                        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant(),
+                        rs.getLong("duration_ms"),
+                        rs.getLong("total_evaluated"),
+                        rs.getLong("compliant"),
+                        rs.getLong("non_compliant")
+                ),
+                status,
+                status,
+                scopeType,
+                scopeType,
+                triggerType,
+                triggerType,
+                limit
+        );
+    }
+
+    public List<RunLogEntry> loadRunLogs(UUID runId, int limit) {
+        String sql = """
+                SELECT ts, level, message
+                FROM run_logs
+                WHERE run_id = ?
+                ORDER BY ts DESC
+                LIMIT ?
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new RunLogEntry(
+                rs.getTimestamp("ts").toInstant(),
+                rs.getString("level"),
+                rs.getString("message")
+        ), runId, limit);
+    }
+
     private List<AudiogramDemoService.AudiogramOutcome> loadOutcomesForRun(UUID runId) {
         String sql = """
                 SELECT o.employee_id, o.status, o.evidence_json
@@ -702,6 +764,28 @@ public class RunPersistenceService {
             double passRate,
             long durationMs,
             List<Map<String, Object>> outcomeCounts
+    ) {
+    }
+
+    public record RunListItem(
+            String runId,
+            String measureName,
+            String status,
+            String scopeType,
+            String triggerType,
+            Instant startedAt,
+            Instant completedAt,
+            long durationMs,
+            long totalEvaluated,
+            long compliantCount,
+            long nonCompliantCount
+    ) {
+    }
+
+    public record RunLogEntry(
+            Instant timestamp,
+            String level,
+            String message
     ) {
     }
 }

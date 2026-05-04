@@ -54,7 +54,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 ### P2 - Execution Maturity
 
 - [x] Add scheduled run backbone (`@Scheduled` cron + persisted run registration).
-- [ ] Expand run history/log visibility (status, duration, failure reasons, filtering).
+- [x] Expand run history/log visibility (status, duration, failure reasons, filtering).
 - [ ] Add/standardize data freshness indicators in run summaries.
 
 ### P2 - Operations Maturity
@@ -87,5 +87,5 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Recommended Next Implementation Batch
 
-1. Expand run history/log visibility (status, duration, failure reasons, filtering).
-2. Add/standardize data freshness indicators in run summaries.
+1. Add/standardize data freshness indicators in run summaries.
+2. Expand worklist filters to full target set: status, priority, assignee, measure, site.

@@ -1,202 +1,263 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-type EvalResponse = {
-  evaluationId: string;
-  outcome: string;
-  summary: string;
-  expressionResults: Array<Record<string, unknown>>;
-  evaluatedResource: Record<string, unknown>;
+type RunListItem = {
+  runId: string;
+  measureName: string;
+  status: string;
+  scopeType: string;
+  triggerType: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number;
+  totalEvaluated: number;
+  compliantCount: number;
+  nonCompliantCount: number;
 };
 
-type AudiogramRunResponse = {
+type RunSummary = {
   runId: string;
   measureName: string;
   measureVersion: string;
-  evaluationDate: string;
-  summary: {
-    compliant: number;
-    dueSoon: number;
-    overdue: number;
-    missingData: number;
-    excluded: number;
-  };
-  outcomes: Array<{
-    patientId: string;
-    outcome: string;
-    summary: string;
-    evidenceJson: Record<string, unknown>;
-  }>;
+  status: string;
+  triggerType: string;
+  scopeType: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  totalEvaluated: number;
+  totalCases: number;
+  compliantCount: number;
+  nonCompliantCount: number;
+  passRate: number;
+  durationMs: number;
+  outcomeCounts: Array<{ status: string; count: number }>;
 };
 
-const samplePayload = {
-  patientBundle: { id: "patient-001" },
-  cqlLibrary: "library AnnualAudiogramCompleted version '1.0.0'"
+type RunLogEntry = {
+  timestamp: string;
+  level: string;
+  message: string;
+};
+
+type ManualRunResponse = {
+  runId: string;
+  scope: string;
+  activeMeasuresExecuted: number;
+  measuresExecuted: string[];
 };
 
 export default function RunsPage() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<EvalResponse | null>(null);
-  const [audiogramRun, setAudiogramRun] = useState<AudiogramRunResponse | null>(null);
-  const [savedRun, setSavedRun] = useState<AudiogramRunResponse | null>(null);
-
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     return raw.trim().replace(/\/+$/, "");
   }, []);
 
-  async function runEvalProbe() {
+  const [statusFilter, setStatusFilter] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("");
+  const [triggerFilter, setTriggerFilter] = useState("");
+  const [runs, setRuns] = useState<RunListItem[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
+  const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const loadRuns = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setResult(null);
-    setAudiogramRun(null);
-    setSavedRun(null);
-
     try {
-      const requestUrl = `${apiBase}/api/eval`;
-      const response = await fetch(requestUrl, {
+      const query = new URLSearchParams();
+      query.set("limit", "100");
+      if (statusFilter) query.set("status", statusFilter);
+      if (scopeFilter) query.set("scopeType", scopeFilter);
+      if (triggerFilter) query.set("triggerType", triggerFilter);
+      const response = await fetch(`${apiBase}/api/runs?${query.toString()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Failed to load runs (${response.status})`);
+      const data = (await response.json()) as RunListItem[];
+      setRuns(data);
+      if (!selectedRunId && data.length) {
+        setSelectedRunId(data[0].runId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBase, selectedRunId, statusFilter, scopeFilter, triggerFilter]);
+
+  const loadSelectedRun = useCallback(async () => {
+    if (!selectedRunId) return;
+    try {
+      const [summaryResponse, logsResponse] = await Promise.all([
+        fetch(`${apiBase}/api/runs/${selectedRunId}`, { cache: "no-store" }),
+        fetch(`${apiBase}/api/runs/${selectedRunId}/logs?limit=200`, { cache: "no-store" })
+      ]);
+      if (!summaryResponse.ok) throw new Error(`Failed to load run detail (${summaryResponse.status})`);
+      if (!logsResponse.ok) throw new Error(`Failed to load run logs (${logsResponse.status})`);
+      setSelectedRun((await summaryResponse.json()) as RunSummary);
+      setRunLogs((await logsResponse.json()) as RunLogEntry[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, [apiBase, selectedRunId]);
+
+  useEffect(() => {
+    if (apiBase) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadRuns();
+    }
+  }, [apiBase, loadRuns]);
+
+  useEffect(() => {
+    if (apiBase && selectedRunId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadSelectedRun();
+    }
+  }, [apiBase, selectedRunId, loadSelectedRun]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const handle = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(handle);
+  }, [toast]);
+
+  async function runAllProgramsNow() {
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/runs/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(samplePayload)
+        body: JSON.stringify({ scope: "All Programs" })
       });
-
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status} (${requestUrl})`);
-      }
-
-      const data = (await response.json()) as EvalResponse;
-      setResult(data);
+      if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
+      const data = (await response.json()) as ManualRunResponse;
+      setToast(`Run started: ${data.runId}`);
+      setSelectedRunId(data.runId);
+      await loadRuns();
+      await loadSelectedRun();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function runAudiogramVertical() {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setAudiogramRun(null);
-    setSavedRun(null);
-
-    try {
-      const requestUrl = `${apiBase}/api/runs/audiogram`;
-      const response = await fetch(requestUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status} (${requestUrl})`);
-      }
-
-      const data = (await response.json()) as AudiogramRunResponse;
-      setAudiogramRun(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadLatestAudiogramRun() {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const requestUrl = `${apiBase}/api/runs/audiogram/latest`;
-      const response = await fetch(requestUrl);
-
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status} (${requestUrl})`);
-      }
-
-      const data = (await response.json()) as AudiogramRunResponse | null;
-      setSavedRun(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
     }
   }
 
   return (
     <section className="space-y-4">
-      <h2 className="text-2xl font-semibold">S0 Eval Probe</h2>
-      <p className="text-slate-600">
-        Walking skeleton check: POST sample patient bundle + CQL to backend and render returned outcome.
-      </p>
-      <p className="text-sm text-slate-500">
-        API base: <code>{apiBase || "(missing NEXT_PUBLIC_API_BASE_URL)"}</code>
-      </p>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold">Run History</h2>
+        <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
+          Run Measures Now
+        </button>
+      </div>
 
-      <button
-        className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-        onClick={runEvalProbe}
-        disabled={loading || !apiBase}
-      >
-        {loading ? "Running..." : "Run Eval Probe"}
-      </button>
-      <button
-        className="ml-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        onClick={runAudiogramVertical}
-        disabled={loading || !apiBase}
-      >
-        {loading ? "Running..." : "Run S1a Audiogram Vertical"}
-      </button>
-      <button
-        className="ml-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        onClick={loadLatestAudiogramRun}
-        disabled={loading || !apiBase}
-      >
-        {loading ? "Loading..." : "Load Latest Saved Audiogram"}
-      </button>
+      <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
+        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All Statuses</option>
+          <option value="completed">completed</option>
+          <option value="running">running</option>
+          <option value="failed">failed</option>
+          <option value="partial">partial</option>
+        </select>
+        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
+          <option value="">All Scope Types</option>
+          <option value="all_programs">all_programs</option>
+          <option value="measure">measure</option>
+        </select>
+        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
+          <option value="">All Trigger Types</option>
+          <option value="manual">manual</option>
+          <option value="scheduler">scheduler</option>
+        </select>
+        <button className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700" onClick={() => void loadRuns()}>
+          Refresh
+        </button>
+      </div>
 
-      {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
-      {result ? (
-        <pre className="overflow-x-auto rounded-md border border-slate-200 bg-slate-50 p-4 text-xs">
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      ) : null}
-      {audiogramRun ? (
-        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <p className="font-medium">
-            {audiogramRun.measureName} v{audiogramRun.measureVersion} - run {audiogramRun.runId}
-          </p>
-          <p className="text-slate-600">Evaluation date: {audiogramRun.evaluationDate}</p>
-          <p className="text-slate-700">
-            Summary: compliant {audiogramRun.summary.compliant}, due soon {audiogramRun.summary.dueSoon},
-            overdue {audiogramRun.summary.overdue}, missing data {audiogramRun.summary.missingData},
-            excluded {audiogramRun.summary.excluded}
-          </p>
-          <pre className="overflow-x-auto rounded-md border border-slate-200 bg-white p-3 text-xs">
-            {JSON.stringify(audiogramRun.outcomes, null, 2)}
-          </pre>
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {toast ? <div className="fixed right-4 top-4 rounded bg-emerald-700 px-3 py-2 text-xs font-medium text-white">{toast}</div> : null}
+      {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-md border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-600">
+              <tr>
+                <th className="px-3 py-2">Run</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Scope</th>
+                <th className="px-3 py-2">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr
+                  key={run.runId}
+                  className={`cursor-pointer border-t border-slate-200 ${selectedRunId === run.runId ? "bg-slate-100" : "hover:bg-slate-50"}`}
+                  onClick={() => setSelectedRunId(run.runId)}
+                >
+                  <td className="px-3 py-2">
+                    <p className="font-medium text-slate-800">{run.measureName}</p>
+                    <p className="text-xs text-slate-500">{run.runId}</p>
+                    <p className="text-xs text-slate-500">{run.startedAt ? new Date(run.startedAt).toLocaleString() : "-"}</p>
+                  </td>
+                  <td className="px-3 py-2">{run.status}</td>
+                  <td className="px-3 py-2">{run.scopeType}</td>
+                  <td className="px-3 py-2">{Math.round(run.durationMs / 1000)}s</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : null}
-      {savedRun ? (
-        <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm">
-          <p className="font-medium">
-            Saved copy: {savedRun.measureName} v{savedRun.measureVersion} - run {savedRun.runId}
-          </p>
-          <p className="text-emerald-800">
-            Loaded from the database-backed latest run endpoint.
-          </p>
-          <pre className="overflow-x-auto rounded-md border border-emerald-200 bg-white p-3 text-xs">
-            {JSON.stringify(savedRun.summary, null, 2)}
-          </pre>
-          <Link
-            href="/cases"
-            className="inline-flex rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
-          >
-            Open Cases
-          </Link>
+
+        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+          <h3 className="text-sm font-semibold text-slate-900">Run Detail</h3>
+          {selectedRun ? (
+            <>
+              <p className="text-sm text-slate-700">
+                {selectedRun.measureName} ({selectedRun.scopeType}) - {selectedRun.status}
+              </p>
+              <p className="text-xs text-slate-600">Trigger: {selectedRun.triggerType}</p>
+              <p className="text-xs text-slate-600">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
+              <p className="text-xs text-slate-600">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
+              <p className="text-xs text-slate-600">Duration: {Math.round(selectedRun.durationMs / 1000)}s</p>
+              <p className="text-xs text-slate-600">Evaluated: {selectedRun.totalEvaluated}</p>
+              <p className="text-xs text-slate-600">Cases: {selectedRun.totalCases}</p>
+              <p className="text-xs text-slate-600">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>
+              <div>
+                <p className="text-xs font-semibold text-slate-700">Outcome Counts</p>
+                <ul className="text-xs text-slate-600">
+                  {selectedRun.outcomeCounts.map((item) => (
+                    <li key={item.status}>
+                      {item.status}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-600">Select a run to view details.</p>
+          )}
         </div>
-      ) : null}
+      </div>
+
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <h3 className="text-sm font-semibold text-slate-900">Run Logs</h3>
+        {runLogs.length === 0 ? (
+          <p className="text-sm text-slate-600">No logs for this run.</p>
+        ) : (
+          <ul className="space-y-1 text-xs">
+            {runLogs.map((entry, idx) => (
+              <li key={`${entry.timestamp}-${idx}`} className="rounded border border-slate-200 px-2 py-1">
+                <span className="font-semibold text-slate-700">{entry.level}</span>{" "}
+                <span className="text-slate-500">{new Date(entry.timestamp).toLocaleString()}</span>{" "}
+                <span className="text-slate-700">{entry.message}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }
+

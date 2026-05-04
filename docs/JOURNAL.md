@@ -65,7 +65,32 @@ Deployment + production checkpoint:
 - Timestamped smoke check (`2026-05-04T00:33:15-04:00`):
   - `GET /actuator/health` -> `UP`
   - `GET /api/measures` -> `200` (`measureCount=2`)
-  - `POST /api/runs/manual` with `{"scope":"All Programs"}` -> `200` (`runId=bc058da6-adea-4f74-a745-9f9dd34d7a66`, `activeMeasuresExecuted=2`)
+- `POST /api/runs/manual` with `{"scope":"All Programs"}` -> `200` (`runId=bc058da6-adea-4f74-a745-9f9dd34d7a66`, `activeMeasuresExecuted=2`)
+
+### Run history/log visibility expansion (P2 execution maturity)
+
+- Backend run APIs expanded:
+  - `GET /api/runs` supports filters: `status`, `scopeType`, `triggerType`, `limit`
+  - `GET /api/runs/{id}/logs` returns persisted run-log entries (latest-first)
+  - Existing `GET /api/runs/{id}` retained for summary/detail
+- Backend service additions:
+  - Added run list query with filter and limit controls
+  - Added run log query with limit controls
+- Frontend `/runs` rewritten from S0 probe page to run-ops console:
+  - Filter bar (status/scope/trigger)
+  - Run history table with status/scope/duration
+  - Run detail panel (counts, pass rate, timings)
+  - Run logs panel (level/timestamp/message)
+  - Manual "Run Measures Now" trigger integrated with refresh and selection
+- Controller test coverage added for:
+  - run list endpoint filters
+  - run detail endpoint
+  - run logs endpoint
+
+Verification checkpoints (local):
+- `backend\\gradlew.bat test` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
 
 ## 2026-05-03
 
