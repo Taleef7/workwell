@@ -2,6 +2,10 @@
 
 This document defines four MVP demo measures in plain English so they can later be translated into CQL.
 
+Current MVP implementation status:
+- All four measures are seeded and runnable in the demo stack.
+- Seeded outcomes are deterministic and cover `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, and `EXCLUDED`.
+
 ## 1) Annual Audiogram Completed
 - Policy reference: OSHA 29 CFR 1910.95 (Occupational Noise Exposure)  
   URL: https://www.ecfr.gov/current/title-29/section-1910.95

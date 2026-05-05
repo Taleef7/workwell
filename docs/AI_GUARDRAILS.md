@@ -35,6 +35,13 @@ AI outputs are suggestions unless a human explicitly accepts the action in UI/AP
 - retain prompt/response lineage where policy allows.
 - preserve linkage to run/case/measure context so explanations are defensible.
 
+Current implemented AI audit events:
+- `AI_DRAFT_SPEC_GENERATED`
+- `AI_CASE_EXPLANATION_GENERATED`
+
+Current implemented MCP audit event:
+- `MCP_TOOL_CALLED` for each MCP tool invocation (read-only layer).
+
 ## TBD before Phase 4
 - Prompt templates and redaction rules for each AI surface.
 - UX copy for confidence/limitations messaging.

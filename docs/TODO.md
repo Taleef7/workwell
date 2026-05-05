@@ -9,7 +9,7 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 - Current phase is stabilization plus deferred-scope completion.
 - Four-measure demo depth is now seeded and runnable (Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine).
 - AI Draft Spec and Explain Why Flagged surfaces are now implemented with explicit advisory-only guardrails and AI call audit events.
-- The next implementation batch should stay focused on exports, MCP expansion, and notifications/admin depth.
+- Exports, MCP expansion, and notifications/admin depth are complete; remaining work is closeout verification and freeze discipline.
 - Video/rehearsal ownership is with human; engineering focus stays on product completeness and quality.
 
 ## Execution Checklist (Always Run)
@@ -88,13 +88,14 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 - [x] Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
 - [x] Standardize export column contracts and document them.
 
-## Recommended Next Implementation Batch
+## Recommended Next Closeout Batch
 
-1. Run final full-stack smoke pass on local/prod routes (`/runs`, `/cases`, `/admin`) including all CSV exports and outreach delivery transitions.
-2. Confirm no remaining non-critical UI regressions before D16 freeze.
-3. If stable, execute final D16 buffer-only bugfix policy (no new features).
+1. Keep D16 freeze posture: bugfix-only, no new features.
+2. Maintain production smoke evidence for core flows and exports after each deploy.
+3. Final polish pass for demo readiness artifacts and docs consistency.
 
 ## Latest Verified Checkpoint
 
 - 2026-05-05 - MCP read-tool expansion (`list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`) completed with per-tool audit events and local backend verification.
 - 2026-05-05 - Notifications/Admin + reporting expansion completed: outreach delivery-state transitions, admin integration health/sync stubs, and CSV exports for runs/outcomes/cases with UI entry points.
+- 2026-05-05 - Production closeout smoke completed after deploy + hotfix; exports, admin sync, and outreach delivery transitions verified live.

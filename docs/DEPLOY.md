@@ -103,6 +103,19 @@ Deployments are currently performed outside this workflow (for example, via Fly 
 - Frontend: `GET /` → 200 OK
 - DB: from Fly machine, `fly ssh console` → `psql $DATABASE_URL_DIRECT -c "SELECT 1"`
 
+Post-deploy smoke checklist (MVP complete surface):
+- `GET /actuator/health` -> `200`
+- `GET /api/runs?limit=1` -> `200`
+- `GET /api/cases?status=open` -> `200`
+- `GET /api/exports/runs?format=csv` -> `200`
+- `GET /api/exports/outcomes?format=csv&runId=<latest-run-id>` -> `200`
+- `GET /api/exports/cases?format=csv&status=open` -> `200`
+- `GET /api/audit-events/export?format=csv` -> `200`
+- `GET /api/admin/integrations` -> `200`
+- `POST /api/admin/integrations/mcp/sync` -> `200`
+- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=SENT` -> `200`
+- `GET /api/cases/{id}` confirms `latestOutreachDeliveryStatus=SENT`
+
 Add Fly HTTP check every 30s on `/actuator/health`. Free, alerts on 3 failures.
 
 ## Rollback
@@ -161,6 +174,10 @@ If any approaches limit, fix that day. Don't wait.
 - Check Spring profile is `prod`, not `dev`
 - Verify migration ran: `fly ssh console`, then `psql $DATABASE_URL_DIRECT -c "\dt"`
 - Should see `audit_event` table
+
+**Case detail or outreach delivery endpoint returns 500 after deploy**
+- Check for SQL operator compatibility in prepared statements.
+- PostgreSQL JSON existence should use `jsonb_exists(payload_json, 'key')` in JDBC query text rather than raw `?` operator when bind parameters are present.
 
 **MCP server can't be reached**
 - MCP runs as separate process or endpoint (`/mcp`)

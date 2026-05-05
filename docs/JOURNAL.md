@@ -2,6 +2,34 @@
 
 ## 2026-05-05
 
+### Closeout parity pass + correctness re-check
+
+Documentation parity updates completed:
+- `docs/ARCHITECTURE.md`
+  - Added live modules (`ai`, `export`, `admin`).
+  - Expanded API surface to include outreach delivery updates, CSV exports, admin integrations sync, and AI endpoints.
+  - Updated source-of-truth references to `docs/SPIKE_PLAN.md`.
+- `docs/DATA_MODEL.md`
+  - Updated case-action lifecycle to include `OUTREACH_DELIVERY_UPDATED`, `ASSIGNED`, and `ESCALATED`.
+  - Documented persisted delivery-state contract (`QUEUED|SENT|FAILED`) on case actions.
+  - Updated source-of-truth references to `docs/SPIKE_PLAN.md`.
+- `docs/MEASURES.md`
+  - Added implementation-status note: four seeded measures runnable with deterministic five-outcome coverage.
+- `docs/DEPLOY.md`
+  - Added post-deploy smoke checklist for exports/admin/outreach delivery endpoints.
+  - Added troubleshooting note for JDBC/Postgres JSON operator placeholder conflict.
+- `docs/AI_GUARDRAILS.md`
+  - Added implemented AI audit events (`AI_DRAFT_SPEC_GENERATED`, `AI_CASE_EXPLANATION_GENERATED`) and MCP per-tool audit event (`MCP_TOOL_CALLED`).
+- `docs/TODO.md`
+  - Shifted from implementation batch language to closeout/freeze posture.
+  - Added production closeout smoke completion checkpoint.
+
+Verification re-run:
+- `backend\\gradlew.bat test` -> FAIL (environment-level Docker/Testcontainers availability; not a compile/runtime regression in the changed web/export/admin paths)
+- `backend\\gradlew.bat test --tests "com.workwell.web.*" --tests "com.workwell.export.*"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### P3 completion: outreach delivery states, admin integrations panel, and CSV reporting
 
 - Completed P3 notifications/admin + reporting backlog items.
@@ -36,6 +64,58 @@ Verification checkpoints:
 - `backend\\gradlew.bat test --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.web.ExportControllerTest"` -> PASS
 - `frontend npm run lint` -> PASS
 - `frontend npm run build` -> PASS
+
+### Production smoke sweep (post-P3) - deployment gap identified
+
+Timestamp:
+- `2026-05-05T19:10:59-04:00`
+
+What was verified live:
+- `GET https://workwell-measure-studio-api.fly.dev/actuator/health` -> `200`
+- `GET https://frontend-seven-eta-24.vercel.app/runs` -> `200`
+- `GET https://frontend-seven-eta-24.vercel.app/cases` -> `200`
+- `GET https://frontend-seven-eta-24.vercel.app/admin` -> `200`
+- `GET https://workwell-measure-studio-api.fly.dev/api/runs?limit=1` -> `200` (`runId=113bb9e9-498c-49b9-a80e-3238bf2122ed`)
+- `GET https://workwell-measure-studio-api.fly.dev/api/audit-events/export?format=csv` -> `200` (`text/csv`)
+
+New P3 APIs checked on production (expected after deploy):
+- `GET /api/exports/runs?format=csv` -> `404`
+- `GET /api/exports/outcomes?format=csv&runId=...` -> `404`
+- `GET /api/exports/cases?format=csv&status=open` -> `404`
+- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=SENT` -> `404`
+- `GET /api/admin/integrations` -> `404`
+- `POST /api/admin/integrations/mcp/sync` -> `404`
+
+Interpretation:
+- Local implementation and tests are complete and passing, but production is still running a pre-P3 backend build.
+- Next required action is backend deploy of commit `579e0b0`, then rerun this exact smoke set.
+
+### Production smoke sweep rerun after deploy + hotfix
+
+Deployment actions:
+- Deployed backend commit `579e0b0` to Fly.
+- Initial rerun showed P3 exports/admin routes alive, but case detail + outreach delivery update returned `500`.
+
+Root cause:
+- JDBC placeholder parsing conflict in `CaseFlowService.findLatestOutreachDeliveryStatus(...)`:
+  - query used PostgreSQL JSON operator `payload_json ? 'deliveryStatus'`
+  - `?` was interpreted as a JDBC bind placeholder.
+
+Fix:
+- Replaced operator usage with `jsonb_exists(payload_json, 'deliveryStatus')`.
+- Commit: `3a6eaf3` (`fix(caseflow): avoid jdbc placeholder conflict in delivery-status query [S6]`)
+- Redeployed backend to Fly.
+
+Timestamped verification (`2026-05-05T19:18:14-04:00`):
+- `GET /actuator/health` -> `200`
+- `GET /api/exports/runs?format=csv` -> `200`
+- `GET /api/exports/outcomes?format=csv&runId=113bb9e9-498c-49b9-a80e-3238bf2122ed` -> `200`
+- `GET /api/exports/cases?format=csv&status=open` -> `200`
+- `GET /api/admin/integrations` -> `200`
+- `POST /api/admin/integrations/mcp/sync` -> `200`
+- `GET /api/cases/c6d79a2f-8f86-4d48-ac91-06f21d478ccb` -> `200`
+- `POST /api/cases/c6d79a2f-8f86-4d48-ac91-06f21d478ccb/actions/outreach/delivery?deliveryStatus=SENT` -> `200`
+- Follow-up case detail confirms `latestOutreachDeliveryStatus=SENT`.
 
 ### MCP read-tool expansion + audit boundaries (P2)
 
