@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-05-05
+
+### MCP read-tool expansion + audit boundaries (P2)
+
+- Expanded MCP Layer 1 read surface in `backend/src/main/java/com/workwell/mcp/McpServerConfig.java` by adding:
+  - `list_measures`
+  - `get_measure_version`
+  - `list_runs`
+  - `explain_outcome`
+- Kept MCP posture read-only (no write tools introduced).
+- Added per-tool audit recording on every MCP tool invocation:
+  - `audit_events.event_type = MCP_TOOL_CALLED`
+  - payload includes tool name + invocation args for traceability.
+
+Behavior details:
+- `list_measures` returns active catalog metadata.
+- `get_measure_version` resolves by `measureId` or `measureName` and returns full latest measure detail payload.
+- `list_runs` supports optional `status`, `scopeType`, `triggerType`, `limit` filters.
+- `explain_outcome` generates structured-first explanation text from persisted `evidence_json` (including `why_flagged`) and includes an explicit compliance disclaimer.
+
+Local verification checkpoints:
+- `backend\\gradlew.bat test --tests "com.workwell.web.*"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+
+Notes:
+- Full `backend\\gradlew.bat test` remains environment-sensitive when Docker/Testcontainers are unavailable.
+- This slice intentionally avoided introducing MCP write capabilities per sprint guardrails.
 ## 2026-05-04
 
 ### Studio measure-load hotfix + deploy/push checkpoint

@@ -74,9 +74,9 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ### P2 - MCP Expansion (Read-Only First)
 
-- [ ] Add tools: `list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`.
-- [ ] Keep read-only posture until explicit post-D16 write-tool decision.
-- [ ] Ensure per-tool audit and permission boundaries.
+- [x] Add tools: `list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`.
+- [x] Keep read-only posture until explicit post-D16 write-tool decision.
+- [x] Ensure per-tool audit and permission boundaries.
 
 ### P3 - Notifications + Admin
 
@@ -91,10 +91,10 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 ## Recommended Next Implementation Batch
 
 1. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
-2. Expand MCP read tools beyond the current minimal server surface.
-3. Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
-4. Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
+2. Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
+3. Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
+4. Finalize export coverage and column-contract documentation for run/outcome/case CSVs.
 
 ## Latest Verified Checkpoint
 
-- 2026-05-05 - Four-measure demo depth plus AI Draft Spec and Explain Why Flagged flows were implemented and locally validated (targeted backend web tests, frontend lint/build).
+- 2026-05-05 - MCP read-tool expansion (`list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`) completed with per-tool audit events and local backend verification.

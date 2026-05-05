@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.function.RouterFunction;
@@ -45,7 +46,8 @@ public class McpServerConfig {
             ObjectMapper objectMapper,
             CaseFlowService caseFlowService,
             RunPersistenceService runPersistenceService,
-            MeasureService measureService
+            MeasureService measureService,
+            JdbcTemplate jdbcTemplate
     ) {
         Tool getCase = new Tool(
                 "get_case",
@@ -61,6 +63,26 @@ public class McpServerConfig {
                 "get_run_summary",
                 "Get run metadata and outcome counts by runId. If runId is omitted, returns latest run.",
                 "{\"type\":\"object\",\"properties\":{\"runId\":{\"type\":\"string\"}}}"
+        );
+        Tool listMeasures = new Tool(
+                "list_measures",
+                "List active measures with catalog metadata",
+                "{\"type\":\"object\"}"
+        );
+        Tool getMeasureVersion = new Tool(
+                "get_measure_version",
+                "Get latest active measure detail by measureId or measureName",
+                "{\"type\":\"object\",\"properties\":{\"measureId\":{\"type\":\"string\"},\"measureName\":{\"type\":\"string\"}}}"
+        );
+        Tool listRuns = new Tool(
+                "list_runs",
+                "List run summaries with optional filters",
+                "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\"},\"scopeType\":{\"type\":\"string\"},\"triggerType\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}}}"
+        );
+        Tool explainOutcome = new Tool(
+                "explain_outcome",
+                "Explain a run outcome from structured evidence only",
+                "{\"type\":\"object\",\"properties\":{\"runId\":{\"type\":\"string\"},\"employeeId\":{\"type\":\"string\"}},\"required\":[\"runId\",\"employeeId\"]}"
         );
 
         McpServerFeatures.SyncToolSpecification getCaseSpec = new McpServerFeatures.SyncToolSpecification(
@@ -81,6 +103,7 @@ public class McpServerConfig {
                     } else {
                         payload.put("why_flagged", Map.of());
                     }
+                    recordMcpAudit(jdbcTemplate, objectMapper, "get_case", Map.of("caseId", caseId));
                     return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
@@ -121,6 +144,11 @@ public class McpServerConfig {
                         row.put("updated_at", summary.updatedAt());
                         return row;
                     }).toList();
+                    recordMcpAudit(jdbcTemplate, objectMapper, "list_cases", Map.of(
+                            "status", status,
+                            "measureId", measureId == null ? "" : measureId.toString(),
+                            "returned", payload.size()
+                    ));
                     return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
@@ -144,13 +172,144 @@ public class McpServerConfig {
                     payload.put("outcome_counts", summary.outcomeCounts());
                     payload.put("started_at", summary.startedAt());
                     payload.put("completed_at", summary.completedAt());
+                    recordMcpAudit(jdbcTemplate, objectMapper, "get_run_summary", Map.of(
+                            "runId", summary.runId(),
+                            "scope", summary.scopeType()
+                    ));
+                    return new CallToolResult(toJson(objectMapper, payload), false);
+                }
+        );
+
+        McpServerFeatures.SyncToolSpecification listMeasuresSpec = new McpServerFeatures.SyncToolSpecification(
+                listMeasures,
+                (exchange, args) -> {
+                    List<Map<String, Object>> payload = measureService.listMeasures().stream().map(m -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("id", m.id());
+                        row.put("name", m.name());
+                        row.put("policy_ref", m.policyRef());
+                        row.put("version", m.version());
+                        row.put("status", m.status());
+                        row.put("owner", m.owner());
+                        row.put("tags", m.tags());
+                        row.put("last_updated", m.lastUpdated());
+                        return row;
+                    }).toList();
+                    recordMcpAudit(jdbcTemplate, objectMapper, "list_measures", Map.of("returned", payload.size()));
+                    return new CallToolResult(toJson(objectMapper, payload), false);
+                }
+        );
+
+        McpServerFeatures.SyncToolSpecification getMeasureVersionSpec = new McpServerFeatures.SyncToolSpecification(
+                getMeasureVersion,
+                (exchange, args) -> {
+                    UUID measureId;
+                    if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                    } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
+                        measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
+                    } else {
+                        throw new IllegalArgumentException("measureId or measureName is required");
+                    }
+                    var detail = measureService.getMeasure(measureId);
+                    if (detail == null) {
+                        throw new IllegalArgumentException("Measure not found");
+                    }
+                    Map<String, Object> payload = objectMapper.convertValue(detail, new TypeReference<Map<String, Object>>() {
+                    });
+                    recordMcpAudit(jdbcTemplate, objectMapper, "get_measure_version", Map.of(
+                            "measureId", measureId.toString(),
+                            "measureName", detail.name()
+                    ));
+                    return new CallToolResult(toJson(objectMapper, payload), false);
+                }
+        );
+
+        McpServerFeatures.SyncToolSpecification listRunsSpec = new McpServerFeatures.SyncToolSpecification(
+                listRuns,
+                (exchange, args) -> {
+                    String status = args.get("status") == null ? null : args.get("status").toString();
+                    String scopeType = args.get("scopeType") == null ? null : args.get("scopeType").toString();
+                    String triggerType = args.get("triggerType") == null ? null : args.get("triggerType").toString();
+                    int limit = args.get("limit") == null ? 20 : Math.max(1, Math.min(200, Integer.parseInt(args.get("limit").toString())));
+                    List<Map<String, Object>> payload = runPersistenceService.listRuns(status, scopeType, triggerType, limit).stream().map(run -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("run_id", run.runId());
+                        row.put("measure_name", run.measureName());
+                        row.put("status", run.status());
+                        row.put("scope_type", run.scopeType());
+                        row.put("trigger_type", run.triggerType());
+                        row.put("started_at", run.startedAt());
+                        row.put("completed_at", run.completedAt());
+                        row.put("duration_ms", run.durationMs());
+                        row.put("total_evaluated", run.totalEvaluated());
+                        row.put("compliant_count", run.compliantCount());
+                        row.put("non_compliant_count", run.nonCompliantCount());
+                        return row;
+                    }).toList();
+                    recordMcpAudit(jdbcTemplate, objectMapper, "list_runs", Map.of(
+                            "status", status == null ? "" : status,
+                            "scopeType", scopeType == null ? "" : scopeType,
+                            "triggerType", triggerType == null ? "" : triggerType,
+                            "returned", payload.size()
+                    ));
+                    return new CallToolResult(toJson(objectMapper, payload), false);
+                }
+        );
+
+        McpServerFeatures.SyncToolSpecification explainOutcomeSpec = new McpServerFeatures.SyncToolSpecification(
+                explainOutcome,
+                (exchange, args) -> {
+                    String runId = stringArg(args, "runId");
+                    String employeeId = stringArg(args, "employeeId");
+                    var outcome = runPersistenceService.loadOutcomeExportRows(UUID.fromString(runId)).stream()
+                            .filter(row -> employeeId.equalsIgnoreCase(row.employeeId()))
+                            .findFirst()
+                            .orElseThrow(() -> new IllegalArgumentException("Outcome not found for runId/employeeId"));
+                    Map<String, Object> whyFlagged = Map.of();
+                    Object why = outcome.evidenceJson().get("why_flagged");
+                    if (why instanceof Map<?, ?> map) {
+                        whyFlagged = objectMapper.convertValue(map, new TypeReference<Map<String, Object>>() {
+                        });
+                    }
+                    String explanation = outcome.employeeName()
+                            + " is " + outcome.status()
+                            + " for " + outcome.measureName()
+                            + " (" + outcome.measureVersion() + ")"
+                            + " based on structured evidence only. "
+                            + "Summary: " + outcome.summary() + ". "
+                            + "why_flagged: " + toJson(objectMapper, whyFlagged) + ".";
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("run_id", runId);
+                    payload.put("employee_id", outcome.employeeId());
+                    payload.put("employee_name", outcome.employeeName());
+                    payload.put("measure_name", outcome.measureName());
+                    payload.put("measure_version", outcome.measureVersion());
+                    payload.put("status", outcome.status());
+                    payload.put("summary", outcome.summary());
+                    payload.put("explanation", explanation);
+                    payload.put("why_flagged", whyFlagged);
+                    payload.put("disclaimer", "Explanation is advisory text derived from evidence_json; compliance remains CQL-driven.");
+                    recordMcpAudit(jdbcTemplate, objectMapper, "explain_outcome", Map.of(
+                            "runId", runId,
+                            "employeeId", employeeId,
+                            "measureName", outcome.measureName()
+                    ));
                     return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
 
         return McpServer.sync(transportProvider)
                 .serverInfo("workwell-mcp", "1.0.1")
-                .tools(getCaseSpec, listCasesSpec, getRunSummarySpec)
+                .tools(
+                        getCaseSpec,
+                        listCasesSpec,
+                        getRunSummarySpec,
+                        listMeasuresSpec,
+                        getMeasureVersionSpec,
+                        listRunsSpec,
+                        explainOutcomeSpec
+                )
                 .build();
     }
 
@@ -176,5 +335,16 @@ public class McpServerConfig {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Unable to serialize MCP response", ex);
         }
+    }
+
+    private void recordMcpAudit(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, String toolName, Map<String, Object> args) {
+        jdbcTemplate.update(
+                "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, payload_json) VALUES (?, ?, ?, ?, ?::jsonb)",
+                "MCP_TOOL_CALLED",
+                "mcp_tool",
+                UUID.randomUUID(),
+                "mcp",
+                toJson(objectMapper, Map.of("tool", toolName, "args", args))
+        );
     }
 }
