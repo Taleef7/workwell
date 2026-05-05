@@ -526,7 +526,7 @@ public class CaseFlowService {
                         SELECT payload_json ->> 'deliveryStatus' AS delivery_status
                         FROM case_actions
                         WHERE case_id = ?
-                          AND payload_json ? 'deliveryStatus'
+                          AND jsonb_exists(payload_json, 'deliveryStatus')
                         ORDER BY performed_at DESC
                         LIMIT 1
                         """,
