@@ -660,17 +660,16 @@ public class CaseFlowService {
                 String.class,
                 measureVersionId
         );
-        boolean isTb = "TB Surveillance".equalsIgnoreCase(measureName);
+        String label = switch (measureName) {
+            case "TB Surveillance" -> "TB screening";
+            case "HAZWOPER Surveillance" -> "HAZWOPER surveillance";
+            case "Flu Vaccine" -> "flu vaccine";
+            default -> "audiogram";
+        };
         return switch (outcome) {
-            case "OVERDUE" -> isTb
-                    ? "Escalate TB screening follow-up immediately."
-                    : "Escalate audiogram follow-up immediately.";
-            case "MISSING_DATA" -> isTb
-                    ? "Collect the missing TB screening documentation."
-                    : "Collect the missing audiogram documentation.";
-            case "DUE_SOON" -> isTb
-                    ? "Schedule the annual TB screening before the due date."
-                    : "Schedule the annual audiogram before the due date.";
+            case "OVERDUE" -> "Escalate " + label + " follow-up immediately.";
+            case "MISSING_DATA" -> "Collect the missing " + label + " documentation.";
+            case "DUE_SOON" -> "Schedule the annual " + label + " before the due date.";
             default -> "No action required.";
         };
     }
@@ -757,11 +756,11 @@ public class CaseFlowService {
 
     private String outcomeSummaryFor(String outcome) {
         return switch (outcome) {
-            case "COMPLIANT" -> "Audiogram completed within compliant window.";
-            case "DUE_SOON" -> "Audiogram nearing annual compliance deadline.";
-            case "OVERDUE" -> "Audiogram is outside annual compliance window.";
-            case "MISSING_DATA" -> "No completed audiogram date found.";
-            case "EXCLUDED" -> "Active waiver document found.";
+            case "COMPLIANT" -> "Measure outcome is compliant for the current window.";
+            case "DUE_SOON" -> "Measure outcome is due soon within the compliance window.";
+            case "OVERDUE" -> "Measure outcome is overdue and requires follow-up.";
+            case "MISSING_DATA" -> "Measure outcome could not be evaluated due to missing data.";
+            case "EXCLUDED" -> "Measure outcome is excluded due to documented exemption/waiver.";
             default -> "Unknown status.";
         };
     }

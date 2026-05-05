@@ -3,6 +3,9 @@ package com.workwell.web;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.FluVaccineDemoService;
+import com.workwell.measure.GenericDemoRun;
+import com.workwell.measure.HazwoperSurveillanceDemoService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
@@ -24,17 +27,23 @@ import org.springframework.http.HttpStatus;
 public class EvalController {
     private final AudiogramDemoService audiogramDemoService;
     private final TBSurveillanceDemoService tbSurveillanceDemoService;
+    private final HazwoperSurveillanceDemoService hazwoperSurveillanceDemoService;
+    private final FluVaccineDemoService fluVaccineDemoService;
     private final RunPersistenceService runPersistenceService;
     private final AllProgramsRunService allProgramsRunService;
 
     public EvalController(
             AudiogramDemoService audiogramDemoService,
             TBSurveillanceDemoService tbSurveillanceDemoService,
+            HazwoperSurveillanceDemoService hazwoperSurveillanceDemoService,
+            FluVaccineDemoService fluVaccineDemoService,
             RunPersistenceService runPersistenceService,
             AllProgramsRunService allProgramsRunService
     ) {
         this.audiogramDemoService = audiogramDemoService;
         this.tbSurveillanceDemoService = tbSurveillanceDemoService;
+        this.hazwoperSurveillanceDemoService = hazwoperSurveillanceDemoService;
+        this.fluVaccineDemoService = fluVaccineDemoService;
         this.runPersistenceService = runPersistenceService;
         this.allProgramsRunService = allProgramsRunService;
     }
@@ -77,6 +86,16 @@ public class EvalController {
     @PostMapping("/api/runs/tb-surveillance")
     public TBSurveillanceDemoService.TBDemoRun runTbSurveillance() {
         return tbSurveillanceDemoService.run();
+    }
+
+    @PostMapping("/api/runs/hazwoper-surveillance")
+    public GenericDemoRun runHazwoperSurveillance() {
+        return hazwoperSurveillanceDemoService.run();
+    }
+
+    @PostMapping("/api/runs/flu-vaccine")
+    public GenericDemoRun runFluVaccine() {
+        return fluVaccineDemoService.run();
     }
 
     @PostMapping("/api/runs/manual")

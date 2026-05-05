@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.measure.AudiogramDemoService;
+import com.workwell.measure.FluVaccineDemoService;
+import com.workwell.measure.HazwoperSurveillanceDemoService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
@@ -35,6 +37,12 @@ class EvalControllerTest {
 
     @MockBean
     private TBSurveillanceDemoService tbSurveillanceDemoService;
+
+    @MockBean
+    private HazwoperSurveillanceDemoService hazwoperSurveillanceDemoService;
+
+    @MockBean
+    private FluVaccineDemoService fluVaccineDemoService;
 
     @MockBean
     private RunPersistenceService runPersistenceService;

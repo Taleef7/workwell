@@ -31,6 +31,8 @@ public class MeasureService {
     public List<MeasureCatalogItem> listMeasures() {
         ensureAudiogramSeed();
         ensureTbSeed();
+        ensureHazwoperSeed();
+        ensureFluSeed();
 
         String sql = """
                 SELECT m.id,
@@ -111,6 +113,8 @@ public class MeasureService {
     public MeasureDetail getMeasure(UUID id) {
         ensureAudiogramSeed();
         ensureTbSeed();
+        ensureHazwoperSeed();
+        ensureFluSeed();
 
         String sql = """
                 SELECT m.id,
@@ -581,6 +585,120 @@ public class MeasureService {
                 "COMPILED",
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active TB measure for demo",
+                "system"
+        );
+    }
+
+    private void ensureHazwoperSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "HAZWOPER Surveillance"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "HAZWOPER Surveillance",
+                    "OSHA 29 CFR 1910.120",
+                    "WorkWell Studio",
+                    "{hazwoper,annual,surveillance}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class,
+                measureId,
+                "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Annual HAZWOPER medical surveillance for hazardous-waste operations employees.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "Industrial Hygienist, Maintenance Tech",
+                "siteFilter", "Plant A, Plant B",
+                "programEnrollmentText", "HAZWOPER Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Exemption", "criteriaText", "Temporary medical exemption documented")));
+        spec.put("complianceWindow", "Annual");
+        spec.put("requiredDataElements", List.of("Last surveillance exam date", "Role", "Site", "Exemption status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(),
+                measureId,
+                "v1.0",
+                "Active",
+                toJson(spec),
+                "library HazwoperSurveillance version '1.0.0'\n\ndefine \"Initial Population\": true",
+                "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active HAZWOPER measure for demo",
+                "system"
+        );
+    }
+
+    private void ensureFluSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "Flu Vaccine"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Flu Vaccine",
+                    "Seasonal Flu Program Policy",
+                    "WorkWell Studio",
+                    "{flu,immunization,seasonal}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class,
+                measureId,
+                "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Seasonal influenza vaccination compliance for active employees.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "Plant A, Plant B, Clinic",
+                "programEnrollmentText", "Seasonal Flu Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Clinical Contraindication", "criteriaText", "Documented contraindication for current season")));
+        spec.put("complianceWindow", "Seasonal");
+        spec.put("requiredDataElements", List.of("Last flu vaccine date", "Current season", "Contraindication status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(),
+                measureId,
+                "v1.0",
+                "Active",
+                toJson(spec),
+                "library FluVaccine version '1.0.0'\n\ndefine \"Initial Population\": true",
+                "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active Flu Vaccine measure for demo",
                 "system"
         );
     }
