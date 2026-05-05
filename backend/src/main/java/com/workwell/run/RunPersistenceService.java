@@ -430,6 +430,41 @@ public class RunPersistenceService {
         ), runId, limit);
     }
 
+    public List<OutcomeExportRow> loadOutcomeExportRows(UUID runId) {
+        String sql = """
+                SELECT o.run_id,
+                       e.external_id AS employee_id,
+                       e.name AS employee_name,
+                       e.site,
+                       m.name AS measure_name,
+                       mv.version AS measure_version,
+                       o.evaluation_period,
+                       o.status,
+                       o.evaluated_at,
+                       o.evidence_json
+                FROM outcomes o
+                JOIN employees e ON o.employee_id = e.id
+                JOIN measure_versions mv ON o.measure_version_id = mv.id
+                JOIN measures m ON mv.measure_id = m.id
+                WHERE o.run_id = ?
+                ORDER BY o.evaluated_at ASC, o.id ASC
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new OutcomeExportRow(
+                (UUID) rs.getObject("run_id"),
+                rs.getString("employee_id"),
+                rs.getString("employee_name"),
+                rs.getString("site"),
+                rs.getString("measure_name"),
+                rs.getString("measure_version"),
+                rs.getString("evaluation_period"),
+                rs.getString("status"),
+                outcomeSummaryFor(rs.getString("status")),
+                rs.getTimestamp("evaluated_at").toInstant(),
+                readJson(rs.getString("evidence_json"))
+        ), runId);
+    }
+
     private List<AudiogramDemoService.AudiogramOutcome> loadOutcomesForRun(UUID runId) {
         String sql = """
                 SELECT o.employee_id, o.status, o.evidence_json
@@ -442,14 +477,7 @@ public class RunPersistenceService {
             String patientId = lookupEmployeeExternalId((UUID) rs.getObject("employee_id"));
             String status = rs.getString("status");
             Map<String, Object> evidenceJson = readJson(rs.getString("evidence_json"));
-            String summary = switch (status) {
-                case "COMPLIANT" -> "Audiogram completed within compliant window.";
-                case "DUE_SOON" -> "Audiogram nearing annual compliance deadline.";
-                case "OVERDUE" -> "Audiogram is outside annual compliance window.";
-                case "MISSING_DATA" -> "No completed audiogram date found.";
-                case "EXCLUDED" -> "Active waiver document found.";
-                default -> "Unknown status.";
-            };
+            String summary = outcomeSummaryFor(status);
             return new AudiogramDemoService.AudiogramOutcome(patientId, status, summary, evidenceJson);
         }, runId);
     }
@@ -800,5 +828,31 @@ public class RunPersistenceService {
             String level,
             String message
     ) {
+    }
+
+    public record OutcomeExportRow(
+            UUID runId,
+            String employeeId,
+            String employeeName,
+            String site,
+            String measureName,
+            String measureVersion,
+            String evaluationPeriod,
+            String status,
+            String summary,
+            Instant evaluatedAt,
+            Map<String, Object> evidenceJson
+    ) {
+    }
+
+    private String outcomeSummaryFor(String status) {
+        return switch (status) {
+            case "COMPLIANT" -> "Audiogram completed within compliant window.";
+            case "DUE_SOON" -> "Audiogram nearing annual compliance deadline.";
+            case "OVERDUE" -> "Audiogram is outside annual compliance window.";
+            case "MISSING_DATA" -> "No completed audiogram date found.";
+            case "EXCLUDED" -> "Active waiver document found.";
+            default -> "Unknown status.";
+        };
     }
 }

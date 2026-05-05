@@ -2,6 +2,17 @@
 
 ## 2026-05-05
 
+### Worktree cleanup + advisor packet closeout
+
+- Finalized repository closeout artifacts for external advisor review:
+  - refreshed `docs/advisor_update.md` with full progress against `docs/TODO.md`, `docs/SPIKE_PLAN.md`, and archived project-plan context.
+  - included explicit advisor clarifications/questions and requested critique focus areas.
+- Normalized `docs/SMOKE_CHECKLIST.md` to current live API contracts:
+  - CSV exports (`/api/exports/runs|outcomes|cases`)
+  - outreach delivery endpoint (`/api/cases/{id}/actions/outreach/delivery?deliveryStatus=...`)
+  - admin integration IDs (`fhir`, `mcp`, `ai`).
+- Kept remaining backend export-support changes (`RunPersistenceService` + integration test coverage) in final committed state for clean worktree.
+
 ### Closeout parity pass + correctness re-check
 
 Documentation parity updates completed:
