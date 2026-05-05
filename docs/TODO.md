@@ -1,12 +1,15 @@
 # WorkWell Studio TODO
 
-Date: 2026-05-03
+Date: 2026-05-05
 Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ## Current Status Summary
 
 - Core vertical demo flow is live: run -> outcomes -> cases -> action -> rerun-to-verify -> audit.
 - Current phase is stabilization plus deferred-scope completion.
+- Four-measure demo depth is now seeded and runnable (Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine).
+- AI Draft Spec and Explain Why Flagged surfaces are now implemented with explicit advisory-only guardrails and AI call audit events.
+- The next implementation batch should stay focused on exports, MCP expansion, and notifications/admin depth.
 - Video/rehearsal ownership is with human; engineering focus stays on product completeness and quality.
 
 ## Execution Checklist (Always Run)
@@ -65,9 +68,9 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ### P2 - AI Surfaces (Guardrailed)
 
-- [ ] Implement AI Draft Spec flow (policy text -> structured `spec_json` suggestion -> explicit human apply).
-- [ ] Implement Explain Why Flagged flow grounded strictly in `evidence_json`.
-- [ ] Audit every AI call with prompt/output metadata and fallback states.
+- [x] Implement AI Draft Spec flow (policy text -> structured `spec_json` suggestion -> explicit human apply).
+- [x] Implement Explain Why Flagged flow grounded strictly in `evidence_json`.
+- [x] Audit every AI call with prompt/output metadata and fallback states.
 
 ### P2 - MCP Expansion (Read-Only First)
 
@@ -88,8 +91,10 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 ## Recommended Next Implementation Batch
 
 1. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
-2. Implement AI Draft Spec flow with human-apply guardrails.
+2. Expand MCP read tools beyond the current minimal server surface.
+3. Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
+4. Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
 
 ## Latest Verified Checkpoint
 
-- 2026-05-04 01:48 - Assignment/escalation flow is deployed and production-smoke verified (`/api/cases/{id}/assign`, `/api/cases/{id}/escalate`, and `/cases/{id}` UI).
+- 2026-05-05 - Four-measure demo depth plus AI Draft Spec and Explain Why Flagged flows were implemented and locally validated (targeted backend web tests, frontend lint/build).

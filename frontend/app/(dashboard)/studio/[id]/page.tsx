@@ -49,6 +49,20 @@ type ActivationReadiness = {
   activationBlockers: string[];
 };
 
+type DraftSpecResponse = {
+  suggestion: {
+    description?: string;
+    eligibilityCriteria?: {
+      roleFilter?: string;
+      siteFilter?: string;
+      programEnrollmentText?: string;
+    };
+    exclusions?: Array<{ label?: string; criteriaText?: string }>;
+    complianceWindow?: string;
+    requiredDataElements?: string[];
+  };
+};
+
 export default function StudioMeasurePage() {
   const params = useParams<{ id: string }>();
   const measureId = typeof params?.id === "string" ? params.id : "";
@@ -79,6 +93,7 @@ export default function StudioMeasurePage() {
   const [testFixtures, setTestFixtures] = useState<TestFixture[]>([]);
   const [testFailures, setTestFailures] = useState<string[]>([]);
   const [activationReadiness, setActivationReadiness] = useState<ActivationReadiness | null>(null);
+  const [policyText, setPolicyText] = useState("");
 
   const loadMeasure = useCallback(async () => {
     setLoading(true);
@@ -166,6 +181,33 @@ export default function StudioMeasurePage() {
     }
     setToast("Draft saved");
     await loadMeasure();
+  }
+
+  async function draftSpecWithAi() {
+    setError(null);
+    const response = await fetch(`${apiBase}/api/ai/draft-spec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        measureName: measure?.name ?? "",
+        policyText
+      })
+    });
+    if (!response.ok) {
+      setError(`AI draft failed (${response.status})`);
+      return;
+    }
+    const payload = (await response.json()) as DraftSpecResponse;
+    const suggestion = payload.suggestion ?? {};
+    setDescription(suggestion.description ?? "");
+    setRoleFilter(suggestion.eligibilityCriteria?.roleFilter ?? "");
+    setSiteFilter(suggestion.eligibilityCriteria?.siteFilter ?? "");
+    setProgramEnrollmentText(suggestion.eligibilityCriteria?.programEnrollmentText ?? "");
+    setExclusionLabel(suggestion.exclusions?.[0]?.label ?? "");
+    setExclusionCriteria(suggestion.exclusions?.[0]?.criteriaText ?? "");
+    setComplianceWindow(suggestion.complianceWindow ?? "");
+    setRequiredDataElementsText((suggestion.requiredDataElements ?? []).join("\n"));
+    setToast("AI draft applied to spec form");
   }
 
   async function compileCql() {
@@ -368,6 +410,12 @@ export default function StudioMeasurePage() {
 
       {tab === "spec" ? (
         <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+          <textarea className="min-h-20 rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Paste policy text for AI draft..." value={policyText} onChange={(e) => setPolicyText(e.target.value)} />
+          <div>
+            <button className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={draftSpecWithAi}>
+              AI Draft Spec
+            </button>
+          </div>
           <textarea className="min-h-20 rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Eligibility Role Filter" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} />
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Eligibility Site Filter" value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} />

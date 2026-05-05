@@ -46,6 +46,11 @@ type CaseDetail = {
   timeline: AuditEvent[];
 };
 
+type CaseExplanationResponse = {
+  explanation: string;
+  disclaimer: string;
+};
+
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
@@ -56,6 +61,8 @@ export default function CaseDetailPage() {
   const [escalating, setEscalating] = useState(false);
   const [assigneeInput, setAssigneeInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [aiExplanation, setAiExplanation] = useState<CaseExplanationResponse | null>(null);
+  const [explaining, setExplaining] = useState(false);
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -142,6 +149,21 @@ export default function CaseDetailPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setEscalating(false);
+    }
+  }
+
+  async function explainWhyFlagged() {
+    if (!apiBase || !caseId) return;
+    setExplaining(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/explain`, { method: "POST" });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      setAiExplanation((await response.json()) as CaseExplanationResponse);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setExplaining(false);
     }
   }
 
@@ -274,6 +296,22 @@ export default function CaseDetailPage() {
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
                   {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
                 </pre>
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => void explainWhyFlagged()}
+                    disabled={explaining}
+                    className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {explaining ? "Explaining..." : "Explain Why Flagged"}
+                  </button>
+                  {aiExplanation ? (
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                      <p>{aiExplanation.explanation}</p>
+                      <p className="mt-2 text-xs text-blue-700">{aiExplanation.disclaimer}</p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
