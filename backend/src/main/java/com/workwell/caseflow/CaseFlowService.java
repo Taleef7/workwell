@@ -172,6 +172,7 @@ public class CaseFlowService {
                         rs.getString("outcome_status"),
                         outcomeSummaryFor(rs.getString("outcome_status")),
                         toInstant(rs.getObject("outcome_evaluated_at")),
+                        findLatestOutreachDeliveryStatus(resolvedCaseId),
                         timeline
                 ));
             }, caseId);
@@ -319,6 +320,38 @@ public class CaseFlowService {
         insertCaseAction(caseId, "ASSIGNED", actor, payload);
         insertAuditEvent(
                 "CASE_ASSIGNED",
+                "case",
+                caseId,
+                actor,
+                existing.lastRunId(),
+                caseId,
+                existing.measureVersionId(),
+                payload
+        );
+        return loadCase(caseId);
+    }
+
+    public Optional<CaseDetail> updateOutreachDelivery(UUID caseId, String deliveryStatus, String actor) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+        String normalized = normalizeDeliveryStatus(deliveryStatus);
+        String nextAction = switch (normalized) {
+            case "FAILED" -> "Retry outreach delivery or escalate if contact path remains blocked.";
+            case "SENT" -> "Wait for employee response, then rerun to verify closure.";
+            default -> "Outreach queued for delivery.";
+        };
+        jdbcTemplate.update("UPDATE cases SET next_action = ?, updated_at = NOW() WHERE id = ?", nextAction, caseId);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("deliveryStatus", normalized);
+        payload.put("note", "Simulated delivery-state transition.");
+        insertCaseAction(caseId, "OUTREACH_DELIVERY_UPDATED", actor, payload);
+
+        CaseContext existing = context.get();
+        insertAuditEvent(
+                "CASE_OUTREACH_DELIVERY_UPDATED",
                 "case",
                 caseId,
                 actor,
@@ -485,6 +518,21 @@ public class CaseFlowService {
         } catch (EmptyResultDataAccessException ex) {
             return Optional.empty();
         }
+    }
+
+    private String findLatestOutreachDeliveryStatus(UUID caseId) {
+        return jdbcTemplate.query(
+                """
+                        SELECT payload_json ->> 'deliveryStatus' AS delivery_status
+                        FROM case_actions
+                        WHERE case_id = ?
+                          AND payload_json ? 'deliveryStatus'
+                        ORDER BY performed_at DESC
+                        LIMIT 1
+                        """,
+                rs -> rs.next() ? rs.getString("delivery_status") : null,
+                caseId
+        );
     }
 
     private UUID createVerificationRun(UUID measureVersionId, String actor) {
@@ -674,6 +722,17 @@ public class CaseFlowService {
         };
     }
 
+    private String normalizeDeliveryStatus(String deliveryStatus) {
+        if (deliveryStatus == null || deliveryStatus.isBlank()) {
+            throw new IllegalArgumentException("deliveryStatus is required");
+        }
+        String normalized = deliveryStatus.trim().toUpperCase();
+        if (!List.of("QUEUED", "SENT", "FAILED").contains(normalized)) {
+            throw new IllegalArgumentException("deliveryStatus must be one of QUEUED, SENT, FAILED");
+        }
+        return normalized;
+    }
+
     private Map<String, Object> casePayload(DemoOutcome outcome, String priority, String nextAction) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subjectId", outcome.subjectId());
@@ -803,6 +862,7 @@ public class CaseFlowService {
             String outcomeStatus,
             String outcomeSummary,
             Instant outcomeEvaluatedAt,
+            String latestOutreachDeliveryStatus,
             List<AuditEvent> timeline
     ) {
     }

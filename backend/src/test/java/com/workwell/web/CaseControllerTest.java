@@ -94,6 +94,7 @@ class CaseControllerTest {
                         "OVERDUE",
                         "Audiogram is outside annual compliance window.",
                         Instant.parse("2026-05-04T12:00:10Z"),
+                        null,
                         List.of(
                                 new CaseFlowService.AuditEvent(
                                         "CASE_CREATED",
@@ -137,6 +138,7 @@ class CaseControllerTest {
                         "OVERDUE",
                         "Audiogram is outside annual compliance window.",
                         Instant.parse("2026-05-04T12:00:10Z"),
+                        "QUEUED",
                         List.of(
                                 new CaseFlowService.AuditEvent(
                                         "CASE_OUTREACH_SENT",
@@ -178,6 +180,7 @@ class CaseControllerTest {
                         "COMPLIANT",
                         "Audiogram completed within compliant window.",
                         Instant.parse("2026-05-04T12:18:00Z"),
+                        "SENT",
                         List.of(
                                 new CaseFlowService.AuditEvent(
                                         "CASE_RESOLVED",
@@ -219,6 +222,7 @@ class CaseControllerTest {
                         "OVERDUE",
                         "Audiogram is outside annual compliance window.",
                         Instant.parse("2026-05-04T12:00:10Z"),
+                        null,
                         List.of()
                 )
         ));
@@ -252,6 +256,7 @@ class CaseControllerTest {
                         "OVERDUE",
                         "TB screening is outside annual compliance window.",
                         Instant.parse("2026-05-04T12:00:10Z"),
+                        "FAILED",
                         List.of()
                 )
         ));
@@ -259,5 +264,39 @@ class CaseControllerTest {
         mockMvc.perform(post("/api/cases/{caseId}/escalate", caseId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nextAction").value("Escalated to supervisor queue for immediate handling."));
+    }
+
+    @Test
+    void updatesOutreachDeliveryState() throws Exception {
+        UUID caseId = UUID.fromString("cccccccc-1111-1111-1111-111111111111");
+        when(caseFlowService.updateOutreachDelivery(caseId, "FAILED", "case-manager")).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-004",
+                        "patient-004",
+                        "TB Surveillance",
+                        "1.3.0",
+                        "2026-05-04",
+                        "OPEN",
+                        "HIGH",
+                        "supervisor-b",
+                        "Retry outreach delivery or escalate if contact path remains blocked.",
+                        "OVERDUE",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:40:00Z"),
+                        null,
+                        Map.of(),
+                        "OVERDUE",
+                        "TB screening is outside annual compliance window.",
+                        Instant.parse("2026-05-04T12:00:10Z"),
+                        "FAILED",
+                        List.of()
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions/outreach/delivery", caseId).param("deliveryStatus", "FAILED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.latestOutreachDeliveryStatus").value("FAILED"));
     }
 }

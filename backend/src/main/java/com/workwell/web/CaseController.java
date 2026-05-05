@@ -45,6 +45,20 @@ public class CaseController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 
+    @PostMapping("/api/cases/{caseId}/actions/outreach/delivery")
+    public CaseFlowService.CaseDetail updateOutreachDelivery(
+            @PathVariable UUID caseId,
+            @RequestParam(name = "deliveryStatus") String deliveryStatus,
+            @RequestParam(name = "actor", defaultValue = "case-manager") String actor
+    ) {
+        try {
+            return caseFlowService.updateOutreachDelivery(caseId, deliveryStatus, actor)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
     @PostMapping("/api/cases/{caseId}/rerun-to-verify")
     public CaseFlowService.CaseDetail rerunToVerify(
             @PathVariable UUID caseId,

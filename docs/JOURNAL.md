@@ -2,6 +2,41 @@
 
 ## 2026-05-05
 
+### P3 completion: outreach delivery states, admin integrations panel, and CSV reporting
+
+- Completed P3 notifications/admin + reporting backlog items.
+
+Backend:
+- Added explicit outreach delivery-state transitions on cases:
+  - `POST /api/cases/{caseId}/actions/outreach/delivery?deliveryStatus=QUEUED|SENT|FAILED`
+  - Persists state changes through `case_actions` payloads and emits `CASE_OUTREACH_DELIVERY_UPDATED` audit events.
+  - Case detail now returns `latestOutreachDeliveryStatus`.
+- Added admin integrations health API:
+  - `GET /api/admin/integrations`
+  - `POST /api/admin/integrations/{integration}/sync`
+  - Integrations tracked as stubs (`fhir`, `mcp`, `ai`) with last successful sync derived from persisted audit events.
+  - Manual sync writes `INTEGRATION_SYNC_TRIGGERED` + `INTEGRATION_SYNC_COMPLETED` audit events.
+- Added/kept CSV exports for:
+  - runs: `GET /api/exports/runs?format=csv`
+  - outcomes: `GET /api/exports/outcomes?format=csv&runId={optional}`
+  - cases: `GET /api/exports/cases?format=csv`
+
+Frontend:
+- `/admin` now shows integrations health cards and manual sync actions.
+- `/cases/[id]` now surfaces outreach delivery state and buttons to mark queued/sent/failed.
+- `/runs` now includes export buttons for runs and outcomes CSVs.
+- `/cases` now includes cases CSV export (plus existing audit CSV export).
+
+Docs:
+- Updated `README.md` API highlights with new admin/outreach/export routes.
+- Added explicit CSV column contracts in `README.md`.
+- Updated `docs/TODO.md` to mark P3 notifications/admin/reporting items complete and move next batch to final smoke/freeze focus.
+
+Verification checkpoints:
+- `backend\\gradlew.bat test --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.web.ExportControllerTest"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### MCP read-tool expansion + audit boundaries (P2)
 
 - Expanded MCP Layer 1 read surface in `backend/src/main/java/com/workwell/mcp/McpServerConfig.java` by adding:
@@ -27,6 +62,18 @@ Local verification checkpoints:
 Notes:
 - Full `backend\\gradlew.bat test` remains environment-sensitive when Docker/Testcontainers are unavailable.
 - This slice intentionally avoided introducing MCP write capabilities per sprint guardrails.
+
+### Focused verification sweep before next slice
+
+- Ran targeted backend tests for recently touched API surfaces:
+  - `backend\\gradlew.bat test --tests "com.workwell.web.AiControllerTest" --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.web.MeasureControllerTest"` -> PASS
+  - `backend\\gradlew.bat test --tests "com.workwell.measure.AudiogramDemoServiceTest"` -> PASS
+- Ran frontend verification gates:
+  - `frontend npm run lint` -> PASS
+  - `frontend npm run build` -> PASS
+- MCP transport probe from local shell:
+  - `GET http://localhost:8080/sse` failed with connection refused because no local backend instance was running during this check (expected environmental condition, not a code failure).
+- Observed one transient Gradle test-results file race during parallel execution (`NoSuchFileException ... in-progress-results...bin`); rerunning the web suite sequentially completed successfully.
 ## 2026-05-04
 
 ### Studio measure-load hotfix + deploy/push checkpoint

@@ -144,13 +144,48 @@ export default function RunsPage() {
     }
   }
 
+  async function downloadCsv(path: string, filename: string) {
+    const response = await fetch(`${apiBase}${path}`);
+    if (!response.ok) {
+      throw new Error(`Export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Run History</h2>
-        <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
-          Run Measures Now
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            onClick={() => void downloadCsv("/api/exports/runs?format=csv", "runs.csv")}
+          >
+            Export runs CSV
+          </button>
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            onClick={() =>
+              void downloadCsv(
+                `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}`,
+                "outcomes.csv"
+              )
+            }
+          >
+            Export outcomes CSV
+          </button>
+          <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
+            Run Measures Now
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">

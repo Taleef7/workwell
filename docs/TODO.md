@@ -80,21 +80,21 @@ Source: SPIKE_PLAN + JOURNAL + archived PROJECT_PLAN_v1 gap review
 
 ### P3 - Notifications + Admin
 
-- [ ] Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
-- [ ] Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
+- [x] Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
+- [x] Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
 
 ### P3 - Reporting Expansion
 
-- [ ] Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
-- [ ] Standardize export column contracts and document them.
+- [x] Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
+- [x] Standardize export column contracts and document them.
 
 ## Recommended Next Implementation Batch
 
-1. Add CSV exports for run summary, outcomes, and cases (audit CSV already exists).
-2. Persist simulated outreach delivery states (`queued/sent/failed`) and expose in case timeline.
-3. Build Admin integrations health panel (status, last sync, manual sync trigger with stubs).
-4. Finalize export coverage and column-contract documentation for run/outcome/case CSVs.
+1. Run final full-stack smoke pass on local/prod routes (`/runs`, `/cases`, `/admin`) including all CSV exports and outreach delivery transitions.
+2. Confirm no remaining non-critical UI regressions before D16 freeze.
+3. If stable, execute final D16 buffer-only bugfix policy (no new features).
 
 ## Latest Verified Checkpoint
 
 - 2026-05-05 - MCP read-tool expansion (`list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`) completed with per-tool audit events and local backend verification.
+- 2026-05-05 - Notifications/Admin + reporting expansion completed: outreach delivery-state transitions, admin integration health/sync stubs, and CSV exports for runs/outcomes/cases with UI entry points.

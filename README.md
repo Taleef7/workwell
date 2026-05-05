@@ -55,8 +55,19 @@ npm run dev
 - `GET /api/cases`
 - `GET /api/cases/{id}`
 - `POST /api/cases/{id}/actions/outreach`
+- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=QUEUED|SENT|FAILED`
 - `POST /api/cases/{id}/rerun-to-verify`
+- `GET /api/admin/integrations`
+- `POST /api/admin/integrations/{integration}/sync`
+- `GET /api/exports/runs?format=csv`
+- `GET /api/exports/outcomes?format=csv&runId={optional}`
+- `GET /api/exports/cases?format=csv`
 - `GET /api/audit-events/export?format=csv`
+
+CSV column contracts:
+- `runs.csv`: `runId,measureName,status,scopeType,triggerType,startedAt,completedAt,durationMs,totalEvaluated,compliant,nonCompliant`
+- `outcomes.csv`: `runId,employeeId,employeeName,site,measureName,measureVersion,evaluationPeriod,status,summary,evaluatedAt,evidenceJson`
+- `cases.csv`: `caseId,employeeId,employeeName,site,measureName,measureVersion,evaluationPeriod,status,priority,assignee,currentOutcomeStatus,lastRunId,updatedAt`
 
 ## Notes
 

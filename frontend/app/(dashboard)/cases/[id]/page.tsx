@@ -43,6 +43,7 @@ type CaseDetail = {
   outcomeStatus: string;
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
+  latestOutreachDeliveryStatus: string | null;
   timeline: AuditEvent[];
 };
 
@@ -56,7 +57,7 @@ export default function CaseDetailPage() {
   const caseId = params.id;
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState<"outreach" | "rerun" | null>(null);
+  const [acting, setActing] = useState<"outreach" | "rerun" | "delivery" | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [escalating, setEscalating] = useState(false);
   const [assigneeInput, setAssigneeInput] = useState("");
@@ -167,6 +168,23 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function updateDeliveryStatus(deliveryStatus: "QUEUED" | "SENT" | "FAILED") {
+    if (!apiBase || !caseId) return;
+    setActing("delivery");
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions/outreach/delivery?deliveryStatus=${deliveryStatus}`, {
+        method: "POST"
+      });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      setCaseDetail((await response.json()) as CaseDetail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setActing(null);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -215,6 +233,9 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Next action</p>
                 <p className="mt-2 text-sm text-amber-950">{caseDetail.nextAction}</p>
+                <p className="mt-2 text-xs text-amber-800">
+                  Outreach delivery: {caseDetail.latestOutreachDeliveryStatus ?? "Not sent yet"}
+                </p>
                 <div className="mt-4 grid gap-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Assignee</label>
                   <div className="flex gap-2">
@@ -258,6 +279,32 @@ export default function CaseDetailPage() {
                     className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void updateDeliveryStatus("QUEUED")}
+                    disabled={acting !== null}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                  >
+                    Mark queued
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void updateDeliveryStatus("SENT")}
+                    disabled={acting !== null}
+                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 disabled:opacity-60"
+                  >
+                    Mark sent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void updateDeliveryStatus("FAILED")}
+                    disabled={acting !== null}
+                    className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-800 disabled:opacity-60"
+                  >
+                    Mark failed
                   </button>
                 </div>
               </div>

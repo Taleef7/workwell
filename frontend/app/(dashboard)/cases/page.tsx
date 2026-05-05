@@ -100,8 +100,8 @@ export default function CasesPage() {
     }
   }, [apiBase, loadCases]);
 
-  async function exportAuditCsv() {
-    const response = await fetch(`${apiBase}/api/audit-events/export?format=csv`);
+  async function exportCsv(urlPath: string, filename: string) {
+    const response = await fetch(`${apiBase}${urlPath}`);
     if (!response.ok) {
       setError(`Export failed (${response.status})`);
       return;
@@ -110,7 +110,7 @@ export default function CasesPage() {
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "audit-events.csv";
+    anchor.download = filename;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -137,10 +137,21 @@ export default function CasesPage() {
           API base: <code>{apiBase || "(missing NEXT_PUBLIC_API_BASE_URL)"}</code>
         </p>
         <button
-          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
-          onClick={exportAuditCsv}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900"
+          onClick={() =>
+            void exportCsv(
+              `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}`,
+              "cases.csv"
+            )
+          }
         >
-          Export CSV
+          Export cases CSV
+        </button>
+        <button
+          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
+          onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
+        >
+          Export audit CSV
         </button>
       </div>
 
