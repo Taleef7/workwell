@@ -321,4 +321,15 @@ class CaseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.latestOutreachDeliveryStatus").value("FAILED"));
     }
+
+    @Test
+    void rejectsOutreachDeliveryUpdateWhenServiceValidationFails() throws Exception {
+        UUID caseId = UUID.fromString("cccccccc-1111-1111-1111-111111111111");
+        when(caseFlowService.updateOutreachDelivery(caseId, "SENT", "case-manager"))
+                .thenThrow(new IllegalArgumentException("Cannot update delivery state before outreach is sent"));
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions/outreach/delivery", caseId).param("deliveryStatus", "SENT"))
+                .andExpect(status().isBadRequest())
+                .andExpect(status().reason("Cannot update delivery state before outreach is sent"));
+    }
 }

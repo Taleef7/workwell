@@ -2,6 +2,26 @@
 
 ## 2026-05-06
 
+### P1 outreach delivery-state API hardening completed
+
+Completed:
+- Kept `POST /api/cases/{caseId}/actions/outreach/delivery` and tightened service behavior to match delivery-state contract:
+  - Enforces precondition that an `OUTREACH_SENT` action exists before accepting delivery updates.
+  - Continues strict `deliveryStatus` validation (`QUEUED|SENT|FAILED`).
+  - Persists `OUTREACH_DELIVERY_UPDATED` case action payload with `deliveryStatus`, `updatedAt`, `actor`, and note.
+  - Emits `CASE_OUTREACH_DELIVERY_UPDATED` audit event with explicit payload `{ caseId, deliveryStatus, updatedAt, actor }`.
+- Tightened latest delivery-state derivation:
+  - `latestOutreachDeliveryStatus` now resolves only from `case_actions.action_type = 'OUTREACH_DELIVERY_UPDATED'`.
+- Frontend case detail improvement:
+  - Added color-coded delivery status badge (QUEUED/SENT/FAILED/NOT_SENT).
+- Added controller coverage for validation failure path:
+  - bad-request mapping when delivery update is attempted before outreach send.
+
+Verification:
+- `backend\\gradlew.bat test --tests \"com.workwell.web.CaseControllerTest\"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### P1 MCP tool expansion completed
 
 Completed:

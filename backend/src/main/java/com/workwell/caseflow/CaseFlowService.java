@@ -376,6 +376,9 @@ public class CaseFlowService {
         if (context.isEmpty()) {
             return Optional.empty();
         }
+        if (!hasOutreachSentAction(caseId)) {
+            throw new IllegalArgumentException("Cannot update delivery state before outreach is sent");
+        }
         String normalized = normalizeDeliveryStatus(deliveryStatus);
         String nextAction = switch (normalized) {
             case "FAILED" -> "Retry outreach delivery or escalate if contact path remains blocked.";
@@ -384,8 +387,11 @@ public class CaseFlowService {
         };
         jdbcTemplate.update("UPDATE cases SET next_action = ?, updated_at = NOW() WHERE id = ?", nextAction, caseId);
 
+        Instant updatedAt = Instant.now();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("deliveryStatus", normalized);
+        payload.put("updatedAt", updatedAt.toString());
+        payload.put("actor", actor);
         payload.put("note", "Simulated delivery-state transition.");
         insertCaseAction(caseId, "OUTREACH_DELIVERY_UPDATED", actor, payload);
 
@@ -398,7 +404,12 @@ public class CaseFlowService {
                 existing.lastRunId(),
                 caseId,
                 existing.measureVersionId(),
-                payload
+                Map.of(
+                        "caseId", caseId.toString(),
+                        "deliveryStatus", normalized,
+                        "updatedAt", updatedAt.toString(),
+                        "actor", actor
+                )
         );
         return loadCase(caseId);
     }
@@ -566,13 +577,22 @@ public class CaseFlowService {
                         SELECT payload_json ->> 'deliveryStatus' AS delivery_status
                         FROM case_actions
                         WHERE case_id = ?
-                          AND jsonb_exists(payload_json, 'deliveryStatus')
+                          AND action_type = 'OUTREACH_DELIVERY_UPDATED'
                         ORDER BY performed_at DESC
                         LIMIT 1
                         """,
                 rs -> rs.next() ? rs.getString("delivery_status") : null,
                 caseId
         );
+    }
+
+    private boolean hasOutreachSentAction(UUID caseId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM case_actions WHERE case_id = ? AND action_type = 'OUTREACH_SENT'",
+                Integer.class,
+                caseId
+        );
+        return count != null && count > 0;
     }
 
     private UUID createVerificationRun(UUID measureVersionId, String actor) {

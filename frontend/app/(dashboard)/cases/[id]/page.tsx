@@ -288,9 +288,12 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Next action</p>
                 <p className="mt-2 text-sm text-amber-950">{caseDetail.nextAction}</p>
-                <p className="mt-2 text-xs text-amber-800">
-                  Outreach delivery: {caseDetail.latestOutreachDeliveryStatus ?? "Not sent yet"}
-                </p>
+                <div className="mt-2 flex items-center gap-2 text-xs text-amber-800">
+                  <span>Outreach delivery:</span>
+                  <span className={deliveryBadgeClass(caseDetail.latestOutreachDeliveryStatus)}>
+                    {caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT"}
+                  </span>
+                </div>
                 <div className="mt-4 grid gap-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Outreach template</label>
                   <select
@@ -522,4 +525,17 @@ function Row({ label, value }: { label: string; value: string }) {
       <dd className="text-right font-medium text-slate-900">{value}</dd>
     </div>
   );
+}
+
+function deliveryBadgeClass(status: string | null) {
+  if (status === "SENT") {
+    return "rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-900";
+  }
+  if (status === "FAILED") {
+    return "rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-semibold text-rose-900";
+  }
+  if (status === "QUEUED") {
+    return "rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900";
+  }
+  return "rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-semibold text-slate-700";
 }

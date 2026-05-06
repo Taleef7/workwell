@@ -309,6 +309,8 @@ Ensure `get_case`, `list_cases`, `get_run_summary` all emit `MCP_TOOL_CALLED` au
 
 ## P1 — Outreach Delivery-State API
 
+Status: COMPLETED (2026-05-06). Added delivery-state update endpoint behavior, strict status validation, outreach-sent precondition, audit event payloads, and case-detail delivery badge rendering.
+
 Add `POST /api/cases/{caseId}/actions/outreach/delivery?deliveryStatus=SENT|FAILED|QUEUED` to `CaseController`:
 - Validate deliveryStatus is one of the three valid values
 - Load the latest `OUTREACH_SENT` case action for this case
