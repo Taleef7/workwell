@@ -66,8 +66,8 @@ public class McpServerConfig {
         );
         Tool listMeasures = new Tool(
                 "list_measures",
-                "List active measures with catalog metadata",
-                "{\"type\":\"object\"}"
+                "List measures with optional lifecycle-status filter",
+                "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\"}}}"
         );
         Tool getMeasureVersion = new Tool(
                 "get_measure_version",
@@ -76,13 +76,13 @@ public class McpServerConfig {
         );
         Tool listRuns = new Tool(
                 "list_runs",
-                "List run summaries with optional filters",
-                "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\"},\"scopeType\":{\"type\":\"string\"},\"triggerType\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}}}"
+                "List run summaries with optional measure filter",
+                "{\"type\":\"object\",\"properties\":{\"measureId\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}}}"
         );
         Tool explainOutcome = new Tool(
                 "explain_outcome",
-                "Explain a run outcome from structured evidence only",
-                "{\"type\":\"object\",\"properties\":{\"runId\":{\"type\":\"string\"},\"employeeId\":{\"type\":\"string\"}},\"required\":[\"runId\",\"employeeId\"]}"
+                "Explain why a case was flagged using deterministic evidence fields",
+                "{\"type\":\"object\",\"properties\":{\"caseId\":{\"type\":\"string\"}},\"required\":[\"caseId\"]}"
         );
 
         McpServerFeatures.SyncToolSpecification getCaseSpec = new McpServerFeatures.SyncToolSpecification(
@@ -183,19 +183,51 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification listMeasuresSpec = new McpServerFeatures.SyncToolSpecification(
                 listMeasures,
                 (exchange, args) -> {
-                    List<Map<String, Object>> payload = measureService.listMeasures().stream().map(m -> {
+                    String requestedStatus = args.get("status") == null || args.get("status").toString().isBlank()
+                            ? "Active"
+                            : args.get("status").toString().trim();
+                    List<Map<String, Object>> payload = jdbcTemplate.query("""
+                            SELECT
+                                m.id AS measure_id,
+                                m.name AS measure_name,
+                                m.policy_ref,
+                                mv.version,
+                                mv.status,
+                                mv.compile_status,
+                                COALESCE(jsonb_array_length(COALESCE(mv.spec_json -> 'testFixtures', '[]'::jsonb)), 0) AS test_fixture_count,
+                                (
+                                    SELECT COUNT(*)
+                                    FROM measure_value_set_links l
+                                    WHERE l.measure_version_id = mv.id
+                                ) AS value_set_count,
+                                mv.created_at AS last_updated
+                            FROM measures m
+                            JOIN LATERAL (
+                                SELECT id, version, status, compile_status, spec_json, created_at
+                                FROM measure_versions
+                                WHERE measure_id = m.id
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            ) mv ON TRUE
+                            WHERE LOWER(mv.status) = LOWER(?)
+                            ORDER BY m.name ASC
+                            """, (rs, rowNum) -> {
                         Map<String, Object> row = new LinkedHashMap<>();
-                        row.put("id", m.id());
-                        row.put("name", m.name());
-                        row.put("policy_ref", m.policyRef());
-                        row.put("version", m.version());
-                        row.put("status", m.status());
-                        row.put("owner", m.owner());
-                        row.put("tags", m.tags());
-                        row.put("last_updated", m.lastUpdated());
+                        row.put("measureId", rs.getObject("measure_id", UUID.class));
+                        row.put("measureName", rs.getString("measure_name"));
+                        row.put("policyRef", rs.getString("policy_ref"));
+                        row.put("version", rs.getString("version"));
+                        row.put("status", rs.getString("status"));
+                        row.put("compileStatus", rs.getString("compile_status"));
+                        row.put("testFixtureCount", rs.getInt("test_fixture_count"));
+                        row.put("valueSetCount", rs.getInt("value_set_count"));
+                        row.put("lastUpdated", rs.getTimestamp("last_updated") == null ? null : rs.getTimestamp("last_updated").toInstant());
                         return row;
-                    }).toList();
-                    recordMcpAudit(jdbcTemplate, objectMapper, "list_measures", Map.of("returned", payload.size()));
+                    }, requestedStatus);
+                    recordMcpAudit(jdbcTemplate, objectMapper, "list_measures", Map.of(
+                            "status", requestedStatus,
+                            "returned", payload.size()
+                    ));
                     return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
@@ -215,8 +247,34 @@ public class McpServerConfig {
                     if (detail == null) {
                         throw new IllegalArgumentException("Measure not found");
                     }
-                    Map<String, Object> payload = objectMapper.convertValue(detail, new TypeReference<Map<String, Object>>() {
-                    });
+                    String cqlText = detail.cqlText() == null ? "" : detail.cqlText();
+                    String cqlPreview = cqlText.length() <= 500 ? cqlText : cqlText.substring(0, 500);
+                    List<Map<String, Object>> valueSetPayload = detail.valueSets().stream().map(vs -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("id", vs.id());
+                        row.put("name", vs.name());
+                        row.put("oid", vs.oid());
+                        row.put("version", vs.version() == null ? "" : vs.version());
+                        return row;
+                    }).toList();
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("measureId", detail.id());
+                    payload.put("measureName", detail.name());
+                    payload.put("policyRef", detail.policyRef());
+                    payload.put("version", detail.version());
+                    payload.put("lifecycleStatus", detail.status());
+                    payload.put("compileStatus", detail.compileStatus());
+                    payload.put("specJson", Map.of(
+                            "description", detail.description(),
+                            "eligibilityCriteria", detail.eligibilityCriteria(),
+                            "exclusions", detail.exclusions(),
+                            "complianceWindow", detail.complianceWindow(),
+                            "requiredDataElements", detail.requiredDataElements()
+                    ));
+                    payload.put("cqlText", cqlPreview);
+                    payload.put("attachedValueSets", valueSetPayload);
+                    payload.put("testFixtureCount", detail.testFixtures().size());
+                    payload.put("valueSetCount", detail.valueSets().size());
                     recordMcpAudit(jdbcTemplate, objectMapper, "get_measure_version", Map.of(
                             "measureId", measureId.toString(),
                             "measureName", detail.name()
@@ -228,29 +286,76 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification listRunsSpec = new McpServerFeatures.SyncToolSpecification(
                 listRuns,
                 (exchange, args) -> {
-                    String status = args.get("status") == null ? null : args.get("status").toString();
-                    String scopeType = args.get("scopeType") == null ? null : args.get("scopeType").toString();
-                    String triggerType = args.get("triggerType") == null ? null : args.get("triggerType").toString();
-                    int limit = args.get("limit") == null ? 20 : Math.max(1, Math.min(200, Integer.parseInt(args.get("limit").toString())));
-                    List<Map<String, Object>> payload = runPersistenceService.listRuns(status, scopeType, triggerType, limit).stream().map(run -> {
+                    UUID measureId = args.get("measureId") == null || args.get("measureId").toString().isBlank()
+                            ? null
+                            : UUID.fromString(args.get("measureId").toString().trim());
+                    int limit = args.get("limit") == null ? 10 : Math.max(1, Math.min(200, Integer.parseInt(args.get("limit").toString())));
+                    List<Object> queryArgs = new java.util.ArrayList<>();
+                    StringBuilder sql = new StringBuilder("""
+                            SELECT
+                                r.id AS run_id,
+                                COALESCE(m.name, 'All Programs') AS measure_name,
+                                COALESCE(mv.version, '-') AS measure_version,
+                                r.status,
+                                r.scope_type,
+                                r.trigger_type,
+                                r.started_at,
+                                r.completed_at,
+                                COALESCE(r.duration_ms, 0) AS duration_ms,
+                                COALESCE(r.total_evaluated, 0) AS total_evaluated,
+                                COALESCE(SUM(CASE WHEN o.status = 'COMPLIANT' THEN 1 ELSE 0 END), 0) AS compliant_count,
+                                COALESCE(SUM(CASE WHEN o.status = 'DUE_SOON' THEN 1 ELSE 0 END), 0) AS due_soon_count,
+                                COALESCE(SUM(CASE WHEN o.status = 'OVERDUE' THEN 1 ELSE 0 END), 0) AS overdue_count,
+                                COALESCE(SUM(CASE WHEN o.status = 'MISSING_DATA' THEN 1 ELSE 0 END), 0) AS missing_data_count,
+                                COALESCE(SUM(CASE WHEN o.status = 'EXCLUDED' THEN 1 ELSE 0 END), 0) AS excluded_count,
+                                CASE
+                                    WHEN COALESCE(r.total_evaluated, 0) = 0 THEN 0
+                                    ELSE ROUND(
+                                        100.0 * COALESCE(SUM(CASE WHEN o.status = 'COMPLIANT' THEN 1 ELSE 0 END), 0) / r.total_evaluated,
+                                        1
+                                    )
+                                END AS compliance_rate
+                            FROM runs r
+                            LEFT JOIN measure_versions mv ON mv.id = r.scope_id
+                            LEFT JOIN measures m ON m.id = mv.measure_id
+                            LEFT JOIN outcomes o ON o.run_id = r.id
+                            WHERE 1=1
+                            """);
+                    if (measureId != null) {
+                        sql.append(" AND mv.measure_id = ? ");
+                        queryArgs.add(measureId);
+                    }
+                    sql.append("""
+                            GROUP BY r.id, m.name, mv.version
+                            ORDER BY r.started_at DESC
+                            LIMIT ?
+                            """);
+                    queryArgs.add(limit);
+                    List<Map<String, Object>> payload = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> {
                         Map<String, Object> row = new LinkedHashMap<>();
-                        row.put("run_id", run.runId());
-                        row.put("measure_name", run.measureName());
-                        row.put("status", run.status());
-                        row.put("scope_type", run.scopeType());
-                        row.put("trigger_type", run.triggerType());
-                        row.put("started_at", run.startedAt());
-                        row.put("completed_at", run.completedAt());
-                        row.put("duration_ms", run.durationMs());
-                        row.put("total_evaluated", run.totalEvaluated());
-                        row.put("compliant_count", run.compliantCount());
-                        row.put("non_compliant_count", run.nonCompliantCount());
+                        row.put("run_id", rs.getObject("run_id", UUID.class));
+                        row.put("measure_name", rs.getString("measure_name"));
+                        row.put("measure_version", rs.getString("measure_version"));
+                        row.put("status", rs.getString("status"));
+                        row.put("scope_type", rs.getString("scope_type"));
+                        row.put("trigger_type", rs.getString("trigger_type"));
+                        row.put("started_at", rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toInstant());
+                        row.put("completed_at", rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant());
+                        row.put("duration_ms", rs.getLong("duration_ms"));
+                        row.put("total_evaluated", rs.getLong("total_evaluated"));
+                        row.put("compliance_rate", rs.getDouble("compliance_rate"));
+                        row.put("outcome_counts", Map.of(
+                                "COMPLIANT", rs.getLong("compliant_count"),
+                                "DUE_SOON", rs.getLong("due_soon_count"),
+                                "OVERDUE", rs.getLong("overdue_count"),
+                                "MISSING_DATA", rs.getLong("missing_data_count"),
+                                "EXCLUDED", rs.getLong("excluded_count")
+                        ));
                         return row;
-                    }).toList();
+                    }, queryArgs.toArray());
                     recordMcpAudit(jdbcTemplate, objectMapper, "list_runs", Map.of(
-                            "status", status == null ? "" : status,
-                            "scopeType", scopeType == null ? "" : scopeType,
-                            "triggerType", triggerType == null ? "" : triggerType,
+                            "measureId", measureId == null ? "" : measureId.toString(),
+                            "limit", limit,
                             "returned", payload.size()
                     ));
                     return new CallToolResult(toJson(objectMapper, payload), false);
@@ -260,47 +365,48 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification explainOutcomeSpec = new McpServerFeatures.SyncToolSpecification(
                 explainOutcome,
                 (exchange, args) -> {
-                    String runId = stringArg(args, "runId");
-                    String employeeId = stringArg(args, "employeeId");
-                    var outcome = runPersistenceService.loadOutcomeExportRows(UUID.fromString(runId)).stream()
-                            .filter(row -> employeeId.equalsIgnoreCase(row.employeeId()))
-                            .findFirst()
-                            .orElseThrow(() -> new IllegalArgumentException("Outcome not found for runId/employeeId"));
-                    Map<String, Object> whyFlagged = Map.of();
-                    Object why = outcome.evidenceJson().get("why_flagged");
-                    if (why instanceof Map<?, ?> map) {
-                        whyFlagged = objectMapper.convertValue(map, new TypeReference<Map<String, Object>>() {
-                        });
-                    }
-                    String explanation = outcome.employeeName()
-                            + " is " + outcome.status()
-                            + " for " + outcome.measureName()
-                            + " (" + outcome.measureVersion() + ")"
-                            + " based on structured evidence only. "
-                            + "Summary: " + outcome.summary() + ". "
-                            + "why_flagged: " + toJson(objectMapper, whyFlagged) + ".";
+                    String caseId = stringArg(args, "caseId");
+                    var caseDetail = caseFlowService.loadCase(UUID.fromString(caseId))
+                            .orElseThrow(() -> new IllegalArgumentException("Case not found: " + caseId));
+                    Map<String, Object> whyFlagged = caseDetail.evidenceJson() == null
+                            ? Map.of()
+                            : objectMapper.convertValue(caseDetail.evidenceJson().getOrDefault("why_flagged", Map.of()), new TypeReference<Map<String, Object>>() {
+                            });
+                    String lastExamDate = whyFlagged.get("lastExamDate") == null ? "unknown date" : whyFlagged.get("lastExamDate").toString();
+                    String daysOverdue = whyFlagged.get("daysOverdue") == null ? "unknown" : whyFlagged.get("daysOverdue").toString();
+                    String complianceWindowDays = whyFlagged.get("complianceWindowDays") == null ? "unknown" : whyFlagged.get("complianceWindowDays").toString();
+                    String roleEligible = whyFlagged.get("roleEligible") == null ? "unknown" : whyFlagged.get("roleEligible").toString();
+                    String siteEligible = whyFlagged.get("siteEligible") == null ? "unknown" : whyFlagged.get("siteEligible").toString();
+                    String waiverStatus = whyFlagged.get("waiverStatus") == null ? "unknown" : whyFlagged.get("waiverStatus").toString();
+                    String explanation = "%s was flagged as %s for the %s measure. Their last qualifying exam was %s (%s days ago), which exceeds the %s-day compliance window. Role eligibility: %s. Site eligibility: %s. Waiver status: %s."
+                            .formatted(
+                                    caseDetail.employeeName(),
+                                    caseDetail.currentOutcomeStatus(),
+                                    caseDetail.measureName(),
+                                    lastExamDate,
+                                    daysOverdue,
+                                    complianceWindowDays,
+                                    roleEligible,
+                                    siteEligible,
+                                    waiverStatus
+                            );
                     Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("run_id", runId);
-                    payload.put("employee_id", outcome.employeeId());
-                    payload.put("employee_name", outcome.employeeName());
-                    payload.put("measure_name", outcome.measureName());
-                    payload.put("measure_version", outcome.measureVersion());
-                    payload.put("status", outcome.status());
-                    payload.put("summary", outcome.summary());
+                    payload.put("case_id", caseId);
+                    payload.put("employee_name", caseDetail.employeeName());
+                    payload.put("measure_name", caseDetail.measureName());
+                    payload.put("status", caseDetail.currentOutcomeStatus());
                     payload.put("explanation", explanation);
                     payload.put("why_flagged", whyFlagged);
-                    payload.put("disclaimer", "Explanation is advisory text derived from evidence_json; compliance remains CQL-driven.");
                     recordMcpAudit(jdbcTemplate, objectMapper, "explain_outcome", Map.of(
-                            "runId", runId,
-                            "employeeId", employeeId,
-                            "measureName", outcome.measureName()
+                            "caseId", caseId,
+                            "outcomeStatus", caseDetail.currentOutcomeStatus()
                     ));
                     return new CallToolResult(toJson(objectMapper, payload), false);
                 }
         );
 
         return McpServer.sync(transportProvider)
-                .serverInfo("workwell-mcp", "1.0.1")
+                .serverInfo("workwell-mcp", "1.1.0")
                 .tools(
                         getCaseSpec,
                         listCasesSpec,

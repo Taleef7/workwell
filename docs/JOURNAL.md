@@ -2,6 +2,22 @@
 
 ## 2026-05-06
 
+### P1 MCP tool expansion completed
+
+Completed:
+- Updated MCP tool contracts in `McpServerConfig` to align with TODO requirements:
+  - `list_measures` now accepts optional `status` (default `Active`) and returns:
+    - `measureId`, `measureName`, `policyRef`, `version`, `status`, `compileStatus`, `testFixtureCount`, `valueSetCount`, `lastUpdated`
+  - `get_measure_version` now returns richer measure-version payload:
+    - `specJson`, truncated `cqlText` (first 500 chars), `compileStatus`, attached value sets (name/OID/version), `testFixtureCount`, `valueSetCount`, lifecycle status.
+  - `list_runs` now accepts `{ measureId?, limit? }` with default `limit=10` and returns run summaries including compliance rate and per-outcome counts.
+  - `explain_outcome` now accepts `{ caseId }` and returns deterministic rule-based explanation derived from case `evidence_json.why_flagged` fields (no AI call).
+- Confirmed `get_case`, `list_cases`, and `get_run_summary` continue to emit `MCP_TOOL_CALLED` audit events with sanitized args.
+- Bumped MCP server version marker to `1.1.0`.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+
 ### P1 exports completed (runs/outcomes/cases contract + docs)
 
 Completed:

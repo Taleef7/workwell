@@ -274,6 +274,8 @@ Document the column contracts for all three in `docs/EXPORTS.md`.
 
 The smoke checklist defines 8 MCP tools. The current implementation has 3. Implement the missing 5.
 
+Status: COMPLETED (2026-05-06). Added the missing MCP tools/contracts and ensured all MCP tools emit `MCP_TOOL_CALLED` audit events with sanitized arguments.
+
 Add to `McpServerConfig.java`:
 
 ### MCP-1: `list_measures`
