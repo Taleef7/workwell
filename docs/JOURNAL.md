@@ -37,6 +37,16 @@ Notes:
 - Local full-suite integration tests that require Docker/Testcontainers still depend on local Docker availability.
 - Option A path now returns real CQL define-level expression results and correctly maps engine output to outcome buckets.
 
+### CI backend bootstrap fix (GitHub Actions)
+
+Completed:
+- Added test-scope Spring AI OpenAI properties in:
+  - `backend/src/test/resources/application.properties`
+- Purpose: ensure Spring Boot test contexts in CI have deterministic OpenAI config placeholders so backend integration tests do not fail context startup when secrets are absent in test runtime.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.AiControllerTest" --tests "com.workwell.compile.CqlCompileValidationServiceTest" --tests "com.workwell.compile.CqlEvaluationServiceTest"` -> PASS
+
 ## 2026-05-05
 
 ### Runs-2 and Runs-3 complete (rerun same scope + scheduler settings)
