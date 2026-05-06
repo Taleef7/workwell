@@ -360,6 +360,8 @@ Show real last-sync timestamps on the admin page, and color-code status badges (
 
 Replace the current string-contains compile check with a real syntactic validation:
 
+Status: COMPLETED (2026-05-06). Real translator validation is wired, compile outcomes now distinguish `COMPILED` vs `WARNINGS` vs `ERROR`, Studio CQL UI renders warning/error sections with line-aware messaging, and activation allows warning-only compile results.
+
 Add dependency: `org.opencds.cqf.fhir:cqf-fhir-cql:3.26.0` (already in the de-risk spike notes as working)
 
 In `MeasureService.compileCql()`:

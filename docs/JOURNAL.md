@@ -2,6 +2,27 @@
 
 ## 2026-05-06
 
+### CQL compile validation polish completed (status + Studio UX)
+
+Completed:
+- Kept translator-based compile pipeline and polished compile status semantics in `MeasureService.compileCql(...)`:
+  - `COMPILED` when no errors and no warnings
+  - `WARNINGS` when no errors but warnings exist
+  - `ERROR` when translator errors exist
+- Updated activation gating behavior:
+  - Activation readiness now treats `COMPILED` and `WARNINGS` as compile-pass states.
+  - Activation transition check now blocks only when compile status is neither `COMPILED` nor `WARNINGS`.
+- Studio CQL tab UX polish in frontend:
+  - Compile badge now reflects exact backend status (`COMPILED` / `WARNINGS` / `ERROR`).
+  - Warnings and errors render in separate color-coded panels.
+  - Added line-aware issue formatting helper so line references are surfaced more clearly to authors.
+  - Added warning guidance banner clarifying that warning-only compile state can still activate.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### P1 admin integrations persistence completed
 
 Completed:

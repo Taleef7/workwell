@@ -78,6 +78,7 @@ export default function StudioMeasurePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
   const [compileErrors, setCompileErrors] = useState<string[]>([]);
 
   const [description, setDescription] = useState("");
@@ -116,6 +117,7 @@ export default function StudioMeasurePage() {
       setRequiredDataElementsText((data.requiredDataElements ?? []).join("\n"));
       setCqlText(data.cqlText ?? "");
       setTestFixtures(data.testFixtures ?? []);
+      setCompileWarnings([]);
       setCompileErrors([]);
       const readinessResponse = await fetch(`${apiBase}/api/measures/${measureId}/activation-readiness`, { cache: "no-store" });
       if (readinessResponse.ok) {
@@ -231,7 +233,8 @@ export default function StudioMeasurePage() {
       setError(`Compile failed (${response.status})`);
       return;
     }
-    setCompileErrors([...(payload.warnings ?? []), ...(payload.errors ?? [])]);
+    setCompileWarnings(payload.warnings ?? []);
+    setCompileErrors(payload.errors ?? []);
     await loadMeasure();
   }
 
@@ -451,16 +454,34 @@ export default function StudioMeasurePage() {
             <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white" onClick={compileCql}>
               Compile
             </button>
-            <span className={`rounded-full px-2 py-1 text-xs font-medium ${measure?.compileStatus === "COMPILED" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
-              {measure?.compileStatus === "COMPILED" ? "Compiled" : "Error"}
+            <span className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(measure?.compileStatus ?? "")}`}>
+              {measure?.compileStatus ?? "UNKNOWN"}
             </span>
           </div>
+          {measure?.compileStatus === "WARNINGS" ? (
+            <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+              Compile completed with warnings. Activation is allowed, but review warnings before moving to Active.
+            </p>
+          ) : null}
+          {compileWarnings.length > 0 ? (
+            <div className="rounded border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-800">Warnings</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+                {compileWarnings.map((entry) => (
+                  <li key={entry}>{formatIssue(entry)}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {compileErrors.length > 0 ? (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-red-700">
-              {compileErrors.map((entry) => (
-                <li key={entry}>{entry}</li>
-              ))}
-            </ul>
+            <div className="rounded border border-red-300 bg-red-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-red-800">Errors</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800">
+                {compileErrors.map((entry) => (
+                  <li key={entry}>{formatIssue(entry)}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -560,4 +581,24 @@ export default function StudioMeasurePage() {
       ) : null}
     </section>
   );
+}
+
+function compileStatusClass(status: string): string {
+  const normalized = status.toUpperCase();
+  if (normalized === "COMPILED") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (normalized === "WARNINGS") {
+    return "bg-amber-100 text-amber-800";
+  }
+  return "bg-red-100 text-red-700";
+}
+
+function formatIssue(issue: string): string {
+  const match = issue.match(/line\\s+(\\d+)/i) ?? issue.match(/\\[(\\d+):(\\d+)\\]/);
+  if (!match) {
+    return issue;
+  }
+  const line = match[1];
+  return `Line ${line}: ${issue}`;
 }

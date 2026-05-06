@@ -247,7 +247,10 @@ public class MeasureService {
         CqlCompileValidationService.CompileResult compileResult = cqlCompileValidationService.validate(cqlText);
         List<String> mergedWarnings = new ArrayList<>(warnings);
         mergedWarnings.addAll(compileResult.warnings());
-        CompileResponse response = new CompileResponse(compileResult.status(), mergedWarnings, compileResult.errors());
+        String compileStatus = compileResult.errors().isEmpty()
+                ? (mergedWarnings.isEmpty() ? "COMPILED" : "WARNINGS")
+                : "ERROR";
+        CompileResponse response = new CompileResponse(compileStatus, mergedWarnings, compileResult.errors());
 
         jdbcTemplate.update(
                 "UPDATE measure_versions SET compile_status = ?, compile_result = ?::jsonb WHERE id = ?",
@@ -369,11 +372,11 @@ public class MeasureService {
         List<ValueSetRef> attachedValueSets = listAttachedValueSets(id);
         List<TestFixture> fixtures = loadTestFixtures(id);
         TestValidationResult testValidationResult = validateTests(id);
-        boolean compilePassed = "COMPILED".equalsIgnoreCase(compileStatus);
+        boolean compilePassed = allowsActivationCompileStatus(compileStatus);
         boolean ready = compilePassed && testValidationResult.passed();
         List<String> blockers = new ArrayList<>();
         if (!compilePassed) {
-            blockers.add("Compile status must be COMPILED.");
+            blockers.add("Compile status must be COMPILED or WARNINGS.");
         }
         if (!testValidationResult.passed()) {
             blockers.addAll(testValidationResult.failures());
@@ -404,8 +407,8 @@ public class MeasureService {
         if (!allowed) {
             throw new IllegalArgumentException("Invalid transition from " + currentStatus + " to " + targetStatus);
         }
-        if ("Approved".equals(currentStatus) && "Active".equals(targetStatus) && !"COMPILED".equals(compileStatus)) {
-            throw new IllegalArgumentException("Measure cannot be activated until CQL compile status is COMPILED");
+        if ("Approved".equals(currentStatus) && "Active".equals(targetStatus) && !allowsActivationCompileStatus(compileStatus)) {
+            throw new IllegalArgumentException("Measure cannot be activated until CQL compile status is COMPILED or WARNINGS");
         }
         ActivationReadiness readiness = activationReadiness(id);
         if ("Approved".equals(currentStatus) && "Active".equals(targetStatus)) {
@@ -853,6 +856,10 @@ public class MeasureService {
 
     private String stringOrEmpty(Object value) {
         return value == null ? "" : value.toString();
+    }
+
+    private boolean allowsActivationCompileStatus(String compileStatus) {
+        return "COMPILED".equalsIgnoreCase(compileStatus) || "WARNINGS".equalsIgnoreCase(compileStatus);
     }
 
     private void insertAuditEvent(String eventType, UUID measureVersionId, String actor, Map<String, Object> payload) {
