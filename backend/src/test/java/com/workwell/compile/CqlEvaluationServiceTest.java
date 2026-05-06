@@ -33,11 +33,11 @@ class CqlEvaluationServiceTest {
         );
 
         DemoOutcome overdue = payload.outcomes().stream()
-                .filter(o -> "emp-003".equals(o.subjectId()))
+                .filter(o -> "emp-006".equals(o.subjectId()))
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals("OVERDUE", overdue.outcome());
+        assertEquals("OVERDUE", overdue.outcome(), "Outcome payload: " + overdue.evidenceJson());
         List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) overdue.evidenceJson().get("expressionResults");
         assertNotNull(expressionResults);
         boolean hasOverdueTrue = expressionResults.stream().anyMatch(row ->
@@ -76,7 +76,7 @@ class CqlEvaluationServiceTest {
         boolean hasSuccessfulOthers = payload.outcomes().stream()
                 .filter(o -> !"emp-002".equals(o.subjectId()))
                 .anyMatch(o -> o.evidenceJson().get("expressionResults") != null);
-        assertTrue(hasSuccessfulOthers, "Expected other employees to evaluate successfully");
+        assertTrue(hasSuccessfulOthers, "Expected other employees to evaluate successfully. Outcomes: " + payload.outcomes());
 
         boolean everyoneFailed = payload.outcomes().stream()
                 .allMatch(o -> "MISSING_DATA".equals(o.outcome()) && o.evidenceJson().containsKey("evaluationError"));

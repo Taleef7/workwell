@@ -39,7 +39,6 @@ public class CqlCompileValidationService {
 
             if (errors.isEmpty()) {
                 try {
-                    translator.toXml();
                     CompiledLibrary translated = translator.getTranslatedLibrary();
                     VersionedIdentifier id = translated == null ? null : translated.getIdentifier();
                     if (id == null || id.getId() == null || id.getId().isBlank()) {

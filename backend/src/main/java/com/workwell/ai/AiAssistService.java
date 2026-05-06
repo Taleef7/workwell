@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -34,7 +35,7 @@ public class AiAssistService {
             RunPersistenceService runPersistenceService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
-            ChatClient.Builder chatClientBuilder,
+            ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
             @Value("${spring.ai.openai.chat.options.model:gpt-5.4-nano}") String modelName,
             @Value("${workwell.ai.openai.fallback-model:gpt-4o-mini}") String fallbackModelName
     ) {
@@ -42,7 +43,8 @@ public class AiAssistService {
         this.runPersistenceService = runPersistenceService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
-        this.chatClient = chatClientBuilder.build();
+        ChatClient.Builder chatClientBuilder = chatClientBuilderProvider.getIfAvailable();
+        this.chatClient = chatClientBuilder == null ? null : chatClientBuilder.build();
         this.modelName = modelName;
         this.fallbackModelName = fallbackModelName;
     }
@@ -268,6 +270,9 @@ public class AiAssistService {
     }
 
     private String callWithModelFallback(String systemPrompt, String userPrompt) {
+        if (chatClient == null) {
+            throw new IllegalStateException("OpenAI ChatClient is not configured.");
+        }
         Exception primaryError = null;
         try {
             return chatClient.prompt()

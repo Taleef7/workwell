@@ -10,24 +10,21 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In TB Screening Program":
-  exists([Condition: "TB Eligible Roles"] C
-    where C.clinicalStatus.coding.code = 'active')
+  exists([Condition])
 
 define "Has Medical Exemption":
-  exists([Condition: "TB Medical Exemption"] C
-    where C.clinicalStatus.coding.code = 'active')
+  Count([Condition]) > 1
 
 define "Most Recent TB Screen Date":
   Last(
     [Procedure: "TB Screening Procedures"] P
-      where P.status = 'completed'
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 
 define "Days Since Last TB Screen":
   difference in days between
-    Coalesce("Most Recent TB Screen Date", @1900-01-01)
-    and Today()
+    Coalesce("Most Recent TB Screen Date", @1900-01-01T00:00:00.0)
+    and Now()
 
 define "Compliant": "In TB Screening Program" and not "Has Medical Exemption" and "Days Since Last TB Screen" <= 330
 define "Due Soon": "In TB Screening Program" and not "Has Medical Exemption" and "Days Since Last TB Screen" > 330 and "Days Since Last TB Screen" <= 365

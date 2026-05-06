@@ -24,6 +24,7 @@ dependencies {
 	implementation("org.opencds.cqf.fhir:cqf-fhir-cql:3.26.0")
 	implementation("org.opencds.cqf.fhir:cqf-fhir-utility:3.26.0")
 	implementation("info.cqframework:model-jaxb:3.26.0")
+	implementation("info.cqframework:elm-jackson:3.26.0")
 	implementation("io.modelcontextprotocol.sdk:mcp:0.10.0")
 	implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc:0.10.0")
 	implementation("org.springframework.boot:spring-boot-starter-web")

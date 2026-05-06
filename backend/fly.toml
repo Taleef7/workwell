@@ -11,7 +11,7 @@ primary_region = 'ord'
   context = '..'
 
 [env]
-  JAVA_OPTS = '-Xmx384m -Xss256k'
+  JAVA_OPTS = '-Xmx768m -Xms256m -Xss256k'
   SPRING_PROFILES_ACTIVE = 'prod'
 
 [http_service]
@@ -30,6 +30,6 @@ primary_region = 'ord'
     path = '/actuator/health'
 
 [[vm]]
-  memory = '512mb'
+  memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1

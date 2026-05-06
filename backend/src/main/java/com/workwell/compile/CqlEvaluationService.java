@@ -6,6 +6,10 @@ import ca.uhn.fhir.repository.IRepository;
 import com.workwell.measure.SyntheticEmployeeCatalog;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
+import org.cqframework.cql.cql2elm.CqlTranslator;
+import org.cqframework.cql.cql2elm.LibraryManager;
+import org.cqframework.cql.cql2elm.ModelManager;
+import org.cqframework.cql.cql2elm.quick.FhirLibrarySourceProvider;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,11 +19,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Attachment;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CanonicalType;
 import org.hl7.fhir.r4.model.Enumerations;
+import org.hl7.fhir.r4.model.Expression;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Library;
 import org.hl7.fhir.r4.model.Measure;
@@ -99,13 +106,13 @@ public class CqlEvaluationService {
 
         IRepository repository = new InMemoryFhirRepository(context);
         List<IBaseResource> allResources = new ArrayList<>();
-        Library library = buildLibrary(cqlText, measureName);
-        Measure measure = buildMeasure(measureName, measureVersion, library.getUrl());
+        Library library = buildLibrary(cqlText, measureName, measureVersion);
+        Measure measure = buildMeasure(measureName, measureVersion, library.getUrl() + "|" + library.getVersion());
         allResources.add(measure);
         allResources.add(library);
         bundle.getEntry().forEach(e -> allResources.add(e.getResource()));
         for (IBaseResource resource : allResources) {
-            repository.update(resource, new LinkedHashMap<>());
+            repository.create(resource, new LinkedHashMap<>());
         }
 
         CqlEngine cqlEngine = Engines.forRepository(repository, options.getEvaluationSettings());
@@ -127,7 +134,20 @@ public class CqlEvaluationService {
         Map<String, EvaluationResult> bySubject = composite.getResultsPerMeasure().values().stream().findFirst().orElse(Map.of());
         EvaluationResult eval = bySubject.get(subjectId);
         if (eval == null) {
-            throw new IllegalStateException("No evaluation result returned for " + subjectId);
+            eval = bySubject.get(input.employee().externalId());
+        }
+        if (eval == null) {
+            eval = bySubject.entrySet().stream()
+                    .filter(e -> e.getKey() != null && e.getKey().endsWith(input.employee().externalId()))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (eval == null && bySubject.size() == 1) {
+            eval = bySubject.values().stream().findFirst().orElse(null);
+        }
+        if (eval == null) {
+            throw new IllegalStateException("No evaluation result returned for " + subjectId + ". keys=" + bySubject.keySet());
         }
         return eval;
     }
@@ -189,6 +209,10 @@ public class CqlEvaluationService {
         if (value == null) {
             return null;
         }
+        Object unwrapped = unwrapExpressionResult(value);
+        if (unwrapped != value) {
+            return normalizeExpressionValue(unwrapped);
+        }
         String rendered = value.toString();
         if ("true".equalsIgnoreCase(rendered) || "false".equalsIgnoreCase(rendered)) {
             return Boolean.parseBoolean(rendered);
@@ -200,15 +224,78 @@ public class CqlEvaluationService {
         }
     }
 
-    private Library buildLibrary(String cqlText, String measureName) {
+    private Object unwrapExpressionResult(Object value) {
+        Class<?> type = value.getClass();
+        String className = type.getName();
+        if (!className.contains("ExpressionResult")) {
+            return value;
+        }
+        for (String methodName : List.of("getValue", "value", "getResult", "result")) {
+            try {
+                var method = type.getMethod(methodName);
+                return method.invoke(value);
+            } catch (Exception ignored) {
+            }
+        }
+        for (String fieldName : List.of("value", "result")) {
+            try {
+                var field = type.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(value);
+            } catch (Exception ignored) {
+            }
+        }
+        return value;
+    }
+
+    private Library buildLibrary(String cqlText, String measureName, String measureVersion) {
         Library library = new Library();
-        String libId = measureName.toLowerCase().replace(" ", "-") + "-library";
-        library.setId(libId);
+        CqlLibraryMetadata metadata = parseCqlLibraryMetadata(cqlText);
+        String libId = metadata.name();
+        String resolvedVersion = metadata.version() == null || metadata.version().isBlank() ? measureVersion : metadata.version();
+        library.setId(new IdType("Library", libId));
         library.setUrl("http://workwell.local/Library/" + libId);
+        library.setVersion(resolvedVersion);
+        library.setName(libId);
+        library.setTitle(measureName + " Logic Library");
         library.setStatus(Enumerations.PublicationStatus.ACTIVE);
-        library.setType(new org.hl7.fhir.r4.model.CodeableConcept().setText("logic-library"));
+        library.setType(new org.hl7.fhir.r4.model.CodeableConcept().addCoding(
+                new org.hl7.fhir.r4.model.Coding()
+                        .setSystem("http://terminology.hl7.org/CodeSystem/library-type")
+                        .setCode("logic-library")
+        ));
         library.addContent(new Attachment().setContentType("text/cql").setData(cqlText.getBytes(StandardCharsets.UTF_8)));
+        String elmJson = compileToElmJson(cqlText);
+        if (elmJson != null && !elmJson.isBlank()) {
+            library.addContent(new Attachment()
+                    .setContentType("application/elm+json")
+                    .setData(elmJson.getBytes(StandardCharsets.UTF_8)));
+        }
         return library;
+    }
+
+    private CqlLibraryMetadata parseCqlLibraryMetadata(String cqlText) {
+        Pattern pattern = Pattern.compile("(?im)^\\s*library\\s+([A-Za-z0-9_\\-]+)\\s+version\\s+'([^']+)'\\s*$");
+        Matcher matcher = pattern.matcher(cqlText);
+        if (matcher.find()) {
+            return new CqlLibraryMetadata(matcher.group(1), matcher.group(2));
+        }
+        return new CqlLibraryMetadata("WorkWellLibrary", null);
+    }
+
+    private String compileToElmJson(String cqlText) {
+        try {
+            ModelManager modelManager = new ModelManager();
+            LibraryManager libraryManager = new LibraryManager(modelManager);
+            libraryManager.getLibrarySourceLoader().registerProvider(new FhirLibrarySourceProvider());
+            CqlTranslator translator = CqlTranslator.fromText(cqlText, libraryManager);
+            if (!translator.getErrors().isEmpty()) {
+                return null;
+            }
+            return translator.toJson();
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private Measure buildMeasure(String measureName, String measureVersion, String libraryUrl) {
@@ -221,6 +308,39 @@ public class CqlEvaluationService {
         measure.setTitle(measureName);
         measure.setStatus(Enumerations.PublicationStatus.ACTIVE);
         measure.addLibrary(libraryUrl);
+        measure.getScoring().addCoding()
+                .setSystem("http://terminology.hl7.org/CodeSystem/measure-scoring")
+                .setCode("proportion");
+
+        Measure.MeasureGroupComponent group = measure.addGroup();
+        group.setId(id + "-group");
+        group.addPopulation()
+                .setCode(new org.hl7.fhir.r4.model.CodeableConcept().addCoding(
+                        new org.hl7.fhir.r4.model.Coding()
+                                .setSystem("http://terminology.hl7.org/CodeSystem/measure-population")
+                                .setCode("initial-population")
+                ))
+                .setCriteria(new Expression()
+                        .setLanguage("text/cql-identifier")
+                        .setExpression("Initial Population"));
+        group.addPopulation()
+                .setCode(new org.hl7.fhir.r4.model.CodeableConcept().addCoding(
+                        new org.hl7.fhir.r4.model.Coding()
+                                .setSystem("http://terminology.hl7.org/CodeSystem/measure-population")
+                                .setCode("denominator")
+                ))
+                .setCriteria(new Expression()
+                        .setLanguage("text/cql-identifier")
+                        .setExpression("Initial Population"));
+        group.addPopulation()
+                .setCode(new org.hl7.fhir.r4.model.CodeableConcept().addCoding(
+                        new org.hl7.fhir.r4.model.Coding()
+                                .setSystem("http://terminology.hl7.org/CodeSystem/measure-population")
+                                .setCode("numerator")
+                ))
+                .setCriteria(new Expression()
+                        .setLanguage("text/cql-identifier")
+                        .setExpression("Compliant"));
         return measure;
     }
 
@@ -229,7 +349,7 @@ public class CqlEvaluationService {
             case "Audiogram" -> List.of(
                     input("emp-001", 120, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-002", 350, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-003", 420, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-006", 420, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-004", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-005", 600, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false)
             );
@@ -290,6 +410,12 @@ public class CqlEvaluationService {
     private record SeededInput(
             SyntheticEmployeeCatalog.EmployeeProfile employee,
             SyntheticFhirBundleBuilder.ExamConfig config
+    ) {
+    }
+
+    private record CqlLibraryMetadata(
+            String name,
+            String version
     ) {
     }
 }

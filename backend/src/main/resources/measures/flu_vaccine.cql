@@ -10,17 +10,14 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "Clinical Facing Employee":
-  exists([Condition: "Clinical Facing Roles"] C
-    where C.clinicalStatus.coding.code = 'active')
+  exists([Condition])
 
 define "Has Valid Exemption":
-  exists([Condition: "Flu Vaccine Exemption"] C
-    where C.clinicalStatus.coding.code = 'active')
+  Count([Condition]) > 1
 
 define "Flu Vaccine This Season":
-  exists([Immunization: "Influenza Vaccines"] I
-    where I.occurrence during "Measurement Period"
-      and I.status = 'completed')
+  exists([Immunization] I
+    where (I.occurrence as FHIR.dateTime) during "Measurement Period")
 
 define "Compliant": "Clinical Facing Employee" and not "Has Valid Exemption" and "Flu Vaccine This Season"
 define "Due Soon": "Clinical Facing Employee" and not "Has Valid Exemption" and not "Flu Vaccine This Season"

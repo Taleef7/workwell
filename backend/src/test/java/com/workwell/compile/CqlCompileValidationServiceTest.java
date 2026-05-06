@@ -25,7 +25,7 @@ class CqlCompileValidationServiceTest {
         for (String file : files) {
             String cql = readClasspathText(file);
             CqlCompileValidationService.CompileResult result = service.validate(cql);
-            assertEquals("COMPILED", result.status(), "Expected COMPILED for " + file);
+            assertEquals("COMPILED", result.status(), "Expected COMPILED for " + file + " but got errors: " + result.errors());
             assertTrue(result.errors().isEmpty(), "Expected empty errors for " + file + " but got: " + result.errors());
         }
     }

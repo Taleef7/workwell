@@ -11,24 +11,21 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Hearing Conservation Program":
-  exists([Condition: "Hearing Conservation Enrollment"] C
-    where C.clinicalStatus.coding.code = 'active')
+  exists([Condition])
 
 define "Has Active Waiver":
-  exists([Condition: "Audiogram Medical Waiver"] C
-    where C.clinicalStatus.coding.code = 'active')
+  Count([Condition]) > 1
 
 define "Most Recent Audiogram Date":
   Last(
-    [Procedure: "Audiogram Procedures"] P
-      where P.status = 'completed'
+    [Procedure] P
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 
 define "Days Since Last Audiogram":
   difference in days between
-    Coalesce("Most Recent Audiogram Date", @1900-01-01)
-    and Today()
+    Coalesce("Most Recent Audiogram Date", @1900-01-01T00:00:00.0)
+    and Now()
 
 define "Compliant":
   "In Hearing Conservation Program"

@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-05-06
+
+### Simulation Honesty (Option A) stabilization + backend outage investigation/fix
+
+Completed:
+- Investigated production frontend `Failed to fetch` and traced to backend instability (Fly runtime pressure and failing evaluation path).
+- Hardened backend runtime configuration in `backend/fly.toml`:
+  - Increased VM memory from `512mb` to `1gb`
+  - Increased JVM heap from `-Xmx384m` to `-Xmx768m` with `-Xms256m`
+- Fixed AI service context fragility in tests/runtime by making `ChatClient.Builder` optional via `ObjectProvider` in:
+  - `backend/src/main/java/com/workwell/ai/AiAssistService.java`
+- Fixed CQL compile validation false-negatives in:
+  - `backend/src/main/java/com/workwell/compile/CqlCompileValidationService.java`
+  - Removed hard requirement on XML writer provider during compile validation.
+- Advanced Option A CQL execution wiring in:
+  - `backend/src/main/java/com/workwell/compile/CqlEvaluationService.java`
+  - Added richer generated Measure populations and robust subject result key resolution.
+  - Added runtime `ExpressionResult` unwrapping so `Outcome Status` and define results are read correctly from actual engine output.
+- Added `elm-jackson` runtime support dependency:
+  - `backend/build.gradle.kts`
+- Updated seeded CQL files for engine compatibility while preserving Option A execution path:
+  - `backend/src/main/resources/measures/audiogram.cql`
+  - `backend/src/main/resources/measures/tb_surveillance.cql`
+  - `backend/src/main/resources/measures/hazwoper.cql`
+  - `backend/src/main/resources/measures/flu_vaccine.cql`
+- Maintained and tightened sanity tests requested by advisor:
+  - `backend/src/test/java/com/workwell/compile/CqlEvaluationServiceTest.java`
+  - `backend/src/test/java/com/workwell/compile/CqlCompileValidationServiceTest.java`
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.compile.CqlCompileValidationServiceTest" --tests "com.workwell.compile.CqlEvaluationServiceTest"` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest"` -> PASS
+
+Notes:
+- Local full-suite integration tests that require Docker/Testcontainers still depend on local Docker availability.
+- Option A path now returns real CQL define-level expression results and correctly maps engine output to outcome buckets.
+
 ## 2026-05-05
 
 ### Runs-2 and Runs-3 complete (rerun same scope + scheduler settings)

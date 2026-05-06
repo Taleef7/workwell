@@ -27,6 +27,11 @@ This is a credibility-killing gap. Fix it in one of two ways:
 
 ### Option A — Wire Real CQL Evaluation (Preferred for full authenticity)
 
+Status update (2026-05-06):
+- In progress and now active as the primary manual run path.
+- `CqlEvaluationService` is wired into run execution, seeded CQL compile/evaluation sanity tests are passing, and expression-level results are being read from engine outputs.
+- Remaining work continues under this option only; no rollback to hidden demo-only evaluation.
+
 Implement a `CqlEvaluationService` in `com.workwell.compile` that:
 - Takes a `measureVersionId` and a list of employee IDs as input
 - Loads the CQL text from `measure_versions.cql_text`

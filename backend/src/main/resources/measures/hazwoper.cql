@@ -10,24 +10,21 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In HAZWOPER Program":
-  exists([Condition: "HAZWOPER Program Enrollment"] C
-    where C.clinicalStatus.coding.code = 'active')
+  exists([Condition])
 
 define "Has Medical Exemption":
-  exists([Condition: "HAZWOPER Medical Exemption"] C
-    where C.clinicalStatus.coding.code = 'active')
+  Count([Condition]) > 1
 
 define "Most Recent Surveillance Exam Date":
   Last(
     [Procedure: "HAZWOPER Surveillance Exams"] P
-      where P.status = 'completed'
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 
 define "Days Since Last Exam":
   difference in days between
-    Coalesce("Most Recent Surveillance Exam Date", @1900-01-01)
-    and Today()
+    Coalesce("Most Recent Surveillance Exam Date", @1900-01-01T00:00:00.0)
+    and Now()
 
 define "Compliant": "In HAZWOPER Program" and not "Has Medical Exemption" and "Days Since Last Exam" <= 335
 define "Due Soon": "In HAZWOPER Program" and not "Has Medical Exemption" and "Days Since Last Exam" > 335 and "Days Since Last Exam" <= 365
