@@ -36,7 +36,7 @@ class ExportControllerTest {
                         .param("triggerType", "manual")
                         .param("limit", "20"))
                 .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"runs.csv\""))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"runs-export.csv\""))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.parseMediaType("text/csv")))
                 .andExpect(content().string("\"runId\"\n\"1\"\n"));
     }
@@ -54,7 +54,7 @@ class ExportControllerTest {
 
     @Test
     void exportsCasesCsv() throws Exception {
-        when(csvExportService.exportCaseCsv("open", null, null, null, null)).thenReturn("\"caseId\"\n\"abc\"\n");
+        when(csvExportService.exportCaseCsv(null, null, null, null, null)).thenReturn("\"caseId\"\n\"abc\"\n");
 
         mockMvc.perform(get("/api/exports/cases"))
                 .andExpect(status().isOk())

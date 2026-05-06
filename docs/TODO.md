@@ -242,6 +242,8 @@ Add `/programs/{measureId}` page showing:
 
 The smoke checklist defines these endpoints. Implement them.
 
+Status: COMPLETED (2026-05-06). Added contract-complete CSV exports for runs/outcomes/cases, wired Runs/Cases export actions, and documented schemas in `docs/EXPORTS.md`.
+
 ### Exports-1: Run Summary Export
 
 `GET /api/exports/runs?format=csv` in a new `ExportController`:

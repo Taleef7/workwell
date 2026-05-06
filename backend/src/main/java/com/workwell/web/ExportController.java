@@ -27,7 +27,7 @@ public class ExportController {
     ) {
         return csvResponse(
                 format,
-                "runs.csv",
+                "runs-export.csv",
                 csvExportService.exportRunSummaryCsv(status, scopeType, triggerType, limit)
         );
     }
@@ -43,7 +43,7 @@ public class ExportController {
     @GetMapping("/api/exports/cases")
     public ResponseEntity<String> exportCases(
             @RequestParam(name = "format", defaultValue = "csv") String format,
-            @RequestParam(name = "status", required = false, defaultValue = "open") String status,
+            @RequestParam(name = "status", required = false) String status,
             @RequestParam(name = "measureId", required = false) UUID measureId,
             @RequestParam(name = "priority", required = false) String priority,
             @RequestParam(name = "assignee", required = false) String assignee,

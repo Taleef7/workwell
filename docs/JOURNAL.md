@@ -2,6 +2,26 @@
 
 ## 2026-05-06
 
+### P1 exports completed (runs/outcomes/cases contract + docs)
+
+Completed:
+- Upgraded `ExportController` CSV contracts:
+  - `GET /api/exports/runs` now returns `runs-export.csv`.
+  - `GET /api/exports/cases` status filter is optional (no forced `open` default).
+- Reworked `CsvExportService` to use SQL-backed export queries with full column contracts:
+  - Runs export now includes versioned scope metadata, all five outcome buckets, pass rate, and data freshness timestamp.
+  - Outcomes export now includes employee role/site and `why_flagged`-derived evidence fields (`lastExamDate`, `complianceWindowDays`, `daysOverdue`, `roleEligible`, `siteEligible`, `waiverStatus`).
+  - Cases export now includes role, next action, created/updated/closed timestamps, and latest outreach delivery state.
+- Added export contract documentation:
+  - `docs/EXPORTS.md`
+- Updated TODO status for P1 CSV exports as completed.
+
+Verification:
+- `backend\\gradlew.bat test --tests \"com.workwell.export.CsvExportServiceTest\" --tests \"com.workwell.web.ExportControllerTest\"` -> PASS
+- `backend\\gradlew.bat test` -> FAIL on Docker/Testcontainers bootstrap (`DockerClientProviderStrategy`) for integration tests in this local environment
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### Simulation Honesty (Option A) stabilization + backend outage investigation/fix
 
 Completed:
