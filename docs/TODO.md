@@ -327,6 +327,8 @@ Add a delivery status badge on the case detail timeline showing QUEUED/SENT/FAIL
 
 The current admin panel returns hardcoded status. Make it stateful.
 
+Status: COMPLETED (2026-05-06). Added persisted `integration_health` table, seeded `fhir/mcp/ai/hris`, wired GET+manual-sync endpoints to DB state, added OpenAI + MCP health checks, and updated admin UI status badges and last-sync timestamps.
+
 Add a `integration_health` table in a new migration:
 ```sql
 CREATE TABLE integration_health (

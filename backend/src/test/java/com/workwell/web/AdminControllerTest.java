@@ -37,19 +37,20 @@ class AdminControllerTest {
     @Test
     void listsIntegrationHealth() throws Exception {
         when(integrationHealthService.listHealth()).thenReturn(List.of(
-                new IntegrationHealthService.IntegrationHealth("fhir", "healthy", Instant.parse("2026-05-05T10:00:00Z"), "ok")
+                new IntegrationHealthService.IntegrationHealth("fhir", "FHIR", "healthy", Instant.parse("2026-05-05T10:00:00Z"), "ok", java.util.Map.of())
         ));
 
         mockMvc.perform(get("/api/admin/integrations"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].integration").value("fhir"))
+                .andExpect(jsonPath("$[0].displayName").value("FHIR"))
                 .andExpect(jsonPath("$[0].status").value("healthy"));
     }
 
     @Test
     void triggersIntegrationSync() throws Exception {
         when(integrationHealthService.triggerManualSync("mcp", "admin-user")).thenReturn(
-                new IntegrationHealthService.IntegrationHealth("mcp", "healthy", Instant.parse("2026-05-05T10:05:00Z"), "sync complete")
+                new IntegrationHealthService.IntegrationHealth("mcp", "MCP", "healthy", Instant.parse("2026-05-05T10:05:00Z"), "sync complete", java.util.Map.of("sseUrl", "http://127.0.0.1:8080/sse"))
         );
 
         mockMvc.perform(post("/api/admin/integrations/mcp/sync"))

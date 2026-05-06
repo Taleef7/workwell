@@ -2,6 +2,32 @@
 
 ## 2026-05-06
 
+### P1 admin integrations persistence completed
+
+Completed:
+- Added DB migration for persistent integration health:
+  - `backend/src/main/resources/db/migration/V002__integration_health.sql`
+  - Creates `integration_health` table and seeds rows for `fhir`, `mcp`, `ai`, `hris`.
+- Replaced hardcoded integration-state logic with table-backed service in:
+  - `backend/src/main/java/com/workwell/admin/IntegrationHealthService.java`
+- `GET /api/admin/integrations` now reads persisted rows (`display_name`, `status`, `last_sync_at`, `last_sync_result`, `config_json`).
+- `POST /api/admin/integrations/{integration}/sync` now updates persisted state and emits audit:
+  - `INTEGRATION_SYNC_TRIGGERED` with `{ integrationId, result, actor, message, syncedAt }`.
+- Implemented manual-sync health checks:
+  - `ai`: OpenAI API health ping against `/v1/responses` with configured model.
+  - `mcp`: SSE reachability probe against configured `workwell.mcp.sse-url` (default `http://127.0.0.1:8080/sse`).
+  - `fhir` and `hris`: deterministic healthy manual-sync stub result with persisted timestamps.
+- Updated Admin UI integration cards:
+  - Shows `displayName` from API.
+  - Color-coded status badges (healthy/degraded-or-stale/unknown).
+  - Continues to show real last-sync timestamps and sync result text.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests \"com.workwell.web.AdminControllerTest\"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### P1 outreach delivery-state API hardening completed
 
 Completed:

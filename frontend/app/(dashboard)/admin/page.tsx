@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type IntegrationHealth = {
   integration: string;
+  displayName: string;
   status: string;
   lastSyncAt: string | null;
   detail: string;
+  config: Record<string, unknown>;
 };
 
 type SchedulerStatus = {
@@ -129,8 +131,10 @@ export default function AdminPage() {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {integrations.map((item) => (
           <article key={item.integration} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.integration}</p>
-            <p className="mt-2 text-lg font-semibold text-slate-900">{item.status}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.displayName}</p>
+            <p className="mt-2">
+              <span className={statusBadgeClass(item.status)}>{item.status}</span>
+            </p>
             <p className="mt-2 text-xs text-slate-500">
               Last sync: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "Never"}
             </p>
@@ -148,4 +152,15 @@ export default function AdminPage() {
       </div>
     </section>
   );
+}
+
+function statusBadgeClass(status: string) {
+  const normalized = (status ?? "").toLowerCase();
+  if (normalized === "healthy") {
+    return "rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-900";
+  }
+  if (normalized === "degraded" || normalized === "stale") {
+    return "rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900";
+  }
+  return "rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700";
 }

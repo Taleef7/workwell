@@ -2,96 +2,182 @@ package com.workwell.admin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class IntegrationHealthService {
-    private static final List<String> INTEGRATIONS = List.of("fhir", "mcp", "ai");
+    private static final Set<String> INTEGRATIONS = Set.of("fhir", "mcp", "ai", "hris");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
+    private final String openAiApiKey;
+    private final String openAiModel;
+    private final String mcpSseUrl;
 
-    public IntegrationHealthService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public IntegrationHealthService(
+            JdbcTemplate jdbcTemplate,
+            ObjectMapper objectMapper,
+            @Value("${spring.ai.openai.api-key:}") String openAiApiKey,
+            @Value("${spring.ai.openai.chat.options.model:gpt-5.4-nano}") String openAiModel,
+            @Value("${workwell.mcp.sse-url:http://127.0.0.1:8080/sse}") String mcpSseUrl
+    ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        this.openAiApiKey = openAiApiKey == null ? "" : openAiApiKey.trim();
+        this.openAiModel = openAiModel == null || openAiModel.isBlank() ? "gpt-5.4-nano" : openAiModel.trim();
+        this.mcpSseUrl = mcpSseUrl == null || mcpSseUrl.isBlank() ? "http://127.0.0.1:8080/sse" : mcpSseUrl.trim();
     }
 
     public List<IntegrationHealth> listHealth() {
-        return INTEGRATIONS.stream().map(this::healthFor).toList();
+        return jdbcTemplate.query(
+                """
+                        SELECT id, display_name, status, last_sync_at, last_sync_result, config_json
+                        FROM integration_health
+                        ORDER BY id ASC
+                        """,
+                (rs, rowNum) -> new IntegrationHealth(
+                        rs.getString("id"),
+                        rs.getString("display_name"),
+                        rs.getString("status"),
+                        rs.getTimestamp("last_sync_at") == null ? null : rs.getTimestamp("last_sync_at").toInstant(),
+                        rs.getString("last_sync_result"),
+                        parseJsonMap(rs.getString("config_json"))
+                )
+        );
     }
 
     public IntegrationHealth triggerManualSync(String integration, String actor) {
-        validateIntegration(integration);
-        Instant triggeredAt = Instant.now();
+        String integrationId = normalizeIntegration(integration);
+        Instant now = Instant.now();
+
+        SyncResult syncResult = switch (integrationId) {
+            case "ai" -> checkAiHealth();
+            case "mcp" -> checkMcpHealth();
+            case "fhir" -> new SyncResult("healthy", "Manual sync triggered", Map.of("mode", "manual-stub"));
+            case "hris" -> new SyncResult("healthy", "Manual sync triggered", Map.of("mode", "manual-stub"));
+            default -> throw new IllegalArgumentException("Unsupported integration: " + integration);
+        };
+
+        jdbcTemplate.update(
+                """
+                        UPDATE integration_health
+                        SET status = ?,
+                            last_sync_at = ?,
+                            last_sync_result = ?,
+                            config_json = ?::jsonb
+                        WHERE id = ?
+                        """,
+                syncResult.status(),
+                java.sql.Timestamp.from(now),
+                syncResult.message(),
+                toJson(syncResult.config()),
+                integrationId
+        );
 
         insertAuditEvent(
                 "INTEGRATION_SYNC_TRIGGERED",
                 actor,
                 Map.of(
-                        "integration", integration,
-                        "mode", "manual",
-                        "status", "QUEUED"
+                        "integrationId", integrationId,
+                        "result", syncResult.status(),
+                        "actor", actor,
+                        "message", syncResult.message(),
+                        "syncedAt", now.toString()
                 )
         );
 
-        insertAuditEvent(
-                "INTEGRATION_SYNC_COMPLETED",
-                actor,
-                Map.of(
-                        "integration", integration,
-                        "mode", "manual",
-                        "status", "SUCCESS",
-                        "durationMs", 250
-                )
-        );
-
-        return new IntegrationHealth(
-                integration,
-                "healthy",
-                triggeredAt,
-                "Manual sync stub completed; external side effects are disabled in MVP."
-        );
+        return loadIntegration(integrationId).orElseThrow(() -> new IllegalStateException("Integration row missing: " + integrationId));
     }
 
-    private IntegrationHealth healthFor(String integration) {
-        Instant lastSuccess = jdbcTemplate.query(
+    private Optional<IntegrationHealth> loadIntegration(String integrationId) {
+        List<IntegrationHealth> rows = jdbcTemplate.query(
                 """
-                        SELECT occurred_at
-                        FROM audit_events
-                        WHERE event_type = 'INTEGRATION_SYNC_COMPLETED'
-                          AND payload_json ->> 'integration' = ?
-                          AND payload_json ->> 'status' = 'SUCCESS'
-                        ORDER BY occurred_at DESC
-                        LIMIT 1
+                        SELECT id, display_name, status, last_sync_at, last_sync_result, config_json
+                        FROM integration_health
+                        WHERE id = ?
                         """,
-                rs -> rs.next() ? rs.getTimestamp("occurred_at").toInstant() : null,
-                integration
+                (rs, rowNum) -> new IntegrationHealth(
+                        rs.getString("id"),
+                        rs.getString("display_name"),
+                        rs.getString("status"),
+                        rs.getTimestamp("last_sync_at") == null ? null : rs.getTimestamp("last_sync_at").toInstant(),
+                        rs.getString("last_sync_result"),
+                        parseJsonMap(rs.getString("config_json"))
+                ),
+                integrationId
         );
+        return rows.stream().findFirst();
+    }
 
-        String status;
-        String detail;
-        if (lastSuccess == null) {
-            status = "unknown";
-            detail = "No successful sync has been recorded yet.";
-        } else {
-            long minutesSince = ChronoUnit.MINUTES.between(lastSuccess, Instant.now());
-            status = minutesSince <= 60 ? "healthy" : "stale";
-            detail = "Last successful sync was " + minutesSince + " minute(s) ago.";
+    private SyncResult checkAiHealth() {
+        if (openAiApiKey.isBlank()) {
+            return new SyncResult("degraded", "OPENAI_API_KEY not configured", Map.of("model", openAiModel));
         }
 
-        return new IntegrationHealth(integration, status, lastSuccess, detail);
+        String body = toJson(Map.of(
+                "model", openAiModel,
+                "input", "ping",
+                "max_output_tokens", 1
+        ));
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.openai.com/v1/responses"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + openAiApiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return new SyncResult("healthy", "Manual sync triggered", Map.of("model", openAiModel, "statusCode", response.statusCode()));
+            }
+            return new SyncResult("degraded", "OpenAI health check failed (HTTP " + response.statusCode() + ")", Map.of("model", openAiModel, "statusCode", response.statusCode()));
+        } catch (Exception ex) {
+            return new SyncResult("degraded", "OpenAI health check failed: " + ex.getMessage(), Map.of("model", openAiModel));
+        }
     }
 
-    private void validateIntegration(String integration) {
-        if (!INTEGRATIONS.contains(integration)) {
+    private SyncResult checkMcpHealth() {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(mcpSseUrl))
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
+        try {
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            if (response.statusCode() >= 200 && response.statusCode() < 400) {
+                return new SyncResult("healthy", "Manual sync triggered", Map.of("sseUrl", mcpSseUrl, "statusCode", response.statusCode()));
+            }
+            return new SyncResult("degraded", "MCP SSE not reachable (HTTP " + response.statusCode() + ")", Map.of("sseUrl", mcpSseUrl, "statusCode", response.statusCode()));
+        } catch (Exception ex) {
+            return new SyncResult("degraded", "MCP SSE check failed: " + ex.getMessage(), Map.of("sseUrl", mcpSseUrl));
+        }
+    }
+
+    private String normalizeIntegration(String integration) {
+        if (integration == null || integration.isBlank()) {
             throw new IllegalArgumentException("Unsupported integration: " + integration);
         }
+        String normalized = integration.trim().toLowerCase();
+        if (!INTEGRATIONS.contains(normalized)) {
+            throw new IllegalArgumentException("Unsupported integration: " + integration);
+        }
+        return normalized;
     }
 
     private void insertAuditEvent(String eventType, String actor, Map<String, Object> payload) {
@@ -105,6 +191,19 @@ public class IntegrationHealthService {
         );
     }
 
+    private Map<String, Object> parseJsonMap(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = objectMapper.readValue(json, LinkedHashMap.class);
+            return map;
+        } catch (Exception ex) {
+            return Map.of("raw", json);
+        }
+    }
+
     private String toJson(Map<String, Object> payload) {
         try {
             return objectMapper.writeValueAsString(payload);
@@ -113,11 +212,16 @@ public class IntegrationHealthService {
         }
     }
 
+    private record SyncResult(String status, String message, Map<String, Object> config) {
+    }
+
     public record IntegrationHealth(
             String integration,
+            String displayName,
             String status,
             Instant lastSyncAt,
-            String detail
+            String detail,
+            Map<String, Object> config
     ) {
     }
 }
