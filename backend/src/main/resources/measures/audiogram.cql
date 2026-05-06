@@ -3,20 +3,64 @@ using FHIR version '4.0.1'
 include FHIRHelpers version '4.0.1' called FHIRHelpers
 
 codesystem "LOINC": 'http://loinc.org'
-
-valueset "Audiogram Procedures": 'urn:oid:2.16.840.1.113883.3.464.1003.118.11.1'
-valueset "Medical Waiver Conditions": 'urn:workwell:vs:medical-waiver'
+valueset "Audiogram Procedures": 'urn:workwell:vs:audiogram-procedures'
 valueset "Hearing Conservation Enrollment": 'urn:workwell:vs:hearing-enrollment'
+valueset "Audiogram Medical Waiver": 'urn:workwell:vs:audiogram-waiver'
 
 parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Hearing Conservation Program":
-  exists([Condition: "Hearing Conservation Enrollment"])
+  exists([Condition: "Hearing Conservation Enrollment"] C
+    where C.clinicalStatus.coding.code = 'active')
 
 define "Has Active Waiver":
-  exists([Condition: "Medical Waiver Conditions"] C where C.clinicalStatus ~ 'active')
+  exists([Condition: "Audiogram Medical Waiver"] C
+    where C.clinicalStatus.coding.code = 'active')
 
-define "Recent Audiogram":
-  exists([Procedure: "Audiogram Procedures"] P
-    where P.performed during "Measurement Period")
+define "Most Recent Audiogram Date":
+  Last(
+    [Procedure: "Audiogram Procedures"] P
+      where P.status = 'completed'
+      sort by (performed as FHIR.dateTime)
+  ).performed as FHIR.dateTime
+
+define "Days Since Last Audiogram":
+  difference in days between
+    Coalesce("Most Recent Audiogram Date", @1900-01-01)
+    and Today()
+
+define "Compliant":
+  "In Hearing Conservation Program"
+    and not "Has Active Waiver"
+    and "Days Since Last Audiogram" <= 335
+
+define "Due Soon":
+  "In Hearing Conservation Program"
+    and not "Has Active Waiver"
+    and "Days Since Last Audiogram" > 335
+    and "Days Since Last Audiogram" <= 365
+
+define "Overdue":
+  "In Hearing Conservation Program"
+    and not "Has Active Waiver"
+    and "Days Since Last Audiogram" > 365
+
+define "Missing Data":
+  "In Hearing Conservation Program"
+    and not "Has Active Waiver"
+    and "Most Recent Audiogram Date" is null
+
+define "Excluded":
+  "Has Active Waiver"
+
+define "Initial Population":
+  "In Hearing Conservation Program" or "Has Active Waiver"
+
+define "Outcome Status":
+  if "Excluded" then 'EXCLUDED'
+  else if "Missing Data" then 'MISSING_DATA'
+  else if "Overdue" then 'OVERDUE'
+  else if "Due Soon" then 'DUE_SOON'
+  else if "Compliant" then 'COMPLIANT'
+  else 'MISSING_DATA'

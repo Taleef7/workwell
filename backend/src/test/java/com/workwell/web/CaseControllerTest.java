@@ -117,7 +117,7 @@ class CaseControllerTest {
     @Test
     void sendsOutreachAction() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.sendOutreach(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+        when(caseFlowService.sendOutreach(caseId, "case-manager", null)).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-003",
@@ -154,6 +154,28 @@ class CaseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value(caseId.toString()))
                 .andExpect(jsonPath("$.nextAction").value("Wait for employee follow-up, then rerun to verify closure."));
+    }
+
+    @Test
+    void previewsOutreach() throws Exception {
+        UUID caseId = UUID.fromString("12121212-1212-1212-1212-121212121212");
+        UUID templateId = UUID.fromString("11111111-0000-0000-0000-000000000001");
+        when(caseFlowService.previewOutreach(caseId, templateId)).thenReturn(java.util.Optional.of(
+                new CaseFlowService.OutreachPreview(
+                        templateId,
+                        "Audiogram Overdue Reminder",
+                        "Action Needed: Overdue Audiogram Follow-up",
+                        "Hello patient-003, please complete your audiogram by 2026-06-01.",
+                        "patient-003",
+                        "AnnualAudiogramCompleted",
+                        "2026-06-01"
+                )
+        ));
+
+        mockMvc.perform(get("/api/cases/{caseId}/actions/outreach/preview", caseId).param("templateId", templateId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.templateName").value("Audiogram Overdue Reminder"))
+                .andExpect(jsonPath("$.dueDate").value("2026-06-01"));
     }
 
     @Test

@@ -9,9 +9,19 @@ type IntegrationHealth = {
   detail: string;
 };
 
+type SchedulerStatus = {
+  enabled: boolean;
+  cron: string;
+  nextFireAt: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: string;
+};
+
 export default function AdminPage() {
   const [integrations, setIntegrations] = useState<IntegrationHealth[]>([]);
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [updatingScheduler, setUpdatingScheduler] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = useMemo(() => {
@@ -30,12 +40,24 @@ export default function AdminPage() {
     }
   }, [apiBase]);
 
+  const loadScheduler = useCallback(async () => {
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/scheduler`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      setScheduler((await response.json()) as SchedulerStatus);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, [apiBase]);
+
   useEffect(() => {
     if (apiBase) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadIntegrations();
+      void loadScheduler();
     }
-  }, [apiBase, loadIntegrations]);
+  }, [apiBase, loadIntegrations, loadScheduler]);
 
   async function triggerSync(integration: string) {
     setSyncing(integration);
@@ -51,6 +73,20 @@ export default function AdminPage() {
     }
   }
 
+  async function toggleScheduler(enabled: boolean) {
+    setUpdatingScheduler(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/scheduler?enabled=${enabled ? "true" : "false"}`, { method: "POST" });
+      if (!response.ok) throw new Error(`Scheduler update failed: ${response.status}`);
+      setScheduler((await response.json()) as SchedulerStatus);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setUpdatingScheduler(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <div>
@@ -59,6 +95,36 @@ export default function AdminPage() {
       </div>
 
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
+
+      <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">scheduler</p>
+        <p className="mt-2 text-lg font-semibold text-slate-900">{scheduler?.enabled ? "enabled" : "disabled"}</p>
+        <p className="mt-2 text-xs text-slate-500">Cron: {scheduler?.cron ?? "-"}</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Next fire: {scheduler?.nextFireAt ? new Date(scheduler.nextFireAt).toLocaleString() : "-"}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          Last scheduled run: {scheduler?.lastRunAt ? new Date(scheduler.lastRunAt).toLocaleString() : "Never"} ({scheduler?.lastRunStatus ?? "never"})
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => void toggleScheduler(true)}
+            disabled={updatingScheduler || scheduler?.enabled === true}
+            className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            Enable
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleScheduler(false)}
+            disabled={updatingScheduler || scheduler?.enabled === false}
+            className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            Disable
+          </button>
+        </div>
+      </article>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {integrations.map((item) => (

@@ -39,9 +39,19 @@ public class CaseController {
     @PostMapping("/api/cases/{caseId}/actions/outreach")
     public CaseFlowService.CaseDetail sendOutreach(
             @PathVariable UUID caseId,
+            @RequestParam(name = "templateId", required = false) UUID templateId,
             @RequestParam(name = "actor", defaultValue = "case-manager") String actor
     ) {
-        return caseFlowService.sendOutreach(caseId, actor)
+        return caseFlowService.sendOutreach(caseId, actor, templateId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
+    }
+
+    @GetMapping("/api/cases/{caseId}/actions/outreach/preview")
+    public CaseFlowService.OutreachPreview previewOutreach(
+            @PathVariable UUID caseId,
+            @RequestParam(name = "templateId", required = false) UUID templateId
+    ) {
+        return caseFlowService.previewOutreach(caseId, templateId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 

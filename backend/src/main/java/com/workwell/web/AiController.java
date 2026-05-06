@@ -21,25 +21,38 @@ public class AiController {
         this.aiAssistService = aiAssistService;
     }
 
-    @PostMapping("/api/ai/draft-spec")
+    @PostMapping({"/api/ai/draft-spec", "/api/measures/{measureId}/ai/draft-spec"})
     public AiAssistService.DraftSpecResponse draftSpec(
+            @PathVariable(name = "measureId", required = false) UUID measureId,
             @RequestBody DraftSpecRequest request,
             @RequestParam(name = "actor", defaultValue = "measure-author") String actor
     ) {
         try {
-            return aiAssistService.draftSpec(request.policyText(), request.measureName(), actor);
+            return aiAssistService.draftSpec(request.policyText(), request.measureName(), actor, measureId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
     }
 
-    @PostMapping("/api/cases/{caseId}/explain")
+    @PostMapping({"/api/cases/{caseId}/explain", "/api/cases/{caseId}/ai/explain"})
     public AiAssistService.CaseExplanationResponse explainCase(
             @PathVariable UUID caseId,
             @RequestParam(name = "actor", defaultValue = "case-manager") String actor
     ) {
         try {
             return aiAssistService.explainCase(caseId, actor);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/runs/{runId}/ai/insight")
+    public AiAssistService.RunInsightResponse runInsight(
+            @PathVariable UUID runId,
+            @RequestParam(name = "actor", defaultValue = "operations-user") String actor
+    ) {
+        try {
+            return aiAssistService.runInsight(runId, actor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }

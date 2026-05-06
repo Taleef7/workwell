@@ -52,6 +52,22 @@ type CaseExplanationResponse = {
   disclaimer: string;
 };
 
+type OutreachTemplate = {
+  id: string;
+  name: string;
+  subject: string;
+};
+
+type OutreachPreview = {
+  templateId: string | null;
+  templateName: string;
+  subject: string;
+  bodyText: string;
+  employeeName: string;
+  measureName: string;
+  dueDate: string;
+};
+
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
@@ -64,6 +80,10 @@ export default function CaseDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [aiExplanation, setAiExplanation] = useState<CaseExplanationResponse | null>(null);
   const [explaining, setExplaining] = useState(false);
+  const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [outreachPreview, setOutreachPreview] = useState<OutreachPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -86,10 +106,25 @@ export default function CaseDetailPage() {
     }
   });
 
+  const loadTemplates = useEffectEvent(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/admin/outreach-templates`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = (await response.json()) as OutreachTemplate[];
+      setTemplates(data);
+      if (!selectedTemplateId && data.length > 0) {
+        setSelectedTemplateId(data[0].id);
+      }
+    } catch {
+      setTemplates([]);
+    }
+  });
+
   useEffect(() => {
     if (apiBase && caseId) {
       const timer = setTimeout(() => {
         void loadCase();
+        void loadTemplates();
       }, 0);
       return () => clearTimeout(timer);
     }
@@ -103,9 +138,10 @@ export default function CaseDetailPage() {
     setActing(action);
     setError(null);
     const endpoint = action === "outreach" ? "actions/outreach" : "rerun-to-verify";
+    const templateQuery = action === "outreach" && selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
 
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/${endpoint}`, {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/${endpoint}${templateQuery}`, {
         method: "POST"
       });
       if (!response.ok) {
@@ -113,10 +149,29 @@ export default function CaseDetailPage() {
       }
       const updated = (await response.json()) as CaseDetail;
       setCaseDetail(updated);
+      if (action === "outreach") {
+        setOutreachPreview(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setActing(null);
+    }
+  }
+
+  async function previewOutreach() {
+    if (!apiBase || !caseId) return;
+    setPreviewing(true);
+    setError(null);
+    try {
+      const templateQuery = selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions/outreach/preview${templateQuery}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      setOutreachPreview((await response.json()) as OutreachPreview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setPreviewing(false);
     }
   }
 
@@ -158,7 +213,7 @@ export default function CaseDetailPage() {
     setExplaining(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/explain`, { method: "POST" });
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/ai/explain`, { method: "POST" });
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
       setAiExplanation((await response.json()) as CaseExplanationResponse);
     } catch (err) {
@@ -237,6 +292,21 @@ export default function CaseDetailPage() {
                   Outreach delivery: {caseDetail.latestOutreachDeliveryStatus ?? "Not sent yet"}
                 </p>
                 <div className="mt-4 grid gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Outreach template</label>
+                  <select
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900"
+                    value={selectedTemplateId}
+                    onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  >
+                    {templates.length === 0 ? <option value="">Default template</option> : null}
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-4 grid gap-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Assignee</label>
                   <div className="flex gap-2">
                     <input
@@ -258,8 +328,16 @@ export default function CaseDetailPage() {
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     type="button"
+                    onClick={() => void previewOutreach()}
+                    disabled={previewing}
+                    className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {previewing ? "Previewing..." : "Preview outreach"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseDetail.status === "CLOSED"}
+                    disabled={acting !== null || caseDetail.status === "CLOSED" || outreachPreview === null}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
@@ -281,6 +359,17 @@ export default function CaseDetailPage() {
                     {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
                   </button>
                 </div>
+                {outreachPreview ? (
+                  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Outreach preview</p>
+                    <p className="mt-2"><span className="font-semibold">Template:</span> {outreachPreview.templateName}</p>
+                    <p className="mt-1"><span className="font-semibold">Subject:</span> {outreachPreview.subject}</p>
+                    <p className="mt-1"><span className="font-semibold">Due date:</span> {outreachPreview.dueDate}</p>
+                    <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-amber-800">Preview the outreach message before sending.</p>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -354,6 +443,7 @@ export default function CaseDetailPage() {
                   </button>
                   {aiExplanation ? (
                     <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Plain-language explanation (AI-assisted)</p>
                       <p>{aiExplanation.explanation}</p>
                       <p className="mt-2 text-xs text-blue-700">{aiExplanation.disclaimer}</p>
                     </div>

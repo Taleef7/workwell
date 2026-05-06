@@ -50,6 +50,8 @@ type ActivationReadiness = {
 };
 
 type DraftSpecResponse = {
+  success: boolean;
+  fallback?: string | null;
   suggestion: {
     description?: string;
     eligibilityCriteria?: {
@@ -94,6 +96,7 @@ export default function StudioMeasurePage() {
   const [testFailures, setTestFailures] = useState<string[]>([]);
   const [activationReadiness, setActivationReadiness] = useState<ActivationReadiness | null>(null);
   const [policyText, setPolicyText] = useState("");
+  const [aiDraftBanner, setAiDraftBanner] = useState<string | null>(null);
 
   const loadMeasure = useCallback(async () => {
     setLoading(true);
@@ -185,7 +188,8 @@ export default function StudioMeasurePage() {
 
   async function draftSpecWithAi() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/ai/draft-spec`, {
+    setAiDraftBanner(null);
+    const response = await fetch(`${apiBase}/api/measures/${measureId}/ai/draft-spec`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -198,6 +202,10 @@ export default function StudioMeasurePage() {
       return;
     }
     const payload = (await response.json()) as DraftSpecResponse;
+    if (!payload.success) {
+      setAiDraftBanner(payload.fallback ?? "AI temporarily unavailable. Please fill the spec manually.");
+      return;
+    }
     const suggestion = payload.suggestion ?? {};
     setDescription(suggestion.description ?? "");
     setRoleFilter(suggestion.eligibilityCriteria?.roleFilter ?? "");
@@ -207,6 +215,7 @@ export default function StudioMeasurePage() {
     setExclusionCriteria(suggestion.exclusions?.[0]?.criteriaText ?? "");
     setComplianceWindow(suggestion.complianceWindow ?? "");
     setRequiredDataElementsText((suggestion.requiredDataElements ?? []).join("\n"));
+    setAiDraftBanner("AI-generated draft - review and edit before saving.");
     setToast("AI draft applied to spec form");
   }
 
@@ -410,6 +419,9 @@ export default function StudioMeasurePage() {
 
       {tab === "spec" ? (
         <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+          {aiDraftBanner ? (
+            <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">{aiDraftBanner}</p>
+          ) : null}
           <textarea className="min-h-20 rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Paste policy text for AI draft..." value={policyText} onChange={(e) => setPolicyText(e.target.value)} />
           <div>
             <button className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={draftSpecWithAi}>

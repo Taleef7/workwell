@@ -430,6 +430,59 @@ public class RunPersistenceService {
         ), runId, limit);
     }
 
+    public Optional<RerunScope> loadRerunScope(UUID runId) {
+        String sql = """
+                SELECT scope_type, scope_id, site
+                FROM runs
+                WHERE id = ?
+                """;
+        try {
+            Map<String, Object> row = jdbcTemplate.queryForMap(sql, runId);
+            return Optional.of(new RerunScope(
+                    row.get("scope_type") == null ? "" : row.get("scope_type").toString(),
+                    (UUID) row.get("scope_id"),
+                    row.get("site") == null ? "" : row.get("site").toString()
+            ));
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
+    public List<RunOutcomeRow> loadRunOutcomes(UUID runId) {
+        String sql = """
+                SELECT e.name AS employee_name,
+                       e.external_id AS employee_external_id,
+                       e.role,
+                       e.site,
+                       o.status AS outcome_status,
+                       o.evidence_json,
+                       c.id AS case_id
+                FROM outcomes o
+                JOIN employees e ON o.employee_id = e.id
+                LEFT JOIN cases c
+                  ON c.employee_id = o.employee_id
+                 AND c.measure_version_id = o.measure_version_id
+                WHERE o.run_id = ?
+                ORDER BY e.name ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Map<String, Object> evidence = readJson(rs.getString("evidence_json"));
+            Map<String, Object> whyFlagged = asMap(evidence.get("why_flagged"));
+            String daysSinceExam = whyFlagged.get("days_since_exam") == null ? null : whyFlagged.get("days_since_exam").toString();
+            String waiverStatus = whyFlagged.get("waiver_status") == null ? null : whyFlagged.get("waiver_status").toString();
+            return new RunOutcomeRow(
+                    rs.getString("employee_name"),
+                    rs.getString("employee_external_id"),
+                    rs.getString("role"),
+                    rs.getString("site"),
+                    rs.getString("outcome_status"),
+                    daysSinceExam,
+                    waiverStatus,
+                    rs.getObject("case_id") == null ? null : rs.getObject("case_id").toString()
+            );
+        }, runId);
+    }
+
     public List<OutcomeExportRow> loadOutcomeExportRows(UUID runId) {
         String sql = """
                 SELECT o.run_id,
@@ -512,7 +565,7 @@ public class RunPersistenceService {
             );
         } catch (EmptyResultDataAccessException ex) {
             UUID measureVersionId = UUID.randomUUID();
-            String cqlText = loadCqlText();
+            String cqlText = loadCqlTextForMeasure(measureName);
             Map<String, Object> specJson = Map.of(
                     "measureName", measureName,
                     "policyRef", "OSHA 29 CFR 1910.95",
@@ -527,8 +580,8 @@ public class RunPersistenceService {
                         ps.setString(4, "Active");
                         ps.setString(5, toJsonb(specJson));
                         ps.setString(6, cqlText);
-                        ps.setString(7, "Compiled");
-                        ps.setString(8, toJsonb(Map.of("status", "Compiled", "warnings", List.of())));
+                        ps.setString(7, "COMPILED");
+                        ps.setString(8, toJsonb(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())));
                         ps.setString(9, "Seeded demo measure");
                         ps.setString(10, "system");
                         ps.setObject(11, Timestamp.from(Instant.now()));
@@ -776,14 +829,29 @@ public class RunPersistenceService {
         }
     }
 
-    private String loadCqlText() {
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
+    private String loadCqlTextForMeasure(String measureName) {
+        String filename = switch (measureName) {
+            case "Audiogram" -> "audiogram.cql";
+            case "TB Surveillance" -> "tb_surveillance.cql";
+            case "HAZWOPER Surveillance" -> "hazwoper.cql";
+            case "Flu Vaccine" -> "flu_vaccine.cql";
+            default -> "audiogram.cql";
+        };
         try {
-            ClassPathResource resource = new ClassPathResource("measures/audiogram.cql");
+            ClassPathResource resource = new ClassPathResource("measures/" + filename);
             return FileCopyUtils.copyToString(
                     new java.io.InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)
             );
         } catch (IOException ex) {
-            throw new IllegalStateException("Unable to read audiogram CQL resource", ex);
+            throw new IllegalStateException("Unable to read CQL resource for " + measureName, ex);
         }
     }
 
@@ -842,6 +910,25 @@ public class RunPersistenceService {
             String summary,
             Instant evaluatedAt,
             Map<String, Object> evidenceJson
+    ) {
+    }
+
+    public record RunOutcomeRow(
+            String employeeName,
+            String employeeExternalId,
+            String role,
+            String site,
+            String outcomeStatus,
+            String daysSinceExam,
+            String waiverStatus,
+            String caseId
+    ) {
+    }
+
+    public record RerunScope(
+            String scopeType,
+            UUID scopeId,
+            String site
     ) {
     }
 

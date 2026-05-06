@@ -7,8 +7,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.admin.IntegrationHealthService;
+import com.workwell.admin.OutreachTemplateService;
+import com.workwell.admin.SchedulerAdminService;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -24,6 +27,12 @@ class AdminControllerTest {
 
     @MockBean
     private IntegrationHealthService integrationHealthService;
+
+    @MockBean
+    private SchedulerAdminService schedulerAdminService;
+
+    @MockBean
+    private OutreachTemplateService outreachTemplateService;
 
     @Test
     void listsIntegrationHealth() throws Exception {
@@ -56,5 +65,54 @@ class AdminControllerTest {
 
         mockMvc.perform(post("/api/admin/integrations/unknown/sync"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsSchedulerStatus() throws Exception {
+        when(schedulerAdminService.status()).thenReturn(new SchedulerAdminService.SchedulerStatus(
+                true,
+                "0 0 6 * * *",
+                Instant.parse("2026-05-07T10:00:00Z"),
+                Instant.parse("2026-05-06T10:00:00Z"),
+                "completed"
+        ));
+
+        mockMvc.perform(get("/api/admin/scheduler"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.cron").value("0 0 6 * * *"));
+    }
+
+    @Test
+    void updatesSchedulerEnabledFlag() throws Exception {
+        when(schedulerAdminService.updateEnabled(false)).thenReturn(new SchedulerAdminService.SchedulerStatus(
+                false,
+                "0 0 6 * * *",
+                Instant.parse("2026-05-07T10:00:00Z"),
+                null,
+                "never"
+        ));
+
+        mockMvc.perform(post("/api/admin/scheduler").param("enabled", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false));
+    }
+
+    @Test
+    void listsOutreachTemplates() throws Exception {
+        when(outreachTemplateService.listTemplates()).thenReturn(List.of(
+                new OutreachTemplateService.OutreachTemplate(
+                        UUID.fromString("11111111-0000-0000-0000-000000000001"),
+                        "Audiogram Overdue Reminder",
+                        "Action Needed",
+                        "Please schedule",
+                        null,
+                        Instant.parse("2026-05-06T01:00:00Z")
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/outreach-templates"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Audiogram Overdue Reminder"));
     }
 }

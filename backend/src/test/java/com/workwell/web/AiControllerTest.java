@@ -27,13 +27,15 @@ class AiControllerTest {
 
     @Test
     void draftsSpec() throws Exception {
-        when(aiAssistService.draftSpec("policy text", "Audiogram", "measure-author")).thenReturn(
+        when(aiAssistService.draftSpec("policy text", "Audiogram", "measure-author", null)).thenReturn(
                 new AiAssistService.DraftSpecResponse(
+                        true,
                         "Audiogram",
                         Map.of("description", "Draft"),
                         "advisory",
                         "fallback-rules",
-                        true
+                        true,
+                        null
                 )
         );
 
@@ -62,5 +64,18 @@ class AiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value(caseId.toString()))
                 .andExpect(jsonPath("$.explanation").value("Explanation"));
+    }
+
+    @Test
+    void runInsight() throws Exception {
+        UUID runId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(aiAssistService.runInsight(runId, "operations-user")).thenReturn(
+                new AiAssistService.RunInsightResponse(false, java.util.List.of("Insight A", "Insight B"))
+        );
+
+        mockMvc.perform(post("/api/runs/{runId}/ai/insight", runId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fallback").value(false))
+                .andExpect(jsonPath("$.insights[0]").value("Insight A"));
     }
 }

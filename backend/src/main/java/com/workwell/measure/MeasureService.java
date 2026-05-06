@@ -3,6 +3,9 @@ package com.workwell.measure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.compile.CqlCompileValidationService;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.sql.Array;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -11,9 +14,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.FileCopyUtils;
 
 @Service
 public class MeasureService {
@@ -22,10 +27,16 @@ public class MeasureService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final CqlCompileValidationService cqlCompileValidationService;
 
-    public MeasureService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public MeasureService(
+            JdbcTemplate jdbcTemplate,
+            ObjectMapper objectMapper,
+            CqlCompileValidationService cqlCompileValidationService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.cqlCompileValidationService = cqlCompileValidationService;
     }
 
     public List<MeasureCatalogItem> listMeasures() {
@@ -233,12 +244,10 @@ public class MeasureService {
             warnings.add("No value sets are attached to this measure version.");
         }
 
-        CompileResponse response;
-        if (cqlText == null || cqlText.trim().isEmpty() || !cqlText.toLowerCase().contains("define")) {
-            response = new CompileResponse("ERROR", warnings, List.of("CQL body is empty or invalid"));
-        } else {
-            response = new CompileResponse("COMPILED", warnings, List.of());
-        }
+        CqlCompileValidationService.CompileResult compileResult = cqlCompileValidationService.validate(cqlText);
+        List<String> mergedWarnings = new ArrayList<>(warnings);
+        mergedWarnings.addAll(compileResult.warnings());
+        CompileResponse response = new CompileResponse(compileResult.status(), mergedWarnings, compileResult.errors());
 
         jdbcTemplate.update(
                 "UPDATE measure_versions SET compile_status = ?, compile_result = ?::jsonb WHERE id = ?",
@@ -502,6 +511,13 @@ public class MeasureService {
                 measureId
         );
         if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("audiogram.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId,
+                    SEEDED_AUDIOGRAM_VERSION
+            );
             return;
         }
 
@@ -524,7 +540,7 @@ public class MeasureService {
                 SEEDED_AUDIOGRAM_VERSION,
                 "Active",
                 toJson(spec),
-                "library Audiogram version '1.0.0'\n\ndefine \"Initial Population\": true",
+                loadSeedCql("audiogram.cql"),
                 "COMPILED",
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active demo measure",
@@ -559,6 +575,13 @@ public class MeasureService {
                 "v1.3"
         );
         if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("tb_surveillance.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId,
+                    "v1.3"
+            );
             return;
         }
 
@@ -581,7 +604,7 @@ public class MeasureService {
                 "v1.3",
                 "Active",
                 toJson(spec),
-                "library TbSurveillance version '1.3.0'\n\ndefine \"Initial Population\": true",
+                loadSeedCql("tb_surveillance.cql"),
                 "COMPILED",
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active TB measure for demo",
@@ -616,6 +639,13 @@ public class MeasureService {
                 "v1.0"
         );
         if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("hazwoper.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId,
+                    "v1.0"
+            );
             return;
         }
 
@@ -638,7 +668,7 @@ public class MeasureService {
                 "v1.0",
                 "Active",
                 toJson(spec),
-                "library HazwoperSurveillance version '1.0.0'\n\ndefine \"Initial Population\": true",
+                loadSeedCql("hazwoper.cql"),
                 "COMPILED",
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active HAZWOPER measure for demo",
@@ -673,6 +703,13 @@ public class MeasureService {
                 "v1.0"
         );
         if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("flu_vaccine.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId,
+                    "v1.0"
+            );
             return;
         }
 
@@ -695,7 +732,7 @@ public class MeasureService {
                 "v1.0",
                 "Active",
                 toJson(spec),
-                "library FluVaccine version '1.0.0'\n\ndefine \"Initial Population\": true",
+                loadSeedCql("flu_vaccine.cql"),
                 "COMPILED",
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active Flu Vaccine measure for demo",
@@ -724,6 +761,15 @@ public class MeasureService {
             return objectMapper.writeValueAsString(payload);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Unable to serialise JSON payload", ex);
+        }
+    }
+
+    private String loadSeedCql(String filename) {
+        try {
+            ClassPathResource resource = new ClassPathResource("measures/" + filename);
+            return FileCopyUtils.copyToString(new InputStreamReader(resource.getInputStream()));
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to load seeded CQL: " + filename, ex);
         }
     }
 

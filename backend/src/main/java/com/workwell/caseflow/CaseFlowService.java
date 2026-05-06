@@ -2,6 +2,7 @@ package com.workwell.caseflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.admin.OutreachTemplateService;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import java.io.IOException;
 import java.time.Instant;
@@ -19,10 +20,16 @@ import org.springframework.stereotype.Service;
 public class CaseFlowService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final OutreachTemplateService outreachTemplateService;
 
-    public CaseFlowService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public CaseFlowService(
+            JdbcTemplate jdbcTemplate,
+            ObjectMapper objectMapper,
+            OutreachTemplateService outreachTemplateService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.outreachTemplateService = outreachTemplateService;
     }
 
     public void upsertCases(
@@ -182,12 +189,43 @@ public class CaseFlowService {
     }
 
     public Optional<CaseDetail> sendOutreach(UUID caseId, String actor) {
+        return sendOutreach(caseId, actor, null);
+    }
+
+    public Optional<OutreachPreview> previewOutreach(UUID caseId, UUID templateId) {
+        Optional<CaseDetail> detail = loadCase(caseId);
+        if (detail.isEmpty()) {
+            return Optional.empty();
+        }
+        CaseDetail c = detail.get();
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByIdOrDefault(templateId);
+        String subjectTemplate = template == null ? "Outreach Reminder for {{measureName}}" : template.subject();
+        String bodyTemplate = template == null
+                ? "Hello {{employeeName}}, please complete required follow-up for {{measureName}}."
+                : template.bodyText();
+
+        String dueDate = computeDueDate(c);
+        String renderedSubject = renderTemplate(subjectTemplate, c.employeeName(), c.measureName(), dueDate, c.currentOutcomeStatus());
+        String renderedBody = renderTemplate(bodyTemplate, c.employeeName(), c.measureName(), dueDate, c.currentOutcomeStatus());
+        return Optional.of(new OutreachPreview(
+                template == null ? null : template.id(),
+                template == null ? "Default Template" : template.name(),
+                renderedSubject,
+                renderedBody,
+                c.employeeName(),
+                c.measureName(),
+                dueDate
+        ));
+    }
+
+    public Optional<CaseDetail> sendOutreach(UUID caseId, String actor, UUID templateId) {
         Optional<CaseContext> context = loadCaseContext(caseId);
         if (context.isEmpty()) {
             return Optional.empty();
         }
 
         CaseContext existing = context.get();
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByIdOrDefault(templateId);
         String nextAction = "Wait for employee follow-up, then rerun to verify closure.";
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW() WHERE id = ?",
@@ -198,7 +236,9 @@ public class CaseFlowService {
 
         Map<String, Object> actionPayload = new LinkedHashMap<>();
         actionPayload.put("channel", "SIMULATED_EMAIL");
-        actionPayload.put("template", "audiogram-reminder-v1");
+        actionPayload.put("template", template == null ? "default-template" : template.name());
+        actionPayload.put("templateId", template == null ? null : template.id());
+        actionPayload.put("subject", template == null ? "Outreach Reminder" : template.subject());
         actionPayload.put("deliveryStatus", "QUEUED");
         actionPayload.put("note", "Demo outreach recorded without external delivery.");
         insertCaseAction(caseId, "OUTREACH_SENT", actor, actionPayload);
@@ -733,6 +773,43 @@ public class CaseFlowService {
         return normalized;
     }
 
+    @SuppressWarnings("unchecked")
+    private String computeDueDate(CaseDetail detail) {
+        try {
+            Object whyObj = detail.evidenceJson().get("why_flagged");
+            if (!(whyObj instanceof Map<?, ?> why)) {
+                return detail.evaluationPeriod();
+            }
+            Object lastExamObj = why.get("last_exam_date");
+            Object windowObj = why.get("compliance_window_days");
+            if (lastExamObj == null || windowObj == null) {
+                return detail.evaluationPeriod();
+            }
+            java.time.LocalDate lastExam = java.time.LocalDate.parse(lastExamObj.toString());
+            int windowDays = Integer.parseInt(windowObj.toString());
+            return lastExam.plusDays(windowDays).toString();
+        } catch (Exception ignored) {
+            return detail.evaluationPeriod();
+        }
+    }
+
+    private String renderTemplate(
+            String raw,
+            String employeeName,
+            String measureName,
+            String dueDate,
+            String outcomeStatus
+    ) {
+        if (raw == null) {
+            return "";
+        }
+        return raw
+                .replace("{{employeeName}}", employeeName == null ? "" : employeeName)
+                .replace("{{measureName}}", measureName == null ? "" : measureName)
+                .replace("{{dueDate}}", dueDate == null ? "" : dueDate)
+                .replace("{{outcomeStatus}}", outcomeStatus == null ? "" : outcomeStatus);
+    }
+
     private Map<String, Object> casePayload(DemoOutcome outcome, String priority, String nextAction) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subjectId", outcome.subjectId());
@@ -864,6 +941,17 @@ public class CaseFlowService {
             Instant outcomeEvaluatedAt,
             String latestOutreachDeliveryStatus,
             List<AuditEvent> timeline
+    ) {
+    }
+
+    public record OutreachPreview(
+            UUID templateId,
+            String templateName,
+            String subject,
+            String bodyText,
+            String employeeName,
+            String measureName,
+            String dueDate
     ) {
     }
 

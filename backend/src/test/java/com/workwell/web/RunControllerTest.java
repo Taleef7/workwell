@@ -1,11 +1,15 @@
 package com.workwell.web;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
+import com.workwell.web.EvalController.ManualRunResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +31,9 @@ class RunControllerTest {
 
     @MockBean
     private RunPersistenceService runPersistenceService;
+
+    @MockBean
+    private AllProgramsRunService allProgramsRunService;
 
     @Test
     void listsRunsWithFilters() throws Exception {
@@ -101,5 +108,52 @@ class RunControllerTest {
         mockMvc.perform(get("/api/runs/{id}/logs", runId).param("limit", "50"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].level").value("INFO"));
+    }
+
+    @Test
+    void returnsRunOutcomes() throws Exception {
+        UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        when(runPersistenceService.loadRunOutcomes(runId)).thenReturn(List.of(
+                new RunPersistenceService.RunOutcomeRow(
+                        "Alex Rivera",
+                        "emp-001",
+                        "Maintenance Tech",
+                        "Plant A",
+                        "OVERDUE",
+                        "420",
+                        "NONE",
+                        "55555555-5555-5555-5555-555555555555"
+                )
+        ));
+
+        mockMvc.perform(get("/api/runs/{id}/outcomes", runId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].employeeExternalId").value("emp-001"))
+                .andExpect(jsonPath("$[0].outcomeStatus").value("OVERDUE"));
+    }
+
+    @Test
+    void rerunsSameScope() throws Exception {
+        UUID runId = UUID.fromString("66666666-6666-6666-6666-666666666666");
+        when(allProgramsRunService.rerunSameScope(runId, "system")).thenReturn(new ManualRunResponse(
+                "77777777-7777-7777-7777-777777777777",
+                "All Programs",
+                4,
+                List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
+        ));
+
+        mockMvc.perform(post("/api/runs/{id}/rerun", runId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activeMeasuresExecuted").value(4));
+    }
+
+    @Test
+    void rerunReturnsBadRequestWhenScopeInvalid() throws Exception {
+        UUID runId = UUID.fromString("88888888-8888-8888-8888-888888888888");
+        doThrow(new IllegalArgumentException("Unsupported run scope type: custom"))
+                .when(allProgramsRunService).rerunSameScope(runId, "system");
+
+        mockMvc.perform(post("/api/runs/{id}/rerun", runId))
+                .andExpect(status().isBadRequest());
     }
 }

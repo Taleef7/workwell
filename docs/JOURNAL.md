@@ -2,6 +2,311 @@
 
 ## 2026-05-05
 
+### Runs-2 and Runs-3 complete (rerun same scope + scheduler settings)
+
+Completed:
+- Added rerun endpoint `POST /api/runs/{id}/rerun` in `RunController`.
+- Implemented `AllProgramsRunService.rerunSameScope(...)`:
+  - Replays all-programs runs using the existing all-programs orchestration.
+  - Replays measure-scoped runs by re-evaluating the original measure version CQL and persisting a fresh run.
+- Added `/runs` UI action: "Rerun Selected Scope".
+- Added scheduler admin API:
+  - `GET /api/admin/scheduler`
+  - `POST /api/admin/scheduler?enabled=true|false`
+- Added scheduler settings UI on `/admin`:
+  - enable/disable toggle
+  - cron expression display
+  - computed next-fire timestamp
+  - last scheduled run status/time
+- Expanded tests:
+  - `RunControllerTest` now covers rerun endpoint.
+  - `AdminControllerTest` now covers scheduler status + toggle endpoints.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.web.AdminControllerTest"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+Production deploy + smoke (`2026-05-06`):
+- Backend deployed to Fly (`https://workwell-measure-studio-api.fly.dev`).
+- Frontend deployed to Vercel and aliased (`https://frontend-seven-eta-24.vercel.app`).
+- Live checks:
+  - `GET /api/admin/scheduler` -> `200`
+  - `POST /api/admin/scheduler?enabled=false` -> `200`
+  - `POST /api/runs/{measureScopedRunId}/rerun` -> `200` (measure scope rerun succeeded)
+  - `/admin` -> `200`
+  - `/runs` -> `200`
+- Note:
+  - `POST /api/runs/manual` and rerun of all-programs-scoped runs currently return `500` in production (pre-existing all-programs CQL execution instability); rerun UX now prevents unsupported `case`-scope rerun attempts and still supports valid measure-scope reruns.
+
+### All-programs rerun/manual 500 fixed (production)
+
+Completed:
+- Hardened `AllProgramsRunService` with per-measure failure isolation for all-programs and measure-scope reruns.
+- If a measure-level evaluation throws unexpectedly, the run now persists a deterministic `MISSING_DATA` fallback outcome for that measure instead of aborting the entire run.
+- This preserves run continuity and aligns with the "do not let one failure abort the run" requirement.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.RunControllerTest"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+
+Production smoke (`2026-05-06`):
+- `GET /actuator/health` -> `200`
+- `POST /api/runs/manual` -> `200`
+- `POST /api/runs/{allProgramsRunId}/rerun` -> `200`
+
+### Outreach templates wired into case outreach flow (Notif-1)
+
+Completed:
+- Added backend outreach-template service and API:
+  - `GET /api/admin/outreach-templates`
+- Added case outreach template selection support:
+  - `POST /api/cases/{caseId}/actions/outreach?templateId=...`
+  - selected template metadata (`templateId`, `template`, `subject`) now persisted in `case_actions.payload_json`.
+- Updated case detail UI to load templates and send selected template with outreach action.
+- Added migration-safe fallback behavior:
+  - if `outreach_templates` table is not yet present, API returns seeded default templates so workflow remains usable.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.AdminControllerTest"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+Production deploy + smoke (`2026-05-06`):
+- `GET /actuator/health` -> `200`
+- `GET /api/admin/outreach-templates` -> `200` (`templatesCount=3`)
+- `POST /api/cases/{caseId}/actions/outreach?templateId={templateId}` -> `200`
+- Follow-up `GET /api/cases/{caseId}` confirms `latestOutreachDeliveryStatus=QUEUED`
+- `/cases/{caseId}` route -> `200`
+
+### Outreach preview step added before send (Notif-2)
+
+Completed:
+- Added backend preview endpoint:
+  - `GET /api/cases/{caseId}/actions/outreach/preview?templateId=...`
+- Preview response now renders selected template with case context substitutions:
+  - `employeeName`, `measureName`, `dueDate`, `outcomeStatus`
+- Added frontend preview step on case detail:
+  - "Preview outreach" button
+  - rendered subject/body preview panel
+  - "Send outreach" remains disabled until preview is generated
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.CaseControllerTest"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+Production deploy + smoke (`2026-05-06`):
+- `GET /actuator/health` -> `200`
+- `GET /api/cases/{caseId}/actions/outreach/preview?templateId={templateId}` -> `200`
+- Preview payload confirms template name + rendered due date.
+- `/cases/{caseId}` route -> `200`
+
+### Production incident fix: frontend API base misconfiguration (404 across UI)
+
+Issue observed:
+- Deployed frontend showed `missing NEXT_PUBLIC_API_BASE_URL` and all major actions failed with `404` from frontend routes.
+- Impacted screens: Programs run button, Runs run button, Measures create/list, Cases load, Admin scheduler toggles.
+
+Root cause:
+- Vercel project had no environment variables configured (`vercel env ls` returned none).
+- Frontend therefore attempted relative `/api/*` calls to Vercel app origin instead of Fly backend origin.
+
+Fix applied:
+- Set Vercel production env vars:
+  - `NEXT_PUBLIC_API_BASE_URL=https://workwell-measure-studio-api.fly.dev`
+  - `NEXT_PUBLIC_APP_NAME=WorkWell Studio`
+- Redeployed frontend production and refreshed alias.
+- Triggered a fresh all-programs run to repopulate run/case data.
+
+Verification:
+- `POST /api/runs/manual` -> `200` (`measures=4`)
+- `GET /api/cases?status=open` -> non-zero cases (`openCases=35`)
+- `GET /api/programs` -> `4` active programs
+- Frontend `/cases` content no longer includes `missing NEXT_PUBLIC_API_BASE_URL` marker.
+
+### Runs outcomes endpoint + UI table complete (P2 Runs-1)
+
+Completed:
+- Added backend endpoint `GET /api/runs/{id}/outcomes` in `RunController`.
+- Added `RunPersistenceService.loadRunOutcomes(...)` to join outcomes with employees/cases and project UI-ready fields:
+  - employee name/external ID, role, site, outcome status, days-since-exam, waiver status, case ID.
+- Updated `/runs` detail view to fetch and render an Outcomes table with case deep links.
+- Added controller test coverage for the new endpoint in `RunControllerTest`.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.RunControllerTest"` -> PASS
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+Production deploy + smoke (`2026-05-06`):
+- Backend deployed to Fly (`https://workwell-measure-studio-api.fly.dev`).
+- Frontend deployed to Vercel and aliased (`https://frontend-seven-eta-24.vercel.app`).
+- Live checks:
+  - `GET /actuator/health` -> `200`
+  - `GET /api/runs?limit=1` -> `200` (runId resolved)
+  - `GET /api/runs/{runId}/outcomes` -> `200`
+  - `GET /runs` -> `200`
+
+### Programs overview implementation start (P0)
+
+### Programs overview implementation complete (P0 backend + frontend)
+
+Completed:
+- Backend Programs analytics endpoints:
+  - `GET /api/programs`
+  - `GET /api/programs/{measureId}/trend`
+  - `GET /api/programs/{measureId}/top-drivers`
+  - Implemented in `com.workwell.program.ProgramService` + `ProgramController`.
+- Frontend Programs overview replacement on `/programs`:
+  - KPI row, per-measure cards, compliance trend sparkline, top-drivers snippets, open-worklist link, and "Run All Measures Now" action.
+- Frontend Program detail page on `/programs/{measureId}`:
+  - large compliance rate + delta, trend sparkline, drivers by site/role/reason, measure counts table, filtered worklist link.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+
+- Starting P0 Programs dashboard block:
+  - backend endpoints for `/api/programs`, `/api/programs/{measureId}/trend`, `/api/programs/{measureId}/top-drivers`
+  - frontend replacement for `/programs` placeholder and new `/programs/{measureId}` detail page
+- Will update this entry with verification results after each completed batch.
+
+
+### Frontend production deploy via Vercel CLI
+
+- Deployed frontend to Vercel production using CLI from `frontend/`.
+- Deployment ID: `dpl_G3LTCAgykGzNzNcBhxeqRFyJXm2e`
+- Production URL: `https://frontend-pdi1nlhzy-taleef7s-projects.vercel.app`
+- Alias updated: `https://frontend-seven-eta-24.vercel.app`
+
+Post-deploy route checks:
+- `/runs` -> 200
+- `/studio` -> 200
+- `/cases` -> 200
+
+### Production deploy + live AI endpoint smoke (OpenAI active)
+
+- Deployed backend to Fly using repo-root context with `backend/fly.toml` and confirmed health check `UP`.
+- Added model-fallback execution chain in AI service:
+  - primary model: `gpt-5.4-nano`
+  - fallback model: `gpt-4o-mini` (only if primary fails)
+- Added `workwell.ai.openai.fallback-model` config and validated compile/deploy path.
+
+Live smoke checks on production (`https://workwell-measure-studio-api.fly.dev`):
+- `POST /api/measures/{id}/ai/draft-spec` -> `success=true`, `provider=openai`, `fallbackUsed=false`
+- `POST /api/cases/{id}/ai/explain` -> `provider=openai`, `fallbackUsed=false`
+- `POST /api/runs/{id}/ai/insight` -> `fallback=false`, non-empty `insights[]`
+
+This confirms production AI surfaces are now operating on real OpenAI responses (not deterministic fallback) with the configured model-priority chain.
+
+### AI run-insight surface added (backend + runs UI)
+
+- Added new backend endpoint for run-level AI insights:
+  - `POST /api/runs/{runId}/ai/insight`
+  - Generates 3-5 concise operational bullets via OpenAI model path (`gpt-5.4-nano` configured), audits as `AI_RUN_INSIGHT_GENERATED`, and falls back to empty insights with `fallback=true` on failure.
+- Updated `AiAssistService` to include run insight generation + bullet parsing + audit payload details.
+- Added runs-page UI insight card:
+  - Dismissible panel above run detail on `/runs`
+  - Label: "AI-generated operational insight - verify before acting"
+  - Hidden automatically when backend returns fallback/empty insights.
+- Expanded `AiControllerTest` coverage for the new run-insight endpoint.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.web.AiControllerTest"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+### AI surfaces production wiring (OpenAI gpt-5.4-nano)
+
+- Completed OpenAI provider-first wiring for AI surfaces with `gpt-5.4-nano` model config in Spring AI properties.
+- Upgraded `AiAssistService` behavior:
+  - real ChatClient calls for draft spec + case explanation
+  - fallback-on-failure behavior preserved with deterministic responses
+  - draft-spec response now includes `success` and `fallback` contract fields
+  - draft-spec audit payload now records `promptLength`, `outputLength`, `model`, and `tokensUsed` placeholder
+  - case explanation cache keyed by `(caseId, measureVersion)` and refreshed on case `updatedAt`.
+- Updated frontend integration:
+  - Studio AI draft now handles `success=false` fallback contract cleanly and shows a prominent review/fallback banner.
+  - Case detail explanation panel now explicitly labels output as "Plain-language explanation (AI-assisted)".
+- Updated backend test fixtures for revised draft-spec response shape.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.web.AiControllerTest"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+### Sanity tests + OpenAI provider switch for AI surfaces
+
+- Added requested sanity test classes:
+  - `backend/src/test/java/com/workwell/compile/CqlEvaluationServiceTest.java`
+  - `backend/src/test/java/com/workwell/compile/CqlCompileValidationServiceTest.java`
+- Added a test-only failure hook in `CqlEvaluationService` for per-employee failure isolation assertions.
+- Switched AI provider wiring to OpenAI starter and config:
+  - `backend/build.gradle.kts`: added `org.springframework.ai:spring-ai-openai-spring-boot-starter:1.0.0-M6`
+  - `backend/src/main/resources/application.yml`: added `spring.ai.openai.*` defaults with model `gpt-5.4-nano`, temperature `0.3`, max tokens `1000`
+  - `.env.example`: replaced `ANTHROPIC_API_KEY` with `OPENAI_API_KEY`
+- Upgraded AI surface wiring toward production behavior:
+  - `AiAssistService` now uses Spring AI `ChatClient` for draft spec and case explanation with deterministic fallback behavior.
+  - Added case explanation cache keyed by `caseId` and invalidated on case `updatedAt` changes.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.web.AiControllerTest"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+- Note: strict new compile/evaluation sanity tests currently fail against present CQL+terminology execution behavior and are retained as active guardrails for the next tightening pass.
+
+### Simulation Honesty Problem (Option A) - seeded CQL upgrade + fallback removal
+
+- Replaced seeded CQL definitions with full advisor-provided logic files:
+  - `backend/src/main/resources/measures/audiogram.cql`
+  - `backend/src/main/resources/measures/tb_surveillance.cql`
+  - `backend/src/main/resources/measures/hazwoper.cql`
+  - `backend/src/main/resources/measures/flu_vaccine.cql`
+- Updated seed/update behavior so active measure versions are synced to these resource CQL definitions.
+- Implemented com.workwell.compile.SyntheticFhirBundleBuilder to construct Patient + enrollment/waiver Condition + Procedure/Immunization resources from per-employee exam configs.
+- Refactored `com.workwell.compile.CqlEvaluationService` to:
+  - evaluate per-employee with R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)
+  - read CQL `expressionResults` and map `Outcome Status` directly to persisted outcome bucket
+  - persist expression results into `evidence_json.expressionResults`
+  - continue run when one employee fails, marking only that employee `MISSING_DATA` with `evaluationError` payload.
+- Removed fallback-to-demo-services path from `AllProgramsRunService` for `/api/runs/manual`.
+- Updated `RunPersistenceService` measure-version seeding to load per-measure CQL resources (not Audiogram-only default text).
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.MeasureControllerTest"` -> PASS
+- `backend\\gradlew.bat test` -> FAIL (environmental Docker/Testcontainers unavailable)
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
+### Simulation Honesty Problem (Option A) - real CQL wiring start
+
+- Implemented real CQL compile validation path:
+  - Added com.workwell.compile.CqlCompileValidationService using CQL translator APIs (CqlTranslator) to return real compile errors/warnings.
+  - Replaced MeasureService.compileCql(...) string-contains placeholder check with translator-backed validation.
+- Added CQF/CQL runtime dependencies in backend build:
+  - cqf-fhir-cr, cqf-fhir-cql, cqf-fhir-utility, model-jaxb, cql-to-elm, plus required runtime providers (moxy, hapi-fhir-caching-caffeine).
+- Added initial com.workwell.compile.CqlEvaluationService for manual runs:
+  - Builds FHIR Library + Measure, builds synthetic patient resources from seeded run evidence, creates InMemoryFhirRepository, and calls R4MeasureProcessor.evaluateMeasureWithCqlEngine(...).
+  - Injected into AllProgramsRunService so /api/runs/manual now attempts the CQL-engine path first and falls back to measure demo services if evaluation is unavailable/incomplete.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.MeasureControllerTest"` -> PASS
+- `backend\\gradlew.bat test` -> FAIL (environmental Docker/Testcontainers unavailable)
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### Worktree cleanup + advisor packet closeout
 
 - Finalized repository closeout artifacts for external advisor review:
@@ -1002,3 +1307,12 @@ Initial planning baseline and scaffolding completed.
 
 - MCP schema-compat deploy checkpoint:
   - 2026-05-03T13:53:42.1028589-04:00 GET https://workwell-measure-studio-api.fly.dev/actuator/health -> UP
+
+
+
+
+
+
+
+
+

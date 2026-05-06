@@ -1,49 +1,113 @@
 package com.workwell.ai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
+import com.workwell.run.RunPersistenceService;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiAssistService {
     private final CaseFlowService caseFlowService;
+    private final RunPersistenceService runPersistenceService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final ChatClient chatClient;
+    private final String modelName;
+    private final String fallbackModelName;
+    private final ConcurrentHashMap<CaseExplanationCacheKey, CachedCaseExplanation> caseExplanationCache = new ConcurrentHashMap<>();
 
     public AiAssistService(
             CaseFlowService caseFlowService,
+            RunPersistenceService runPersistenceService,
             JdbcTemplate jdbcTemplate,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ChatClient.Builder chatClientBuilder,
+            @Value("${spring.ai.openai.chat.options.model:gpt-5.4-nano}") String modelName,
+            @Value("${workwell.ai.openai.fallback-model:gpt-4o-mini}") String fallbackModelName
     ) {
         this.caseFlowService = caseFlowService;
+        this.runPersistenceService = runPersistenceService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.chatClient = chatClientBuilder.build();
+        this.modelName = modelName;
+        this.fallbackModelName = fallbackModelName;
     }
 
-    public DraftSpecResponse draftSpec(String policyText, String measureName, String actor) {
+    public DraftSpecResponse draftSpec(String policyText, String measureName, String actor, UUID measureId) {
         String text = policyText == null ? "" : policyText.trim();
         if (text.isBlank()) {
             throw new IllegalArgumentException("policyText is required");
         }
         String resolvedMeasure = (measureName == null || measureName.isBlank()) ? "New Measure" : measureName.trim();
-        Map<String, Object> suggestion = buildSuggestion(text, resolvedMeasure);
-        DraftSpecResponse response = new DraftSpecResponse(
-                resolvedMeasure,
-                suggestion,
-                "AI suggestion generated from policy text. Human review and explicit apply are required.",
-                "fallback-rules",
-                true
-        );
+        DraftSpecResponse response;
+        int promptLength = text.length();
+        try {
+            String modelResponse = callWithModelFallback(
+                    """
+                            You are a compliance measure assistant.
+                            Return ONLY a valid JSON object matching:
+                            {
+                              "description": string,
+                              "eligibilityCriteria": {
+                                "roleFilter": string,
+                                "siteFilter": string,
+                                "programEnrollmentText": string
+                              },
+                              "exclusions": [{"label": string, "criteriaText": string}],
+                              "complianceWindow": string,
+                              "requiredDataElements": [string]
+                            }
+                            You must NOT make any compliance determination about specific employees.
+                            Output is a draft for human review only.
+                            """,
+                    "Measure: " + resolvedMeasure + "\nPolicy text:\n" + text
+            );
+
+            Map<String, Object> suggestion = parseSuggestionJson(modelResponse);
+            if (suggestion.isEmpty()) {
+                throw new IllegalStateException("Model response did not include valid JSON spec fields.");
+            }
+            response = new DraftSpecResponse(
+                    true,
+                    resolvedMeasure,
+                    suggestion,
+                    "AI-generated draft - review and edit before saving.",
+                    "openai",
+                    false,
+                    null
+            );
+        } catch (Exception ex) {
+            response = new DraftSpecResponse(
+                    false,
+                    resolvedMeasure,
+                    Map.of(),
+                    "AI temporarily unavailable. Please fill the spec manually.",
+                    "fallback-rules",
+                    true,
+                    "AI temporarily unavailable. Please fill the spec manually."
+            );
+        }
         insertAiAudit("AI_DRAFT_SPEC_GENERATED", actor, null, null, Map.of(
                 "measureName", resolvedMeasure,
-                "policyTextLength", text.length(),
+                "measureId", measureId == null ? "" : measureId.toString(),
+                "promptLength", promptLength,
+                "outputLength", response.suggestion().toString().length(),
+                "model", modelName,
+                "tokensUsed", -1,
                 "provider", response.provider(),
                 "fallbackUsed", response.fallbackUsed()
         ));
@@ -53,20 +117,83 @@ public class AiAssistService {
     public CaseExplanationResponse explainCase(UUID caseId, String actor) {
         CaseFlowService.CaseDetail detail = caseFlowService.loadCase(caseId)
                 .orElseThrow(() -> new IllegalArgumentException("Case not found"));
-        String explanation = buildExplanation(detail);
+        CaseExplanationCacheKey cacheKey = new CaseExplanationCacheKey(caseId, detail.measureVersion());
+        CachedCaseExplanation cached = caseExplanationCache.get(cacheKey);
+        if (cached != null && cached.updatedAt().equals(detail.updatedAt())) {
+            return cached.response();
+        }
+        String explanation;
+        String provider;
+        boolean fallbackUsed;
+        try {
+            String modelResponse = callWithModelFallback(
+                    "You are a clinical quality measure analyst. Based only on provided structured evidence, explain in 2-3 plain English sentences why the employee was flagged. Do not add information not present. Do not make compliance recommendations.",
+                    "Outcome status: " + detail.currentOutcomeStatus() + "\nEvidence JSON:\n" + toJson(detail.evidenceJson())
+            );
+            explanation = modelResponse == null ? "" : modelResponse.trim();
+            if (explanation.isBlank()) {
+                throw new IllegalStateException("Empty model response");
+            }
+            provider = "openai";
+            fallbackUsed = false;
+        } catch (Exception ex) {
+            explanation = buildDeterministicFallbackExplanation(detail);
+            provider = "fallback-rules";
+            fallbackUsed = true;
+        }
         insertAiAudit("AI_CASE_EXPLANATION_GENERATED", actor, detail.lastRunId(), caseId, Map.of(
                 "measureName", detail.measureName(),
                 "outcomeStatus", detail.currentOutcomeStatus(),
-                "provider", "fallback-rules",
-                "fallbackUsed", true
+                "provider", provider,
+                "fallbackUsed", fallbackUsed
         ));
-        return new CaseExplanationResponse(
+        CaseExplanationResponse response = new CaseExplanationResponse(
                 caseId.toString(),
                 explanation,
-                "fallback-rules",
-                true,
+                provider,
+                fallbackUsed,
                 "AI explanation is advisory text only. Compliance decisions come from structured CQL evidence."
         );
+        caseExplanationCache.put(cacheKey, new CachedCaseExplanation(detail.updatedAt(), response));
+        return response;
+    }
+
+    public RunInsightResponse runInsight(UUID runId, String actor) {
+        RunPersistenceService.RunSummaryResponse run = runPersistenceService.loadRunById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found"));
+        try {
+            String prompt = "Run summary:\n"
+                    + "measure=" + run.measureName() + "\n"
+                    + "version=" + run.measureVersion() + "\n"
+                    + "status=" + run.status() + "\n"
+                    + "evaluated=" + run.totalEvaluated() + "\n"
+                    + "compliant=" + run.compliantCount() + "\n"
+                    + "nonCompliant=" + run.nonCompliantCount() + "\n"
+                    + "passRate=" + run.passRate() + "\n"
+                    + "outcomeCounts=" + run.outcomeCounts();
+            String content = callWithModelFallback(
+                    "You are an operations analyst. Return exactly 3 to 5 concise bullet points. Verify before acting. No markdown headings.",
+                    prompt
+            );
+            List<String> bullets = parseBullets(content);
+            insertAiAudit("AI_RUN_INSIGHT_GENERATED", actor, runId, null, Map.of(
+                    "runId", runId.toString(),
+                    "measureName", run.measureName(),
+                    "model", modelName,
+                    "fallbackUsed", false,
+                    "bulletCount", bullets.size()
+            ));
+            return new RunInsightResponse(false, bullets);
+        } catch (Exception ex) {
+            insertAiAudit("AI_RUN_INSIGHT_GENERATED", actor, runId, null, Map.of(
+                    "runId", runId.toString(),
+                    "measureName", run.measureName(),
+                    "model", modelName,
+                    "fallbackUsed", true,
+                    "bulletCount", 0
+            ));
+            return new RunInsightResponse(true, List.of());
+        }
     }
 
     private Map<String, Object> buildSuggestion(String policyText, String measureName) {
@@ -102,21 +229,28 @@ public class AiAssistService {
         return suggestion;
     }
 
-    private String buildExplanation(CaseFlowService.CaseDetail detail) {
+    private String buildDeterministicFallbackExplanation(CaseFlowService.CaseDetail detail) {
         Map<String, Object> whyFlagged = detail.evidenceJson() == null
                 ? Map.of()
                 : safeMap(detail.evidenceJson().get("why_flagged"));
+        List<Map<String, Object>> expressionResults = detail.evidenceJson() == null
+                ? List.of()
+                : readExpressionResults(detail.evidenceJson().get("expressionResults"));
         String lastExamDate = valueAsString(whyFlagged.get("last_exam_date"), "unknown");
         String daysOverdue = valueAsString(whyFlagged.get("days_overdue"), "unknown");
         String window = valueAsString(whyFlagged.get("compliance_window_days"), "unknown");
         String waiver = valueAsString(whyFlagged.get("waiver_status"), "unknown");
-        return detail.employeeName()
-                + " was flagged for " + detail.measureName()
-                + " with status " + detail.currentOutcomeStatus()
-                + ". Last recorded exam/vaccine date is " + lastExamDate
-                + " against a " + window + "-day window, with " + daysOverdue
-                + " days overdue and waiver status " + waiver
-                + ". This explanation is derived from structured evidence_json and does not determine compliance.";
+        String defineSnippet = expressionResults.stream()
+                .limit(3)
+                .map(row -> valueAsString(row.get("define"), "define") + "=" + valueAsString(row.get("result"), "unknown"))
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("no define-level results available");
+
+        return detail.employeeName() + " was flagged as " + detail.currentOutcomeStatus()
+                + " for " + detail.measureName() + " based on structured evaluation evidence. "
+                + "The last recorded exam/vaccine date is " + lastExamDate + " with a " + window
+                + "-day window, days overdue " + daysOverdue + ", and waiver status " + waiver + ". "
+                + "Observed define results include " + defineSnippet + ".";
     }
 
     @SuppressWarnings("unchecked")
@@ -131,6 +265,94 @@ public class AiAssistService {
         String trimmed = text.replaceAll("\\s+", " ").trim();
         if (trimmed.length() <= maxLen) return trimmed;
         return trimmed.substring(0, maxLen - 3) + "...";
+    }
+
+    private String callWithModelFallback(String systemPrompt, String userPrompt) {
+        Exception primaryError = null;
+        try {
+            return chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(modelName).temperature(0.3).maxTokens(1000).build())
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .call()
+                    .content();
+        } catch (Exception ex) {
+            primaryError = ex;
+        }
+
+        if (fallbackModelName == null || fallbackModelName.isBlank() || fallbackModelName.equalsIgnoreCase(modelName)) {
+            throw new IllegalStateException("Primary model call failed and no fallback model configured.", primaryError);
+        }
+
+        try {
+            return chatClient.prompt()
+                    .options(OpenAiChatOptions.builder().model(fallbackModelName).temperature(0.3).maxTokens(1000).build())
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .call()
+                    .content();
+        } catch (Exception fallbackError) {
+            throw new IllegalStateException("Primary and fallback model calls failed.", fallbackError);
+        }
+    }
+
+    private List<String> parseBullets(String content) {
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+        List<String> bullets = new ArrayList<>();
+        for (String line : content.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.isBlank()) {
+                continue;
+            }
+            if (trimmed.startsWith("-")) {
+                bullets.add(trimmed.substring(1).trim());
+            } else if (trimmed.matches("^\\d+[\\.)].*")) {
+                bullets.add(trimmed.replaceFirst("^\\d+[\\.)]\\s*", ""));
+            } else {
+                bullets.add(trimmed);
+            }
+        }
+        return bullets.stream().filter(s -> !s.isBlank()).limit(5).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseSuggestionJson(String rawContent) {
+        if (rawContent == null || rawContent.isBlank()) {
+            return Map.of();
+        }
+        String trimmed = rawContent.trim();
+        if (trimmed.startsWith("```")) {
+            List<String> lines = new ArrayList<>(List.of(trimmed.split("\\R")));
+            if (!lines.isEmpty()) {
+                lines.remove(0);
+            }
+            if (!lines.isEmpty() && lines.get(lines.size() - 1).startsWith("```")) {
+                lines.remove(lines.size() - 1);
+            }
+            trimmed = String.join("\n", lines).trim();
+        }
+        try {
+            return objectMapper.readValue(trimmed, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception ex) {
+            return Map.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> readExpressionResults(Object value) {
+        if (value instanceof List<?> list) {
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> map) {
+                    rows.add((Map<String, Object>) map);
+                }
+            }
+            return rows;
+        }
+        return List.of();
     }
 
     private String valueAsString(Object value, String fallback) {
@@ -162,11 +384,13 @@ public class AiAssistService {
     }
 
     public record DraftSpecResponse(
+            boolean success,
             String measureName,
             Map<String, Object> suggestion,
             String explanation,
             String provider,
-            boolean fallbackUsed
+            boolean fallbackUsed,
+            String fallback
     ) {
     }
 
@@ -176,6 +400,24 @@ public class AiAssistService {
             String provider,
             boolean fallbackUsed,
             String disclaimer
+    ) {
+    }
+
+    public record RunInsightResponse(
+            boolean fallback,
+            List<String> insights
+    ) {
+    }
+
+    private record CachedCaseExplanation(
+            Instant updatedAt,
+            CaseExplanationResponse response
+    ) {
+    }
+
+    private record CaseExplanationCacheKey(
+            UUID caseId,
+            String measureVersion
     ) {
     }
 }

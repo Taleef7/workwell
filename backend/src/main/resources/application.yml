@@ -1,6 +1,14 @@
 spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          model: gpt-5.4-nano
+          temperature: 0.3
+          max-tokens: 1000
   flyway:
     enabled: true
     url: ${DATABASE_URL_DIRECT:${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}}
@@ -14,3 +22,7 @@ workwell:
   scheduler:
     enabled: ${WORKWELL_SCHEDULER_ENABLED:false}
     cron: ${WORKWELL_SCHEDULER_CRON:0 0 6 * * *}
+  ai:
+    openai:
+      fallback-model: gpt-4o-mini
+

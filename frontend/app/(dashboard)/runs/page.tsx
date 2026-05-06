@@ -42,11 +42,27 @@ type RunLogEntry = {
   message: string;
 };
 
+type RunOutcomeRow = {
+  employeeName: string;
+  employeeExternalId: string;
+  role: string;
+  site: string;
+  outcomeStatus: string;
+  daysSinceExam: string | null;
+  waiverStatus: string | null;
+  caseId: string | null;
+};
+
 type ManualRunResponse = {
   runId: string;
   scope: string;
   activeMeasuresExecuted: number;
   measuresExecuted: string[];
+};
+
+type RunInsightResponse = {
+  fallback: boolean;
+  insights: string[];
 };
 
 export default function RunsPage() {
@@ -62,9 +78,13 @@ export default function RunsPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
+  const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
+  const [insightDismissed, setInsightDismissed] = useState(false);
+  const rerunSupported = selectedRun ? selectedRun.scopeType === "all_programs" || selectedRun.scopeType === "measure" : false;
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -100,8 +120,27 @@ export default function RunsPage() {
       if (!logsResponse.ok) throw new Error(`Failed to load run logs (${logsResponse.status})`);
       setSelectedRun((await summaryResponse.json()) as RunSummary);
       setRunLogs((await logsResponse.json()) as RunLogEntry[]);
+      const outcomesResponse = await fetch(`${apiBase}/api/runs/${selectedRunId}/outcomes`, { cache: "no-store" });
+      if (outcomesResponse.ok) {
+        setRunOutcomes((await outcomesResponse.json()) as RunOutcomeRow[]);
+      } else {
+        setRunOutcomes([]);
+      }
+      setInsightDismissed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, [apiBase, selectedRunId]);
+
+  const loadRunInsight = useCallback(async () => {
+    if (!selectedRunId) return;
+    try {
+      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/ai/insight`, { method: "POST" });
+      if (!response.ok) return;
+      const data = (await response.json()) as RunInsightResponse;
+      setRunInsight(data);
+    } catch {
+      setRunInsight(null);
     }
   }, [apiBase, selectedRunId]);
 
@@ -116,8 +155,9 @@ export default function RunsPage() {
     if (apiBase && selectedRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadSelectedRun();
+      void loadRunInsight();
     }
-  }, [apiBase, selectedRunId, loadSelectedRun]);
+  }, [apiBase, selectedRunId, loadSelectedRun, loadRunInsight]);
 
   useEffect(() => {
     if (!toast) return;
@@ -136,6 +176,22 @@ export default function RunsPage() {
       if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
       const data = (await response.json()) as ManualRunResponse;
       setToast(`Run started: ${data.runId}`);
+      setSelectedRunId(data.runId);
+      await loadRuns();
+      await loadSelectedRun();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
+  async function rerunSameScope() {
+    if (!selectedRunId) return;
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/rerun`, { method: "POST" });
+      if (!response.ok) throw new Error(`Rerun failed (${response.status})`);
+      const data = (await response.json()) as ManualRunResponse;
+      setToast(`Rerun started: ${data.runId}`);
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();
@@ -185,6 +241,13 @@ export default function RunsPage() {
           <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
             Run Measures Now
           </button>
+          <button
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
+            onClick={() => void rerunSameScope()}
+            disabled={!selectedRunId || !rerunSupported}
+          >
+            Rerun Selected Scope
+          </button>
         </div>
       </div>
 
@@ -212,6 +275,9 @@ export default function RunsPage() {
       </div>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {selectedRun && !rerunSupported ? (
+        <p className="text-xs text-amber-700">Rerun is available only for all-programs or measure-scoped runs.</p>
+      ) : null}
       {toast ? <div className="fixed right-4 top-4 rounded bg-emerald-700 px-3 py-2 text-xs font-medium text-white">{toast}</div> : null}
       {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
 
@@ -249,6 +315,21 @@ export default function RunsPage() {
 
         <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
           <h3 className="text-sm font-semibold text-slate-900">Run Detail</h3>
+          {runInsight && !runInsight.fallback && runInsight.insights.length > 0 && !insightDismissed ? (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">AI-generated operational insight - verify before acting</p>
+                <button className="text-xs text-blue-700 underline" onClick={() => setInsightDismissed(true)}>
+                  Dismiss
+                </button>
+              </div>
+              <ul className="list-disc space-y-1 pl-4 text-xs text-blue-900">
+                {runInsight.insights.map((item, idx) => (
+                  <li key={`${idx}-${item}`}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {selectedRun ? (
             <>
               <p className="text-sm text-slate-700">
@@ -298,6 +379,53 @@ export default function RunsPage() {
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      <div className="rounded-md border border-slate-200 bg-white p-3">
+        <h3 className="text-sm font-semibold text-slate-900">Outcomes</h3>
+        {runOutcomes.length === 0 ? (
+          <p className="text-sm text-slate-600">No outcomes for this run.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-50 text-left text-slate-600">
+                <tr>
+                  <th className="px-2 py-2">Employee</th>
+                  <th className="px-2 py-2">Role</th>
+                  <th className="px-2 py-2">Site</th>
+                  <th className="px-2 py-2">Outcome</th>
+                  <th className="px-2 py-2">Days Since Exam</th>
+                  <th className="px-2 py-2">Waiver</th>
+                  <th className="px-2 py-2">Case</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runOutcomes.map((row) => (
+                  <tr key={`${row.employeeExternalId}-${row.caseId ?? "none"}`} className="border-t border-slate-200">
+                    <td className="px-2 py-2">
+                      <p className="font-medium text-slate-800">{row.employeeName}</p>
+                      <p className="text-slate-500">{row.employeeExternalId}</p>
+                    </td>
+                    <td className="px-2 py-2">{row.role}</td>
+                    <td className="px-2 py-2">{row.site}</td>
+                    <td className="px-2 py-2">{row.outcomeStatus}</td>
+                    <td className="px-2 py-2">{row.daysSinceExam ?? "-"}</td>
+                    <td className="px-2 py-2">{row.waiverStatus ?? "-"}</td>
+                    <td className="px-2 py-2">
+                      {row.caseId ? (
+                        <a className="text-blue-700 underline" href={`/cases/${row.caseId}`}>
+                          {row.caseId.slice(0, 8)}...
+                        </a>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </section>
