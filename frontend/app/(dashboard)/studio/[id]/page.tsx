@@ -31,6 +31,10 @@ type ValueSetRef = {
   oid: string;
   name: string;
   version: string;
+  resolvabilityStatus: "RESOLVED" | "UNRESOLVED" | string;
+  resolvabilityLabel: string;
+  resolvabilityNote: string;
+  codeCount: number;
 };
 
 type TestFixture = {
@@ -98,6 +102,7 @@ export default function StudioMeasurePage() {
   const [activationReadiness, setActivationReadiness] = useState<ActivationReadiness | null>(null);
   const [policyText, setPolicyText] = useState("");
   const [aiDraftBanner, setAiDraftBanner] = useState<string | null>(null);
+  const [changeSummary, setChangeSummary] = useState("");
 
   const loadMeasure = useCallback(async () => {
     setLoading(true);
@@ -313,6 +318,27 @@ export default function StudioMeasurePage() {
     await loadMeasure();
   }
 
+  async function createNewVersion() {
+    setError(null);
+    if (!changeSummary.trim()) {
+      setError("Change summary is required to create a new version.");
+      return;
+    }
+    const response = await fetch(`${apiBase}/api/measures/${measureId}/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changeSummary: changeSummary.trim() })
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      setError(body || `Version clone failed (${response.status})`);
+      return;
+    }
+    setChangeSummary("");
+    setToast("New draft version created");
+    await loadMeasure();
+  }
+
   async function validateTests() {
     setError(null);
     const response = await fetch(`${apiBase}/api/measures/${measureId}/tests/validate`, {
@@ -362,7 +388,21 @@ export default function StudioMeasurePage() {
             </p>
           ) : null}
         </div>
-        <div>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            <input
+              className="rounded border border-slate-300 px-2 py-1 text-xs"
+              placeholder="Change summary (required)"
+              value={changeSummary}
+              onChange={(e) => setChangeSummary(e.target.value)}
+            />
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+              onClick={createNewVersion}
+            >
+              New Version
+            </button>
+          </div>
           {measure?.status === "Draft" ? (
             <button className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => transition("Approved")}>
               Submit for Approval
@@ -496,6 +536,12 @@ export default function StudioMeasurePage() {
                   <div>
                     <p className="font-medium text-slate-800">{valueSet.name}</p>
                     <p className="text-xs text-slate-600">{valueSet.oid} • {valueSet.version}</p>
+                    <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(valueSet.resolvabilityStatus)}`}>
+                      {valueSet.resolvabilityLabel}
+                    </p>
+                    {valueSet.resolvabilityStatus === "UNRESOLVED" ? (
+                      <p className="mt-1 text-xs text-amber-700">{valueSet.resolvabilityNote}</p>
+                    ) : null}
                   </div>
                   <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={() => detachValueSet(valueSet.id)}>
                     Remove
@@ -527,6 +573,9 @@ export default function StudioMeasurePage() {
                     <div>
                       <p className="font-medium text-slate-800">{valueSet.name}</p>
                       <p className="text-xs text-slate-600">{valueSet.oid} • {valueSet.version}</p>
+                      <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(valueSet.resolvabilityStatus)}`}>
+                        {valueSet.resolvabilityLabel}
+                      </p>
                     </div>
                     <button className="rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white" onClick={() => attachValueSet(valueSet.id)}>
                       Attach
@@ -601,4 +650,12 @@ function formatIssue(issue: string): string {
   }
   const line = match[1];
   return `Line ${line}: ${issue}`;
+}
+
+function valueSetBadgeClass(status: string): string {
+  const normalized = status.toUpperCase();
+  if (normalized === "RESOLVED") {
+    return "border border-emerald-300 bg-emerald-100 text-emerald-800";
+  }
+  return "border border-amber-300 bg-amber-100 text-amber-800";
 }

@@ -385,6 +385,8 @@ This makes the authoring experience real and defensible.
 
 ### Studio-1: Version Cloning ("New Version" Flow)
 
+Status: COMPLETED (2026-05-06). Added backend clone endpoint (`POST /api/measures/{id}/versions`) with required `changeSummary`, draft version incrementing, copied spec/CQL/value-set links/test fixtures, and `MEASURE_VERSION_CLONED` audit event. Studio UI now supports "New Version" creation and reloads the new draft.
+
 Add a "New Version" button on the measure detail page that:
 - Clones the current active measure version into a new Draft version with an incremented version number (v1.0 → v1.1, v1.3 → v1.4)
 - Copies `spec_json`, `cql_text`, value set links, and test fixtures from the source version
@@ -396,6 +398,8 @@ Backend: `POST /api/measures/{id}/versions` accepting `{ changeSummary: string }
 
 ### Studio-2: Monaco Editor Integration
 
+Status: BLOCKED BY SPRINT GUARDRAIL (2026-05-06). Installing `@monaco-editor/react` requires adding a new dependency after D5, which conflicts with `AGENTS.md` hard rule "No new dependencies after D5 (May 6, 2026)". Current textarea-based CQL editor remains in place.
+
 Replace the current `<textarea>` in the CQL tab with a Monaco editor:
 - Install `@monaco-editor/react` in the frontend
 - Configure it with a basic CQL language definition (keywords: `library`, `using`, `include`, `parameter`, `context`, `define`, `where`, `exists`, `during`, `return`, `such that`)
@@ -403,6 +407,8 @@ Replace the current `<textarea>` in the CQL tab with a Monaco editor:
 - Wire the editor value to the existing `cqlText` state
 
 ### Studio-3: Value Set Resolvability Indicator
+
+Status: COMPLETED (2026-05-06). Value set payload now includes resolvability metadata, Studio shows resolved/unresolved badges + unresolved tooltip text, and compile now emits unresolved value-set warnings.
 
 In the Value Sets tab, next to each attached value set, show a resolvability badge:
 - For the seeded demo value sets, show "Resolved (demo)" in green

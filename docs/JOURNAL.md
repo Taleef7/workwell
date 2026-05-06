@@ -2,6 +2,33 @@
 
 ## 2026-05-06
 
+### P2 Studio UX progress: version cloning + value set resolvability
+
+Completed:
+- Implemented version cloning API and service flow:
+  - Backend endpoint: `POST /api/measures/{id}/versions`
+  - Requires `changeSummary`
+  - Clones latest measure version into a new `Draft` version with incremented version number (`vX.Y -> vX.(Y+1)`).
+  - Copies `spec_json`, `cql_text`, compile metadata, and `measure_value_set_links` from source version.
+  - Emits `MEASURE_VERSION_CLONED` audit event with source/target metadata.
+- Studio UI:
+  - Added change-summary input and `New Version` action on measure detail page.
+  - After successful clone, page reloads and surfaces the new draft context.
+- Value set resolvability support:
+  - Extended `ValueSetRef` payload with resolvability metadata (`status`, `label`, `note`, `codeCount`).
+  - Added resolvability badges on attached and attachable value-set lists.
+  - Added unresolved compile warnings:
+    - `Value set '{name}' ({oid}) has no codes loaded. Verify codes are available before activation.`
+
+Constraint observed:
+- Monaco editor task (`@monaco-editor/react`) not executed due sprint hard rule: no new dependencies after D5.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests \"com.workwell.web.MeasureControllerTest\"` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### CQL compile validation polish completed (status + Studio UX)
 
 Completed:

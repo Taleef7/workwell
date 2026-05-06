@@ -46,6 +46,16 @@ public class MeasureController {
         return detail;
     }
 
+    @PostMapping("/api/measures/{id}/versions")
+    public Map<String, String> createVersion(@PathVariable UUID id, @Valid @RequestBody CreateVersionRequest request) {
+        try {
+            UUID versionId = measureService.createVersion(id, request.changeSummary());
+            return Map.of("status", "created", "versionId", versionId.toString());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
     @GetMapping("/api/value-sets")
     public List<MeasureService.ValueSetRef> listValueSets() {
         return measureService.listValueSets();
@@ -161,6 +171,11 @@ public class MeasureController {
             @NotBlank String oid,
             @NotBlank String name,
             String version
+    ) {
+    }
+
+    public record CreateVersionRequest(
+            @NotBlank String changeSummary
     ) {
     }
 

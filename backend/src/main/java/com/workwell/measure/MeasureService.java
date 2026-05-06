@@ -243,6 +243,11 @@ public class MeasureService {
         if (attachedValueSets.isEmpty()) {
             warnings.add("No value sets are attached to this measure version.");
         }
+        for (ValueSetRef valueSet : attachedValueSets) {
+            if ("UNRESOLVED".equalsIgnoreCase(valueSet.resolvabilityStatus())) {
+                warnings.add("Value set '" + valueSet.name() + "' (" + valueSet.oid() + ") has no codes loaded. Verify codes are available before activation.");
+            }
+        }
 
         CqlCompileValidationService.CompileResult compileResult = cqlCompileValidationService.validate(cqlText);
         List<String> mergedWarnings = new ArrayList<>(warnings);
@@ -273,7 +278,11 @@ public class MeasureService {
                 rs.getString("oid"),
                 rs.getString("name"),
                 rs.getString("version"),
-                toInstant(rs.getObject("last_resolved_at"))
+                toInstant(rs.getObject("last_resolved_at")),
+                "UNRESOLVED",
+                "Unresolved",
+                "Codes not yet loaded. Resolvability check will warn at compile time.",
+                0
         ));
     }
 
@@ -339,6 +348,83 @@ public class MeasureService {
                 "system",
                 Map.of("field", "tests", "measureId", id.toString(), "fixtureCount", fixtures == null ? 0 : fixtures.size())
         );
+    }
+
+    public UUID createVersion(UUID measureId, String changeSummary) {
+        if (changeSummary == null || changeSummary.isBlank()) {
+            throw new IllegalArgumentException("changeSummary is required");
+        }
+
+        Map<String, Object> source = jdbcTemplate.queryForMap(
+                """
+                        SELECT id, version, spec_json::text AS spec_json_text, cql_text, compile_status, compile_result::text AS compile_result_text
+                        FROM measure_versions
+                        WHERE measure_id = ?
+                        ORDER BY (CASE WHEN status = 'Active' THEN 0 ELSE 1 END), created_at DESC
+                        LIMIT 1
+                        """,
+                measureId
+        );
+
+        UUID sourceVersionId = (UUID) source.get("id");
+        String sourceVersion = stringOrEmpty(source.get("version"));
+        String nextVersion = incrementVersion(sourceVersion);
+        UUID newVersionId = UUID.randomUUID();
+        String specJsonText = stringOrEmpty(source.get("spec_json_text"));
+        String cqlText = stringOrEmpty(source.get("cql_text"));
+        String compileStatus = stringOrEmpty(source.get("compile_status"));
+        String compileResultText = stringOrEmpty(source.get("compile_result_text"));
+
+        jdbcTemplate.update(
+                """
+                        INSERT INTO measure_versions (
+                            id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result,
+                            change_summary, approved_by, activated_at, created_at
+                        ) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, NOW())
+                        """,
+                ps -> {
+                    ps.setObject(1, newVersionId);
+                    ps.setObject(2, measureId);
+                    ps.setString(3, nextVersion);
+                    ps.setString(4, "Draft");
+                    ps.setString(5, specJsonText);
+                    ps.setString(6, cqlText);
+                    ps.setString(7, compileStatus.isBlank() ? "ERROR" : compileStatus);
+                    ps.setString(8, compileResultText.isBlank() ? toJson(Map.of("status", "ERROR", "warnings", List.of(), "errors", List.of("No compile result copied"))) : compileResultText);
+                    ps.setString(9, changeSummary.trim());
+                    ps.setNull(10, java.sql.Types.VARCHAR);
+                    ps.setNull(11, java.sql.Types.TIMESTAMP);
+                }
+        );
+
+        jdbcTemplate.update(
+                """
+                        INSERT INTO measure_value_set_links (measure_version_id, value_set_id)
+                        SELECT ?, value_set_id
+                        FROM measure_value_set_links
+                        WHERE measure_version_id = ?
+                        ON CONFLICT DO NOTHING
+                        """,
+                newVersionId,
+                sourceVersionId
+        );
+
+        jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", measureId);
+        insertAuditEvent(
+                "MEASURE_VERSION_CLONED",
+                newVersionId,
+                "system",
+                Map.of(
+                        "measureId", measureId.toString(),
+                        "sourceVersionId", sourceVersionId.toString(),
+                        "sourceVersion", sourceVersion,
+                        "newVersionId", newVersionId.toString(),
+                        "newVersion", nextVersion,
+                        "changeSummary", changeSummary.trim()
+                )
+        );
+
+        return newVersionId;
     }
 
     public TestValidationResult validateTests(UUID id) {
@@ -457,19 +543,36 @@ public class MeasureService {
     private List<ValueSetRef> listAttachedValueSets(UUID measureId) {
         UUID measureVersionId = latestMeasureVersionId(measureId);
         String sql = """
-                SELECT vs.id, vs.oid, vs.name, vs.version, vs.last_resolved_at
+                SELECT vs.id, vs.oid, vs.name, vs.version, vs.last_resolved_at,
+                       COALESCE(jsonb_array_length(vs.codes_json), 0) AS code_count
                 FROM measure_value_set_links l
                 JOIN value_sets vs ON vs.id = l.value_set_id
                 WHERE l.measure_version_id = ?
                 ORDER BY vs.name ASC, vs.oid ASC
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new ValueSetRef(
-                (UUID) rs.getObject("id"),
-                rs.getString("oid"),
-                rs.getString("name"),
-                rs.getString("version"),
-                toInstant(rs.getObject("last_resolved_at"))
-        ), measureVersionId);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            String oid = rs.getString("oid");
+            int codeCount = rs.getInt("code_count");
+            boolean demoResolved = oid != null && oid.startsWith("urn:workwell:vs:");
+            String resolvabilityStatus = demoResolved || codeCount > 0 ? "RESOLVED" : "UNRESOLVED";
+            String resolvabilityLabel = demoResolved
+                    ? "Resolved (demo)"
+                    : (codeCount > 0 ? "Resolved" : "Unresolved");
+            String resolvabilityNote = demoResolved || codeCount > 0
+                    ? ""
+                    : "Codes not yet loaded. Resolvability check will warn at compile time.";
+            return new ValueSetRef(
+                    (UUID) rs.getObject("id"),
+                    oid,
+                    rs.getString("name"),
+                    rs.getString("version"),
+                    toInstant(rs.getObject("last_resolved_at")),
+                    resolvabilityStatus,
+                    resolvabilityLabel,
+                    resolvabilityNote,
+                    codeCount
+            );
+        }, measureVersionId);
     }
 
     private List<TestFixture> loadTestFixtures(UUID measureId) {
@@ -862,6 +965,22 @@ public class MeasureService {
         return "COMPILED".equalsIgnoreCase(compileStatus) || "WARNINGS".equalsIgnoreCase(compileStatus);
     }
 
+    private String incrementVersion(String version) {
+        String trimmed = version == null ? "" : version.trim();
+        String normalized = trimmed.startsWith("v") || trimmed.startsWith("V") ? trimmed.substring(1) : trimmed;
+        String[] parts = normalized.split("\\.");
+        if (parts.length < 2) {
+            return "v1.0";
+        }
+        try {
+            int major = Integer.parseInt(parts[0]);
+            int minor = Integer.parseInt(parts[1]);
+            return "v" + major + "." + (minor + 1);
+        } catch (NumberFormatException ex) {
+            return "v1.0";
+        }
+    }
+
     private void insertAuditEvent(String eventType, UUID measureVersionId, String actor, Map<String, Object> payload) {
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?::jsonb)",
@@ -935,7 +1054,11 @@ public class MeasureService {
             String oid,
             String name,
             String version,
-            Instant lastResolvedAt
+            Instant lastResolvedAt,
+            String resolvabilityStatus,
+            String resolvabilityLabel,
+            String resolvabilityNote,
+            int codeCount
     ) {
     }
 
