@@ -420,6 +420,7 @@ In the Value Sets tab, next to each attached value set, show a resolvability bad
 ## P2 — Case Worklist UX Completeness
 
 ### Cases-1: Case Timeline Improvements
+Status: COMPLETED (2026-05-06). Case detail timeline now renders event-specific icons, explicit source tags (`audit` vs `action`), normalized human-readable labels, and highlights the most recent event.
 
 On the case detail timeline:
 - Render each event type with a distinct icon (outreach = email icon, rerun = refresh icon, created = plus icon, resolved = checkmark icon, escalated = alert icon, assigned = person icon)
@@ -428,6 +429,7 @@ On the case detail timeline:
 - Highlight the most recent event
 
 ### Cases-2: Bulk Actions on Worklist
+Status: COMPLETED (2026-05-06). Cases list now supports multi-select with a bulk toolbar: sequential bulk assign, sequential bulk escalate, and selected-case CSV export via `caseIds` filter.
 
 Add a checkbox column on the cases list. When one or more cases are selected:
 - Show a bulk action toolbar: "Assign to...", "Escalate selected", "Export selected"
@@ -435,10 +437,12 @@ Add a checkbox column on the cases list. When one or more cases are selected:
 - Bulk export: trigger a filtered CSV export for the selected case IDs
 
 ### Cases-3: Case Search
+Status: COMPLETED (2026-05-06). Added client-side search on cases page for employee name or employee ID against the loaded case array.
 
 Add a search field on the cases page that filters by employee name or employee ID. Implement as a client-side filter on the already-loaded cases array (no additional backend call needed).
 
 ### Cases-4: Evidence Deep Link
+Status: COMPLETED (2026-05-06). Added a `View Raw Evidence` toggle in case detail to expand/collapse full `evidence_json` for traceability.
 
 From the case detail's "Why Flagged" section, add a "View Raw Evidence" toggle that expands the full `evidence_json` as a collapsible JSON viewer (use `react-json-view` or a simple `<pre>` block with syntax highlighting).
 

@@ -1,7 +1,10 @@
 package com.workwell.web;
 
 import com.workwell.export.CsvExportService;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -47,13 +50,25 @@ public class ExportController {
             @RequestParam(name = "measureId", required = false) UUID measureId,
             @RequestParam(name = "priority", required = false) String priority,
             @RequestParam(name = "assignee", required = false) String assignee,
-            @RequestParam(name = "site", required = false) String site
+            @RequestParam(name = "site", required = false) String site,
+            @RequestParam(name = "caseIds", required = false) String caseIds
     ) {
         return csvResponse(
                 format,
                 "cases.csv",
-                csvExportService.exportCaseCsv(status, measureId, priority, assignee, site)
+                csvExportService.exportCaseCsv(status, measureId, priority, assignee, site, parseCaseIds(caseIds))
         );
+    }
+
+    private List<UUID> parseCaseIds(String caseIds) {
+        if (caseIds == null || caseIds.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(caseIds.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .map(UUID::fromString)
+                .collect(Collectors.toList());
     }
 
     private ResponseEntity<String> csvResponse(String format, String filename, String csv) {

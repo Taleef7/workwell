@@ -36,6 +36,10 @@ export default function CasesPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [siteFilter, setSiteFilter] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -79,6 +83,7 @@ export default function CasesPage() {
       }
       const data = (await response.json()) as CaseSummary[];
       setCases(data);
+      setSelectedCaseIds((existing) => existing.filter((id) => data.some((item) => item.caseId === id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -88,17 +93,47 @@ export default function CasesPage() {
 
   useEffect(() => {
     if (apiBase) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadMeasures();
+      const timer = setTimeout(() => {
+        void loadMeasures();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [apiBase, loadMeasures]);
 
   useEffect(() => {
     if (apiBase) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadCases();
+      const timer = setTimeout(() => {
+        void loadCases();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [apiBase, loadCases]);
+
+  const filteredCases = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) {
+      return cases;
+    }
+    return cases.filter((item) => item.employeeName.toLowerCase().includes(term) || item.employeeId.toLowerCase().includes(term));
+  }, [cases, searchTerm]);
+
+  const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
+
+  function toggleCase(caseId: string) {
+    setSelectedCaseIds((existing) =>
+      existing.includes(caseId) ? existing.filter((id) => id !== caseId) : [...existing, caseId]
+    );
+  }
+
+  function toggleAllFiltered() {
+    if (allFilteredSelected) {
+      setSelectedCaseIds((existing) => existing.filter((id) => !filteredCases.some((item) => item.caseId === id)));
+      return;
+    }
+    const ids = new Set(selectedCaseIds);
+    filteredCases.forEach((item) => ids.add(item.caseId));
+    setSelectedCaseIds(Array.from(ids));
+  }
 
   async function exportCsv(urlPath: string, filename: string) {
     const response = await fetch(`${apiBase}${urlPath}`);
@@ -115,6 +150,64 @@ export default function CasesPage() {
     anchor.click();
     document.body.removeChild(anchor);
     window.URL.revokeObjectURL(url);
+  }
+
+  async function bulkAssign() {
+    if (!apiBase || selectedCaseIds.length === 0) {
+      return;
+    }
+    setBulkActing("assign");
+    setError(null);
+    try {
+      const assigneeQuery = bulkAssignee.trim() ? `?assignee=${encodeURIComponent(bulkAssignee.trim())}` : "";
+      for (const caseId of selectedCaseIds) {
+        const response = await fetch(`${apiBase}/api/cases/${caseId}/assign${assigneeQuery}`, { method: "POST" });
+        if (!response.ok) {
+          throw new Error(`Bulk assign failed (${response.status})`);
+        }
+      }
+      await loadCases();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setBulkActing(null);
+    }
+  }
+
+  async function bulkEscalate() {
+    if (!apiBase || selectedCaseIds.length === 0) {
+      return;
+    }
+    setBulkActing("escalate");
+    setError(null);
+    try {
+      for (const caseId of selectedCaseIds) {
+        const response = await fetch(`${apiBase}/api/cases/${caseId}/escalate`, { method: "POST" });
+        if (!response.ok) {
+          throw new Error(`Bulk escalate failed (${response.status})`);
+        }
+      }
+      await loadCases();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setBulkActing(null);
+    }
+  }
+
+  async function bulkExportSelected() {
+    if (selectedCaseIds.length === 0) {
+      return;
+    }
+    setBulkActing("export");
+    try {
+      const params = new URLSearchParams();
+      params.set("format", "csv");
+      params.set("caseIds", selectedCaseIds.join(","));
+      await exportCsv(`/api/exports/cases?${params.toString()}`, "cases-selected.csv");
+    } finally {
+      setBulkActing(null);
+    }
   }
 
   return (
@@ -227,32 +320,88 @@ export default function CasesPage() {
             ))}
           </select>
         </label>
+        <label className="text-sm text-slate-600">
+          Search
+          <input
+            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
+            placeholder="Employee name or ID"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </label>
       </div>
+
+      {selectedCaseIds.length > 0 ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="font-semibold text-blue-900">{selectedCaseIds.length} selected</span>
+            <input
+              className="rounded border border-blue-300 bg-white px-2 py-1"
+              placeholder="Assignee for selected"
+              value={bulkAssignee}
+              onChange={(e) => setBulkAssignee(e.target.value)}
+            />
+            <button
+              className="rounded-md border border-blue-300 bg-white px-3 py-1 font-semibold text-blue-900 disabled:opacity-60"
+              disabled={bulkActing !== null}
+              onClick={() => void bulkAssign()}
+            >
+              {bulkActing === "assign" ? "Assigning..." : "Assign to..."}
+            </button>
+            <button
+              className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1 font-semibold text-rose-900 disabled:opacity-60"
+              disabled={bulkActing !== null}
+              onClick={() => void bulkEscalate()}
+            >
+              {bulkActing === "escalate" ? "Escalating..." : "Escalate selected"}
+            </button>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-1 font-semibold text-slate-900 disabled:opacity-60"
+              disabled={bulkActing !== null}
+              onClick={() => void bulkExportSelected()}
+            >
+              {bulkActing === "export" ? "Exporting..." : "Export selected"}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {loading ? <p className="text-sm text-slate-600">Loading cases...</p> : null}
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
 
-      {!loading && !error && cases.length === 0 ? (
+      {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600">
-          No cases yet. Run the Audiogram vertical first, then come back here to inspect the flagged outcomes.
+          No cases match this filter set yet.
+        </div>
+      ) : null}
+
+      {filteredCases.length > 0 ? (
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
+          <span>Select all in current results</span>
         </div>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {cases.map((item) => (
-          <Link
-            key={item.caseId}
-            href={`/cases/${item.caseId}`}
-            className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
-          >
+        {filteredCases.map((item) => (
+          <div key={item.caseId} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
-                <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
-                <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
-                <p className="mt-1 text-xs text-slate-500">{item.site}</p>
-              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={selectedCaseIds.includes(item.caseId)}
+                  onChange={() => toggleCase(item.caseId)}
+                />
+                Select
+              </label>
               <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{item.priority}</span>
+            </div>
+
+            <div className="mt-2">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
+              <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
+              <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
+              <p className="mt-1 text-xs text-slate-500">{item.site}</p>
             </div>
 
             <dl className="mt-4 space-y-2 text-sm text-slate-700">
@@ -270,13 +419,11 @@ export default function CasesPage() {
               </div>
             </dl>
 
-            <p className="mt-4 text-sm text-slate-600">
-              Updated {new Date(item.updatedAt).toLocaleString()}.
-            </p>
-            <p className="mt-2 text-sm font-medium text-slate-900 transition group-hover:translate-x-0.5">
+            <p className="mt-4 text-sm text-slate-600">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
+            <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-slate-900 hover:underline">
               View structured evidence →
-            </p>
-          </Link>
+            </Link>
+          </div>
         ))}
       </div>
     </section>

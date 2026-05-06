@@ -165,7 +165,7 @@ public class CsvExportService {
         return csv.toString();
     }
 
-    public String exportCaseCsv(String status, UUID measureId, String priority, String assignee, String site) {
+    public String exportCaseCsv(String status, UUID measureId, String priority, String assignee, String site, List<UUID> caseIds) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT
@@ -223,6 +223,11 @@ public class CsvExportService {
         if (hasText(site)) {
             sql.append(" AND e.site = ? ");
             args.add(site.trim());
+        }
+        if (caseIds != null && !caseIds.isEmpty()) {
+            String placeholders = String.join(", ", java.util.Collections.nCopies(caseIds.size(), "?"));
+            sql.append(" AND c.id IN (").append(placeholders).append(") ");
+            args.addAll(caseIds);
         }
         sql.append(" ORDER BY c.updated_at DESC ");
 

@@ -2,6 +2,27 @@
 
 ## 2026-05-06
 
+### P2 case worklist/detail UX polish completed
+
+Completed:
+- Cases list bulk actions:
+  - Added multi-select checkboxes with select-all for current filtered results.
+  - Added bulk toolbar for `Assign to...`, `Escalate selected`, and `Export selected`.
+  - Bulk assign/escalate executes sequential per-case API calls (`/assign`, `/escalate`) and refreshes list on completion.
+- Case search:
+  - Added client-side search box filtering loaded cases by employee name or employee ID.
+- Selected-case CSV export:
+  - Extended `GET /api/exports/cases` to accept optional `caseIds` query param (comma-separated UUIDs).
+  - Extended `CsvExportService.exportCaseCsv(...)` to filter by selected case IDs when provided.
+- Case detail evidence/timeline polish:
+  - Added `View Raw Evidence` toggle under Why Flagged to show/hide full `evidence_json`.
+  - Timeline now includes event icons, source tags (`audit` vs `action`), humanized labels, and most-recent highlight.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `frontend npm run lint` -> PASS
+- `frontend npm run build` -> PASS
+
 ### P2 Studio UX progress: version cloning + value set resolvability
 
 Completed:
