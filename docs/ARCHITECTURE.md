@@ -1,69 +1,109 @@
 # WorkWell Measure Studio - Architecture
 
-## Scope
-This document captures the MVP architecture baseline from `docs/SPIKE_PLAN.md`, centered on a single backend deployable and clear module boundaries.
+## 1) System Overview
+WorkWell Measure Studio is a two-tier web application:
+- Frontend: Next.js App Router dashboard on Vercel.
+- Backend: Spring Boot API on Fly.io.
+- Data: PostgreSQL 16 (Neon) with Flyway migrations.
+- Optional assistive surfaces: OpenAI-backed Spring AI calls for drafting/explanations (never compliance decisions).
 
-## Deployment Rationale (ADR-001)
-The project runs as one Spring Boot deployable plus one Next.js frontend during MVP. This keeps the system operationally simple while the highest-risk work (CQL evaluation integration, idempotent caseflow behavior, and evidence traceability) is still being validated.
+Compliance outcomes are determined only by CQL evaluation + structured evidence persistence.
 
-Why this is the default:
-- 13-week timeline favors fast vertical slices over distributed service overhead.
-- One runtime boundary reduces local setup and CI complexity.
-- Domain package boundaries preserve a clean seam for future extraction.
+## 2) Deployment Topology
 
-## Runtime Topology
-- Frontend: Next.js dashboard shell and workflow UI.
-- Backend: Spring Boot API + orchestration logic.
-- Datastores/services: Postgres app DB, HAPI FHIR server, optional AI provider in Phase 4.
+```text
+Browser
+  -> Vercel (Next.js frontend)
+      -> Fly.io (Spring Boot API)
+          -> Neon Postgres (primary app DB)
+          -> CQL engine in-process (cqf-fhir-cr + HAPI FHIR model)
+          -> OpenAI API (assistive text only)
+          -> MCP read interface (/sse + tools)
+```
 
-## Backend Domain Package Layout
-- `com.workwell.measure`: measure catalog and version lifecycle.
-- `com.workwell.compile`: CQL compile/validate APIs.
-- `com.workwell.run`: run orchestration, outcome persistence, and latest-run readback.
-- `com.workwell.caseflow`: idempotent case upsert, case state transitions, simulated outreach action logging, rerun-to-verify closure flow, and Why Flagged readback.
-- `com.workwell.audit`: append-only audit event publishing and query.
-- `com.workwell.valueset`: value set registry and resolvability checks.
-- `com.workwell.ai`: guardrailed AI assist for Draft Spec and Explain Why Flagged (advisory-only).
-- `com.workwell.export`: CSV export services for runs/outcomes/cases.
-- `com.workwell.admin`: admin integrations health and manual sync stubs.
-- `com.workwell.mcp`: read-only MCP server tools for measure/run/case retrieval.
+Production endpoints:
+- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Backend: `https://workwell-measure-studio-api.fly.dev`
 
-## Seam for Future Split
-If post-MVP scale or team ownership requires service decomposition, package boundaries are the extraction seam:
-- `run` + `compile` can split behind an internal API first.
-- `caseflow` can split once run-output contracts are stable.
-- `mcp` can remain separately deployable earlier because it is read-only.
+## 3) Backend Module Boundaries (`com.workwell.*`)
+- `measure`: measure catalog, versioning, lifecycle transitions.
+- `valueset`: value set registry and measure/value-set linkage.
+- `compile`: CQL translator compile validation and compile metadata.
+- `fhir`: measure library/resource assembly used by evaluation runtime.
+- `run`: run orchestration, run detail/summary read models, rerun scope support.
+- `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline.
+- `audit`: append-only audit event publisher + export/query paths.
+- `export`: runs/outcomes/cases CSV contracts.
+- `integrations`: integration service adapters/checks.
+- `admin`: scheduler settings, integration health, outreach template APIs.
+- `ai`: AI draft spec, explain-why-flagged, run insight surfaces with deterministic fallback.
+- `mcp`: read-only MCP tools and tool-call audit logging.
+- `notification`: outreach preview/composition support.
+- `config`: cross-cutting app/security/CORS/runtime configuration.
+- `security`: HTTP security policy and allowed origins.
+- `web`: REST controllers and request/response contracts.
 
-No split is planned in MVP unless a specific bottleneck forces it.
+## 4) Frontend Route Surfaces (`app/(dashboard)`)
+- `/programs`: compliance KPI overview + per-program cards.
+- `/programs/[measureId]`: measure-specific trend and driver view.
+- `/runs`: run history, run detail, outcomes table, rerun selected scope.
+- `/cases`: worklist with filters, search, bulk actions, exports.
+- `/cases/[id]`: case detail, timeline, evidence, outreach/escalate/assign/rerun actions.
+- `/measures`: measure list and create flow.
+- `/studio/[id]`: authoring tabs (Spec/CQL/Value Sets/Tests), compile + version cloning.
+- `/admin`: scheduler controls + integration health + manual sync.
 
-## TBD before Phase 3
-- Sequence diagram for the full run pipeline (`evaluateMeasureWithCqlEngine -> evaluateMeasure(compositeResults)` plus outcome/case writes).
-- Interface contracts between `run` and `caseflow` modules (event payload schema).
-- Deployment topology decision for demo vs pilot (single host vs container platform).
+## 5) End-to-End Data Flow
 
-## Current API Surface (MVP live)
-Caseflow:
-- `GET /api/cases`
-- `GET /api/cases/{id}`
-- `POST /api/cases/{id}/actions/outreach` (simulated outreach action; audit logged)
-- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=QUEUED|SENT|FAILED` (persist simulated delivery lifecycle)
-- `POST /api/cases/{id}/rerun-to-verify` (case-level verification rerun; closes case when verified compliant)
-- `POST /api/cases/{id}/assign`
-- `POST /api/cases/{id}/escalate`
+### 5.1 OSHA/Policy Text -> Spec
+1. Author opens Studio Spec tab.
+2. Manual entry or AI Draft Spec creates a draft proposal.
+3. Draft is saved to `measure_versions.spec_json`.
+4. `AI_DRAFT_SPEC_GENERATED` audit event is written if AI was used.
 
-Reporting:
-- `GET /api/exports/runs?format=csv`
-- `GET /api/exports/outcomes?format=csv&runId={optional}`
-- `GET /api/exports/cases?format=csv`
-- `GET /api/audit-events/export?format=csv`
+### 5.2 Spec -> CQL
+1. Author updates CQL text in Studio.
+2. Compile API runs translator validation.
+3. Compile result persisted in `measure_versions.compile_status` + `compile_result`.
+4. Activation is blocked unless compile gate and test-fixture gate pass.
 
-Admin integrations:
-- `GET /api/admin/integrations`
-- `POST /api/admin/integrations/{integration}/sync`
+### 5.3 CQL -> Run
+1. User triggers manual run (`/api/runs/manual` or scoped run endpoint).
+2. Run row inserted in `runs`.
+3. For each employee:
+   - Synthetic FHIR bundle is constructed from employee profile + exam config.
+   - CQL engine evaluates measure defines against in-memory FHIR repository.
+   - `Outcome Status` define determines bucket (`COMPLIANT|DUE_SOON|OVERDUE|MISSING_DATA|EXCLUDED`).
+   - Define-level `expressionResults` are captured into `outcomes.evidence_json`.
+4. Run summary counters are finalized in `runs`.
 
-AI:
-- `POST /api/measures/{id}/ai/draft-spec`
-- `POST /api/cases/{id}/explain`
+### 5.4 Outcomes -> Cases
+1. Non-compliant outcomes (`DUE_SOON|OVERDUE|MISSING_DATA`) upsert open cases.
+2. `COMPLIANT|EXCLUDED` closes existing case for same `(employee, measure_version, evaluation_period)`.
+3. Case events and operator actions are written to `audit_events` and `case_actions`.
 
-MCP:
-- Read-only tool layer including `get_case`, `list_cases`, `get_run_summary`, `list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`.
+### 5.5 Cases -> Actions
+1. Operator can assign, escalate, preview/send outreach, and mark delivery state.
+2. Delivery state (`QUEUED|SENT|FAILED`) updates next-action guidance and timeline.
+3. Rerun-to-verify performs scoped rerun for that case and closes case if now compliant.
+
+### 5.6 Actions -> Audit
+Every state-changing operation emits an `audit_events` record with actor + entity refs + payload.
+
+## 6) Runtime Invariants
+- AI cannot set compliance status.
+- CQL `Outcome Status` is the only compliance classification source.
+- Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
+- One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
+
+## 7) External Interfaces
+- REST API: measure, run, case, admin, export endpoints.
+- MCP: read-only tools with per-call audit events.
+- CSV exports: runs/outcomes/cases + audit export.
+
+## 8) Current Infra Split
+- Fly.io hosts backend process and serves REST + MCP SSE.
+- Vercel hosts frontend only.
+- Neon hosts all relational persistence used by backend.
+
+No microservice decomposition is used in MVP; package boundaries are the future extraction seam.

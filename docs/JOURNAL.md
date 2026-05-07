@@ -2,6 +2,28 @@
 
 ## 2026-05-06
 
+### P3 docs tranche completed: Architecture + Data Model + Demo Runbook
+
+Completed:
+- Rewrote `docs/ARCHITECTURE.md` to reflect current live runtime:
+  - Vercel frontend -> Fly backend -> Neon DB topology
+  - Detailed package boundaries across `com.workwell.*`
+  - End-to-end flow: policy text -> spec -> CQL compile -> run -> outcomes -> cases -> actions -> audit
+  - Option A runtime invariants and compliance source-of-truth constraints
+- Rewrote `docs/DATA_MODEL.md` with:
+  - Full schema coverage for active tables (`V001`, `V002`) plus migration-safe `outreach_templates` contract
+  - Case upsert idempotency worked example (`UNIQUE(employee_id, measure_version_id, evaluation_period)`)
+  - Detailed `evidence_json` contract and evaluation-error fallback payload shape
+  - Full CSV export column contracts and case export filter contract (including `caseIds`)
+- Added `docs/DEMO_RUNBOOK.md`:
+  - Production URLs
+  - Pinned production case IDs including overdue Audiogram showcase case
+  - Click-by-click demo flow with expected outcomes and fallback paths (including AI unavailable path)
+
+Verification:
+- `GET https://workwell-measure-studio-api.fly.dev/api/cases?status=open` -> 200
+- Pinned case IDs validated from live response payload at write time.
+
 ### P2 case worklist/detail UX polish completed
 
 Completed:

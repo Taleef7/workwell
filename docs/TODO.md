@@ -512,6 +512,7 @@ Before sending outreach, show a preview of the templated message with employee n
 ## P3 — Documentation and Showcase Readiness
 
 ### Docs-1: Update ARCHITECTURE.md
+Status: COMPLETED (2026-05-06). Rewrote architecture doc with current production topology (Vercel + Fly + Neon), package boundaries for `com.workwell.*`, end-to-end data flow from policy text to audit, and Option A CQL runtime invariants.
 
 Rewrite `docs/ARCHITECTURE.md` with:
 - Current system diagram (text-based is fine: backend modules, frontend routes, DB tables, MCP server, external APIs)
@@ -520,6 +521,7 @@ Rewrite `docs/ARCHITECTURE.md` with:
 - Deployment topology (Fly + Vercel + Neon)
 
 ### Docs-2: Update DATA_MODEL.md
+Status: COMPLETED (2026-05-06). Rewrote data model doc with full live schema references, integration/outreach template coverage, idempotent case upsert worked example, authoritative evidence_json contract, and full CSV column/filter contracts.
 
 Rewrite `docs/DATA_MODEL.md` with:
 - Complete schema for all tables including the new `integration_health` and `outreach_templates` tables
@@ -528,6 +530,7 @@ Rewrite `docs/DATA_MODEL.md` with:
 - Export column contracts for all three CSV exports
 
 ### Docs-3: Demo Runbook
+Status: COMPLETED (2026-05-06). Added `docs/DEMO_RUNBOOK.md` with production URLs, pinned live case IDs (including overdue Audiogram), step-by-step click-paths, expected outcomes, and fallback handling for AI/unavailable paths.
 
 Create `docs/DEMO_RUNBOOK.md` (distinct from DEMO_SCRIPT.md) with:
 - Specific URLs for the deployed application
