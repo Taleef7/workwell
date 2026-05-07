@@ -24,6 +24,21 @@ Verification:
 - `backend\\gradlew.bat compileJava` -> PASS
 - `backend\\gradlew.bat test --tests \"com.workwell.compile.CqlCompileValidationServiceTest\" --tests \"com.workwell.compile.CqlEvaluationServiceTest\" --no-daemon` -> PASS
 
+### Data-2 historical run seeding completed
+
+Completed:
+- Added `SeedHistoricalRunsService` (`com.workwell.run`) with startup seeding guard:
+  - if `runs` table has data, no-op
+  - if empty, seed 5 historical all-program runs at 30-day spacing
+- Historical run generation uses real Option A CQL evaluation payloads per active measure and then applies deterministic compliant-rate variance deltas:
+  - `-5%`, `-2%`, `0%`, `+3%`, `+5%`
+- Adjustment is encoded in evidence metadata (`historicalSeedAdjusted`, `historicalSeedOutcome`) for traceability.
+- Seeded runs are persisted through existing `persistAllProgramsRun(...)` path so audit/outcome/case pipelines stay consistent.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests \"com.workwell.compile.CqlCompileValidationServiceTest\" --tests \"com.workwell.compile.CqlEvaluationServiceTest\" --tests \"com.workwell.web.RunControllerTest\" --no-daemon` -> PASS
+
 ## 2026-05-06
 
 ### P3 docs tranche completed: AI guardrails + measure mapping

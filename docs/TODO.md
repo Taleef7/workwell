@@ -573,6 +573,7 @@ The current catalog has 50 employees. Expand to 100 with more diversity:
 - Keep the catalog in `SyntheticEmployeeCatalog.java` — it's clean and easy to extend
 
 ### Data-2: Historical Run Seeding
+Status: COMPLETED (2026-05-07). Added startup `SeedHistoricalRunsService` that seeds 5 historical all-program runs at 30-day intervals when `runs` is empty, with deterministic ±5% compliant-rate adjustments to produce non-flat trend lines.
 
 Add a `SeedHistoricalRunsService` that, on first startup if no runs exist, creates 5 synthetic historical runs at 30-day intervals in the past. Each historical run should have slightly varied compliance rates (±5%) to create a meaningful trend line in the Programs Overview chart. This makes the trend chart non-trivial from day one.
 
