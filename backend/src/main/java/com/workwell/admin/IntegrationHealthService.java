@@ -3,6 +3,7 @@ package com.workwell.admin;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
+import java.net.HttpURLConnection;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -154,16 +155,27 @@ public class IntegrationHealthService {
     }
 
     private SyncResult checkMcpHealth() {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(mcpSseUrl))
-                .timeout(Duration.ofSeconds(5))
-                .GET()
-                .build();
         try {
-            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-            if (response.statusCode() >= 200 && response.statusCode() < 400) {
-                return new SyncResult("healthy", "Manual sync triggered", Map.of("sseUrl", mcpSseUrl, "statusCode", response.statusCode()));
+            HttpURLConnection connection = (HttpURLConnection) URI.create(mcpSseUrl).toURL().openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.connect();
+
+            int statusCode = connection.getResponseCode();
+            String contentType = connection.getHeaderField("Content-Type");
+            if (statusCode >= 200 && statusCode < 400) {
+                return new SyncResult("healthy", "Manual sync triggered", Map.of(
+                        "sseUrl", mcpSseUrl,
+                        "statusCode", statusCode,
+                        "contentType", contentType == null ? "" : contentType
+                ));
             }
-            return new SyncResult("degraded", "MCP SSE not reachable (HTTP " + response.statusCode() + ")", Map.of("sseUrl", mcpSseUrl, "statusCode", response.statusCode()));
+            return new SyncResult("degraded", "MCP SSE not reachable (HTTP " + statusCode + ")", Map.of(
+                    "sseUrl", mcpSseUrl,
+                    "statusCode", statusCode,
+                    "contentType", contentType == null ? "" : contentType
+            ));
         } catch (Exception ex) {
             return new SyncResult("degraded", "MCP SSE check failed: " + ex.getMessage(), Map.of("sseUrl", mcpSseUrl));
         }

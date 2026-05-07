@@ -40,6 +40,24 @@ Frontend route checks:
 Note:
 - `HEAD https://workwell-measure-studio-api.fly.dev/sse` returned `404` during MCP transport probe. This endpoint had previously been expected in older notes; current runtime appears to expose MCP differently or not at `/sse`. Core app user flows and required API smoke checks above are passing.
 
+### MCP discoverability + health probe fix
+
+Investigation:
+- Verified MCP SSE endpoint is reachable over GET:
+  - `GET https://workwell-measure-studio-api.fly.dev/sse` returns `200` with `content-type: text/event-stream` (long-lived connection).
+- Root cause for false-negative MCP health status:
+  - Integration health check used Java `HttpClient` with `BodyHandlers.discarding()` on a long-lived SSE stream, which can wait on completion and incorrectly degrade on timeout.
+
+Fix implemented:
+- Updated `IntegrationHealthService.checkMcpHealth()` to use `HttpURLConnection` GET and validate response headers/status immediately (without waiting for stream completion).
+- Health payload now records:
+  - `sseUrl`
+  - `statusCode`
+  - `contentType`
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.web.AdminControllerTest" --no-daemon` -> PASS
+
 ### UI polish tranche completed (UI-1 through UI-6)
 
 Completed:
