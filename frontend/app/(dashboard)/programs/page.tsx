@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { emitToast } from "@/lib/toast";
 
 type ProgramSummary = {
   measureId: string;
@@ -91,6 +92,7 @@ export default function ProgramsPage() {
         body: JSON.stringify({ scope: "All Programs" })
       });
       if (!r.ok) throw new Error(`Manual run failed (${r.status})`);
+      emitToast("Run completed - All Programs refreshed");
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -126,6 +128,11 @@ export default function ProgramsPage() {
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {loading ? <p className="text-sm text-slate-600">Loading programs...</p> : null}
+      {!loading && programs.length === 0 ? (
+        <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+          No active measures. Create and release a measure to begin.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {programs.map((program) => {
@@ -145,7 +152,7 @@ export default function ProgramsPage() {
                 <Badge label={`COMPLIANT ${program.compliant}`} tone="green" />
                 <Badge label={`DUE_SOON ${program.dueSoon}`} tone="amber" />
                 <Badge label={`OVERDUE ${program.overdue}`} tone="red" />
-                <Badge label={`MISSING_DATA ${program.missingData}`} tone="slate" />
+                <Badge label={`MISSING_DATA ${program.missingData}`} tone="violet" />
                 <Badge label={`EXCLUDED ${program.excluded}`} tone="slate" />
               </div>
 
@@ -190,13 +197,15 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" | "slate" }) {
+function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" }) {
   const style = tone === "green"
     ? "bg-emerald-100 text-emerald-700"
     : tone === "amber"
     ? "bg-amber-100 text-amber-800"
     : tone === "red"
     ? "bg-rose-100 text-rose-700"
+    : tone === "violet"
+    ? "bg-violet-100 text-violet-800"
     : "bg-slate-100 text-slate-700";
   return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
 }

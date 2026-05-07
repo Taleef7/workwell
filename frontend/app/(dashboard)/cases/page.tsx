@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { emitToast } from "@/lib/toast";
+import { outcomeStatusClass } from "@/lib/status";
 
 type CaseSummary = {
   caseId: string;
@@ -36,7 +38,9 @@ export default function CasesPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [siteFilter, setSiteFilter] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(() =>
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("search") ?? ""
+  );
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
@@ -167,6 +171,7 @@ export default function CasesPage() {
         }
       }
       await loadCases();
+      emitToast(`Case assigned to ${bulkAssignee.trim() || "unassigned"}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -188,6 +193,7 @@ export default function CasesPage() {
         }
       }
       await loadCases();
+      emitToast("Selected cases escalated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -205,6 +211,7 @@ export default function CasesPage() {
       params.set("format", "csv");
       params.set("caseIds", selectedCaseIds.join(","));
       await exportCsv(`/api/exports/cases?${params.toString()}`, "cases-selected.csv");
+      emitToast("Selected cases exported");
     } finally {
       setBulkActing(null);
     }
@@ -371,7 +378,7 @@ export default function CasesPage() {
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600">
-          No cases match this filter set yet.
+          No open cases. Run a measure to generate cases.
         </div>
       ) : null}
 
@@ -411,7 +418,11 @@ export default function CasesPage() {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-slate-500">Why flagged</dt>
-                <dd className="font-medium">{item.currentOutcomeStatus}</dd>
+                <dd>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
+                    {item.currentOutcomeStatus}
+                  </span>
+                </dd>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-slate-500">Period</dt>

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState, useEffect, useCallback } from "react";
+import { measureStatusClass } from "@/lib/status";
+import { emitToast } from "@/lib/toast";
 
 type MeasureDetail = {
   id: string;
@@ -81,7 +83,6 @@ export default function StudioMeasurePage() {
   const [allValueSets, setAllValueSets] = useState<ValueSetRef[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
   const [compileErrors, setCompileErrors] = useState<string[]>([]);
 
@@ -155,12 +156,6 @@ export default function StudioMeasurePage() {
     }
   }, [apiBase, measureId, loadMeasure, loadValueSets]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const handle = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(handle);
-  }, [toast]);
-
   async function saveSpec() {
     setError(null);
     const requiredDataElements = requiredDataElementsText
@@ -189,7 +184,7 @@ export default function StudioMeasurePage() {
       setError(`Spec save failed (${response.status})`);
       return;
     }
-    setToast("Draft saved");
+    emitToast("Spec saved");
     await loadMeasure();
   }
 
@@ -223,7 +218,7 @@ export default function StudioMeasurePage() {
     setComplianceWindow(suggestion.complianceWindow ?? "");
     setRequiredDataElementsText((suggestion.requiredDataElements ?? []).join("\n"));
     setAiDraftBanner("AI-generated draft - review and edit before saving.");
-    setToast("AI draft applied to spec form");
+    emitToast("AI draft applied to spec form");
   }
 
   async function compileCql() {
@@ -240,6 +235,9 @@ export default function StudioMeasurePage() {
     }
     setCompileWarnings(payload.warnings ?? []);
     setCompileErrors(payload.errors ?? []);
+    if ((payload.errors ?? []).length === 0) {
+      emitToast("CQL compiled successfully");
+    }
     await loadMeasure();
   }
 
@@ -258,7 +256,7 @@ export default function StudioMeasurePage() {
     setValueSetName("");
     setValueSetVersion("");
     await loadValueSets();
-    setToast("Value set created");
+    emitToast("Value set created");
   }
 
   async function attachValueSet(valueSetId: string) {
@@ -271,7 +269,7 @@ export default function StudioMeasurePage() {
       return;
     }
     await loadMeasure();
-    setToast("Value set attached");
+    emitToast("Value set attached");
   }
 
   async function detachValueSet(valueSetId: string) {
@@ -284,7 +282,7 @@ export default function StudioMeasurePage() {
       return;
     }
     await loadMeasure();
-    setToast("Value set removed");
+    emitToast("Value set removed");
   }
 
   async function transition(targetStatus: "Approved" | "Active" | "Deprecated") {
@@ -300,7 +298,7 @@ export default function StudioMeasurePage() {
       return;
     }
     await loadMeasure();
-    setToast(`Status changed to ${targetStatus}`);
+    emitToast(`Status changed to ${targetStatus}`);
   }
 
   async function saveTests() {
@@ -314,7 +312,7 @@ export default function StudioMeasurePage() {
       setError(`Tests save failed (${response.status})`);
       return;
     }
-    setToast("Test fixtures saved");
+    emitToast("Test fixtures saved");
     await loadMeasure();
   }
 
@@ -335,7 +333,7 @@ export default function StudioMeasurePage() {
       return;
     }
     setChangeSummary("");
-    setToast("New draft version created");
+    emitToast("New draft version created");
     await loadMeasure();
   }
 
@@ -350,7 +348,7 @@ export default function StudioMeasurePage() {
     }
     const payload = (await response.json()) as { passed: boolean; failures: string[] };
     setTestFailures(payload.failures ?? []);
-    setToast(payload.passed ? "Test fixtures are valid" : "Test fixtures need fixes");
+    emitToast(payload.passed ? "Test fixtures are valid" : "Test fixtures need fixes");
   }
 
   function updateFixture(index: number, field: keyof TestFixture, value: string) {
@@ -365,13 +363,6 @@ export default function StudioMeasurePage() {
     setTestFixtures((current) => current.filter((_, i) => i !== index));
   }
 
-  function statusClass(status: string): string {
-    if (status === "Draft") return "bg-slate-100 text-slate-700";
-    if (status === "Approved") return "bg-blue-100 text-blue-700";
-    if (status === "Active") return "bg-emerald-100 text-emerald-700";
-    return "bg-slate-200 text-slate-700";
-  }
-
   const canActivate = activationReadiness?.ready ?? false;
 
   return (
@@ -384,7 +375,7 @@ export default function StudioMeasurePage() {
           <h2 className="text-2xl font-semibold">{measure?.name ?? "Measure Studio"}</h2>
           {measure ? (
             <p className="mt-1 text-sm text-slate-600">
-              {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${statusClass(measure.status)}`}>{measure.status}</span>
+              {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(measure.status)}`}>{measure.status}</span>
             </p>
           ) : null}
         </div>
@@ -440,7 +431,6 @@ export default function StudioMeasurePage() {
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {!measureId ? <p className="text-sm text-red-700">Invalid measure route ID.</p> : null}
-      {toast ? <div className="fixed right-4 top-4 rounded bg-emerald-700 px-3 py-2 text-xs font-medium text-white">{toast}</div> : null}
       {loading ? <p className="text-sm text-slate-600">Loading...</p> : null}
       {measure?.status === "Approved" && activationReadiness ? (
         <div className="rounded-md border border-slate-200 bg-white p-3 text-sm">

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { emitToast } from "@/lib/toast";
+import { outcomeStatusClass } from "@/lib/status";
 
 type RunListItem = {
   runId: string;
@@ -81,7 +83,6 @@ export default function RunsPage() {
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
   const rerunSupported = selectedRun ? selectedRun.scopeType === "all_programs" || selectedRun.scopeType === "measure" : false;
@@ -159,12 +160,6 @@ export default function RunsPage() {
     }
   }, [apiBase, selectedRunId, loadSelectedRun, loadRunInsight]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const handle = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(handle);
-  }, [toast]);
-
   async function runAllProgramsNow() {
     setError(null);
     try {
@@ -175,7 +170,7 @@ export default function RunsPage() {
       });
       if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
       const data = (await response.json()) as ManualRunResponse;
-      setToast(`Run started: ${data.runId}`);
+      emitToast(`Run completed - ${data.activeMeasuresExecuted} measures generated`);
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();
@@ -191,7 +186,7 @@ export default function RunsPage() {
       const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/rerun`, { method: "POST" });
       if (!response.ok) throw new Error(`Rerun failed (${response.status})`);
       const data = (await response.json()) as ManualRunResponse;
-      setToast(`Rerun started: ${data.runId}`);
+      emitToast("Rerun started");
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();
@@ -278,8 +273,8 @@ export default function RunsPage() {
       {selectedRun && !rerunSupported ? (
         <p className="text-xs text-amber-700">Rerun is available only for all-programs or measure-scoped runs.</p>
       ) : null}
-      {toast ? <div className="fixed right-4 top-4 rounded bg-emerald-700 px-3 py-2 text-xs font-medium text-white">{toast}</div> : null}
       {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
+      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Click &apos;Run Measures Now&apos; to start.</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white">
@@ -409,7 +404,11 @@ export default function RunsPage() {
                     </td>
                     <td className="px-2 py-2">{row.role}</td>
                     <td className="px-2 py-2">{row.site}</td>
-                    <td className="px-2 py-2">{row.outcomeStatus}</td>
+                    <td className="px-2 py-2">
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${outcomeStatusClass(row.outcomeStatus)}`}>
+                        {row.outcomeStatus}
+                      </span>
+                    </td>
                     <td className="px-2 py-2">{row.daysSinceExam ?? "-"}</td>
                     <td className="px-2 py-2">{row.waiverStatus ?? "-"}</td>
                     <td className="px-2 py-2">

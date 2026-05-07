@@ -2,6 +2,32 @@
 
 ## 2026-05-07
 
+### UI polish tranche completed (UI-1 through UI-6)
+
+Completed:
+- Added shared frontend UI utilities:
+  - `frontend/lib/status.ts` for canonical measure lifecycle + outcome badge classes.
+  - `frontend/lib/toast.ts` and `frontend/components/global-toast.tsx` for a single global 2.5s toast system.
+- Dashboard shell responsive + search:
+  - Reworked `frontend/app/(dashboard)/layout.tsx` with sticky top bar, mobile nav toggle, and global search input routing to `/cases?search=...`.
+- Cases list/detail polish:
+  - Cases page now honors query-driven search initialization and applies shared outcome badges.
+  - Added stronger empty-state copy.
+  - Case detail now emits toasts for outreach/assign/escalate/delivery/rerun actions.
+  - Added AI explanation loading skeleton while explain call is pending.
+- Runs page polish:
+  - Replaced local toast stub with global toast events.
+  - Added no-runs empty state.
+  - Applied shared outcome badge colors in outcomes table.
+- Programs + Measures + Studio consistency:
+  - Programs: `MISSING_DATA` badge now purple/violet; added empty-measures state; run-all success toast.
+  - Measures and Studio status pills now use shared lifecycle status mapping.
+  - Studio compile success now emits `CQL compiled successfully` toast; local toast stub removed.
+
+Verification:
+- `frontend\\npm run lint` -> PASS
+- `frontend\\npm run build` -> PASS
+
 ### Tests-1 and Tests-2 completed (AI + MCP server coverage)
 
 Completed:

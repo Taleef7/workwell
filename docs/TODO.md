@@ -619,10 +619,12 @@ Add `ProgramsControllerTest` verifying:
 ## P3 — UI Polish to Match V0 Storyboard
 
 ### UI-1: Global Search Bar
+Status: COMPLETED (2026-05-07). Added a global search field in dashboard chrome that routes to `/cases?search=...`, with Cases page query-aware filtering by employee name/ID.
 
 Add a global search input in the top nav that queries employees by name/ID across cases. Implement as a debounced client-side filter for now.
 
 ### UI-2: Measure Status Color System
+Status: COMPLETED (2026-05-07). Implemented shared lifecycle status color mapping (`Draft` gray, `Approved` blue, `Active` green, `Deprecated` slate) and applied across Measures + Studio status pills.
 
 Ensure all measure lifecycle status pills use consistent colors across all views:
 - Draft: gray
@@ -631,6 +633,7 @@ Ensure all measure lifecycle status pills use consistent colors across all views
 - Deprecated: slate/dark
 
 ### UI-3: Outcome Status Color System
+Status: COMPLETED (2026-05-07). Implemented shared outcome badge palette and applied across Programs, Cases list/detail, and Runs outcomes table (`MISSING_DATA` now violet/purple as required).
 
 Ensure all outcome status badges use consistent colors:
 - COMPLIANT: green
@@ -642,6 +645,7 @@ Ensure all outcome status badges use consistent colors:
 Apply these colors everywhere outcomes appear: case cards, run outcome tables, programs dashboard KPI cards.
 
 ### UI-4: Empty States
+Status: COMPLETED (2026-05-07). Added explicit empty states for no runs, no cases/no filter matches, and no active measures; added AI explanation loading skeleton panel while explain call is in progress.
 
 Add meaningful empty states everywhere:
 - No cases: "No open cases. Run a measure to generate cases."
@@ -650,10 +654,12 @@ Add meaningful empty states everywhere:
 - No AI explanation loaded: show a skeleton loader while fetching
 
 ### UI-5: Toast Notifications
+Status: COMPLETED (2026-05-07). Replaced page-local toast stubs with a shared global toast event system and wired action success notifications for outreach, assignment, run triggers, spec save, and compile success.
 
 Replace all toast stubs with a consistent toast system. Every successful action should show a 2.5s toast: "Outreach sent", "Case assigned to {name}", "Run completed — {N} cases generated", "Spec saved", "CQL compiled successfully".
 
 ### UI-6: Responsive Layout
+Status: COMPLETED (2026-05-07). Refactored dashboard shell for responsive behavior: sticky top bar, mobile menu toggle, narrower sidebar on desktop, and removal of fixed-width constraints causing laptop horizontal overflow.
 
 The current grid layout breaks below ~900px viewport. Fix the dashboard layout to be usable on a laptop screen (1280px) without horizontal scroll. The primary use case is a laptop screen during a demo or in a clinical office.
 

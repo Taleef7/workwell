@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { ReactNode, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { emitToast } from "@/lib/toast";
+import { outcomeStatusClass } from "@/lib/status";
 
 type AuditEvent = {
   eventType: string;
@@ -152,6 +154,9 @@ export default function CaseDetailPage() {
       setCaseDetail(updated);
       if (action === "outreach") {
         setOutreachPreview(null);
+        emitToast("Outreach sent");
+      } else {
+        emitToast("Case rerun verification completed");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -186,6 +191,7 @@ export default function CaseDetailPage() {
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
       const updated = (await response.json()) as CaseDetail;
       setCaseDetail(updated);
+      emitToast(`Case assigned to ${assigneeInput.trim() || "unassigned"}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -202,6 +208,7 @@ export default function CaseDetailPage() {
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
       const updated = (await response.json()) as CaseDetail;
       setCaseDetail(updated);
+      emitToast("Case escalated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -234,6 +241,7 @@ export default function CaseDetailPage() {
       });
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
       setCaseDetail((await response.json()) as CaseDetail);
+      emitToast(`Outreach delivery marked ${deliveryStatus}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -280,7 +288,14 @@ export default function CaseDetailPage() {
               </div>
 
               <dl className="mt-6 grid gap-4 sm:grid-cols-2">
-                <Info label="Outcome" value={caseDetail.currentOutcomeStatus} />
+                <Info
+                  label="Outcome"
+                  value={
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(caseDetail.currentOutcomeStatus)}`}>
+                      {caseDetail.currentOutcomeStatus}
+                    </span>
+                  }
+                />
                 <Info label="Evaluation period" value={caseDetail.evaluationPeriod} />
                 <Info label="Outcome summary" value={caseDetail.outcomeSummary} />
                 <Info label="Last run" value={caseDetail.lastRunId} />
@@ -459,6 +474,7 @@ export default function CaseDetailPage() {
                   >
                     {explaining ? "Explaining..." : "Explain Why Flagged"}
                   </button>
+                  {explaining ? <div className="mt-3 h-16 animate-pulse rounded-xl border border-slate-200 bg-slate-100" /> : null}
                   {aiExplanation ? (
                     <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
                       <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Plain-language explanation (AI-assisted)</p>
@@ -557,7 +573,7 @@ function timelineSource(eventType: string) {
   return eventType.toUpperCase().startsWith("CASE_ACTION_") ? "action" : "audit";
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <dt className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</dt>
