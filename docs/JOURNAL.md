@@ -2,6 +2,25 @@
 
 ## 2026-05-06
 
+### P3 docs tranche completed: AI guardrails + measure mapping
+
+Completed:
+- Rewrote `docs/AI_GUARDRAILS.md` with implementation-accurate details from `AiAssistService`:
+  - Real prompt templates for Draft Spec, Explain Why Flagged, and Run Insight
+  - Model and fallback configuration (`gpt-5.4-nano` primary, `gpt-4o-mini` fallback, temp 0.3, max tokens 1000)
+  - Per-surface deterministic fallback behavior
+  - Concrete audit payload schemas for `AI_DRAFT_SPEC_GENERATED`, `AI_CASE_EXPLANATION_GENERATED`, and `AI_RUN_INSIGHT_GENERATED`
+  - Explicit persistence boundary: AI outputs are non-canonical, CQL outcomes remain source of truth
+- Rewrote `docs/MEASURES.md` with CQL-to-outcome mapping for all four measures:
+  - Audiogram, HAZWOPER, TB, Flu
+  - Define-level logic summary and final `Outcome Status` bucket mapping
+  - Clarified canonical status derivation from `Outcome Status` define output
+
+Verification:
+- Confirmed AI config values from `backend/src/main/resources/application.yml`.
+- Confirmed prompt/audit/fallback behavior from `backend/src/main/java/com/workwell/ai/AiAssistService.java`.
+- Confirmed current CQL files from `backend/src/main/resources/measures/*.cql`.
+
 ### P3 docs tranche completed: Architecture + Data Model + Demo Runbook
 
 Completed:

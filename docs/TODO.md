@@ -541,6 +541,7 @@ Create `docs/DEMO_RUNBOOK.md` (distinct from DEMO_SCRIPT.md) with:
 - MCP prompts to run in Claude Desktop with expected responses
 
 ### Docs-4: AI_GUARDRAILS.md Completion
+Status: COMPLETED (2026-05-06). Replaced placeholder guardrails with implemented prompt templates, model/fallback settings (`gpt-5.4-nano` -> `gpt-4o-mini`), per-surface fallback matrix, and concrete AI audit payload schemas.
 
 Finish `docs/AI_GUARDRAILS.md` with:
 - Actual prompt templates used for each AI surface (Draft Spec, Explain Why Flagged, Run Summary Insight)
@@ -550,6 +551,7 @@ Finish `docs/AI_GUARDRAILS.md` with:
 - A statement that AI outputs are never persisted as canonical data — only audit events recording that an AI call occurred are persisted
 
 ### Docs-5: MEASURES.md — CQL-to-Outcome Mapping
+Status: COMPLETED (2026-05-06). Rewrote measure documentation to include per-measure CQL define-to-outcome mappings and clarified that canonical persisted status comes from `Outcome Status` define output.
 
 For each of the 4 measures, add a section to `docs/MEASURES.md` showing:
 - The CQL define names and what each evaluates
