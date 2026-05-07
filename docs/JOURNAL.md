@@ -2,6 +2,44 @@
 
 ## 2026-05-07
 
+### Production smoke pass completed (post-UI polish deploy check)
+
+Executed against:
+- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Backend: `https://workwell-measure-studio-api.fly.dev`
+
+Production API checks:
+- `GET /actuator/health` -> `200`, body `{"status":"UP"}`
+- `GET /api/programs` -> `200` (4 active measures returned)
+- `POST /api/runs/manual` -> `200`
+  - Run: `5c6ebb99-9b21-46ab-9690-adca628b3044`
+  - `activeMeasuresExecuted=4`, `measuresExecuted=[Audiogram, Flu Vaccine, HAZWOPER Surveillance, TB Surveillance]`
+- `GET /api/cases?status=open` -> `200` (open cases present; current rows use `emp-*` external IDs, no legacy `patient-*` rows observed in payload)
+- `GET /api/exports/runs?format=csv` -> `200`, `text/csv`
+- `GET /api/exports/outcomes?format=csv` -> `200`, `text/csv`
+- `GET /api/exports/cases?format=csv&status=open` -> `200`, `text/csv`
+- `GET /api/audit-events/export?format=csv` -> `200`, `text/csv`
+- `POST /api/measures/{measureId}/ai/draft-spec` -> `200`
+  - measure used: `4ae5d865-3d64-4a17-905d-f1b315a037e2`
+- `POST /api/cases/{caseId}/ai/explain` -> `200`
+  - case used: `c0162cf4-b0bf-4410-878a-af6f1bbf9472`
+- `GET /api/programs/{measureId}/trend` -> `200`
+- `GET /api/programs/{measureId}/top-drivers` -> `200`
+- `GET /api/runs/{runId}/outcomes` -> `200` (run `5c6ebb99-9b21-46ab-9690-adca628b3044`)
+- `GET /api/admin/integrations` -> `200`
+- `POST /api/admin/integrations/ai/sync` -> `200`
+
+Frontend route checks:
+- `GET /programs` -> `200`
+- `GET /cases` -> `200`
+- `GET /runs` -> `200`
+- `GET /measures` -> `200`
+- `GET /admin` -> `200`
+- `GET /studio` -> `200`
+
+Note:
+- `HEAD https://workwell-measure-studio-api.fly.dev/sse` returned `404` during MCP transport probe. This endpoint had previously been expected in older notes; current runtime appears to expose MCP differently or not at `/sse`. Core app user flows and required API smoke checks above are passing.
+
 ### UI polish tranche completed (UI-1 through UI-6)
 
 Completed:
