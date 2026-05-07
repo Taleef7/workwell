@@ -88,7 +88,7 @@ class CsvExportServiceTest {
         row.put("latest_outreach_delivery_status", "QUEUED");
         when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(List.of(row));
 
-        String csv = csvExportService.exportCaseCsv("open", UUID.fromString("44444444-4444-4444-4444-444444444444"), "HIGH", "unassigned", "Clinic");
+        String csv = csvExportService.exportCaseCsv("open", UUID.fromString("44444444-4444-4444-4444-444444444444"), "HIGH", "unassigned", "Clinic", List.of());
 
         assertThat(csv.lines().toList()).containsExactly(
                 "\"caseId\",\"employeeExternalId\",\"employeeName\",\"role\",\"site\",\"measureName\",\"measureVersion\",\"evaluationPeriod\",\"status\",\"priority\",\"assignee\",\"currentOutcomeStatus\",\"nextAction\",\"lastRunId\",\"createdAt\",\"updatedAt\",\"closedAt\",\"latestOutreachDeliveryStatus\"",

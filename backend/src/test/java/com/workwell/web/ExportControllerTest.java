@@ -54,7 +54,7 @@ class ExportControllerTest {
 
     @Test
     void exportsCasesCsv() throws Exception {
-        when(csvExportService.exportCaseCsv(null, null, null, null, null)).thenReturn("\"caseId\"\n\"abc\"\n");
+        when(csvExportService.exportCaseCsv(null, null, null, null, null, java.util.List.of())).thenReturn("\"caseId\"\n\"abc\"\n");
 
         mockMvc.perform(get("/api/exports/cases"))
                 .andExpect(status().isOk())
