@@ -564,6 +564,7 @@ For each of the 4 measures, add a section to `docs/MEASURES.md` showing:
 ## P3 — Synthetic Data Expansion
 
 ### Data-1: Expand to ~100 Employees
+Status: COMPLETED (2026-05-07). Expanded `SyntheticEmployeeCatalog` to 100 employees with additional edge profiles (waiver-heavy, multi-role overlap strings, clinic/industrial diversity), and expanded Option A CQL seeded inputs to broaden per-measure bucket coverage (including Flu `DUE_SOON`/`OVERDUE` outcome paths).
 
 The current catalog has 50 employees. Expand to 100 with more diversity:
 - Add employees with edge-case profiles: employees with active waivers/exemptions, employees with multiple role overlaps, employees with missing data across multiple measures

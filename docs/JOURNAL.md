@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-05-07
+
+### Data-1 synthetic expansion completed (100-employee catalog)
+
+Completed:
+- Expanded `SyntheticEmployeeCatalog` from 50 -> 100 employees (`emp-001` through `emp-100`).
+- Added edge-profile diversity:
+  - role-overlap labels (for example maintenance+hazwoper, nurse+clinic operations),
+  - additional clinic and plant cohorts,
+  - broader population for waiver/missing-data seeded scenarios.
+- Expanded Option A seeded CQL input sets in `CqlEvaluationService`:
+  - Audiogram: 15 seeded employees (3 per each of compliant/due-soon/overdue/missing/excluded).
+  - TB Surveillance: 15 seeded employees (3 per each bucket).
+  - HAZWOPER Surveillance: 15 seeded employees (3 per each bucket), including a larger hazwoper-enrolled subset.
+  - Flu Vaccine: expanded seeded set and updated CQL mapping to allow `DUE_SOON`/`OVERDUE` paths based on most recent flu vaccine recency while preserving `EXCLUDED` and `MISSING_DATA`.
+- Updated `backend/src/main/resources/measures/flu_vaccine.cql`:
+  - added `Most Recent Flu Vaccine Date`
+  - added `Days Since Last Flu Vaccine`
+  - updated `Outcome Status` ordering to emit `OVERDUE` and `DUE_SOON` when applicable.
+
+Verification:
+- `backend\\gradlew.bat compileJava` -> PASS
+- `backend\\gradlew.bat test --tests \"com.workwell.compile.CqlCompileValidationServiceTest\" --tests \"com.workwell.compile.CqlEvaluationServiceTest\" --no-daemon` -> PASS
+
 ## 2026-05-06
 
 ### P3 docs tranche completed: AI guardrails + measure mapping

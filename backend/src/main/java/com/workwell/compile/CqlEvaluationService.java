@@ -348,31 +348,68 @@ public class CqlEvaluationService {
         return switch (measureName) {
             case "Audiogram" -> List.of(
                     input("emp-001", 120, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-013", 80, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-051", 200, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-002", 350, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-007", 360, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-059", 340, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-006", 420, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-008", 480, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-071", 390, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
                     input("emp-004", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-005", 600, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false)
+                    input("emp-009", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-074", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-005", 600, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-010", 700, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
+                    input("emp-079", 500, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false)
             );
             case "TB Surveillance" -> List.of(
                     input("emp-041", 120, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-042", 210, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-093", 90, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
                     input("emp-044", 330, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-045", 340, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-094", 365, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
                     input("emp-046", 380, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-047", 450, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-095", 500, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
                     input("emp-049", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-050", 600, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false)
+                    input("emp-048", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-097", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-050", 600, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-091", 520, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
+                    input("emp-100", 700, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false)
             );
             case "HAZWOPER Surveillance" -> List.of(
                     input("emp-003", 120, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-028", 200, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-053", 160, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
                     input("emp-008", 355, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-033", 365, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-060", 360, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
                     input("emp-013", 380, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-038", 410, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-065", 500, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
                     input("emp-018", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-023", 440, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false)
+                    input("emp-064", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-085", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-023", 440, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-070", 600, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
+                    input("emp-090", 550, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false)
             );
             case "Flu Vaccine" -> List.of(
                     input("emp-041", 120, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-042", null, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
                     input("emp-043", 40, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-091", 180, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-042", null, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-045", null, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-097", null, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-092", 380, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-094", 420, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-099", 500, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
+                    input("emp-048", null, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
                     input("emp-044", null, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-045", null, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true)
+                    input("emp-100", null, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true)
             );
             default -> List.of();
         };
