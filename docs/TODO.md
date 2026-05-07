@@ -597,6 +597,7 @@ Add `McpServerConfigTest` (Spring context, mocked services) verifying that each 
 - Handles missing/invalid IDs gracefully (returns error text, not exception)
 
 ### Tests-3: Export Controller Tests
+Status: COMPLETED (2026-05-07). `ExportControllerTest` now verifies CSV response bodies/headers for runs, outcomes, and cases exports, and asserts invalid `format` returns HTTP 400 with explicit error message.
 
 Add `ExportControllerTest` (WebMvcTest) verifying:
 - Each export endpoint returns 200 with `text/csv` content type
@@ -604,6 +605,7 @@ Add `ExportControllerTest` (WebMvcTest) verifying:
 - Invalid format parameter returns 400
 
 ### Tests-4: Programs API Tests
+Status: COMPLETED (2026-05-07). Added `ProgramControllerTest` covering `/api/programs`, `/api/programs/{measureId}/trend`, and `/api/programs/{measureId}/top-drivers` payload shapes and key fields.
 
 Add `ProgramsControllerTest` verifying:
 - `/api/programs` returns all active measures with correct outcome counts

@@ -39,6 +39,20 @@ Verification:
 - `backend\\gradlew.bat compileJava` -> PASS
 - `backend\\gradlew.bat test --tests \"com.workwell.compile.CqlCompileValidationServiceTest\" --tests \"com.workwell.compile.CqlEvaluationServiceTest\" --tests \"com.workwell.web.RunControllerTest\" --no-daemon` -> PASS
 
+### Tests-3 and Tests-4 completed (export + programs APIs)
+
+Completed:
+- Expanded `ExportControllerTest`:
+  - verifies runs/outcomes/cases CSV responses with concrete body expectations,
+  - verifies invalid format handling returns `400` with `Unsupported format. Use format=csv.`.
+- Added new `ProgramControllerTest`:
+  - verifies `/api/programs` payload shape and key fields,
+  - verifies `/api/programs/{measureId}/trend` time-series payload,
+  - verifies `/api/programs/{measureId}/top-drivers` by-site/by-role/by-outcome payloads.
+
+Verification:
+- `backend\\gradlew.bat test --tests \"com.workwell.web.ExportControllerTest\" --tests \"com.workwell.web.ProgramControllerTest\" --no-daemon` -> PASS
+
 ## 2026-05-06
 
 ### P3 docs tranche completed: AI guardrails + measure mapping

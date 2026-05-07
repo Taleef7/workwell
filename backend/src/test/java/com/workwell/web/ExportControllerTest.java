@@ -44,21 +44,28 @@ class ExportControllerTest {
     @Test
     void exportsOutcomeCsv() throws Exception {
         UUID runId = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(csvExportService.exportOutcomeCsv(runId)).thenReturn("\"runId\"\n\"555\"\n");
+        when(csvExportService.exportOutcomeCsv(runId)).thenReturn("\"outcomeId\",\"runId\"\n\"abc\",\"555\"\n");
 
         mockMvc.perform(get("/api/exports/outcomes").param("runId", runId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"outcomes.csv\""))
-                .andExpect(content().string("\"runId\"\n\"555\"\n"));
+                .andExpect(content().string("\"outcomeId\",\"runId\"\n\"abc\",\"555\"\n"));
     }
 
     @Test
     void exportsCasesCsv() throws Exception {
-        when(csvExportService.exportCaseCsv(null, null, null, null, null, java.util.List.of())).thenReturn("\"caseId\"\n\"abc\"\n");
+        when(csvExportService.exportCaseCsv(null, null, null, null, null, java.util.List.of())).thenReturn("\"caseId\",\"employeeExternalId\"\n\"abc\",\"emp-1\"\n");
 
         mockMvc.perform(get("/api/exports/cases"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cases.csv\""))
-                .andExpect(content().string("\"caseId\"\n\"abc\"\n"));
+                .andExpect(content().string("\"caseId\",\"employeeExternalId\"\n\"abc\",\"emp-1\"\n"));
+    }
+
+    @Test
+    void rejectsInvalidFormat() throws Exception {
+        mockMvc.perform(get("/api/exports/runs").param("format", "json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string("Unsupported format. Use format=csv."));
     }
 }
