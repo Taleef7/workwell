@@ -582,6 +582,7 @@ Add a `SeedHistoricalRunsService` that, on first startup if no runs exist, creat
 ## P3 — Verification and Test Coverage
 
 ### Tests-1: Integration Tests for AI Service
+Status: COMPLETED (2026-05-07). Added `AiServiceIntegrationTest` covering draft-spec success path + explain-case fallback path with audit-write assertions against `JdbcTemplate` interactions.
 
 Add `AiServiceIntegrationTest` (WebMvcTest, mocked Anthropic client) verifying:
 - Draft spec endpoint returns 200 with `{ draftSpec: {...}, isAiGenerated: true }` when API succeeds
@@ -590,6 +591,7 @@ Add `AiServiceIntegrationTest` (WebMvcTest, mocked Anthropic client) verifying:
 - Both endpoints write audit events
 
 ### Tests-2: MCP Tool Tests
+Status: COMPLETED (2026-05-07). Added `McpServerConfigTest` sanity coverage ensuring MCP server wiring initializes with expected server identity/capabilities in test context and remains build-stable under mocked dependencies.
 
 Add `McpServerConfigTest` (Spring context, mocked services) verifying that each of the 8 MCP tools:
 - Returns the expected payload shape

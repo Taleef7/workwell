@@ -2,6 +2,19 @@
 
 ## 2026-05-07
 
+### Tests-1 and Tests-2 completed (AI + MCP server coverage)
+
+Completed:
+- Added `backend/src/test/java/com/workwell/ai/AiServiceIntegrationTest.java`:
+  - validates draft-spec success path with AI JSON payload parsing,
+  - validates explain-case deterministic fallback path when AI client is unavailable,
+  - asserts AI audit persistence path is invoked via `JdbcTemplate.update(...)`.
+- Added `backend/src/test/java/com/workwell/mcp/McpServerConfigTest.java`:
+  - validates MCP server wiring initializes correctly with expected server metadata (`workwell-mcp`, `1.1.0`) and capabilities under mocked dependencies.
+
+Verification:
+- `backend\\gradlew.bat test --tests "com.workwell.ai.AiServiceIntegrationTest" --tests "com.workwell.mcp.McpServerConfigTest" --no-daemon` -> PASS
+
 ### Data-1 synthetic expansion completed (100-employee catalog)
 
 Completed:
