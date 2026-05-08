@@ -1,25 +1,37 @@
 # WorkWell Measure Studio
 
-Spring Boot + Next.js monorepo for occupational-health compliance operations:
-author measures, run evaluations, manage cases, and maintain an audit trail.
+WorkWell Measure Studio is a Spring Boot + Next.js monorepo for occupational-health compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one demoable stack.
 
-## Current Scope
+## What it includes
 
-- Measures catalog + Studio (Spec, CQL, Value Sets, Tests)
-- Lifecycle transitions: `Draft -> Approved -> Active -> Deprecated`
-- Compile gate + test-fixture validation gate before activation
-- Manual measure runs (`Audiogram`, `TB Surveillance`, and `All Programs`)
-- Case worklist, case detail, outreach action, rerun-to-verify
-- Audit trail + CSV export
-- MCP Layer 1 read tools
+- Measure catalog + Studio authoring for Spec, CQL, Value Sets, and Tests
+- Lifecycle flow: `Draft -> Approved -> Active -> Deprecated`
+- Compile gate and test-fixture validation gate before activation
+- Manual runs for Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine, and all-program views
+- Case worklist, case detail, outreach, assign/escalate, rerun-to-verify, and timeline audit history
+- CSV exports for runs, outcomes, cases, and audit events
+- Read-only MCP tools for programmatic inspection
+- AI assist surfaces for drafting and explanations, with compliance always decided by CQL
 
-## Tech Stack
+## Production surfaces
 
-- Backend: Java 21, Spring Boot 3.x, Gradle, PostgreSQL 16, Flyway
-- Frontend: Next.js App Router, TypeScript
-- Infra: Fly.io (backend), Vercel (frontend), Neon Postgres
+- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Backend API: `https://workwell-measure-studio-api.fly.dev`
 
-## Local Development
+## Stack
+
+- Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
+- Frontend: Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui, Monaco
+- CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0
+- Infra: Fly.io, Vercel, Neon, GitHub Actions, pnpm
+
+## Repository layout
+
+- `backend/` Spring Boot API, CQL evaluation, caseflow, exports, MCP, and security
+- `frontend/` Next.js dashboard, Studio, admin, login, and demo UX
+- `docs/` architecture, data model, deployment, demo runbook, and closeout notes
+
+## Quick start
 
 ### Backend
 
@@ -33,13 +45,25 @@ cd backend
 
 ```bash
 cd frontend
-npm install
-npm run lint
-npm run build
-npm run dev
+pnpm install
+pnpm lint
+pnpm build
+pnpm dev
 ```
 
-## API Highlights
+## Key routes
+
+- `/programs` dashboard overview
+- `/programs/[measureId]` measure trend/detail view
+- `/runs` run history and summaries
+- `/cases` worklist and filters
+- `/cases/[id]` case detail, timeline, outreach, and rerun actions
+- `/measures` measure catalog and create flow
+- `/studio/[id]` Studio authoring for a specific measure
+- `/admin` scheduler controls and integration health
+- `/login` demo login entry point
+
+## API highlights
 
 - `GET /api/measures`
 - `GET /api/measures/{id}`
@@ -47,45 +71,29 @@ npm run dev
 - `POST /api/measures/{id}/cql/compile`
 - `PUT /api/measures/{id}/tests`
 - `POST /api/measures/{id}/tests/validate`
-- `GET /api/value-sets`
-- `POST /api/value-sets`
-- `POST /api/runs/audiogram`
-- `POST /api/runs/tb-surveillance`
 - `POST /api/runs/manual`
-- `GET /api/cases`
-- `GET /api/cases/{id}`
-- `POST /api/cases/{id}/actions/outreach`
-- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=QUEUED|SENT|FAILED`
-- `POST /api/cases/{id}/rerun-to-verify`
+- `GET /api/runs?limit=1`
+- `GET /api/cases?status=open`
 - `GET /api/admin/integrations`
-- `POST /api/admin/integrations/{integration}/sync`
 - `GET /api/exports/runs?format=csv`
-- `GET /api/exports/outcomes?format=csv&runId={optional}`
+- `GET /api/exports/outcomes?format=csv&runId={id}`
 - `GET /api/exports/cases?format=csv`
-- `GET /api/audit-events/export?format=csv`
 
-CSV column contracts:
+## CSV exports
 
-- `GET /api/exports/runs?format=csv`
-  - Optional query params: `status`, `scopeType`, `triggerType`, `limit`
-```text
-runId|measureName|measureVersion|scopeType|triggerType|status|startedAt|completedAt|durationMs|totalEvaluated|compliant|dueSoon|overdue|missingData|excluded|passRate|dataFreshAsOf
-```
+Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
 
-- `GET /api/exports/outcomes?format=csv&runId={runId}`
-  - Optional query param: `runId` (defaults to latest run when omitted)
-```text
-outcomeId|runId|employeeExternalId|employeeName|role|site|measureName|measureVersion|evaluationPeriod|status|lastExamDate|complianceWindowDays|daysOverdue|roleEligible|siteEligible|waiverStatus|evaluatedAt
-```
+## Docs to read next
 
-- `GET /api/exports/cases?format=csv`
-  - Optional query params: `status`, `measureId`, `priority`, `assignee`, `site`
-```text
-caseId|employeeExternalId|employeeName|role|site|measureName|measureVersion|evaluationPeriod|status|priority|assignee|currentOutcomeStatus|nextAction|lastRunId|createdAt|updatedAt|closedAt|latestOutreachDeliveryStatus
-```
+- `docs/ARCHITECTURE.md`
+- `docs/DATA_MODEL.md`
+- `docs/MEASURES.md`
+- `docs/DEPLOY.md`
+- `docs/DEMO_SCRIPT.md`
+- `docs/DEMO_RUNBOOK.md`
+- `docs/JOURNAL.md`
 
 ## Notes
 
 - `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
-- Canonical execution plan: `docs/SPIKE_PLAN.md`.
-- Active execution backlog: `docs/TODO.md`.
+- `docs/archive/SPIKE_PLAN.md` is historical sprint context.
