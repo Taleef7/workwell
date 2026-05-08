@@ -18,10 +18,14 @@ import org.springframework.util.FileCopyUtils;
 
 class CqlEvaluationServiceTest {
 
+    private static EvaluationPopulationProperties defaultPopulationProperties() {
+        return new EvaluationPopulationProperties();
+    }
+
     @SuppressWarnings("unchecked")
     @Test
     void cqlEvaluationProducesRealExpressionResults() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService();
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
         String cqlText = readClasspathText("measures/audiogram.cql");
 
         DemoRunPayload payload = service.evaluate(
@@ -33,10 +37,11 @@ class CqlEvaluationServiceTest {
         );
 
         DemoOutcome overdue = payload.outcomes().stream()
-                .filter(o -> "emp-006".equals(o.subjectId()))
+                .filter(o -> "OVERDUE".equals(o.outcome()))
                 .findFirst()
                 .orElseThrow();
 
+        assertEquals(100, payload.outcomes().size());
         assertEquals("OVERDUE", overdue.outcome(), "Outcome payload: " + overdue.evidenceJson());
         List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) overdue.evidenceJson().get("expressionResults");
         assertNotNull(expressionResults);
@@ -48,7 +53,7 @@ class CqlEvaluationServiceTest {
 
     @Test
     void perEmployeeFailureIsolationKeepsRunGoing() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService() {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties()) {
             @Override
             protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
                 return "emp-002".equals(employeeExternalId);
@@ -70,8 +75,9 @@ class CqlEvaluationServiceTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals("MISSING_DATA", failed.outcome());
         assertEquals("CQL engine failure", String.valueOf(failed.evidenceJson().get("evaluationError")));
+        assertEquals("MISSING_DATA", failed.outcome());
+        assertEquals(failed.outcome(), String.valueOf(failed.evidenceJson().get("fallbackOutcome")));
 
         boolean hasSuccessfulOthers = payload.outcomes().stream()
                 .filter(o -> !"emp-002".equals(o.subjectId()))
@@ -79,8 +85,39 @@ class CqlEvaluationServiceTest {
         assertTrue(hasSuccessfulOthers, "Expected other employees to evaluate successfully. Outcomes: " + payload.outcomes());
 
         boolean everyoneFailed = payload.outcomes().stream()
-                .allMatch(o -> "MISSING_DATA".equals(o.outcome()) && o.evidenceJson().containsKey("evaluationError"));
+                .allMatch(o -> o.evidenceJson().containsKey("evaluationError"));
         assertFalse(everyoneFailed, "Expected isolated failure, not full-run failure");
+    }
+
+    @Test
+    void tbHazwoperAndFluEvaluationsProduceStructuredOutcomes() throws Exception {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+
+        for (String measureName : List.of("TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")) {
+            String cqlText = readClasspathText("measures/" + resourceName(measureName) + ".cql");
+            DemoRunPayload payload = service.evaluate(
+                    "33333333-3333-3333-3333-333333333333",
+                    measureName,
+                    "v1.0",
+                    cqlText,
+                    LocalDate.now()
+            );
+
+            assertEquals(100, payload.outcomes().size(), measureName + " should evaluate every seeded employee");
+            long excludedCount = payload.outcomes().stream().filter(outcome -> "EXCLUDED".equals(outcome.outcome())).count();
+            long compliantCount = payload.outcomes().stream().filter(outcome -> "COMPLIANT".equals(outcome.outcome())).count();
+            assertEquals(3, excludedCount, measureName + " should preserve the seeded exclusion cohort");
+            assertTrue(compliantCount > 0, measureName + " should produce compliant outcomes");
+        }
+    }
+
+    private String resourceName(String measureName) {
+        return switch (measureName) {
+            case "TB Surveillance" -> "tb_surveillance";
+            case "HAZWOPER Surveillance" -> "hazwoper";
+            case "Flu Vaccine" -> "flu_vaccine";
+            default -> throw new IllegalArgumentException(measureName);
+        };
     }
 
     private String readClasspathText(String resourcePath) throws Exception {

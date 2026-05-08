@@ -1,0 +1,111 @@
+{
+  "tools": [
+    {
+      "name": "get_case",
+      "description": "Get full case detail by caseId",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "caseId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "caseId"
+        ]
+      }
+    },
+    {
+      "name": "list_cases",
+      "description": "List case summaries with optional status and measure filter (measureId or measureName)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ]
+          },
+          "measureId": {
+            "type": "string"
+          },
+          "measureName": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_run_summary",
+      "description": "Get run metadata and outcome counts by runId. If runId is omitted, returns latest run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_measures",
+      "description": "List measures with optional lifecycle-status filter",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_measure_version",
+      "description": "Get latest active measure detail by measureId or measureName",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "measureId": {
+            "type": "string"
+          },
+          "measureName": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_runs",
+      "description": "List run summaries with optional measure filter",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "measureId": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "explain_outcome",
+      "description": "Explain why a case was flagged using deterministic evidence fields",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "caseId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "caseId"
+        ]
+      }
+    }
+  ]
+}

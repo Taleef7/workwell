@@ -3,10 +3,13 @@ package com.workwell.measure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.security.SecurityActor;
 import com.workwell.compile.CqlCompileValidationService;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.sql.Array;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,13 +42,13 @@ public class MeasureService {
         this.cqlCompileValidationService = cqlCompileValidationService;
     }
 
-    public List<MeasureCatalogItem> listMeasures() {
+    public List<MeasureCatalogItem> listMeasures(String statusFilter, String search) {
         ensureAudiogramSeed();
         ensureTbSeed();
         ensureHazwoperSeed();
         ensureFluSeed();
 
-        String sql = """
+        StringBuilder sql = new StringBuilder("""
                 SELECT m.id,
                        m.name,
                        m.policy_ref,
@@ -53,34 +56,68 @@ public class MeasureService {
                        mv.status,
                        m.owner,
                        m.tags,
-                       COALESCE(mv.activated_at, mv.created_at, m.updated_at) AS last_updated
+                       COALESCE(mv.activated_at, mv.created_at, m.updated_at) AS last_updated,
+                       COALESCE(mv.activated_at, mv.created_at, m.updated_at) AS status_updated_at,
+                       COALESCE(mv.approved_by, m.owner, 'system') AS status_updated_by
                 FROM measures m
                 JOIN LATERAL (
-                    SELECT version, status, activated_at, created_at
+                    SELECT version, status, activated_at, created_at, approved_by
                     FROM measure_versions
                     WHERE measure_id = m.id
                     ORDER BY created_at DESC
                     LIMIT 1
                 ) mv ON TRUE
-                WHERE mv.status = 'Active'
-                ORDER BY last_updated DESC, m.name ASC
-                """;
+                WHERE 1=1
+                """);
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new MeasureCatalogItem(
-                (UUID) rs.getObject("id"),
-                rs.getString("name"),
-                rs.getString("policy_ref"),
-                rs.getString("version"),
-                rs.getString("status"),
-                rs.getString("owner"),
-                readSqlArray(rs.getArray("tags")),
-                toInstant(rs.getObject("last_updated"))
-        ));
+        String normalizedStatus = normalizeStatusFilter(statusFilter);
+        String normalizedSearch = search == null || search.isBlank() ? null : search.trim();
+        List<Object> args = new ArrayList<>();
+
+        if (normalizedStatus != null) {
+            sql.append(" AND mv.status = ?");
+            args.add(normalizedStatus);
+        }
+        if (normalizedSearch != null) {
+            sql.append("""
+                     AND (
+                         m.name ILIKE CONCAT('%', ?, '%')
+                         OR EXISTS (
+                             SELECT 1 FROM unnest(COALESCE(m.tags, ARRAY[]::text[])) tag WHERE tag ILIKE CONCAT('%', ?, '%')
+                         )
+                     )
+                    """);
+            args.add(normalizedSearch);
+            args.add(normalizedSearch);
+        }
+        sql.append(" ORDER BY last_updated DESC, m.name ASC");
+
+        return jdbcTemplate.query(
+                sql.toString(),
+                (rs, rowNum) -> new MeasureCatalogItem(
+                        (UUID) rs.getObject("id"),
+                        rs.getString("name"),
+                        rs.getString("policy_ref"),
+                        rs.getString("version"),
+                        rs.getString("status"),
+                        rs.getString("owner"),
+                        readSqlArray(rs.getArray("tags")),
+                        toInstant(rs.getObject("last_updated")),
+                        toInstant(rs.getObject("status_updated_at")),
+                        rs.getString("status_updated_by")
+                ),
+                args.toArray()
+        );
+    }
+
+    public List<MeasureCatalogItem> listMeasures() {
+        return listMeasures(null, null);
     }
 
     public UUID createMeasure(String name, String policyRef, String owner) {
         UUID measureId = UUID.randomUUID();
         UUID measureVersionId = UUID.randomUUID();
+        UUID oshaReferenceId = resolveOshaReferenceId(policyRef, null);
 
         Map<String, Object> spec = new LinkedHashMap<>();
         spec.put("description", "");
@@ -102,19 +139,20 @@ public class MeasureService {
         );
 
         jdbcTemplate.update(
-                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, NOW())",
+                "INSERT INTO measure_versions (id, measure_id, osha_reference_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, NOW())",
                 ps -> {
                     ps.setObject(1, measureVersionId);
                     ps.setObject(2, measureId);
-                    ps.setString(3, "v1.0");
-                    ps.setString(4, "Draft");
-                    ps.setString(5, toJson(spec));
-                    ps.setString(6, "");
-                    ps.setString(7, "ERROR");
-                    ps.setString(8, toJson(Map.of("status", "ERROR", "errors", List.of("CQL body is empty or invalid"))));
-                    ps.setString(9, "Initial draft");
-                    ps.setNull(10, java.sql.Types.VARCHAR);
-                    ps.setNull(11, java.sql.Types.TIMESTAMP);
+                    setNullableUuid(ps, 3, oshaReferenceId);
+                    ps.setString(4, "v1.0");
+                    ps.setString(5, "Draft");
+                    ps.setString(6, toJson(spec));
+                    ps.setString(7, "");
+                    ps.setString(8, "ERROR");
+                    ps.setString(9, toJson(Map.of("status", "ERROR", "errors", List.of("CQL body is empty or invalid"))));
+                    ps.setString(10, "Initial draft");
+                    ps.setNull(11, java.sql.Types.VARCHAR);
+                    ps.setNull(12, java.sql.Types.TIMESTAMP);
                 }
         );
 
@@ -131,6 +169,7 @@ public class MeasureService {
                 SELECT m.id,
                        m.name,
                        m.policy_ref,
+                       mv.osha_reference_id,
                        mv.version,
                        mv.status,
                        mv.compile_status,
@@ -164,6 +203,7 @@ public class MeasureService {
                     (UUID) rs.getObject("id"),
                     rs.getString("name"),
                     rs.getString("policy_ref"),
+                    (UUID) rs.getObject("osha_reference_id"),
                     rs.getString("version"),
                     rs.getString("status"),
                     rs.getString("owner"),
@@ -188,6 +228,8 @@ public class MeasureService {
 
     public void updateSpec(UUID id, SpecUpdateRequest request) {
         UUID measureVersionId = latestMeasureVersionId(id);
+        String policyRef = request.policyRef() == null ? "" : request.policyRef().trim();
+        UUID oshaReferenceId = resolveOshaReferenceId(policyRef, request.oshaReferenceId());
 
         Map<String, Object> spec = new LinkedHashMap<>();
         spec.put("description", request.description());
@@ -202,16 +244,28 @@ public class MeasureService {
         spec.put("testFixtures", loadTestFixtures(id));
 
         jdbcTemplate.update(
-                "UPDATE measure_versions SET spec_json = ?::jsonb WHERE id = ?",
-                toJson(spec),
-                measureVersionId
+                "UPDATE measure_versions SET spec_json = ?::jsonb, osha_reference_id = ? WHERE id = ?",
+                ps -> {
+                    ps.setString(1, toJson(spec));
+                    setNullableUuid(ps, 2, oshaReferenceId);
+                    ps.setObject(3, measureVersionId);
+                }
         );
-        jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+        jdbcTemplate.update(
+                "UPDATE measures SET policy_ref = ?, updated_at = NOW() WHERE id = ?",
+                policyRef,
+                id
+        );
         insertAuditEvent(
                 "MEASURE_VERSION_DRAFT_SAVED",
                 measureVersionId,
                 "system",
-                Map.of("field", "spec", "measureId", id.toString())
+                Map.of(
+                        "field", "spec",
+                        "measureId", id.toString(),
+                        "policyRef", policyRef,
+                        "oshaReferenceId", oshaReferenceId == null ? "" : oshaReferenceId.toString()
+                )
         );
     }
 
@@ -286,6 +340,20 @@ public class MeasureService {
         ));
     }
 
+    public List<OshaReference> listOshaReferences() {
+        String sql = """
+                SELECT id, cfr_citation, title, program_area
+                FROM osha_references
+                ORDER BY cfr_citation ASC, title ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new OshaReference(
+                (UUID) rs.getObject("id"),
+                rs.getString("cfr_citation"),
+                rs.getString("title"),
+                rs.getString("program_area")
+        ));
+    }
+
     public UUID createValueSet(String oid, String name, String version) {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
@@ -357,7 +425,7 @@ public class MeasureService {
 
         Map<String, Object> source = jdbcTemplate.queryForMap(
                 """
-                        SELECT id, version, spec_json::text AS spec_json_text, cql_text, compile_status, compile_result::text AS compile_result_text
+                        SELECT id, version, spec_json::text AS spec_json_text, cql_text, compile_status, compile_result::text AS compile_result_text, osha_reference_id
                         FROM measure_versions
                         WHERE measure_id = ?
                         ORDER BY (CASE WHEN status = 'Active' THEN 0 ELSE 1 END), created_at DESC
@@ -374,26 +442,28 @@ public class MeasureService {
         String cqlText = stringOrEmpty(source.get("cql_text"));
         String compileStatus = stringOrEmpty(source.get("compile_status"));
         String compileResultText = stringOrEmpty(source.get("compile_result_text"));
+        UUID oshaReferenceId = (UUID) source.get("osha_reference_id");
 
         jdbcTemplate.update(
                 """
                         INSERT INTO measure_versions (
-                            id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result,
+                            id, measure_id, osha_reference_id, version, status, spec_json, cql_text, compile_status, compile_result,
                             change_summary, approved_by, activated_at, created_at
-                        ) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, NOW())
+                        ) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, NOW())
                         """,
                 ps -> {
                     ps.setObject(1, newVersionId);
                     ps.setObject(2, measureId);
-                    ps.setString(3, nextVersion);
-                    ps.setString(4, "Draft");
-                    ps.setString(5, specJsonText);
-                    ps.setString(6, cqlText);
-                    ps.setString(7, compileStatus.isBlank() ? "ERROR" : compileStatus);
-                    ps.setString(8, compileResultText.isBlank() ? toJson(Map.of("status", "ERROR", "warnings", List.of(), "errors", List.of("No compile result copied"))) : compileResultText);
-                    ps.setString(9, changeSummary.trim());
-                    ps.setNull(10, java.sql.Types.VARCHAR);
-                    ps.setNull(11, java.sql.Types.TIMESTAMP);
+                    setNullableUuid(ps, 3, oshaReferenceId);
+                    ps.setString(4, nextVersion);
+                    ps.setString(5, "Draft");
+                    ps.setString(6, specJsonText);
+                    ps.setString(7, cqlText);
+                    ps.setString(8, compileStatus.isBlank() ? "ERROR" : compileStatus);
+                    ps.setString(9, compileResultText.isBlank() ? toJson(Map.of("status", "ERROR", "warnings", List.of(), "errors", List.of("No compile result copied"))) : compileResultText);
+                    ps.setString(10, changeSummary.trim());
+                    ps.setNull(11, java.sql.Types.VARCHAR);
+                    ps.setNull(12, java.sql.Types.TIMESTAMP);
                 }
         );
 
@@ -475,6 +545,106 @@ public class MeasureService {
                 testValidationResult.passed(),
                 blockers
         );
+    }
+
+    public List<MeasureVersionHistoryItem> listVersionHistory(UUID id) {
+        String sql = """
+                SELECT mv.id,
+                       mv.version,
+                       mv.status,
+                       COALESCE(mv.approved_by, m.owner, 'system') AS author,
+                       mv.created_at,
+                       COALESCE(mv.change_summary, '') AS change_summary
+                FROM measure_versions mv
+                JOIN measures m ON m.id = mv.measure_id
+                WHERE mv.measure_id = ?
+                ORDER BY mv.created_at DESC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new MeasureVersionHistoryItem(
+                (UUID) rs.getObject("id"),
+                rs.getString("version"),
+                rs.getString("status"),
+                rs.getString("author"),
+                toInstant(rs.getObject("created_at")),
+                rs.getString("change_summary")
+        ), id);
+    }
+
+    public String approveMeasure(UUID id) {
+        UUID measureVersionId = latestMeasureVersionId(id);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, compile_status, version FROM measure_versions WHERE id = ?",
+                measureVersionId
+        );
+        String currentStatus = (String) row.get("status");
+        if (!"Draft".equals(currentStatus)) {
+            throw new IllegalArgumentException("Only Draft measures can be approved.");
+        }
+
+        ActivationReadiness readiness = activationReadiness(id);
+        if (!allowsActivationCompileStatus(readiness.compileStatus())) {
+            throw new IllegalArgumentException("Measure cannot be approved until compile status is COMPILED or WARNINGS.");
+        }
+        if (!readiness.testValidationPassed()) {
+            throw new IllegalArgumentException("Measure cannot be approved until test fixtures pass validation.");
+        }
+
+        String approver = SecurityActor.currentActorOr("system");
+        jdbcTemplate.update(
+                "UPDATE measure_versions SET status = 'Approved', approved_by = ? WHERE id = ?",
+                approver,
+                measureVersionId
+        );
+        jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+
+        insertAuditEvent(
+                "MEASURE_APPROVED",
+                measureVersionId,
+                approver,
+                Map.of(
+                        "measureId", id.toString(),
+                        "version", String.valueOf(row.get("version")),
+                        "approvedBy", approver,
+                        "compileStatus", readiness.compileStatus(),
+                        "testFixtureCount", readiness.testFixtureCount(),
+                        "testValidationPassed", readiness.testValidationPassed()
+                )
+        );
+        return "Approved";
+    }
+
+    public String deprecateMeasure(UUID id, String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Deprecation reason is required.");
+        }
+        UUID measureVersionId = latestMeasureVersionId(id);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, version FROM measure_versions WHERE id = ?",
+                measureVersionId
+        );
+        String currentStatus = (String) row.get("status");
+        if (!"Active".equals(currentStatus)) {
+            throw new IllegalArgumentException("Only Active measures can be deprecated.");
+        }
+        String actor = SecurityActor.currentActorOr("system");
+        jdbcTemplate.update(
+                "UPDATE measure_versions SET status = ? WHERE id = ?",
+                "Deprecated",
+                measureVersionId
+        );
+        jdbcTemplate.update("UPDATE measures SET updated_at = NOW() WHERE id = ?", id);
+        insertAuditEvent(
+                "MEASURE_DEPRECATED",
+                measureVersionId,
+                actor,
+                Map.of(
+                        "measureId", id.toString(),
+                        "version", String.valueOf(row.get("version")),
+                        "reason", reason.trim(),
+                        "deprecatedBy", actor
+                )
+        );
+        return "Deprecated";
     }
 
     public String transitionStatus(UUID id, String targetStatus) {
@@ -593,6 +763,7 @@ public class MeasureService {
 
     private void ensureAudiogramSeed() {
         UUID measureId;
+        UUID oshaReferenceId = resolveOshaReferenceId("OSHA 29 CFR 1910.95", null);
         try {
             measureId = jdbcTemplate.queryForObject(
                     "SELECT id FROM measures WHERE name = ?",
@@ -618,9 +789,10 @@ public class MeasureService {
         );
         if (existing != null && existing > 0) {
             jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb, osha_reference_id = ? WHERE measure_id = ? AND version = ?",
                     loadSeedCql("audiogram.cql"),
                     toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    oshaReferenceId,
                     measureId,
                     SEEDED_AUDIOGRAM_VERSION
             );
@@ -640,9 +812,10 @@ public class MeasureService {
         spec.put("testFixtures", List.of());
 
         jdbcTemplate.update(
-                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                "INSERT INTO measure_versions (id, measure_id, osha_reference_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
                 UUID.randomUUID(),
                 measureId,
+                oshaReferenceId,
                 SEEDED_AUDIOGRAM_VERSION,
                 "Active",
                 toJson(spec),
@@ -720,6 +893,7 @@ public class MeasureService {
 
     private void ensureHazwoperSeed() {
         UUID measureId;
+        UUID oshaReferenceId = resolveOshaReferenceId("OSHA 29 CFR 1910.120", null);
         try {
             measureId = jdbcTemplate.queryForObject(
                     "SELECT id FROM measures WHERE name = ?",
@@ -746,9 +920,10 @@ public class MeasureService {
         );
         if (existing != null && existing > 0) {
             jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb, osha_reference_id = ? WHERE measure_id = ? AND version = ?",
                     loadSeedCql("hazwoper.cql"),
                     toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    oshaReferenceId,
                     measureId,
                     "v1.0"
             );
@@ -768,9 +943,10 @@ public class MeasureService {
         spec.put("testFixtures", List.of());
 
         jdbcTemplate.update(
-                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                "INSERT INTO measure_versions (id, measure_id, osha_reference_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
                 UUID.randomUUID(),
                 measureId,
+                oshaReferenceId,
                 "v1.0",
                 "Active",
                 toJson(spec),
@@ -961,8 +1137,85 @@ public class MeasureService {
         return value == null ? "" : value.toString();
     }
 
+    private UUID resolveOshaReferenceId(String policyRef, UUID requestedOshaReferenceId) {
+        if (requestedOshaReferenceId != null) {
+            return validateOshaReferenceId(requestedOshaReferenceId);
+        }
+
+        String normalized = normalizeOshaReferenceText(policyRef);
+        if (normalized == null) {
+            return null;
+        }
+
+        try {
+            return jdbcTemplate.queryForObject(
+                    """
+                    SELECT id
+                    FROM osha_references
+                    WHERE LOWER(cfr_citation) = LOWER(?)
+                       OR LOWER(title) = LOWER(?)
+                       OR LOWER(CONCAT(cfr_citation, ' — ', title)) = LOWER(?)
+                    LIMIT 1
+                    """,
+                    UUID.class,
+                    normalized,
+                    normalized,
+                    normalized
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
+    private UUID validateOshaReferenceId(UUID oshaReferenceId) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT id FROM osha_references WHERE id = ?",
+                    UUID.class,
+                    oshaReferenceId
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            throw new IllegalArgumentException("Unknown OSHA reference: " + oshaReferenceId);
+        }
+    }
+
+    private String normalizeOshaReferenceText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.regionMatches(true, 0, "OSHA ", 0, 5)) {
+            trimmed = trimmed.substring(5).trim();
+        }
+        return trimmed;
+    }
+
+    private void setNullableUuid(PreparedStatement ps, int index, UUID value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, java.sql.Types.OTHER);
+        } else {
+            ps.setObject(index, value);
+        }
+    }
+
     private boolean allowsActivationCompileStatus(String compileStatus) {
         return "COMPILED".equalsIgnoreCase(compileStatus) || "WARNINGS".equalsIgnoreCase(compileStatus);
+    }
+
+    private String normalizeStatusFilter(String statusFilter) {
+        if (statusFilter == null || statusFilter.isBlank() || "All".equalsIgnoreCase(statusFilter)) {
+            return null;
+        }
+        return switch (statusFilter.trim().toUpperCase()) {
+            case "DRAFT" -> "Draft";
+            case "APPROVED" -> "Approved";
+            case "ACTIVE" -> "Active";
+            case "DEPRECATED" -> "Deprecated";
+            default -> null;
+        };
     }
 
     private String incrementVersion(String version) {
@@ -982,12 +1235,13 @@ public class MeasureService {
     }
 
     private void insertAuditEvent(String eventType, UUID measureVersionId, String actor, Map<String, Object> payload) {
+        String resolvedActor = SecurityActor.currentActorOr(actor);
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?::jsonb)",
                 eventType,
                 "measure_version",
                 measureVersionId,
-                actor,
+                resolvedActor,
                 measureVersionId,
                 toJson(payload)
         );
@@ -1001,7 +1255,9 @@ public class MeasureService {
             String status,
             String owner,
             List<String> tags,
-            Instant lastUpdated
+            Instant lastUpdated,
+            Instant statusUpdatedAt,
+            String statusUpdatedBy
     ) {
     }
 
@@ -1016,6 +1272,7 @@ public class MeasureService {
             UUID id,
             String name,
             String policyRef,
+            UUID oshaReferenceId,
             String version,
             String status,
             String owner,
@@ -1034,6 +1291,8 @@ public class MeasureService {
     }
 
     public record SpecUpdateRequest(
+            String policyRef,
+            UUID oshaReferenceId,
             String description,
             EligibilityCriteria eligibilityCriteria,
             List<Map<String, String>> exclusions,
@@ -1062,6 +1321,14 @@ public class MeasureService {
     ) {
     }
 
+    public record OshaReference(
+            UUID id,
+            String cfrCitation,
+            String title,
+            String programArea
+    ) {
+    }
+
     public record TestFixture(
             String fixtureName,
             String employeeExternalId,
@@ -1083,6 +1350,16 @@ public class MeasureService {
             int valueSetCount,
             boolean testValidationPassed,
             List<String> activationBlockers
+    ) {
+    }
+
+    public record MeasureVersionHistoryItem(
+            UUID id,
+            String version,
+            String status,
+            String author,
+            Instant createdAt,
+            String changeSummary
     ) {
     }
 }

@@ -29,7 +29,7 @@ class ProgramControllerTest {
     void listsPrograms() throws Exception {
         UUID measureId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         UUID runId = UUID.fromString("22222222-2222-2222-2222-222222222222");
-        when(programService.listPrograms()).thenReturn(List.of(
+        when(programService.listPrograms(null, null, null)).thenReturn(List.of(
                 new ProgramService.ProgramSummary(
                         measureId,
                         "Audiogram",
@@ -60,7 +60,7 @@ class ProgramControllerTest {
         UUID measureId = UUID.fromString("33333333-3333-3333-3333-333333333333");
         UUID runIdA = UUID.fromString("44444444-4444-4444-4444-444444444444");
         UUID runIdB = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(programService.trend(measureId)).thenReturn(List.of(
+        when(programService.trend(measureId, null, null, null)).thenReturn(List.of(
                 new ProgramService.ProgramTrendPoint(runIdA, Instant.parse("2026-05-07T00:00:00Z"), 55.0, 100),
                 new ProgramService.ProgramTrendPoint(runIdB, Instant.parse("2026-04-07T00:00:00Z"), 50.0, 100)
         ));
@@ -75,7 +75,7 @@ class ProgramControllerTest {
     @Test
     void returnsTopDrivers() throws Exception {
         UUID measureId = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(programService.topDrivers(measureId)).thenReturn(
+        when(programService.topDrivers(measureId, null, null, null)).thenReturn(
                 new ProgramService.TopDrivers(
                         List.of(new ProgramService.DriverSite("Plant A", 7, "High overdue concentration")),
                         List.of(new ProgramService.DriverRole("Maintenance Tech", 5)),
@@ -89,5 +89,10 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.byRole[0].role").value("Maintenance Tech"))
                 .andExpect(jsonPath("$.byOutcomeReason[0].reason").value("OVERDUE"));
     }
-}
 
+    @Test
+    void rejectsInvalidDateFilters() throws Exception {
+        mockMvc.perform(get("/api/programs").param("from", "2026-13-01"))
+                .andExpect(status().isBadRequest());
+    }
+}

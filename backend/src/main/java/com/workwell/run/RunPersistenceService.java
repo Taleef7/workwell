@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.measure.AudiogramDemoService;
 import com.workwell.measure.SyntheticEmployeeCatalog;
+import com.workwell.security.SecurityActor;
 import com.workwell.run.DemoRunModels.ActiveMeasureScope;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
@@ -366,7 +367,15 @@ public class RunPersistenceService {
         }
     }
 
-    public List<RunListItem> listRuns(String status, String scopeType, String triggerType, int limit) {
+    public List<RunListItem> listRuns(
+            String status,
+            String scopeType,
+            String triggerType,
+            String site,
+            Instant from,
+            Instant to,
+            int limit
+    ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT r.id AS run_id,
                        r.status,
@@ -396,6 +405,26 @@ public class RunPersistenceService {
         if (triggerType != null && !triggerType.isBlank()) {
             sql.append(" AND LOWER(r.trigger_type) = LOWER(?)");
             args.add(triggerType);
+        }
+        if (site != null && !site.isBlank()) {
+            sql.append("""
+                     AND EXISTS (
+                         SELECT 1
+                         FROM outcomes o
+                         JOIN employees e ON e.id = o.employee_id
+                         WHERE o.run_id = r.id
+                           AND LOWER(COALESCE(e.site, '')) = LOWER(?)
+                     )
+                    """);
+            args.add(site);
+        }
+        if (from != null) {
+            sql.append(" AND r.started_at >= ?");
+            args.add(Timestamp.from(from));
+        }
+        if (to != null) {
+            sql.append(" AND r.started_at <= ?");
+            args.add(Timestamp.from(to));
         }
         sql.append(" ORDER BY r.started_at DESC LIMIT ?");
         args.add(limit);
@@ -798,13 +827,14 @@ public class RunPersistenceService {
             UUID refMeasureVersionId,
             Map<String, Object> payload
     ) {
+        String resolvedActor = SecurityActor.currentActorOr(actor);
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)",
                 ps -> {
                     ps.setString(1, eventType);
                     ps.setString(2, entityType);
                     ps.setObject(3, entityId);
-                    ps.setString(4, actor);
+                    ps.setString(4, resolvedActor);
                     ps.setObject(5, refRunId);
                     ps.setObject(6, refCaseId);
                     ps.setObject(7, refMeasureVersionId);

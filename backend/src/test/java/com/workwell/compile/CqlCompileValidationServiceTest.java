@@ -30,6 +30,23 @@ class CqlCompileValidationServiceTest {
         }
     }
 
+    @Test
+    void compileErrorsIncludeLineAndColumnInformation() {
+        String invalidCql = """
+                library Broken version '1.0.0'
+
+                define "Broken Expression": true and
+                """;
+
+        CqlCompileValidationService.CompileResult result = service.validate(invalidCql);
+
+        assertEquals("ERROR", result.status());
+        assertTrue(
+                result.errors().stream().anyMatch(error -> error.matches("(?i).*line\\s+\\d+.*column\\s+\\d+.*")),
+                () -> "Expected at least one compile error to include line and column information but got: " + result.errors()
+        );
+    }
+
     private String readClasspathText(String resourcePath) throws Exception {
         ClassPathResource resource = new ClassPathResource(resourcePath);
         return FileCopyUtils.copyToString(new java.io.InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8));

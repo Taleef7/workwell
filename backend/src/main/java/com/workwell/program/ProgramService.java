@@ -18,7 +18,19 @@ public class ProgramService {
         this.measureService = measureService;
     }
 
-    public List<ProgramSummary> listPrograms() {
+    public List<String> listSites() {
+        return jdbcTemplate.query(
+                """
+                        SELECT DISTINCT site
+                        FROM employees
+                        WHERE site IS NOT NULL AND site <> ''
+                        ORDER BY site ASC
+                        """,
+                (rs, rowNum) -> rs.getString("site")
+        );
+    }
+
+    public List<ProgramSummary> listPrograms(String site, Instant from, Instant to) {
         measureService.listMeasures();
         String sql = """
                 WITH active_versions AS (
@@ -32,28 +44,40 @@ public class ProgramService {
                     FROM measures m
                     JOIN measure_versions mv ON mv.measure_id = m.id
                     WHERE mv.status = 'Active'
-                ), latest_run AS (
-                    SELECT o.measure_version_id,
-                           o.run_id,
-                           r.started_at,
-                           ROW_NUMBER() OVER (PARTITION BY o.measure_version_id ORDER BY r.started_at DESC) AS rn
+                ), filtered_outcomes AS (
+                    SELECT o.*
                     FROM outcomes o
+                    JOIN employees e ON e.id = o.employee_id
                     JOIN runs r ON r.id = o.run_id
+                    WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                      AND (? IS NULL OR r.started_at >= ?)
+                      AND (? IS NULL OR r.started_at <= ?)
+                ), latest_run AS (
+                    SELECT fo.measure_version_id,
+                           fo.run_id,
+                           r.started_at,
+                           ROW_NUMBER() OVER (PARTITION BY fo.measure_version_id ORDER BY r.started_at DESC) AS rn
+                    FROM filtered_outcomes fo
+                    JOIN runs r ON r.id = fo.run_id
                 ), outcome_counts AS (
-                    SELECT o.measure_version_id,
-                           o.run_id,
+                    SELECT fo.measure_version_id,
+                           fo.run_id,
                            COUNT(*) AS total_evaluated,
-                           COUNT(*) FILTER (WHERE o.status = 'COMPLIANT') AS compliant,
-                           COUNT(*) FILTER (WHERE o.status = 'DUE_SOON') AS due_soon,
-                           COUNT(*) FILTER (WHERE o.status = 'OVERDUE') AS overdue,
-                           COUNT(*) FILTER (WHERE o.status = 'MISSING_DATA') AS missing_data,
-                           COUNT(*) FILTER (WHERE o.status = 'EXCLUDED') AS excluded
-                    FROM outcomes o
-                    GROUP BY o.measure_version_id, o.run_id
+                           COUNT(*) FILTER (WHERE fo.status = 'COMPLIANT') AS compliant,
+                           COUNT(*) FILTER (WHERE fo.status = 'DUE_SOON') AS due_soon,
+                           COUNT(*) FILTER (WHERE fo.status = 'OVERDUE') AS overdue,
+                           COUNT(*) FILTER (WHERE fo.status = 'MISSING_DATA') AS missing_data,
+                           COUNT(*) FILTER (WHERE fo.status = 'EXCLUDED') AS excluded
+                    FROM filtered_outcomes fo
+                    GROUP BY fo.measure_version_id, fo.run_id
                 ), open_cases AS (
                     SELECT c.measure_version_id,
                            COUNT(*) FILTER (WHERE c.status = 'OPEN') AS open_case_count
                     FROM cases c
+                    JOIN employees e ON e.id = c.employee_id
+                    WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                      AND (? IS NULL OR c.created_at >= ?)
+                      AND (? IS NULL OR c.created_at <= ?)
                     GROUP BY c.measure_version_id
                 )
                 SELECT av.measure_id,
@@ -95,10 +119,17 @@ public class ProgramService {
                 rs.getLong("excluded"),
                 rs.getDouble("compliance_rate"),
                 rs.getLong("open_case_count")
-        ));
+        ),
+                site, site,
+                from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
+                to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to),
+                site, site,
+                from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
+                to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to)
+        );
     }
 
-    public List<ProgramTrendPoint> trend(UUID measureId) {
+    public List<ProgramTrendPoint> trend(UUID measureId, String site, Instant from, Instant to) {
         String sql = """
                 WITH active_measure_version AS (
                     SELECT mv.id
@@ -113,7 +144,11 @@ public class ProgramService {
                        COUNT(*) FILTER (WHERE o.status = 'COMPLIANT') AS compliant
                 FROM outcomes o
                 JOIN runs r ON r.id = o.run_id
+                JOIN employees e ON e.id = o.employee_id
                 JOIN active_measure_version amv ON amv.id = o.measure_version_id
+                WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                  AND (? IS NULL OR r.started_at >= ?)
+                  AND (? IS NULL OR r.started_at <= ?)
                 GROUP BY o.run_id, r.started_at
                 ORDER BY r.started_at DESC
                 LIMIT 10
@@ -129,10 +164,10 @@ public class ProgramService {
                     complianceRate,
                     totalEvaluated
             );
-        }, measureId);
+        }, measureId, site, site, from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from), to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to));
     }
 
-    public TopDrivers topDrivers(UUID measureId) {
+    public TopDrivers topDrivers(UUID measureId, String site, Instant from, Instant to) {
         UUID latestRunId = jdbcTemplate.query(
                 """
                 WITH active_measure_version AS (
@@ -145,13 +180,20 @@ public class ProgramService {
                 SELECT o.run_id
                 FROM outcomes o
                 JOIN runs r ON r.id = o.run_id
+                JOIN employees e ON e.id = o.employee_id
                 JOIN active_measure_version amv ON amv.id = o.measure_version_id
+                WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                  AND (? IS NULL OR r.started_at >= ?)
+                  AND (? IS NULL OR r.started_at <= ?)
                 GROUP BY o.run_id, r.started_at
                 ORDER BY r.started_at DESC
                 LIMIT 1
                 """,
                 rs -> rs.next() ? (UUID) rs.getObject("run_id") : null,
-                measureId
+                measureId,
+                site, site,
+                from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
+                to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to)
         );
 
         if (latestRunId == null) {
@@ -164,6 +206,7 @@ public class ProgramService {
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status = 'OVERDUE'
+                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
                 GROUP BY e.site
                 ORDER BY overdue_count DESC, e.site ASC
                 LIMIT 5
@@ -173,7 +216,7 @@ public class ProgramService {
                         rs.getLong("overdue_count"),
                         "High overdue concentration"
                 ),
-                latestRunId
+                latestRunId, site, site
         );
 
         List<DriverRole> byRole = jdbcTemplate.query(
@@ -182,6 +225,7 @@ public class ProgramService {
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status = 'OVERDUE'
+                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
                 GROUP BY e.role
                 ORDER BY overdue_count DESC, e.role ASC
                 LIMIT 5
@@ -190,20 +234,22 @@ public class ProgramService {
                         rs.getString("role"),
                         rs.getLong("overdue_count")
                 ),
-                latestRunId
+                latestRunId, site, site
         );
 
         long totalFlagged = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM outcomes WHERE run_id = ? AND status IN ('OVERDUE', 'MISSING_DATA')",
+                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA') AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))",
                 Long.class,
-                latestRunId
+                latestRunId, site, site
         );
 
         List<DriverOutcomeReason> byOutcomeReason = jdbcTemplate.query(
                 """
                 SELECT o.status AS reason, COUNT(*) AS cnt
                 FROM outcomes o
+                JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA')
+                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
                 GROUP BY o.status
                 ORDER BY cnt DESC
                 """,
@@ -216,7 +262,7 @@ public class ProgramService {
                             pct
                     );
                 },
-                latestRunId
+                latestRunId, site, site
         );
 
         return new TopDrivers(bySite, byRole, byOutcomeReason);

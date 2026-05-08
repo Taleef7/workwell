@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "[{\"measureId\":\"4ae5d865-3d64-4a17-905d-f1b315a037e2\",\"measureName\":\"Audiogram\",\"policyRef\":\"OSHA 29 CFR 1910.95\",\"version\":\"v1.0\",\"status\":\"Active\",\"compileStatus\":\"COMPILED\",\"testFixtureCount\":0,\"valueSetCount\":0,\"lastUpdated\":\"2026-05-03T04:19:48.921473Z\"},{\"measureId\":\"9db33281-0933-4dd6-86e9-e4c6df2b9a94\",\"measureName\":\"Flu Vaccine\",\"policyRef\":\"Seasonal Flu Program Policy\",\"version\":\"v1.0\",\"status\":\"Active\",\"compileStatus\":\"COMPILED\",\"testFixtureCount\":0,\"valueSetCount\":0,\"lastUpdated\":\"2026-05-05T23:33:56.097036Z\"},{\"measureId\":\"eaa81302-b6f6-4aba-a143-bb72941f9c00\",\"measureName\":\"HAZWOPER Surveillance\",\"policyRef\":\"OSHA 29 CFR 1910.120\",\"version\":\"v1.0\",\"status\":\"Active\",\"compileStatus\":\"COMPILED\",\"testFixtureCount\":0,\"valueSetCount\":0,\"lastUpdated\":\"2026-05-05T23:33:56.039875Z\"},{\"measureId\":\"8c9fda6f-b9bb-413a-be4d-8ce4faa72999\",\"measureName\":\"TB Surveillance\",\"policyRef\":\"CDC Occupational TB Guidance\",\"version\":\"v1.3\",\"status\":\"Active\",\"compileStatus\":\"COMPILED\",\"testFixtureCount\":2,\"valueSetCount\":0,\"lastUpdated\":\"2026-05-03T05:01:39.531706Z\"}]"
+    }
+  ],
+  "isError": false
+}

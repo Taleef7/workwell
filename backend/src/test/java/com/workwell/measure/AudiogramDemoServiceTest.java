@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class AudiogramDemoServiceTest {
+    // Tests the legacy /api/runs/audiogram endpoint path. The primary evaluation pipeline is tested in CqlEvaluationServiceTest.
 
     @Mock
     private RunPersistenceService runPersistenceService;

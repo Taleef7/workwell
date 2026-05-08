@@ -37,7 +37,7 @@ class RunControllerTest {
 
     @Test
     void listsRunsWithFilters() throws Exception {
-        when(runPersistenceService.listRuns("completed", "all_programs", "manual", 20)).thenReturn(List.of(
+        when(runPersistenceService.listRuns("completed", "all_programs", "manual", null, null, null, 20)).thenReturn(List.of(
                 new RunPersistenceService.RunListItem(
                         "11111111-1111-1111-1111-111111111111",
                         "All Programs",
@@ -154,6 +154,12 @@ class RunControllerTest {
                 .when(allProgramsRunService).rerunSameScope(runId, "system");
 
         mockMvc.perform(post("/api/runs/{id}/rerun", runId))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsInvalidDateFilters() throws Exception {
+        mockMvc.perform(get("/api/runs").param("from", "2026-13-01"))
                 .andExpect(status().isBadRequest());
     }
 }

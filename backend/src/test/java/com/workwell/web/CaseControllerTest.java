@@ -1,12 +1,17 @@
 package com.workwell.web;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.audit.CaseAccessAuditService;
 import com.workwell.caseflow.CaseFlowService;
+import com.workwell.caseflow.EvidenceService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -28,10 +33,16 @@ class CaseControllerTest {
     @MockBean
     private CaseFlowService caseFlowService;
 
+    @MockBean
+    private EvidenceService evidenceService;
+
+    @MockBean
+    private CaseAccessAuditService caseAccessAuditService;
+
     @Test
     void listsCases() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.listCases("open", null, null, null, null)).thenReturn(List.of(
+        when(caseFlowService.listCases("open", null, null, null, null, null, null)).thenReturn(List.of(
                 new CaseFlowService.CaseSummary(
                         caseId,
                         "patient-003",
@@ -46,6 +57,10 @@ class CaseControllerTest {
                         null,
                         "OVERDUE",
                         UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                        null,
+                        null,
+                        false,
+                        0,
                         Instant.parse("2026-05-04T12:00:00Z")
                 )
         ));
@@ -59,6 +74,47 @@ class CaseControllerTest {
     }
 
     @Test
+    void listsExcludedCases() throws Exception {
+        UUID caseId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(caseFlowService.listCases("excluded", null, null, null, null, null, null)).thenReturn(List.of(
+                new CaseFlowService.CaseSummary(
+                        caseId,
+                        "patient-010",
+                        "patient-010",
+                        "Plant B",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                        "TB Surveillance",
+                        "1.1.0",
+                        "2026-05-04",
+                        "EXCLUDED",
+                        "LOW",
+                        null,
+                        "EXCLUDED",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        "Active waiver on file.",
+                        Instant.parse("2026-06-04T00:00:00Z"),
+                        false,
+                        0,
+                        Instant.parse("2026-05-04T12:00:00Z")
+                )
+        ));
+
+        mockMvc.perform(get("/api/cases").param("status", "excluded"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("EXCLUDED"))
+                .andExpect(jsonPath("$[0].exclusionReason").value("Active waiver on file."));
+    }
+
+    @Test
+    void rejectsUnsupportedCaseStatus() throws Exception {
+        when(caseFlowService.listCases("bogus", null, null, null, null, null, null))
+                .thenThrow(new IllegalArgumentException("status must be one of open, closed, excluded, all"));
+
+        mockMvc.perform(get("/api/cases").param("status", "bogus"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void returnsCaseDetail() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         when(caseFlowService.loadCase(caseId)).thenReturn(java.util.Optional.of(
@@ -67,6 +123,7 @@ class CaseControllerTest {
                         "patient-003",
                         "patient-003",
                         "AnnualAudiogramCompleted",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "1.0.0",
                         "2026-05-04",
                         "OPEN",
@@ -78,6 +135,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:05:00Z"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
                         Map.of(
                                 "expressionResults", List.of(
                                         Map.of("define", "In Hearing Conservation Program", "result", true),
@@ -112,6 +174,29 @@ class CaseControllerTest {
                 .andExpect(jsonPath("$.outcomeStatus").value("OVERDUE"))
                 .andExpect(jsonPath("$.evidenceJson.evaluatedResource.patientId").value("patient-003"))
                 .andExpect(jsonPath("$.timeline[0].eventType").value("CASE_CREATED"));
+
+        verify(caseAccessAuditService).recordCaseViewed(
+                eq(caseId),
+                eq(UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
+                eq("system"),
+                eq("patient-003"),
+                eq("AnnualAudiogramCompleted"),
+                any(Instant.class)
+        );
+    }
+
+    @Test
+    void rejectsMissingCaseActionType() throws Exception {
+        UUID caseId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions", caseId)
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "note": "Missing action type"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -123,6 +208,7 @@ class CaseControllerTest {
                         "patient-003",
                         "patient-003",
                         "AnnualAudiogramCompleted",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "1.0.0",
                         "2026-05-04",
                         "OPEN",
@@ -134,6 +220,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:15:00Z"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
                         Map.of(),
                         "OVERDUE",
                         "Audiogram is outside annual compliance window.",
@@ -187,6 +278,7 @@ class CaseControllerTest {
                         "patient-003",
                         "patient-003",
                         "AnnualAudiogramCompleted",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "1.0.0",
                         "2026-05-04",
                         "RESOLVED",
@@ -198,6 +290,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:18:00Z"),
                         Instant.parse("2026-05-04T12:18:00Z"),
+                        "RERUN_VERIFIED",
+                        "case-manager",
+                        null,
+                        null,
+                        false,
                         Map.of(),
                         "COMPLIANT",
                         "Audiogram completed within compliant window.",
@@ -229,6 +326,7 @@ class CaseControllerTest {
                         "patient-003",
                         "patient-003",
                         "AnnualAudiogramCompleted",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                         "1.0.0",
                         "2026-05-04",
                         "OPEN",
@@ -240,6 +338,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:20:00Z"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
                         Map.of(),
                         "OVERDUE",
                         "Audiogram is outside annual compliance window.",
@@ -263,6 +366,7 @@ class CaseControllerTest {
                         "patient-004",
                         "patient-004",
                         "TB Surveillance",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
                         "1.3.0",
                         "2026-05-04",
                         "OPEN",
@@ -274,6 +378,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:30:00Z"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
                         Map.of(),
                         "OVERDUE",
                         "TB screening is outside annual compliance window.",
@@ -297,6 +406,7 @@ class CaseControllerTest {
                         "patient-004",
                         "patient-004",
                         "TB Surveillance",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
                         "1.3.0",
                         "2026-05-04",
                         "OPEN",
@@ -308,6 +418,11 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:00:00Z"),
                         Instant.parse("2026-05-04T12:40:00Z"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
                         Map.of(),
                         "OVERDUE",
                         "TB screening is outside annual compliance window.",

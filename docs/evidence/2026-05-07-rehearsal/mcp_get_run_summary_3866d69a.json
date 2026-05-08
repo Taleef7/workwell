@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"run_id\":\"3866d69a-2519-4051-bad0-98da9ea696bf\",\"scope\":\"all_programs\",\"total_cases\":46,\"compliant_count\":9,\"non_compliant_count\":51,\"pass_rate\":15.0,\"duration\":60000,\"outcome_counts\":[{\"count\":9,\"status\":\"COMPLIANT\"},{\"count\":3,\"status\":\"DUE_SOON\"},{\"count\":6,\"status\":\"EXCLUDED\"},{\"count\":33,\"status\":\"MISSING_DATA\"},{\"count\":9,\"status\":\"OVERDUE\"}],\"started_at\":\"2026-05-07T00:00:00Z\",\"completed_at\":\"2026-05-07T00:01:00Z\"}"
+    }
+  ],
+  "isError": false
+}

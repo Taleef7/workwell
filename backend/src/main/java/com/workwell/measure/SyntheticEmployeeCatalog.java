@@ -8,10 +8,10 @@ public final class SyntheticEmployeeCatalog {
 
     public static List<EmployeeProfile> allEmployees() {
         return List.of(
-                new EmployeeProfile("emp-001", "Amina Shah", "Maintenance Tech", "Plant A"),
-                new EmployeeProfile("emp-002", "Bilal Raza", "Welder", "Plant A"),
-                new EmployeeProfile("emp-003", "Hina Qureshi", "Industrial Hygienist", "Plant A"),
-                new EmployeeProfile("emp-004", "Kamran Malik", "Office Staff", "Plant A"),
+                new EmployeeProfile("emp-001", "Demo Author", "Author", "HQ"),
+                new EmployeeProfile("emp-002", "Demo Approver", "Approver", "HQ"),
+                new EmployeeProfile("emp-003", "Demo Case Manager", "Case Manager", "HQ"),
+                new EmployeeProfile("emp-004", "Demo Admin", "Admin", "HQ"),
                 new EmployeeProfile("emp-005", "Nadia Anwar", "Maintenance Tech", "Plant A"),
                 new EmployeeProfile("emp-006", "Omar Siddiq", "Welder", "Plant A"),
                 new EmployeeProfile("emp-007", "Sana Imtiaz", "Office Staff", "Plant A"),

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -27,8 +28,11 @@ public class MeasureController {
     }
 
     @GetMapping("/api/measures")
-    public List<MeasureService.MeasureCatalogItem> listMeasures() {
-        return measureService.listMeasures();
+    public List<MeasureService.MeasureCatalogItem> listMeasures(
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "search", required = false) String search
+    ) {
+        return measureService.listMeasures(status, search);
     }
 
     @PostMapping("/api/measures")
@@ -56,9 +60,19 @@ public class MeasureController {
         }
     }
 
+    @GetMapping("/api/measures/{id}/versions")
+    public List<MeasureService.MeasureVersionHistoryItem> versionHistory(@PathVariable UUID id) {
+        return measureService.listVersionHistory(id);
+    }
+
     @GetMapping("/api/value-sets")
     public List<MeasureService.ValueSetRef> listValueSets() {
         return measureService.listValueSets();
+    }
+
+    @GetMapping("/api/osha-references")
+    public List<MeasureService.OshaReference> listOshaReferences() {
+        return measureService.listOshaReferences();
     }
 
     @PostMapping("/api/value-sets")
@@ -85,6 +99,8 @@ public class MeasureController {
                 ? new EligibilityCriteriaRequest("", "", "")
                 : request.eligibilityCriteria();
         measureService.updateSpec(id, new MeasureService.SpecUpdateRequest(
+                request.policyRef(),
+                request.oshaReferenceId(),
                 request.description(),
                 new MeasureService.EligibilityCriteria(
                         nullToEmpty(eligibility.roleFilter()),
@@ -114,6 +130,26 @@ public class MeasureController {
     public Map<String, String> transitionStatus(@PathVariable UUID id, @Valid @RequestBody StatusUpdateRequest request) {
         try {
             String status = measureService.transitionStatus(id, request.targetStatus());
+            return Map.of("status", status);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/measures/{id}/approve")
+    public Map<String, String> approveMeasure(@PathVariable UUID id) {
+        try {
+            String status = measureService.approveMeasure(id);
+            return Map.of("status", status);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/measures/{id}/deprecate")
+    public Map<String, String> deprecateMeasure(@PathVariable UUID id, @Valid @RequestBody DeprecateRequest request) {
+        try {
+            String status = measureService.deprecateMeasure(id, request.reason());
             return Map.of("status", status);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -151,6 +187,8 @@ public class MeasureController {
     }
 
     public record SpecUpdateRequest(
+            @NotBlank String policyRef,
+            UUID oshaReferenceId,
             String description,
             EligibilityCriteriaRequest eligibilityCriteria,
             List<Map<String, String>> exclusions,
@@ -181,6 +219,11 @@ public class MeasureController {
 
     public record TestsUpdateRequest(
             List<MeasureService.TestFixture> fixtures
+    ) {
+    }
+
+    public record DeprecateRequest(
+            @NotBlank String reason
     ) {
     }
 
