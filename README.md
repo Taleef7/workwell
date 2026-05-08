@@ -65,9 +65,24 @@ npm run dev
 - `GET /api/audit-events/export?format=csv`
 
 CSV column contracts:
-- `runs.csv`: `runId,measureName,status,scopeType,triggerType,startedAt,completedAt,durationMs,totalEvaluated,compliant,nonCompliant`
-- `outcomes.csv`: `runId,employeeId,employeeName,site,measureName,measureVersion,evaluationPeriod,status,summary,evaluatedAt,evidenceJson`
-- `cases.csv`: `caseId,employeeId,employeeName,site,measureName,measureVersion,evaluationPeriod,status,priority,assignee,currentOutcomeStatus,lastRunId,updatedAt`
+
+- `GET /api/exports/runs?format=csv`
+  - Optional query params: `status`, `scopeType`, `triggerType`, `limit`
+```text
+runId|measureName|measureVersion|scopeType|triggerType|status|startedAt|completedAt|durationMs|totalEvaluated|compliant|dueSoon|overdue|missingData|excluded|passRate|dataFreshAsOf
+```
+
+- `GET /api/exports/outcomes?format=csv&runId={runId}`
+  - Optional query param: `runId` (defaults to latest run when omitted)
+```text
+outcomeId|runId|employeeExternalId|employeeName|role|site|measureName|measureVersion|evaluationPeriod|status|lastExamDate|complianceWindowDays|daysOverdue|roleEligible|siteEligible|waiverStatus|evaluatedAt
+```
+
+- `GET /api/exports/cases?format=csv`
+  - Optional query params: `status`, `measureId`, `priority`, `assignee`, `site`
+```text
+caseId|employeeExternalId|employeeName|role|site|measureName|measureVersion|evaluationPeriod|status|priority|assignee|currentOutcomeStatus|nextAction|lastRunId|createdAt|updatedAt|closedAt|latestOutreachDeliveryStatus
+```
 
 ## Notes
 

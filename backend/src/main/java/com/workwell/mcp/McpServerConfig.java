@@ -125,7 +125,7 @@ public class McpServerConfig {
                         String requestedMeasureName = args.get("measureName").toString().trim();
                         measureId = lookupMeasureIdByName(measureService, requestedMeasureName);
                     }
-                    var summaries = caseFlowService.listCases(status, measureId, null, null, null);
+                    var summaries = caseFlowService.listCases(status, measureId, null, null, null, null, null);
                     List<Map<String, Object>> payload = summaries.stream().map(summary -> {
                         Map<String, Object> row = new LinkedHashMap<>();
                         row.put("case_id", summary.caseId());
@@ -372,12 +372,13 @@ public class McpServerConfig {
                             ? Map.of()
                             : objectMapper.convertValue(caseDetail.evidenceJson().getOrDefault("why_flagged", Map.of()), new TypeReference<Map<String, Object>>() {
                             });
-                    String lastExamDate = whyFlagged.get("lastExamDate") == null ? "unknown date" : whyFlagged.get("lastExamDate").toString();
-                    String daysOverdue = whyFlagged.get("daysOverdue") == null ? "unknown" : whyFlagged.get("daysOverdue").toString();
-                    String complianceWindowDays = whyFlagged.get("complianceWindowDays") == null ? "unknown" : whyFlagged.get("complianceWindowDays").toString();
-                    String roleEligible = whyFlagged.get("roleEligible") == null ? "unknown" : whyFlagged.get("roleEligible").toString();
-                    String siteEligible = whyFlagged.get("siteEligible") == null ? "unknown" : whyFlagged.get("siteEligible").toString();
-                    String waiverStatus = whyFlagged.get("waiverStatus") == null ? "unknown" : whyFlagged.get("waiverStatus").toString();
+                    // Fixed: was reading camelCase keys; CqlEvaluationService writes snake_case.
+                    String lastExamDate = whyFlagged.get("last_exam_date") == null ? "unknown date" : whyFlagged.get("last_exam_date").toString();
+                    String daysOverdue = whyFlagged.get("days_overdue") == null ? "unknown" : whyFlagged.get("days_overdue").toString();
+                    String complianceWindowDays = whyFlagged.get("compliance_window_days") == null ? "unknown" : whyFlagged.get("compliance_window_days").toString();
+                    String roleEligible = whyFlagged.get("role_eligible") == null ? "unknown" : whyFlagged.get("role_eligible").toString();
+                    String siteEligible = whyFlagged.get("site_eligible") == null ? "unknown" : whyFlagged.get("site_eligible").toString();
+                    String waiverStatus = whyFlagged.get("waiver_status") == null ? "unknown" : whyFlagged.get("waiver_status").toString();
                     String explanation = "%s was flagged as %s for the %s measure. Their last qualifying exam was %s (%s days ago), which exceeds the %s-day compliance window. Role eligibility: %s. Site eligibility: %s. Waiver status: %s."
                             .formatted(
                                     caseDetail.employeeName(),

@@ -1,9 +1,9 @@
 package com.workwell.compile;
 
 import com.workwell.measure.SyntheticEmployeeCatalog;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Condition;
@@ -16,7 +16,11 @@ import org.hl7.fhir.r4.model.Reference;
 
 public class SyntheticFhirBundleBuilder {
 
-    public Bundle buildBundle(SyntheticEmployeeCatalog.EmployeeProfile employee, ExamConfig config) {
+    public Bundle buildBundle(
+            SyntheticEmployeeCatalog.EmployeeProfile employee,
+            ExamConfig config,
+            LocalDate evaluationDate
+    ) {
         Bundle bundle = new Bundle();
         bundle.setType(Bundle.BundleType.COLLECTION);
 
@@ -46,7 +50,7 @@ public class SyntheticFhirBundleBuilder {
         }
 
         if (config.daysSinceLastExam() != null) {
-            String performedDateTime = LocalDate.now()
+            String performedDateTime = evaluationDate
                     .minusDays(config.daysSinceLastExam())
                     .atStartOfDay()
                     .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);

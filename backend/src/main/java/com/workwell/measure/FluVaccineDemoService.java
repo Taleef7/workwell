@@ -88,22 +88,25 @@ public class FluVaccineDemoService {
         whyFlagged.put("generated_at", Instant.now().toString());
         whyFlagged.put("outcome_status", outcome);
 
-        return Map.of(
-                "expressionResults", List.of(
-                        Map.of("define", "Active Employee", "result", true),
-                        Map.of("define", "Has Contraindication", "result", candidate.hasContraindication()),
-                        Map.of("define", "Days Since Flu Vaccine", "result", candidate.daysSinceVaccine())
-                ),
-                "evaluatedResource", Map.of(
-                        "subjectId", employee.externalId(),
-                        "employeeName", employee.name(),
-                        "role", employee.role(),
-                        "site", employee.site(),
-                        "daysSinceLastFluVaccine", candidate.daysSinceVaccine(),
-                        "measurementWindowDays", 365
-                ),
-                "why_flagged", whyFlagged
+        List<Map<String, Object>> expressionResults = List.of(
+                Map.of("define", "Active Employee", "result", true),
+                Map.of("define", "Has Contraindication", "result", candidate.hasContraindication()),
+                Map.of("define", "Days Since Flu Vaccine", "result", candidate.daysSinceVaccine() == null ? "unknown" : candidate.daysSinceVaccine())
         );
+
+        Map<String, Object> evaluatedResource = new LinkedHashMap<>();
+        evaluatedResource.put("subjectId", employee.externalId());
+        evaluatedResource.put("employeeName", employee.name());
+        evaluatedResource.put("role", employee.role());
+        evaluatedResource.put("site", employee.site());
+        evaluatedResource.put("daysSinceLastFluVaccine", candidate.daysSinceVaccine());
+        evaluatedResource.put("measurementWindowDays", 365);
+
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("expressionResults", expressionResults);
+        evidence.put("evaluatedResource", evaluatedResource);
+        evidence.put("why_flagged", whyFlagged);
+        return evidence;
     }
 
     private record Candidate(String subjectId, Integer daysSinceVaccine, boolean hasContraindication) {

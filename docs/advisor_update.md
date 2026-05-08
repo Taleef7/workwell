@@ -1,151 +1,174 @@
 # Advisor Update - WorkWell Measure Studio
 
-Date: 2026-05-05
-Prepared by: Codex (implementation + verification)
-Purpose: Comprehensive status packet for external advisor review and critique
+Date: 2026-05-07
+Prepared by: Codex (implementation + verification support)
+Audience: External advisor
+Purpose: Full status handoff for architecture, execution progress, production readiness, risks, and near-term decisions
 
-## 1) Executive Summary
+## 1) Executive Snapshot
 
-The MVP scope from the active sprint plan (`docs/SPIKE_PLAN.md`) is functionally complete and running in production, with closeout now in stabilization/freeze mode.
+WorkWell Measure Studio is in advisor-ready stabilization with MVP scope delivered, production-verified, and freeze posture active.
 
-Current delivered system supports the full demo narrative:
-- Author measure artifacts (spec, CQL compile/validate, value sets, tests, lifecycle).
-- Execute seeded measure runs and persist outcomes/evidence.
-- Operate case workflows (idempotent upsert, assignment/escalation, outreach, rerun-to-verify closure).
-- Audit every state-changing action.
-- Guardrailed AI assist (draft spec + explain case) with audit events.
-- MCP read-only tooling with per-tool audit events.
-- CSV exports for runs/outcomes/cases plus audit export.
-- Admin integrations health and manual sync stubs.
+Current live system supports the complete target story:
+- Measure authoring and lifecycle (`Draft -> Approved -> Active -> Deprecated`)
+- CQL compile/validation and seeded 4-measure catalog
+- Manual + scheduled run pipeline with persisted outcomes/evidence
+- Case worklist and case detail with outreach, assign/escalate, rerun-to-verify, and closure
+- Audit logging for state-changing operations
+- AI assist surfaces (draft spec, case explanation, run insight) with deterministic fallbacks
+- MCP read tools with tool-level audit events
+- CSV exports (runs, outcomes, cases, audit events)
+- Admin operations panel (integration health, sync actions, scheduler controls, outreach templates)
 
-## 2) Plan Alignment Snapshot
+## 2) Canonical Plan Alignment (as of May 7, 2026)
 
-### A) Against `docs/SPIKE_PLAN.md` (canonical)
+Primary reference: `docs/SPIKE_PLAN.md`
 
-- S2 Authoring vertical: complete.
-- S3 Generalization + run pipeline + determinism: complete for seeded MVP path.
-- S4 Worklist/case loop + rerun-to-verify + audit chain: complete.
-- S5 AI + MCP read tools: complete (read-only MCP posture retained).
-- S6 4-measure seeded depth + exports + demo-path hardening: complete.
+- S0/S1/S2/S3/S4/S5/S6: delivered in repo and represented in production-smoke evidence
+- Remaining sprint objective has shifted from feature-building to demo reliability and execution discipline
 
-Status call: **MVP feature scope achieved; now in D16 freeze/closeout discipline**.
+Status call:
+- Feature implementation: complete for MVP narrative
+- Operational confidence: high
+- Actionable TODO status from execution tracker (`docs/new_instructions.md`): `55/55 completed`, `0 open`
 
-### B) Against `docs/TODO.md`
+## 3) What Shipped Since Prior Advisor Packet
 
-All listed P0/P1/P2/P3 items are now marked done, including:
-- measure-depth expansion,
-- AI surfaces,
-- MCP expansion,
-- outreach delivery-state persistence,
-- admin integration panel,
-- run/outcome/case CSV export coverage + documented column contracts.
+1. Data and measure depth
+- Expanded synthetic population to 100 employees with broader edge cases
+- Added deterministic historical run seeding for non-flat trend lines
+- Ensured all four seeded measures remain runnable with all outcome classes represented
 
-### C) Against archived `docs/archive/PROJECT_PLAN_v1.md`
+2. Verification hardening
+- Added/expanded targeted test coverage:
+  - `AiServiceIntegrationTest`
+  - `McpServerConfigTest`
+  - `ExportControllerTest`
+  - `ProgramControllerTest`
+- Performed production smoke checks across run/case/export/AI/admin/program endpoints
 
-Archived plan themes that remain represented in delivered work:
-- single-backend deployable modular architecture,
-- CQL-centered compliance truth,
-- evidence-first explainability,
-- operational caseflow with auditability,
-- AI assist as advisory (not decisioning),
-- MCP read integration path.
+3. UI polish and consistency
+- Unified status badge systems and global toast behavior
+- Improved responsive dashboard shell
+- Added stronger empty states and loading skeleton behavior
+- Improved cases/runs/programs usability for demo flow reliability
 
-## 3) Major Work Delivered Since Last Advisor Packet
+4. MCP and integration health accuracy
+- Resolved MCP health check false-negative behavior for SSE transport
+- Adjusted integration health probing to classify long-lived SSE endpoint correctly
 
-1. Four-measure demo depth
-- Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine seeded and runnable.
+## 4) Verification Evidence (Current)
 
-2. AI layer (guardrailed)
-- Draft Spec and Explain Why Flagged implemented.
-- AI calls audited (`AI_DRAFT_SPEC_GENERATED`, `AI_CASE_EXPLANATION_GENERATED`).
+Evidence source of truth: `docs/JOURNAL.md` entries for 2026-05-06 and 2026-05-07.
 
-3. MCP read expansion
-- Added `list_measures`, `get_measure_version`, `list_runs`, `explain_outcome`.
-- Per-tool audit event `MCP_TOOL_CALLED` on invocation.
-
-4. Reporting/export expansion
-- API exports for runs, outcomes, and cases.
-- Frontend export entry points added.
-- CSV column contracts documented.
-
-5. Notifications/Admin depth
-- Outreach delivery-state transitions persisted (`QUEUED/SENT/FAILED`).
-- Case detail now surfaces latest outreach delivery status.
-- Admin integrations health + manual sync stubs implemented and audited.
-
-6. Production stabilization
-- Identified and fixed live regression in outreach-delivery query due to JDBC placeholder conflict with PostgreSQL JSON operator.
-- Patch deployed and production re-verified.
-
-## 4) Verification Evidence (Most Recent)
-
-### Local verification
-- Backend targeted suites for touched surfaces: PASS
-  - web/export/admin/case controllers and related behavior.
-- Frontend gates: PASS
-  - `npm run lint`
-  - `npm run build`
-- Full backend suite can fail in this environment when Docker/Testcontainers is unavailable (known environment constraint, not app-logic regression).
-
-### Production verification
-After latest deploy + hotfix:
-- `GET /actuator/health` -> 200
-- `GET /api/exports/runs?format=csv` -> 200
-- `GET /api/exports/outcomes?format=csv&runId=<latest>` -> 200
-- `GET /api/exports/cases?format=csv&status=open` -> 200
+Recent production evidence includes:
+- `GET /actuator/health` -> 200 (`UP`)
+- `POST /api/runs/manual` -> 200 with 4 measures executed
+- `GET /api/cases?status=open` -> 200
+- `GET /api/programs` and measure-detail analytics endpoints -> 200
+- `POST /api/measures/{measureId}/ai/draft-spec` -> 200
+- `POST /api/cases/{caseId}/ai/explain` -> 200
+- MCP Inspector CLI tool transcripts captured against production SSE:
+  - `tools/list`
+  - `tools/call list_measures`
+  - `tools/call get_run_summary`
+  - `tools/call explain_outcome` (returns real evidence values; no `"unknown"` placeholders)
+- `GET /api/exports/runs|outcomes|cases?format=csv` -> 200
 - `GET /api/audit-events/export?format=csv` -> 200
-- `GET /api/admin/integrations` -> 200
-- `POST /api/admin/integrations/mcp/sync` -> 200
-- `GET /api/cases/{id}` -> 200
-- `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=SENT` -> 200
-- follow-up case detail confirms `latestOutreachDeliveryStatus=SENT`
+- `GET /api/admin/integrations` + sync actions -> 200
 
-Detailed timestamps and checkpoints are recorded in `docs/JOURNAL.md`.
+Recent local gate evidence includes:
+- Frontend `lint` + `build`: PASS
+- Targeted backend suites for touched subsystems: PASS
+- Full backend suite may still be environment-sensitive when Docker/Testcontainers is unavailable locally
 
-## 5) Architecture/Data/Docs Closeout Status
+Additional closeout artifacts:
+- Rehearsal evidence bundle: `docs/evidence/2026-05-07-rehearsal/`
+- Includes API snapshots + MCP transcripts + pinned case/AI explain payloads.
 
-Docs updated for parity:
+## 5) Current State of Documentation and Operational Artifacts
+
+Core docs updated and aligned with implementation:
 - `docs/ARCHITECTURE.md`
 - `docs/DATA_MODEL.md`
 - `docs/MEASURES.md`
-- `docs/DEPLOY.md`
 - `docs/AI_GUARDRAILS.md`
-- `README.md`
+- `docs/DEPLOY.md`
+- `docs/EXPORTS.md`
+- `docs/DEMO_RUNBOOK.md`
+- `docs/DEMO_SCRIPT.md`
 - `docs/TODO.md`
 - `docs/JOURNAL.md`
 
-Closeout note:
-- Current remaining work is demo packaging/rehearsal discipline, not net-new feature scope.
+## 6) What's Left (Realistically)
 
-## 6) Risks and Caveats (Current)
+No remaining must-do implementation items are open in the current instruction batch.
 
-1. Full backend test reliability in local non-Docker contexts
-- Integration tests using Testcontainers require Docker availability.
+Optional advisor-facing polish only:
+1. Run one final timed rehearsal from `docs/DEMO_SCRIPT.md` immediately before consult/demo.
+2. Capture fresh screenshot visuals (if desired) to complement existing JSON/CLI evidence bundle.
+3. Keep freeze discipline: bugfix-only changes with explicit risk justification.
 
-2. Freeze discipline risk
-- Any net-new feature work now increases demo risk; bugfix-only posture is recommended.
+## 7) Risks / Caveats (Advisor Should Know)
 
-3. Demo fragility risk
-- Final runbook should pin specific case IDs / run IDs for deterministic rehearsal.
+1. Environment-sensitive full backend test sweep
+- Some integration tests depend on Docker/Testcontainers availability.
 
-## 7) Recommended Next Actions (Advisor Confirmation Requested)
+2. Late-sprint scope creep risk
+- New feature requests now have disproportionate regression risk.
 
-1. Keep strict bugfix-only freeze through final demo window.
-2. Run one scripted production rehearsal from `docs/DEMO_SCRIPT.md` with timestamped evidence capture.
-3. Finalize external runbook (URLs, expected outputs, fallback actions).
+3. Production run-all latency variability
+- `POST /api/runs/manual` has shown intermittent latency/timeout behavior in some probes, though recent production checks succeeded and measure-specific runs are stable.
 
-## 8) Advisor Clarifications / Questions
+4. Demo determinism risk
+- Rehearsal quality depends on keeping runbook IDs/scenarios current and pinned.
 
-1. For final demo optics, should we target one flagship measure flow (Audiogram) plus mention others, or actively demonstrate actions across two measures live?
-2. Should we lock a hard no-change cutoff (date/time) before presentation, including bugfixes unless critical outage?
-3. Is current MCP read-only scope sufficient for advisor-facing demo, or should we include explicit narrative for post-MVP write-tool roadmap in the presentation?
-4. Do you want any additional audit/report artifact exported ahead of review (for example fixed CSV snapshots attached to advisor packet)?
-5. Should we include a concise "known limitations" slide/section for stakeholder transparency, or keep that in appendix only?
+## 8) Advisor Questions / Clarifications Requested
+
+Please respond inline to these so we can lock the final presentation posture:
+
+1. Demo narrative shape:
+- Should we live-demo one flagship measure end-to-end plus summarize the other three, or actively perform live actions across two measures?
+
+2. Change freeze:
+- Do you recommend a hard no-change timestamp before final demo day (except P0 outage fixes)?
+
+3. MCP messaging:
+- Is read-only MCP sufficient for this advisor/stakeholder round, or should we explicitly include a post-MVP write-tool roadmap slide?
+
+4. Artifact expectations:
+- Do you want a static evidence bundle (CSV exports + key API responses) attached ahead of your review?
+
+5. Limitations disclosure:
+- Should known limitations be presented in the main deck narrative or kept in an appendix for Q&A?
+
+6. Pilot-readiness threshold:
+- From your perspective, what are the top 2-3 criteria still needed to call this pilot-ready beyond MVP-complete?
 
 ## 9) Requested Advisor Critique Focus
 
-Please critique specifically:
-- correctness/defensibility of the compliance decision boundary (CQL truth vs AI assist),
-- operational usability of the caseflow loop,
-- demo-risk exposure in the current freeze state,
-- any gaps between delivered MVP and pilot-readiness expectations.
+Please focus critique on:
+- Compliance defensibility (CQL source-of-truth vs AI assist boundaries)
+- Caseflow operational usability (from open case to verified closure)
+- Demo fragility exposure in current freeze phase
+- Gaps between current MVP delivery and near-term pilot-readiness
+
+## 10) Recommended Handoff Files for External Advisor
+
+Pass these first (core packet):
+- `docs/advisor_update.md` (this file)
+- `docs/JOURNAL.md` (execution log + verification evidence)
+- `docs/SPIKE_PLAN.md` (canonical scope/schedule/stop conditions)
+- `docs/TODO.md` (implementation backlog status and completion map)
+- `docs/ARCHITECTURE.md`
+- `docs/DATA_MODEL.md`
+- `docs/MEASURES.md`
+- `docs/AI_GUARDRAILS.md`
+- `docs/DEMO_RUNBOOK.md`
+- `docs/DEMO_SCRIPT.md`
+- `docs/EXPORTS.md`
+- `docs/DEPLOY.md`
+
+Optional but useful context:
+- `docs/DECISIONS.md`
+- `README.md`

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { outcomeStatusClass } from "@/lib/status";
+import { useGlobalFilters } from "@/components/global-filter-context";
 
 type RunListItem = {
   runId: string;
@@ -85,6 +86,7 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
+  const { siteId, from, to } = useGlobalFilters();
   const rerunSupported = selectedRun ? selectedRun.scopeType === "all_programs" || selectedRun.scopeType === "measure" : false;
 
   const loadRuns = useCallback(async () => {
@@ -96,6 +98,9 @@ export default function RunsPage() {
       if (statusFilter) query.set("status", statusFilter);
       if (scopeFilter) query.set("scopeType", scopeFilter);
       if (triggerFilter) query.set("triggerType", triggerFilter);
+      if (siteId) query.set("site", siteId);
+      if (from) query.set("from", from);
+      if (to) query.set("to", to);
       const response = await fetch(`${apiBase}/api/runs?${query.toString()}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`Failed to load runs (${response.status})`);
       const data = (await response.json()) as RunListItem[];
@@ -108,7 +113,7 @@ export default function RunsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, selectedRunId, statusFilter, scopeFilter, triggerFilter]);
+  }, [apiBase, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;

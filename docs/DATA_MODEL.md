@@ -2,11 +2,12 @@
 
 ## 1) Scope
 This document is the current schema and contract reference for the WorkWell MVP runtime.
-All tables below reflect active backend behavior as of 2026-05-06.
+All tables below reflect active backend behavior as of 2026-05-08.
 
 ## 2) Core Tables and Responsibilities
 - `measures`: logical measure records (name, owner, tags).
 - `measure_versions`: executable measure revisions (spec, CQL, compile metadata, lifecycle status).
+- `osha_references`: curated OSHA/policy reference lookup used by Studio Spec authoring.
 - `value_sets`: value set catalog with code payloads.
 - `measure_value_set_links`: many-to-many link between versions and value sets.
 - `employees`: seeded workforce entities used for evaluation/case operations.
@@ -36,6 +37,7 @@ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 measure_id UUID NOT NULL REFERENCES measures(id)
+osha_reference_id UUID REFERENCES osha_references(id)
 version TEXT NOT NULL
 status TEXT NOT NULL
 spec_json JSONB NOT NULL
@@ -49,7 +51,15 @@ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 UNIQUE(measure_id, version)
 ```
 
-### 3.3 `value_sets`
+### 3.3 `osha_references`
+```sql
+id UUID PK DEFAULT gen_random_uuid()
+cfr_citation TEXT NOT NULL UNIQUE
+title TEXT NOT NULL
+program_area TEXT NOT NULL
+```
+
+### 3.4 `value_sets`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 oid TEXT NOT NULL
@@ -60,14 +70,14 @@ last_resolved_at TIMESTAMPTZ
 UNIQUE(oid, version)
 ```
 
-### 3.4 `measure_value_set_links`
+### 3.5 `measure_value_set_links`
 ```sql
 measure_version_id UUID NOT NULL REFERENCES measure_versions(id)
 value_set_id UUID NOT NULL REFERENCES value_sets(id)
 PRIMARY KEY(measure_version_id, value_set_id)
 ```
 
-### 3.5 `employees`
+### 3.6 `employees`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 external_id TEXT UNIQUE NOT NULL
@@ -80,7 +90,7 @@ start_date DATE
 active BOOLEAN DEFAULT TRUE
 ```
 
-### 3.6 `runs`
+### 3.7 `runs`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 scope_type TEXT NOT NULL
@@ -99,7 +109,7 @@ measurement_period_start TIMESTAMPTZ NOT NULL
 measurement_period_end TIMESTAMPTZ NOT NULL
 ```
 
-### 3.7 `run_logs`
+### 3.8 `run_logs`
 ```sql
 id BIGSERIAL PK
 run_id UUID NOT NULL REFERENCES runs(id)
@@ -108,7 +118,7 @@ level TEXT NOT NULL
 message TEXT NOT NULL
 ```
 
-### 3.8 `outcomes`
+### 3.9 `outcomes`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 run_id UUID NOT NULL REFERENCES runs(id)
@@ -122,7 +132,7 @@ INDEX outcomes_employee_measure_period_idx(employee_id, measure_version_id, eval
 INDEX outcomes_run_id_idx(run_id)
 ```
 
-### 3.9 `cases`
+### 3.10 `cases`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 employee_id UUID NOT NULL REFERENCES employees(id)
@@ -140,7 +150,7 @@ closed_at TIMESTAMPTZ
 UNIQUE(employee_id, measure_version_id, evaluation_period)
 ```
 
-### 3.10 `case_actions`
+### 3.11 `case_actions`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
 case_id UUID NOT NULL REFERENCES cases(id)
@@ -150,7 +160,7 @@ performed_by TEXT
 performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```
 
-### 3.11 `audit_events`
+### 3.12 `audit_events`
 ```sql
 id BIGSERIAL PK
 event_type TEXT NOT NULL
@@ -166,7 +176,7 @@ INDEX audit_events_ref_run_id_idx(ref_run_id)
 INDEX audit_events_ref_case_id_idx(ref_case_id)
 ```
 
-### 3.12 `integration_health`
+### 3.13 `integration_health`
 ```sql
 id TEXT PK
 display_name TEXT NOT NULL
@@ -177,7 +187,7 @@ config_json JSONB NOT NULL DEFAULT '{}'::jsonb
 ```
 Seeded IDs: `fhir`, `mcp`, `ai`, `hris`.
 
-### 3.13 `outreach_templates` (optional migration-safe table)
+### 3.14 `outreach_templates` (optional migration-safe table)
 Expected runtime schema:
 ```sql
 id UUID PK DEFAULT gen_random_uuid()

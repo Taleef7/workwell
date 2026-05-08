@@ -3,8 +3,11 @@ package com.workwell.caseflow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.admin.OutreachTemplateService;
+import com.workwell.admin.WaiverService;
+import com.workwell.security.SecurityActor;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import java.io.IOException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Locale;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -21,15 +25,18 @@ public class CaseFlowService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final OutreachTemplateService outreachTemplateService;
+    private final WaiverService waiverService;
 
     public CaseFlowService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
-            OutreachTemplateService outreachTemplateService
+            OutreachTemplateService outreachTemplateService,
+            WaiverService waiverService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.outreachTemplateService = outreachTemplateService;
+        this.waiverService = waiverService;
     }
 
     public void upsertCases(
@@ -42,7 +49,9 @@ public class CaseFlowService {
         for (int i = 0; i < outcomes.size(); i++) {
             UUID employeeId = employeeIds.get(i);
             DemoOutcome outcome = outcomes.get(i);
-            if (requiresOpenCase(outcome.outcome())) {
+            if ("EXCLUDED".equals(outcome.outcome())) {
+                upsertExcludedCase(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
+            } else if (requiresOpenCase(outcome.outcome())) {
                 upsertOpenCase(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
             } else {
                 closeExistingCaseIfNeeded(runId, measureVersionId, evaluationPeriod, employeeId, outcome);
@@ -50,7 +59,16 @@ public class CaseFlowService {
         }
     }
 
-    public List<CaseSummary> listCases(String statusFilter, UUID measureId, String priority, String assignee, String site) {
+    public List<CaseSummary> listCases(
+            String statusFilter,
+            UUID measureId,
+            String priority,
+            String assignee,
+            String site,
+            Instant from,
+            Instant to
+    ) {
+        String normalizedStatusFilter = normalizeStatusFilter(statusFilter);
         StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
                        e.external_id AS employee_id,
@@ -65,21 +83,37 @@ public class CaseFlowService {
                        c.assignee,
                        c.current_outcome_status,
                        c.last_run_id,
+                       w.exclusion_reason AS exclusion_reason,
+                       w.expires_at AS waiver_expires_at,
+                       CASE
+                           WHEN w.active AND w.expires_at IS NOT NULL AND w.expires_at < NOW() THEN TRUE
+                           ELSE FALSE
+                       END AS waiver_expired,
+                       COALESCE((SELECT COUNT(*) FROM outreach_records orw WHERE orw.case_id = c.id), 0) AS outreach_record_count,
                        c.updated_at
                 FROM cases c
                 JOIN employees e ON c.employee_id = e.id
                 JOIN measure_versions mv ON c.measure_version_id = mv.id
                 JOIN measures m ON mv.measure_id = m.id
+                LEFT JOIN LATERAL (
+                    SELECT w.exclusion_reason, w.expires_at, w.active
+                    FROM waivers w
+                    WHERE w.employee_id = c.employee_id
+                      AND w.measure_version_id = c.measure_version_id
+                    ORDER BY w.active DESC, w.granted_at DESC, w.id DESC
+                    LIMIT 1
+                ) w ON TRUE
                 WHERE 1=1
                 """);
 
         List<Object> params = new ArrayList<>();
-        if (!"all".equalsIgnoreCase(statusFilter)) {
-            if ("closed".equalsIgnoreCase(statusFilter)) {
-                sql.append(" AND c.status IN ('CLOSED', 'RESOLVED')");
-            } else {
-                sql.append(" AND c.status = 'OPEN'");
+        switch (normalizedStatusFilter) {
+            case "all" -> {
             }
+            case "closed" -> sql.append(" AND c.status IN ('CLOSED', 'RESOLVED')");
+            case "excluded" -> sql.append(" AND c.status = 'EXCLUDED'");
+            case "open" -> sql.append(" AND c.status = 'OPEN'");
+            default -> throw new IllegalStateException("Unexpected status filter: " + normalizedStatusFilter);
         }
         if (measureId != null) {
             sql.append(" AND m.id = ?");
@@ -96,6 +130,14 @@ public class CaseFlowService {
         if (site != null && !site.isBlank()) {
             sql.append(" AND LOWER(COALESCE(e.site, '')) = LOWER(?)");
             params.add(site);
+        }
+        if (from != null) {
+            sql.append(" AND c.created_at >= ?");
+            params.add(Timestamp.from(from));
+        }
+        if (to != null) {
+            sql.append(" AND c.created_at <= ?");
+            params.add(Timestamp.from(to));
         }
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
@@ -114,8 +156,22 @@ public class CaseFlowService {
                 rs.getString("assignee"),
                 rs.getString("current_outcome_status"),
                 (UUID) rs.getObject("last_run_id"),
+                rs.getString("exclusion_reason"),
+                toInstant(rs.getObject("waiver_expires_at")),
+                rs.getBoolean("waiver_expired"),
+                rs.getInt("outreach_record_count"),
                 rs.getTimestamp("updated_at").toInstant()
         ), params.toArray());
+    }
+
+    private String normalizeStatusFilter(String statusFilter) {
+        if (statusFilter == null || statusFilter.isBlank()) {
+            return "open";
+        }
+        return switch (statusFilter.trim().toLowerCase(Locale.ROOT)) {
+            case "all", "closed", "excluded", "open" -> statusFilter.trim().toLowerCase(Locale.ROOT);
+            default -> throw new IllegalArgumentException("status must be one of open, closed, excluded, all");
+        };
     }
 
     public Optional<CaseDetail> loadCase(UUID caseId) {
@@ -132,9 +188,18 @@ public class CaseFlowService {
                        c.next_action,
                        c.current_outcome_status,
                        c.last_run_id,
+                       c.measure_version_id,
                        c.created_at,
                        c.updated_at,
                        c.closed_at,
+                       c.closed_reason,
+                       c.closed_by,
+                       w.exclusion_reason AS exclusion_reason,
+                       w.expires_at AS waiver_expires_at,
+                       CASE
+                           WHEN w.active AND w.expires_at IS NOT NULL AND w.expires_at < NOW() THEN TRUE
+                           ELSE FALSE
+                       END AS waiver_expired,
                        o.evidence_json,
                        o.status AS outcome_status,
                        o.evaluated_at AS outcome_evaluated_at
@@ -142,6 +207,14 @@ public class CaseFlowService {
                 JOIN employees e ON c.employee_id = e.id
                 JOIN measure_versions mv ON c.measure_version_id = mv.id
                 JOIN measures m ON mv.measure_id = m.id
+                LEFT JOIN LATERAL (
+                    SELECT w.exclusion_reason, w.expires_at, w.active
+                    FROM waivers w
+                    WHERE w.employee_id = c.employee_id
+                      AND w.measure_version_id = c.measure_version_id
+                    ORDER BY w.active DESC, w.granted_at DESC, w.id DESC
+                    LIMIT 1
+                ) w ON TRUE
                 LEFT JOIN outcomes o ON o.run_id = c.last_run_id
                     AND o.employee_id = c.employee_id
                     AND o.measure_version_id = c.measure_version_id
@@ -164,6 +237,7 @@ public class CaseFlowService {
                         rs.getString("employee_id"),
                         rs.getString("employee_name"),
                         rs.getString("measure_name"),
+                        (UUID) rs.getObject("measure_version_id"),
                         rs.getString("measure_version"),
                         rs.getString("evaluation_period"),
                         rs.getString("status"),
@@ -175,6 +249,11 @@ public class CaseFlowService {
                         toInstant(rs.getObject("created_at")),
                         toInstant(rs.getObject("updated_at")),
                         toInstant(rs.getObject("closed_at")),
+                        rs.getString("closed_reason"),
+                        rs.getString("closed_by"),
+                        rs.getString("exclusion_reason"),
+                        toInstant(rs.getObject("waiver_expires_at")),
+                        rs.getBoolean("waiver_expired"),
                         evidenceJson == null ? Map.of() : readJson(evidenceJson),
                         rs.getString("outcome_status"),
                         outcomeSummaryFor(rs.getString("outcome_status")),
@@ -235,13 +314,23 @@ public class CaseFlowService {
         );
 
         Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("autoTriggered", false);
         actionPayload.put("channel", "SIMULATED_EMAIL");
         actionPayload.put("template", template == null ? "default-template" : template.name());
+        actionPayload.put("templateName", template == null ? "Default Template" : template.name());
         actionPayload.put("templateId", template == null ? null : template.id());
         actionPayload.put("subject", template == null ? "Outreach Reminder" : template.subject());
         actionPayload.put("deliveryStatus", "QUEUED");
         actionPayload.put("note", "Demo outreach recorded without external delivery.");
         insertCaseAction(caseId, "OUTREACH_SENT", actor, actionPayload);
+        insertOutreachRecord(
+                caseId,
+                "OUTREACH",
+                "QUEUED",
+                template == null ? "Default Template" : template.name(),
+                false,
+                actionPayload
+        );
 
         Map<String, Object> auditPayload = new LinkedHashMap<>();
         auditPayload.put("caseStatus", "OPEN");
@@ -300,13 +389,15 @@ public class CaseFlowService {
         );
 
         jdbcTemplate.update(
-                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
+                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW(), closed_reason = ?, closed_by = ? WHERE id = ?",
                 // MVP choice: compliant reruns move OPEN cases to RESOLVED.
                 "RESOLVED",
                 "LOW",
                 "No follow-up needed after compliant verification rerun.",
                 "COMPLIANT",
                 verificationRunId,
+                "RERUN_VERIFIED",
+                actor,
                 caseId
         );
 
@@ -340,6 +431,179 @@ public class CaseFlowService {
         );
 
         return loadCase(caseId);
+    }
+
+    public Optional<CaseDetail> resolveCase(UUID caseId, String actor, String note, Instant resolvedAt, String resolvedBy) {
+        Optional<CaseContext> context = loadCaseContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+
+        CaseContext existing = context.get();
+        if (!List.of("OPEN", "IN_PROGRESS").contains(existing.status())) {
+            throw new IllegalArgumentException("Only OPEN or IN_PROGRESS cases can be manually resolved");
+        }
+
+        String trimmedNote = note == null ? "" : note.trim();
+        if (trimmedNote.isBlank()) {
+            throw new IllegalArgumentException("Closure note is required");
+        }
+
+        Instant effectiveResolvedAt = resolvedAt == null ? Instant.now() : resolvedAt;
+        String effectiveResolvedBy = resolvedBy == null || resolvedBy.isBlank() ? actor : resolvedBy.trim();
+
+        jdbcTemplate.update(
+                "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW(), closed_at = ?, closed_reason = ?, closed_by = ? WHERE id = ?",
+                "CLOSED",
+                "Manually resolved by case manager/admin.",
+                Timestamp.from(effectiveResolvedAt),
+                "MANUAL_RESOLVE",
+                effectiveResolvedBy,
+                caseId
+        );
+
+        Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("type", "RESOLVE");
+        actionPayload.put("note", trimmedNote);
+        actionPayload.put("resolvedAt", effectiveResolvedAt.toString());
+        actionPayload.put("resolvedBy", effectiveResolvedBy);
+        insertCaseAction(caseId, "RESOLVE", actor, actionPayload);
+
+        insertAuditEvent(
+                "CASE_MANUALLY_CLOSED",
+                "case",
+                caseId,
+                actor,
+                existing.lastRunId(),
+                caseId,
+                existing.measureVersionId(),
+                Map.of(
+                        "caseId", caseId.toString(),
+                        "note", trimmedNote,
+                        "resolvedAt", effectiveResolvedAt.toString(),
+                        "resolvedBy", effectiveResolvedBy,
+                        "closedReason", "MANUAL_RESOLVE"
+                )
+        );
+
+        return loadCase(caseId);
+    }
+
+    public Optional<CaseDetail> scheduleAppointment(
+            UUID caseId,
+            String actor,
+            String appointmentType,
+            Instant scheduledAt,
+            String location,
+            String notes
+    ) {
+        if (appointmentType == null || appointmentType.isBlank()) {
+            throw new IllegalArgumentException("appointmentType is required");
+        }
+        if (scheduledAt == null) {
+            throw new IllegalArgumentException("scheduledAt is required");
+        }
+        if (location == null || location.isBlank()) {
+            throw new IllegalArgumentException("location is required");
+        }
+
+        Optional<CaseSchedulingContext> context = loadCaseSchedulingContext(caseId);
+        if (context.isEmpty()) {
+            return Optional.empty();
+        }
+        CaseSchedulingContext c = context.get();
+
+        UUID appointmentId = UUID.randomUUID();
+        jdbcTemplate.update(
+                """
+                        INSERT INTO scheduled_appointments (
+                            id, case_id, employee_id, measure_id, appointment_type, scheduled_at, location, status, notes, created_by, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                        """,
+                appointmentId,
+                caseId,
+                c.employeeId(),
+                c.measureId(),
+                appointmentType.trim(),
+                Timestamp.from(scheduledAt),
+                location.trim(),
+                "PENDING",
+                notes == null || notes.isBlank() ? null : notes.trim(),
+                actor
+        );
+
+        Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("type", "SCHEDULE_APPOINTMENT");
+        actionPayload.put("appointmentId", appointmentId.toString());
+        actionPayload.put("appointmentType", appointmentType.trim());
+        actionPayload.put("scheduledAt", scheduledAt.toString());
+        actionPayload.put("location", location.trim());
+        actionPayload.put("notes", notes == null ? "" : notes.trim());
+        insertCaseAction(caseId, "SCHEDULE_APPOINTMENT", actor, actionPayload);
+
+        jdbcTemplate.update(
+                """
+                        INSERT INTO outreach_records (id, case_id, type, status, template_name, auto_triggered, payload_json, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, NOW())
+                        """,
+                UUID.randomUUID(),
+                caseId,
+                "APPOINTMENT_REMINDER",
+                "QUEUED",
+                "Appointment Confirmation",
+                true,
+                toJsonb(Map.of(
+                        "appointmentId", appointmentId.toString(),
+                        "scheduledAt", scheduledAt.toString(),
+                        "location", location.trim()
+                ))
+        );
+
+        if ("OPEN".equals(c.status())) {
+            jdbcTemplate.update("UPDATE cases SET status = 'IN_PROGRESS', updated_at = NOW() WHERE id = ?", caseId);
+        } else {
+            jdbcTemplate.update("UPDATE cases SET updated_at = NOW() WHERE id = ?", caseId);
+        }
+
+        insertAuditEvent(
+                "APPOINTMENT_SCHEDULED",
+                "case",
+                caseId,
+                actor,
+                c.lastRunId(),
+                caseId,
+                c.measureVersionId(),
+                Map.of(
+                        "appointmentId", appointmentId.toString(),
+                        "appointmentType", appointmentType.trim(),
+                        "scheduledAt", scheduledAt.toString(),
+                        "location", location.trim()
+                )
+        );
+
+        return loadCase(caseId);
+    }
+
+    public List<ScheduledAppointment> listAppointments(UUID caseId) {
+        String sql = """
+                SELECT id, case_id, employee_id, measure_id, appointment_type, scheduled_at, location, status, notes, created_by, created_at
+                FROM scheduled_appointments
+                WHERE case_id = ?
+                ORDER BY scheduled_at DESC, created_at DESC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new ScheduledAppointment(
+                (UUID) rs.getObject("id"),
+                (UUID) rs.getObject("case_id"),
+                (UUID) rs.getObject("employee_id"),
+                (UUID) rs.getObject("measure_id"),
+                rs.getString("appointment_type"),
+                toInstant(rs.getObject("scheduled_at")),
+                rs.getString("location"),
+                rs.getString("status"),
+                rs.getString("notes"),
+                rs.getString("created_by"),
+                toInstant(rs.getObject("created_at"))
+        ), caseId);
     }
 
     public Optional<CaseDetail> assignCase(UUID caseId, String assignee, String actor) {
@@ -469,7 +733,9 @@ public class CaseFlowService {
                             current_outcome_status = EXCLUDED.current_outcome_status,
                             last_run_id = EXCLUDED.last_run_id,
                             updated_at = NOW(),
-                            closed_at = NULL
+                            closed_at = NULL,
+                            closed_reason = NULL,
+                            closed_by = NULL
                         RETURNING id, (xmax = 0) AS created
                         """,
                 candidateCaseId,
@@ -496,6 +762,80 @@ public class CaseFlowService {
                 measureVersionId,
                 casePayload(outcome, priority, nextAction)
         );
+
+        if (created) {
+            queueAutoNotification(runId, caseId, measureVersionId, outcome);
+        }
+    }
+
+    private void upsertExcludedCase(
+            UUID runId,
+            UUID measureVersionId,
+            String evaluationPeriod,
+            UUID employeeId,
+            DemoOutcome outcome
+    ) {
+        String priority = priorityFor(outcome.outcome());
+        String nextAction = nextActionFor(outcome.outcome(), measureVersionId);
+        UUID candidateCaseId = UUID.randomUUID();
+        Map<String, Object> upserted = jdbcTemplate.queryForMap(
+                """
+                        INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)
+                        ON CONFLICT (employee_id, measure_version_id, evaluation_period)
+                        DO UPDATE SET
+                            status = EXCLUDED.status,
+                            priority = EXCLUDED.priority,
+                            next_action = EXCLUDED.next_action,
+                            current_outcome_status = EXCLUDED.current_outcome_status,
+                            last_run_id = EXCLUDED.last_run_id,
+                            updated_at = NOW(),
+                            closed_at = NULL,
+                            closed_reason = NULL,
+                            closed_by = NULL
+                        RETURNING id, (xmax = 0) AS created
+                        """,
+                candidateCaseId,
+                employeeId,
+                measureVersionId,
+                evaluationPeriod,
+                "EXCLUDED",
+                priority,
+                null,
+                nextAction,
+                outcome.outcome(),
+                runId
+        );
+        UUID caseId = (UUID) upserted.get("id");
+        boolean created = Boolean.TRUE.equals(upserted.get("created"));
+
+        String exclusionReason = outcome.summary();
+        Optional<WaiverService.WaiverRecord> waiver = waiverService.ensureExclusionWaiver(
+                employeeId,
+                measureVersionId,
+                exclusionReason,
+                "system",
+                "Auto-linked from excluded evaluation."
+        );
+
+        Map<String, Object> payload = new LinkedHashMap<>(casePayload(outcome, priority, nextAction));
+        payload.put("status", "EXCLUDED");
+        payload.put("created", created);
+        payload.put("waiverId", waiver.map(record -> record.waiverId().toString()).orElse(null));
+        payload.put("exclusionReason", waiver.map(WaiverService.WaiverRecord::exclusionReason).orElse(exclusionReason));
+        payload.put("waiverExpiresAt", waiver.flatMap(record -> Optional.ofNullable(record.expiresAt())).map(Instant::toString).orElse(null));
+        payload.put("waiverExpired", waiver.map(WaiverService.WaiverRecord::expired).orElse(false));
+
+        insertAuditEvent(
+                "CASE_EXCLUDED",
+                "case",
+                caseId,
+                "system",
+                runId,
+                caseId,
+                measureVersionId,
+                payload
+        );
     }
 
     private void closeExistingCaseIfNeeded(
@@ -512,12 +852,14 @@ public class CaseFlowService {
 
         UUID caseId = existingCaseId.get();
         jdbcTemplate.update(
-                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?",
+                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW(), closed_reason = ?, closed_by = ? WHERE id = ?",
                 "RESOLVED",
                 "LOW",
                 "Resolved by compliant rerun.",
                 outcome.outcome(),
                 runId,
+                "AUTO_RESOLVE",
+                "system",
                 caseId
         );
 
@@ -551,7 +893,7 @@ public class CaseFlowService {
         try {
             return Optional.ofNullable(jdbcTemplate.queryForObject(
                     """
-                            SELECT id, employee_id, measure_version_id, evaluation_period, current_outcome_status, last_run_id, assignee
+                            SELECT id, employee_id, measure_version_id, evaluation_period, status, current_outcome_status, last_run_id, assignee
                             FROM cases
                             WHERE id = ?
                             """,
@@ -560,9 +902,40 @@ public class CaseFlowService {
                             (UUID) rs.getObject("employee_id"),
                             (UUID) rs.getObject("measure_version_id"),
                             rs.getString("evaluation_period"),
+                            rs.getString("status"),
                             rs.getString("current_outcome_status"),
                             (UUID) rs.getObject("last_run_id"),
                             rs.getString("assignee")
+                    ),
+                    caseId
+            ));
+        } catch (EmptyResultDataAccessException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<CaseSchedulingContext> loadCaseSchedulingContext(UUID caseId) {
+        try {
+            return Optional.ofNullable(jdbcTemplate.queryForObject(
+                    """
+                            SELECT c.id,
+                                   c.employee_id,
+                                   c.measure_version_id,
+                                   c.status,
+                                   c.last_run_id,
+                                   m.id AS measure_id
+                            FROM cases c
+                            JOIN measure_versions mv ON c.measure_version_id = mv.id
+                            JOIN measures m ON mv.measure_id = m.id
+                            WHERE c.id = ?
+                            """,
+                    (rs, rowNum) -> new CaseSchedulingContext(
+                            (UUID) rs.getObject("id"),
+                            (UUID) rs.getObject("employee_id"),
+                            (UUID) rs.getObject("measure_version_id"),
+                            (UUID) rs.getObject("measure_id"),
+                            rs.getString("status"),
+                            (UUID) rs.getObject("last_run_id")
                     ),
                     caseId
             ));
@@ -710,6 +1083,7 @@ public class CaseFlowService {
                            id::text AS sort_key
                     FROM audit_events
                     WHERE ref_case_id = ?
+                      AND event_type <> 'CASE_VIEWED'
                     UNION ALL
                     SELECT action_type AS event_type,
                            performed_by AS actor,
@@ -758,16 +1132,7 @@ public class CaseFlowService {
     }
 
     private String nextActionFor(String outcome, UUID measureVersionId) {
-        String measureName = jdbcTemplate.queryForObject(
-                """
-                        SELECT m.name
-                        FROM measure_versions mv
-                        JOIN measures m ON mv.measure_id = m.id
-                        WHERE mv.id = ?
-                        """,
-                String.class,
-                measureVersionId
-        );
+        String measureName = measureNameFor(measureVersionId);
         String label = switch (measureName) {
             case "TB Surveillance" -> "TB screening";
             case "HAZWOPER Surveillance" -> "HAZWOPER surveillance";
@@ -778,7 +1143,93 @@ public class CaseFlowService {
             case "OVERDUE" -> "Escalate " + label + " follow-up immediately.";
             case "MISSING_DATA" -> "Collect the missing " + label + " documentation.";
             case "DUE_SOON" -> "Schedule the annual " + label + " before the due date.";
+            case "EXCLUDED" -> "Review the active waiver and rerun before it expires.";
             default -> "No action required.";
+        };
+    }
+
+    private void queueAutoNotification(UUID runId, UUID caseId, UUID measureVersionId, DemoOutcome outcome) {
+        String measureName = measureNameFor(measureVersionId);
+        String templateName = autoNotificationTemplateName(outcome.outcome(), measureName);
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByNameOrDefault(templateName);
+        if (template == null) {
+            return;
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("autoTriggered", true);
+        payload.put("outcomeStatus", outcome.outcome());
+        payload.put("measureName", measureName);
+        payload.put("templateId", template.id());
+        payload.put("templateName", template.name());
+        payload.put("subject", template.subject());
+        payload.put("nextAction", nextActionFor(outcome.outcome(), measureVersionId));
+        payload.put("note", "Auto-queued outreach created during case upsert.");
+
+        insertOutreachRecord(caseId, "OUTREACH", "QUEUED", template.name(), true, payload);
+        insertAuditEvent(
+                "NOTIFICATION_AUTO_QUEUED",
+                "case",
+                caseId,
+                "system",
+                runId,
+                caseId,
+                measureVersionId,
+                payload
+        );
+    }
+
+    private void insertOutreachRecord(
+            UUID caseId,
+            String type,
+            String status,
+            String templateName,
+            boolean autoTriggered,
+            Map<String, Object> payload
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO outreach_records (id, case_id, type, status, template_name, auto_triggered, payload_json, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, NOW())
+                        """,
+                UUID.randomUUID(),
+                caseId,
+                type,
+                status,
+                templateName,
+                autoTriggered,
+                toJsonb(payload)
+        );
+    }
+
+    private String measureNameFor(UUID measureVersionId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT m.name
+                        FROM measure_versions mv
+                        JOIN measures m ON mv.measure_id = m.id
+                        WHERE mv.id = ?
+                        """,
+                String.class,
+                measureVersionId
+        );
+    }
+
+    private String autoNotificationTemplateName(String outcome, String measureName) {
+        String normalizedMeasure = measureName == null ? "" : measureName.toLowerCase(Locale.ROOT);
+        return switch (outcome) {
+            case "MISSING_DATA" -> "Missing Data Follow-Up";
+            case "DUE_SOON" -> {
+                if (normalizedMeasure.contains("audiogram") || normalizedMeasure.contains("hearing")) {
+                    yield "Hearing Conservation Overdue Outreach";
+                }
+                if (normalizedMeasure.contains("tb")) {
+                    yield "TB Surveillance Follow-Up";
+                }
+                yield "General Compliance Reminder";
+            }
+            case "OVERDUE" -> "General Compliance Reminder";
+            default -> "General Compliance Reminder";
         };
     }
 
@@ -850,13 +1301,14 @@ public class CaseFlowService {
             UUID refMeasureVersionId,
             Map<String, Object> payload
     ) {
+        String resolvedActor = SecurityActor.currentActorOr(actor);
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)",
                 ps -> {
                     ps.setString(1, eventType);
                     ps.setString(2, entityType);
                     ps.setObject(3, entityId);
-                    ps.setString(4, actor);
+                    ps.setString(4, resolvedActor);
                     ps.setObject(5, refRunId);
                     ps.setObject(6, refCaseId);
                     ps.setObject(7, refMeasureVersionId);
@@ -935,6 +1387,10 @@ public class CaseFlowService {
             String assignee,
             String currentOutcomeStatus,
             UUID lastRunId,
+            String exclusionReason,
+            Instant waiverExpiresAt,
+            boolean waiverExpired,
+            int outreachRecordCount,
             Instant updatedAt
     ) {
     }
@@ -944,6 +1400,7 @@ public class CaseFlowService {
             String employeeId,
             String employeeName,
             String measureName,
+            UUID measureVersionId,
             String measureVersion,
             String evaluationPeriod,
             String status,
@@ -955,6 +1412,11 @@ public class CaseFlowService {
             Instant createdAt,
             Instant updatedAt,
             Instant closedAt,
+            String closedReason,
+            String closedBy,
+            String exclusionReason,
+            Instant waiverExpiresAt,
+            boolean waiverExpired,
             Map<String, Object> evidenceJson,
             String outcomeStatus,
             String outcomeSummary,
@@ -983,14 +1445,40 @@ public class CaseFlowService {
     ) {
     }
 
+    public record ScheduledAppointment(
+            UUID id,
+            UUID caseId,
+            UUID employeeId,
+            UUID measureId,
+            String appointmentType,
+            Instant scheduledAt,
+            String location,
+            String status,
+            String notes,
+            String createdBy,
+            Instant createdAt
+    ) {
+    }
+
     private record CaseContext(
             UUID caseId,
             UUID employeeId,
             UUID measureVersionId,
             String evaluationPeriod,
+            String status,
             String currentOutcomeStatus,
             UUID lastRunId,
             String assignee
+    ) {
+    }
+
+    private record CaseSchedulingContext(
+            UUID caseId,
+            UUID employeeId,
+            UUID measureVersionId,
+            UUID measureId,
+            String status,
+            UUID lastRunId
     ) {
     }
 }

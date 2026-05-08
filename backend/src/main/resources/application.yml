@@ -19,6 +19,12 @@ management:
         include: health
 
 workwell:
+  evaluation:
+    compliance-rates:
+      audiogram: 0.78
+      tb_surveillance: 0.91
+      hazwoper: 0.65
+      flu_vaccine: 0.84
   scheduler:
     enabled: ${WORKWELL_SCHEDULER_ENABLED:false}
     cron: ${WORKWELL_SCHEDULER_CRON:0 0 6 * * *}

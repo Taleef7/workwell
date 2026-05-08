@@ -81,11 +81,13 @@ Doc PR ships with code PR. Always.
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current focus
+## Current Focus (as of 2026-05-08)
 
-Update before each session.
+**PR review follow-up and bugfix-only hardening.**
 
-**Today:** D3 in progress (Mon May 4, 2026) - Audiogram vertical now includes live case action flow (`outreach` + `rerun-to-verify`) with production verification of case closure and audit timeline linkage.
-
-**Next:** Re-evaluate progress versus SPIKE_PLAN acceptance checkpoints and start the next highest-risk slice.
+The sprint feature set is in place and this branch is being tightened for review. The remaining work right now is:
+- Clear review feedback on the sprint-closeout branch
+- Keep CI green and verify the affected surfaces end-to-end
+- Update docs/journal entries for any behavior changes
+- Stay in bugfix/polish mode unless the spike plan explicitly changes
 

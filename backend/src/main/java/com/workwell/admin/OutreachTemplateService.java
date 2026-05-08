@@ -3,7 +3,6 @@ package com.workwell.admin;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -16,25 +15,25 @@ public class OutreachTemplateService {
     }
 
     public List<OutreachTemplate> listTemplates() {
-        try {
-            return jdbcTemplate.query(
-                    """
-                            SELECT id, name, subject, body_text, measure_id, created_at
-                            FROM outreach_templates
-                            ORDER BY created_at DESC, name ASC
-                            """,
-                    (rs, rowNum) -> new OutreachTemplate(
-                            (UUID) rs.getObject("id"),
-                            rs.getString("name"),
-                            rs.getString("subject"),
-                            rs.getString("body_text"),
-                            (UUID) rs.getObject("measure_id"),
-                            rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant()
-                    )
-            );
-        } catch (DataAccessException ex) {
-            return fallbackTemplates();
-        }
+        return jdbcTemplate.query(
+                """
+                        SELECT id, name, subject, body_text, type, created_by, created_at, updated_at, active
+                        FROM outreach_templates
+                        WHERE active = TRUE
+                        ORDER BY created_at DESC, name ASC
+                        """,
+                (rs, rowNum) -> new OutreachTemplate(
+                        (UUID) rs.getObject("id"),
+                        rs.getString("name"),
+                        rs.getString("subject"),
+                        rs.getString("body_text"),
+                        rs.getString("type"),
+                        rs.getString("created_by"),
+                        rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant(),
+                        rs.getBoolean("active")
+                )
+        );
     }
 
     public OutreachTemplate resolveByIdOrDefault(UUID templateId) {
@@ -51,34 +50,109 @@ public class OutreachTemplateService {
                 .orElse(templates.get(0));
     }
 
-    private List<OutreachTemplate> fallbackTemplates() {
-        Instant now = Instant.now();
-        return List.of(
-                new OutreachTemplate(
-                        UUID.fromString("11111111-0000-0000-0000-000000000001"),
-                        "Audiogram Overdue Reminder",
-                        "Action Needed: Overdue Audiogram Follow-up",
-                        "Your annual audiogram is overdue. Please coordinate with occupational health for immediate scheduling.",
-                        null,
-                        now
-                ),
-                new OutreachTemplate(
-                        UUID.fromString("11111111-0000-0000-0000-000000000002"),
-                        "TB Due Soon Reminder",
-                        "Upcoming TB Screening Due Date",
-                        "Your TB surveillance screening is due soon. Please book your screening within the compliance window.",
-                        null,
-                        now
-                ),
-                new OutreachTemplate(
-                        UUID.fromString("11111111-0000-0000-0000-000000000003"),
-                        "Flu Vaccine Follow-up",
-                        "Seasonal Flu Vaccine Compliance Reminder",
-                        "Please complete this season's flu vaccine documentation to maintain program compliance.",
-                        null,
-                        now
-                )
+    public OutreachTemplate resolveByNameOrDefault(String templateName) {
+        List<OutreachTemplate> templates = listTemplates();
+        if (templates.isEmpty()) {
+            return null;
+        }
+        if (templateName == null || templateName.isBlank()) {
+            return templates.get(0);
+        }
+        return templates.stream()
+                .filter(t -> templateName.equalsIgnoreCase(t.name()))
+                .findFirst()
+                .orElse(templates.get(0));
+    }
+
+    public OutreachTemplate createTemplate(String name, String subject, String bodyText, String type, String actor) {
+        UUID id = UUID.randomUUID();
+        String normalizedType = normalizeType(type);
+        jdbcTemplate.update(
+                """
+                        INSERT INTO outreach_templates (id, name, subject, body_text, type, created_by, created_at, updated_at, active)
+                        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW(), TRUE)
+                        """,
+                id,
+                name.trim(),
+                subject.trim(),
+                bodyText.trim(),
+                normalizedType,
+                actor
         );
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT id, name, subject, body_text, type, created_by, created_at, updated_at, active
+                        FROM outreach_templates
+                        WHERE id = ?
+                        """,
+                (rs, rowNum) -> new OutreachTemplate(
+                        (UUID) rs.getObject("id"),
+                        rs.getString("name"),
+                        rs.getString("subject"),
+                        rs.getString("body_text"),
+                        rs.getString("type"),
+                        rs.getString("created_by"),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at").toInstant(),
+                        rs.getBoolean("active")
+                ),
+                id
+        );
+    }
+
+    public OutreachTemplate updateTemplate(UUID id, String name, String subject, String bodyText, String type, boolean active) {
+        String normalizedType = normalizeType(type);
+        int updated = jdbcTemplate.update(
+                """
+                        UPDATE outreach_templates
+                        SET name = ?,
+                            subject = ?,
+                            body_text = ?,
+                            type = ?,
+                            active = ?,
+                            updated_at = NOW()
+                        WHERE id = ?
+                        """,
+                name.trim(),
+                subject.trim(),
+                bodyText.trim(),
+                normalizedType,
+                active,
+                id
+        );
+        if (updated == 0) {
+            throw new IllegalArgumentException("Outreach template not found: " + id);
+        }
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT id, name, subject, body_text, type, created_by, created_at, updated_at, active
+                        FROM outreach_templates
+                        WHERE id = ?
+                        """,
+                (rs, rowNum) -> new OutreachTemplate(
+                        (UUID) rs.getObject("id"),
+                        rs.getString("name"),
+                        rs.getString("subject"),
+                        rs.getString("body_text"),
+                        rs.getString("type"),
+                        rs.getString("created_by"),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at").toInstant(),
+                        rs.getBoolean("active")
+                ),
+                id
+        );
+    }
+
+    private String normalizeType(String type) {
+        if (type == null || type.isBlank()) {
+            return "OUTREACH";
+        }
+        String normalized = type.trim().toUpperCase();
+        return switch (normalized) {
+            case "OUTREACH", "APPOINTMENT_REMINDER", "ESCALATION" -> normalized;
+            default -> throw new IllegalArgumentException("Unsupported template type: " + type);
+        };
     }
 
     public record OutreachTemplate(
@@ -86,8 +160,11 @@ public class OutreachTemplateService {
             String name,
             String subject,
             String bodyText,
-            UUID measureId,
-            Instant createdAt
+            String type,
+            String createdBy,
+            Instant createdAt,
+            Instant updatedAt,
+            boolean active
     ) {
     }
 }

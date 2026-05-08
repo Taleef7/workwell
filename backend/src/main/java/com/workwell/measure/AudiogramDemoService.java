@@ -11,7 +11,13 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
+/**
+ * @deprecated Legacy single-measure demo path. The primary evaluation pipeline is
+ * {@link com.workwell.compile.CqlEvaluationService}. This class is retained for backward
+ * compatibility with the /api/runs/audiogram endpoint only.
+ */
 @Service
+@Deprecated
 public class AudiogramDemoService {
     private final RunPersistenceService runPersistenceService;
 

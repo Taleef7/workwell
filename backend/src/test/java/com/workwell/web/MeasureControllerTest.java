@@ -2,10 +2,12 @@ package com.workwell.web;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.measure.MeasureService;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,5 +47,20 @@ class MeasureControllerTest {
                         .contentType("application/json")
                         .content("{\"changeSummary\":\"\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listsOshaReferences() throws Exception {
+        UUID referenceId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        when(measureService.listOshaReferences()).thenReturn(List.of(
+                new MeasureService.OshaReference(referenceId, "29 CFR 1910.95", "Occupational Noise Exposure", "Hearing Conservation")
+        ));
+
+        mockMvc.perform(get("/api/osha-references"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(referenceId.toString()))
+                .andExpect(jsonPath("$[0].cfrCitation").value("29 CFR 1910.95"))
+                .andExpect(jsonPath("$[0].title").value("Occupational Noise Exposure"))
+                .andExpect(jsonPath("$[0].programArea").value("Hearing Conservation"));
     }
 }

@@ -1,6 +1,7 @@
 package com.workwell.web;
 
 import com.workwell.ai.AiAssistService;
+import com.workwell.security.SecurityActor;
 import jakarta.validation.constraints.NotBlank;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -25,10 +26,11 @@ public class AiController {
     public AiAssistService.DraftSpecResponse draftSpec(
             @PathVariable(name = "measureId", required = false) UUID measureId,
             @RequestBody DraftSpecRequest request,
-            @RequestParam(name = "actor", defaultValue = "measure-author") String actor
+            @RequestParam(name = "actor", required = false) String actor
     ) {
         try {
-            return aiAssistService.draftSpec(request.policyText(), request.measureName(), actor, measureId);
+            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("measure-author") : actor;
+            return aiAssistService.draftSpec(request.policyText(), request.measureName(), resolvedActor, measureId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
@@ -37,10 +39,11 @@ public class AiController {
     @PostMapping({"/api/cases/{caseId}/explain", "/api/cases/{caseId}/ai/explain"})
     public AiAssistService.CaseExplanationResponse explainCase(
             @PathVariable UUID caseId,
-            @RequestParam(name = "actor", defaultValue = "case-manager") String actor
+            @RequestParam(name = "actor", required = false) String actor
     ) {
         try {
-            return aiAssistService.explainCase(caseId, actor);
+            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
+            return aiAssistService.explainCase(caseId, resolvedActor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
@@ -49,10 +52,11 @@ public class AiController {
     @PostMapping("/api/runs/{runId}/ai/insight")
     public AiAssistService.RunInsightResponse runInsight(
             @PathVariable UUID runId,
-            @RequestParam(name = "actor", defaultValue = "operations-user") String actor
+            @RequestParam(name = "actor", required = false) String actor
     ) {
         try {
-            return aiAssistService.runInsight(runId, actor);
+            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("operations-user") : actor;
+            return aiAssistService.runInsight(runId, resolvedActor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }

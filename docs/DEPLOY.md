@@ -45,6 +45,8 @@ fly secrets set DATABASE_URL=<neon-pooled>
 fly secrets set DATABASE_URL_DIRECT=<neon-direct>
 fly secrets set ANTHROPIC_API_KEY=<key>
 fly secrets set SPRING_PROFILES_ACTIVE=prod
+fly secrets set WORKWELL_AUTH_ENABLED=true
+fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
 ```
 
 Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`).
@@ -65,6 +67,7 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 3. Env vars:
    - `NEXT_PUBLIC_API_BASE_URL` = Fly app URL (e.g., `https://workwell-measure-studio-api.fly.dev`)
    - `NEXT_PUBLIC_APP_NAME` = `WorkWell Measure Studio`
+   - `NEXT_PUBLIC_DEMO_MODE` = `true` only for local/demo builds that should prefill the login form
 4. D1 stops after project connection and env configuration. First deploy from `main` happens during D2/S0.
 
 ### Anthropic
@@ -81,8 +84,11 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 | `DATABASE_URL_DIRECT` | Fly | Direct Neon connection for Flyway migrations |
 | `ANTHROPIC_API_KEY` | Fly | AI calls (Explain Why Flagged, Draft Spec) |
 | `SPRING_PROFILES_ACTIVE` | Fly | Always `prod` in deployed env |
+| `WORKWELL_AUTH_ENABLED` | Fly | Enable stub auth; set `true` in deployed env |
+| `WORKWELL_AUTH_JWT_SECRET` | Fly | Required when auth is enabled; use a strong secret |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel | Backend URL for fetch calls |
 | `NEXT_PUBLIC_APP_NAME` | Vercel | App display name |
+| `NEXT_PUBLIC_DEMO_MODE` | Vercel | Prefill login form for local/demo builds only |
 
 `.env.example` at repo root mirrors this list (without values). At present, env vars must be verified manually before deploy; the existing CI workflow does not validate deployment secrets or Vercel env configuration.
 

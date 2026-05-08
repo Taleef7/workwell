@@ -1,15 +1,31 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import type { Monaco, OnChange, OnMount } from "@monaco-editor/react";
 import { measureStatusClass } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
+import { useAuth } from "@/components/auth-provider";
+import { OshaReferenceCombobox, type OshaReferenceOption } from "@/components/osha-reference-combobox";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex min-h-[400px] items-center justify-center rounded-md border border-slate-200 bg-slate-950 text-sm text-slate-200">
+      Loading editor...
+    </div>
+  )
+});
+
+const BACKEND_MARKER_OWNER = "backend-compile";
 
 type MeasureDetail = {
   id: string;
   name: string;
   policyRef: string;
+  oshaReferenceId: string | null;
   version: string;
   status: "Draft" | "Approved" | "Active" | "Deprecated" | string;
   owner: string;
@@ -39,6 +55,8 @@ type ValueSetRef = {
   codeCount: number;
 };
 
+type OshaReference = OshaReferenceOption;
+
 type TestFixture = {
   fixtureName: string;
   employeeExternalId: string;
@@ -53,6 +71,15 @@ type ActivationReadiness = {
   valueSetCount: number;
   testValidationPassed: boolean;
   activationBlockers: string[];
+};
+
+type VersionHistoryItem = {
+  id: string;
+  version: string;
+  status: "Draft" | "Approved" | "Active" | "Deprecated" | string;
+  author: string;
+  createdAt: string;
+  changeSummary: string;
 };
 
 type DraftSpecResponse = {
@@ -72,20 +99,24 @@ type DraftSpecResponse = {
 };
 
 export default function StudioMeasurePage() {
+  const { user } = useAuth();
   const params = useParams<{ id: string }>();
   const measureId = typeof params?.id === "string" ? params.id : "";
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     return raw.trim().replace(/\/+$/, "");
   }, []);
-  const [tab, setTab] = useState<"spec" | "cql" | "valuesets" | "tests">("spec");
+  const [tab, setTab] = useState<"spec" | "cql" | "valuesets" | "tests" | "release">("spec");
   const [measure, setMeasure] = useState<MeasureDetail | null>(null);
   const [allValueSets, setAllValueSets] = useState<ValueSetRef[]>([]);
+  const [oshaReferences, setOshaReferences] = useState<OshaReference[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
   const [compileErrors, setCompileErrors] = useState<string[]>([]);
 
+  const [policyRef, setPolicyRef] = useState("");
+  const [oshaReferenceId, setOshaReferenceId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [siteFilter, setSiteFilter] = useState("");
@@ -101,9 +132,16 @@ export default function StudioMeasurePage() {
   const [testFixtures, setTestFixtures] = useState<TestFixture[]>([]);
   const [testFailures, setTestFailures] = useState<string[]>([]);
   const [activationReadiness, setActivationReadiness] = useState<ActivationReadiness | null>(null);
+  const [versionHistory, setVersionHistory] = useState<VersionHistoryItem[]>([]);
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+  const [showActivateConfirm, setShowActivateConfirm] = useState(false);
+  const [showDeprecateConfirm, setShowDeprecateConfirm] = useState(false);
+  const [deprecateReason, setDeprecateReason] = useState("");
   const [policyText, setPolicyText] = useState("");
   const [aiDraftBanner, setAiDraftBanner] = useState<string | null>(null);
   const [changeSummary, setChangeSummary] = useState("");
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
 
   const loadMeasure = useCallback(async () => {
     setLoading(true);
@@ -113,6 +151,8 @@ export default function StudioMeasurePage() {
       if (!response.ok) throw new Error(`Failed to load measure (${response.status})`);
       const data = (await response.json()) as MeasureDetail;
       setMeasure(data);
+      setPolicyRef(data.policyRef ?? "");
+      setOshaReferenceId(data.oshaReferenceId ?? null);
       setDescription(data.description ?? "");
       setRoleFilter(data.eligibilityCriteria?.roleFilter ?? "");
       setSiteFilter(data.eligibilityCriteria?.siteFilter ?? "");
@@ -123,12 +163,15 @@ export default function StudioMeasurePage() {
       setRequiredDataElementsText((data.requiredDataElements ?? []).join("\n"));
       setCqlText(data.cqlText ?? "");
       setTestFixtures(data.testFixtures ?? []);
-      setCompileWarnings([]);
-      setCompileErrors([]);
       const readinessResponse = await fetch(`${apiBase}/api/measures/${measureId}/activation-readiness`, { cache: "no-store" });
       if (readinessResponse.ok) {
         const readiness = (await readinessResponse.json()) as ActivationReadiness;
         setActivationReadiness(readiness);
+      }
+      const versionsResponse = await fetch(`${apiBase}/api/measures/${measureId}/versions`, { cache: "no-store" });
+      if (versionsResponse.ok) {
+        const versions = (await versionsResponse.json()) as VersionHistoryItem[];
+        setVersionHistory(versions);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -148,16 +191,63 @@ export default function StudioMeasurePage() {
     }
   }, [apiBase]);
 
+  const loadOshaReferences = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/osha-references`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Failed to load OSHA references (${response.status})`);
+      const data = (await response.json()) as OshaReference[];
+      setOshaReferences(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, [apiBase]);
+
   useEffect(() => {
     if (apiBase && measureId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadMeasure();
       void loadValueSets();
+      void loadOshaReferences();
     }
-  }, [apiBase, measureId, loadMeasure, loadValueSets]);
+  }, [apiBase, measureId, loadMeasure, loadValueSets, loadOshaReferences]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCompileWarnings([]);
+      setCompileErrors([]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [measureId]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = editor?.getModel?.();
+    if (!editor || !monaco || !model) {
+      return;
+    }
+
+    const markers = compileErrors
+      .map(parseCompileIssue)
+      .filter((issue): issue is ParsedCompileIssue => issue !== null)
+      .map((issue) => ({
+        severity: monaco.MarkerSeverity.Error,
+        message: issue.message,
+        startLineNumber: issue.line,
+        startColumn: issue.column,
+        endLineNumber: issue.line,
+        endColumn: issue.column + 1
+      }));
+
+    monaco.editor.setModelMarkers(model, BACKEND_MARKER_OWNER, markers);
+  }, [compileErrors]);
 
   async function saveSpec() {
     setError(null);
+    if (!policyRef.trim()) {
+      setError("Policy reference is required.");
+      return;
+    }
     const requiredDataElements = requiredDataElementsText
       .split("\n")
       .map((item) => item.trim())
@@ -172,6 +262,8 @@ export default function StudioMeasurePage() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        policyRef: policyRef.trim(),
+        oshaReferenceId,
         description,
         eligibilityCriteria: { roleFilter, siteFilter, programEnrollmentText },
         exclusions,
@@ -241,6 +333,36 @@ export default function StudioMeasurePage() {
     await loadMeasure();
   }
 
+  const handleCqlMount = useCallback<OnMount>((editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    const model = editor?.getModel?.();
+    if (!model) {
+      return;
+    }
+
+    const markers = compileErrors
+      .map(parseCompileIssue)
+      .filter((issue): issue is ParsedCompileIssue => issue !== null)
+      .map((issue) => ({
+        severity: monaco.MarkerSeverity.Error,
+        message: issue.message,
+        startLineNumber: issue.line,
+        startColumn: issue.column,
+        endLineNumber: issue.line,
+        endColumn: issue.column + 1
+      }));
+
+    monaco.editor.setModelMarkers(model, BACKEND_MARKER_OWNER, markers);
+  }, [compileErrors]);
+
+  const handleCqlChange = useCallback<OnChange>((value) => {
+    setCqlText(value ?? "");
+    setCompileWarnings([]);
+    setCompileErrors([]);
+  }, []);
+
   async function createValueSet() {
     setError(null);
     const response = await fetch(`${apiBase}/api/value-sets`, {
@@ -285,20 +407,58 @@ export default function StudioMeasurePage() {
     emitToast("Value set removed");
   }
 
-  async function transition(targetStatus: "Approved" | "Active" | "Deprecated") {
+  async function approveForRelease() {
+    setError(null);
+    const response = await fetch(`${apiBase}/api/measures/${measureId}/approve`, {
+      method: "POST"
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      setError(body || `Approve failed (${response.status})`);
+      return;
+    }
+    setShowApproveConfirm(false);
+    emitToast("Measure approved for release");
+    await loadMeasure();
+  }
+
+  async function activateMeasure() {
     setError(null);
     const response = await fetch(`${apiBase}/api/measures/${measureId}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetStatus })
+      body: JSON.stringify({ targetStatus: "Active" })
     });
     if (!response.ok) {
       const body = await response.text();
-      setError(body || `Status update failed (${response.status})`);
+      setError(body || `Activation failed (${response.status})`);
       return;
     }
+    setShowActivateConfirm(false);
+    emitToast("Measure activated");
     await loadMeasure();
-    emitToast(`Status changed to ${targetStatus}`);
+  }
+
+  async function deprecateMeasure() {
+    setError(null);
+    if (!deprecateReason.trim()) {
+      setError("Deprecation reason is required.");
+      return;
+    }
+    const response = await fetch(`${apiBase}/api/measures/${measureId}/deprecate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: deprecateReason.trim() })
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      setError(body || `Deprecation failed (${response.status})`);
+      return;
+    }
+    setShowDeprecateConfirm(false);
+    setDeprecateReason("");
+    emitToast("Measure deprecated");
+    await loadMeasure();
   }
 
   async function saveTests() {
@@ -364,6 +524,26 @@ export default function StudioMeasurePage() {
   }
 
   const canActivate = activationReadiness?.ready ?? false;
+  const canClone = user?.role === "ROLE_AUTHOR";
+  const canApprove = user?.role === "ROLE_APPROVER" || user?.role === "ROLE_ADMIN";
+  const canAdminDeprecate = user?.role === "ROLE_ADMIN";
+  const compileReady = !!activationReadiness && ["COMPILED", "WARNINGS"].includes((activationReadiness.compileStatus ?? "").toUpperCase());
+  const testsReady = !!activationReadiness && activationReadiness.testValidationPassed;
+  const hasValueSets = (measure?.valueSets?.length ?? 0) > 0;
+  const unresolvedValueSets = (measure?.valueSets ?? []).filter((vs) => vs.resolvabilityStatus.toUpperCase() === "UNRESOLVED").length;
+  const requiredSpecComplete =
+    !!policyRef.trim() &&
+    !!description.trim() &&
+    !!roleFilter.trim() &&
+    !!siteFilter.trim() &&
+    !!programEnrollmentText.trim() &&
+    !!complianceWindow.trim() &&
+    requiredDataElementsText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean).length > 0;
+  const approveEnabled = compileReady && testsReady;
+  const approveDisabledReason = !compileReady ? "Compile status must be COMPILED or WARNINGS." : !testsReady ? "Test fixtures must pass validation." : "";
 
   return (
     <section className="space-y-4">
@@ -380,44 +560,21 @@ export default function StudioMeasurePage() {
           ) : null}
         </div>
         <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            <input
-              className="rounded border border-slate-300 px-2 py-1 text-xs"
-              placeholder="Change summary (required)"
-              value={changeSummary}
-              onChange={(e) => setChangeSummary(e.target.value)}
-            />
-            <button
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
-              onClick={createNewVersion}
-            >
-              New Version
-            </button>
-          </div>
-          {measure?.status === "Draft" ? (
-            <button className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => transition("Approved")}>
-              Submit for Approval
-            </button>
-          ) : null}
-          {measure?.status === "Approved" ? (
-            <div className="flex flex-col items-end gap-1">
+          {canClone ? (
+            <div className="flex items-center gap-2">
+              <input
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                placeholder="Change summary (required)"
+                value={changeSummary}
+                onChange={(e) => setChangeSummary(e.target.value)}
+              />
               <button
-                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => transition("Active")}
-                disabled={!canActivate}
-                title={!canActivate ? "Resolve blockers before activating." : "Activate"}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+                onClick={createNewVersion}
               >
-                Activate
+                New Version
               </button>
-              {!canActivate && activationReadiness?.activationBlockers?.length ? (
-                <p className="text-xs text-amber-700">Blocked: {activationReadiness.activationBlockers[0]}</p>
-              ) : null}
             </div>
-          ) : null}
-          {measure?.status === "Active" ? (
-            <button className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => transition("Deprecated")}>
-              Deprecate
-            </button>
           ) : null}
         </div>
       </div>
@@ -427,6 +584,7 @@ export default function StudioMeasurePage() {
         <button className={`rounded-md px-3 py-2 text-sm ${tab === "cql" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => setTab("cql")}>CQL</button>
         <button className={`rounded-md px-3 py-2 text-sm ${tab === "valuesets" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => setTab("valuesets")}>Value Sets</button>
         <button className={`rounded-md px-3 py-2 text-sm ${tab === "tests" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => setTab("tests")}>Tests</button>
+        <button className={`rounded-md px-3 py-2 text-sm ${tab === "release" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => setTab("release")}>Release & Approval</button>
       </div>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
@@ -461,6 +619,13 @@ export default function StudioMeasurePage() {
               AI Draft Spec
             </button>
           </div>
+          <OshaReferenceCombobox
+            value={policyRef}
+            selectedReferenceId={oshaReferenceId}
+            references={oshaReferences}
+            onValueChange={setPolicyRef}
+            onReferenceSelect={(reference) => setOshaReferenceId(reference?.id ?? null)}
+          />
           <textarea className="min-h-20 rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Eligibility Role Filter" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} />
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Eligibility Site Filter" value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} />
@@ -479,7 +644,25 @@ export default function StudioMeasurePage() {
 
       {tab === "cql" ? (
         <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
-          <textarea className="min-h-56 rounded border border-slate-300 px-3 py-2 font-mono text-sm" placeholder="Enter CQL here..." value={cqlText} onChange={(e) => setCqlText(e.target.value)} />
+          <div className="overflow-hidden rounded border border-slate-300" style={{ minHeight: 400, height: "calc(100vh - 24rem)", maxHeight: "calc(100vh - 12rem)" }}>
+            <MonacoEditor
+              height="100%"
+              language="sql"
+              theme="vs-dark"
+              value={cqlText}
+              onMount={handleCqlMount}
+              onChange={handleCqlChange}
+              options={{
+                automaticLayout: true,
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: "on",
+                scrollBeyondLastLine: false,
+                wordWrap: "on"
+              }}
+              loading={<div className="flex h-full items-center justify-center bg-slate-950 text-sm text-slate-200">Loading editor...</div>}
+            />
+          </div>
           <div className="flex items-center gap-2">
             <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white" onClick={compileCql}>
               Compile
@@ -618,6 +801,139 @@ export default function StudioMeasurePage() {
           ) : null}
         </div>
       ) : null}
+
+      {tab === "release" ? (
+        <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Readiness Checklist</h3>
+          <div className="grid gap-2 text-sm">
+            <p>Compile Status: <span className={compileReady ? "text-emerald-700" : "text-red-700"}>{compileReady ? "✅" : "❌"} {activationReadiness?.compileStatus ?? "UNKNOWN"}</span></p>
+            <p>Test Fixtures: <span className={testsReady ? "text-emerald-700" : "text-red-700"}>{testsReady ? "✅" : "❌"} {activationReadiness?.testFixtureCount ?? 0} fixtures</span></p>
+            <p>
+              Value Set Resolvability:{" "}
+              {hasValueSets ? (
+                unresolvedValueSets === 0 ? <span className="text-emerald-700">✅ All resolved</span> : <span className="text-red-700">❌ {unresolvedValueSets} unresolved</span>
+              ) : (
+                <span className="text-amber-700">⚠️ No value sets attached</span>
+              )}
+            </p>
+            <p>Required Spec Fields: <span className={requiredSpecComplete ? "text-emerald-700" : "text-red-700"}>{requiredSpecComplete ? "✅ Complete" : "❌ Incomplete"}</span></p>
+          </div>
+
+          <h3 className="mt-2 text-sm font-semibold text-slate-900">Version History</h3>
+          {versionHistory.length === 0 ? (
+            <p className="text-sm text-slate-600">No versions found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-2 py-1">Version</th>
+                    <th className="px-2 py-1">Status</th>
+                    <th className="px-2 py-1">Author</th>
+                    <th className="px-2 py-1">Created</th>
+                    <th className="px-2 py-1">Change Summary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {versionHistory.map((entry) => (
+                    <tr key={entry.id} className="border-t border-slate-200">
+                      <td className="px-2 py-1">{entry.version}</td>
+                      <td className="px-2 py-1"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${measureStatusClass(entry.status)}`}>{entry.status}</span></td>
+                      <td className="px-2 py-1">{entry.author}</td>
+                      <td className="px-2 py-1">{new Date(entry.createdAt).toLocaleDateString()}</td>
+                      <td className="px-2 py-1">{entry.changeSummary || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {measure?.status === "Draft" && canApprove ? (
+            <div className="mt-2">
+              <button
+                className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!approveEnabled}
+                title={!approveEnabled ? approveDisabledReason : "Approve for release"}
+                onClick={() => setShowApproveConfirm(true)}
+              >
+                Approve for Release
+              </button>
+            </div>
+          ) : null}
+
+          {measure?.status === "Approved" && canApprove ? (
+            <div className="mt-2">
+              <button
+                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canActivate}
+                title={!canActivate ? "Resolve blockers before activating." : "Activate measure"}
+                onClick={() => setShowActivateConfirm(true)}
+              >
+                Activate Measure
+              </button>
+            </div>
+          ) : null}
+
+          {measure?.status === "Active" && canAdminDeprecate ? (
+            <div className="mt-2">
+              <button className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => setShowDeprecateConfirm(true)}>
+                Deprecate
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showApproveConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white p-4">
+            <h3 className="text-base font-semibold text-slate-900">Approve for Release</h3>
+            <p className="mt-2 text-sm text-slate-700">Confirm approval with checklist summary below:</p>
+            <ul className="mt-2 list-disc pl-5 text-sm text-slate-700">
+              <li>Compile: {activationReadiness?.compileStatus ?? "UNKNOWN"}</li>
+              <li>Fixtures Valid: {testsReady ? "Yes" : "No"}</li>
+              <li>Value Sets Attached: {hasValueSets ? "Yes" : "No"}</li>
+            </ul>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowApproveConfirm(false)}>Cancel</button>
+              <button className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={approveForRelease}>Confirm</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showActivateConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white p-4">
+            <h3 className="text-base font-semibold text-slate-900">Activate Measure</h3>
+            <p className="mt-2 text-sm text-slate-700">Activating this version replaces any currently Active version.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowActivateConfirm(false)}>Cancel</button>
+              <button className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white" onClick={activateMeasure}>Confirm Activate</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showDeprecateConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white p-4">
+            <h3 className="text-base font-semibold text-slate-900">Deprecate Measure</h3>
+            <p className="mt-2 text-sm text-slate-700">Deprecation reason is required.</p>
+            <textarea
+              className="mt-2 min-h-24 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              placeholder="Enter deprecation reason..."
+              value={deprecateReason}
+              onChange={(e) => setDeprecateReason(e.target.value)}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowDeprecateConfirm(false)}>Cancel</button>
+              <button className="rounded bg-slate-700 px-3 py-2 text-xs font-semibold text-white" onClick={deprecateMeasure}>Confirm Deprecate</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -634,12 +950,11 @@ function compileStatusClass(status: string): string {
 }
 
 function formatIssue(issue: string): string {
-  const match = issue.match(/line\\s+(\\d+)/i) ?? issue.match(/\\[(\\d+):(\\d+)\\]/);
-  if (!match) {
+  const parsed = parseCompileIssue(issue);
+  if (!parsed) {
     return issue;
   }
-  const line = match[1];
-  return `Line ${line}: ${issue}`;
+  return `Line ${parsed.line}, Column ${parsed.column}: ${parsed.message}`;
 }
 
 function valueSetBadgeClass(status: string): string {
@@ -648,4 +963,32 @@ function valueSetBadgeClass(status: string): string {
     return "border border-emerald-300 bg-emerald-100 text-emerald-800";
   }
   return "border border-amber-300 bg-amber-100 text-amber-800";
+}
+
+type ParsedCompileIssue = {
+  line: number;
+  column: number;
+  message: string;
+};
+
+function parseCompileIssue(issue: string): ParsedCompileIssue | null {
+  const exactMatch = issue.match(/^Line\s+(\d+),\s+Column\s+(\d+):\s+(?:ERROR|WARNING):\s+(.*)$/i);
+  if (exactMatch) {
+    return {
+      line: Number(exactMatch[1]),
+      column: Number(exactMatch[2]),
+      message: exactMatch[3]
+    };
+  }
+
+  const locationMatch = issue.match(/line\s+(\d+)(?:,\s*column\s+(\d+))?/i) ?? issue.match(/\[(\d+):(\d+)\]/);
+  if (!locationMatch) {
+    return null;
+  }
+
+  return {
+    line: Number(locationMatch[1]),
+    column: Number(locationMatch[2] ?? 1),
+    message: issue
+  };
 }

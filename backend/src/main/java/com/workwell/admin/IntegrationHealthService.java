@@ -2,6 +2,7 @@ package com.workwell.admin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.security.SecurityActor;
 import java.net.URI;
 import java.net.HttpURLConnection;
 import java.net.http.HttpClient;
@@ -193,12 +194,13 @@ public class IntegrationHealthService {
     }
 
     private void insertAuditEvent(String eventType, String actor, Map<String, Object> payload) {
+        String resolvedActor = SecurityActor.currentActorOr(actor);
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, payload_json) VALUES (?, ?, ?, ?, ?::jsonb)",
                 eventType,
                 "integration",
                 UUID.randomUUID(),
-                actor,
+                resolvedActor,
                 toJson(payload)
         );
     }

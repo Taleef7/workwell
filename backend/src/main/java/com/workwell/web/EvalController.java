@@ -9,6 +9,7 @@ import com.workwell.measure.HazwoperSurveillanceDemoService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
+import com.workwell.security.SecurityActor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -107,7 +108,7 @@ public class EvalController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only scope 'All Programs' is supported for MVP.");
         }
 
-        return allProgramsRunService.runAllPrograms("All Programs", "system");
+        return allProgramsRunService.runAllPrograms("All Programs", SecurityActor.currentActor());
     }
 
     @GetMapping("/api/runs/audiogram/latest")

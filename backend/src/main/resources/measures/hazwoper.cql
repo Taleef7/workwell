@@ -17,7 +17,8 @@ define "Has Medical Exemption":
 
 define "Most Recent Surveillance Exam Date":
   Last(
-    [Procedure: "HAZWOPER Surveillance Exams"] P
+    [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:hazwoper-exams' and C.code = 'hazwoper-exam')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 

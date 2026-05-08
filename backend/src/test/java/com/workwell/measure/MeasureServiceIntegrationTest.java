@@ -81,4 +81,48 @@ class MeasureServiceIntegrationTest {
         assertThat(payload).contains("valueSetCount");
         assertThat(payload).contains("activationBlockers");
     }
+
+    @Test
+    void exposesSeededOshaReferencesAndPersistsStructuredSelection() {
+        var references = measureService.listOshaReferences();
+        assertThat(references).hasSizeGreaterThanOrEqualTo(8);
+
+        var audiogramReference = references.stream()
+                .filter(reference -> "29 CFR 1910.95".equals(reference.cfrCitation()))
+                .findFirst()
+                .orElseThrow();
+
+        var measureId = measureService.createMeasure("Structured Policy Measure", "OSHA 29 CFR 1910.95", "QA");
+        measureService.updateSpec(measureId, new MeasureService.SpecUpdateRequest(
+                "29 CFR 1910.95 — Occupational Noise Exposure",
+                audiogramReference.id(),
+                "Updated description",
+                new MeasureService.EligibilityCriteria("Maintenance Tech", "Plant A", "Hearing Conservation Program"),
+                List.of(),
+                "Annual",
+                List.of("Last audiogram date")
+        ));
+
+        var detail = measureService.getMeasure(measureId);
+        assertThat(detail.policyRef()).isEqualTo("29 CFR 1910.95 — Occupational Noise Exposure");
+        assertThat(detail.oshaReferenceId()).isEqualTo(audiogramReference.id());
+    }
+
+    @Test
+    void preservesCustomPolicyTextWithoutStructuredSelection() {
+        var measureId = measureService.createMeasure("Custom Policy Measure", "Company Occupational Health Policy", "QA");
+        measureService.updateSpec(measureId, new MeasureService.SpecUpdateRequest(
+                "Company Occupational Health Policy",
+                null,
+                "Updated description",
+                new MeasureService.EligibilityCriteria("All", "All Sites", "Custom program"),
+                List.of(),
+                "Annual",
+                List.of("Policy memo")
+        ));
+
+        var detail = measureService.getMeasure(measureId);
+        assertThat(detail.policyRef()).isEqualTo("Company Occupational Health Policy");
+        assertThat(detail.oshaReferenceId()).isNull();
+    }
 }
