@@ -5,9 +5,11 @@ import com.workwell.caseflow.EvidenceService;
 import com.workwell.audit.CaseAccessAuditService;
 import com.workwell.security.SecurityActor;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
@@ -49,15 +51,19 @@ public class CaseController {
             @RequestParam(name = "from", required = false) String from,
             @RequestParam(name = "to", required = false) String to
     ) {
-        return caseFlowService.listCases(
-                status,
-                measureId,
-                priority,
-                assignee,
-                site,
-                parseFromDate(from),
-                parseToDate(to)
-        );
+        try {
+            return caseFlowService.listCases(
+                    status,
+                    measureId,
+                    priority,
+                    assignee,
+                    site,
+                    parseFromDate(from),
+                    parseToDate(to)
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
     }
 
     @GetMapping("/api/cases/{caseId}")
@@ -217,7 +223,7 @@ public class CaseController {
     }
 
     public record CaseActionRequest(
-            String type,
+            @NotBlank String type,
             String note,
             Instant resolvedAt,
             String resolvedBy,
@@ -232,13 +238,21 @@ public class CaseController {
         if (from == null || from.isBlank()) {
             return null;
         }
-        return LocalDate.parse(from.trim()).atStartOfDay().toInstant(ZoneOffset.UTC);
+        try {
+            return LocalDate.parse(from.trim()).atStartOfDay().toInstant(ZoneOffset.UTC);
+        } catch (DateTimeParseException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from must use YYYY-MM-DD", ex);
+        }
     }
 
     private Instant parseToDate(String to) {
         if (to == null || to.isBlank()) {
             return null;
         }
-        return LocalDate.parse(to.trim()).plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
+        try {
+            return LocalDate.parse(to.trim()).plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
+        } catch (DateTimeParseException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "to must use YYYY-MM-DD", ex);
+        }
     }
 }

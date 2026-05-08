@@ -2,6 +2,26 @@
 
 ## 2026-05-08
 
+### PR review fixes completed — backend CI restored and review comments addressed
+
+Completed:
+- Fixed the seeded CQL evaluation path so runs use the actual `Measure` object instead of asking the CQF processor to resolve the measure back out of the in-memory repository.
+- Adjusted the TB and HAZWOPER recency logic to use explicit code-based procedure filtering, which keeps the demo measures compatible with the CQF in-memory evaluator.
+- Added regression coverage for TB, HAZWOPER, and Flu seeded evaluation outcomes in `CqlEvaluationServiceTest`.
+- Kept the review-driven hardening already in place across backend and frontend:
+  - `status=excluded` case filtering now works end to end
+  - dashboard global filters preserve search/site/date query state
+  - login demo credentials are gated behind `NEXT_PUBLIC_DEMO_MODE`
+  - invalid date inputs now return 400 in the case/run/admin controllers
+  - JWT auth now fails fast if the default secret is used while auth is enabled
+  - evidence uploads validate file signatures instead of trusting client MIME types
+- Updated `docs/MEASURES.md` with a short implementation note for the TB/HAZWOPER CQF compatibility choice.
+
+Verification:
+- Backend full suite: `backend\\./gradlew.bat test` -> PASS
+- Frontend lint: `corepack pnpm lint` -> PASS
+- Frontend build: `corepack pnpm build` -> PASS
+
 ### MINOR-1 completed — OSHA reference dropdown in Studio Spec tab
 
 Completed:

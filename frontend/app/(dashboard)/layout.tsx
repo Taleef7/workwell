@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 
@@ -18,6 +18,7 @@ const nav = [
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, logout } = useAuth();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -79,7 +80,20 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     event.preventDefault();
     const term = search.trim();
     if (!term) return;
-    router.push(`/cases?search=${encodeURIComponent(term)}`);
+    const params = new URLSearchParams();
+    if (siteId) params.set("site", siteId);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (pathname?.startsWith("/cases")) {
+      for (const key of ["status", "measureId", "priority", "assignee"] as const) {
+        const value = searchParams.get(key);
+        if (value) {
+          params.set(key, value);
+        }
+      }
+    }
+    params.set("search", term);
+    router.push(`/cases?${params.toString()}`);
     setMenuOpen(false);
   }
 
@@ -182,8 +196,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <GlobalFilterProvider>
-      <DashboardShell>{children}</DashboardShell>
-    </GlobalFilterProvider>
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <GlobalFilterProvider>
+        <DashboardShell>{children}</DashboardShell>
+      </GlobalFilterProvider>
+    </Suspense>
   );
 }

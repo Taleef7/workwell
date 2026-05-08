@@ -6,6 +6,7 @@ Current implementation status:
 - All four measures are seeded and runnable.
 - Evaluation writes define-level evidence (`expressionResults`) and computed `Outcome Status`.
 - Outcome buckets: `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
+- TB and HAZWOPER recency checks use explicit procedure-code filtering in CQL so the seeded in-memory CQF evaluator can resolve the most recent exam date without relying on unsupported value-set token retrieval.
 
 ## 1) Annual Audiogram Completed
 - Policy reference: OSHA 29 CFR 1910.95

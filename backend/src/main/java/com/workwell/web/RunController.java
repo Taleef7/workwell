@@ -7,6 +7,7 @@ import com.workwell.web.EvalController.ManualRunResponse;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -82,13 +83,21 @@ public class RunController {
         if (from == null || from.isBlank()) {
             return null;
         }
-        return LocalDate.parse(from.trim()).atStartOfDay().toInstant(ZoneOffset.UTC);
+        try {
+            return LocalDate.parse(from.trim()).atStartOfDay().toInstant(ZoneOffset.UTC);
+        } catch (DateTimeParseException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from must use YYYY-MM-DD", ex);
+        }
     }
 
     private Instant parseToDate(String to) {
         if (to == null || to.isBlank()) {
             return null;
         }
-        return LocalDate.parse(to.trim()).plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
+        try {
+            return LocalDate.parse(to.trim()).plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
+        } catch (DateTimeParseException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "to must use YYYY-MM-DD", ex);
+        }
     }
 }

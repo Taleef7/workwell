@@ -25,7 +25,6 @@ import java.util.regex.Pattern;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Attachment;
 import org.hl7.fhir.r4.model.Bundle;
-import org.hl7.fhir.r4.model.CanonicalType;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.Expression;
 import org.hl7.fhir.r4.model.IdType;
@@ -37,7 +36,6 @@ import org.opencds.cqf.fhir.cql.Engines;
 import org.opencds.cqf.fhir.cr.measure.MeasureEvaluationOptions;
 import org.opencds.cqf.fhir.cr.measure.common.MeasureProcessorUtils;
 import org.opencds.cqf.fhir.cr.measure.r4.R4MeasureProcessor;
-import org.opencds.cqf.fhir.utility.monad.Eithers;
 import org.opencds.cqf.fhir.utility.repository.InMemoryFhirRepository;
 import org.springframework.stereotype.Service;
 
@@ -65,7 +63,7 @@ public class CqlEvaluationService {
                 }
                 EvaluationResult eval = evaluateEmployee(measureName, measureVersion, cqlText, evaluationDate, input);
                 Map<String, ?> expressionResultsMap = eval.expressionResults == null ? Map.of() : eval.expressionResults;
-                String outcomeStatus = input.targetOutcomeStatus();
+                String outcomeStatus = normalizeOutcomeStatus(expressionResultsMap.get("Outcome Status"));
                 Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate);
 
                 outcomes.add(new DemoOutcome(
@@ -78,14 +76,14 @@ public class CqlEvaluationService {
                         evidenceJson
                 ));
             } catch (Exception ex) {
-                String fallbackOutcome = input.targetOutcomeStatus();
+                String fallbackOutcome = "MISSING_DATA";
                 outcomes.add(new DemoOutcome(
                         input.employee().externalId(),
                         input.employee().name(),
                         input.employee().role(),
                         input.employee().site(),
                         fallbackOutcome,
-                        "Outcome derived from deterministic seeded profile after CQL evaluation fallback.",
+                        "CQL evaluation failed for this employee; recorded as MISSING_DATA.",
                         Map.of(
                                 "evaluationError", "CQL engine failure",
                                 "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(),
@@ -100,19 +98,6 @@ public class CqlEvaluationService {
 
     protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
         return false;
-    }
-
-    private String fallbackFluOutcome(SyntheticFhirBundleBuilder.ExamConfig config) {
-        if (config.hasWaiver()) {
-            return "EXCLUDED";
-        }
-        if (config.daysSinceLastExam() == null) {
-            return "MISSING_DATA";
-        }
-        if (config.daysSinceLastExam() <= 365) {
-            return "COMPLIANT";
-        }
-        return "OVERDUE";
     }
 
     private EvaluationResult evaluateEmployee(
@@ -152,9 +137,10 @@ public class CqlEvaluationService {
         }
         String subjectId = "Patient/" + input.employee().externalId();
 
+        // Pass the in-memory Measure directly; CQF canonical re-resolution is brittle for these synthetic demo measures.
         var composite = processor.evaluateMeasureWithCqlEngine(
                 List.of(subjectId),
-                Eithers.forLeft3(new CanonicalType(measure.getUrl())),
+                measure,
                 start,
                 end,
                 null,

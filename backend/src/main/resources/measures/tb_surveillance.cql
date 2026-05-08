@@ -17,7 +17,8 @@ define "Has Medical Exemption":
 
 define "Most Recent TB Screen Date":
   Last(
-    [Procedure: "TB Screening Procedures"] P
+    [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:tb-screening' and C.code = 'tb-screen')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 

@@ -81,15 +81,13 @@ Doc PR ships with code PR. Always.
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-05-07)
+## Current Focus (as of 2026-05-08)
 
-**FREEZE POSTURE — bugfix and polish only.**
+**PR review follow-up and bugfix-only hardening.**
 
-All core features are shipped and in production. The remaining work before the May 18 internship demo is:
-- Fix P0 bugs (MCP snake_case, Flu Vaccine measurement period, seeded population)
-- Fix P1 items (README CSV contracts, /studio placeholder, demo script, runbook IDs)
-- One full rehearsal from DEMO_SCRIPT.md with timestamped evidence capture
-- No new features, no schema migrations, no dependency upgrades
-
-Do not add new CQL measures, new API endpoints, new UI pages, or new AI surfaces. Stabilize and rehearse.
+The sprint feature set is in place and this branch is being tightened for review. The remaining work right now is:
+- Clear review feedback on the sprint-closeout branch
+- Keep CI green and verify the affected surfaces end-to-end
+- Update docs/journal entries for any behavior changes
+- Stay in bugfix/polish mode unless the spike plan explicitly changes
 

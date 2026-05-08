@@ -156,4 +156,10 @@ class RunControllerTest {
         mockMvc.perform(post("/api/runs/{id}/rerun", runId))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void rejectsInvalidDateFilters() throws Exception {
+        mockMvc.perform(get("/api/runs").param("from", "2026-13-01"))
+                .andExpect(status().isBadRequest());
+    }
 }

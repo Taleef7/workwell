@@ -5,12 +5,10 @@ import com.workwell.security.SecurityActor;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -22,7 +20,6 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class EvidenceService {
     private static final long MAX_BYTES = 10L * 1024L * 1024L;
-    private static final Set<String> ALLOWED_MIME = Set.of("application/pdf", "image/png", "image/jpeg");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -46,8 +43,15 @@ public class EvidenceService {
             throw new IllegalArgumentException("Files larger than 10 MB are not allowed");
         }
 
-        String mimeType = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase();
-        if (!ALLOWED_MIME.contains(mimeType)) {
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to read evidence file", ex);
+        }
+
+        String mimeType = detectMimeType(bytes);
+        if (mimeType == null) {
             throw new IllegalArgumentException("Only PDF, PNG, and JPG files are allowed");
         }
 
@@ -63,7 +67,7 @@ public class EvidenceService {
 
         try {
             Files.createDirectories(targetPath.getParent());
-            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            Files.write(targetPath, bytes);
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to store evidence file", ex);
         }
@@ -98,7 +102,7 @@ public class EvidenceService {
                 caseId,
                 resolvedActor,
                 safeFileName,
-                file.getSize(),
+                bytes.length,
                 mimeType,
                 storageKey,
                 description == null || description.isBlank() ? null : description.trim(),
@@ -201,6 +205,35 @@ public class EvidenceService {
     private String sanitize(String fileName) {
         String candidate = fileName == null || fileName.isBlank() ? "evidence" : fileName;
         return candidate.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private String detectMimeType(byte[] bytes) {
+        if (bytes.length >= 8
+                && (bytes[0] & 0xFF) == 0x89
+                && bytes[1] == 'P'
+                && bytes[2] == 'N'
+                && bytes[3] == 'G'
+                && bytes[4] == 0x0D
+                && bytes[5] == 0x0A
+                && bytes[6] == 0x1A
+                && bytes[7] == 0x0A) {
+            return "image/png";
+        }
+        if (bytes.length >= 3
+                && (bytes[0] & 0xFF) == 0xFF
+                && (bytes[1] & 0xFF) == 0xD8
+                && (bytes[2] & 0xFF) == 0xFF) {
+            return "image/jpeg";
+        }
+        if (bytes.length >= 5
+                && bytes[0] == '%'
+                && bytes[1] == 'P'
+                && bytes[2] == 'D'
+                && bytes[3] == 'F'
+                && bytes[4] == '-') {
+            return "application/pdf";
+        }
+        return null;
     }
 
     public record EvidenceAttachment(

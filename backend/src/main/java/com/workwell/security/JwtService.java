@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class JwtService {
     private static final String HMAC_ALGO = "HmacSHA256";
+    private static final String DEFAULT_SECRET = "workwell-demo-secret-change-me";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -24,10 +25,14 @@ public class JwtService {
 
     public JwtService(
             ObjectMapper objectMapper,
-            @Value("${workwell.auth.jwt-secret:workwell-demo-secret-change-me}") String secret,
-            @Value("${workwell.auth.jwt-ttl-seconds:28800}") long ttlSeconds
+            @Value("${workwell.auth.jwt-secret:" + DEFAULT_SECRET + "}") String secret,
+            @Value("${workwell.auth.jwt-ttl-seconds:28800}") long ttlSeconds,
+            @Value("${workwell.auth.enabled:true}") boolean authEnabled
     ) {
         this.objectMapper = objectMapper;
+        if (authEnabled && (secret == null || secret.isBlank() || DEFAULT_SECRET.equals(secret))) {
+            throw new IllegalStateException("workwell.auth.jwt-secret must be configured when workwell.auth.enabled=true");
+        }
         this.secret = secret.getBytes(StandardCharsets.UTF_8);
         this.ttlSeconds = ttlSeconds;
     }

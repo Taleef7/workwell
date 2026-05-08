@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type DateRangePreset = "7d" | "30d" | "90d" | "all";
 
@@ -39,15 +39,20 @@ function derivePreset(from: string, to: string): DateRangePreset {
 export function GlobalFilterProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [siteId, setSiteIdState] = useState(() =>
-    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("site") ?? ""
-  );
-  const [from, setFrom] = useState(() =>
-    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("from") ?? ""
-  );
-  const [to, setTo] = useState(() =>
-    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("to") ?? ""
-  );
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
+  const [siteId, setSiteIdState] = useState(() => searchParams.get("site") ?? "");
+  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");
+  const [to, setTo] = useState(() => searchParams.get("to") ?? "");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSiteIdState(searchParams.get("site") ?? "");
+      setFrom(searchParams.get("from") ?? "");
+      setTo(searchParams.get("to") ?? "");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [searchParams, searchParamsString]);
 
   const datePreset = derivePreset(from, to);
 
@@ -56,16 +61,13 @@ export function GlobalFilterProvider({ children }: { children: React.ReactNode }
     const nextFrom = next.from !== undefined ? next.from : from;
     const nextTo = next.to !== undefined ? next.to : to;
 
-    const params = new URLSearchParams();
-    if (nextSite) {
-      params.set("site", nextSite);
-    }
-    if (nextFrom) {
-      params.set("from", nextFrom);
-    }
-    if (nextTo) {
-      params.set("to", nextTo);
-    }
+    const params = new URLSearchParams(searchParamsString);
+    if (nextSite) params.set("site", nextSite);
+    else params.delete("site");
+    if (nextFrom) params.set("from", nextFrom);
+    else params.delete("from");
+    if (nextTo) params.set("to", nextTo);
+    else params.delete("to");
 
     setSiteIdState(nextSite);
     setFrom(nextFrom);
@@ -73,7 +75,7 @@ export function GlobalFilterProvider({ children }: { children: React.ReactNode }
 
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
-  }, [siteId, from, to, router, pathname]);
+  }, [siteId, from, to, router, pathname, searchParamsString]);
 
   const setSiteId = useCallback((nextSite: string) => {
     updateParams({ site: nextSite });

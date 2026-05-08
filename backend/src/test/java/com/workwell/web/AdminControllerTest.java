@@ -212,4 +212,10 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.name").value("General Compliance Reminder"))
                 .andExpect(jsonPath("$.type").value("OUTREACH"));
     }
+
+    @Test
+    void rejectsInvalidWaiverDates() throws Exception {
+        mockMvc.perform(get("/api/admin/waivers").param("expiresAfter", "not-a-date"))
+                .andExpect(status().isBadRequest());
+    }
 }

@@ -47,8 +47,9 @@ class RunPersistenceServiceIntegrationTest {
 
         assertThat(count("SELECT COUNT(*) FROM runs")).isEqualTo(1L);
         assertThat(count("SELECT COUNT(*) FROM outcomes")).isEqualTo(15L);
-        assertThat(count("SELECT COUNT(*) FROM cases")).isEqualTo(10L);
+        assertThat(count("SELECT COUNT(*) FROM cases")).isEqualTo(12L);
         assertThat(count("SELECT COUNT(*) FROM cases WHERE status = 'OPEN'")).isEqualTo(10L);
+        assertThat(count("SELECT COUNT(*) FROM cases WHERE status = 'EXCLUDED'")).isEqualTo(2L);
         assertThat(count("SELECT COUNT(*) FROM audit_events WHERE event_type IN ('CASE_CREATED', 'CASE_UPDATED', 'CASE_CLOSED')")).isEqualTo(10L);
         assertThat(runPersistenceService.loadOutcomeExportRows(runId)).hasSize(15);
 
@@ -56,7 +57,8 @@ class RunPersistenceServiceIntegrationTest {
 
         assertThat(count("SELECT COUNT(*) FROM runs")).isEqualTo(2L);
         assertThat(count("SELECT COUNT(*) FROM outcomes")).isEqualTo(30L);
-        assertThat(count("SELECT COUNT(*) FROM cases")).isEqualTo(10L);
+        assertThat(count("SELECT COUNT(*) FROM cases")).isEqualTo(12L);
+        assertThat(count("SELECT COUNT(*) FROM cases WHERE status = 'EXCLUDED'")).isEqualTo(2L);
         assertThat(count("SELECT COUNT(*) FROM audit_events WHERE event_type IN ('CASE_CREATED', 'CASE_UPDATED', 'CASE_CLOSED')")).isEqualTo(20L);
     }
 

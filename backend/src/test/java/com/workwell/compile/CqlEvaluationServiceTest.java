@@ -76,6 +76,7 @@ class CqlEvaluationServiceTest {
                 .orElseThrow();
 
         assertEquals("CQL engine failure", String.valueOf(failed.evidenceJson().get("evaluationError")));
+        assertEquals("MISSING_DATA", failed.outcome());
         assertEquals(failed.outcome(), String.valueOf(failed.evidenceJson().get("fallbackOutcome")));
 
         boolean hasSuccessfulOthers = payload.outcomes().stream()
@@ -86,6 +87,37 @@ class CqlEvaluationServiceTest {
         boolean everyoneFailed = payload.outcomes().stream()
                 .allMatch(o -> o.evidenceJson().containsKey("evaluationError"));
         assertFalse(everyoneFailed, "Expected isolated failure, not full-run failure");
+    }
+
+    @Test
+    void tbHazwoperAndFluEvaluationsProduceStructuredOutcomes() throws Exception {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+
+        for (String measureName : List.of("TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")) {
+            String cqlText = readClasspathText("measures/" + resourceName(measureName) + ".cql");
+            DemoRunPayload payload = service.evaluate(
+                    "33333333-3333-3333-3333-333333333333",
+                    measureName,
+                    "v1.0",
+                    cqlText,
+                    LocalDate.now()
+            );
+
+            assertEquals(100, payload.outcomes().size(), measureName + " should evaluate every seeded employee");
+            long excludedCount = payload.outcomes().stream().filter(outcome -> "EXCLUDED".equals(outcome.outcome())).count();
+            long compliantCount = payload.outcomes().stream().filter(outcome -> "COMPLIANT".equals(outcome.outcome())).count();
+            assertEquals(3, excludedCount, measureName + " should preserve the seeded exclusion cohort");
+            assertTrue(compliantCount > 0, measureName + " should produce compliant outcomes");
+        }
+    }
+
+    private String resourceName(String measureName) {
+        return switch (measureName) {
+            case "TB Surveillance" -> "tb_surveillance";
+            case "HAZWOPER Surveillance" -> "hazwoper";
+            case "Flu Vaccine" -> "flu_vaccine";
+            default -> throw new IllegalArgumentException(measureName);
+        };
     }
 
     private String readClasspathText(String resourcePath) throws Exception {

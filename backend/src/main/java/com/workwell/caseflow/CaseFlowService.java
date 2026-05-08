@@ -68,6 +68,7 @@ public class CaseFlowService {
             Instant from,
             Instant to
     ) {
+        String normalizedStatusFilter = normalizeStatusFilter(statusFilter);
         StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
                        e.external_id AS employee_id,
@@ -106,12 +107,13 @@ public class CaseFlowService {
                 """);
 
         List<Object> params = new ArrayList<>();
-        if (!"all".equalsIgnoreCase(statusFilter)) {
-            if ("closed".equalsIgnoreCase(statusFilter)) {
-                sql.append(" AND c.status IN ('CLOSED', 'RESOLVED')");
-            } else {
-                sql.append(" AND c.status = 'OPEN'");
+        switch (normalizedStatusFilter) {
+            case "all" -> {
             }
+            case "closed" -> sql.append(" AND c.status IN ('CLOSED', 'RESOLVED')");
+            case "excluded" -> sql.append(" AND c.status = 'EXCLUDED'");
+            case "open" -> sql.append(" AND c.status = 'OPEN'");
+            default -> throw new IllegalStateException("Unexpected status filter: " + normalizedStatusFilter);
         }
         if (measureId != null) {
             sql.append(" AND m.id = ?");
@@ -160,6 +162,16 @@ public class CaseFlowService {
                 rs.getInt("outreach_record_count"),
                 rs.getTimestamp("updated_at").toInstant()
         ), params.toArray());
+    }
+
+    private String normalizeStatusFilter(String statusFilter) {
+        if (statusFilter == null || statusFilter.isBlank()) {
+            return "open";
+        }
+        return switch (statusFilter.trim().toLowerCase(Locale.ROOT)) {
+            case "all", "closed", "excluded", "open" -> statusFilter.trim().toLowerCase(Locale.ROOT);
+            default -> throw new IllegalArgumentException("status must be one of open, closed, excluded, all");
+        };
     }
 
     public Optional<CaseDetail> loadCase(UUID caseId) {

@@ -89,4 +89,10 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.byRole[0].role").value("Maintenance Tech"))
                 .andExpect(jsonPath("$.byOutcomeReason[0].reason").value("OVERDUE"));
     }
+
+    @Test
+    void rejectsInvalidDateFilters() throws Exception {
+        mockMvc.perform(get("/api/programs").param("from", "2026-13-01"))
+                .andExpect(status().isBadRequest());
+    }
 }

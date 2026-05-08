@@ -74,6 +74,47 @@ class CaseControllerTest {
     }
 
     @Test
+    void listsExcludedCases() throws Exception {
+        UUID caseId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(caseFlowService.listCases("excluded", null, null, null, null, null, null)).thenReturn(List.of(
+                new CaseFlowService.CaseSummary(
+                        caseId,
+                        "patient-010",
+                        "patient-010",
+                        "Plant B",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                        "TB Surveillance",
+                        "1.1.0",
+                        "2026-05-04",
+                        "EXCLUDED",
+                        "LOW",
+                        null,
+                        "EXCLUDED",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        "Active waiver on file.",
+                        Instant.parse("2026-06-04T00:00:00Z"),
+                        false,
+                        0,
+                        Instant.parse("2026-05-04T12:00:00Z")
+                )
+        ));
+
+        mockMvc.perform(get("/api/cases").param("status", "excluded"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("EXCLUDED"))
+                .andExpect(jsonPath("$[0].exclusionReason").value("Active waiver on file."));
+    }
+
+    @Test
+    void rejectsUnsupportedCaseStatus() throws Exception {
+        when(caseFlowService.listCases("bogus", null, null, null, null, null, null))
+                .thenThrow(new IllegalArgumentException("status must be one of open, closed, excluded, all"));
+
+        mockMvc.perform(get("/api/cases").param("status", "bogus"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void returnsCaseDetail() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         when(caseFlowService.loadCase(caseId)).thenReturn(java.util.Optional.of(
@@ -142,6 +183,20 @@ class CaseControllerTest {
                 eq("AnnualAudiogramCompleted"),
                 any(Instant.class)
         );
+    }
+
+    @Test
+    void rejectsMissingCaseActionType() throws Exception {
+        UUID caseId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions", caseId)
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "note": "Missing action type"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

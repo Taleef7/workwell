@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
@@ -32,19 +33,38 @@ type MeasureOption = {
   status: string;
 };
 
+type CaseStatusFilter = "open" | "closed" | "excluded" | "all";
+
+function normalizeCaseStatusFilter(value: string | null): CaseStatusFilter {
+  switch (value?.toLowerCase()) {
+    case "closed":
+      return "closed";
+    case "excluded":
+      return "excluded";
+    case "all":
+      return "all";
+    case "open":
+    default:
+      return "open";
+  }
+}
+
 export default function CasesPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlStatus = searchParams.get("status");
+  const urlSearch = searchParams.get("search") ?? "";
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "excluded" | "all">("open");
+  const statusFilter = normalizeCaseStatusFilter(urlStatus);
   const [measureFilter, setMeasureFilter] = useState<string>("");
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [siteFilter, setSiteFilter] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState(() =>
-    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("search") ?? ""
-  );
+  const [searchTerm, setSearchTerm] = useState<string>(urlSearch);
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
@@ -54,6 +74,13 @@ export default function CasesPage() {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     return raw.trim().replace(/\/+$/, "");
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchTerm(urlSearch);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [urlSearch]);
 
   const loadMeasures = useCallback(async () => {
     try {
@@ -66,7 +93,7 @@ export default function CasesPage() {
     } catch {
       setMeasures([]);
     }
-  }, [apiBase]);
+  }, [apiBase, setMeasures]);
 
   const loadCases = useCallback(async () => {
     setLoading(true);
@@ -106,7 +133,21 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter]);
+  }, [
+    apiBase,
+    assigneeFilter,
+    measureFilter,
+    priorityFilter,
+    siteFilter,
+    siteId,
+    from,
+    to,
+    statusFilter,
+    setLoading,
+    setError,
+    setCases,
+    setSelectedCaseIds
+  ]);
 
   useEffect(() => {
     if (apiBase) {
@@ -135,6 +176,17 @@ export default function CasesPage() {
   }, [cases, searchTerm]);
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
+
+  const setStatusAndUrl = useCallback((nextStatus: CaseStatusFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextStatus === "open") {
+      params.delete("status");
+    } else {
+      params.set("status", nextStatus);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
 
   function toggleCase(caseId: string) {
     setSelectedCaseIds((existing) =>
@@ -275,7 +327,7 @@ export default function CasesPage() {
             <button
               key={status}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => setStatusAndUrl(status)}
               className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === status ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
             >
               {status === "open" ? "Open" : status === "closed" ? "Closed" : "All"}
@@ -283,7 +335,7 @@ export default function CasesPage() {
           ))}
           <button
             type="button"
-            onClick={() => setStatusFilter("excluded")}
+            onClick={() => setStatusAndUrl("excluded")}
             className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === "excluded" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
           >
             Excluded
