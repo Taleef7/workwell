@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitToast } from "@/lib/toast";
-import { outcomeStatusClass } from "@/lib/status";
+import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
+import { useGlobalFilters } from "@/components/global-filter-context";
 
 type CaseSummary = {
   caseId: string;
@@ -19,6 +20,9 @@ type CaseSummary = {
   assignee: string | null;
   currentOutcomeStatus: string;
   lastRunId: string;
+  exclusionReason: string | null;
+  waiverExpiresAt: string | null;
+  waiverExpired: boolean;
   updatedAt: string;
 };
 
@@ -33,7 +37,7 @@ export default function CasesPage() {
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("open");
+  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "excluded" | "all">("open");
   const [measureFilter, setMeasureFilter] = useState<string>("");
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
@@ -44,6 +48,7 @@ export default function CasesPage() {
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
+  const { siteId, from, to } = useGlobalFilters();
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -80,6 +85,14 @@ export default function CasesPage() {
       }
       if (siteFilter) {
         params.set("site", siteFilter);
+      } else if (siteId) {
+        params.set("site", siteId);
+      }
+      if (from) {
+        params.set("from", from);
+      }
+      if (to) {
+        params.set("to", to);
       }
       const response = await fetch(`${apiBase}/api/cases?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) {
@@ -93,7 +106,7 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, assigneeFilter, measureFilter, priorityFilter, siteFilter, statusFilter]);
+  }, [apiBase, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter]);
 
   useEffect(() => {
     if (apiBase) {
@@ -223,8 +236,8 @@ export default function CasesPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold">Why Flagged cases</h2>
         <p className="mt-3 max-w-2xl text-slate-300">
-          Open worklist cases now persist from the seeded Audiogram run. Each card below links to the structured evidence
-          that explains why the case exists.
+          Open worklist cases now persist from the seeded measure runs. Each card below links to the structured evidence
+          that explains why the case exists, including excluded-waiver context when it applies.
         </p>
       </div>
 
@@ -256,18 +269,26 @@ export default function CasesPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
-        <label className="text-sm text-slate-600">
-          Status{" "}
-          <select
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "open" | "closed" | "all")}
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          <span>Status</span>
+          {(["open", "closed", "all"] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setStatusFilter(status)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === status ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
+            >
+              {status === "open" ? "Open" : status === "closed" ? "Closed" : "All"}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setStatusFilter("excluded")}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === "excluded" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
           >
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
-            <option value="all">All</option>
-          </select>
-        </label>
+            Excluded
+          </button>
+        </div>
         <label className="text-sm text-slate-600">
           Measure{" "}
           <select
@@ -378,7 +399,13 @@ export default function CasesPage() {
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600">
-          No open cases. Run a measure to generate cases.
+          {statusFilter === "excluded"
+            ? "No excluded cases yet."
+            : statusFilter === "closed"
+              ? "No closed cases yet."
+              : statusFilter === "all"
+                ? "No cases found for the current filters."
+                : "No open cases. Run a measure to generate cases."}
         </div>
       ) : null}
 
@@ -401,7 +428,10 @@ export default function CasesPage() {
                 />
                 Select
               </label>
-              <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{item.priority}</span>
+              <div className="flex flex-wrap justify-end gap-2">
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{item.status}</span>
+                <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{item.priority}</span>
+              </div>
             </div>
 
             <div className="mt-2">
@@ -428,6 +458,28 @@ export default function CasesPage() {
                 <dt className="text-slate-500">Period</dt>
                 <dd className="font-medium">{item.evaluationPeriod}</dd>
               </div>
+              {item.status === "EXCLUDED" ? (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-slate-500">Exclusion reason</dt>
+                    <dd className="max-w-[220px] text-right text-xs text-slate-700">
+                      {item.exclusionReason ?? "Excluded by active waiver or exemption."}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-slate-500">Waiver</dt>
+                    <dd className="text-right text-xs font-medium text-slate-700">
+                      {item.waiverExpiresAt ? (
+                        <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800" : "bg-indigo-100 text-indigo-800"}`}>
+                          {item.waiverExpired ? "Expired" : "Expires"} {new Date(item.waiverExpiresAt).toLocaleDateString()}
+                        </span>
+                      ) : (
+                        "No expiry on file"
+                      )}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
             </dl>
 
             <p className="mt-4 text-sm text-slate-600">Updated {new Date(item.updatedAt).toLocaleString()}.</p>

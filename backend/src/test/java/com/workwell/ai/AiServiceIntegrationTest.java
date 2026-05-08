@@ -79,6 +79,7 @@ class AiServiceIntegrationTest {
                 "emp-001",
                 "Aisha Khan",
                 "Audiogram",
+                UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
                 "v1.0",
                 "2026-05-01",
                 "OPEN",
@@ -90,6 +91,11 @@ class AiServiceIntegrationTest {
                 Instant.now().minusSeconds(120),
                 Instant.now().minusSeconds(60),
                 null,
+                null,
+                null,
+                null,
+                null,
+                false,
                 Map.of(
                         "why_flagged", Map.of(
                                 "last_exam_date", "2025-03-01",

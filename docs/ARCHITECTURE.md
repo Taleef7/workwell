@@ -58,8 +58,9 @@ Production endpoints:
 ### 5.1 OSHA/Policy Text -> Spec
 1. Author opens Studio Spec tab.
 2. Manual entry or AI Draft Spec creates a draft proposal.
-3. Draft is saved to `measure_versions.spec_json`.
-4. `AI_DRAFT_SPEC_GENERATED` audit event is written if AI was used.
+3. The policy reference is selected from the curated OSHA combobox or entered as free text.
+4. Draft is saved to `measure_versions.spec_json` and, when applicable, `measure_versions.osha_reference_id`.
+5. `AI_DRAFT_SPEC_GENERATED` audit event is written if AI was used.
 
 ### 5.2 Spec -> CQL
 1. Author updates CQL text in Studio.

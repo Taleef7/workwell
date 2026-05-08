@@ -37,7 +37,7 @@ class RunControllerTest {
 
     @Test
     void listsRunsWithFilters() throws Exception {
-        when(runPersistenceService.listRuns("completed", "all_programs", "manual", 20)).thenReturn(List.of(
+        when(runPersistenceService.listRuns("completed", "all_programs", "manual", null, null, null, 20)).thenReturn(List.of(
                 new RunPersistenceService.RunListItem(
                         "11111111-1111-1111-1111-111111111111",
                         "All Programs",

@@ -18,10 +18,14 @@ import org.springframework.util.FileCopyUtils;
 
 class CqlEvaluationServiceTest {
 
+    private static EvaluationPopulationProperties defaultPopulationProperties() {
+        return new EvaluationPopulationProperties();
+    }
+
     @SuppressWarnings("unchecked")
     @Test
     void cqlEvaluationProducesRealExpressionResults() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService();
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
         String cqlText = readClasspathText("measures/audiogram.cql");
 
         DemoRunPayload payload = service.evaluate(
@@ -33,10 +37,11 @@ class CqlEvaluationServiceTest {
         );
 
         DemoOutcome overdue = payload.outcomes().stream()
-                .filter(o -> "emp-006".equals(o.subjectId()))
+                .filter(o -> "OVERDUE".equals(o.outcome()))
                 .findFirst()
                 .orElseThrow();
 
+        assertEquals(100, payload.outcomes().size());
         assertEquals("OVERDUE", overdue.outcome(), "Outcome payload: " + overdue.evidenceJson());
         List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) overdue.evidenceJson().get("expressionResults");
         assertNotNull(expressionResults);
@@ -48,7 +53,7 @@ class CqlEvaluationServiceTest {
 
     @Test
     void perEmployeeFailureIsolationKeepsRunGoing() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService() {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties()) {
             @Override
             protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
                 return "emp-002".equals(employeeExternalId);
@@ -70,8 +75,8 @@ class CqlEvaluationServiceTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals("MISSING_DATA", failed.outcome());
         assertEquals("CQL engine failure", String.valueOf(failed.evidenceJson().get("evaluationError")));
+        assertEquals(failed.outcome(), String.valueOf(failed.evidenceJson().get("fallbackOutcome")));
 
         boolean hasSuccessfulOthers = payload.outcomes().stream()
                 .filter(o -> !"emp-002".equals(o.subjectId()))
@@ -79,7 +84,7 @@ class CqlEvaluationServiceTest {
         assertTrue(hasSuccessfulOthers, "Expected other employees to evaluate successfully. Outcomes: " + payload.outcomes());
 
         boolean everyoneFailed = payload.outcomes().stream()
-                .allMatch(o -> "MISSING_DATA".equals(o.outcome()) && o.evidenceJson().containsKey("evaluationError"));
+                .allMatch(o -> o.evidenceJson().containsKey("evaluationError"));
         assertFalse(everyoneFailed, "Expected isolated failure, not full-run failure");
     }
 

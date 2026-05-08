@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
+import com.workwell.admin.WaiverService;
+import com.workwell.audit.AuditQueryService;
 import com.workwell.admin.SchedulerAdminService;
 import java.time.Instant;
 import java.util.List;
@@ -33,6 +35,12 @@ class AdminControllerTest {
 
     @MockBean
     private OutreachTemplateService outreachTemplateService;
+
+    @MockBean
+    private WaiverService waiverService;
+
+    @MockBean
+    private AuditQueryService auditQueryService;
 
     @Test
     void listsIntegrationHealth() throws Exception {
@@ -107,13 +115,101 @@ class AdminControllerTest {
                         "Audiogram Overdue Reminder",
                         "Action Needed",
                         "Please schedule",
-                        null,
-                        Instant.parse("2026-05-06T01:00:00Z")
+                        "OUTREACH",
+                        "admin@workwell.dev",
+                        Instant.parse("2026-05-06T01:00:00Z"),
+                        Instant.parse("2026-05-06T01:00:00Z"),
+                        true
                 )
         ));
 
         mockMvc.perform(get("/api/admin/outreach-templates"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("Audiogram Overdue Reminder"));
+    }
+
+    @Test
+    void listsWaivers() throws Exception {
+        when(waiverService.listWaivers(null, null, null, null, null)).thenReturn(List.of(
+                new WaiverService.WaiverRecord(
+                        UUID.fromString("11111111-0000-0000-0000-000000000011"),
+                        "patient-003",
+                        "Patient Three",
+                        "Plant A",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                        "Audiogram",
+                        UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                        "1.0.0",
+                        "Active waiver on file.",
+                        "admin-user",
+                        Instant.parse("2026-05-06T01:00:00Z"),
+                        Instant.parse("2026-06-06T01:00:00Z"),
+                        "Demo waiver",
+                        true,
+                        false
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/waivers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].employeeExternalId").value("patient-003"))
+                .andExpect(jsonPath("$[0].measureName").value("Audiogram"));
+    }
+
+    @Test
+    void listsAuditEvents() throws Exception {
+        when(auditQueryService.listEvents("access", 100)).thenReturn(List.of(
+                new AuditQueryService.AuditEventRow(
+                        Instant.parse("2026-05-08T12:00:00Z"),
+                        "CASE_VIEWED",
+                        "access",
+                        UUID.fromString("11111111-1111-1111-1111-111111111111"),
+                        null,
+                        "Audiogram",
+                        "patient-003",
+                        "case-manager",
+                        "{\"caseId\":\"11111111-1111-1111-1111-111111111111\"}"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/audit-events").param("scope", "access"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].eventType").value("CASE_VIEWED"))
+                .andExpect(jsonPath("$[0].scope").value("access"));
+    }
+
+    @Test
+    void createsOutreachTemplate() throws Exception {
+        when(outreachTemplateService.createTemplate(
+                "General Compliance Reminder",
+                "Compliance Follow-up Required",
+                "Please complete follow-up.",
+                "OUTREACH",
+                "admin-user"
+        )).thenReturn(new OutreachTemplateService.OutreachTemplate(
+                UUID.fromString("11111111-0000-0000-0000-000000000004"),
+                "General Compliance Reminder",
+                "Compliance Follow-up Required",
+                "Please complete follow-up.",
+                "OUTREACH",
+                "admin-user",
+                Instant.parse("2026-05-08T01:00:00Z"),
+                Instant.parse("2026-05-08T01:00:00Z"),
+                true
+        ));
+
+        mockMvc.perform(post("/api/admin/outreach-templates")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "name":"General Compliance Reminder",
+                                  "subject":"Compliance Follow-up Required",
+                                  "bodyText":"Please complete follow-up.",
+                                  "type":"OUTREACH"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("General Compliance Reminder"))
+                .andExpect(jsonPath("$.type").value("OUTREACH"));
     }
 }

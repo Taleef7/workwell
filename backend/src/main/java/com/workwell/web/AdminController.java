@@ -2,12 +2,23 @@ package com.workwell.web;
 
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
+import com.workwell.admin.WaiverService;
+import com.workwell.audit.AuditQueryService;
 import com.workwell.admin.SchedulerAdminService;
+import com.workwell.security.SecurityActor;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -17,15 +28,21 @@ public class AdminController {
     private final IntegrationHealthService integrationHealthService;
     private final SchedulerAdminService schedulerAdminService;
     private final OutreachTemplateService outreachTemplateService;
+    private final WaiverService waiverService;
+    private final AuditQueryService auditQueryService;
 
     public AdminController(
             IntegrationHealthService integrationHealthService,
             SchedulerAdminService schedulerAdminService,
-            OutreachTemplateService outreachTemplateService
+            OutreachTemplateService outreachTemplateService,
+            WaiverService waiverService,
+            AuditQueryService auditQueryService
     ) {
         this.integrationHealthService = integrationHealthService;
         this.schedulerAdminService = schedulerAdminService;
         this.outreachTemplateService = outreachTemplateService;
+        this.waiverService = waiverService;
+        this.auditQueryService = auditQueryService;
     }
 
     @GetMapping("/api/admin/integrations")
@@ -36,10 +53,13 @@ public class AdminController {
     @PostMapping("/api/admin/integrations/{integration}/sync")
     public IntegrationHealthService.IntegrationHealth syncIntegration(
             @PathVariable String integration,
-            @RequestParam(name = "actor", defaultValue = "admin-user") String actor
+            @RequestParam(name = "actor", required = false) String actor
     ) {
         try {
-            return integrationHealthService.triggerManualSync(integration, actor);
+            return integrationHealthService.triggerManualSync(
+                    integration,
+                    actor == null || actor.isBlank() ? SecurityActor.currentActorOr("admin-user") : actor
+            );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
@@ -58,5 +78,123 @@ public class AdminController {
     @GetMapping("/api/admin/outreach-templates")
     public List<OutreachTemplateService.OutreachTemplate> outreachTemplates() {
         return outreachTemplateService.listTemplates();
+    }
+
+    @PostMapping("/api/admin/outreach-templates")
+    public OutreachTemplateService.OutreachTemplate createOutreachTemplate(@Valid @RequestBody OutreachTemplateRequest request) {
+        try {
+            return outreachTemplateService.createTemplate(
+                    request.name(),
+                    request.subject(),
+                    request.bodyText(),
+                    request.type(),
+                    SecurityActor.currentActorOr("admin-user")
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/api/admin/outreach-templates/{id}")
+    public OutreachTemplateService.OutreachTemplate updateOutreachTemplate(
+            @PathVariable UUID id,
+            @Valid @RequestBody OutreachTemplateUpdateRequest request
+    ) {
+        try {
+            return outreachTemplateService.updateTemplate(
+                    id,
+                    request.name(),
+                    request.subject(),
+                    request.bodyText(),
+                    request.type(),
+                    request.active()
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/waivers")
+    public List<WaiverService.WaiverRecord> listWaivers(
+            @RequestParam(name = "measureId", required = false) UUID measureId,
+            @RequestParam(name = "site", required = false) String site,
+            @RequestParam(name = "expiresAfter", required = false) String expiresAfter,
+            @RequestParam(name = "expiresBefore", required = false) String expiresBefore,
+            @RequestParam(name = "active", required = false) Boolean active
+    ) {
+        return waiverService.listWaivers(
+                measureId,
+                site,
+                parseFromDate(expiresAfter),
+                parseToDate(expiresBefore),
+                active
+        );
+    }
+
+    @PostMapping("/api/admin/waivers")
+    public WaiverService.WaiverRecord grantWaiver(@Valid @RequestBody WaiverRequest request) {
+        try {
+            return waiverService.grantWaiver(
+                    request.employeeExternalId(),
+                    request.measureId(),
+                    request.exclusionReason(),
+                    SecurityActor.currentActorOr("admin-user"),
+                    request.expiresAt(),
+                    request.notes(),
+                    request.active()
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/audit-events")
+    public List<AuditQueryService.AuditEventRow> listAuditEvents(
+            @RequestParam(name = "scope", defaultValue = "all") String scope,
+            @RequestParam(name = "limit", defaultValue = "100") int limit
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, 250));
+        return auditQueryService.listEvents(scope, safeLimit);
+    }
+
+    public record OutreachTemplateRequest(
+            @NotBlank String name,
+            @NotBlank String subject,
+            @NotBlank String bodyText,
+            String type
+    ) {
+    }
+
+    public record OutreachTemplateUpdateRequest(
+            @NotBlank String name,
+            @NotBlank String subject,
+            @NotBlank String bodyText,
+            String type,
+            boolean active
+    ) {
+    }
+
+    public record WaiverRequest(
+            @NotBlank String employeeExternalId,
+            UUID measureId,
+            @NotBlank String exclusionReason,
+            Instant expiresAt,
+            String notes,
+            Boolean active
+    ) {
+    }
+
+    private Instant parseFromDate(String from) {
+        if (from == null || from.isBlank()) {
+            return null;
+        }
+        return LocalDate.parse(from.trim()).atStartOfDay().toInstant(ZoneOffset.UTC);
+    }
+
+    private Instant parseToDate(String to) {
+        if (to == null || to.isBlank()) {
+            return null;
+        }
+        return LocalDate.parse(to.trim()).plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
     }
 }

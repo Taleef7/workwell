@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
-import { outcomeStatusClass } from "@/lib/status";
+import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
 
 type AuditEvent = {
   eventType: string;
@@ -18,6 +18,7 @@ type CaseDetail = {
   employeeId: string;
   employeeName: string;
   measureName: string;
+  measureVersionId: string;
   measureVersion: string;
   evaluationPeriod: string;
   status: string;
@@ -29,6 +30,11 @@ type CaseDetail = {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  closedReason: string | null;
+  closedBy: string | null;
+  exclusionReason: string | null;
+  waiverExpiresAt: string | null;
+  waiverExpired: boolean;
   evidenceJson: {
     expressionResults?: Array<Record<string, unknown>>;
     evaluatedResource?: Record<string, unknown>;
@@ -70,6 +76,26 @@ type OutreachPreview = {
   dueDate: string;
 };
 
+type ScheduledAppointment = {
+  id: string;
+  appointmentType: string;
+  scheduledAt: string;
+  location: string;
+  status: string;
+  notes: string | null;
+  createdBy: string;
+};
+
+type EvidenceAttachment = {
+  id: string;
+  fileName: string;
+  fileSizeBytes: number;
+  mimeType: string;
+  description: string | null;
+  uploadedBy: string;
+  uploadedAt: string;
+};
+
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
@@ -87,13 +113,27 @@ export default function CaseDetailPage() {
   const [outreachPreview, setOutreachPreview] = useState<OutreachPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [showRawEvidence, setShowRawEvidence] = useState(false);
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [resolveModalOpen, setResolveModalOpen] = useState(false);
+  const [appointments, setAppointments] = useState<ScheduledAppointment[]>([]);
+  const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
+  const [appointmentType, setAppointmentType] = useState("Audiogram");
+  const [appointmentDateTime, setAppointmentDateTime] = useState("");
+  const [appointmentLocation, setAppointmentLocation] = useState("");
+  const [appointmentNotes, setAppointmentNotes] = useState("");
+  const [scheduling, setScheduling] = useState(false);
+  const [evidence, setEvidence] = useState<EvidenceAttachment[]>([]);
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceDescription, setEvidenceDescription] = useState("");
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   const apiBase = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     return raw.trim().replace(/\/+$/, "");
   }, []);
 
-  const loadCase = useEffectEvent(async () => {
+  const loadCase = useCallback(async () => {
     try {
       const response = await fetch(`${apiBase}/api/cases/${caseId}`);
       if (!response.ok) {
@@ -107,7 +147,7 @@ export default function CaseDetailPage() {
     } finally {
       setLoading(false);
     }
-  });
+  }, [apiBase, caseId]);
 
   const loadTemplates = useEffectEvent(async () => {
     try {
@@ -123,15 +163,37 @@ export default function CaseDetailPage() {
     }
   });
 
+  const loadAppointments = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/appointments`, { cache: "no-store" });
+      if (!response.ok) return;
+      setAppointments((await response.json()) as ScheduledAppointment[]);
+    } catch {
+      setAppointments([]);
+    }
+  }, [apiBase, caseId]);
+
+  const loadEvidence = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/evidence`, { cache: "no-store" });
+      if (!response.ok) return;
+      setEvidence((await response.json()) as EvidenceAttachment[]);
+    } catch {
+      setEvidence([]);
+    }
+  }, [apiBase, caseId]);
+
   useEffect(() => {
     if (apiBase && caseId) {
       const timer = setTimeout(() => {
         void loadCase();
         void loadTemplates();
+        void loadAppointments();
+        void loadEvidence();
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [apiBase, caseId]);
+  }, [apiBase, caseId, loadAppointments, loadEvidence, loadCase]);
 
   async function runAction(action: "outreach" | "rerun") {
     if (!apiBase || !caseId) {
@@ -249,6 +311,102 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function markResolved() {
+    if (!apiBase || !caseId) return;
+    if (!resolveNote.trim()) {
+      setError("Closure note is required");
+      return;
+    }
+    setResolving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "RESOLVE",
+          note: resolveNote.trim(),
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: caseDetail?.assignee ?? undefined
+        })
+      });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      const updated = (await response.json()) as CaseDetail;
+      setCaseDetail(updated);
+      setResolveModalOpen(false);
+      setResolveNote("");
+      emitToast("Case manually resolved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  async function scheduleAppointment() {
+    if (!apiBase || !caseId) return;
+    if (!appointmentDateTime || !appointmentLocation.trim()) {
+      setError("Appointment date/time and location are required");
+      return;
+    }
+    setScheduling(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "SCHEDULE_APPOINTMENT",
+          appointmentType,
+          scheduledAt: new Date(appointmentDateTime).toISOString(),
+          location: appointmentLocation.trim(),
+          notes: appointmentNotes.trim()
+        })
+      });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      const updated = (await response.json()) as CaseDetail;
+      setCaseDetail(updated);
+      setAppointmentModalOpen(false);
+      setAppointmentNotes("");
+      setAppointmentLocation("");
+      setAppointmentDateTime("");
+      await loadAppointments();
+      emitToast("Appointment scheduled");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  async function uploadEvidence() {
+    if (!apiBase || !caseId || !evidenceFile) {
+      setError("Select a file to upload");
+      return;
+    }
+    setUploadingEvidence(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", evidenceFile);
+      formData.append("description", evidenceDescription);
+      const response = await fetch(`${apiBase}/api/cases/${caseId}/evidence`, {
+        method: "POST",
+        body: formData
+      });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      setEvidenceFile(null);
+      setEvidenceDescription("");
+      await loadEvidence();
+      await loadCase();
+      emitToast("Evidence uploaded");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setUploadingEvidence(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -257,7 +415,7 @@ export default function CaseDetailPage() {
             ← Back to cases
           </Link>
           <h2 className="mt-2 text-3xl font-semibold">Case detail</h2>
-          <p className="mt-2 text-slate-600">Structured Why Flagged evidence for the seeded Audiogram slice.</p>
+          <p className="mt-2 text-slate-600">Structured Why Flagged evidence for the selected case and its waiver context.</p>
         </div>
         <p className="text-sm text-slate-500">
           API base: <code>{apiBase || "(missing NEXT_PUBLIC_API_BASE_URL)"}</code>
@@ -278,7 +436,7 @@ export default function CaseDetailPage() {
                   <p className="mt-1 text-sm text-slate-500">{caseDetail.employeeId}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(caseDetail.status)}`}>
                     {caseDetail.status}
                   </span>
                   <span className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -310,6 +468,22 @@ export default function CaseDetailPage() {
                     {caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT"}
                   </span>
                 </div>
+                {caseDetail.status === "EXCLUDED" ? (
+                  <div className={`mt-4 rounded-2xl border p-4 ${caseDetail.waiverExpired ? "border-rose-200 bg-rose-50" : "border-indigo-200 bg-indigo-50"}`}>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700">Waiver status</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {caseDetail.exclusionReason ?? "Excluded by documented waiver or exemption."}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {caseDetail.waiverExpiresAt
+                        ? `Expires ${new Date(caseDetail.waiverExpiresAt).toLocaleString()}`
+                        : "No expiry on file."}
+                    </p>
+                    <p className={`mt-2 text-sm font-semibold ${caseDetail.waiverExpired ? "text-rose-700" : "text-indigo-800"}`}>
+                      {caseDetail.waiverExpired ? "Waiver Expired — Rerun Recommended" : "Active waiver on file"}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="mt-4 grid gap-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Outreach template</label>
                   <select
@@ -348,7 +522,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => void previewOutreach()}
-                    disabled={previewing}
+                    disabled={previewing || caseDetail.status === "EXCLUDED"}
                     className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {previewing ? "Previewing..." : "Preview outreach"}
@@ -356,7 +530,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseDetail.status === "CLOSED" || outreachPreview === null}
+                    disabled={acting !== null || caseDetail.status === "CLOSED" || caseDetail.status === "EXCLUDED" || outreachPreview === null}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
@@ -377,7 +551,76 @@ export default function CaseDetailPage() {
                   >
                     {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setResolveModalOpen(true)}
+                    disabled={caseDetail.status === "CLOSED" || caseDetail.status === "RESOLVED"}
+                    className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Mark Resolved
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentModalOpen(true)}
+                    className="rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-900 transition hover:bg-indigo-100"
+                  >
+                    Schedule Appointment
+                  </button>
                 </div>
+                {appointmentModalOpen ? (
+                  <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                    <label className="text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Appointment type</label>
+                    <select className="mt-2 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm" value={appointmentType} onChange={(e) => setAppointmentType(e.target.value)}>
+                      <option>Audiogram</option>
+                      <option>TB Test</option>
+                      <option>Annual Physical</option>
+                      <option>Flu Vaccine</option>
+                      <option>Other</option>
+                    </select>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Date and time</label>
+                    <input type="datetime-local" className="mt-2 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm" value={appointmentDateTime} onChange={(e) => setAppointmentDateTime(e.target.value)} />
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Location</label>
+                    <input className="mt-2 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm" value={appointmentLocation} onChange={(e) => setAppointmentLocation(e.target.value)} />
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Notes</label>
+                    <textarea className="mt-2 min-h-20 w-full rounded border border-indigo-300 bg-white px-3 py-2 text-sm" value={appointmentNotes} onChange={(e) => setAppointmentNotes(e.target.value)} />
+                    <div className="mt-3 flex gap-2">
+                      <button type="button" onClick={() => void scheduleAppointment()} disabled={scheduling} className="rounded-lg bg-indigo-700 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60">
+                        {scheduling ? "Scheduling..." : "Save Appointment"}
+                      </button>
+                      <button type="button" onClick={() => setAppointmentModalOpen(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {resolveModalOpen ? (
+                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <label className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-800">Closure note (required)</label>
+                    <textarea
+                      className="mt-2 min-h-24 w-full rounded border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-900"
+                      value={resolveNote}
+                      onChange={(e) => setResolveNote(e.target.value)}
+                      placeholder="Describe why this case was manually resolved."
+                    />
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void markResolved()}
+                        disabled={resolving || !resolveNote.trim()}
+                        className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                      >
+                        {resolving ? "Resolving..." : "Confirm Resolve"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResolveModalOpen(false)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 {outreachPreview ? (
                   <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
                     <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Outreach preview</p>
@@ -501,40 +744,101 @@ export default function CaseDetailPage() {
                 <Row label="Created" value={new Date(caseDetail.createdAt).toLocaleString()} />
                 <Row label="Updated" value={new Date(caseDetail.updatedAt).toLocaleString()} />
                 <Row label="Closed" value={caseDetail.closedAt ? new Date(caseDetail.closedAt).toLocaleString() : "Open"} />
+                <Row label="Closed reason" value={caseDetail.closedReason ?? "-"} />
+                <Row label="Closed by" value={caseDetail.closedBy ?? "-"} />
                 <Row label="Assignee" value={caseDetail.assignee ?? "Unassigned"} />
                 <Row label="Outcome evaluated" value={new Date(caseDetail.outcomeEvaluatedAt).toLocaleString()} />
               </dl>
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Appointments</p>
+              {appointments.length === 0 ? <p className="mt-2 text-sm text-slate-600">No appointments scheduled.</p> : null}
+              <div className="mt-3 space-y-2">
+                {appointments.map((appointment) => (
+                  <div key={appointment.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                    <p className="font-semibold text-slate-900">{appointment.appointmentType}</p>
+                    <p className="text-slate-700">{new Date(appointment.scheduledAt).toLocaleString()} • {appointment.location}</p>
+                    <p className="text-xs text-slate-600">Status: {appointment.status} • Created by: {appointment.createdBy}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Evidence</p>
+              <div className="mt-3 space-y-2">
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
+                <input
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Description"
+                  value={evidenceDescription}
+                  onChange={(e) => setEvidenceDescription(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void uploadEvidence()}
+                  disabled={uploadingEvidence || !evidenceFile}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  {uploadingEvidence ? "Uploading..." : "Upload Evidence"}
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {evidence.length === 0 ? <p className="text-sm text-slate-600">No evidence uploaded.</p> : null}
+                {evidence.map((entry) => (
+                  <div key={entry.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                    <p className="font-semibold text-slate-900">📎 {entry.fileName}</p>
+                    <p className="text-xs text-slate-600">{Math.round(entry.fileSizeBytes / 1024)} KB • {entry.mimeType}</p>
+                    <p className="text-xs text-slate-600">Uploaded by {entry.uploadedBy} at {new Date(entry.uploadedAt).toLocaleString()}</p>
+                    {entry.description ? <p className="text-xs text-slate-700">{entry.description}</p> : null}
+                    <a className="mt-2 inline-block text-xs font-semibold text-blue-700 hover:underline" href={`${apiBase}/api/evidence/${entry.id}/download`} target="_blank" rel="noreferrer">
+                      Download
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Audit timeline</p>
               <div className="mt-4 space-y-3">
                 {caseDetail.timeline.map((event, index) => (
-                  <div
-                    key={`${event.eventType}-${event.occurredAt}`}
-                    className={`rounded-2xl border p-4 ${
-                      index === 0 ? "border-blue-300 bg-blue-50/50" : "border-slate-200"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
-                          <span className="mr-2" aria-hidden>{eventIcon(event.eventType)}</span>
-                          {formatEventType(event.eventType)}
-                        </p>
-                        <p className="text-xs text-slate-500">{event.actor}</p>
+                  (() => {
+                    const notificationBadge = timelineNotificationBadge(event);
+                    return (
+                      <div
+                        key={`${event.eventType}-${event.occurredAt}`}
+                        className={`rounded-2xl border p-4 ${
+                          index === 0 ? "border-blue-300 bg-blue-50/50" : "border-slate-200"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              <span className="mr-2" aria-hidden>{eventIcon(event.eventType)}</span>
+                              {formatEventType(event.eventType)}
+                            </p>
+                            <p className="text-xs text-slate-500">{event.actor}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">{new Date(event.occurredAt).toLocaleString()}</p>
+                            <span className="mt-1 inline-block rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-700">
+                              {timelineSource(event.eventType)}
+                            </span>
+                            {notificationBadge ? (
+                              <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${notificationBadge.className}`}>
+                                {notificationBadge.label}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
+                          {JSON.stringify(event.payload, null, 2)}
+                        </pre>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs text-slate-500">{new Date(event.occurredAt).toLocaleString()}</p>
-                        <span className="mt-1 inline-block rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-700">
-                          {timelineSource(event.eventType)}
-                        </span>
-                      </div>
-                    </div>
-                    <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
-                      {JSON.stringify(event.payload, null, 2)}
-                    </pre>
-                  </div>
+                    );
+                  })()
                 ))}
               </div>
             </div>
@@ -560,6 +864,8 @@ function formatEventType(eventType: string) {
 
 function eventIcon(eventType: string) {
   const normalized = eventType.toUpperCase();
+  if (normalized.includes("APPOINTMENT")) return "📅";
+  if (normalized.includes("EVIDENCE")) return "📎";
   if (normalized.includes("OUTREACH")) return "✉";
   if (normalized.includes("RERUN") || normalized.includes("RUN")) return "↻";
   if (normalized.includes("CREATED")) return "+";
@@ -571,6 +877,29 @@ function eventIcon(eventType: string) {
 
 function timelineSource(eventType: string) {
   return eventType.toUpperCase().startsWith("CASE_ACTION_") ? "action" : "audit";
+}
+
+function timelineNotificationBadge(event: AuditEvent) {
+  const payload = event.payload as Record<string, unknown>;
+  const eventType = event.eventType.toUpperCase();
+  const autoTriggered = payload.autoTriggered ?? payload.auto_triggered;
+  const timelineSourceValue = payload.timelineSource;
+
+  if (eventType === "NOTIFICATION_AUTO_QUEUED" || autoTriggered === true) {
+    return {
+      label: "Auto",
+      className: "border-indigo-200 bg-indigo-50 text-indigo-800"
+    };
+  }
+
+  if (eventType.includes("OUTREACH") && timelineSourceValue === "case_action") {
+    return {
+      label: "Manual",
+      className: "border-slate-300 bg-slate-100 text-slate-700"
+    };
+  }
+
+  return null;
 }
 
 function Info({ label, value }: { label: string; value: ReactNode }) {

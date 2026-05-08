@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitToast } from "@/lib/toast";
+import { useGlobalFilters } from "@/components/global-filter-context";
 
 type ProgramSummary = {
   measureId: string;
@@ -36,6 +37,7 @@ type TopDrivers = {
 
 export default function ProgramsPage() {
   const apiBase = useMemo(() => (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, ""), []);
+  const { siteId, from, to } = useGlobalFilters();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
   const [driversByMeasure, setDriversByMeasure] = useState<Record<string, TopDrivers>>({});
@@ -46,14 +48,22 @@ export default function ProgramsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/programs`, { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (siteId) params.set("site", siteId);
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const response = await fetch(`${apiBase}/api/programs/overview${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`Failed to load programs (${response.status})`);
       const data = (await response.json()) as ProgramSummary[];
       setPrograms(data);
 
       const trendPairs = await Promise.all(
         data.map(async (program) => {
-          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/trend`, { cache: "no-store" });
+          const trendParams = new URLSearchParams();
+          if (siteId) trendParams.set("site", siteId);
+          if (from) trendParams.set("from", from);
+          if (to) trendParams.set("to", to);
+          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/trend${trendParams.toString() ? `?${trendParams.toString()}` : ""}`, { cache: "no-store" });
           return [program.measureId, r.ok ? ((await r.json()) as TrendPoint[]) : []] as const;
         })
       );
@@ -61,7 +71,11 @@ export default function ProgramsPage() {
 
       const driverPairs = await Promise.all(
         data.map(async (program) => {
-          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/top-drivers`, { cache: "no-store" });
+          const driverParams = new URLSearchParams();
+          if (siteId) driverParams.set("site", siteId);
+          if (from) driverParams.set("from", from);
+          if (to) driverParams.set("to", to);
+          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/top-drivers${driverParams.toString() ? `?${driverParams.toString()}` : ""}`, { cache: "no-store" });
           const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
           return [program.measureId, r.ok ? ((await r.json()) as TopDrivers) : empty] as const;
         })
@@ -72,7 +86,7 @@ export default function ProgramsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, [apiBase, siteId, from, to]);
 
   useEffect(() => {
     if (apiBase) {

@@ -125,7 +125,7 @@ public class McpServerConfig {
                         String requestedMeasureName = args.get("measureName").toString().trim();
                         measureId = lookupMeasureIdByName(measureService, requestedMeasureName);
                     }
-                    var summaries = caseFlowService.listCases(status, measureId, null, null, null);
+                    var summaries = caseFlowService.listCases(status, measureId, null, null, null, null, null);
                     List<Map<String, Object>> payload = summaries.stream().map(summary -> {
                         Map<String, Object> row = new LinkedHashMap<>();
                         row.put("case_id", summary.caseId());

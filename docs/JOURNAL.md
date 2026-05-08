@@ -1,6 +1,356 @@
 # Journal
 
+## 2026-05-08
+
+### MINOR-1 completed — OSHA reference dropdown in Studio Spec tab
+
+Completed:
+- Added `backend/src/main/resources/db/migration/V010__osha_references.sql`:
+  - creates `osha_references`
+  - adds `measure_versions.osha_reference_id`
+  - seeds 8 common occupational health citations
+  - backfills existing matching measure versions where policy text already matches a curated citation
+- Added `GET /api/osha-references` so the frontend can load curated OSHA policy choices.
+- Replaced the Studio Spec tab policy reference text input with a searchable combobox.
+- Kept free-text fallback for non-OSHA references while persisting the selected `osha_reference_id` through the measure version save/load path.
+
+Verification:
+- Backend compile + targeted measure tests: `backend\\./gradlew.bat compileJava test --tests "com.workwell.measure.MeasureServiceIntegrationTest" --tests "com.workwell.web.MeasureControllerTest"` -> PASS
+- Frontend lint: `corepack pnpm lint` -> PASS
+- Frontend build: `corepack pnpm build` -> PASS
+
+### MAJOR-7 completed — Monaco editor for CQL
+
+Completed:
+- Added `@monaco-editor/react` to the frontend and replaced the Studio CQL textarea with a Monaco editor.
+- Kept the editor in the CQL tab controlled by the existing `cqlText` state, so content persists across tab switches.
+- Enabled SQL syntax highlighting, dark theme, automatic layout, and preserved view state for a smoother authoring experience.
+- Updated backend CQL compile validation messages to include line/column prefixes so frontend error markers can target the exact location.
+- Parsed backend compile errors into Monaco markers, so compile failures now show red squiggles at the offending line and column.
+
+Verification:
+- Backend compile + compile-validation test: `backend\\./gradlew.bat compileJava test --tests "com.workwell.compile.CqlCompileValidationServiceTest"` -> PASS
+- Frontend lint: `corepack pnpm lint` -> PASS
+- Frontend build: `corepack pnpm build` -> PASS
+
+### MAJOR-6 completed — EXCLUDED outcomes / waivers worklist
+
+Completed:
+- Added waiver persistence and exclusion context:
+  - Migration `backend/src/main/resources/db/migration/V009__waivers.sql`
+  - `waivers` table linking employee, measure, measure version, reason, grant metadata, expiry, notes, and active state
+- Added `WaiverService` for listing, granting, and resolving active waivers for excluded cases.
+- Updated `CaseFlowService` so EXCLUDED outcomes now create `EXCLUDED` cases instead of disappearing from the workflow.
+- Added worklist and case-detail support for excluded cases:
+  - Excluded filter tab on `/cases`
+  - Waiver expiry / expired warning cue in case detail
+  - Outreach actions disabled for excluded cases
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend controller tests: `backend\\./gradlew.bat test --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.AdminControllerTest"` -> PASS
+- Backend integration tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.run.Major1PopulationIntegrationTest" --tests "com.workwell.run.CaseViewAuditIntegrationTest" --tests "com.workwell.ai.AiServiceIntegrationTest"` -> PASS after Docker Desktop was started so Testcontainers could connect
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### MINOR-2 completed — Case viewed audit event
+
+Completed:
+- Added `CaseAccessAuditService` to emit `CASE_VIEWED` audit events asynchronously from case detail reads.
+- `GET /api/cases/{id}` now records the access event without adding it to the case timeline.
+- Added `AuditQueryService` plus `GET /api/admin/audit-events` so the admin UI can filter access events apart from mutations.
+- Admin audit page now exposes access/mutation filters and shows `CASE_VIEWED` rows under Access Events.
+
+Verification:
+- Covered by the same backend test slice above, including `CaseControllerTest`, `AdminControllerTest`, and `CaseViewAuditIntegrationTest`.
+
+### MAJOR-5 completed — Auto-notification on case creation + worklist gap badge
+
+Completed:
+- Added auto-queue behavior during case creation:
+  - `CaseFlowService.upsertOpenCase(...)` now creates an `outreach_records` row for newly created `DUE_SOON`, `OVERDUE`, and `MISSING_DATA` cases.
+  - Writes `NOTIFICATION_AUTO_QUEUED` audit events with template/outcome payload.
+  - `EXCLUDED` outcomes intentionally skip outreach creation.
+- Added outreach template coverage for missing data:
+  - Migration `backend/src/main/resources/db/migration/V008__missing_data_follow_up_template.sql`
+  - Seeds `Missing Data Follow-Up`
+- Made outreach persistence visible for manual actions too:
+  - manual `Send outreach` now writes an `outreach_records` row with `auto_triggered = false`
+  - appointment reminder rows already continue to write as queued outreach records
+- Added UI signal for outreach source:
+  - case timeline now shows `Auto` and `Manual` badges on outreach-related rows
+  - dashboard nav now shows a Worklist badge for open cases that still have no outreach queued
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.ProgramControllerTest"` -> PASS
+- Backend integration tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.run.Major1PopulationIntegrationTest.manualRunAutoQueuesOutreachForNonCompliantOutcomesAndSkipsExcluded"` -> PASS
+  - `backend\\./gradlew.bat test --tests "com.workwell.run.Major1PopulationIntegrationTest.manualRunPersistsOneHundredOutcomesPerMeasureAndTbHighCompliance"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### MAJOR-4 completed — Global site + date header filters
+
+Completed:
+- Added global dashboard filter context:
+  - `frontend/components/global-filter-context.tsx`
+  - Provides `siteId`, `from`, `to`, and date presets (`7d`, `30d`, `90d`, `all`).
+- Wired dashboard header controls in `frontend/app/(dashboard)/layout.tsx`:
+  - Site selector populated from backend sites endpoint.
+  - Date preset selector in top navigation.
+  - Navigation links preserve active `site/from/to` query values.
+- Added backend filter parameters:
+  - `GET /api/runs` accepts `site`, `from`, `to`.
+  - `GET /api/cases` accepts `from`, `to` (existing site filter retained).
+  - `GET /api/programs` + `GET /api/programs/overview` accept `site`, `from`, `to`.
+  - `GET /api/programs/{measureId}/trend` + `/top-drivers` accept `site`, `from`, `to`.
+  - Added `GET /api/programs/sites` for distinct site values.
+- Updated dashboard pages to apply global filters:
+  - `/programs` requests overview/trend/top-drivers with global params.
+  - `/runs` requests list with global params.
+  - `/cases` applies global date range and global site fallback.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend targeted web tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.ProgramControllerTest"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### MAJOR-3 completed — Outreach templates migration-managed + editable
+
+Completed:
+- Added DB migration:
+  - `backend/src/main/resources/db/migration/V007__outreach_templates.sql`
+  - Creates `outreach_templates` table and seeds four templates for outreach/reminder flows.
+- Removed fragile fallback behavior:
+  - `OutreachTemplateService.listTemplates()` no longer catches `DataAccessException` with in-memory defaults.
+  - Runtime now loads templates from DB persistence only.
+- Added admin template CRUD endpoints:
+  - `POST /api/admin/outreach-templates`
+  - `PUT /api/admin/outreach-templates/{id}`
+- Added template persistence methods in service:
+  - `createTemplate(...)`
+  - `updateTemplate(...)`
+  - Type validation for `OUTREACH`, `APPOINTMENT_REMINDER`, `ESCALATION`.
+- Updated admin security posture:
+  - `/api/admin/**` now consistently requires `ROLE_ADMIN`.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.web.CaseControllerTest"` -> PASS
+
+### MAJOR-2 completed — Release & Approval Studio tab
+
+Completed:
+- Added Release tab + workflow surface in Studio:
+  - New fifth tab `Release & Approval` in `frontend/app/(dashboard)/studio/[id]/page.tsx`.
+  - Readiness checklist now visible in-tab for:
+    - compile status
+    - test fixture validation
+    - value set resolvability
+    - required spec completeness
+- Added Version History panel in Studio:
+  - backend endpoint `GET /api/measures/{id}/versions`
+  - frontend table shows version, status, author, created date, change summary.
+- Added dedicated release actions:
+  - backend `POST /api/measures/{id}/approve`
+  - backend `POST /api/measures/{id}/deprecate` (mandatory reason)
+  - approval writes `MEASURE_APPROVED` audit event.
+- Studio action gating and confirmations:
+  - `Approve for Release` shown to APPROVER/ADMIN only; disabled when compile/test gates fail (tooltip shown).
+  - `Activate Measure` shown after Approved to APPROVER/ADMIN with confirmation.
+  - `Deprecate` shown only to ADMIN with mandatory reason prompt.
+- Security policy alignment:
+  - `/api/measures/*/approve` -> `ROLE_APPROVER` or `ROLE_ADMIN`
+  - `/api/measures/*/deprecate` -> `ROLE_ADMIN`
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests "com.workwell.web.*"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
 ## 2026-05-07
+
+### MAJOR-1 completed — 100-employee evaluation population
+
+Completed:
+- Reworked `CqlEvaluationService` to evaluate all 100 employees from `SyntheticEmployeeCatalog` per measure instead of 12-15 hardcoded subsets.
+- Added deterministic seeded population assignment (`measure + employeeId` stable mapping) so reruns remain consistent.
+- Added compliance-rate configuration under `workwell.evaluation.compliance-rates` in `backend/src/main/resources/application.yml`:
+  - `audiogram: 0.78`
+  - `tb_surveillance: 0.91`
+  - `hazwoper: 0.65`
+  - `flu_vaccine: 0.84`
+- Updated synthetic bundle generation to use run evaluation date for exam/immunization timestamps (stable historical behavior).
+- Fixed `MeasureService.listMeasures(...)` PostgreSQL null-parameter query issue that blocked manual run seeding paths.
+- Added integration verification coverage:
+  - `Major1PopulationIntegrationTest`
+  - updated `CqlEvaluationServiceTest`
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Targeted eval + MAJOR-1 integration tests:
+  - `backend\\./gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest" --tests "com.workwell.run.Major1PopulationIntegrationTest"` -> PASS
+
+### CRITICAL-5 completed — Evidence upload/documentation action
+
+Completed:
+- Added evidence schema:
+  - Migration `backend/src/main/resources/db/migration/V006__evidence_attachments.sql`
+  - New table `evidence_attachments`
+- Implemented evidence storage/service:
+  - `EvidenceService` with server-side filesystem storage under `uploads/evidence/...`
+  - Upload validation:
+    - allowed: PDF, PNG, JPG/JPEG
+    - max size: 10 MB
+  - Automatic audit write: `EVIDENCE_UPLOADED`
+- Added backend endpoints:
+  - `POST /api/cases/{id}/evidence` (multipart upload + optional description)
+  - `GET /api/cases/{id}/evidence` (list)
+  - `GET /api/evidence/{id}/download` (file streaming; image inline, PDF attachment)
+- Frontend Case Detail enhancements:
+  - Upload Evidence section with file input and description
+  - Evidence list with metadata and download links
+  - Timeline icon mapping for evidence events
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests \"com.workwell.web.*\"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### CRITICAL-4 completed — Schedule appointment action path
+
+Completed:
+- Added DB support for appointment and reminder records:
+  - `scheduled_appointments`
+  - `outreach_records`
+  - Migration: `backend/src/main/resources/db/migration/V005__scheduled_appointments_and_outreach_records.sql`
+- Expanded unified case action endpoint to support:
+  - `type = SCHEDULE_APPOINTMENT`
+- Implemented appointment workflow in `CaseFlowService.scheduleAppointment(...)`:
+  - Validates appointment inputs (`appointmentType`, `scheduledAt`, `location`)
+  - Persists appointment row with `PENDING` status
+  - Records case action `SCHEDULE_APPOINTMENT`
+  - Auto-creates `outreach_records` row:
+    - `type=APPOINTMENT_REMINDER`
+    - `status=QUEUED`
+    - `auto_triggered=true`
+  - Transitions case `OPEN -> IN_PROGRESS`
+  - Writes audit event `APPOINTMENT_SCHEDULED`
+- Added appointments query endpoint:
+  - `GET /api/cases/{id}/appointments`
+- Frontend Case Detail updates:
+  - Added `Schedule Appointment` button and modal with:
+    - appointment type
+    - date/time
+    - location
+    - notes
+  - Added appointment list panel
+  - Added timeline icon mapping for appointment events.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests \"com.workwell.web.*\"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### CRITICAL-3 completed — Manual case closure action ("Mark Resolved")
+
+Completed:
+- Added manual closure API action:
+  - `POST /api/cases/{id}/actions`
+  - Payload supports `{ type: "RESOLVE", note, resolvedAt, resolvedBy }`.
+- Implemented manual closure service path:
+  - `CaseFlowService.resolveCase(...)`
+  - Validates state (`OPEN`/`IN_PROGRESS` only) and mandatory closure note
+  - Sets case state to `CLOSED`
+  - Persists closure metadata (`closed_at`, `closed_reason=MANUAL_RESOLVE`, `closed_by`)
+  - Writes case action `RESOLVE`
+  - Writes audit event `CASE_MANUALLY_CLOSED` including actor + note context
+- Added schema support:
+  - Migration `backend/src/main/resources/db/migration/V004__case_manual_closure_fields.sql`
+  - New columns on `cases`: `closed_reason`, `closed_by`
+- Frontend updates:
+  - Case detail page now has `Mark Resolved` button
+  - Modal enforces closure note before submit
+  - UI refreshes to closed state after success
+  - Metadata panel now surfaces `Closed reason` and `Closed by`
+- Worklist status controls updated to explicit tabs:
+  - `Open` / `Closed` / `All`
+  - Default remains `Open`, so closed cases are hidden from default view.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests \"com.workwell.web.*\"` -> PASS
+- Targeted AI integration test: `backend\\./gradlew.bat test --tests \"com.workwell.ai.AiServiceIntegrationTest\"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### CRITICAL-2 completed — Measure Catalog all-status visibility + status/search filters
+
+Completed:
+- Updated backend catalog listing to remove Active-only restriction:
+  - `MeasureService.listMeasures(...)` now returns all statuses by default.
+  - Added optional query filtering:
+    - `status`: `Draft | Approved | Active | Deprecated`
+    - `search`: name/tag match
+- Extended catalog DTO payload with lifecycle metadata:
+  - `statusUpdatedAt`
+  - `statusUpdatedBy`
+- Updated `GET /api/measures` controller contract to accept `?status=` and `?search=`.
+- Frontend `Measures` page updates:
+  - Added status filter pill row (`All / Draft / Approved / Active / Deprecated`).
+  - Added search box for name/tag filtering.
+  - Added status pill rendering for each row and status update metadata column.
+- Studio role visibility alignment (tied to RBAC):
+  - `New Version` control is shown only to `ROLE_AUTHOR`.
+  - `Approve` action is shown only to `ROLE_APPROVER`.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests \"com.workwell.web.*\"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+### CRITICAL-1 completed — Auth + RBAC foundation
+
+Completed:
+- Added migration `backend/src/main/resources/db/migration/V003__demo_users.sql` with `demo_users` and seeded role personas:
+  - `author@workwell.dev` (`ROLE_AUTHOR`)
+  - `approver@workwell.dev` (`ROLE_APPROVER`)
+  - `cm@workwell.dev` (`ROLE_CASE_MANAGER`)
+  - `admin@workwell.dev` (`ROLE_ADMIN`)
+- Implemented JWT login flow:
+  - `POST /api/auth/login`
+  - signed HS256 JWTs with configurable TTL/secret via `workwell.auth.*` properties
+  - BCrypt password verification
+- Implemented request authentication:
+  - `JwtAuthFilter` parses bearer token and sets Spring Security authentication
+  - `SecurityConfig` enforces role-based access policies for mutation/admin routes
+- Added actor derivation from security context:
+  - introduced `SecurityActor` helper and wired audit-write paths to prefer authenticated email actor where available
+- Frontend auth UX:
+  - Added `/login` page and in-memory session handling
+  - Injected auth provider globally
+  - Dashboard header now shows logged-in user email + role badge + logout
+- Added demo personas into synthetic employees catalog metadata for UI/runtime coherence.
+
+Verification:
+- Backend compile: `backend\\./gradlew.bat compileJava` -> PASS
+- Backend web tests: `backend\\./gradlew.bat test --tests \"com.workwell.web.*\"` -> PASS
+- Frontend lint: `frontend\\npm run lint` -> PASS
+- Frontend build: `frontend\\npm run build` -> PASS
+
+Notes:
+- For test stability with existing `@WebMvcTest` slices, auth can be disabled in tests via `workwell.auth.enabled=false` (test resources only); runtime default remains enabled.
+- Remaining TODO items are intentionally untouched and still pending in required execution order.
 
 ### Advisor-ready closeout (final pre-consult sync)
 

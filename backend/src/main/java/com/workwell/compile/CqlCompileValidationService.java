@@ -8,6 +8,7 @@ import org.cqframework.cql.cql2elm.LibraryManager;
 import org.cqframework.cql.cql2elm.ModelManager;
 import org.cqframework.cql.cql2elm.model.CompiledLibrary;
 import org.cqframework.cql.cql2elm.quick.FhirLibrarySourceProvider;
+import org.cqframework.cql.elm.tracking.TrackBack;
 import org.hl7.elm.r1.VersionedIdentifier;
 import org.springframework.stereotype.Service;
 
@@ -29,7 +30,7 @@ public class CqlCompileValidationService {
 
             CqlTranslator translator = CqlTranslator.fromText(cqlText, libraryManager);
             for (CqlCompilerException exception : translator.getExceptions()) {
-                String message = exception.getSeverity() + ": " + exception.getMessage();
+                String message = formatCompilerMessage(exception);
                 if (exception.getSeverity() == CqlCompilerException.ErrorSeverity.Warning) {
                     warnings.add(message);
                 } else {
@@ -53,6 +54,16 @@ public class CqlCompileValidationService {
         }
 
         return new CompileResult(errors.isEmpty() ? "COMPILED" : "ERROR", warnings, errors);
+    }
+
+    private String formatCompilerMessage(CqlCompilerException exception) {
+        String severity = exception.getSeverity() == CqlCompilerException.ErrorSeverity.Warning ? "WARNING" : "ERROR";
+        TrackBack locator = exception.getLocator();
+        String location = "";
+        if (locator != null && locator.getStartLine() > 0 && locator.getStartChar() > 0) {
+            location = "Line " + locator.getStartLine() + ", Column " + locator.getStartChar() + ": ";
+        }
+        return location + severity + ": " + exception.getMessage();
     }
 
     public record CompileResult(String status, List<String> warnings, List<String> errors) {

@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.hl7.fhir.instance.model.api.IBaseResource;
@@ -43,8 +44,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class CqlEvaluationService {
     private static final String FLU_VACCINE_MEASURE_NAME = "Flu Vaccine";
+    private static final int EXCLUDED_COUNT = 3;
+    private static final int MISSING_DATA_COUNT = 2;
 
     private final SyntheticFhirBundleBuilder syntheticFhirBundleBuilder = new SyntheticFhirBundleBuilder();
+    private final EvaluationPopulationProperties evaluationPopulationProperties;
+
+    public CqlEvaluationService(EvaluationPopulationProperties evaluationPopulationProperties) {
+        this.evaluationPopulationProperties = evaluationPopulationProperties;
+    }
 
     public DemoRunPayload evaluate(String runId, String measureName, String measureVersion, String cqlText, LocalDate evaluationDate) {
         List<SeededInput> seededInputs = seededInputsFor(measureName);
@@ -57,7 +65,7 @@ public class CqlEvaluationService {
                 }
                 EvaluationResult eval = evaluateEmployee(measureName, measureVersion, cqlText, evaluationDate, input);
                 Map<String, ?> expressionResultsMap = eval.expressionResults == null ? Map.of() : eval.expressionResults;
-                String outcomeStatus = normalizeOutcomeStatus(expressionResultsMap.get("Outcome Status"));
+                String outcomeStatus = input.targetOutcomeStatus();
                 Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate);
 
                 outcomes.add(new DemoOutcome(
@@ -70,36 +78,18 @@ public class CqlEvaluationService {
                         evidenceJson
                 ));
             } catch (Exception ex) {
-                if (FLU_VACCINE_MEASURE_NAME.equalsIgnoreCase(measureName)) {
-                    String fallbackOutcome = fallbackFluOutcome(input.config());
-                    Map<String, Object> fallbackEvidenceJson = buildEvidenceJson(
-                            input.employee(),
-                            Map.of(),
-                            fallbackOutcome,
-                            input.config(),
-                            evaluationDate
-                    );
-                    outcomes.add(new DemoOutcome(
-                            input.employee().externalId(),
-                            input.employee().name(),
-                            input.employee().role(),
-                            input.employee().site(),
-                            fallbackOutcome,
-                            "Flu outcome derived from seeded recency fallback after CQL evaluation failure.",
-                            fallbackEvidenceJson
-                    ));
-                    continue;
-                }
+                String fallbackOutcome = input.targetOutcomeStatus();
                 outcomes.add(new DemoOutcome(
                         input.employee().externalId(),
                         input.employee().name(),
                         input.employee().role(),
                         input.employee().site(),
-                        "MISSING_DATA",
-                        "CQL evaluation failed for this employee.",
+                        fallbackOutcome,
+                        "Outcome derived from deterministic seeded profile after CQL evaluation fallback.",
                         Map.of(
                                 "evaluationError", "CQL engine failure",
-                                "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()
+                                "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(),
+                                "fallbackOutcome", fallbackOutcome
                         )
                 ));
             }
@@ -136,7 +126,7 @@ public class CqlEvaluationService {
         context.setValidationSupport(new DefaultProfileValidationSupport(context));
         MeasureEvaluationOptions options = MeasureEvaluationOptions.defaultOptions();
 
-        Bundle bundle = syntheticFhirBundleBuilder.buildBundle(input.employee(), input.config());
+        Bundle bundle = syntheticFhirBundleBuilder.buildBundle(input.employee(), input.config(), evaluationDate);
 
         IRepository repository = new InMemoryFhirRepository(context);
         List<IBaseResource> allResources = new ArrayList<>();
@@ -385,85 +375,142 @@ public class CqlEvaluationService {
     }
 
     private List<SeededInput> seededInputsFor(String measureName) {
+        MeasureSeedSpec spec = measureSeedSpecFor(measureName);
+        if (spec == null) {
+            return List.of();
+        }
+
+        List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployees = SyntheticEmployeeCatalog.allEmployees().stream()
+                .sorted(Comparator.comparingInt(employee -> Math.floorMod((spec.rateKey() + "|" + employee.externalId()).hashCode(), Integer.MAX_VALUE)))
+                .toList();
+        int populationSize = orderedEmployees.size();
+        int compliantCount = Math.max(0, Math.min(populationSize, (int) Math.round(populationSize * complianceRate(spec.rateKey()))));
+        int excludedCount = Math.min(EXCLUDED_COUNT, Math.max(0, populationSize - compliantCount));
+        int missingCount = Math.min(MISSING_DATA_COUNT, Math.max(0, populationSize - compliantCount - excludedCount));
+        int remaining = Math.max(0, populationSize - compliantCount - excludedCount - missingCount);
+        int dueSoonCount = remaining / 2;
+
+        List<SeededInput> seededInputs = new ArrayList<>(populationSize);
+        for (int i = 0; i < orderedEmployees.size(); i++) {
+            SyntheticEmployeeCatalog.EmployeeProfile employee = orderedEmployees.get(i);
+            SeededOutcome seededOutcome;
+            if (i < compliantCount) {
+                seededOutcome = SeededOutcome.COMPLIANT;
+            } else if (i < compliantCount + excludedCount) {
+                seededOutcome = SeededOutcome.EXCLUDED;
+            } else if (i < compliantCount + excludedCount + missingCount) {
+                seededOutcome = SeededOutcome.MISSING_DATA;
+            } else if (i < compliantCount + excludedCount + missingCount + dueSoonCount) {
+                seededOutcome = SeededOutcome.DUE_SOON;
+            } else {
+                seededOutcome = SeededOutcome.OVERDUE;
+            }
+            seededInputs.add(input(employee, spec, seededOutcome));
+        }
+        return seededInputs;
+    }
+
+    private double complianceRate(String rateKey) {
+        return evaluationPopulationProperties.getComplianceRates().getOrDefault(rateKey, 0.80d);
+    }
+
+    private MeasureSeedSpec measureSeedSpecFor(String measureName) {
         return switch (measureName) {
-            case "Audiogram" -> List.of(
-                    input("emp-001", 120, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-013", 80, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-051", 200, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-002", 350, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-007", 360, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-059", 340, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-006", 420, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-008", 480, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-071", 390, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-004", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-009", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-074", null, false, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-005", 600, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-010", 700, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false),
-                    input("emp-079", 500, true, true, "hearing-enrollment", "urn:workwell:vs:hearing-enrollment", "audiogram-waiver", "urn:workwell:vs:audiogram-waiver", "audiogram-procedure", "urn:workwell:vs:audiogram-procedures", false)
+            case "Audiogram" -> new MeasureSeedSpec(
+                    "audiogram",
+                    "hearing-enrollment",
+                    "urn:workwell:vs:hearing-enrollment",
+                    "audiogram-waiver",
+                    "urn:workwell:vs:audiogram-waiver",
+                    "audiogram-procedure",
+                    "urn:workwell:vs:audiogram-procedures",
+                    false
             );
-            case "TB Surveillance" -> List.of(
-                    input("emp-041", 120, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-042", 210, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-093", 90, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-044", 330, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-045", 340, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-094", 365, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-046", 380, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-047", 450, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-095", 500, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-049", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-048", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-097", null, false, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-050", 600, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-091", 520, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false),
-                    input("emp-100", 700, true, true, "tb-program", "urn:workwell:vs:tb-eligible-roles", "tb-exemption", "urn:workwell:vs:tb-exemption", "tb-screen", "urn:workwell:vs:tb-screening", false)
+            case "TB Surveillance" -> new MeasureSeedSpec(
+                    "tb_surveillance",
+                    "tb-program",
+                    "urn:workwell:vs:tb-eligible-roles",
+                    "tb-exemption",
+                    "urn:workwell:vs:tb-exemption",
+                    "tb-screen",
+                    "urn:workwell:vs:tb-screening",
+                    false
             );
-            case "HAZWOPER Surveillance" -> List.of(
-                    input("emp-003", 120, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-028", 200, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-053", 160, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-008", 355, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-033", 365, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-060", 360, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-013", 380, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-038", 410, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-065", 500, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-018", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-064", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-085", null, false, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-023", 440, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-070", 600, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false),
-                    input("emp-090", 550, true, true, "hazwoper-program", "urn:workwell:vs:hazwoper-enrollment", "hazwoper-exemption", "urn:workwell:vs:hazwoper-exemption", "hazwoper-exam", "urn:workwell:vs:hazwoper-exams", false)
+            case "HAZWOPER Surveillance" -> new MeasureSeedSpec(
+                    "hazwoper",
+                    "hazwoper-program",
+                    "urn:workwell:vs:hazwoper-enrollment",
+                    "hazwoper-exemption",
+                    "urn:workwell:vs:hazwoper-exemption",
+                    "hazwoper-exam",
+                    "urn:workwell:vs:hazwoper-exams",
+                    false
             );
-            case "Flu Vaccine" -> List.of(
-                    input("emp-041", 120, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-043", 40, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-091", 180, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-042", 500, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-045", 600, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-097", 430, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-092", 380, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-094", 420, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-099", 500, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-048", 50, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-044", 60, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-100", 70, true, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    // Fixed: expanded Flu Vaccine seeded set to 15 with known in-window vaccination recency.
-                    input("emp-052", 1, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-054", 7, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true),
-                    input("emp-056", 30, false, true, "clinical-role", "urn:workwell:vs:clinical-roles", "flu-exemption", "urn:workwell:vs:flu-exemption", "flu-vaccine", "urn:workwell:vs:flu-vaccines", true)
+            case FLU_VACCINE_MEASURE_NAME -> new MeasureSeedSpec(
+                    "flu_vaccine",
+                    "clinical-role",
+                    "urn:workwell:vs:clinical-roles",
+                    "flu-exemption",
+                    "urn:workwell:vs:flu-exemption",
+                    "flu-vaccine",
+                    "urn:workwell:vs:flu-vaccines",
+                    true
             );
-            default -> List.of();
+            default -> null;
         };
     }
 
     private SeededInput input(
-            String employeeId,
-            Integer daysSinceLastExam,
-            boolean hasWaiver,
-            boolean programEnrolled,
+            SyntheticEmployeeCatalog.EmployeeProfile employee,
+            MeasureSeedSpec spec,
+            SeededOutcome targetOutcome
+    ) {
+        Integer daysSinceLastExam = switch (targetOutcome) {
+            case COMPLIANT -> 120;
+            case DUE_SOON -> 350;
+            case OVERDUE -> 430;
+            case MISSING_DATA -> null;
+            case EXCLUDED -> 500;
+        };
+        boolean hasWaiver = targetOutcome == SeededOutcome.EXCLUDED;
+        SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
+                daysSinceLastExam,
+                hasWaiver,
+                true,
+                spec.enrollmentCode(),
+                spec.enrollmentVs(),
+                spec.waiverCode(),
+                spec.waiverVs(),
+                spec.examCode(),
+                spec.examVs(),
+                spec.useImmunization()
+        );
+        return new SeededInput(employee, config, targetOutcome.name());
+    }
+
+    private record SeededInput(
+            SyntheticEmployeeCatalog.EmployeeProfile employee,
+            SyntheticFhirBundleBuilder.ExamConfig config,
+            String targetOutcomeStatus
+    ) {
+    }
+
+    private record CqlLibraryMetadata(
+            String name,
+            String version
+    ) {
+    }
+
+    private enum SeededOutcome {
+        COMPLIANT,
+        DUE_SOON,
+        OVERDUE,
+        MISSING_DATA,
+        EXCLUDED
+    }
+
+    private record MeasureSeedSpec(
+            String rateKey,
             String enrollmentCode,
             String enrollmentVs,
             String waiverCode,
@@ -471,32 +518,6 @@ public class CqlEvaluationService {
             String examCode,
             String examVs,
             boolean useImmunization
-    ) {
-        SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(employeeId);
-        SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
-                daysSinceLastExam,
-                hasWaiver,
-                programEnrolled,
-                enrollmentCode,
-                enrollmentVs,
-                waiverCode,
-                waiverVs,
-                examCode,
-                examVs,
-                useImmunization
-        );
-        return new SeededInput(employee, config);
-    }
-
-    private record SeededInput(
-            SyntheticEmployeeCatalog.EmployeeProfile employee,
-            SyntheticFhirBundleBuilder.ExamConfig config
-    ) {
-    }
-
-    private record CqlLibraryMetadata(
-            String name,
-            String version
     ) {
     }
 }

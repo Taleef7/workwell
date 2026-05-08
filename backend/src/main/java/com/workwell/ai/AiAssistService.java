@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.run.RunPersistenceService;
+import com.workwell.security.SecurityActor;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -365,12 +366,13 @@ public class AiAssistService {
     }
 
     private void insertAiAudit(String eventType, String actor, UUID runId, UUID caseId, Map<String, Object> payload) {
+        String resolvedActor = SecurityActor.currentActorOr(actor);
         jdbcTemplate.update(
                 "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)",
                 eventType,
                 "ai",
                 UUID.randomUUID(),
-                actor,
+                resolvedActor,
                 runId,
                 caseId,
                 toJson(Map.of(
