@@ -81,11 +81,15 @@ Doc PR ships with code PR. Always.
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current focus
+## Current Focus (as of 2026-05-07)
 
-Update before each session.
+**FREEZE POSTURE — bugfix and polish only.**
 
-**Today:** D3 in progress (Mon May 4, 2026) - Audiogram vertical now includes live case action flow (`outreach` + `rerun-to-verify`) with production verification of case closure and audit timeline linkage.
+All core features are shipped and in production. The remaining work before the May 18 internship demo is:
+- Fix P0 bugs (MCP snake_case, Flu Vaccine measurement period, seeded population)
+- Fix P1 items (README CSV contracts, /studio placeholder, demo script, runbook IDs)
+- One full rehearsal from DEMO_SCRIPT.md with timestamped evidence capture
+- No new features, no schema migrations, no dependency upgrades
 
-**Next:** Re-evaluate progress versus SPIKE_PLAN acceptance checkpoints and start the next highest-risk slice.
+Do not add new CQL measures, new API endpoints, new UI pages, or new AI surfaces. Stabilize and rehearse.
 

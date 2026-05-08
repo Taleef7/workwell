@@ -27,9 +27,9 @@ services:
       context: ..
       dockerfile: infra/backend.Dockerfile
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/workwell
-      SPRING_DATASOURCE_USERNAME: workwell
-      SPRING_DATASOURCE_PASSWORD: workwell
+      DATABASE_URL: jdbc:postgresql://postgres:5432/workwell?user=workwell&password=workwell
+      DATABASE_URL_DIRECT: jdbc:postgresql://postgres:5432/workwell?user=workwell&password=workwell
+      OPENAI_API_KEY: local-dev-placeholder
     ports:
       - "8080:8080"
     depends_on:

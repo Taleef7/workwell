@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"case_id\":\"32fee6f4-6e69-4675-b44e-5f6392de7dbd\",\"employee_name\":\"Omar Siddiq\",\"measure_name\":\"Audiogram\",\"status\":\"OVERDUE\",\"explanation\":\"Omar Siddiq was flagged as OVERDUE for the Audiogram measure. Their last qualifying exam was 2025-03-13 (55 days ago), which exceeds the 365-day compliance window. Role eligibility: true. Site eligibility: true. Waiver status: none.\",\"why_flagged\":{\"days_overdue\":55,\"generated_at\":\"2026-05-07T22:16:12.251054319Z\",\"role_eligible\":true,\"site_eligible\":true,\"waiver_status\":\"none\",\"last_exam_date\":\"2025-03-13\",\"outcome_status\":\"OVERDUE\",\"compliance_window_days\":365}}"
+    }
+  ],
+  "isError": false
+}

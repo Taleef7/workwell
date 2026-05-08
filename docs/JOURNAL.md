@@ -2,6 +2,109 @@
 
 ## 2026-05-07
 
+### Advisor-ready closeout (final pre-consult sync)
+
+Completed:
+- Reconciled `docs/new_instructions.md` checklist to zero actionable open items (`55/55` done).
+- Re-ran production `POST /api/runs/manual` successfully:
+  - run `3866d69a-2519-4051-bad0-98da9ea696bf`
+  - `activeMeasuresExecuted=4`.
+- Refreshed `docs/DEMO_RUNBOOK.md` pinned latest run IDs to current production values and updated MCP `get_run_summary` sample run ID.
+- Finalized advisor rehearsal evidence bundle in:
+  - `docs/evidence/2026-05-07-rehearsal/`
+  - Includes programs/measures snapshots, pinned case payload, AI explanation payload, and MCP tool transcripts (`tools/list`, `list_measures`, `get_run_summary`, `explain_outcome`).
+
+Outcome:
+- Current branch is in advisor-ready freeze posture with production verification artifacts and runbook IDs synchronized to live state.
+
+### Production deploy + post-deploy verification pass (freeze bugfix tranche)
+
+Completed:
+- Deployed backend to Fly from current branch:
+  - `flyctl deploy --config backend/fly.toml --remote-only`
+  - release `v57` on `workwell-measure-studio-api`.
+- Deployed frontend to Vercel from current branch:
+  - deployment `dpl_H88GXJKjsnvah3YaG2pH5vuVfSdj`
+  - alias confirmed at `https://frontend-seven-eta-24.vercel.app`.
+- Verified `/studio` route behavior in production:
+  - `GET https://frontend-seven-eta-24.vercel.app/studio` -> `307` redirect to `/measures`.
+- Verified MCP transport endpoint is reachable:
+  - `GET https://workwell-measure-studio-api.fly.dev/sse` -> `200`.
+- Verified production Flu behavior after deploy:
+  - `POST /api/runs/flu-vaccine` returned run `2c9ba3b4-e8f0-4391-91ec-19f5e8ea06fa` with non-zero compliant bucket.
+  - `GET /api/programs` now reports Flu with `totalEvaluated=15`, `compliant=6`, `excluded=3`, `overdue=6`, `missingData=0`, `complianceRate=40.0`.
+- Re-validated explainability evidence fields on production case detail:
+  - `GET /api/cases/c0162cf4-b0bf-4410-878a-af6f1bbf9472` includes `why_flagged.last_exam_date`, `days_overdue`, `compliance_window_days` plus eligibility fields.
+- Re-validated AI explain endpoint:
+  - `POST /api/cases/c0162cf4-b0bf-4410-878a-af6f1bbf9472/ai/explain` -> `provider=openai`, `fallbackUsed=false`.
+
+Notes:
+- `POST /api/runs/manual` intermittently hangs from direct curl despite measure-specific run endpoints succeeding; tracked as a runtime reliability follow-up for the full Run-All demo flow.
+- Core freeze goals for Flu distribution and `/studio` dead-end are now verified in production.
+- Rehearsal evidence bundle has been saved for demo reuse under `docs/evidence/2026-05-07-rehearsal/` including:
+  - `programs.json`, `measures.json`
+  - `case_c0162cf4.json`, `ai_explain_c0162cf4.json`
+  - `mcp_tools_list.json`, `mcp_list_measures.json`, `mcp_get_run_summary_fba26713.json`, `mcp_get_run_summary_3866d69a.json`, `mcp_explain_outcome_32fee6f4.json`
+- Follow-up production run-all probe succeeded in this cycle:
+  - `POST /api/runs/manual` -> run `3866d69a-2519-4051-bad0-98da9ea696bf` with `activeMeasuresExecuted=4`.
+- `docs/DEMO_RUNBOOK.md` pinned run IDs were refreshed to current production values, and the MCP `get_run_summary` sample call now points to run `3866d69a-2519-4051-bad0-98da9ea696bf`.
+- TODO reconciliation closeout:
+  - `docs/new_instructions.md` stale unchecked items were reconciled to completed/superseded with explicit evidence references.
+  - Remaining actionable TODO count for this instruction batch is now zero.
+- MCP protocol probe details:
+  - `GET /sse` returns an endpoint event with session-scoped message path (`/mcp/message?sessionId=...`).
+  - Raw curl JSON-RPC post to the message endpoint was not sufficient for a stable tool transcript capture in this shell-only flow; a proper MCP client session (SSE + message channel together) is still needed for final `explain_outcome` transcript evidence.
+  - Partial protocol evidence was captured: MCP `initialize` response returned `serverInfo.name=workwell-mcp`, `serverInfo.version=1.1.0`, `protocolVersion=2024-11-05`.
+  - Follow-up closure: used MCP Inspector CLI directly against production SSE and captured successful tool transcripts:
+    - `tools/list` returned full registered tool set.
+    - `tools/call` `list_measures` returned all 4 active measures.
+    - `tools/call` `get_run_summary` for run `fba26713-92ff-49e3-84d0-fa8d137881f7` returned structured counts and pass-rate.
+    - `tools/call` `explain_outcome` for case `32fee6f4-6e69-4675-b44e-5f6392de7dbd` returned deterministic evidence fields with real values (`last_exam_date=2025-03-13`, `days_overdue=55`, `compliance_window_days=365`), no `unknown` placeholders.
+
+### Freeze bugfix verification loop (continued) — local stack + test/build re-check
+
+Completed:
+- Re-ran backend test suite:
+  - `backend\\./gradlew.bat test` -> `BUILD SUCCESSFUL` (all tasks up-to-date, no new failures).
+- Re-ran frontend production build:
+  - `frontend\\npm run build` -> PASS (Next.js 16.2.4 build completed; `/studio` route present).
+- Verified local docker runtime status:
+  - `docker compose -f infra/docker-compose.yml ps` -> `backend` and `postgres` both `Up`.
+- Verified local backend health:
+  - `GET http://localhost:8080/actuator/health` -> `{"status":"UP"}`.
+- Executed fresh local all-program run:
+  - `POST http://localhost:8080/api/runs/manual` -> run `901100a1-95f3-4765-ac42-0ef2f74b04ac`, `activeMeasuresExecuted=4`.
+- Verified Flu outcome mix for the fresh run from outcomes CSV export:
+  - `COMPLIANT=6`, `EXCLUDED=3`, `OVERDUE=6`, `TOTAL=15`, `PASS_RATE=40%`.
+
+Notes:
+- Flu pass-rate remains within the advisor target band (20%-60%) on local branch code.
+- Remaining gap is deployment-time production re-validation for MCP `explain_outcome` payload fields and final rehearsal evidence capture.
+- Local evidence JSON check on overdue Audiogram case (`a38b94d7-8c6a-4678-b693-db31d9c5bb91`) confirms concrete snake_case values in `why_flagged`:
+  - `last_exam_date=2025-03-13`, `days_overdue=55`, `compliance_window_days=365`, `role_eligible=true`, `site_eligible=true`, `waiver_status=none`.
+
+### Advisor handoff packet refreshed (external review prep)
+
+Completed:
+- Rewrote `docs/advisor_update.md` for a full external-advisor handoff with:
+  - implementation status snapshot,
+  - plan alignment against `docs/SPIKE_PLAN.md`,
+  - production/local verification signal summary,
+  - explicit "what is left" vs "what is done",
+  - risk/caveat section,
+  - direct advisor questions and clarification asks,
+  - recommended file packet list for review handoff.
+- Synced tracker/context docs for consistency with current day status:
+  - `docs/TODO.md` latest checkpoint date advanced to 2026-05-07,
+  - `CLAUDE.md` current focus moved from historical D3 note to stabilization/freeze focus.
+
+Purpose:
+- Ensure external advisor receives one coherent, evidence-backed package describing:
+  - project state,
+  - work completed,
+  - open risks,
+  - remaining execution steps before final demo/pilot positioning.
+
 ### Production smoke pass completed (post-UI polish deploy check)
 
 Executed against:
