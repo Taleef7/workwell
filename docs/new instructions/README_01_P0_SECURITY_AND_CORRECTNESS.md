@@ -275,4 +275,4 @@ Complete
 - `docs/new instructions/README_01_P0_SECURITY_AND_CORRECTNESS.md`
 
 ### Commit
-- d644291 fix(security): tighten production cors and startup checks
+- bf6d596 fix(security): close remaining p0 auth and audit gaps
