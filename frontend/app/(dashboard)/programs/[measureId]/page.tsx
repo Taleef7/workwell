@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { emitToast } from "@/lib/toast";
 
 type ProgramSummary = {
   measureId: string;
@@ -141,11 +142,20 @@ export default function ProgramDetailPage() {
             <button
               className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white"
               onClick={async () => {
-                await fetch(`${apiBase}/api/runs/manual`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ scope: "All Programs" })
-                });
+                try {
+                  setError(null);
+                  const response = await fetch(`${apiBase}/api/runs/manual`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ scopeType: "MEASURE", measureId })
+                  });
+                  if (!response.ok) {
+                    throw new Error(`Measure run failed (${response.status})`);
+                  }
+                  emitToast(`${program.measureName} run completed`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Unknown error");
+                }
               }}
             >
               Run This Measure
