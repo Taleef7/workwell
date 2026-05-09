@@ -2,6 +2,7 @@ package com.workwell.caseflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.compile.CqlEvaluationService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.security.SecurityActor;
@@ -9,6 +10,8 @@ import com.workwell.run.DemoRunModels.DemoOutcome;
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.Locale;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CaseFlowService {
@@ -26,17 +30,20 @@ public class CaseFlowService {
     private final ObjectMapper objectMapper;
     private final OutreachTemplateService outreachTemplateService;
     private final WaiverService waiverService;
+    private final CqlEvaluationService cqlEvaluationService;
 
     public CaseFlowService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             OutreachTemplateService outreachTemplateService,
-            WaiverService waiverService
+            WaiverService waiverService,
+            CqlEvaluationService cqlEvaluationService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.outreachTemplateService = outreachTemplateService;
         this.waiverService = waiverService;
+        this.cqlEvaluationService = cqlEvaluationService;
     }
 
     public void upsertCases(
@@ -351,6 +358,7 @@ public class CaseFlowService {
         return loadCase(caseId);
     }
 
+    @Transactional
     public Optional<CaseDetail> rerunToVerify(UUID caseId, String actor) {
         Optional<CaseContext> context = loadCaseContext(caseId);
         if (context.isEmpty()) {
@@ -358,23 +366,36 @@ public class CaseFlowService {
         }
 
         CaseContext existing = context.get();
-        UUID verificationRunId = createVerificationRun(existing.measureVersionId(), actor);
-        String evaluationPeriod = existing.evaluationPeriod();
-
-        Map<String, Object> verifiedEvidence = new LinkedHashMap<>();
-        verifiedEvidence.put("source", "rerun-to-verify");
-        verifiedEvidence.put("priorOutcomeStatus", existing.currentOutcomeStatus());
-        verifiedEvidence.put("verifiedStatus", "COMPLIANT");
-        verifiedEvidence.put("verifiedAt", Instant.now().toString());
-        verifiedEvidence.put("note", "Demo verification run marked employee as compliant after outreach.");
+        String employeeExternalId = jdbcTemplate.queryForObject(
+                "SELECT external_id FROM employees WHERE id = ?",
+                String.class,
+                existing.employeeId()
+        );
+        VerificationMeasure verificationMeasure = loadVerificationMeasure(existing.measureVersionId());
+        LocalDate evaluationDate = verificationEvaluationDate(existing.evaluationPeriod());
+        DemoOutcome verificationOutcome = cqlEvaluationService.evaluateSubject(
+                verificationMeasure.measureName(),
+                verificationMeasure.measureVersion(),
+                verificationMeasure.cqlText(),
+                evaluationDate,
+                employeeExternalId
+        );
+        UUID verificationRunId = createVerificationRun(
+                caseId,
+                existing.measureVersionId(),
+                actor,
+                evaluationDate,
+                verificationOutcome
+        );
 
         insertOutcome(
                 verificationRunId,
+                caseId,
                 existing.employeeId(),
                 existing.measureVersionId(),
-                evaluationPeriod,
-                "COMPLIANT",
-                verifiedEvidence
+                existing.evaluationPeriod(),
+                verificationOutcome,
+                actor
         );
 
         insertCaseAction(
@@ -383,24 +404,41 @@ public class CaseFlowService {
                 actor,
                 Map.of(
                         "priorOutcomeStatus", existing.currentOutcomeStatus(),
-                        "verifiedStatus", "COMPLIANT",
-                        "runId", verificationRunId
+                        "verifiedStatus", verificationOutcome.outcome(),
+                        "runId", verificationRunId.toString(),
+                        "subjectId", verificationOutcome.subjectId(),
+                        "evaluationPeriod", existing.evaluationPeriod()
                 )
         );
 
+        String verifiedStatus = verificationOutcome.outcome();
+        String updatedCaseStatus = verificationCaseStatus(existing.status(), verifiedStatus);
+        String nextAction = verificationNextAction(verifiedStatus, existing.measureVersionId());
+        Instant closedAt = verificationClosedAt(verifiedStatus);
+        String closedReason = verificationClosedReason(verifiedStatus);
+        String closedBy = verificationClosedBy(verifiedStatus, actor);
+
         jdbcTemplate.update(
-                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = NOW(), closed_reason = ?, closed_by = ? WHERE id = ?",
-                // MVP choice: compliant reruns move OPEN cases to RESOLVED.
-                "RESOLVED",
-                "LOW",
-                "No follow-up needed after compliant verification rerun.",
-                "COMPLIANT",
+                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = ?, closed_reason = ?, closed_by = ? WHERE id = ?",
+                updatedCaseStatus,
+                priorityFor(verifiedStatus),
+                nextAction,
+                verifiedStatus,
                 verificationRunId,
-                "RERUN_VERIFIED",
-                actor,
+                closedAt == null ? null : Timestamp.from(closedAt),
+                closedReason,
+                closedBy,
                 caseId
         );
 
+        Map<String, Object> verificationPayload = new LinkedHashMap<>();
+        verificationPayload.put("priorOutcomeStatus", existing.currentOutcomeStatus());
+        verificationPayload.put("verifiedStatus", verifiedStatus);
+        verificationPayload.put("evaluationPeriod", existing.evaluationPeriod());
+        verificationPayload.put("runId", verificationRunId.toString());
+        verificationPayload.put("status", updatedCaseStatus);
+        verificationPayload.put("nextAction", nextAction);
+        verificationPayload.put("subjectId", verificationOutcome.subjectId());
         insertAuditEvent(
                 "CASE_RERUN_VERIFIED",
                 "case",
@@ -409,24 +447,65 @@ public class CaseFlowService {
                 verificationRunId,
                 caseId,
                 existing.measureVersionId(),
-                Map.of(
-                        "priorOutcomeStatus", existing.currentOutcomeStatus(),
-                        "verifiedStatus", "COMPLIANT",
-                        "evaluationPeriod", evaluationPeriod
-                )
+                verificationPayload
         );
 
+        if ("COMPLIANT".equals(verifiedStatus)) {
+            insertAuditEvent(
+                    "CASE_RESOLVED",
+                    "case",
+                    caseId,
+                    actor,
+                    verificationRunId,
+                    caseId,
+                    existing.measureVersionId(),
+                    Map.of(
+                            "status", "COMPLIANT",
+                            "summary", "Case closed by rerun-to-verify after real CQL verification.",
+                            "runId", verificationRunId.toString()
+                    )
+            );
+        } else if ("EXCLUDED".equals(verifiedStatus)) {
+            Optional<WaiverService.WaiverRecord> waiver = waiverService.ensureExclusionWaiver(
+                    existing.employeeId(),
+                    existing.measureVersionId(),
+                    verificationOutcome.summary(),
+                    actor,
+                    "Auto-linked from excluded verification rerun."
+            );
+            Map<String, Object> excludedPayload = new LinkedHashMap<>(verificationPayload);
+            excludedPayload.put("waiverId", waiver.map(record -> record.waiverId().toString()).orElse(null));
+            excludedPayload.put("exclusionReason", waiver.map(WaiverService.WaiverRecord::exclusionReason).orElse(verificationOutcome.summary()));
+            excludedPayload.put("waiverExpiresAt", waiver.flatMap(record -> Optional.ofNullable(record.expiresAt())).map(Instant::toString).orElse(null));
+            excludedPayload.put("waiverExpired", waiver.map(WaiverService.WaiverRecord::expired).orElse(false));
+            insertAuditEvent(
+                    "CASE_EXCLUDED",
+                    "case",
+                    caseId,
+                    actor,
+                    verificationRunId,
+                    caseId,
+                    existing.measureVersionId(),
+                    excludedPayload
+            );
+        }
+
         insertAuditEvent(
-                "CASE_RESOLVED",
-                "case",
-                caseId,
+                "RUN_COMPLETED",
+                "run",
+                verificationRunId,
                 actor,
                 verificationRunId,
                 caseId,
                 existing.measureVersionId(),
                 Map.of(
-                        "status", "COMPLIANT",
-                        "summary", "Case closed by rerun-to-verify after outreach."
+                        "scope", "case",
+                        "source", "rerun-to-verify",
+                        "subjectId", verificationOutcome.subjectId(),
+                        "verifiedStatus", verifiedStatus,
+                        "totalEvaluated", 1,
+                        "compliant", "COMPLIANT".equals(verifiedStatus) ? 1 : 0,
+                        "nonCompliant", "COMPLIANT".equals(verifiedStatus) ? 0 : 1
                 )
         );
 
@@ -968,9 +1047,19 @@ public class CaseFlowService {
         return count != null && count > 0;
     }
 
-    private UUID createVerificationRun(UUID measureVersionId, String actor) {
+    private UUID createVerificationRun(
+            UUID caseId,
+            UUID measureVersionId,
+            String actor,
+            LocalDate evaluationDate,
+            DemoOutcome verificationOutcome
+    ) {
         UUID runId = UUID.randomUUID();
         Instant now = Instant.now();
+        Instant measurementPeriodStart = evaluationDate.atStartOfDay().toInstant(ZoneOffset.UTC);
+        Instant measurementPeriodEnd = evaluationDate.plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
+        long compliant = "COMPLIANT".equals(verificationOutcome.outcome()) ? 1L : 0L;
+        long nonCompliant = compliant == 1L ? 0L : 1L;
         jdbcTemplate.update(
                 "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ps -> {
@@ -981,21 +1070,21 @@ public class CaseFlowService {
                     ps.setString(5, "manual");
                     ps.setString(6, "completed");
                     ps.setString(7, actor);
-                    ps.setObject(8, java.sql.Timestamp.from(now));
-                    ps.setObject(9, java.sql.Timestamp.from(now.plusSeconds(5)));
+                    ps.setObject(8, Timestamp.from(now));
+                    ps.setObject(9, Timestamp.from(now.plusSeconds(5)));
                     ps.setInt(10, 1);
-                    ps.setInt(11, 1);
-                    ps.setInt(12, 0);
+                    ps.setLong(11, compliant);
+                    ps.setLong(12, nonCompliant);
                     ps.setLong(13, 5_000L);
-                    ps.setObject(14, java.sql.Timestamp.from(now));
-                    ps.setObject(15, java.sql.Timestamp.from(now.plusSeconds(5)));
+                    ps.setObject(14, Timestamp.from(measurementPeriodStart));
+                    ps.setObject(15, Timestamp.from(measurementPeriodEnd));
                 }
         );
         jdbcTemplate.update(
                 "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
                 runId,
                 "INFO",
-                "Case-level rerun-to-verify executed."
+                "Case-level rerun-to-verify executed for subject " + verificationOutcome.subjectId() + "."
         );
         insertAuditEvent(
                 "RUN_STARTED",
@@ -1003,30 +1092,27 @@ public class CaseFlowService {
                 runId,
                 actor,
                 runId,
-                null,
+                caseId,
                 measureVersionId,
-                Map.of("scope", "case", "source", "rerun-to-verify")
-        );
-        insertAuditEvent(
-                "RUN_COMPLETED",
-                "run",
-                runId,
-                actor,
-                runId,
-                null,
-                measureVersionId,
-                Map.of("scope", "case", "source", "rerun-to-verify", "totalEvaluated", 1, "compliant", 1)
+                Map.of(
+                        "scope", "case",
+                        "source", "rerun-to-verify",
+                        "subjectId", verificationOutcome.subjectId(),
+                        "verifiedStatus", verificationOutcome.outcome(),
+                        "evaluationPeriod", evaluationDate.toString()
+                )
         );
         return runId;
     }
 
     private void insertOutcome(
             UUID runId,
+            UUID caseId,
             UUID employeeId,
             UUID measureVersionId,
             String evaluationPeriod,
-            String status,
-            Map<String, Object> evidence
+            DemoOutcome outcome,
+            String actor
     ) {
         UUID outcomeId = UUID.randomUUID();
         jdbcTemplate.update(
@@ -1036,23 +1122,93 @@ public class CaseFlowService {
                 employeeId,
                 measureVersionId,
                 evaluationPeriod,
-                status,
-                toJsonb(evidence)
+                outcome.outcome(),
+                toJsonb(outcome.evidenceJson())
         );
 
         insertAuditEvent(
                 "OUTCOME_PERSISTED",
                 "outcome",
                 outcomeId,
-                "system",
+                actor,
                 runId,
-                null,
+                caseId,
                 measureVersionId,
                 Map.of(
-                        "status", status,
+                        "subjectId", outcome.subjectId(),
+                        "status", outcome.outcome(),
+                        "summary", outcome.summary(),
                         "source", "case-rerun-verify"
                 )
         );
+    }
+
+    private VerificationMeasure loadVerificationMeasure(UUID measureVersionId) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    """
+                            SELECT m.name AS measure_name,
+                                   mv.version AS measure_version,
+                                   mv.cql_text AS cql_text
+                            FROM measure_versions mv
+                            JOIN measures m ON mv.measure_id = m.id
+                            WHERE mv.id = ?
+                            """,
+                    (rs, rowNum) -> new VerificationMeasure(
+                            rs.getString("measure_name"),
+                            rs.getString("measure_version"),
+                            rs.getString("cql_text")
+                    ),
+                    measureVersionId
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            throw new IllegalStateException("Unable to load verification measure for " + measureVersionId, ex);
+        }
+    }
+
+    private LocalDate verificationEvaluationDate(String evaluationPeriod) {
+        try {
+            return LocalDate.parse(evaluationPeriod);
+        } catch (Exception ex) {
+            return LocalDate.now();
+        }
+    }
+
+    private String verificationCaseStatus(String currentStatus, String verifiedStatus) {
+        return switch (verifiedStatus) {
+            case "COMPLIANT" -> "RESOLVED";
+            case "EXCLUDED" -> "EXCLUDED";
+            default -> List.of("OPEN", "IN_PROGRESS").contains(currentStatus) ? currentStatus : "OPEN";
+        };
+    }
+
+    private String verificationNextAction(String verifiedStatus, UUID measureVersionId) {
+        return switch (verifiedStatus) {
+            case "COMPLIANT" -> "No follow-up needed after compliant verification rerun.";
+            default -> nextActionFor(verifiedStatus, measureVersionId);
+        };
+    }
+
+    private Instant verificationClosedAt(String verifiedStatus) {
+        return switch (verifiedStatus) {
+            case "COMPLIANT", "EXCLUDED" -> Instant.now();
+            default -> null;
+        };
+    }
+
+    private String verificationClosedReason(String verifiedStatus) {
+        return switch (verifiedStatus) {
+            case "COMPLIANT" -> "RERUN_VERIFIED";
+            case "EXCLUDED" -> "RERUN_EXCLUDED";
+            default -> null;
+        };
+    }
+
+    private String verificationClosedBy(String verifiedStatus, String actor) {
+        return switch (verifiedStatus) {
+            case "COMPLIANT", "EXCLUDED" -> actor;
+            default -> null;
+        };
     }
 
     private void insertCaseAction(UUID caseId, String actionType, String actor, Map<String, Object> payload) {
@@ -1479,6 +1635,13 @@ public class CaseFlowService {
             UUID measureId,
             String status,
             UUID lastRunId
+    ) {
+    }
+
+    private record VerificationMeasure(
+            String measureName,
+            String measureVersion,
+            String cqlText
     ) {
     }
 }

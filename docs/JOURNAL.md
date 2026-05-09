@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-05-09
+
+### P0 rerun-to-verify hardening completed
+
+Completed:
+- Replaced the case rerun-to-verify shortcut with a real structured CQL evaluation of the case subject using the persisted measure CQL and evaluation period.
+- Preserved non-compliant reruns as open/in-progress cases and only close on structured compliant or excluded outcomes.
+- Added a single-subject evaluation path to `CqlEvaluationService` and a regression test proving it matches the batch evaluator for the same employee.
+- Added an integration test that seeds an open case, reruns it, and verifies the case does not fake COMPLIANT, persists the actual rerun outcome, and avoids `CASE_RESOLVED` on non-compliant reruns.
+- Updated the product docs to describe the real rerun-to-verify behavior.
+
+Verification:
+- Targeted backend regression tests: `backend\\./gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest" --tests "com.workwell.caseflow.CaseFlowRerunIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test` -> PASS
+- Backend build: `backend\\./gradlew.bat build` -> PASS
+
 ## 2026-05-08
 
 ### PR review fixes completed — backend CI restored and review comments addressed

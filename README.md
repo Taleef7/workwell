@@ -96,4 +96,5 @@ Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
 ## Notes
 
 - `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
+- Case rerun-to-verify re-evaluates the subject through the structured CQL path and only resolves the case when that evaluation returns a compliant or excluded outcome.
 - `docs/archive/SPIKE_PLAN.md` is historical sprint context.
