@@ -1,6 +1,7 @@
 package com.workwell.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -141,5 +143,38 @@ class McpSecurityIntegrationTest {
         assertThat(sanitizedArguments).containsEntry("status", "open");
         assertThat(sanitizedArguments).containsEntry("measureId", "11111111-1111-1111-1111-111111111111");
         assertThat(payload.get("argumentHash")).isInstanceOf(String.class);
+    }
+
+    @Test
+    @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
+    void invalidMcpArgumentsFailSafelyAndAreAudited() throws Exception {
+        assertThatThrownBy(() -> mcpServerConfig.executeTool(
+                jdbcTemplate,
+                objectMapper,
+                "get_case",
+                "restricted",
+                Map.of("caseId", "not-a-uuid"),
+                () -> {
+                    UUID.fromString("not-a-uuid");
+                    return Map.of("case_id", "unused");
+                }
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid UUID string");
+
+        String payloadJson = jdbcTemplate.queryForObject(
+                """
+                        SELECT payload_json::text
+                        FROM audit_events
+                        WHERE event_type = 'MCP_TOOL_CALLED'
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                String.class
+        );
+        Map<String, Object> payload = objectMapper.readValue(payloadJson, new TypeReference<Map<String, Object>>() {
+        });
+        assertThat(payload.get("toolName")).isEqualTo("get_case");
+        assertThat(payload.get("success")).isEqualTo(Boolean.FALSE);
+        assertThat(payload.get("failureMessage")).asString().contains("Invalid UUID string");
     }
 }

@@ -91,12 +91,14 @@ Production endpoints:
 ### 5.6 Actions -> Audit
 Every state-changing operation emits an `audit_events` record with actor + entity refs + payload.
 Evidence uploads and downloads are restricted to case manager/admin roles; downloads resolve the linked case, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows with the evidence UUID, case UUID, content type, file size, and timestamp.
+Public API actions derive audit identity from the authenticated security context. The backend no longer accepts caller-supplied `actor` or `resolvedBy` fields for audit identity.
 
 ## 6) Runtime Invariants
 - AI cannot set compliance status.
 - CQL `Outcome Status` is the only compliance classification source.
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
+- Public API actor identity always comes from Spring Security; caller-supplied actor fields are ignored or removed.
 - Production startup is fail-fast: the backend refuses auth-disabled, weak-secret, wildcard-CORS, localhost-CORS-in-production, or backend-demo configurations when a production-like profile is active.
 - Production CORS uses exact allowed origins from `workwell.cors.allowed-origins`; wildcard Vercel patterns are not used.
 - Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
@@ -105,6 +107,7 @@ Evidence uploads and downloads are restricted to case manager/admin roles; downl
 - REST API: measure, run, case, admin, export endpoints.
 - REST API: evidence upload/download on case detail, role-gated to case manager/admin.
 - MCP: read-only tools with per-call audit events and Spring Security role gates on `/sse` and `/mcp/**`.
+- MCP tool audit actors come from the authenticated security context, not a hardcoded transport identity.
 - CSV exports: runs/outcomes/cases + audit export.
 
 ## 8) Current Infra Split

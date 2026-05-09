@@ -102,5 +102,6 @@ Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
 - Production backend startup rejects unsafe settings: auth-off, weak or missing JWT secrets, wildcard CORS, localhost CORS in production-like profiles, and backend demo flags without an explicit public-demo override.
 - Production CORS uses exact origins from `WORKWELL_CORS_ALLOWED_ORIGINS`; `https://*.vercel.app` is not allowed.
 - Frontend demo prefill (`NEXT_PUBLIC_DEMO_MODE`) is local-only and the frontend build fails if it is enabled during a production build.
-- MCP routes remain protected through Spring Security role checks; there is no public MCP mode in production.
+- Public APIs derive audit identity from the authenticated security context; they no longer accept caller-supplied `actor` or `resolvedBy` inputs.
+- MCP routes remain protected through Spring Security role checks; there is no public MCP mode in production. See [`docs/MCP.md`](docs/MCP.md).
 - `docs/archive/SPIKE_PLAN.md` is historical sprint context.

@@ -215,6 +215,7 @@ Complete
 - [x] Secure MCP routes and transport endpoints with role checks.
 - [x] MCP audit now resolves actor from the authenticated security context and records tool metadata.
 - [x] Remove spoofable actor query parameters from case and AI endpoints.
+- [x] Remove spoofable actor query/body inputs from admin sync and manual case resolution.
 - [x] Fix rerun-to-verify so it uses the structured CQL evaluation path and only closes on compliant or excluded outcomes.
 - [x] Add evidence download authorization and audit logging.
 - [x] Tighten production CORS and add startup safety checks.
@@ -229,6 +230,7 @@ Complete
 - `/sse` and `/mcp/**` are now restricted to `ROLE_ADMIN`, `ROLE_CASE_MANAGER`, or `ROLE_MCP_CLIENT`.
 - MCP audit payloads now include the tool name, sanitized arguments, argument hash, result size, success flag, sensitivity label, and timestamp.
 - Case outreach, assignment, escalation, rerun, and AI helper actions now derive actor identity from the authenticated security context instead of request parameters.
+- Admin integration sync now derives actor identity from the authenticated security context, and manual case resolution no longer accepts a caller-supplied resolved-by field.
 - Case rerun-to-verify now evaluates the subject through the persisted measure CQL for the case's evaluation period and only resolves when the structured outcome is `COMPLIANT` or `EXCLUDED`.
 - Evidence downloads now resolve the linked case first, require `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows.
 - Production startup now fails fast when auth is disabled, the JWT secret is weak or missing, localhost/wildcard CORS is configured, or backend demo mode is enabled without an explicit public-demo override.
@@ -246,18 +248,29 @@ Complete
 - `backend/src/test/java/com/workwell/web/EvidenceAccessIntegrationTest.java`
 - `backend/src/test/java/com/workwell/config/StartupSafetyValidatorTest.java`
 - `backend/src/test/java/com/workwell/config/SecurityConfigCorsTest.java`
+- `backend/src/test/java/com/workwell/web/AdminControllerTest.java`
+- `backend/src/test/java/com/workwell/web/RunControllerTest.java`
+- `backend/src/test/java/com/workwell/web/EvalControllerTest.java`
+- `backend/src/test/java/com/workwell/web/MeasureServiceIntegrationTest.java`
+- `backend/src/test/java/com/workwell/web/CaseControllerTest.java`
+- `backend/src/test/java/com/workwell/mcp/McpSecurityIntegrationTest.java`
 - Covers unauthenticated/forbidden/authorized MCP transport access and authenticated audit logging metadata.
 - Covers actor identity flowing from `@WithMockUser` through case and AI controller actions.
+- Covers spoofed admin sync actor input being ignored and spoofed manual-case resolve bodies being ignored.
+- Covers authenticated actor identity for manual runs, reruns, and measure status transitions.
 - Covers single-subject CQL evaluation, compliant/excluded/open rerun branches, and evidence upload/download authorization plus audit logging.
+- Covers safe MCP invalid-argument failures and audit logging.
 - Covers startup guardrails for auth-disabled, wildcard CORS, localhost CORS, weak JWT secrets, and demo-mode override behavior.
 - Covers exact-origin CORS matching for production and local-dev localhost origins.
 - Covers frontend production-build rejection when `NEXT_PUBLIC_DEMO_MODE=true`.
+- Covers removal of caller-supplied actor fields from the case resolve frontend payload.
 
 ### Docs updated
 - `README.md`
 - `frontend/README.md`
 - `docs/ARCHITECTURE.md`
 - `docs/JOURNAL.md`
+- `docs/MCP.md`
 - `.env.example`
 - `docs/new instructions/README_01_P0_SECURITY_AND_CORRECTNESS.md`
 
