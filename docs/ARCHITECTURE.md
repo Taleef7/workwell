@@ -86,7 +86,7 @@ Production endpoints:
 ### 5.5 Cases -> Actions
 1. Operator can assign, escalate, preview/send outreach, and mark delivery state.
 2. Delivery state (`QUEUED|SENT|FAILED`) updates next-action guidance and timeline.
-3. Rerun-to-verify performs scoped rerun for that case and closes case if now compliant.
+3. Rerun-to-verify re-evaluates the case subject through the persisted measure CQL and only closes the case when the structured outcome is compliant or excluded; non-compliant reruns keep the case open/in progress.
 
 ### 5.6 Actions -> Audit
 Every state-changing operation emits an `audit_events` record with actor + entity refs + payload.

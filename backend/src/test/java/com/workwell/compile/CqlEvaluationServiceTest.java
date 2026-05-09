@@ -52,6 +52,39 @@ class CqlEvaluationServiceTest {
     }
 
     @Test
+    void singleSubjectEvaluationMatchesBatchOutcome() throws Exception {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        String cqlText = readClasspathText("measures/audiogram.cql");
+        LocalDate evaluationDate = LocalDate.now();
+
+        DemoRunPayload payload = service.evaluate(
+                "11111111-1111-1111-1111-111111111111",
+                "Audiogram",
+                "v1.0",
+                cqlText,
+                evaluationDate
+        );
+
+        DemoOutcome expected = payload.outcomes().stream()
+                .filter(outcome -> "emp-003".equals(outcome.subjectId()))
+                .findFirst()
+                .orElseThrow();
+
+        DemoOutcome actual = service.evaluateSubject(
+                "Audiogram",
+                "v1.0",
+                cqlText,
+                evaluationDate,
+                "emp-003"
+        );
+
+        assertEquals(expected.outcome(), actual.outcome());
+        assertEquals(expected.summary(), actual.summary());
+        assertEquals(expected.evidenceJson().get("expressionResults"), actual.evidenceJson().get("expressionResults"));
+        assertEquals(expected.evidenceJson().get("evaluatedResource"), actual.evidenceJson().get("evaluatedResource"));
+    }
+
+    @Test
     void perEmployeeFailureIsolationKeepsRunGoing() throws Exception {
         CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties()) {
             @Override
