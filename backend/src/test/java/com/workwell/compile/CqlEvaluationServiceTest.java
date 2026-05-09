@@ -80,8 +80,37 @@ class CqlEvaluationServiceTest {
 
         assertEquals(expected.outcome(), actual.outcome());
         assertEquals(expected.summary(), actual.summary());
+        assertEquals(expected.evidenceJson().keySet(), actual.evidenceJson().keySet());
         assertEquals(expected.evidenceJson().get("expressionResults"), actual.evidenceJson().get("expressionResults"));
         assertEquals(expected.evidenceJson().get("evaluatedResource"), actual.evidenceJson().get("evaluatedResource"));
+        
+        Map<String, Object> expectedWhyFlagged = (Map<String, Object>) expected.evidenceJson().get("why_flagged");
+        Map<String, Object> actualWhyFlagged = (Map<String, Object>) actual.evidenceJson().get("why_flagged");
+        assertNotNull(expectedWhyFlagged);
+        assertNotNull(actualWhyFlagged);
+        assertEquals(expectedWhyFlagged.keySet(), actualWhyFlagged.keySet());
+        assertEquals(expectedWhyFlagged.get("last_exam_date"), actualWhyFlagged.get("last_exam_date"));
+        assertEquals(expectedWhyFlagged.get("compliance_window_days"), actualWhyFlagged.get("compliance_window_days"));
+        assertEquals(expectedWhyFlagged.get("days_overdue"), actualWhyFlagged.get("days_overdue"));
+        assertEquals(expectedWhyFlagged.get("role_eligible"), actualWhyFlagged.get("role_eligible"));
+        assertEquals(expectedWhyFlagged.get("site_eligible"), actualWhyFlagged.get("site_eligible"));
+        assertEquals(expectedWhyFlagged.get("waiver_status"), actualWhyFlagged.get("waiver_status"));
+        assertEquals(expectedWhyFlagged.get("outcome_status"), actualWhyFlagged.get("outcome_status"));
+
+        Map<String, Object> whyFlagged = actualWhyFlagged;
+        assertNotNull(whyFlagged);
+        assertTrue(whyFlagged.containsKey("last_exam_date"));
+        assertTrue(whyFlagged.containsKey("compliance_window_days"));
+        assertTrue(whyFlagged.containsKey("days_overdue"));
+        assertTrue(whyFlagged.containsKey("role_eligible"));
+        assertTrue(whyFlagged.containsKey("site_eligible"));
+        assertTrue(whyFlagged.containsKey("waiver_status"));
+        assertTrue(whyFlagged.containsKey("outcome_status"));
+        assertTrue(whyFlagged.containsKey("generated_at"));
+
+        List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) actual.evidenceJson().get("expressionResults");
+        assertTrue(expressionResults.stream().anyMatch(row -> "Outcome Status".equals(String.valueOf(row.get("define")))),
+                "Expected Outcome Status in expressionResults: " + expressionResults);
     }
 
     @Test

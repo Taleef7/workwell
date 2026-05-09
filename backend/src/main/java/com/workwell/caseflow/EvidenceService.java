@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -57,7 +58,7 @@ public class EvidenceService {
 
         ensureCaseExists(caseId);
 
-        String safeFileName = sanitize(file.getOriginalFilename());
+        String safeFileName = sanitizeFileName(file.getOriginalFilename());
         UUID evidenceId = UUID.randomUUID();
         String storageKey = caseId + "/" + evidenceId + "-" + safeFileName;
         Path targetPath = evidenceRoot.resolve(storageKey).normalize();
@@ -73,6 +74,7 @@ public class EvidenceService {
         }
 
         String resolvedActor = SecurityActor.currentActorOr(actor);
+        Instant uploadedAt = Instant.now();
         jdbcTemplate.update(
                 """
                         INSERT INTO evidence_attachments (
@@ -89,12 +91,13 @@ public class EvidenceService {
                 description == null || description.isBlank() ? null : description.trim()
         );
 
-        insertAudit(caseId, resolvedActor, Map.of(
+        insertUploadAudit(caseId, evidenceId, resolvedActor, Map.of(
                 "evidenceId", evidenceId.toString(),
                 "fileName", safeFileName,
                 "mimeType", mimeType,
                 "fileSizeBytes", file.getSize(),
-                "description", description == null ? "" : description.trim()
+                "description", description == null ? "" : description.trim(),
+                "timestamp", uploadedAt.toString()
         ));
 
         return new EvidenceAttachment(
@@ -106,7 +109,7 @@ public class EvidenceService {
                 mimeType,
                 storageKey,
                 description == null || description.isBlank() ? null : description.trim(),
-                Instant.now()
+                uploadedAt
         );
     }
 
@@ -134,7 +137,32 @@ public class EvidenceService {
     }
 
     public DownloadedEvidence loadForDownload(UUID evidenceId) {
-        EvidenceAttachment attachment = jdbcTemplate.query(
+        EvidenceAttachment attachment = loadAttachment(evidenceId);
+        if (attachment == null) {
+            throw new IllegalArgumentException("Evidence not found");
+        }
+
+        ensureDownloadAllowed();
+        ensureCaseExists(attachment.caseId());
+
+        Path path = evidenceRoot.resolve(attachment.storageKey()).normalize();
+        if (!path.startsWith(evidenceRoot) || !Files.exists(path)) {
+            throw new IllegalStateException("Evidence file is missing");
+        }
+
+        try {
+            byte[] bytes = Files.readAllBytes(path);
+            MediaType mediaType = MediaType.parseMediaType(attachment.mimeType());
+            boolean inline = attachment.mimeType().startsWith("image/");
+            insertDownloadAudit(attachment, bytes.length);
+            return new DownloadedEvidence(attachment, bytes, mediaType, inline);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to read evidence file", ex);
+        }
+    }
+
+    private EvidenceAttachment loadAttachment(UUID evidenceId) {
+        return jdbcTemplate.query(
                 """
                         SELECT id, case_id, uploaded_by, file_name, file_size_bytes, mime_type, storage_key, description, uploaded_at
                         FROM evidence_attachments
@@ -156,23 +184,6 @@ public class EvidenceService {
                 },
                 evidenceId
         );
-        if (attachment == null) {
-            throw new IllegalArgumentException("Evidence not found");
-        }
-
-        Path path = evidenceRoot.resolve(attachment.storageKey()).normalize();
-        if (!path.startsWith(evidenceRoot) || !Files.exists(path)) {
-            throw new IllegalStateException("Evidence file is missing");
-        }
-
-        try {
-            byte[] bytes = Files.readAllBytes(path);
-            MediaType mediaType = MediaType.parseMediaType(attachment.mimeType());
-            boolean inline = attachment.mimeType().startsWith("image/");
-            return new DownloadedEvidence(attachment, bytes, mediaType, inline);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to read evidence file", ex);
-        }
     }
 
     private void ensureCaseExists(UUID caseId) {
@@ -183,16 +194,38 @@ public class EvidenceService {
         }
     }
 
-    private void insertAudit(UUID caseId, String actor, Map<String, Object> payload) {
+    private void ensureDownloadAllowed() {
+        if (!SecurityActor.hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")) {
+            throw new AccessDeniedException("Evidence download requires case manager or admin access");
+        }
+    }
+
+    private void insertUploadAudit(UUID caseId, UUID evidenceId, String actor, Map<String, Object> payload) {
+        writeAudit("EVIDENCE_UPLOADED", "evidence", evidenceId, actor, caseId, payload);
+    }
+
+    private void insertDownloadAudit(EvidenceAttachment attachment, long fileSizeBytes) {
+        Map<String, Object> payload = Map.of(
+                "evidenceId", attachment.id().toString(),
+                "caseId", attachment.caseId().toString(),
+                "fileName", sanitizeFileName(attachment.fileName()),
+                "contentType", attachment.mimeType(),
+                "fileSizeBytes", fileSizeBytes,
+                "timestamp", Instant.now().toString()
+        );
+        writeAudit("EVIDENCE_DOWNLOADED", "evidence", attachment.id(), SecurityActor.currentActor(), attachment.caseId(), payload);
+    }
+
+    private void writeAudit(String eventType, String entityType, UUID entityId, String actor, UUID caseId, Map<String, Object> payload) {
         try {
             jdbcTemplate.update(
                     """
                             INSERT INTO audit_events (event_type, entity_type, entity_id, actor, ref_case_id, payload_json)
                             VALUES (?, ?, ?, ?, ?, ?::jsonb)
                             """,
-                    "EVIDENCE_UPLOADED",
-                    "evidence_attachment",
-                    UUID.randomUUID(),
+                    eventType,
+                    entityType,
+                    entityId,
                     actor,
                     caseId,
                     objectMapper.writeValueAsString(payload)
@@ -202,9 +235,16 @@ public class EvidenceService {
         }
     }
 
-    private String sanitize(String fileName) {
+    private String sanitizeFileName(String fileName) {
         String candidate = fileName == null || fileName.isBlank() ? "evidence" : fileName;
-        return candidate.replaceAll("[^A-Za-z0-9._-]", "_");
+        candidate = candidate.trim().replace('\\', '/');
+        int lastSlash = candidate.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            candidate = candidate.substring(lastSlash + 1);
+        }
+        candidate = candidate.replaceAll("[^A-Za-z0-9._-]", "_");
+        candidate = candidate.replaceAll("^\\.+", "");
+        return candidate.isBlank() ? "evidence" : candidate;
     }
 
     private String detectMimeType(byte[] bytes) {

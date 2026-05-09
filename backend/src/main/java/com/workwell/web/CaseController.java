@@ -16,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -158,6 +159,8 @@ public class CaseController {
                     .contentType(downloaded.mediaType())
                     .header(HttpHeaders.CONTENT_DISPOSITION, disposition + "; filename=\"" + downloaded.attachment().fileName() + "\"")
                     .body(downloaded.bytes());
+        } catch (AccessDeniedException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         } catch (IllegalStateException ex) {
