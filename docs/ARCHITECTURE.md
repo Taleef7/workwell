@@ -97,11 +97,14 @@ Evidence uploads and downloads are restricted to case manager/admin roles; downl
 - CQL `Outcome Status` is the only compliance classification source.
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
+- Production startup is fail-fast: the backend refuses auth-disabled, weak-secret, wildcard-CORS, localhost-CORS-in-production, or backend-demo configurations when a production-like profile is active.
+- Production CORS uses exact allowed origins from `workwell.cors.allowed-origins`; wildcard Vercel patterns are not used.
+- Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
 
 ## 7) External Interfaces
 - REST API: measure, run, case, admin, export endpoints.
 - REST API: evidence upload/download on case detail, role-gated to case manager/admin.
-- MCP: read-only tools with per-call audit events.
+- MCP: read-only tools with per-call audit events and Spring Security role gates on `/sse` and `/mcp/**`.
 - CSV exports: runs/outcomes/cases + audit export.
 
 ## 8) Current Infra Split
