@@ -103,7 +103,7 @@ export default function ProgramsPage() {
       const r = await fetch(`${apiBase}/api/runs/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: "All Programs" })
+        body: JSON.stringify({ scopeType: "ALL_PROGRAMS" })
       });
       if (!r.ok) throw new Error(`Manual run failed (${r.status})`);
       emitToast("Run completed - All Programs refreshed");

@@ -107,7 +107,14 @@ non_compliant INTEGER
 duration_ms BIGINT
 measurement_period_start TIMESTAMPTZ NOT NULL
 measurement_period_end TIMESTAMPTZ NOT NULL
+requested_scope_json JSONB NOT NULL DEFAULT '{}'::jsonb
+failure_summary TEXT
+partial_failure_count INTEGER NOT NULL DEFAULT 0
+dry_run BOOLEAN NOT NULL DEFAULT FALSE
 ```
+
+Runtime status values observed in the current implementation include `REQUESTED`, `QUEUED`, `RUNNING`, `PARTIAL_FAILURE`, `COMPLETED`, `FAILED`, and `CANCELLED`.
+For measure/case runs, `scope_id` stores the resolved measure version UUID; for all-programs runs it remains null.
 
 ### 3.8 `run_logs`
 ```sql

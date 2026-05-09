@@ -2,6 +2,23 @@
 
 ## 2026-05-09
 
+### Scoped runs and run job model phase 1 completed
+
+Completed:
+- Added a typed `ManualRunRequest`/`RunScopeType` contract and routed `/api/runs/manual` through the shared scoped-run executor.
+- Preserved `ALL_PROGRAMS` behavior, added `MEASURE` scope, added `CASE` scope, and made CASE reuse the structured rerun-to-verify path.
+- Persisted scoped-run request metadata, run lifecycle status, failure summary, and partial-failure counts in the `runs` table.
+- Added durable run logs for requested, scope resolved, evaluation, persistence, and completion steps.
+- Updated the runs/programs UI to send `scopeType` payloads and expose a simple scoped run control surface.
+- Added regression tests for scoped measure runs, case reruns, unsupported scopes, and existing run-controller behavior.
+
+Verification:
+- Focused backend tests: `backend\\./gradlew.bat test --tests "com.workwell.run.ScopedRunIntegrationTest" --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.run.Major1PopulationIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+
 ### Final P0 completion pass: MCP auth and actor spoofing hardening completed
 
 Completed:

@@ -57,7 +57,7 @@ public class SeedHistoricalRunsService {
                     .map(scope -> buildAdjustedPayload(runId, scope, evaluationDate, delta))
                     .toList();
 
-            runPersistenceService.persistAllProgramsRun(runId.toString(), "All Programs", payloads);
+            runPersistenceService.persistAllProgramsRun(runId.toString(), "All Programs", payloads, "system");
             log.info("Seeded historical run {} at {} with pass-rate delta {}", runId, evaluationDate, delta);
         }
     }

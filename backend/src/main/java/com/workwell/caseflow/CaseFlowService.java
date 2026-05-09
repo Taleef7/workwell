@@ -366,150 +366,219 @@ public class CaseFlowService {
         }
 
         CaseContext existing = context.get();
-        String employeeExternalId = jdbcTemplate.queryForObject(
-                "SELECT external_id FROM employees WHERE id = ?",
-                String.class,
-                existing.employeeId()
-        );
-        VerificationMeasure verificationMeasure = loadVerificationMeasure(existing.measureVersionId());
-        LocalDate evaluationDate = verificationEvaluationDate(existing.evaluationPeriod());
-        DemoOutcome verificationOutcome = cqlEvaluationService.evaluateSubject(
-                verificationMeasure.measureName(),
-                verificationMeasure.measureVersion(),
-                verificationMeasure.cqlText(),
-                evaluationDate,
-                employeeExternalId
-        );
-        UUID verificationRunId = createVerificationRun(
-                caseId,
-                existing.measureVersionId(),
-                actor,
-                evaluationDate,
-                verificationOutcome
-        );
+        UUID verificationRunId = null;
+        try {
+            String employeeExternalId = jdbcTemplate.queryForObject(
+                    "SELECT external_id FROM employees WHERE id = ?",
+                    String.class,
+                    existing.employeeId()
+            );
+            VerificationMeasure verificationMeasure = loadVerificationMeasure(existing.measureVersionId());
+            LocalDate evaluationDate = verificationEvaluationDate(existing.evaluationPeriod());
+            verificationRunId = createVerificationRun(
+                    caseId,
+                    existing.measureVersionId(),
+                    actor,
+                    evaluationDate,
+                    employeeExternalId
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    verificationRunId,
+                    "INFO",
+                    "Case loaded for rerun-to-verify."
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    verificationRunId,
+                    "INFO",
+                    "Subject resolved for rerun-to-verify: " + employeeExternalId + "."
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    verificationRunId,
+                    "INFO",
+                    "Scoped CQL verification started."
+            );
+            DemoOutcome verificationOutcome = cqlEvaluationService.evaluateSubject(
+                    verificationMeasure.measureName(),
+                    verificationMeasure.measureVersion(),
+                    verificationMeasure.cqlText(),
+                    evaluationDate,
+                    employeeExternalId
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    verificationRunId,
+                    "INFO",
+                    "Scoped CQL verification completed with status " + verificationOutcome.outcome() + "."
+            );
 
-        insertOutcome(
-                verificationRunId,
-                caseId,
-                existing.employeeId(),
-                existing.measureVersionId(),
-                existing.evaluationPeriod(),
-                verificationOutcome,
-                actor
-        );
+            insertOutcome(
+                    verificationRunId,
+                    caseId,
+                    existing.employeeId(),
+                    existing.measureVersionId(),
+                    existing.evaluationPeriod(),
+                    verificationOutcome,
+                    actor
+            );
 
-        insertCaseAction(
-                caseId,
-                "RERUN_TO_VERIFY",
-                actor,
-                Map.of(
-                        "priorOutcomeStatus", existing.currentOutcomeStatus(),
-                        "verifiedStatus", verificationOutcome.outcome(),
-                        "runId", verificationRunId.toString(),
-                        "subjectId", verificationOutcome.subjectId(),
-                        "evaluationPeriod", existing.evaluationPeriod()
-                )
-        );
+            insertCaseAction(
+                    caseId,
+                    "RERUN_TO_VERIFY",
+                    actor,
+                    Map.of(
+                            "priorOutcomeStatus", existing.currentOutcomeStatus(),
+                            "verifiedStatus", verificationOutcome.outcome(),
+                            "runId", verificationRunId.toString(),
+                            "subjectId", verificationOutcome.subjectId(),
+                            "evaluationPeriod", existing.evaluationPeriod()
+                    )
+            );
 
-        String verifiedStatus = verificationOutcome.outcome();
-        String updatedCaseStatus = verificationCaseStatus(existing.status(), verifiedStatus);
-        String nextAction = verificationNextAction(verifiedStatus, existing.measureVersionId());
-        Instant closedAt = verificationClosedAt(verifiedStatus);
-        String closedReason = verificationClosedReason(verifiedStatus);
-        String closedBy = verificationClosedBy(verifiedStatus, actor);
+            String verifiedStatus = verificationOutcome.outcome();
+            String updatedCaseStatus = verificationCaseStatus(existing.status(), verifiedStatus);
+            String nextAction = verificationNextAction(verifiedStatus, existing.measureVersionId());
+            Instant closedAt = verificationClosedAt(verifiedStatus);
+            String closedReason = verificationClosedReason(verifiedStatus);
+            String closedBy = verificationClosedBy(verifiedStatus, actor);
 
-        jdbcTemplate.update(
-                "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = ?, closed_reason = ?, closed_by = ? WHERE id = ?",
-                updatedCaseStatus,
-                priorityFor(verifiedStatus),
-                nextAction,
-                verifiedStatus,
-                verificationRunId,
-                closedAt == null ? null : Timestamp.from(closedAt),
-                closedReason,
-                closedBy,
-                caseId
-        );
+            jdbcTemplate.update(
+                    "UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?, last_run_id = ?, updated_at = NOW(), closed_at = ?, closed_reason = ?, closed_by = ? WHERE id = ?",
+                    updatedCaseStatus,
+                    priorityFor(verifiedStatus),
+                    nextAction,
+                    verifiedStatus,
+                    verificationRunId,
+                    closedAt == null ? null : Timestamp.from(closedAt),
+                    closedReason,
+                    closedBy,
+                    caseId
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    verificationRunId,
+                    "INFO",
+                    "Case updated from " + existing.status() + " to " + updatedCaseStatus + "."
+            );
 
-        Map<String, Object> verificationPayload = new LinkedHashMap<>();
-        verificationPayload.put("priorOutcomeStatus", existing.currentOutcomeStatus());
-        verificationPayload.put("verifiedStatus", verifiedStatus);
-        verificationPayload.put("evaluationPeriod", existing.evaluationPeriod());
-        verificationPayload.put("runId", verificationRunId.toString());
-        verificationPayload.put("status", updatedCaseStatus);
-        verificationPayload.put("nextAction", nextAction);
-        verificationPayload.put("subjectId", verificationOutcome.subjectId());
-        insertAuditEvent(
-                "CASE_RERUN_VERIFIED",
-                "case",
-                caseId,
-                actor,
-                verificationRunId,
-                caseId,
-                existing.measureVersionId(),
-                verificationPayload
-        );
-
-        if ("COMPLIANT".equals(verifiedStatus)) {
+            Map<String, Object> verificationPayload = new LinkedHashMap<>();
+            verificationPayload.put("priorOutcomeStatus", existing.currentOutcomeStatus());
+            verificationPayload.put("verifiedStatus", verifiedStatus);
+            verificationPayload.put("evaluationPeriod", existing.evaluationPeriod());
+            verificationPayload.put("runId", verificationRunId.toString());
+            verificationPayload.put("status", updatedCaseStatus);
+            verificationPayload.put("nextAction", nextAction);
+            verificationPayload.put("subjectId", verificationOutcome.subjectId());
             insertAuditEvent(
-                    "CASE_RESOLVED",
+                    "CASE_RERUN_VERIFIED",
                     "case",
                     caseId,
+                    actor,
+                    verificationRunId,
+                    caseId,
+                    existing.measureVersionId(),
+                    verificationPayload
+            );
+
+            if ("COMPLIANT".equals(verifiedStatus)) {
+                insertAuditEvent(
+                        "CASE_RESOLVED",
+                        "case",
+                        caseId,
+                        actor,
+                        verificationRunId,
+                        caseId,
+                        existing.measureVersionId(),
+                        Map.of(
+                                "status", "COMPLIANT",
+                                "summary", "Case closed by rerun-to-verify after real CQL verification.",
+                                "runId", verificationRunId.toString()
+                        )
+                );
+            } else if ("EXCLUDED".equals(verifiedStatus)) {
+                Optional<WaiverService.WaiverRecord> waiver = waiverService.ensureExclusionWaiver(
+                        existing.employeeId(),
+                        existing.measureVersionId(),
+                        verificationOutcome.summary(),
+                        actor,
+                        "Auto-linked from excluded verification rerun."
+                );
+                Map<String, Object> excludedPayload = new LinkedHashMap<>(verificationPayload);
+                excludedPayload.put("waiverId", waiver.map(record -> record.waiverId().toString()).orElse(null));
+                excludedPayload.put("exclusionReason", waiver.map(WaiverService.WaiverRecord::exclusionReason).orElse(verificationOutcome.summary()));
+                excludedPayload.put("waiverExpiresAt", waiver.flatMap(record -> Optional.ofNullable(record.expiresAt())).map(Instant::toString).orElse(null));
+                excludedPayload.put("waiverExpired", waiver.map(WaiverService.WaiverRecord::expired).orElse(false));
+                insertAuditEvent(
+                        "CASE_EXCLUDED",
+                        "case",
+                        caseId,
+                        actor,
+                        verificationRunId,
+                        caseId,
+                        existing.measureVersionId(),
+                        excludedPayload
+                );
+            }
+
+            boolean hasEvaluationError = verificationOutcome.evidenceJson() != null && verificationOutcome.evidenceJson().containsKey("evaluationError");
+            String finalRunStatus = hasEvaluationError ? "PARTIAL_FAILURE" : "COMPLETED";
+            jdbcTemplate.update(
+                    """
+                            UPDATE runs
+                            SET status = ?,
+                                completed_at = NOW(),
+                                total_evaluated = 1,
+                                compliant = ?,
+                                non_compliant = ?,
+                                duration_ms = ?,
+                                failure_summary = ?,
+                                partial_failure_count = ?
+                            WHERE id = ?
+                            """,
+                    finalRunStatus,
+                    "COMPLIANT".equals(verifiedStatus) ? 1 : 0,
+                    "COMPLIANT".equals(verifiedStatus) ? 0 : 1,
+                    5_000L,
+                    hasEvaluationError ? verificationOutcome.summary() : null,
+                    hasEvaluationError ? 1 : 0,
+                    verificationRunId
+            );
+            insertAuditEvent(
+                    "RUN_COMPLETED",
+                    "run",
+                    verificationRunId,
                     actor,
                     verificationRunId,
                     caseId,
                     existing.measureVersionId(),
                     Map.of(
-                            "status", "COMPLIANT",
-                            "summary", "Case closed by rerun-to-verify after real CQL verification.",
-                            "runId", verificationRunId.toString()
+                            "scope", "case",
+                            "source", "rerun-to-verify",
+                            "subjectId", verificationOutcome.subjectId(),
+                            "verifiedStatus", verifiedStatus,
+                            "status", finalRunStatus,
+                            "totalEvaluated", 1,
+                            "compliant", "COMPLIANT".equals(verifiedStatus) ? 1 : 0,
+                            "nonCompliant", "COMPLIANT".equals(verifiedStatus) ? 0 : 1,
+                            "partialFailureCount", hasEvaluationError ? 1 : 0
                     )
             );
-        } else if ("EXCLUDED".equals(verifiedStatus)) {
-            Optional<WaiverService.WaiverRecord> waiver = waiverService.ensureExclusionWaiver(
-                    existing.employeeId(),
-                    existing.measureVersionId(),
-                    verificationOutcome.summary(),
-                    actor,
-                    "Auto-linked from excluded verification rerun."
-            );
-            Map<String, Object> excludedPayload = new LinkedHashMap<>(verificationPayload);
-            excludedPayload.put("waiverId", waiver.map(record -> record.waiverId().toString()).orElse(null));
-            excludedPayload.put("exclusionReason", waiver.map(WaiverService.WaiverRecord::exclusionReason).orElse(verificationOutcome.summary()));
-            excludedPayload.put("waiverExpiresAt", waiver.flatMap(record -> Optional.ofNullable(record.expiresAt())).map(Instant::toString).orElse(null));
-            excludedPayload.put("waiverExpired", waiver.map(WaiverService.WaiverRecord::expired).orElse(false));
-            insertAuditEvent(
-                    "CASE_EXCLUDED",
-                    "case",
-                    caseId,
-                    actor,
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
                     verificationRunId,
-                    caseId,
-                    existing.measureVersionId(),
-                    excludedPayload
+                    "INFO",
+                    "Run completed with status " + finalRunStatus + "."
             );
+
+            return loadCase(caseId);
+        } catch (RuntimeException ex) {
+            if (verificationRunId != null) {
+                markVerificationRunFailed(verificationRunId, actor, "rerun-to-verify", ex);
+            }
+            throw ex;
         }
-
-        insertAuditEvent(
-                "RUN_COMPLETED",
-                "run",
-                verificationRunId,
-                actor,
-                verificationRunId,
-                caseId,
-                existing.measureVersionId(),
-                Map.of(
-                        "scope", "case",
-                        "source", "rerun-to-verify",
-                        "subjectId", verificationOutcome.subjectId(),
-                        "verifiedStatus", verifiedStatus,
-                        "totalEvaluated", 1,
-                        "compliant", "COMPLIANT".equals(verifiedStatus) ? 1 : 0,
-                        "nonCompliant", "COMPLIANT".equals(verifiedStatus) ? 0 : 1
-                )
-        );
-
-        return loadCase(caseId);
     }
 
     public Optional<CaseDetail> resolveCase(UUID caseId, String actor, String note, Instant resolvedAt) {
@@ -1052,57 +1121,115 @@ public class CaseFlowService {
             UUID measureVersionId,
             String actor,
             LocalDate evaluationDate,
-            DemoOutcome verificationOutcome
+            String subjectId
     ) {
         UUID runId = UUID.randomUUID();
         Instant now = Instant.now();
         Instant measurementPeriodStart = evaluationDate.atStartOfDay().toInstant(ZoneOffset.UTC);
         Instant measurementPeriodEnd = evaluationDate.plusDays(1).atStartOfDay().minusSeconds(1).toInstant(ZoneOffset.UTC);
-        long compliant = "COMPLIANT".equals(verificationOutcome.outcome()) ? 1L : 0L;
-        long nonCompliant = compliant == 1L ? 0L : 1L;
+        boolean runInserted = false;
+        try {
+            jdbcTemplate.update(
+                    """
+                            INSERT INTO runs (
+                                id, scope_type, scope_id, site, trigger_type, status, triggered_by,
+                                started_at, completed_at, total_evaluated, compliant, non_compliant,
+                                duration_ms, measurement_period_start, measurement_period_end,
+                                requested_scope_json, failure_summary, partial_failure_count, dry_run
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                            """,
+                    ps -> {
+                        ps.setObject(1, runId);
+                        ps.setString(2, "case");
+                        ps.setObject(3, measureVersionId);
+                        ps.setString(4, "demo");
+                        ps.setString(5, "manual");
+                        ps.setString(6, "RUNNING");
+                        ps.setString(7, actor);
+                        ps.setObject(8, Timestamp.from(now));
+                        ps.setNull(9, java.sql.Types.TIMESTAMP);
+                        ps.setInt(10, 0);
+                        ps.setInt(11, 0);
+                        ps.setInt(12, 0);
+                        ps.setLong(13, 5_000L);
+                        ps.setObject(14, Timestamp.from(measurementPeriodStart));
+                        ps.setObject(15, Timestamp.from(measurementPeriodEnd));
+                        ps.setString(16, toJsonb(Map.of(
+                                "scopeType", "CASE",
+                                "caseId", caseId.toString(),
+                                "subjectId", subjectId,
+                                "evaluationDate", evaluationDate.toString(),
+                                "dryRun", false
+                        )));
+                        ps.setNull(17, java.sql.Types.VARCHAR);
+                        ps.setInt(18, 0);
+                        ps.setBoolean(19, false);
+                    }
+            );
+            runInserted = true;
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Case-level rerun-to-verify requested for subject " + subjectId + "."
+            );
+            insertAuditEvent(
+                    "RUN_STARTED",
+                    "run",
+                    runId,
+                    actor,
+                    runId,
+                    caseId,
+                    measureVersionId,
+                    Map.of(
+                            "scope", "case",
+                            "source", "rerun-to-verify",
+                            "subjectId", subjectId,
+                            "evaluationPeriod", evaluationDate.toString(),
+                            "status", "RUNNING"
+                    )
+            );
+            return runId;
+        } catch (RuntimeException ex) {
+            if (runInserted) {
+                markVerificationRunFailed(runId, actor, "create-verification-run", ex);
+            }
+            throw ex;
+        }
+    }
+
+    private void markVerificationRunFailed(UUID runId, String actor, String stage, RuntimeException ex) {
+        String failureSummary = "Run failed at stage " + stage + ": " + (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
         jdbcTemplate.update(
-                "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ps -> {
-                    ps.setObject(1, runId);
-                    ps.setString(2, "case");
-                    ps.setObject(3, measureVersionId);
-                    ps.setString(4, "demo");
-                    ps.setString(5, "manual");
-                    ps.setString(6, "completed");
-                    ps.setString(7, actor);
-                    ps.setObject(8, Timestamp.from(now));
-                    ps.setObject(9, Timestamp.from(now.plusSeconds(5)));
-                    ps.setInt(10, 1);
-                    ps.setLong(11, compliant);
-                    ps.setLong(12, nonCompliant);
-                    ps.setLong(13, 5_000L);
-                    ps.setObject(14, Timestamp.from(measurementPeriodStart));
-                    ps.setObject(15, Timestamp.from(measurementPeriodEnd));
-                }
+                """
+                        UPDATE runs
+                        SET status = 'FAILED',
+                            completed_at = NOW(),
+                            failure_summary = ?
+                        WHERE id = ?
+                        """,
+                failureSummary,
+                runId
         );
         jdbcTemplate.update(
                 "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
                 runId,
-                "INFO",
-                "Case-level rerun-to-verify executed for subject " + verificationOutcome.subjectId() + "."
+                "ERROR",
+                failureSummary
         );
         insertAuditEvent(
-                "RUN_STARTED",
+                "RUN_FAILED",
                 "run",
                 runId,
                 actor,
                 runId,
-                caseId,
-                measureVersionId,
+                null,
+                null,
                 Map.of(
-                        "scope", "case",
-                        "source", "rerun-to-verify",
-                        "subjectId", verificationOutcome.subjectId(),
-                        "verifiedStatus", verificationOutcome.outcome(),
-                        "evaluationPeriod", evaluationDate.toString()
+                        "stage", stage,
+                        "failureSummary", failureSummary
                 )
         );
-        return runId;
     }
 
     private void insertOutcome(

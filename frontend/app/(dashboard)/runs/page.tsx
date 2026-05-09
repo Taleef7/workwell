@@ -58,9 +58,22 @@ type RunOutcomeRow = {
 
 type ManualRunResponse = {
   runId: string;
-  scope: string;
+  scopeType: string;
+  scopeLabel: string;
+  status: string;
   activeMeasuresExecuted: number;
+  totalEvaluated: number;
+  compliant: number;
+  nonCompliant: number;
+  message: string;
   measuresExecuted: string[];
+};
+
+type MeasureOption = {
+  id: string;
+  name: string;
+  version: string;
+  status: string;
 };
 
 type RunInsightResponse = {
@@ -82,12 +95,31 @@ export default function RunsPage() {
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
+  const [measures, setMeasures] = useState<MeasureOption[]>([]);
+  const [runScopeType, setRunScopeType] = useState<"ALL_PROGRAMS" | "MEASURE" | "CASE">("ALL_PROGRAMS");
+  const [runMeasureId, setRunMeasureId] = useState("");
+  const [runCaseId, setRunCaseId] = useState("");
+  const [runEvaluationDate, setRunEvaluationDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
-  const rerunSupported = selectedRun ? selectedRun.scopeType === "all_programs" || selectedRun.scopeType === "measure" : false;
+  const rerunSupported = selectedRun ? ["all_programs", "measure", "case"].includes(selectedRun.scopeType) : false;
+
+  const loadMeasures = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/measures`, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as MeasureOption[];
+      setMeasures(data);
+      setRunMeasureId((current) => current || (data.length > 0 ? data[0].id : ""));
+    } catch {
+      setMeasures([]);
+    }
+  }, [apiBase]);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -154,8 +186,9 @@ export default function RunsPage() {
     if (apiBase) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadRuns();
+      void loadMeasures();
     }
-  }, [apiBase, loadRuns]);
+  }, [apiBase, loadMeasures, loadRuns]);
 
   useEffect(() => {
     if (apiBase && selectedRunId) {
@@ -165,17 +198,35 @@ export default function RunsPage() {
     }
   }, [apiBase, selectedRunId, loadSelectedRun, loadRunInsight]);
 
-  async function runAllProgramsNow() {
+  async function runManualScope() {
     setError(null);
     try {
+      const payload: Record<string, string | boolean | null> = {
+        scopeType: runScopeType,
+        dryRun: false
+      };
+      if (runScopeType === "MEASURE") {
+        if (!runMeasureId) {
+          throw new Error("Select a measure before running a measure-scoped job.");
+        }
+        payload.measureId = runMeasureId;
+      } else if (runScopeType === "CASE") {
+        if (!runCaseId.trim()) {
+          throw new Error("Enter a case ID before running a case-scoped job.");
+        }
+        payload.caseId = runCaseId.trim();
+      }
+      if (runEvaluationDate) {
+        payload.evaluationDate = runEvaluationDate;
+      }
       const response = await fetch(`${apiBase}/api/runs/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: "All Programs" })
+        body: JSON.stringify(payload)
       });
       if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
       const data = (await response.json()) as ManualRunResponse;
-      emitToast(`Run completed - ${data.activeMeasuresExecuted} measures generated`);
+      emitToast(`${data.scopeLabel} - ${data.message}`);
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();
@@ -238,9 +289,6 @@ export default function RunsPage() {
           >
             Export outcomes CSV
           </button>
-          <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
-            Run Measures Now
-          </button>
           <button
             className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
             onClick={() => void rerunSameScope()}
@@ -263,6 +311,7 @@ export default function RunsPage() {
           <option value="">All Scope Types</option>
           <option value="all_programs">all_programs</option>
           <option value="measure">measure</option>
+          <option value="case">case</option>
         </select>
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
           <option value="">All Trigger Types</option>
@@ -274,12 +323,72 @@ export default function RunsPage() {
         </button>
       </div>
 
+      <div className="rounded-md border border-slate-200 bg-white p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Scope</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              value={runScopeType}
+              onChange={(e) => setRunScopeType(e.target.value as "ALL_PROGRAMS" | "MEASURE" | "CASE")}
+            >
+              <option value="ALL_PROGRAMS">ALL_PROGRAMS</option>
+              <option value="MEASURE">MEASURE</option>
+              <option value="CASE">CASE</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Measure</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-100"
+              value={runMeasureId}
+              onChange={(e) => setRunMeasureId(e.target.value)}
+              disabled={runScopeType !== "MEASURE"}
+            >
+              <option value="">Select a measure</option>
+              {measures.map((measure) => (
+                <option key={measure.id} value={measure.id}>
+                  {measure.name} v{measure.version} ({measure.status})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Evaluation Date</label>
+            <input
+              type="date"
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              value={runEvaluationDate}
+              onChange={(e) => setRunEvaluationDate(e.target.value)}
+            />
+          </div>
+          {runScopeType === "CASE" ? (
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Case ID</label>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                value={runCaseId}
+                onChange={(e) => setRunCaseId(e.target.value)}
+                placeholder="Paste a case UUID"
+              />
+            </div>
+          ) : null}
+          <div className="flex items-end">
+            <button className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={() => void runManualScope()}>
+              Run Now
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">MEASURE runs require a measure selection. CASE runs require a case UUID.</p>
+      </div>
+
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
-        <p className="text-xs text-amber-700">Rerun is available only for all-programs or measure-scoped runs.</p>
+        <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, or case-scoped runs.</p>
       ) : null}
       {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
-      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Click &apos;Run Measures Now&apos; to start.</p> : null}
+      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Use the run controls above to start one.</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white">

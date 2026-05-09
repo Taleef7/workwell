@@ -139,8 +139,14 @@ class RunControllerTest {
         UUID runId = UUID.fromString("66666666-6666-6666-6666-666666666666");
         when(allProgramsRunService.rerunSameScope(runId, "cm@workwell.dev")).thenReturn(new ManualRunResponse(
                 "77777777-7777-7777-7777-777777777777",
+                "ALL_PROGRAMS",
                 "All Programs",
+                "COMPLETED",
                 4,
+                100L,
+                80L,
+                20L,
+                "Run completed",
                 List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
         ));
 

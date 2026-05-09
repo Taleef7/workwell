@@ -69,14 +69,15 @@ Production endpoints:
 4. Activation is blocked unless compile gate and test-fixture gate pass.
 
 ### 5.3 CQL -> Run
-1. User triggers manual run (`/api/runs/manual` or scoped run endpoint).
-2. Run row inserted in `runs`.
-3. For each employee:
+1. User triggers a scoped manual run (`/api/runs/manual`) or a case rerun using the shared CASE path.
+2. Run row inserted in `runs` with requested-scope JSON and a transitional status such as `RUNNING`.
+3. For each employee in the resolved scope:
    - Synthetic FHIR bundle is constructed from employee profile + exam config.
    - CQL engine evaluates measure defines against in-memory FHIR repository.
    - `Outcome Status` define determines bucket (`COMPLIANT|DUE_SOON|OVERDUE|MISSING_DATA|EXCLUDED`).
    - Define-level `expressionResults` are captured into `outcomes.evidence_json`.
-4. Run summary counters are finalized in `runs`.
+4. Run summary counters, failure summary, and final status are persisted in `runs`.
+5. Supported scopes now include `ALL_PROGRAMS`, `MEASURE`, and `CASE`; unsupported scopes fail fast with a 400.
 
 ### 5.4 Outcomes -> Cases
 1. Non-compliant outcomes (`DUE_SOON|OVERDUE|MISSING_DATA`) upsert open cases.
@@ -98,6 +99,7 @@ Public API actions derive audit identity from the authenticated security context
 - CQL `Outcome Status` is the only compliance classification source.
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
+- Scoped runs use the same structured CQL path as rerun-to-verify for CASE verification.
 - Public API actor identity always comes from Spring Security; caller-supplied actor fields are ignored or removed.
 - Production startup is fail-fast: the backend refuses auth-disabled, weak-secret, wildcard-CORS, localhost-CORS-in-production, or backend-demo configurations when a production-like profile is active.
 - Production CORS uses exact allowed origins from `workwell.cors.allowed-origins`; wildcard Vercel patterns are not used.
