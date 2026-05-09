@@ -2,6 +2,22 @@
 
 ## 2026-05-09
 
+### Final P0 completion pass: MCP auth and actor spoofing hardening completed
+
+Completed:
+- Confirmed MCP routes are authenticated and role-gated at `/sse` and `/mcp/**`, with `MCP_TOOL_CALLED` audit rows using the authenticated security-context actor.
+- Removed the spoofable `actor` query parameter from the admin integration sync endpoint.
+- Removed the spoofable `resolvedBy` request-body field from manual case resolution and normalized closed-by bookkeeping to the authenticated actor.
+- Updated the frontend case detail resolve action to stop sending a caller-controlled actor field.
+- Added regression tests for spoofed admin sync requests, spoofed case-resolution bodies, authenticated run reruns, authenticated manual run triggers, authenticated measure-status audit rows, and safe MCP invalid-argument handling.
+
+Verification:
+- Backend targeted tests: `backend\\./gradlew.bat test --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.measure.MeasureServiceIntegrationTest" --tests "com.workwell.mcp.McpSecurityIntegrationTest"` -> PASS
+- Backend full suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+
 ### P0 production CORS tightening and startup safety checks completed
 
 Completed:

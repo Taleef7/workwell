@@ -198,7 +198,70 @@ class CaseControllerTest {
                                   "note": "Missing action type"
                                 }
                                 """))
-                .andExpect(status().isBadRequest());
+                        .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void resolvesCaseUsingAuthenticatedActorEvenWhenBodyTriesToSpoofIt() throws Exception {
+        UUID caseId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        when(caseFlowService.resolveCase(
+                caseId,
+                "cm@workwell.dev",
+                "Closure note",
+                Instant.parse("2026-05-04T12:18:00Z")
+        )).thenReturn(java.util.Optional.of(
+                new CaseFlowService.CaseDetail(
+                        caseId,
+                        "patient-003",
+                        "patient-003",
+                        "AnnualAudiogramCompleted",
+                        UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                        "1.0.0",
+                        "2026-05-04",
+                        "CLOSED",
+                        "LOW",
+                        null,
+                        "Manually resolved by case manager/admin.",
+                        "OVERDUE",
+                        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                        Instant.parse("2026-05-04T12:00:00Z"),
+                        Instant.parse("2026-05-04T12:18:00Z"),
+                        Instant.parse("2026-05-04T12:18:00Z"),
+                        "MANUAL_RESOLVE",
+                        "cm@workwell.dev",
+                        null,
+                        null,
+                        false,
+                        Map.of(),
+                        "OVERDUE",
+                        "Audiogram is outside annual compliance window.",
+                        Instant.parse("2026-05-04T12:00:10Z"),
+                        null,
+                        List.of()
+                )
+        ));
+
+        mockMvc.perform(post("/api/cases/{caseId}/actions", caseId)
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "type": "RESOLVE",
+                                  "note": "Closure note",
+                                  "resolvedAt": "2026-05-04T12:18:00Z",
+                                  "resolvedBy": "spoofed@workwell.dev"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.closedBy").value("cm@workwell.dev"));
+
+        verify(caseFlowService).resolveCase(
+                caseId,
+                "cm@workwell.dev",
+                "Closure note",
+                Instant.parse("2026-05-04T12:18:00Z")
+        );
     }
 
     @Test

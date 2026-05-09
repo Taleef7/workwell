@@ -512,7 +512,7 @@ public class CaseFlowService {
         return loadCase(caseId);
     }
 
-    public Optional<CaseDetail> resolveCase(UUID caseId, String actor, String note, Instant resolvedAt, String resolvedBy) {
+    public Optional<CaseDetail> resolveCase(UUID caseId, String actor, String note, Instant resolvedAt) {
         Optional<CaseContext> context = loadCaseContext(caseId);
         if (context.isEmpty()) {
             return Optional.empty();
@@ -529,7 +529,7 @@ public class CaseFlowService {
         }
 
         Instant effectiveResolvedAt = resolvedAt == null ? Instant.now() : resolvedAt;
-        String effectiveResolvedBy = resolvedBy == null || resolvedBy.isBlank() ? actor : resolvedBy.trim();
+        String effectiveResolvedBy = actor;
 
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW(), closed_at = ?, closed_reason = ?, closed_by = ? WHERE id = ?",

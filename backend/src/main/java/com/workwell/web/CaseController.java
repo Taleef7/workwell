@@ -97,21 +97,19 @@ public class CaseController {
             @Valid @RequestBody CaseActionRequest request
     ) {
         try {
-            String actor = SecurityActor.currentActor();
             if ("RESOLVE".equalsIgnoreCase(request.type())) {
                 return caseFlowService.resolveCase(
                                 caseId,
-                                actor,
+                                SecurityActor.currentActor(),
                                 request.note(),
-                                request.resolvedAt(),
-                                request.resolvedBy()
+                                request.resolvedAt()
                         )
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
             }
             if ("SCHEDULE_APPOINTMENT".equalsIgnoreCase(request.type())) {
                 return caseFlowService.scheduleAppointment(
                                 caseId,
-                                actor,
+                                SecurityActor.currentActor(),
                                 request.appointmentType(),
                                 request.scheduledAt(),
                                 request.location(),
@@ -219,7 +217,6 @@ public class CaseController {
             @NotBlank String type,
             String note,
             Instant resolvedAt,
-            String resolvedBy,
             String appointmentType,
             Instant scheduledAt,
             String location,

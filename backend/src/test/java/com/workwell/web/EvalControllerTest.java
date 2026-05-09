@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
@@ -132,9 +133,10 @@ class EvalControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void runsAllProgramsScopeUsingActiveMeasureVersions() throws Exception {
         UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(allProgramsRunService.runAllPrograms("All Programs", "system")).thenReturn(
+        when(allProgramsRunService.runAllPrograms("All Programs", "cm@workwell.dev")).thenReturn(
                 new EvalController.ManualRunResponse(
                         runId.toString(),
                         "All Programs",

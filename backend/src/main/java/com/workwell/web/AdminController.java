@@ -53,13 +53,12 @@ public class AdminController {
 
     @PostMapping("/api/admin/integrations/{integration}/sync")
     public IntegrationHealthService.IntegrationHealth syncIntegration(
-            @PathVariable String integration,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable String integration
     ) {
         try {
             return integrationHealthService.triggerManualSync(
                     integration,
-                    actor == null || actor.isBlank() ? SecurityActor.currentActorOr("admin-user") : actor
+                    SecurityActor.currentActor()
             );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -89,7 +88,7 @@ public class AdminController {
                     request.subject(),
                     request.bodyText(),
                     request.type(),
-                    SecurityActor.currentActorOr("admin-user")
+                    SecurityActor.currentActor()
             );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -139,7 +138,7 @@ public class AdminController {
                     request.employeeExternalId(),
                     request.measureId(),
                     request.exclusionReason(),
-                    SecurityActor.currentActorOr("admin-user"),
+                    SecurityActor.currentActor(),
                     request.expiresAt(),
                     request.notes(),
                     request.active()

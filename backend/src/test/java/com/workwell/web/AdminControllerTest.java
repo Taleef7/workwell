@@ -1,6 +1,7 @@
 package com.workwell.web;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,10 +20,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AdminController.class)
 @AutoConfigureMockMvc(addFilters = false)
+@WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
 class AdminControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -57,19 +60,21 @@ class AdminControllerTest {
 
     @Test
     void triggersIntegrationSync() throws Exception {
-        when(integrationHealthService.triggerManualSync("mcp", "admin-user")).thenReturn(
+        when(integrationHealthService.triggerManualSync("mcp", "admin@workwell.dev")).thenReturn(
                 new IntegrationHealthService.IntegrationHealth("mcp", "MCP", "healthy", Instant.parse("2026-05-05T10:05:00Z"), "sync complete", java.util.Map.of("sseUrl", "http://127.0.0.1:8080/sse"))
         );
 
-        mockMvc.perform(post("/api/admin/integrations/mcp/sync"))
+        mockMvc.perform(post("/api/admin/integrations/mcp/sync").param("actor", "spoofed@workwell.dev"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.integration").value("mcp"))
                 .andExpect(jsonPath("$.status").value("healthy"));
+
+        verify(integrationHealthService).triggerManualSync("mcp", "admin@workwell.dev");
     }
 
     @Test
     void returnsBadRequestForUnsupportedIntegration() throws Exception {
-        when(integrationHealthService.triggerManualSync("unknown", "admin-user"))
+        when(integrationHealthService.triggerManualSync("unknown", "admin@workwell.dev"))
                 .thenThrow(new IllegalArgumentException("Unsupported integration: unknown"));
 
         mockMvc.perform(post("/api/admin/integrations/unknown/sync"))
@@ -185,14 +190,14 @@ class AdminControllerTest {
                 "Compliance Follow-up Required",
                 "Please complete follow-up.",
                 "OUTREACH",
-                "admin-user"
+                "admin@workwell.dev"
         )).thenReturn(new OutreachTemplateService.OutreachTemplate(
                 UUID.fromString("11111111-0000-0000-0000-000000000004"),
                 "General Compliance Reminder",
                 "Compliance Follow-up Required",
                 "Please complete follow-up.",
                 "OUTREACH",
-                "admin-user",
+                "admin@workwell.dev",
                 Instant.parse("2026-05-08T01:00:00Z"),
                 Instant.parse("2026-05-08T01:00:00Z"),
                 true

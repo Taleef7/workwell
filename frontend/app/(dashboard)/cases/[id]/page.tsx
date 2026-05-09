@@ -326,8 +326,7 @@ export default function CaseDetailPage() {
         body: JSON.stringify({
           type: "RESOLVE",
           note: resolveNote.trim(),
-          resolvedAt: new Date().toISOString(),
-          resolvedBy: caseDetail?.assignee ?? undefined
+          resolvedAt: new Date().toISOString()
         })
       });
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
