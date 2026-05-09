@@ -2,6 +2,22 @@
 
 ## 2026-05-09
 
+### P0 production CORS tightening and startup safety checks completed
+
+Completed:
+- Replaced the hardcoded CORS origin patterns with exact-origin configuration driven by `WORKWELL_CORS_ALLOWED_ORIGINS`.
+- Added `StartupSafetyValidator` to fail startup in production-like deployments when auth is disabled, the JWT secret is weak or missing, localhost/wildcard CORS is configured, or backend demo mode is enabled without an explicit public-demo override.
+- Added backend tests for production-like auth disablement, wildcard and localhost CORS rejection, weak JWT secret rejection, exact-origin success, and demo-mode override behavior.
+- Added frontend production-build enforcement so `NEXT_PUBLIC_DEMO_MODE=true` fails `next build`.
+
+Verification:
+- Focused backend config tests: `backend\\./gradlew.bat test --tests "com.workwell.config.StartupSafetyValidatorTest" --tests "com.workwell.config.SecurityConfigCorsTest"` -> PASS
+- Full backend suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+- Frontend negative guard check: `NEXT_PUBLIC_DEMO_MODE=true frontend\\corepack pnpm build` -> FAIL as expected with the explicit unsafe-configuration error
+
 ### P0 rerun sanity check and evidence authorization completed
 
 Completed:

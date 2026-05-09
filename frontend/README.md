@@ -23,7 +23,13 @@ pnpm dev
 
 - `NEXT_PUBLIC_API_BASE_URL` - backend API base URL
 - `NEXT_PUBLIC_APP_NAME` - display name shown in the UI
-- `NEXT_PUBLIC_DEMO_MODE` - set to `true` to prefill the demo login form locally
+- `NEXT_PUBLIC_DEMO_MODE` - set to `true` only for local demo runs; production builds fail if it is enabled
+
+## Safety notes
+
+- The login page demo prefill is a local convenience only.
+- Do not ship `NEXT_PUBLIC_DEMO_MODE=true` in production.
+- The frontend build will stop if demo mode is left on during a production build.
 
 ## Notes
 

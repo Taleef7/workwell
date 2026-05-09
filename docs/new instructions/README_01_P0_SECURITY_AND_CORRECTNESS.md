@@ -209,7 +209,7 @@ Docs must distinguish production behavior from synthetic/demo behavior.
 ## Implementation Progress
 
 ### Status
-In progress
+Complete
 
 ### Completed
 - [x] Secure MCP routes and transport endpoints with role checks.
@@ -217,12 +217,13 @@ In progress
 - [x] Remove spoofable actor query parameters from case and AI endpoints.
 - [x] Fix rerun-to-verify so it uses the structured CQL evaluation path and only closes on compliant or excluded outcomes.
 - [x] Add evidence download authorization and audit logging.
+- [x] Tighten production CORS and add startup safety checks.
 
 ### In progress
-- [ ] Tighten production CORS and add startup safety checks.
+- None.
 
 ### Blocked
-- Blocker: None.
+- None.
 
 ### Notes from implementation
 - `/sse` and `/mcp/**` are now restricted to `ROLE_ADMIN`, `ROLE_CASE_MANAGER`, or `ROLE_MCP_CLIENT`.
@@ -230,6 +231,10 @@ In progress
 - Case outreach, assignment, escalation, rerun, and AI helper actions now derive actor identity from the authenticated security context instead of request parameters.
 - Case rerun-to-verify now evaluates the subject through the persisted measure CQL for the case's evaluation period and only resolves when the structured outcome is `COMPLIANT` or `EXCLUDED`.
 - Evidence downloads now resolve the linked case first, require `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows.
+- Production startup now fails fast when auth is disabled, the JWT secret is weak or missing, localhost/wildcard CORS is configured, or backend demo mode is enabled without an explicit public-demo override.
+- Production CORS is exact-origin only via `WORKWELL_CORS_ALLOWED_ORIGINS`.
+- Frontend demo login prefill is guarded in `next.config.ts` and production builds fail if `NEXT_PUBLIC_DEMO_MODE=true`.
+- MCP remains protected through Spring Security role checks; there is no public MCP mode toggle in this repo.
 
 ### Tests added/updated
 - `backend/src/test/java/com/workwell/mcp/McpSecurityIntegrationTest.java`
@@ -239,12 +244,22 @@ In progress
 - `backend/src/test/java/com/workwell/compile/CqlEvaluationServiceTest.java`
 - `backend/src/test/java/com/workwell/caseflow/CaseFlowRerunIntegrationTest.java`
 - `backend/src/test/java/com/workwell/web/EvidenceAccessIntegrationTest.java`
+- `backend/src/test/java/com/workwell/config/StartupSafetyValidatorTest.java`
+- `backend/src/test/java/com/workwell/config/SecurityConfigCorsTest.java`
 - Covers unauthenticated/forbidden/authorized MCP transport access and authenticated audit logging metadata.
 - Covers actor identity flowing from `@WithMockUser` through case and AI controller actions.
 - Covers single-subject CQL evaluation, compliant/excluded/open rerun branches, and evidence upload/download authorization plus audit logging.
+- Covers startup guardrails for auth-disabled, wildcard CORS, localhost CORS, weak JWT secrets, and demo-mode override behavior.
+- Covers exact-origin CORS matching for production and local-dev localhost origins.
+- Covers frontend production-build rejection when `NEXT_PUBLIC_DEMO_MODE=true`.
 
 ### Docs updated
 - `README.md`
+- `frontend/README.md`
 - `docs/ARCHITECTURE.md`
 - `docs/JOURNAL.md`
+- `.env.example`
 - `docs/new instructions/README_01_P0_SECURITY_AND_CORRECTNESS.md`
+
+### Commit
+- Pending

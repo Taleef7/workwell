@@ -99,4 +99,8 @@ Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
 - `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
 - Case rerun-to-verify re-evaluates the subject through the structured CQL path and only resolves the case when that evaluation returns a compliant or excluded outcome.
 - Evidence uploads and downloads are role-protected for `ROLE_CASE_MANAGER` and `ROLE_ADMIN`; downloads resolve the linked case first and write `EVIDENCE_DOWNLOADED` audit events with sanitized filenames and content types.
+- Production backend startup rejects unsafe settings: auth-off, weak or missing JWT secrets, wildcard CORS, localhost CORS in production-like profiles, and backend demo flags without an explicit public-demo override.
+- Production CORS uses exact origins from `WORKWELL_CORS_ALLOWED_ORIGINS`; `https://*.vercel.app` is not allowed.
+- Frontend demo prefill (`NEXT_PUBLIC_DEMO_MODE`) is local-only and the frontend build fails if it is enabled during a production build.
+- MCP routes remain protected through Spring Security role checks; there is no public MCP mode in production.
 - `docs/archive/SPIKE_PLAN.md` is historical sprint context.

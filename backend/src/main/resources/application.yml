@@ -19,6 +19,14 @@ management:
         include: health
 
 workwell:
+  auth:
+    enabled: ${WORKWELL_AUTH_ENABLED:true}
+    jwt-secret: ${WORKWELL_AUTH_JWT_SECRET:workwell-demo-secret-change-me}
+  cors:
+    allowed-origins: ${WORKWELL_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
+  demo:
+    enabled: ${WORKWELL_DEMO_ENABLED:false}
+    allow-public-demo: ${WORKWELL_DEMO_ALLOW_PUBLIC_DEMO:false}
   evaluation:
     compliance-rates:
       audiogram: 0.78
