@@ -84,11 +84,9 @@ public class CaseController {
     @PostMapping("/api/cases/{caseId}/actions/outreach")
     public CaseFlowService.CaseDetail sendOutreach(
             @PathVariable UUID caseId,
-            @RequestParam(name = "templateId", required = false) UUID templateId,
-            @RequestParam(name = "actor", required = false) String actor
+            @RequestParam(name = "templateId", required = false) UUID templateId
     ) {
-        String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-        return caseFlowService.sendOutreach(caseId, resolvedActor, templateId)
+        return caseFlowService.sendOutreach(caseId, SecurityActor.currentActor(), templateId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 
@@ -98,7 +96,7 @@ public class CaseController {
             @Valid @RequestBody CaseActionRequest request
     ) {
         try {
-            String actor = SecurityActor.currentActorOr("case-manager");
+            String actor = SecurityActor.currentActor();
             if ("RESOLVE".equalsIgnoreCase(request.type())) {
                 return caseFlowService.resolveCase(
                                 caseId,
@@ -138,7 +136,7 @@ public class CaseController {
             @RequestParam(name = "description", required = false) String description
     ) {
         try {
-            return evidenceService.upload(caseId, file, description, SecurityActor.currentActorOr("case-manager"));
+            return evidenceService.upload(caseId, file, description, SecurityActor.currentActor());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IllegalStateException ex) {
@@ -179,12 +177,10 @@ public class CaseController {
     @PostMapping("/api/cases/{caseId}/actions/outreach/delivery")
     public CaseFlowService.CaseDetail updateOutreachDelivery(
             @PathVariable UUID caseId,
-            @RequestParam(name = "deliveryStatus") String deliveryStatus,
-            @RequestParam(name = "actor", required = false) String actor
+            @RequestParam(name = "deliveryStatus") String deliveryStatus
     ) {
         try {
-            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-            return caseFlowService.updateOutreachDelivery(caseId, deliveryStatus, resolvedActor)
+            return caseFlowService.updateOutreachDelivery(caseId, deliveryStatus, SecurityActor.currentActor())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -193,32 +189,26 @@ public class CaseController {
 
     @PostMapping("/api/cases/{caseId}/rerun-to-verify")
     public CaseFlowService.CaseDetail rerunToVerify(
-            @PathVariable UUID caseId,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable UUID caseId
     ) {
-        String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-        return caseFlowService.rerunToVerify(caseId, resolvedActor)
+        return caseFlowService.rerunToVerify(caseId, SecurityActor.currentActor())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 
     @PostMapping("/api/cases/{caseId}/assign")
     public CaseFlowService.CaseDetail assignCase(
             @PathVariable UUID caseId,
-            @RequestParam(name = "assignee", required = false) String assignee,
-            @RequestParam(name = "actor", required = false) String actor
+            @RequestParam(name = "assignee", required = false) String assignee
     ) {
-        String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-        return caseFlowService.assignCase(caseId, assignee, resolvedActor)
+        return caseFlowService.assignCase(caseId, assignee, SecurityActor.currentActor())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 
     @PostMapping("/api/cases/{caseId}/escalate")
     public CaseFlowService.CaseDetail escalateCase(
-            @PathVariable UUID caseId,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable UUID caseId
     ) {
-        String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-        return caseFlowService.escalateCase(caseId, resolvedActor)
+        return caseFlowService.escalateCase(caseId, SecurityActor.currentActor())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Case not found"));
     }
 
