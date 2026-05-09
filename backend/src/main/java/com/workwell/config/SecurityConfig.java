@@ -46,6 +46,7 @@ public class SecurityConfig {
         } else {
             http.authorizeHttpRequests(auth -> auth
                     .requestMatchers("/api/auth/login", "/actuator/health", "/api/health").permitAll()
+                    .requestMatchers("/sse", "/mcp/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_CASE_MANAGER", "ROLE_MCP_CLIENT")
                     .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/measures/*/approve").hasAnyAuthority("ROLE_APPROVER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/measures/*/activate").hasAnyAuthority("ROLE_APPROVER", "ROLE_ADMIN")
