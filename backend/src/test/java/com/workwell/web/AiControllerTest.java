@@ -14,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AiController.class)
@@ -26,8 +27,9 @@ class AiControllerTest {
     private AiAssistService aiAssistService;
 
     @Test
+    @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
     void draftsSpec() throws Exception {
-        when(aiAssistService.draftSpec("policy text", "Audiogram", "measure-author", null)).thenReturn(
+        when(aiAssistService.draftSpec("policy text", "Audiogram", "author@workwell.dev", null)).thenReturn(
                 new AiAssistService.DraftSpecResponse(
                         true,
                         "Audiogram",
@@ -48,9 +50,10 @@ class AiControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void explainsCase() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(aiAssistService.explainCase(caseId, "case-manager")).thenReturn(
+        when(aiAssistService.explainCase(caseId, "cm@workwell.dev")).thenReturn(
                 new AiAssistService.CaseExplanationResponse(
                         caseId.toString(),
                         "Explanation",
@@ -67,9 +70,10 @@ class AiControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
     void runInsight() throws Exception {
         UUID runId = UUID.fromString("22222222-2222-2222-2222-222222222222");
-        when(aiAssistService.runInsight(runId, "operations-user")).thenReturn(
+        when(aiAssistService.runInsight(runId, "admin@workwell.dev")).thenReturn(
                 new AiAssistService.RunInsightResponse(false, java.util.List.of("Insight A", "Insight B"))
         );
 

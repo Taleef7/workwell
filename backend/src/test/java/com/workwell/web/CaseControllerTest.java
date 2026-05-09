@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(CaseController.class)
@@ -115,6 +116,7 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
     void returnsCaseDetail() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         when(caseFlowService.loadCase(caseId)).thenReturn(java.util.Optional.of(
@@ -178,7 +180,7 @@ class CaseControllerTest {
         verify(caseAccessAuditService).recordCaseViewed(
                 eq(caseId),
                 eq(UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
-                eq("system"),
+                eq("admin@workwell.dev"),
                 eq("patient-003"),
                 eq("AnnualAudiogramCompleted"),
                 any(Instant.class)
@@ -200,9 +202,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void sendsOutreachAction() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.sendOutreach(caseId, "case-manager", null)).thenReturn(java.util.Optional.of(
+        when(caseFlowService.sendOutreach(caseId, "cm@workwell.dev", null)).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-003",
@@ -233,7 +236,7 @@ class CaseControllerTest {
                         List.of(
                                 new CaseFlowService.AuditEvent(
                                         "CASE_OUTREACH_SENT",
-                                        "case-manager",
+                                        "cm@workwell.dev",
                                         Instant.parse("2026-05-04T12:15:00Z"),
                                         Map.of("channel", "SIMULATED_EMAIL")
                                 )
@@ -270,9 +273,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rerunsCaseToVerifyClosure() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.rerunToVerify(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+        when(caseFlowService.rerunToVerify(caseId, "cm@workwell.dev")).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-003",
@@ -291,7 +295,7 @@ class CaseControllerTest {
                         Instant.parse("2026-05-04T12:18:00Z"),
                         Instant.parse("2026-05-04T12:18:00Z"),
                         "RERUN_VERIFIED",
-                        "case-manager",
+                        "cm@workwell.dev",
                         null,
                         null,
                         false,
@@ -303,7 +307,7 @@ class CaseControllerTest {
                         List.of(
                                 new CaseFlowService.AuditEvent(
                                         "CASE_RESOLVED",
-                                        "case-manager",
+                                        "cm@workwell.dev",
                                         Instant.parse("2026-05-04T12:18:00Z"),
                                         Map.of("status", "COMPLIANT")
                                 )
@@ -318,9 +322,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void assignsCase() throws Exception {
         UUID caseId = UUID.fromString("aaaaaaaa-1111-1111-1111-111111111111");
-        when(caseFlowService.assignCase(caseId, "supervisor-a", "case-manager")).thenReturn(java.util.Optional.of(
+        when(caseFlowService.assignCase(caseId, "supervisor-a", "cm@workwell.dev")).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-003",
@@ -358,9 +363,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void escalatesCase() throws Exception {
         UUID caseId = UUID.fromString("bbbbbbbb-1111-1111-1111-111111111111");
-        when(caseFlowService.escalateCase(caseId, "case-manager")).thenReturn(java.util.Optional.of(
+        when(caseFlowService.escalateCase(caseId, "cm@workwell.dev")).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-004",
@@ -398,9 +404,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void updatesOutreachDeliveryState() throws Exception {
         UUID caseId = UUID.fromString("cccccccc-1111-1111-1111-111111111111");
-        when(caseFlowService.updateOutreachDelivery(caseId, "FAILED", "case-manager")).thenReturn(java.util.Optional.of(
+        when(caseFlowService.updateOutreachDelivery(caseId, "FAILED", "cm@workwell.dev")).thenReturn(java.util.Optional.of(
                 new CaseFlowService.CaseDetail(
                         caseId,
                         "patient-004",
@@ -438,9 +445,10 @@ class CaseControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rejectsOutreachDeliveryUpdateWhenServiceValidationFails() throws Exception {
         UUID caseId = UUID.fromString("cccccccc-1111-1111-1111-111111111111");
-        when(caseFlowService.updateOutreachDelivery(caseId, "SENT", "case-manager"))
+        when(caseFlowService.updateOutreachDelivery(caseId, "SENT", "cm@workwell.dev"))
                 .thenThrow(new IllegalArgumentException("Cannot update delivery state before outreach is sent"));
 
         mockMvc.perform(post("/api/cases/{caseId}/actions/outreach/delivery", caseId).param("deliveryStatus", "SENT"))

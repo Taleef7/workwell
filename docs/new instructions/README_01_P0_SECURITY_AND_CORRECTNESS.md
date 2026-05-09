@@ -214,9 +214,9 @@ In progress
 ### Completed
 - [x] Secure MCP routes and transport endpoints with role checks.
 - [x] MCP audit now resolves actor from the authenticated security context and records tool metadata.
+- [x] Remove spoofable actor query parameters from case and AI endpoints.
 
 ### In progress
-- [ ] Remove spoofable actor query parameters.
 - [ ] Fix rerun-to-verify so it uses the real evaluation path or refuses to close the case.
 - [ ] Add evidence download authorization and audit logging.
 - [ ] Tighten production CORS and add startup safety checks.
@@ -227,11 +227,15 @@ In progress
 ### Notes from implementation
 - `/sse` and `/mcp/**` are now restricted to `ROLE_ADMIN`, `ROLE_CASE_MANAGER`, or `ROLE_MCP_CLIENT`.
 - MCP audit payloads now include the tool name, sanitized arguments, argument hash, result size, success flag, sensitivity label, and timestamp.
+- Case outreach, assignment, escalation, rerun, and AI helper actions now derive actor identity from the authenticated security context instead of request parameters.
 
 ### Tests added/updated
 - `backend/src/test/java/com/workwell/mcp/McpSecurityIntegrationTest.java`
 - `backend/src/test/java/com/workwell/mcp/McpServerConfigTest.java`
+- `backend/src/test/java/com/workwell/web/CaseControllerTest.java`
+- `backend/src/test/java/com/workwell/web/AiControllerTest.java`
 - Covers unauthenticated/forbidden/authorized MCP transport access and authenticated audit logging metadata.
+- Covers actor identity flowing from `@WithMockUser` through case and AI controller actions.
 
 ### Docs updated
 - `docs/new instructions/README_01_P0_SECURITY_AND_CORRECTNESS.md`

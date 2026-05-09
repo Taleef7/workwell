@@ -25,12 +25,10 @@ public class AiController {
     @PostMapping({"/api/ai/draft-spec", "/api/measures/{measureId}/ai/draft-spec"})
     public AiAssistService.DraftSpecResponse draftSpec(
             @PathVariable(name = "measureId", required = false) UUID measureId,
-            @RequestBody DraftSpecRequest request,
-            @RequestParam(name = "actor", required = false) String actor
+            @RequestBody DraftSpecRequest request
     ) {
         try {
-            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("measure-author") : actor;
-            return aiAssistService.draftSpec(request.policyText(), request.measureName(), resolvedActor, measureId);
+            return aiAssistService.draftSpec(request.policyText(), request.measureName(), SecurityActor.currentActor(), measureId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
@@ -38,12 +36,10 @@ public class AiController {
 
     @PostMapping({"/api/cases/{caseId}/explain", "/api/cases/{caseId}/ai/explain"})
     public AiAssistService.CaseExplanationResponse explainCase(
-            @PathVariable UUID caseId,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable UUID caseId
     ) {
         try {
-            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("case-manager") : actor;
-            return aiAssistService.explainCase(caseId, resolvedActor);
+            return aiAssistService.explainCase(caseId, SecurityActor.currentActor());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
@@ -51,12 +47,10 @@ public class AiController {
 
     @PostMapping("/api/runs/{runId}/ai/insight")
     public AiAssistService.RunInsightResponse runInsight(
-            @PathVariable UUID runId,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable UUID runId
     ) {
         try {
-            String resolvedActor = actor == null || actor.isBlank() ? SecurityActor.currentActorOr("operations-user") : actor;
-            return aiAssistService.runInsight(runId, resolvedActor);
+            return aiAssistService.runInsight(runId, SecurityActor.currentActor());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
