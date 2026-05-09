@@ -262,4 +262,4 @@ Complete
 - `docs/new instructions/README_01_P0_SECURITY_AND_CORRECTNESS.md`
 
 ### Commit
-- Pending
+- d644291 fix(security): tighten production cors and startup checks
