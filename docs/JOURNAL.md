@@ -2,6 +2,18 @@
 
 ## 2026-05-09
 
+### P0 rerun sanity check and evidence authorization completed
+
+Completed:
+- Sanity-checked the rerun-to-verify path after commit `518f378` and confirmed the case rerun now flows through the structured CQL evaluator instead of fabricating a COMPLIANT outcome.
+- Hardened evidence access so uploads and downloads are restricted to `ROLE_CASE_MANAGER` and `ROLE_ADMIN`, downloads resolve the linked case first, and download responses are audited as `EVIDENCE_DOWNLOADED`.
+- Added regression coverage for compliant, excluded, due-soon, overdue, and missing-data rerun branches plus evidence upload/download authorization, sanitization, and audit logging.
+
+Verification:
+- Focused backend slice: `backend\\./gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest" --tests "com.workwell.caseflow.CaseFlowRerunIntegrationTest" --tests "com.workwell.web.EvidenceAccessIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test` -> PASS
+- Backend build: `backend\\./gradlew.bat build` -> PASS
+
 ### P0 rerun-to-verify hardening completed
 
 Completed:

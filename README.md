@@ -74,6 +74,7 @@ pnpm dev
 - `POST /api/runs/manual`
 - `GET /api/runs?limit=1`
 - `GET /api/cases?status=open`
+- `POST /api/cases/{caseId}/evidence` and `GET /api/evidence/{id}/download` for case evidence, restricted to case manager/admin roles
 - `GET /api/admin/integrations`
 - `GET /api/exports/runs?format=csv`
 - `GET /api/exports/outcomes?format=csv&runId={id}`
@@ -97,4 +98,5 @@ Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
 
 - `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
 - Case rerun-to-verify re-evaluates the subject through the structured CQL path and only resolves the case when that evaluation returns a compliant or excluded outcome.
+- Evidence uploads and downloads are role-protected for `ROLE_CASE_MANAGER` and `ROLE_ADMIN`; downloads resolve the linked case first and write `EVIDENCE_DOWNLOADED` audit events with sanitized filenames and content types.
 - `docs/archive/SPIKE_PLAN.md` is historical sprint context.

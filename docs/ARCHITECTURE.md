@@ -90,6 +90,7 @@ Production endpoints:
 
 ### 5.6 Actions -> Audit
 Every state-changing operation emits an `audit_events` record with actor + entity refs + payload.
+Evidence uploads and downloads are restricted to case manager/admin roles; downloads resolve the linked case, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows with the evidence UUID, case UUID, content type, file size, and timestamp.
 
 ## 6) Runtime Invariants
 - AI cannot set compliance status.
@@ -99,6 +100,7 @@ Every state-changing operation emits an `audit_events` record with actor + entit
 
 ## 7) External Interfaces
 - REST API: measure, run, case, admin, export endpoints.
+- REST API: evidence upload/download on case detail, role-gated to case manager/admin.
 - MCP: read-only tools with per-call audit events.
 - CSV exports: runs/outcomes/cases + audit export.
 

@@ -216,9 +216,9 @@ In progress
 - [x] MCP audit now resolves actor from the authenticated security context and records tool metadata.
 - [x] Remove spoofable actor query parameters from case and AI endpoints.
 - [x] Fix rerun-to-verify so it uses the structured CQL evaluation path and only closes on compliant or excluded outcomes.
+- [x] Add evidence download authorization and audit logging.
 
 ### In progress
-- [ ] Add evidence download authorization and audit logging.
 - [ ] Tighten production CORS and add startup safety checks.
 
 ### Blocked
@@ -229,6 +229,7 @@ In progress
 - MCP audit payloads now include the tool name, sanitized arguments, argument hash, result size, success flag, sensitivity label, and timestamp.
 - Case outreach, assignment, escalation, rerun, and AI helper actions now derive actor identity from the authenticated security context instead of request parameters.
 - Case rerun-to-verify now evaluates the subject through the persisted measure CQL for the case's evaluation period and only resolves when the structured outcome is `COMPLIANT` or `EXCLUDED`.
+- Evidence downloads now resolve the linked case first, require `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows.
 
 ### Tests added/updated
 - `backend/src/test/java/com/workwell/mcp/McpSecurityIntegrationTest.java`
@@ -237,9 +238,10 @@ In progress
 - `backend/src/test/java/com/workwell/web/AiControllerTest.java`
 - `backend/src/test/java/com/workwell/compile/CqlEvaluationServiceTest.java`
 - `backend/src/test/java/com/workwell/caseflow/CaseFlowRerunIntegrationTest.java`
+- `backend/src/test/java/com/workwell/web/EvidenceAccessIntegrationTest.java`
 - Covers unauthenticated/forbidden/authorized MCP transport access and authenticated audit logging metadata.
 - Covers actor identity flowing from `@WithMockUser` through case and AI controller actions.
-- Covers single-subject CQL evaluation and non-compliant case rerun behavior.
+- Covers single-subject CQL evaluation, compliant/excluded/open rerun branches, and evidence upload/download authorization plus audit logging.
 
 ### Docs updated
 - `README.md`
