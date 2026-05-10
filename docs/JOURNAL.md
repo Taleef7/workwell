@@ -2,6 +2,26 @@
 
 ## 2026-05-09
 
+### Frontend: Studio page split into hooks and tab components (README_03 Part B)
+
+Completed:
+- Extracted all types into `frontend/features/studio/types.ts`.
+- Extracted pure helper functions into `frontend/features/studio/utils.ts` (`parseCompileIssue`, `formatIssue`, `compileStatusClass`, `valueSetBadgeClass`).
+- Created `hooks/useMeasureDetail.ts` — loads measure + activation readiness + version history; returns state + `load` refresh callback.
+- Created `hooks/useValueSets.ts` — loads global value set catalog; returns `allValueSets` + `load`.
+- Created `hooks/useOshaReferences.ts` — loads OSHA reference options; returns `oshaReferences` + `load`.
+- Created tab components that own their own local state and take `api`/`measureId`/callbacks as props:
+  - `components/SpecTab.tsx` — spec form with AI draft, owns policyRef/description/etc.
+  - `components/CqlTab.tsx` — Monaco editor + compile error markers.
+  - `components/ValueSetsTab.tsx` — attach/detach/create value sets.
+  - `components/TestsTab.tsx` — fixture CRUD + validate.
+  - `components/ReleaseApprovalTab.tsx` — readiness checklist, version history, lifecycle confirmation modals.
+- Route page `studio/[id]/page.tsx` reduced from 944 to ~120 lines: param parsing, hook composition, tab navigation, and shell rendering only.
+
+Verification:
+- Frontend lint: `frontend\\corepack pnpm lint` -> exit 0
+- Frontend build: `frontend\\corepack pnpm build` -> `✓ Compiled successfully`, all 12 routes built
+
 ### Frontend: typed API client introduced, global fetch monkey-patch removed
 
 Completed:

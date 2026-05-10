@@ -180,19 +180,17 @@ Rerun-to-verify messaging must say closure depends on actual new CQL outcome.
 - [x] `app/login/page.tsx` intentionally unchanged (no token at login time)
 - [x] lint exit 0, build all 12 routes pass
 
-### Part B: Measure Studio componentization — PENDING
+### Part B: Measure Studio componentization — COMPLETE (2026-05-09)
 
-- [ ] `frontend/features/studio/hooks/useMeasureDetail.ts`
-- [ ] `frontend/features/studio/hooks/useMeasureActions.ts`
-- [ ] `frontend/features/studio/hooks/useValueSets.ts`
-- [ ] `frontend/features/studio/hooks/useOshaReferences.ts`
-- [ ] `frontend/features/studio/hooks/useActivationReadiness.ts`
-- [ ] `frontend/features/studio/components/StudioHeader.tsx`
-- [ ] `frontend/features/studio/components/StudioTabs.tsx`
-- [ ] `frontend/features/studio/components/ActivationReadinessCard.tsx`
-- [ ] `frontend/features/studio/components/SpecTab.tsx`
-- [ ] `frontend/features/studio/components/CqlTab.tsx`
-- [ ] `frontend/features/studio/components/ValueSetsTab.tsx`
-- [ ] `frontend/features/studio/components/TestsTab.tsx`
-- [ ] `frontend/features/studio/components/ReleaseApprovalTab.tsx`
-- [ ] Route page `studio/[id]/page.tsx` trimmed to param parsing + shell render
+- [x] `frontend/features/studio/types.ts` — all shared types
+- [x] `frontend/features/studio/utils.ts` — parseCompileIssue, formatIssue, compileStatusClass, valueSetBadgeClass
+- [x] `frontend/features/studio/hooks/useMeasureDetail.ts` — load measure + activation readiness + version history
+- [x] `frontend/features/studio/hooks/useValueSets.ts` — load global value set catalog
+- [x] `frontend/features/studio/hooks/useOshaReferences.ts` — load OSHA reference options
+- [x] `frontend/features/studio/components/SpecTab.tsx` — spec form + AI draft, owns local form state
+- [x] `frontend/features/studio/components/CqlTab.tsx` — Monaco editor + compile, owns compile state
+- [x] `frontend/features/studio/components/ValueSetsTab.tsx` — attach/detach/create value sets
+- [x] `frontend/features/studio/components/TestsTab.tsx` — fixture CRUD + validate
+- [x] `frontend/features/studio/components/ReleaseApprovalTab.tsx` — readiness checklist + version history + lifecycle actions + confirmation modals
+- [x] Route page `studio/[id]/page.tsx` trimmed to ~120 lines: param parsing + hook composition + shell render
+- [x] lint: exit 0, build: all 12 routes compiled successfully
