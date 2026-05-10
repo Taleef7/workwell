@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(RunController.class)
@@ -133,12 +134,19 @@ class RunControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rerunsSameScope() throws Exception {
         UUID runId = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(allProgramsRunService.rerunSameScope(runId, "system")).thenReturn(new ManualRunResponse(
+        when(allProgramsRunService.rerunSameScope(runId, "cm@workwell.dev")).thenReturn(new ManualRunResponse(
                 "77777777-7777-7777-7777-777777777777",
+                "ALL_PROGRAMS",
                 "All Programs",
+                "COMPLETED",
                 4,
+                100L,
+                80L,
+                20L,
+                "Run completed",
                 List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
         ));
 
@@ -148,10 +156,11 @@ class RunControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rerunReturnsBadRequestWhenScopeInvalid() throws Exception {
         UUID runId = UUID.fromString("88888888-8888-8888-8888-888888888888");
         doThrow(new IllegalArgumentException("Unsupported run scope type: custom"))
-                .when(allProgramsRunService).rerunSameScope(runId, "system");
+                .when(allProgramsRunService).rerunSameScope(runId, "cm@workwell.dev");
 
         mockMvc.perform(post("/api/runs/{id}/rerun", runId))
                 .andExpect(status().isBadRequest());

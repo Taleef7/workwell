@@ -26,13 +26,14 @@ Production endpoints:
 - Backend: `https://workwell-measure-studio-api.fly.dev`
 
 ## 3) Backend Module Boundaries (`com.workwell.*`)
-- `measure`: measure catalog, versioning, lifecycle transitions.
+- `measure`: measure catalog, versioning, lifecycle transitions, policy traceability matrix (`MeasureTraceabilityService`), dry-run activation impact preview (`MeasureImpactPreviewService`), and value set governance + terminology mapping (`ValueSetGovernanceService` — resolve-check, diff, CQL unattached reference detection, terminology mapping CRUD).
+- `admin`: integration health, scheduler, waivers, outreach templates, and data readiness (`DataReadinessService` — source mapping, freshness, missingness computation).
 - `valueset`: value set registry and measure/value-set linkage.
 - `compile`: CQL translator compile validation and compile metadata.
 - `fhir`: measure library/resource assembly used by evaluation runtime.
 - `run`: run orchestration, run detail/summary read models, rerun scope support.
 - `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline.
-- `audit`: append-only audit event publisher + export/query paths.
+- `audit`: append-only audit event publisher + export/query paths. `AuditPacketService` assembles structured audit export packets (case, run, measure version) as JSON or HTML bytes; writes `AUDIT_PACKET_GENERATED` audit events and records in `audit_packet_exports`.
 - `export`: runs/outcomes/cases CSV contracts.
 - `integrations`: integration service adapters/checks.
 - `admin`: scheduler settings, integration health, outreach template APIs.
@@ -69,14 +70,15 @@ Production endpoints:
 4. Activation is blocked unless compile gate and test-fixture gate pass.
 
 ### 5.3 CQL -> Run
-1. User triggers manual run (`/api/runs/manual` or scoped run endpoint).
-2. Run row inserted in `runs`.
-3. For each employee:
+1. User triggers a scoped manual run (`/api/runs/manual`) or a case rerun using the shared CASE path.
+2. Run row inserted in `runs` with requested-scope JSON and a transitional status such as `RUNNING`.
+3. For each employee in the resolved scope:
    - Synthetic FHIR bundle is constructed from employee profile + exam config.
    - CQL engine evaluates measure defines against in-memory FHIR repository.
    - `Outcome Status` define determines bucket (`COMPLIANT|DUE_SOON|OVERDUE|MISSING_DATA|EXCLUDED`).
    - Define-level `expressionResults` are captured into `outcomes.evidence_json`.
-4. Run summary counters are finalized in `runs`.
+4. Run summary counters, failure summary, and final status are persisted in `runs`.
+5. Supported scopes now include `ALL_PROGRAMS`, `MEASURE`, and `CASE`; unsupported scopes fail fast with a 400.
 
 ### 5.4 Outcomes -> Cases
 1. Non-compliant outcomes (`DUE_SOON|OVERDUE|MISSING_DATA`) upsert open cases.
@@ -86,20 +88,29 @@ Production endpoints:
 ### 5.5 Cases -> Actions
 1. Operator can assign, escalate, preview/send outreach, and mark delivery state.
 2. Delivery state (`QUEUED|SENT|FAILED`) updates next-action guidance and timeline.
-3. Rerun-to-verify performs scoped rerun for that case and closes case if now compliant.
+3. Rerun-to-verify re-evaluates the case subject through the persisted measure CQL and only closes the case when the structured outcome is compliant or excluded; non-compliant reruns keep the case open/in progress.
 
 ### 5.6 Actions -> Audit
 Every state-changing operation emits an `audit_events` record with actor + entity refs + payload.
+Evidence uploads and downloads are restricted to case manager/admin roles; downloads resolve the linked case, sanitize the response filename, and write `EVIDENCE_DOWNLOADED` audit rows with the evidence UUID, case UUID, content type, file size, and timestamp.
+Public API actions derive audit identity from the authenticated security context. The backend no longer accepts caller-supplied `actor` or `resolvedBy` fields for audit identity.
 
 ## 6) Runtime Invariants
 - AI cannot set compliance status.
 - CQL `Outcome Status` is the only compliance classification source.
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
+- Scoped runs use the same structured CQL path as rerun-to-verify for CASE verification.
+- Public API actor identity always comes from Spring Security; caller-supplied actor fields are ignored or removed.
+- Production startup is fail-fast: the backend refuses auth-disabled, weak-secret, wildcard-CORS, localhost-CORS-in-production, or backend-demo configurations when a production-like profile is active.
+- Production CORS uses exact allowed origins from `workwell.cors.allowed-origins`; wildcard Vercel patterns are not used.
+- Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
 
 ## 7) External Interfaces
-- REST API: measure, run, case, admin, export endpoints.
-- MCP: read-only tools with per-call audit events.
+- REST API: measure, run, case, admin, export, and auditor packet endpoints.
+- REST API: evidence upload/download on case detail, role-gated to case manager/admin.
+- MCP: read-only tools with per-call audit events and Spring Security role gates on `/sse` and `/mcp/**`.
+- MCP tool audit actors come from the authenticated security context, not a hardcoded transport identity.
 - CSV exports: runs/outcomes/cases + audit export.
 
 ## 8) Current Infra Split

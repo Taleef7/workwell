@@ -17,20 +17,25 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 public class SecurityConfig {
     private final ObjectProvider<JwtService> jwtServiceProvider;
     private final boolean authEnabled;
+    private final String allowedOriginsConfig;
 
     public SecurityConfig(
             ObjectProvider<JwtService> jwtServiceProvider,
-            @Value("${workwell.auth.enabled:true}") boolean authEnabled
+            @Value("${workwell.auth.enabled:true}") boolean authEnabled,
+            @Value("${workwell.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}") String allowedOriginsConfig
     ) {
         this.jwtServiceProvider = jwtServiceProvider;
         this.authEnabled = authEnabled;
+        this.allowedOriginsConfig = allowedOriginsConfig;
     }
 
     @Bean
@@ -46,7 +51,11 @@ public class SecurityConfig {
         } else {
             http.authorizeHttpRequests(auth -> auth
                     .requestMatchers("/api/auth/login", "/actuator/health", "/api/health").permitAll()
+                    .requestMatchers("/sse", "/mcp/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_CASE_MANAGER", "ROLE_MCP_CLIENT")
                     .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
+                    .requestMatchers(HttpMethod.POST, "/api/cases/*/evidence").hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")
+                    .requestMatchers(HttpMethod.GET, "/api/cases/*/evidence").hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")
+                    .requestMatchers(HttpMethod.GET, "/api/evidence/*/download").hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/measures/*/approve").hasAnyAuthority("ROLE_APPROVER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/measures/*/activate").hasAnyAuthority("ROLE_APPROVER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/measures/*/deprecate").hasAuthority("ROLE_ADMIN")
@@ -77,11 +86,7 @@ public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of(
-                "https://workwell-measure-studio.vercel.app",
-                "https://*.vercel.app",
-                "http://localhost:3000"
-        ));
+        config.setAllowedOrigins(parseAllowedOrigins(allowedOriginsConfig));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
@@ -89,5 +94,12 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;
+    }
+
+    static List<String> parseAllowedOrigins(String configuredOrigins) {
+        return Arrays.stream(StringUtils.commaDelimitedListToStringArray(configuredOrigins))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList();
     }
 }

@@ -69,19 +69,20 @@ public class RunPersistenceService {
 
     @Transactional
     public void persistDemoRun(DemoRunPayload run) {
-        persistSingleMeasureRun(run, "measure", "demo", "manual", "system");
+        persistMeasureRun(run, "measure", "demo", "manual", "system", Map.of(), false);
     }
 
     @Transactional
-    public UUID persistAllProgramsRun(String runId, String scopeLabel, List<DemoRunPayload> measureRuns) {
+    public UUID persistAllProgramsRun(String runId, String scopeLabel, List<DemoRunPayload> measureRuns, String actor) {
         if (measureRuns.isEmpty()) {
             throw new IllegalArgumentException("No active measures found to execute.");
         }
 
         String stage = "start";
+        UUID persistedRunId = UUID.fromString(runId);
+        boolean runInserted = false;
         try {
             seedSyntheticEmployees();
-            UUID persistedRunId = UUID.fromString(runId);
             Instant startedAt = LocalDate.parse(measureRuns.get(0).evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
             Instant completedAt = startedAt.plusSeconds(60);
             String evaluationPeriod = measureRuns.get(0).evaluationDate();
@@ -92,34 +93,57 @@ public class RunPersistenceService {
                     .filter(outcome -> "COMPLIANT".equals(outcome.outcome()))
                     .count();
             long nonCompliant = totalEvaluated - compliant;
+            long partialFailureCount = countPartialFailuresAcrossRuns(measureRuns);
+            String finalStatus = partialFailureCount > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
+            String failureSummary = partialFailureCount > 0
+                    ? partialFailureCount + " measure evaluation(s) returned evaluationError"
+                    : null;
 
             stage = "insert-run";
             jdbcTemplate.update(
-                    "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    """
+                            INSERT INTO runs (
+                                id, scope_type, scope_id, site, trigger_type, status, triggered_by,
+                                started_at, completed_at, total_evaluated, compliant, non_compliant,
+                                duration_ms, measurement_period_start, measurement_period_end,
+                                requested_scope_json, failure_summary, partial_failure_count, dry_run
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                            """,
                     ps -> {
                         ps.setObject(1, persistedRunId);
                         ps.setString(2, "all_programs");
                         ps.setNull(3, java.sql.Types.OTHER);
                         ps.setString(4, scopeLabel);
                         ps.setString(5, "manual");
-                        ps.setString(6, "completed");
-                        ps.setString(7, "system");
+                        ps.setString(6, "RUNNING");
+                        ps.setString(7, actor);
                         ps.setObject(8, Timestamp.from(startedAt));
-                        ps.setObject(9, Timestamp.from(completedAt));
+                        ps.setNull(9, java.sql.Types.TIMESTAMP);
                         ps.setLong(10, totalEvaluated);
                         ps.setLong(11, compliant);
                         ps.setLong(12, nonCompliant);
                         ps.setLong(13, 60_000L);
                         ps.setObject(14, Timestamp.from(startedAt));
                         ps.setObject(15, Timestamp.from(completedAt));
+                        ps.setString(16, toJsonb(Map.of(
+                                "scopeType", "ALL_PROGRAMS",
+                                "scopeLabel", scopeLabel,
+                                "evaluationDate", evaluationPeriod,
+                                "activeMeasures", measureRuns.stream().map(DemoRunPayload::measureName).toList(),
+                                "dryRun", false
+                        )));
+                        ps.setString(17, failureSummary);
+                        ps.setLong(18, partialFailureCount);
+                        ps.setBoolean(19, false);
                     }
             );
+            runInserted = true;
 
             insertAuditEvent(
                     "RUN_STARTED",
                     "run",
                     persistedRunId,
-                    "system",
+                    actor,
                     persistedRunId,
                     null,
                     null,
@@ -168,7 +192,7 @@ public class RunPersistenceService {
                             "OUTCOME_PERSISTED",
                             "outcome",
                             outcomeId,
-                            "system",
+                            actor,
                             persistedRunId,
                             null,
                             measureVersionId,
@@ -190,11 +214,26 @@ public class RunPersistenceService {
                 );
             }
 
+            jdbcTemplate.update(
+                    """
+                            UPDATE runs
+                            SET status = ?,
+                                completed_at = ?,
+                                failure_summary = ?,
+                                partial_failure_count = ?
+                            WHERE id = ?
+                            """,
+                    finalStatus,
+                    Timestamp.from(completedAt),
+                    failureSummary,
+                    partialFailureCount,
+                    persistedRunId
+            );
             insertAuditEvent(
                     "RUN_COMPLETED",
                     "run",
                     persistedRunId,
-                    "system",
+                    actor,
                     persistedRunId,
                     null,
                     null,
@@ -203,11 +242,22 @@ public class RunPersistenceService {
                             "evaluationDate", evaluationPeriod,
                             "totalEvaluated", totalEvaluated,
                             "compliant", compliant,
-                            "nonCompliant", nonCompliant
+                            "nonCompliant", nonCompliant,
+                            "status", finalStatus,
+                            "partialFailureCount", partialFailureCount
                     )
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    persistedRunId,
+                    "INFO",
+                    "Run completed with status " + finalStatus + "."
             );
             return persistedRunId;
         } catch (RuntimeException ex) {
+            if (runInserted) {
+                markRunFailed(persistedRunId, actor, stage, ex);
+            }
             log.error("Failed to persist all-programs run at stage {}: {}", stage, ex.getMessage(), ex);
             throw ex;
         }
@@ -671,20 +721,38 @@ public class RunPersistenceService {
         }
     }
 
-    private void persistSingleMeasureRun(
+    public UUID persistMeasureRun(
             DemoRunPayload run,
             String scopeType,
             String site,
             String triggerType,
-            String actor
+            String actor,
+            Map<String, Object> requestedScopeJson,
+            boolean dryRun
     ) {
         String stage = "start";
+        UUID runId = UUID.fromString(run.runId());
+        boolean runInserted = false;
         try {
+            if (dryRun) {
+                throw new IllegalArgumentException("dryRun is not supported for manual measure runs yet");
+            }
+
             long compliant = run.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
             long dueSoon = run.outcomes().stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
             long overdue = run.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
             long missingData = run.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
             long excluded = run.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+            long partialFailureCount = countPartialFailures(run.outcomes());
+            boolean evaluationFailedBeforeEmployees = requestedScopeJson != null && requestedScopeJson.containsKey("evaluationError") && run.outcomes().isEmpty();
+            String finalStatus = evaluationFailedBeforeEmployees
+                    ? "FAILED"
+                    : partialFailureCount > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
+            String failureSummary = evaluationFailedBeforeEmployees
+                    ? String.valueOf(requestedScopeJson.get("evaluationError"))
+                    : partialFailureCount > 0
+                    ? partialFailureCount + " employee evaluation(s) returned evaluationError"
+                    : null;
 
             stage = "ensure-measure";
             UUID measureId = ensureMeasure(run.measureName());
@@ -694,31 +762,48 @@ public class RunPersistenceService {
             seedSyntheticEmployees();
             List<UUID> employeeIds = ensureEmployees(run.outcomes());
 
-            UUID runId = UUID.fromString(run.runId());
             Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
             Instant completedAt = startedAt.plusSeconds(60);
             String evaluationPeriod = run.evaluationDate();
 
             stage = "insert-run";
             jdbcTemplate.update(
-                    "INSERT INTO runs (id, scope_type, scope_id, site, trigger_type, status, triggered_by, started_at, completed_at, total_evaluated, compliant, non_compliant, duration_ms, measurement_period_start, measurement_period_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    """
+                            INSERT INTO runs (
+                                id, scope_type, scope_id, site, trigger_type, status, triggered_by,
+                                started_at, completed_at, total_evaluated, compliant, non_compliant,
+                                duration_ms, measurement_period_start, measurement_period_end,
+                                requested_scope_json, failure_summary, partial_failure_count, dry_run
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                            """,
                     ps -> {
                         ps.setObject(1, runId);
                         ps.setString(2, scopeType);
                         ps.setObject(3, measureVersionId);
                         ps.setString(4, site);
                         ps.setString(5, triggerType);
-                        ps.setString(6, "completed");
+                        ps.setString(6, "RUNNING");
                         ps.setString(7, actor);
                         ps.setObject(8, Timestamp.from(startedAt));
-                        ps.setObject(9, Timestamp.from(completedAt));
+                        ps.setNull(9, java.sql.Types.TIMESTAMP);
                         ps.setInt(10, run.outcomes().size());
                         ps.setLong(11, compliant);
                         ps.setLong(12, dueSoon + overdue + missingData + excluded);
                         ps.setLong(13, 60_000L);
                         ps.setObject(14, Timestamp.from(startedAt));
                         ps.setObject(15, Timestamp.from(completedAt));
+                        ps.setString(16, toJsonb(requestedScopeJson == null ? Map.of() : requestedScopeJson));
+                        ps.setString(17, failureSummary);
+                        ps.setLong(18, partialFailureCount);
+                        ps.setBoolean(19, dryRun);
                     }
+            );
+            runInserted = true;
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Measure loaded: " + run.measureName() + " v" + run.measureVersion() + "."
             );
 
             insertAuditEvent(
@@ -732,7 +817,8 @@ public class RunPersistenceService {
                     Map.of(
                             "measureName", run.measureName(),
                             "measureVersion", run.measureVersion(),
-                            "scopeType", scopeType
+                            "scopeType", scopeType,
+                            "requestedScope", requestedScopeJson == null ? Map.of() : requestedScopeJson
                     )
             );
 
@@ -741,10 +827,22 @@ public class RunPersistenceService {
                     "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
                     runId,
                     "INFO",
-                    "Seeded " + run.measureName() + " run persisted with " + run.outcomes().size() + " outcomes."
+                    "Run requested for " + run.measureName() + " v" + run.measureVersion() + "."
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Scope resolved for " + scopeType + " run."
             );
 
             stage = "insert-outcomes";
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Evaluation started for " + run.measureName() + "."
+            );
             for (int i = 0; i < run.outcomes().size(); i++) {
                 DemoOutcome outcome = run.outcomes().get(i);
                 UUID outcomeId = UUID.randomUUID();
@@ -779,15 +877,57 @@ public class RunPersistenceService {
                         )
                 );
             }
+            if (evaluationFailedBeforeEmployees) {
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "ERROR",
+                        "Measure evaluation failed before employee evaluation: " + failureSummary
+                );
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "WARN",
+                        "Outcomes were not generated because evaluation failed before employee processing."
+                );
+            } else {
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "INFO",
+                        "Outcomes persisted for " + run.measureName() + "."
+                );
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "INFO",
+                        "Evaluation completed for " + run.measureName() + "."
+                );
+            }
 
             stage = "upsert-cases";
-            caseFlowService.upsertCases(
-                    runId,
-                    measureVersionId,
-                    evaluationPeriod,
-                    employeeIds,
-                    run.outcomes()
-            );
+            if (!evaluationFailedBeforeEmployees) {
+                caseFlowService.upsertCases(
+                        runId,
+                        measureVersionId,
+                        evaluationPeriod,
+                        employeeIds,
+                        run.outcomes()
+                );
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "INFO",
+                        "Cases upserted for " + run.measureName() + "."
+                );
+            } else {
+                jdbcTemplate.update(
+                        "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                        runId,
+                        "WARN",
+                        "Cases skipped because measure evaluation failed before employee evaluation."
+                );
+            }
 
             stage = "insert-run-audit";
             insertAuditEvent(
@@ -807,14 +947,76 @@ public class RunPersistenceService {
                                     "dueSoon", dueSoon,
                                     "overdue", overdue,
                                     "missingData", missingData,
-                                    "excluded", excluded
+                                    "excluded", excluded,
+                                    "partialFailureCount", partialFailureCount
                             )
                     )
             );
+            jdbcTemplate.update(
+                    """
+                            UPDATE runs
+                            SET status = ?,
+                                completed_at = ?,
+                                failure_summary = ?,
+                                partial_failure_count = ?
+                            WHERE id = ?
+                            """,
+                    finalStatus,
+                    Timestamp.from(completedAt),
+                    failureSummary,
+                    partialFailureCount,
+                    runId
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    ("FAILED".equals(finalStatus)
+                            ? "Run failed with status " + finalStatus + "."
+                            : "Run completed with status " + finalStatus + ".")
+            );
+            return runId;
         } catch (RuntimeException ex) {
+            if (runInserted) {
+                markRunFailed(runId, actor, stage, ex);
+            }
             log.error("Failed to persist demo run at stage {}: {}", stage, ex.getMessage(), ex);
             throw ex;
         }
+    }
+
+    private void markRunFailed(UUID runId, String actor, String stage, RuntimeException ex) {
+        String failureSummary = "Run failed at stage " + stage + ": " + (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
+        jdbcTemplate.update(
+                """
+                        UPDATE runs
+                        SET status = 'FAILED',
+                            completed_at = NOW(),
+                            failure_summary = ?
+                        WHERE id = ?
+                        """,
+                failureSummary,
+                runId
+        );
+        jdbcTemplate.update(
+                "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                runId,
+                "ERROR",
+                failureSummary
+        );
+        insertAuditEvent(
+                "RUN_FAILED",
+                "run",
+                runId,
+                actor,
+                runId,
+                null,
+                null,
+                Map.of(
+                        "stage", stage,
+                        "failureSummary", failureSummary
+                )
+        );
     }
 
     private void insertAuditEvent(
@@ -865,6 +1067,25 @@ public class RunPersistenceService {
             return (Map<String, Object>) map;
         }
         return Map.of();
+    }
+
+    private long countPartialFailures(List<DemoOutcome> outcomes) {
+        return outcomes.stream()
+                .filter(outcome -> {
+                    Map<String, Object> evidence = outcome.evidenceJson();
+                    return evidence != null && evidence.containsKey("evaluationError");
+                })
+                .count();
+    }
+
+    private long countPartialFailuresAcrossRuns(List<DemoRunPayload> runs) {
+        return runs.stream()
+                .flatMap(run -> run.outcomes().stream())
+                .filter(outcome -> {
+                    Map<String, Object> evidence = outcome.evidenceJson();
+                    return evidence != null && evidence.containsKey("evaluationError");
+                })
+                .count();
     }
 
     private String loadCqlTextForMeasure(String measureName) {

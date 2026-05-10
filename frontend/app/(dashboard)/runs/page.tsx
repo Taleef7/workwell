@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { outcomeStatusClass } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type RunListItem = {
   runId: string;
@@ -58,9 +59,22 @@ type RunOutcomeRow = {
 
 type ManualRunResponse = {
   runId: string;
-  scope: string;
+  scopeType: string;
+  scopeLabel: string;
+  status: string;
   activeMeasuresExecuted: number;
+  totalEvaluated: number;
+  compliant: number;
+  nonCompliant: number;
+  message: string;
   measuresExecuted: string[];
+};
+
+type MeasureOption = {
+  id: string;
+  name: string;
+  version: string;
+  status: string;
 };
 
 type RunInsightResponse = {
@@ -69,10 +83,7 @@ type RunInsightResponse = {
 };
 
 export default function RunsPage() {
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const api = useApi();
 
   const [statusFilter, setStatusFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
@@ -82,12 +93,27 @@ export default function RunsPage() {
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
+  const [measures, setMeasures] = useState<MeasureOption[]>([]);
+  const [runScopeType, setRunScopeType] = useState<"ALL_PROGRAMS" | "MEASURE" | "CASE">("ALL_PROGRAMS");
+  const [runMeasureId, setRunMeasureId] = useState("");
+  const [runCaseId, setRunCaseId] = useState("");
+  const [runEvaluationDate, setRunEvaluationDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
-  const rerunSupported = selectedRun ? selectedRun.scopeType === "all_programs" || selectedRun.scopeType === "measure" : false;
+  const rerunSupported = selectedRun ? ["all_programs", "measure", "case"].includes(selectedRun.scopeType) : false;
+
+  const loadMeasures = useCallback(async () => {
+    try {
+      const data = await api.get<MeasureOption[]>("/api/measures");
+      setMeasures(data);
+      setRunMeasureId((current) => current || (data.length > 0 ? data[0].id : ""));
+    } catch {
+      setMeasures([]);
+    }
+  }, [api]);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -101,9 +127,7 @@ export default function RunsPage() {
       if (siteId) query.set("site", siteId);
       if (from) query.set("from", from);
       if (to) query.set("to", to);
-      const response = await fetch(`${apiBase}/api/runs?${query.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load runs (${response.status})`);
-      const data = (await response.json()) as RunListItem[];
+      const data = await api.get<RunListItem[]>(`/api/runs?${query.toString()}`);
       setRuns(data);
       if (!selectedRunId && data.length) {
         setSelectedRunId(data[0].runId);
@@ -113,69 +137,76 @@ export default function RunsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+  }, [api, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
     try {
-      const [summaryResponse, logsResponse] = await Promise.all([
-        fetch(`${apiBase}/api/runs/${selectedRunId}`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/runs/${selectedRunId}/logs?limit=200`, { cache: "no-store" })
+      const [summary, logs] = await Promise.all([
+        api.get<RunSummary>(`/api/runs/${selectedRunId}`),
+        api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`)
       ]);
-      if (!summaryResponse.ok) throw new Error(`Failed to load run detail (${summaryResponse.status})`);
-      if (!logsResponse.ok) throw new Error(`Failed to load run logs (${logsResponse.status})`);
-      setSelectedRun((await summaryResponse.json()) as RunSummary);
-      setRunLogs((await logsResponse.json()) as RunLogEntry[]);
-      const outcomesResponse = await fetch(`${apiBase}/api/runs/${selectedRunId}/outcomes`, { cache: "no-store" });
-      if (outcomesResponse.ok) {
-        setRunOutcomes((await outcomesResponse.json()) as RunOutcomeRow[]);
-      } else {
+      setSelectedRun(summary);
+      setRunLogs(logs);
+      try {
+        const outcomes = await api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`);
+        setRunOutcomes(outcomes);
+      } catch {
         setRunOutcomes([]);
       }
       setInsightDismissed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase, selectedRunId]);
+  }, [api, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
     if (!selectedRunId) return;
     try {
-      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/ai/insight`, { method: "POST" });
-      if (!response.ok) return;
-      const data = (await response.json()) as RunInsightResponse;
+      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${selectedRunId}/ai/insight`);
       setRunInsight(data);
     } catch {
       setRunInsight(null);
     }
-  }, [apiBase, selectedRunId]);
+  }, [api, selectedRunId]);
 
   useEffect(() => {
-    if (apiBase) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadRuns();
-    }
-  }, [apiBase, loadRuns]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRuns();
+    void loadMeasures();
+  }, [loadMeasures, loadRuns]);
 
   useEffect(() => {
-    if (apiBase && selectedRunId) {
+    if (selectedRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadSelectedRun();
       void loadRunInsight();
     }
-  }, [apiBase, selectedRunId, loadSelectedRun, loadRunInsight]);
+  }, [selectedRunId, loadSelectedRun, loadRunInsight]);
 
-  async function runAllProgramsNow() {
+  async function runManualScope() {
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/runs/manual`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: "All Programs" })
-      });
-      if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
-      const data = (await response.json()) as ManualRunResponse;
-      emitToast(`Run completed - ${data.activeMeasuresExecuted} measures generated`);
+      const payload: Record<string, string | boolean | null> = {
+        scopeType: runScopeType,
+        dryRun: false
+      };
+      if (runScopeType === "MEASURE") {
+        if (!runMeasureId) {
+          throw new Error("Select a measure before running a measure-scoped job.");
+        }
+        payload.measureId = runMeasureId;
+      } else if (runScopeType === "CASE") {
+        if (!runCaseId.trim()) {
+          throw new Error("Enter a case ID before running a case-scoped job.");
+        }
+        payload.caseId = runCaseId.trim();
+      }
+      if (runEvaluationDate) {
+        payload.evaluationDate = runEvaluationDate;
+      }
+      const data = await api.post<typeof payload, ManualRunResponse>("/api/runs/manual", payload);
+      emitToast(`${data.scopeLabel} - ${data.message}`);
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();
@@ -188,9 +219,7 @@ export default function RunsPage() {
     if (!selectedRunId) return;
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/rerun`, { method: "POST" });
-      if (!response.ok) throw new Error(`Rerun failed (${response.status})`);
-      const data = (await response.json()) as ManualRunResponse;
+      const data = await api.post<undefined, ManualRunResponse>(`/api/runs/${selectedRunId}/rerun`);
       emitToast("Rerun started");
       setSelectedRunId(data.runId);
       await loadRuns();
@@ -201,15 +230,24 @@ export default function RunsPage() {
   }
 
   async function downloadCsv(path: string, filename: string) {
-    const response = await fetch(`${apiBase}${path}`);
-    if (!response.ok) {
-      throw new Error(`Export failed (${response.status})`);
-    }
-    const blob = await response.blob();
+    const blob = await api.downloadBlob(path);
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
+
+  async function exportRunAuditPacket() {
+    if (!selectedRunId) return;
+    const blob = await api.downloadBlob(`/api/auditor/runs/${selectedRunId}/packet?format=json`);
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `workwell-run-packet-${selectedRunId}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -238,9 +276,6 @@ export default function RunsPage() {
           >
             Export outcomes CSV
           </button>
-          <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={runAllProgramsNow}>
-            Run Measures Now
-          </button>
           <button
             className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
             onClick={() => void rerunSameScope()}
@@ -263,6 +298,7 @@ export default function RunsPage() {
           <option value="">All Scope Types</option>
           <option value="all_programs">all_programs</option>
           <option value="measure">measure</option>
+          <option value="case">case</option>
         </select>
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
           <option value="">All Trigger Types</option>
@@ -274,12 +310,72 @@ export default function RunsPage() {
         </button>
       </div>
 
+      <div className="rounded-md border border-slate-200 bg-white p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Scope</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              value={runScopeType}
+              onChange={(e) => setRunScopeType(e.target.value as "ALL_PROGRAMS" | "MEASURE" | "CASE")}
+            >
+              <option value="ALL_PROGRAMS">ALL_PROGRAMS</option>
+              <option value="MEASURE">MEASURE</option>
+              <option value="CASE">CASE</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Measure</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-100"
+              value={runMeasureId}
+              onChange={(e) => setRunMeasureId(e.target.value)}
+              disabled={runScopeType !== "MEASURE"}
+            >
+              <option value="">Select a measure</option>
+              {measures.map((measure) => (
+                <option key={measure.id} value={measure.id}>
+                  {measure.name} v{measure.version} ({measure.status})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Evaluation Date</label>
+            <input
+              type="date"
+              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              value={runEvaluationDate}
+              onChange={(e) => setRunEvaluationDate(e.target.value)}
+            />
+          </div>
+          {runScopeType === "CASE" ? (
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Case ID</label>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                value={runCaseId}
+                onChange={(e) => setRunCaseId(e.target.value)}
+                placeholder="Paste a case UUID"
+              />
+            </div>
+          ) : null}
+          <div className="flex items-end">
+            <button className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={() => void runManualScope()}>
+              Run Now
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">MEASURE runs require a measure selection. CASE runs require a case UUID.</p>
+      </div>
+
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
-        <p className="text-xs text-amber-700">Rerun is available only for all-programs or measure-scoped runs.</p>
+        <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, or case-scoped runs.</p>
       ) : null}
       {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
-      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Click &apos;Run Measures Now&apos; to start.</p> : null}
+      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Use the run controls above to start one.</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white">
@@ -358,6 +454,12 @@ export default function RunsPage() {
                   ))}
                 </ul>
               </div>
+              <button
+                className="mt-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                onClick={() => void exportRunAuditPacket()}
+              >
+                Export Run Audit Packet
+              </button>
             </>
           ) : (
             <p className="text-sm text-slate-600">Select a run to view details.</p>

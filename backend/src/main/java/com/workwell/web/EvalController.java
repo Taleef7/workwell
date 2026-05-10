@@ -8,6 +8,7 @@ import com.workwell.measure.GenericDemoRun;
 import com.workwell.measure.HazwoperSurveillanceDemoService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
+import com.workwell.run.ManualRunRequest;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.security.SecurityActor;
 import java.time.Instant;
@@ -101,14 +102,14 @@ public class EvalController {
 
     @PostMapping("/api/runs/manual")
     public ManualRunResponse runAllPrograms(@RequestBody(required = false) ManualRunRequest request) {
-        String scope = request == null || request.scope() == null || request.scope().isBlank()
-                ? "All Programs"
-                : request.scope().trim();
-        if (!"All Programs".equalsIgnoreCase(scope)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only scope 'All Programs' is supported for MVP.");
+        if (request == null || request.scopeType() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "scopeType is required.");
         }
-
-        return allProgramsRunService.runAllPrograms("All Programs", SecurityActor.currentActor());
+        try {
+            return allProgramsRunService.run(request, SecurityActor.currentActor());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping("/api/runs/audiogram/latest")
@@ -131,13 +132,16 @@ public class EvalController {
     ) {
     }
 
-    public record ManualRunRequest(String scope) {
-    }
-
     public record ManualRunResponse(
             String runId,
-            String scope,
+            String scopeType,
+            String scopeLabel,
+            String status,
             int activeMeasuresExecuted,
+            long totalEvaluated,
+            long compliant,
+            long nonCompliant,
+            String message,
             List<String> measuresExecuted
     ) {
     }

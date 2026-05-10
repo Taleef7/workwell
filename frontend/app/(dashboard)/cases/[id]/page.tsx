@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 import { useParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
+import { useApi } from "@/lib/api/hooks";
 
 type AuditEvent = {
   eventType: string;
@@ -99,6 +100,7 @@ type EvidenceAttachment = {
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
+  const api = useApi();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"outreach" | "rerun" | "delivery" | null>(null);
@@ -128,18 +130,9 @@ export default function CaseDetailPage() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
-
   const loadCase = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}`);
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-      const data = (await response.json()) as CaseDetail;
+      const data = await api.get<CaseDetail>(`/api/cases/${caseId}`);
       setCaseDetail(data);
       setAssigneeInput(data.assignee ?? "");
     } catch (err) {
@@ -147,13 +140,11 @@ export default function CaseDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, caseId]);
+  }, [api, caseId]);
 
   const loadTemplates = useEffectEvent(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/admin/outreach-templates`, { cache: "no-store" });
-      if (!response.ok) return;
-      const data = (await response.json()) as OutreachTemplate[];
+      const data = await api.get<OutreachTemplate[]>("/api/admin/outreach-templates");
       setTemplates(data);
       if (!selectedTemplateId && data.length > 0) {
         setSelectedTemplateId(data[0].id);
@@ -165,26 +156,24 @@ export default function CaseDetailPage() {
 
   const loadAppointments = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/appointments`, { cache: "no-store" });
-      if (!response.ok) return;
-      setAppointments((await response.json()) as ScheduledAppointment[]);
+      const data = await api.get<ScheduledAppointment[]>(`/api/cases/${caseId}/appointments`);
+      setAppointments(data);
     } catch {
       setAppointments([]);
     }
-  }, [apiBase, caseId]);
+  }, [api, caseId]);
 
   const loadEvidence = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/evidence`, { cache: "no-store" });
-      if (!response.ok) return;
-      setEvidence((await response.json()) as EvidenceAttachment[]);
+      const data = await api.get<EvidenceAttachment[]>(`/api/cases/${caseId}/evidence`);
+      setEvidence(data);
     } catch {
       setEvidence([]);
     }
-  }, [apiBase, caseId]);
+  }, [api, caseId]);
 
   useEffect(() => {
-    if (apiBase && caseId) {
+    if (caseId) {
       const timer = setTimeout(() => {
         void loadCase();
         void loadTemplates();
@@ -193,26 +182,16 @@ export default function CaseDetailPage() {
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [apiBase, caseId, loadAppointments, loadEvidence, loadCase]);
+  }, [caseId, loadAppointments, loadEvidence, loadCase]);
 
   async function runAction(action: "outreach" | "rerun") {
-    if (!apiBase || !caseId) {
-      return;
-    }
-
+    if (!caseId) return;
     setActing(action);
     setError(null);
     const endpoint = action === "outreach" ? "actions/outreach" : "rerun-to-verify";
     const templateQuery = action === "outreach" && selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
-
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/${endpoint}${templateQuery}`, {
-        method: "POST"
-      });
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-      const updated = (await response.json()) as CaseDetail;
+      const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/${endpoint}${templateQuery}`);
       setCaseDetail(updated);
       if (action === "outreach") {
         setOutreachPreview(null);
@@ -228,14 +207,13 @@ export default function CaseDetailPage() {
   }
 
   async function previewOutreach() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     setPreviewing(true);
     setError(null);
     try {
       const templateQuery = selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions/outreach/preview${templateQuery}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setOutreachPreview((await response.json()) as OutreachPreview);
+      const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview${templateQuery}`);
+      setOutreachPreview(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -244,14 +222,12 @@ export default function CaseDetailPage() {
   }
 
   async function assignCase() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     setAssigning(true);
     setError(null);
     try {
       const assigneeParam = assigneeInput.trim() ? `?assignee=${encodeURIComponent(assigneeInput.trim())}` : "";
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/assign${assigneeParam}`, { method: "POST" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const updated = (await response.json()) as CaseDetail;
+      const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/assign${assigneeParam}`);
       setCaseDetail(updated);
       emitToast(`Case assigned to ${assigneeInput.trim() || "unassigned"}`);
     } catch (err) {
@@ -262,13 +238,11 @@ export default function CaseDetailPage() {
   }
 
   async function escalateCase() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     setEscalating(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/escalate`, { method: "POST" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const updated = (await response.json()) as CaseDetail;
+      const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/escalate`);
       setCaseDetail(updated);
       emitToast("Case escalated");
     } catch (err) {
@@ -279,13 +253,12 @@ export default function CaseDetailPage() {
   }
 
   async function explainWhyFlagged() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     setExplaining(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/ai/explain`, { method: "POST" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setAiExplanation((await response.json()) as CaseExplanationResponse);
+      const data = await api.post<undefined, CaseExplanationResponse>(`/api/cases/${caseId}/ai/explain`);
+      setAiExplanation(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -294,15 +267,12 @@ export default function CaseDetailPage() {
   }
 
   async function updateDeliveryStatus(deliveryStatus: "QUEUED" | "SENT" | "FAILED") {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     setActing("delivery");
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions/outreach/delivery?deliveryStatus=${deliveryStatus}`, {
-        method: "POST"
-      });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setCaseDetail((await response.json()) as CaseDetail);
+      const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/actions/outreach/delivery?deliveryStatus=${deliveryStatus}`);
+      setCaseDetail(updated);
       emitToast(`Outreach delivery marked ${deliveryStatus}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -312,7 +282,7 @@ export default function CaseDetailPage() {
   }
 
   async function markResolved() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     if (!resolveNote.trim()) {
       setError("Closure note is required");
       return;
@@ -320,18 +290,11 @@ export default function CaseDetailPage() {
     setResolving(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "RESOLVE",
-          note: resolveNote.trim(),
-          resolvedAt: new Date().toISOString(),
-          resolvedBy: caseDetail?.assignee ?? undefined
-        })
+      const updated = await api.post<object, CaseDetail>(`/api/cases/${caseId}/actions`, {
+        type: "RESOLVE",
+        note: resolveNote.trim(),
+        resolvedAt: new Date().toISOString()
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const updated = (await response.json()) as CaseDetail;
       setCaseDetail(updated);
       setResolveModalOpen(false);
       setResolveNote("");
@@ -344,7 +307,7 @@ export default function CaseDetailPage() {
   }
 
   async function scheduleAppointment() {
-    if (!apiBase || !caseId) return;
+    if (!caseId) return;
     if (!appointmentDateTime || !appointmentLocation.trim()) {
       setError("Appointment date/time and location are required");
       return;
@@ -352,19 +315,13 @@ export default function CaseDetailPage() {
     setScheduling(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "SCHEDULE_APPOINTMENT",
-          appointmentType,
-          scheduledAt: new Date(appointmentDateTime).toISOString(),
-          location: appointmentLocation.trim(),
-          notes: appointmentNotes.trim()
-        })
+      const updated = await api.post<object, CaseDetail>(`/api/cases/${caseId}/actions`, {
+        type: "SCHEDULE_APPOINTMENT",
+        appointmentType,
+        scheduledAt: new Date(appointmentDateTime).toISOString(),
+        location: appointmentLocation.trim(),
+        notes: appointmentNotes.trim()
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const updated = (await response.json()) as CaseDetail;
       setCaseDetail(updated);
       setAppointmentModalOpen(false);
       setAppointmentNotes("");
@@ -380,7 +337,7 @@ export default function CaseDetailPage() {
   }
 
   async function uploadEvidence() {
-    if (!apiBase || !caseId || !evidenceFile) {
+    if (!caseId || !evidenceFile) {
       setError("Select a file to upload");
       return;
     }
@@ -390,11 +347,7 @@ export default function CaseDetailPage() {
       const formData = new FormData();
       formData.append("file", evidenceFile);
       formData.append("description", evidenceDescription);
-      const response = await fetch(`${apiBase}/api/cases/${caseId}/evidence`, {
-        method: "POST",
-        body: formData
-      });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      await api.postForm(`/api/cases/${caseId}/evidence`, formData);
       setEvidenceFile(null);
       setEvidenceDescription("");
       await loadEvidence();
@@ -407,6 +360,19 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function exportCaseAuditPacket() {
+    if (!caseId) return;
+    const blob = await api.downloadBlob(`/api/auditor/cases/${caseId}/packet?format=json`);
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `workwell-case-packet-${caseId}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -417,9 +383,17 @@ export default function CaseDetailPage() {
           <h2 className="mt-2 text-3xl font-semibold">Case detail</h2>
           <p className="mt-2 text-slate-600">Structured Why Flagged evidence for the selected case and its waiver context.</p>
         </div>
-        <p className="text-sm text-slate-500">
-          API base: <code>{apiBase || "(missing NEXT_PUBLIC_API_BASE_URL)"}</code>
-        </p>
+        <div className="flex flex-col items-end gap-2">
+          <p className="text-sm text-slate-500">
+            Case: <code>{caseId}</code>
+          </p>
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            onClick={() => void exportCaseAuditPacket()}
+          >
+            Export Case Audit Packet
+          </button>
+        </div>
       </div>
 
       {loading ? <p className="text-sm text-slate-600">Loading case...</p> : null}
@@ -792,9 +766,26 @@ export default function CaseDetailPage() {
                     <p className="text-xs text-slate-600">{Math.round(entry.fileSizeBytes / 1024)} KB • {entry.mimeType}</p>
                     <p className="text-xs text-slate-600">Uploaded by {entry.uploadedBy} at {new Date(entry.uploadedAt).toLocaleString()}</p>
                     {entry.description ? <p className="text-xs text-slate-700">{entry.description}</p> : null}
-                    <a className="mt-2 inline-block text-xs font-semibold text-blue-700 hover:underline" href={`${apiBase}/api/evidence/${entry.id}/download`} target="_blank" rel="noreferrer">
+                    <button
+                      type="button"
+                      className="mt-2 text-xs font-semibold text-blue-700 hover:underline"
+                      onClick={() => {
+                        void api.downloadBlob(`/api/evidence/${entry.id}/download`).then((blob) => {
+                          const url = window.URL.createObjectURL(blob);
+                          const anchor = document.createElement("a");
+                          anchor.href = url;
+                          anchor.download = entry.fileName;
+                          document.body.appendChild(anchor);
+                          anchor.click();
+                          document.body.removeChild(anchor);
+                          window.URL.revokeObjectURL(url);
+                        }).catch((err: unknown) => {
+                          setError(err instanceof Error ? err.message : "Download failed");
+                        });
+                      }}
+                    >
                       Download
-                    </a>
+                    </button>
                   </div>
                 ))}
               </div>

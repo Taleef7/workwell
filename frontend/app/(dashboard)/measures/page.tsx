@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { measureStatusClass } from "@/lib/status";
+import { useApi } from "@/lib/api/hooks";
 
 type Measure = {
   id: string;
@@ -22,10 +23,7 @@ type StatusFilter = (typeof statusFilters)[number];
 
 export default function MeasuresPage() {
   const router = useRouter();
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const api = useApi();
 
   const [items, setItems] = useState<Measure[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,18 +47,14 @@ export default function MeasuresPage() {
       if (search.trim()) {
         params.set("search", search.trim());
       }
-      const response = await fetch(`${apiBase}/api/measures?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`Failed to load measures (${response.status})`);
-      }
-      const data = (await response.json()) as Measure[];
+      const data = await api.get<Measure[]>(`/api/measures?${params.toString()}`);
       setItems(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [apiBase, search, statusFilter]);
+  }, [api, search, statusFilter]);
 
   async function createMeasure() {
     if (!name.trim() || !policyRef.trim() || !owner.trim()) {
@@ -70,19 +64,11 @@ export default function MeasuresPage() {
     setCreating(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/measures`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          policyRef: policyRef.trim(),
-          owner: owner.trim()
-        })
+      const payload = await api.post<object, { id: string }>("/api/measures", {
+        name: name.trim(),
+        policyRef: policyRef.trim(),
+        owner: owner.trim()
       });
-      if (!response.ok) {
-        throw new Error(`Create failed (${response.status})`);
-      }
-      const payload = (await response.json()) as { id: string };
       setShowCreate(false);
       router.push(`/studio/${payload.id}`);
     } catch (err) {
@@ -93,11 +79,9 @@ export default function MeasuresPage() {
   }
 
   useEffect(() => {
-    if (apiBase) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadMeasures();
-    }
-  }, [apiBase, loadMeasures]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMeasures();
+  }, [loadMeasures]);
 
   return (
     <section className="space-y-4">

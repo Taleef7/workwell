@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type IntegrationHealth = {
   integration: string;
@@ -44,6 +45,32 @@ type WaiverRecord = {
   expired: boolean;
 };
 
+type DataElementMapping = {
+  id: string;
+  sourceId: string;
+  sourceDisplayName: string;
+  canonicalElement: string;
+  sourceField: string;
+  mappingStatus: string;
+  lastValidatedAt: string | null;
+  notes: string | null;
+};
+
+type TerminologyMapping = {
+  id: string;
+  localCode: string;
+  localDisplay: string | null;
+  localSystem: string;
+  standardCode: string;
+  standardDisplay: string | null;
+  standardSystem: string;
+  mappingStatus: string;
+  mappingConfidence: number | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  notes: string | null;
+};
+
 type AuditEventRow = {
   occurredAt: string;
   eventType: string;
@@ -62,6 +89,9 @@ export default function AdminPage() {
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [waivers, setWaivers] = useState<WaiverRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEventRow[]>([]);
+  const [dataMappings, setDataMappings] = useState<DataElementMapping[]>([]);
+  const [terminologyMappings, setTerminologyMappings] = useState<TerminologyMapping[]>([]);
+  const [validatingMappings, setValidatingMappings] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [updatingScheduler, setUpdatingScheduler] = useState(false);
   const [loadingWaivers, setLoadingWaivers] = useState(false);
@@ -80,44 +110,54 @@ export default function AdminPage() {
   const [waiverActive, setWaiverActive] = useState(true);
   const [grantingWaiver, setGrantingWaiver] = useState(false);
   const { siteId } = useGlobalFilters();
+  const api = useApi();
 
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const loadDataMappings = useCallback(async () => {
+    try {
+      const data = await api.get<DataElementMapping[]>("/api/admin/data-mappings");
+      setDataMappings(data);
+    } catch {
+      setDataMappings([]);
+    }
+  }, [api]);
+
+  const loadTerminologyMappings = useCallback(async () => {
+    try {
+      const data = await api.get<TerminologyMapping[]>("/api/admin/terminology-mappings");
+      setTerminologyMappings(data);
+    } catch {
+      setTerminologyMappings([]);
+    }
+  }, [api]);
 
   const loadIntegrations = useCallback(async () => {
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/integrations`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setIntegrations((await response.json()) as IntegrationHealth[]);
+      const data = await api.get<IntegrationHealth[]>("/api/admin/integrations");
+      setIntegrations(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadScheduler = useCallback(async () => {
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/scheduler`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setScheduler((await response.json()) as SchedulerStatus);
+      const data = await api.get<SchedulerStatus>("/api/admin/scheduler");
+      setScheduler(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadMeasures = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/measures`, { cache: "no-store" });
-      if (!response.ok) return;
-      const data = (await response.json()) as MeasureOption[];
+      const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data.filter((item) => item.status === "Active"));
     } catch {
       setMeasures([]);
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadWaivers = useCallback(async () => {
     setLoadingWaivers(true);
@@ -129,64 +169,71 @@ export default function AdminPage() {
       if (waiverExpiresAfter) params.set("expiresAfter", waiverExpiresAfter);
       if (waiverExpiresBefore) params.set("expiresBefore", waiverExpiresBefore);
       if (waiverActiveFilter) params.set("active", waiverActiveFilter);
-      const response = await fetch(`${apiBase}/api/admin/waivers?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setWaivers((await response.json()) as WaiverRecord[]);
+      const data = await api.get<WaiverRecord[]>(`/api/admin/waivers?${params.toString()}`);
+      setWaivers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoadingWaivers(false);
     }
-  }, [apiBase, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter]);
+  }, [api, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter]);
 
   const loadAuditEvents = useCallback(async () => {
     setLoadingAudit(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/audit-events?scope=${auditScope}&limit=50`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setAuditEvents((await response.json()) as AuditEventRow[]);
+      const data = await api.get<AuditEventRow[]>(`/api/admin/audit-events?scope=${auditScope}&limit=50`);
+      setAuditEvents(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoadingAudit(false);
     }
-  }, [apiBase, auditScope]);
+  }, [api, auditScope]);
 
   useEffect(() => {
-    if (!apiBase) return;
     const timer = window.setTimeout(() => {
       void loadIntegrations();
       void loadScheduler();
       void loadMeasures();
+      void loadDataMappings();
+      void loadTerminologyMappings();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [apiBase, loadIntegrations, loadMeasures, loadScheduler]);
+  }, [loadIntegrations, loadMeasures, loadScheduler, loadDataMappings, loadTerminologyMappings]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = window.setTimeout(() => {
-        void loadWaivers();
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, [apiBase, loadWaivers]);
+    const timer = window.setTimeout(() => {
+      void loadWaivers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadWaivers]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = window.setTimeout(() => {
-        void loadAuditEvents();
-      }, 0);
-      return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => {
+      void loadAuditEvents();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAuditEvents]);
+
+  async function validateMappings() {
+    setValidatingMappings(true);
+    setError(null);
+    try {
+      const data = await api.post<undefined, DataElementMapping[]>("/api/admin/data-mappings/validate");
+      setDataMappings(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Validation failed");
+    } finally {
+      setValidatingMappings(false);
     }
-  }, [apiBase, loadAuditEvents]);
+  }
 
   async function triggerSync(integration: string) {
     setSyncing(integration);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/integrations/${integration}/sync`, { method: "POST" });
-      if (!response.ok) throw new Error(`Sync failed: ${response.status}`);
+      await api.post(`/api/admin/integrations/${integration}/sync`);
       await loadIntegrations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -199,9 +246,8 @@ export default function AdminPage() {
     setUpdatingScheduler(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/scheduler?enabled=${enabled ? "true" : "false"}`, { method: "POST" });
-      if (!response.ok) throw new Error(`Scheduler update failed: ${response.status}`);
-      setScheduler((await response.json()) as SchedulerStatus);
+      const data = await api.post<undefined, SchedulerStatus>(`/api/admin/scheduler?enabled=${enabled ? "true" : "false"}`);
+      setScheduler(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -218,23 +264,17 @@ export default function AdminPage() {
       setError("Waiver reason is required");
       return;
     }
-
     setGrantingWaiver(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/waivers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employeeExternalId: waiverEmployeeExternalId.trim(),
-          measureId: waiverMeasureId,
-          exclusionReason: waiverExclusionReason.trim(),
-          expiresAt: waiverExpiresAt ? new Date(waiverExpiresAt).toISOString() : null,
-          notes: waiverNotes.trim() || null,
-          active: waiverActive
-        })
+      await api.post("/api/admin/waivers", {
+        employeeExternalId: waiverEmployeeExternalId.trim(),
+        measureId: waiverMeasureId,
+        exclusionReason: waiverExclusionReason.trim(),
+        expiresAt: waiverExpiresAt ? new Date(waiverExpiresAt).toISOString() : null,
+        notes: waiverNotes.trim() || null,
+        active: waiverActive
       });
-      if (!response.ok) throw new Error(`Grant failed: ${response.status}`);
       setWaiverEmployeeExternalId("");
       setWaiverMeasureId("");
       setWaiverExclusionReason("");
@@ -319,6 +359,141 @@ export default function AdminPage() {
           </div>
         </article>
       </div>
+
+      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">data readiness</p>
+            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Source mappings</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Required data elements for each measure must be mapped to a source system before a measure can safely activate.
+              Run Validate Mappings to sync source health into mapping statuses.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void validateMappings()}
+            disabled={validatingMappings}
+            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60"
+          >
+            {validatingMappings ? "Validating…" : "Validate Mappings"}
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Canonical Element</th>
+                <th className="px-4 py-2 font-medium">Source</th>
+                <th className="px-4 py-2 font-medium">Source Field</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Last Validated</th>
+                <th className="px-4 py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dataMappings.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-4 text-sm text-slate-500">No mappings loaded.</td>
+                </tr>
+              ) : null}
+              {dataMappings.map((m) => (
+                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.canonicalElement}</code>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{m.sourceDisplayName}</td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.sourceField}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(m.mappingStatus)}`}>
+                      {m.mappingStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">
+                    {m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">terminology governance</p>
+            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Local code mappings</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Local and internal codes mapped to standard terminology (LOINC, CPT, CVX, SNOMED). Demo mappings are
+              labeled as such and do not claim official accuracy.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadTerminologyMappings()}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Local Code</th>
+                <th className="px-4 py-2 font-medium">Local System</th>
+                <th className="px-4 py-2 font-medium">Standard Code</th>
+                <th className="px-4 py-2 font-medium">Standard System</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Confidence</th>
+                <th className="px-4 py-2 font-medium">Reviewed By</th>
+                <th className="px-4 py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {terminologyMappings.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-4 text-sm text-slate-500">No terminology mappings loaded.</td>
+                </tr>
+              ) : null}
+              {terminologyMappings.map((m) => (
+                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.localCode}</code>
+                    {m.localDisplay ? <p className="text-[11px] text-slate-500">{m.localDisplay}</p> : null}
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.localSystem}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.standardCode}</code>
+                    {m.standardDisplay ? <p className="text-[11px] text-slate-500">{m.standardDisplay}</p> : null}
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.standardSystem}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(m.mappingStatus)}`}>
+                      {m.mappingStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-600">
+                    {m.mappingConfidence != null ? `${Math.round(m.mappingConfidence * 100)}%` : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.reviewedBy ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -576,6 +751,23 @@ export default function AdminPage() {
       </article>
     </section>
   );
+}
+
+function terminologyStatusBadgeClass(status: string) {
+  const s = (status ?? "").toUpperCase();
+  if (s === "APPROVED") return "bg-emerald-100 text-emerald-800";
+  if (s === "REVIEWED") return "bg-blue-100 text-blue-800";
+  if (s === "PROPOSED") return "bg-amber-100 text-amber-800";
+  if (s === "REJECTED") return "bg-red-100 text-red-800";
+  return "bg-slate-100 text-slate-700";
+}
+
+function mappingStatusBadgeClass(status: string) {
+  const s = (status ?? "").toUpperCase();
+  if (s === "MAPPED") return "bg-emerald-100 text-emerald-800";
+  if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800";
+  if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800";
+  return "bg-slate-100 text-slate-700";
 }
 
 function statusBadgeClass(status: string) {

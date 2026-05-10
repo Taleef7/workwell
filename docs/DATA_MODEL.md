@@ -2,13 +2,14 @@
 
 ## 1) Scope
 This document is the current schema and contract reference for the WorkWell MVP runtime.
-All tables below reflect active backend behavior as of 2026-05-08.
+All tables below reflect active backend behavior as of 2026-05-10.
 
 ## 2) Core Tables and Responsibilities
 - `measures`: logical measure records (name, owner, tags).
 - `measure_versions`: executable measure revisions (spec, CQL, compile metadata, lifecycle status).
 - `osha_references`: curated OSHA/policy reference lookup used by Studio Spec authoring.
-- `value_sets`: value set catalog with code payloads.
+- `value_sets`: value set catalog with code payloads and governance metadata (canonical URL, code systems, source, status, resolution status, expansion hash).
+- `terminology_mappings`: local-to-standard code mappings with review workflow status and confidence scores.
 - `measure_value_set_links`: many-to-many link between versions and value sets.
 - `employees`: seeded workforce entities used for evaluation/case operations.
 - `runs`: execution instances + aggregate metrics.
@@ -19,6 +20,7 @@ All tables below reflect active backend behavior as of 2026-05-08.
 - `audit_events`: append-only audit ledger.
 - `integration_health`: persisted admin health state per integration.
 - `outreach_templates`: optional DB-backed message templates (runtime falls back to built-ins if table absent).
+- `audit_packet_exports`: record of every audit packet generation (type, entity, format, actor, timestamp, payload hash, size).
 
 ## 3) Full Table Schemas
 
@@ -67,8 +69,38 @@ name TEXT NOT NULL
 version TEXT
 codes_json JSONB NOT NULL
 last_resolved_at TIMESTAMPTZ
+canonical_url TEXT
+code_systems TEXT[] DEFAULT '{}'
+source TEXT
+status TEXT NOT NULL DEFAULT 'DRAFT'
+expansion_hash TEXT
+resolution_status TEXT NOT NULL DEFAULT 'UNKNOWN'
+resolution_error TEXT
 UNIQUE(oid, version)
 ```
+
+Resolution status values: `RESOLVED`, `UNRESOLVED`, `EMPTY`, `ERROR`, `UNKNOWN`.
+Demo value sets are seeded with fixed UUIDs (`a0000001-0000-0000-0000-00000000000{1-4}`) and `resolution_status = 'RESOLVED'` for stable cross-migration references.
+
+### 3.4a `terminology_mappings`
+```sql
+id UUID PK DEFAULT gen_random_uuid()
+local_code TEXT NOT NULL
+local_display TEXT
+local_system TEXT NOT NULL
+standard_code TEXT NOT NULL
+standard_display TEXT
+standard_system TEXT NOT NULL
+mapping_status TEXT NOT NULL
+mapping_confidence NUMERIC
+reviewed_by TEXT
+reviewed_at TIMESTAMPTZ
+notes TEXT
+UNIQUE(local_system, local_code, standard_system, standard_code)
+```
+
+Mapping status values: `PROPOSED`, `REVIEWED`, `APPROVED`, `REJECTED`.
+Demo seeds: 3 APPROVED mappings (audiogram→CPT 92557, TB PPD→CPT 86580, flu→CVX 141), 1 REVIEWED (HAZWOPER internal), 1 PROPOSED (TB IGRA→CPT 86480).
 
 ### 3.5 `measure_value_set_links`
 ```sql
@@ -107,7 +139,14 @@ non_compliant INTEGER
 duration_ms BIGINT
 measurement_period_start TIMESTAMPTZ NOT NULL
 measurement_period_end TIMESTAMPTZ NOT NULL
+requested_scope_json JSONB NOT NULL DEFAULT '{}'::jsonb
+failure_summary TEXT
+partial_failure_count INTEGER NOT NULL DEFAULT 0
+dry_run BOOLEAN NOT NULL DEFAULT FALSE
 ```
+
+Runtime status values observed in the current implementation include `REQUESTED`, `QUEUED`, `RUNNING`, `PARTIAL_FAILURE`, `COMPLETED`, `FAILED`, and `CANCELLED`.
+For measure/case runs, `scope_id` stores the resolved measure version UUID; for all-programs runs it remains null.
 
 ### 3.8 `run_logs`
 ```sql
@@ -198,6 +237,22 @@ measure_id UUID REFERENCES measures(id)
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```
 If this table is absent, service falls back to built-in default templates.
+
+### 3.15 `audit_packet_exports`
+```sql
+id UUID PK DEFAULT gen_random_uuid()
+packet_type TEXT NOT NULL
+entity_id UUID NOT NULL
+format TEXT NOT NULL
+generated_by TEXT NOT NULL
+generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+payload_hash TEXT
+payload_size_bytes BIGINT
+```
+`packet_type` values: `CASE`, `RUN`, `MEASURE_VERSION`.
+`format` values: `json`, `html`.
+`payload_hash` is a SHA-256 hex digest of the serialized packet bytes for integrity verification.
+Written by `AuditPacketService` on every successful packet generation alongside an `AUDIT_PACKET_GENERATED` audit event.
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.

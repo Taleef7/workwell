@@ -1,16 +1,19 @@
 package com.workwell.web;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.audit.AuditQueryService;
 import com.workwell.admin.SchedulerAdminService;
+import com.workwell.measure.ValueSetGovernanceService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -19,10 +22,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AdminController.class)
 @AutoConfigureMockMvc(addFilters = false)
+@WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
 class AdminControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -42,6 +47,12 @@ class AdminControllerTest {
     @MockBean
     private AuditQueryService auditQueryService;
 
+    @MockBean
+    private DataReadinessService dataReadinessService;
+
+    @MockBean
+    private ValueSetGovernanceService valueSetGovernanceService;
+
     @Test
     void listsIntegrationHealth() throws Exception {
         when(integrationHealthService.listHealth()).thenReturn(List.of(
@@ -57,19 +68,21 @@ class AdminControllerTest {
 
     @Test
     void triggersIntegrationSync() throws Exception {
-        when(integrationHealthService.triggerManualSync("mcp", "admin-user")).thenReturn(
+        when(integrationHealthService.triggerManualSync("mcp", "admin@workwell.dev")).thenReturn(
                 new IntegrationHealthService.IntegrationHealth("mcp", "MCP", "healthy", Instant.parse("2026-05-05T10:05:00Z"), "sync complete", java.util.Map.of("sseUrl", "http://127.0.0.1:8080/sse"))
         );
 
-        mockMvc.perform(post("/api/admin/integrations/mcp/sync"))
+        mockMvc.perform(post("/api/admin/integrations/mcp/sync").param("actor", "spoofed@workwell.dev"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.integration").value("mcp"))
                 .andExpect(jsonPath("$.status").value("healthy"));
+
+        verify(integrationHealthService).triggerManualSync("mcp", "admin@workwell.dev");
     }
 
     @Test
     void returnsBadRequestForUnsupportedIntegration() throws Exception {
-        when(integrationHealthService.triggerManualSync("unknown", "admin-user"))
+        when(integrationHealthService.triggerManualSync("unknown", "admin@workwell.dev"))
                 .thenThrow(new IllegalArgumentException("Unsupported integration: unknown"));
 
         mockMvc.perform(post("/api/admin/integrations/unknown/sync"))
@@ -185,14 +198,14 @@ class AdminControllerTest {
                 "Compliance Follow-up Required",
                 "Please complete follow-up.",
                 "OUTREACH",
-                "admin-user"
+                "admin@workwell.dev"
         )).thenReturn(new OutreachTemplateService.OutreachTemplate(
                 UUID.fromString("11111111-0000-0000-0000-000000000004"),
                 "General Compliance Reminder",
                 "Compliance Follow-up Required",
                 "Please complete follow-up.",
                 "OUTREACH",
-                "admin-user",
+                "admin@workwell.dev",
                 Instant.parse("2026-05-08T01:00:00Z"),
                 Instant.parse("2026-05-08T01:00:00Z"),
                 true
@@ -211,6 +224,65 @@ class AdminControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("General Compliance Reminder"))
                 .andExpect(jsonPath("$.type").value("OUTREACH"));
+    }
+
+    @Test
+    void listDataMappingsReturnsOk() throws Exception {
+        UUID mappingId = UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        when(dataReadinessService.listMappings()).thenReturn(List.of(
+                new DataReadinessService.DataElementMapping(
+                        mappingId, "fhir", "FHIR Repository", "FHIR_R4",
+                        "procedure.audiogram", "Procedure.performedDateTime",
+                        "Procedure", "Procedure.where(code in audiogram-vs).performedDateTime",
+                        null, "MAPPED", null, "Most recent audiogram date"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/data-mappings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].canonicalElement").value("procedure.audiogram"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("MAPPED"))
+                .andExpect(jsonPath("$[0].sourceId").value("fhir"));
+    }
+
+    @Test
+    void validateDataMappingsReturnsUpdatedList() throws Exception {
+        UUID mappingId = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        when(dataReadinessService.validateMappings()).thenReturn(List.of(
+                new DataReadinessService.DataElementMapping(
+                        mappingId, "hris", "HRIS", "INTERNAL",
+                        "employee.role", "employee_role",
+                        null, null, null, "MAPPED",
+                        java.time.Instant.parse("2026-05-09T12:00:00Z"), null
+                )
+        ));
+
+        mockMvc.perform(post("/api/admin/data-mappings/validate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].canonicalElement").value("employee.role"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("MAPPED"))
+                .andExpect(jsonPath("$[0].lastValidatedAt").isNotEmpty());
+    }
+
+    @Test
+    void listTerminologyMappingsReturnsOk() throws Exception {
+        UUID mappingId = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+        when(valueSetGovernanceService.listTerminologyMappings()).thenReturn(List.of(
+                new ValueSetGovernanceService.TerminologyMapping(
+                        mappingId,
+                        "LOCAL-AUD-001", "Baseline audiogram", "urn:workwell:demo",
+                        "92557", "Comprehensive audiometry evaluation", "http://www.ama-assn.org/go/cpt",
+                        "APPROVED", 0.90, "occupational-health-team",
+                        Instant.parse("2026-05-09T00:00:00Z"),
+                        "Demo mapping"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/terminology-mappings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].localCode").value("LOCAL-AUD-001"))
+                .andExpect(jsonPath("$[0].standardCode").value("92557"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("APPROVED"));
     }
 
     @Test
