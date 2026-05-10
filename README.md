@@ -89,6 +89,9 @@ pnpm dev
 - `GET /api/exports/runs?format=csv`
 - `GET /api/exports/outcomes?format=csv&runId={id}`
 - `GET /api/exports/cases?format=csv`
+- `GET /api/auditor/cases/{caseId}/packet?format=json|html` — structured case audit packet: case summary, evidence, actions, outreach, appointments, AI assist logs, disclaimers; requires `ROLE_CASE_MANAGER` or `ROLE_ADMIN`
+- `GET /api/auditor/runs/{runId}/packet?format=json|html` — structured run audit packet: run metadata, outcomes summary, logs, audit events, disclaimers; requires `ROLE_CASE_MANAGER` or `ROLE_ADMIN`
+- `GET /api/auditor/measure-versions/{mvId}/packet?format=json|html` — structured measure version audit packet: spec, CQL+hash, compile result, value sets, governance, traceability, data readiness, approval history; requires `ROLE_APPROVER` or `ROLE_ADMIN`
 
 ## CSV exports
 

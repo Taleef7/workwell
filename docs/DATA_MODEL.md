@@ -20,6 +20,7 @@ All tables below reflect active backend behavior as of 2026-05-10.
 - `audit_events`: append-only audit ledger.
 - `integration_health`: persisted admin health state per integration.
 - `outreach_templates`: optional DB-backed message templates (runtime falls back to built-ins if table absent).
+- `audit_packet_exports`: record of every audit packet generation (type, entity, format, actor, timestamp, payload hash, size).
 
 ## 3) Full Table Schemas
 
@@ -236,6 +237,22 @@ measure_id UUID REFERENCES measures(id)
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```
 If this table is absent, service falls back to built-in default templates.
+
+### 3.15 `audit_packet_exports`
+```sql
+id UUID PK DEFAULT gen_random_uuid()
+packet_type TEXT NOT NULL
+entity_id UUID NOT NULL
+format TEXT NOT NULL
+generated_by TEXT NOT NULL
+generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+payload_hash TEXT
+payload_size_bytes BIGINT
+```
+`packet_type` values: `CASE`, `RUN`, `MEASURE_VERSION`.
+`format` values: `json`, `html`.
+`payload_hash` is a SHA-256 hex digest of the serialized packet bytes for integrity verification.
+Written by `AuditPacketService` on every successful packet generation alongside an `AUDIT_PACKET_GENERATED` audit event.
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.

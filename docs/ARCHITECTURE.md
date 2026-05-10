@@ -33,7 +33,7 @@ Production endpoints:
 - `fhir`: measure library/resource assembly used by evaluation runtime.
 - `run`: run orchestration, run detail/summary read models, rerun scope support.
 - `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline.
-- `audit`: append-only audit event publisher + export/query paths.
+- `audit`: append-only audit event publisher + export/query paths. `AuditPacketService` assembles structured audit export packets (case, run, measure version) as JSON or HTML bytes; writes `AUDIT_PACKET_GENERATED` audit events and records in `audit_packet_exports`.
 - `export`: runs/outcomes/cases CSV contracts.
 - `integrations`: integration service adapters/checks.
 - `admin`: scheduler settings, integration health, outreach template APIs.
@@ -107,7 +107,7 @@ Public API actions derive audit identity from the authenticated security context
 - Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
 
 ## 7) External Interfaces
-- REST API: measure, run, case, admin, export endpoints.
+- REST API: measure, run, case, admin, export, and auditor packet endpoints.
 - REST API: evidence upload/download on case detail, role-gated to case manager/admin.
 - MCP: read-only tools with per-call audit events and Spring Security role gates on `/sse` and `/mcp/**`.
 - MCP tool audit actors come from the authenticated security context, not a hardcoded transport identity.
