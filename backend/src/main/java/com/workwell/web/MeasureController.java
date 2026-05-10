@@ -4,8 +4,10 @@ import com.workwell.admin.DataReadinessService;
 import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
+import com.workwell.measure.ValueSetGovernanceService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,17 +30,20 @@ public class MeasureController {
     private final MeasureTraceabilityService traceabilityService;
     private final MeasureImpactPreviewService impactPreviewService;
     private final DataReadinessService dataReadinessService;
+    private final ValueSetGovernanceService valueSetGovernanceService;
 
     public MeasureController(
             MeasureService measureService,
             MeasureTraceabilityService traceabilityService,
             MeasureImpactPreviewService impactPreviewService,
-            DataReadinessService dataReadinessService
+            DataReadinessService dataReadinessService,
+            ValueSetGovernanceService valueSetGovernanceService
     ) {
         this.measureService = measureService;
         this.traceabilityService = traceabilityService;
         this.impactPreviewService = impactPreviewService;
         this.dataReadinessService = dataReadinessService;
+        this.valueSetGovernanceService = valueSetGovernanceService;
     }
 
     @GetMapping("/api/measures")
@@ -183,7 +188,48 @@ public class MeasureController {
 
     @GetMapping("/api/measures/{id}/activation-readiness")
     public MeasureService.ActivationReadiness activationReadiness(@PathVariable UUID id) {
-        return measureService.activationReadiness(id);
+        MeasureService.ActivationReadiness base = measureService.activationReadiness(id);
+        ValueSetGovernanceService.ResolveCheckResult vsCheck = valueSetGovernanceService.resolveCheck(id);
+        List<String> allBlockers = new ArrayList<>(base.activationBlockers());
+        allBlockers.addAll(vsCheck.blockers());
+        return new MeasureService.ActivationReadiness(
+                base.ready() && vsCheck.allResolved(),
+                base.compileStatus(),
+                base.testFixtureCount(),
+                base.valueSetCount(),
+                base.testValidationPassed(),
+                allBlockers
+        );
+    }
+
+    @PostMapping("/api/measures/{id}/value-sets/resolve-check")
+    public ValueSetGovernanceService.ResolveCheckResult resolveCheck(@PathVariable UUID id) {
+        try {
+            return valueSetGovernanceService.resolveCheck(id);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/value-sets/{id}/diff")
+    public ValueSetGovernanceService.ValueSetDiffResponse valueSetDiff(
+            @PathVariable UUID id,
+            @RequestParam(name = "to") UUID toId
+    ) {
+        try {
+            return valueSetGovernanceService.diff(id, toId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/value-sets/{id}/detail")
+    public ValueSetGovernanceService.ValueSetDetail valueSetDetail(@PathVariable UUID id) {
+        try {
+            return valueSetGovernanceService.getValueSetDetail(id);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
     }
 
     @GetMapping("/api/measures/{id}/traceability")
