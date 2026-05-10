@@ -114,6 +114,7 @@ public class EvidenceService {
     }
 
     public List<EvidenceAttachment> list(UUID caseId) {
+        ensureListAllowed();
         return jdbcTemplate.query(
                 """
                         SELECT id, case_id, uploaded_by, file_name, file_size_bytes, mime_type, storage_key, description, uploaded_at
@@ -191,6 +192,12 @@ public class EvidenceService {
             jdbcTemplate.queryForObject("SELECT id FROM cases WHERE id = ?", UUID.class, caseId);
         } catch (EmptyResultDataAccessException ex) {
             throw new IllegalArgumentException("Case not found");
+        }
+    }
+
+    private void ensureListAllowed() {
+        if (!SecurityActor.hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")) {
+            throw new AccessDeniedException("Evidence listing requires case manager or admin access");
         }
     }
 

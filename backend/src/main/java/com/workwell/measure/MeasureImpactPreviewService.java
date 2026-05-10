@@ -60,10 +60,18 @@ public class MeasureImpactPreviewService {
             );
         }
 
-        List<DemoOutcome> outcomes = payload.outcomes();
+        List<DemoOutcome> allOutcomes = payload.outcomes();
+
+        // Apply scope filtering (site / employeeExternalId)
+        ImpactPreviewScope scope = request == null ? null : request.scope();
+        List<DemoOutcome> outcomes = applyScope(allOutcomes, scope);
+        if (scope != null && (scope.site() != null || scope.employeeExternalId() != null) && outcomes.isEmpty()) {
+            warnings.add("No employees matched the requested scope — preview reflects 0 subjects.");
+        }
+
         Map<String, Integer> outcomeCounts = countOutcomes(outcomes);
 
-        // Estimate case impact by comparing preview outcomes against existing open cases
+        // Estimate case impact by comparing preview outcomes against existing open cases for this period
         CaseImpact caseImpact = estimateCaseImpact(target.measureVersionId(), outcomes, evaluationDate);
 
         // Site and role breakdown
@@ -83,6 +91,7 @@ public class MeasureImpactPreviewService {
                 outcomes.size(), outcomeCounts, caseImpact,
                 siteBreakdown, roleBreakdown, warnings
         );
+
     }
 
     private MeasureTarget resolveMeasureTarget(UUID measureId, ImpactPreviewRequest request) {
@@ -137,8 +146,8 @@ public class MeasureImpactPreviewService {
         if (request != null && request.evaluationDate() != null && !request.evaluationDate().isBlank()) {
             try {
                 return LocalDate.parse(request.evaluationDate());
-            } catch (Exception ignored) {
-                // fall through
+            } catch (Exception ex) {
+                throw new IllegalArgumentException("Invalid evaluationDate format: '" + request.evaluationDate() + "' — expected YYYY-MM-DD");
             }
         }
         return LocalDate.now();
@@ -169,10 +178,12 @@ public class MeasureImpactPreviewService {
                     FROM cases c
                     JOIN employees e ON e.id = c.employee_id
                     WHERE c.measure_version_id = ?
+                      AND c.evaluation_period = ?
                       AND c.status != 'RESOLVED'
                     """,
                     (rs, i) -> rs.getString("external_id"),
-                    measureVersionId
+                    measureVersionId,
+                    evalPeriod
             );
         } catch (Exception ex) {
             openCaseSubjectIds = List.of();
@@ -201,6 +212,14 @@ public class MeasureImpactPreviewService {
         }
 
         return new CaseImpact(wouldCreate, wouldUpdate, wouldClose, wouldExclude);
+    }
+
+    private List<DemoOutcome> applyScope(List<DemoOutcome> outcomes, ImpactPreviewScope scope) {
+        if (scope == null) return outcomes;
+        return outcomes.stream()
+                .filter(o -> scope.site() == null || scope.site().equalsIgnoreCase(o.site()))
+                .filter(o -> scope.employeeExternalId() == null || scope.employeeExternalId().equalsIgnoreCase(o.subjectId()))
+                .toList();
     }
 
     private List<Map<String, Object>> buildSiteBreakdown(List<DemoOutcome> outcomes) {
