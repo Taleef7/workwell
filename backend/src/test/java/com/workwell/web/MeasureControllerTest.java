@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
@@ -32,6 +33,9 @@ class MeasureControllerTest {
 
     @MockBean
     private MeasureImpactPreviewService impactPreviewService;
+
+    @MockBean
+    private DataReadinessService dataReadinessService;
 
     @Test
     void createsNewMeasureVersion() throws Exception {
@@ -96,6 +100,29 @@ class MeasureControllerTest {
                 .andExpect(jsonPath("$.measureId").value(measureId.toString()))
                 .andExpect(jsonPath("$.populationEvaluated").value(10))
                 .andExpect(jsonPath("$.caseImpact.wouldCreate").value(3));
+    }
+
+    @Test
+    void dataReadinessEndpointReturnsOk() throws Exception {
+        UUID measureId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        when(dataReadinessService.computeReadiness(measureId)).thenReturn(
+                new DataReadinessService.DataReadinessResponse(
+                        "READY",
+                        List.of(new DataReadinessService.RequiredElementReadiness(
+                                "procedure.audiogram", "Last audiogram date", "fhir", "MAPPED", "FRESH", 0.0, List.of()
+                        )),
+                        List.of(),
+                        List.of()
+                )
+        );
+
+        mockMvc.perform(get("/api/measures/{id}/data-readiness", measureId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overallStatus").value("READY"))
+                .andExpect(jsonPath("$.requiredElements[0].canonicalElement").value("procedure.audiogram"))
+                .andExpect(jsonPath("$.requiredElements[0].mappingStatus").value("MAPPED"))
+                .andExpect(jsonPath("$.blockers").isArray())
+                .andExpect(jsonPath("$.warnings").isArray());
     }
 
     @Test

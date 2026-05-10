@@ -1,5 +1,6 @@
 package com.workwell.web;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
@@ -26,15 +27,18 @@ public class MeasureController {
     private final MeasureService measureService;
     private final MeasureTraceabilityService traceabilityService;
     private final MeasureImpactPreviewService impactPreviewService;
+    private final DataReadinessService dataReadinessService;
 
     public MeasureController(
             MeasureService measureService,
             MeasureTraceabilityService traceabilityService,
-            MeasureImpactPreviewService impactPreviewService
+            MeasureImpactPreviewService impactPreviewService,
+            DataReadinessService dataReadinessService
     ) {
         this.measureService = measureService;
         this.traceabilityService = traceabilityService;
         this.impactPreviewService = impactPreviewService;
+        this.dataReadinessService = dataReadinessService;
     }
 
     @GetMapping("/api/measures")
@@ -198,6 +202,15 @@ public class MeasureController {
     ) {
         try {
             return impactPreviewService.preview(id, request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/measures/{id}/data-readiness")
+    public DataReadinessService.DataReadinessResponse dataReadiness(@PathVariable UUID id) {
+        try {
+            return dataReadinessService.computeReadiness(id);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
