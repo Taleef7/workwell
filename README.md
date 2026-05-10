@@ -76,6 +76,11 @@ pnpm dev
 - `POST /api/admin/data-mappings/validate` — cross-reference integration health into mapping statuses (marks STALE on degraded source)
 - `GET /api/measures/{id}/traceability` — policy-to-evidence traceability matrix with gap detection
 - `POST /api/measures/{id}/impact-preview` — dry-run activation impact: outcome counts, case impact, no DB writes; writes `MEASURE_IMPACT_PREVIEWED` audit event
+- `POST /api/measures/{id}/value-sets/resolve-check` — governance resolve-check: resolution status, code counts, CQL unattached reference detection, blockers/warnings
+- `GET /api/value-sets/{id}/diff?to={toId}` — code-level diff between two value set versions with affected measure list
+- `GET /api/value-sets/{id}/detail` — full value set detail including governance metadata and code list
+- `GET /api/admin/terminology-mappings` — list local-to-standard terminology mappings with status and confidence
+- `POST /api/admin/terminology-mappings` — create a new terminology mapping (PROPOSED by default)
 - `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
 - `GET /api/runs?limit=1`
 - `GET /api/cases?status=open`

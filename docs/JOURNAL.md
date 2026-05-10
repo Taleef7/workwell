@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-05-10
+
+### Value Set and Terminology Governance (README_06)
+
+Completed:
+
+Backend:
+- Migration `V013__value_set_governance.sql` — extends `value_sets` with 7 governance columns (`canonical_url`, `code_systems`, `source`, `status`, `expansion_hash`, `resolution_status`, `resolution_error`). Seeds 4 demo value sets with fixed UUIDs and non-empty `codes_json` (RESOLVED status). Creates `terminology_mappings` table; seeds 5 demo mappings (3 APPROVED, 1 REVIEWED, 1 PROPOSED).
+- Added `ValueSetGovernanceService` (`com.workwell.measure`) — `resolveCheck(measureId)`, `diff(fromId, toId)`, `getValueSetDetail(id)`, `listTerminologyMappings()`, `createTerminologyMapping(...)`. Lazy demo value set linking via `ensureDemoValueSetLinks()` called on resolve-check. CQL unattached reference detection via line-scan for `valueset "Name"` declarations.
+- Extended `MeasureController.activationReadiness()` to merge VS governance blockers into the base readiness result. Added `POST /api/measures/{id}/value-sets/resolve-check`, `GET /api/value-sets/{id}/diff`, `GET /api/value-sets/{id}/detail`.
+- Extended `AdminController` — added `GET /api/admin/terminology-mappings` and `POST /api/admin/terminology-mappings`.
+- Integration tests: `ValueSetGovernanceIntegrationTest` (6 tests, Testcontainers, requires Docker).
+- Controller unit tests updated: `MeasureControllerTest` (2 new tests), `AdminControllerTest` (1 new test).
+
+Frontend:
+- Added `ValueSetCodeEntry`, `ValueSetDetail`, `ValueSetCheckItem`, `ResolveCheckResponse`, `AffectedMeasure`, `ValueSetDiffResponse`, `TerminologyMapping` types to `features/studio/types.ts`.
+- Created `ValueSetGovernancePanel.tsx` — auto-loads on mount, Re-check button, overall ALL RESOLVED / BLOCKERS FOUND badge, blockers list, warnings list, per-value-set table (name, version, resolution status badge, code count).
+- Embedded `ValueSetGovernancePanel` in `ValueSetsTab` (authoring view) and `ReleaseApprovalTab` (after DataReadinessPanel).
+- Added Terminology Governance section to `admin/page.tsx` — table of all mappings with status badge, confidence %, reviewed by, notes.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: all 12 routes compiled, TypeScript clean
+- Controller unit tests: MeasureControllerTest + AdminControllerTest pass (WebMvcTest, no Docker)
+- Integration tests: ValueSetGovernanceIntegrationTest (6 tests, Testcontainers with Docker Desktop)
+
 ## 2026-05-09
 
 ### Data Readiness and Integration Mapping Cockpit (README_05)
