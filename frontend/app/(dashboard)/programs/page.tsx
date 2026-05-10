@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type ProgramSummary = {
   measureId: string;
@@ -36,7 +37,7 @@ type TopDrivers = {
 };
 
 export default function ProgramsPage() {
-  const apiBase = useMemo(() => (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, ""), []);
+  const api = useApi();
   const { siteId, from, to } = useGlobalFilters();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
@@ -52,9 +53,8 @@ export default function ProgramsPage() {
       if (siteId) params.set("site", siteId);
       if (from) params.set("from", from);
       if (to) params.set("to", to);
-      const response = await fetch(`${apiBase}/api/programs/overview${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load programs (${response.status})`);
-      const data = (await response.json()) as ProgramSummary[];
+      const qs = params.toString();
+      const data = await api.get<ProgramSummary[]>(`/api/programs/overview${qs ? `?${qs}` : ""}`);
       setPrograms(data);
 
       const trendPairs = await Promise.all(
@@ -63,8 +63,13 @@ export default function ProgramsPage() {
           if (siteId) trendParams.set("site", siteId);
           if (from) trendParams.set("from", from);
           if (to) trendParams.set("to", to);
-          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/trend${trendParams.toString() ? `?${trendParams.toString()}` : ""}`, { cache: "no-store" });
-          return [program.measureId, r.ok ? ((await r.json()) as TrendPoint[]) : []] as const;
+          const tqs = trendParams.toString();
+          try {
+            const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${tqs ? `?${tqs}` : ""}`);
+            return [program.measureId, trend] as const;
+          } catch {
+            return [program.measureId, []] as const;
+          }
         })
       );
       setTrendByMeasure(Object.fromEntries(trendPairs));
@@ -75,9 +80,14 @@ export default function ProgramsPage() {
           if (siteId) driverParams.set("site", siteId);
           if (from) driverParams.set("from", from);
           if (to) driverParams.set("to", to);
-          const r = await fetch(`${apiBase}/api/programs/${program.measureId}/top-drivers${driverParams.toString() ? `?${driverParams.toString()}` : ""}`, { cache: "no-store" });
+          const dqs = driverParams.toString();
           const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
-          return [program.measureId, r.ok ? ((await r.json()) as TopDrivers) : empty] as const;
+          try {
+            const drivers = await api.get<TopDrivers>(`/api/programs/${program.measureId}/top-drivers${dqs ? `?${dqs}` : ""}`);
+            return [program.measureId, drivers] as const;
+          } catch {
+            return [program.measureId, empty] as const;
+          }
         })
       );
       setDriversByMeasure(Object.fromEntries(driverPairs));
@@ -86,26 +96,19 @@ export default function ProgramsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, siteId, from, to]);
+  }, [api, siteId, from, to]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = setTimeout(() => {
-        void loadAll();
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [apiBase, loadAll]);
+    const timer = setTimeout(() => {
+      void loadAll();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [loadAll]);
 
   async function runAllMeasuresNow() {
     setError(null);
     try {
-      const r = await fetch(`${apiBase}/api/runs/manual`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scopeType: "ALL_PROGRAMS" })
-      });
-      if (!r.ok) throw new Error(`Manual run failed (${r.status})`);
+      await api.post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
       emitToast("Run completed - All Programs refreshed");
       await loadAll();
     } catch (err) {

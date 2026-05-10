@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type CaseSummary = {
   caseId: string;
@@ -69,11 +70,7 @@ export default function CasesPage() {
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
   const { siteId, from, to } = useGlobalFilters();
-
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const api = useApi();
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -84,16 +81,12 @@ export default function CasesPage() {
 
   const loadMeasures = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/measures`, { cache: "no-store" });
-      if (!response.ok) {
-        return;
-      }
-      const data = (await response.json()) as MeasureOption[];
+      const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data.filter((item) => item.status === "Active"));
     } catch {
       setMeasures([]);
     }
-  }, [apiBase, setMeasures]);
+  }, [api, setMeasures]);
 
   const loadCases = useCallback(async () => {
     setLoading(true);
@@ -101,31 +94,17 @@ export default function CasesPage() {
     try {
       const params = new URLSearchParams();
       params.set("status", statusFilter);
-      if (measureFilter) {
-        params.set("measureId", measureFilter);
-      }
-      if (priorityFilter) {
-        params.set("priority", priorityFilter);
-      }
-      if (assigneeFilter) {
-        params.set("assignee", assigneeFilter);
-      }
+      if (measureFilter) params.set("measureId", measureFilter);
+      if (priorityFilter) params.set("priority", priorityFilter);
+      if (assigneeFilter) params.set("assignee", assigneeFilter);
       if (siteFilter) {
         params.set("site", siteFilter);
       } else if (siteId) {
         params.set("site", siteId);
       }
-      if (from) {
-        params.set("from", from);
-      }
-      if (to) {
-        params.set("to", to);
-      }
-      const response = await fetch(`${apiBase}/api/cases?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-      const data = (await response.json()) as CaseSummary[];
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const data = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
       setCases(data);
       setSelectedCaseIds((existing) => existing.filter((id) => data.some((item) => item.caseId === id)));
     } catch (err) {
@@ -133,39 +112,21 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [
-    apiBase,
-    assigneeFilter,
-    measureFilter,
-    priorityFilter,
-    siteFilter,
-    siteId,
-    from,
-    to,
-    statusFilter,
-    setLoading,
-    setError,
-    setCases,
-    setSelectedCaseIds
-  ]);
+  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = setTimeout(() => {
-        void loadMeasures();
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [apiBase, loadMeasures]);
+    const timer = setTimeout(() => {
+      void loadMeasures();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [loadMeasures]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = setTimeout(() => {
-        void loadCases();
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [apiBase, loadCases]);
+    const timer = setTimeout(() => {
+      void loadCases();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [loadCases]);
 
   const filteredCases = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -205,35 +166,29 @@ export default function CasesPage() {
   }
 
   async function exportCsv(urlPath: string, filename: string) {
-    const response = await fetch(`${apiBase}${urlPath}`);
-    if (!response.ok) {
-      setError(`Export failed (${response.status})`);
-      return;
+    try {
+      const blob = await api.downloadBlob(urlPath);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed");
     }
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
   }
 
   async function bulkAssign() {
-    if (!apiBase || selectedCaseIds.length === 0) {
-      return;
-    }
+    if (selectedCaseIds.length === 0) return;
     setBulkActing("assign");
     setError(null);
     try {
       const assigneeQuery = bulkAssignee.trim() ? `?assignee=${encodeURIComponent(bulkAssignee.trim())}` : "";
       for (const caseId of selectedCaseIds) {
-        const response = await fetch(`${apiBase}/api/cases/${caseId}/assign${assigneeQuery}`, { method: "POST" });
-        if (!response.ok) {
-          throw new Error(`Bulk assign failed (${response.status})`);
-        }
+        await api.post(`/api/cases/${caseId}/assign${assigneeQuery}`);
       }
       await loadCases();
       emitToast(`Case assigned to ${bulkAssignee.trim() || "unassigned"}`);
@@ -245,17 +200,12 @@ export default function CasesPage() {
   }
 
   async function bulkEscalate() {
-    if (!apiBase || selectedCaseIds.length === 0) {
-      return;
-    }
+    if (selectedCaseIds.length === 0) return;
     setBulkActing("escalate");
     setError(null);
     try {
       for (const caseId of selectedCaseIds) {
-        const response = await fetch(`${apiBase}/api/cases/${caseId}/escalate`, { method: "POST" });
-        if (!response.ok) {
-          throw new Error(`Bulk escalate failed (${response.status})`);
-        }
+        await api.post(`/api/cases/${caseId}/escalate`);
       }
       await loadCases();
       emitToast("Selected cases escalated");
@@ -299,7 +249,7 @@ export default function CasesPage() {
           <p className="text-sm text-slate-500">Loaded from the DB-backed case endpoints.</p>
         </div>
         <p className="text-sm text-slate-500">
-          API base: <code>{apiBase || "(missing NEXT_PUBLIC_API_BASE_URL)"}</code>
+          {cases.length} case{cases.length !== 1 ? "s" : ""} loaded
         </p>
         <button
           className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900"

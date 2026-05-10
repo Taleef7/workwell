@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
+import { useApi } from "@/lib/api/hooks";
 
 type ProgramSummary = {
   measureId: string;
@@ -38,7 +39,7 @@ type TopDrivers = {
 export default function ProgramDetailPage() {
   const params = useParams<{ measureId: string }>();
   const measureId = params.measureId;
-  const apiBase = useMemo(() => (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, ""), []);
+  const api = useApi();
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -46,27 +47,29 @@ export default function ProgramDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!measureId) return;
     async function load() {
       try {
-        const [programsRes, trendRes, driversRes] = await Promise.all([
-          fetch(`${apiBase}/api/programs`, { cache: "no-store" }),
-          fetch(`${apiBase}/api/programs/${measureId}/trend`, { cache: "no-store" }),
-          fetch(`${apiBase}/api/programs/${measureId}/top-drivers`, { cache: "no-store" })
-        ]);
-        if (!programsRes.ok) throw new Error(`Failed loading programs (${programsRes.status})`);
-        const programs = (await programsRes.json()) as ProgramSummary[];
+        const programs = await api.get<ProgramSummary[]>("/api/programs");
         setProgram(programs.find((p) => p.measureId === measureId) ?? null);
-        setTrend(trendRes.ok ? ((await trendRes.json()) as TrendPoint[]) : []);
-        setDrivers(driversRes.ok ? ((await driversRes.json()) as TopDrivers) : { bySite: [], byRole: [], byOutcomeReason: [] });
+        try {
+          const t = await api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`);
+          setTrend(t);
+        } catch {
+          setTrend([]);
+        }
+        try {
+          const d = await api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`);
+          setDrivers(d);
+        } catch {
+          setDrivers({ bySite: [], byRole: [], byOutcomeReason: [] });
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
       }
     }
-
-    if (apiBase && measureId) {
-      void load();
-    }
-  }, [apiBase, measureId]);
+    void load();
+  }, [api, measureId]);
 
   const prevRate = trend.length > 1 ? trend[1].complianceRate : program?.complianceRate ?? 0;
   const delta = (program?.complianceRate ?? 0) - prevRate;
@@ -141,21 +144,16 @@ export default function ProgramDetailPage() {
             </Link>
             <button
               className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-              onClick={async () => {
-                try {
-                  setError(null);
-                  const response = await fetch(`${apiBase}/api/runs/manual`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ scopeType: "MEASURE", measureId })
-                  });
-                  if (!response.ok) {
-                    throw new Error(`Measure run failed (${response.status})`);
+              onClick={() => {
+                void (async () => {
+                  try {
+                    setError(null);
+                    await api.post("/api/runs/manual", { scopeType: "MEASURE", measureId });
+                    emitToast(`${program.measureName} run completed`);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Unknown error");
                   }
-                  emitToast(`${program.measureName} run completed`);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Unknown error");
-                }
+                })();
               }}
             >
               Run This Measure

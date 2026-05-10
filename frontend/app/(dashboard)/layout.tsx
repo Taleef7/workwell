@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 
 const nav = [
@@ -20,35 +21,28 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, logout } = useAuth();
+  const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
 
   useEffect(() => {
     let mounted = true;
     async function loadSites() {
       try {
-        const response = await fetch(`${apiBase}/api/programs/sites`, { cache: "no-store" });
-        if (!response.ok) return;
-        const data = (await response.json()) as string[];
+        const data = await api.get<string[]>("/api/programs/sites");
         if (mounted) setSites(data);
       } catch {
         if (mounted) setSites([]);
       }
     }
-    if (apiBase) {
-      void loadSites();
-    }
+    void loadSites();
     return () => {
       mounted = false;
     };
-  }, [apiBase]);
+  }, [api]);
 
   useEffect(() => {
     let mounted = true;
@@ -59,22 +53,18 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         if (siteId) params.set("site", siteId);
         if (from) params.set("from", from);
         if (to) params.set("to", to);
-        const response = await fetch(`${apiBase}/api/cases?${params.toString()}`, { cache: "no-store" });
-        if (!response.ok) return;
-        const data = (await response.json()) as Array<{ outreachRecordCount?: number }>;
+        const data = await api.get<Array<{ outreachRecordCount?: number }>>(`/api/cases?${params.toString()}`);
         const count = data.filter((item) => (item.outreachRecordCount ?? 0) === 0).length;
         if (mounted) setWorklistGapCount(count);
       } catch {
         if (mounted) setWorklistGapCount(0);
       }
     }
-    if (apiBase) {
-      void loadWorklistGapCount();
-    }
+    void loadWorklistGapCount();
     return () => {
       mounted = false;
     };
-  }, [apiBase, siteId, from, to]);
+  }, [api, siteId, from, to]);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

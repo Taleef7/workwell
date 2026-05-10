@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type IntegrationHealth = {
   integration: string;
@@ -80,44 +81,36 @@ export default function AdminPage() {
   const [waiverActive, setWaiverActive] = useState(true);
   const [grantingWaiver, setGrantingWaiver] = useState(false);
   const { siteId } = useGlobalFilters();
-
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const api = useApi();
 
   const loadIntegrations = useCallback(async () => {
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/integrations`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setIntegrations((await response.json()) as IntegrationHealth[]);
+      const data = await api.get<IntegrationHealth[]>("/api/admin/integrations");
+      setIntegrations(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadScheduler = useCallback(async () => {
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/scheduler`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setScheduler((await response.json()) as SchedulerStatus);
+      const data = await api.get<SchedulerStatus>("/api/admin/scheduler");
+      setScheduler(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadMeasures = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/measures`, { cache: "no-store" });
-      if (!response.ok) return;
-      const data = (await response.json()) as MeasureOption[];
+      const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data.filter((item) => item.status === "Active"));
     } catch {
       setMeasures([]);
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadWaivers = useCallback(async () => {
     setLoadingWaivers(true);
@@ -129,64 +122,56 @@ export default function AdminPage() {
       if (waiverExpiresAfter) params.set("expiresAfter", waiverExpiresAfter);
       if (waiverExpiresBefore) params.set("expiresBefore", waiverExpiresBefore);
       if (waiverActiveFilter) params.set("active", waiverActiveFilter);
-      const response = await fetch(`${apiBase}/api/admin/waivers?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setWaivers((await response.json()) as WaiverRecord[]);
+      const data = await api.get<WaiverRecord[]>(`/api/admin/waivers?${params.toString()}`);
+      setWaivers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoadingWaivers(false);
     }
-  }, [apiBase, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter]);
+  }, [api, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter]);
 
   const loadAuditEvents = useCallback(async () => {
     setLoadingAudit(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/audit-events?scope=${auditScope}&limit=50`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      setAuditEvents((await response.json()) as AuditEventRow[]);
+      const data = await api.get<AuditEventRow[]>(`/api/admin/audit-events?scope=${auditScope}&limit=50`);
+      setAuditEvents(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoadingAudit(false);
     }
-  }, [apiBase, auditScope]);
+  }, [api, auditScope]);
 
   useEffect(() => {
-    if (!apiBase) return;
     const timer = window.setTimeout(() => {
       void loadIntegrations();
       void loadScheduler();
       void loadMeasures();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [apiBase, loadIntegrations, loadMeasures, loadScheduler]);
+  }, [loadIntegrations, loadMeasures, loadScheduler]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = window.setTimeout(() => {
-        void loadWaivers();
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, [apiBase, loadWaivers]);
+    const timer = window.setTimeout(() => {
+      void loadWaivers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadWaivers]);
 
   useEffect(() => {
-    if (apiBase) {
-      const timer = window.setTimeout(() => {
-        void loadAuditEvents();
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, [apiBase, loadAuditEvents]);
+    const timer = window.setTimeout(() => {
+      void loadAuditEvents();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAuditEvents]);
 
   async function triggerSync(integration: string) {
     setSyncing(integration);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/integrations/${integration}/sync`, { method: "POST" });
-      if (!response.ok) throw new Error(`Sync failed: ${response.status}`);
+      await api.post(`/api/admin/integrations/${integration}/sync`);
       await loadIntegrations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -199,9 +184,8 @@ export default function AdminPage() {
     setUpdatingScheduler(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/scheduler?enabled=${enabled ? "true" : "false"}`, { method: "POST" });
-      if (!response.ok) throw new Error(`Scheduler update failed: ${response.status}`);
-      setScheduler((await response.json()) as SchedulerStatus);
+      const data = await api.post<undefined, SchedulerStatus>(`/api/admin/scheduler?enabled=${enabled ? "true" : "false"}`);
+      setScheduler(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -218,23 +202,17 @@ export default function AdminPage() {
       setError("Waiver reason is required");
       return;
     }
-
     setGrantingWaiver(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/waivers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employeeExternalId: waiverEmployeeExternalId.trim(),
-          measureId: waiverMeasureId,
-          exclusionReason: waiverExclusionReason.trim(),
-          expiresAt: waiverExpiresAt ? new Date(waiverExpiresAt).toISOString() : null,
-          notes: waiverNotes.trim() || null,
-          active: waiverActive
-        })
+      await api.post("/api/admin/waivers", {
+        employeeExternalId: waiverEmployeeExternalId.trim(),
+        measureId: waiverMeasureId,
+        exclusionReason: waiverExclusionReason.trim(),
+        expiresAt: waiverExpiresAt ? new Date(waiverExpiresAt).toISOString() : null,
+        notes: waiverNotes.trim() || null,
+        active: waiverActive
       });
-      if (!response.ok) throw new Error(`Grant failed: ${response.status}`);
       setWaiverEmployeeExternalId("");
       setWaiverMeasureId("");
       setWaiverExclusionReason("");

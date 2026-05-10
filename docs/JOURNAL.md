@@ -2,6 +2,31 @@
 
 ## 2026-05-09
 
+### Frontend: typed API client introduced, global fetch monkey-patch removed
+
+Completed:
+- Created `frontend/lib/api/errors.ts` — `ApiError` class with typed status helpers (`isUnauthorized`, `isForbidden`, `isNotFound`, `isClientError`, `isServerError`).
+- Created `frontend/lib/api/client.ts` — `ApiClient` class that reads `NEXT_PUBLIC_API_BASE_URL`, attaches `Authorization: Bearer <token>`, handles 401 via `onUnauthorized` callback, and throws `ApiError` on non-OK responses. Methods: `get`, `post`, `put`, `delete`, `postForm`, `downloadBlob`.
+- Created `frontend/lib/api/hooks.ts` — `useApi()` hook composing `useAuth()` + `ApiClient`; recreates client only when token or logout changes.
+- Removed the entire `window.fetch` monkey-patch `useEffect` from `frontend/components/auth-provider.tsx`. Auth-provider is now a clean context provider with no global side effects.
+- Migrated all 9 dashboard pages from bare `fetch()` + inline `apiBase` patterns to `useApi()`:
+  - `app/(dashboard)/layout.tsx`
+  - `app/(dashboard)/measures/page.tsx`
+  - `app/(dashboard)/programs/page.tsx`
+  - `app/(dashboard)/programs/[measureId]/page.tsx`
+  - `app/(dashboard)/runs/page.tsx`
+  - `app/(dashboard)/cases/page.tsx`
+  - `app/(dashboard)/cases/[id]/page.tsx`
+  - `app/(dashboard)/studio/[id]/page.tsx`
+  - `app/(dashboard)/admin/page.tsx`
+- Evidence download in `cases/[id]` converted from plain `<a href>` to a button calling `api.downloadBlob()` so the Authorization header is sent (role-protected endpoint).
+- Fixed two rounds of lint: re-added `// eslint-disable-next-line react-hooks/set-state-in-effect` before `void loadXxx()` calls in effects; added missing stable setState refs to `useCallback` dep arrays in `cases/page.tsx` per `react-hooks/preserve-manual-memoization`.
+- `login/page.tsx` intentionally left using bare `fetch()` — no token at login time, correct behavior.
+
+Verification:
+- Frontend lint: `frontend\\corepack pnpm lint` -> exit 0 (0 errors, 0 warnings)
+- Frontend build: `frontend\\corepack pnpm build` -> `✓ Compiled successfully`, all 12 routes built
+
 ### Scoped runs and run job model phase 1 completed
 
 Completed:
