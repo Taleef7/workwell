@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
@@ -44,6 +45,9 @@ class AdminControllerTest {
 
     @MockBean
     private AuditQueryService auditQueryService;
+
+    @MockBean
+    private DataReadinessService dataReadinessService;
 
     @Test
     void listsIntegrationHealth() throws Exception {
@@ -216,6 +220,44 @@ class AdminControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("General Compliance Reminder"))
                 .andExpect(jsonPath("$.type").value("OUTREACH"));
+    }
+
+    @Test
+    void listDataMappingsReturnsOk() throws Exception {
+        UUID mappingId = UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        when(dataReadinessService.listMappings()).thenReturn(List.of(
+                new DataReadinessService.DataElementMapping(
+                        mappingId, "fhir", "FHIR Repository", "FHIR_R4",
+                        "procedure.audiogram", "Procedure.performedDateTime",
+                        "Procedure", "Procedure.where(code in audiogram-vs).performedDateTime",
+                        null, "MAPPED", null, "Most recent audiogram date"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/data-mappings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].canonicalElement").value("procedure.audiogram"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("MAPPED"))
+                .andExpect(jsonPath("$[0].sourceId").value("fhir"));
+    }
+
+    @Test
+    void validateDataMappingsReturnsUpdatedList() throws Exception {
+        UUID mappingId = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        when(dataReadinessService.validateMappings()).thenReturn(List.of(
+                new DataReadinessService.DataElementMapping(
+                        mappingId, "hris", "HRIS", "INTERNAL",
+                        "employee.role", "employee_role",
+                        null, null, null, "MAPPED",
+                        java.time.Instant.parse("2026-05-09T12:00:00Z"), null
+                )
+        ));
+
+        mockMvc.perform(post("/api/admin/data-mappings/validate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].canonicalElement").value("employee.role"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("MAPPED"))
+                .andExpect(jsonPath("$[0].lastValidatedAt").isNotEmpty());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.workwell.web;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
@@ -31,19 +32,22 @@ public class AdminController {
     private final OutreachTemplateService outreachTemplateService;
     private final WaiverService waiverService;
     private final AuditQueryService auditQueryService;
+    private final DataReadinessService dataReadinessService;
 
     public AdminController(
             IntegrationHealthService integrationHealthService,
             SchedulerAdminService schedulerAdminService,
             OutreachTemplateService outreachTemplateService,
             WaiverService waiverService,
-            AuditQueryService auditQueryService
+            AuditQueryService auditQueryService,
+            DataReadinessService dataReadinessService
     ) {
         this.integrationHealthService = integrationHealthService;
         this.schedulerAdminService = schedulerAdminService;
         this.outreachTemplateService = outreachTemplateService;
         this.waiverService = waiverService;
         this.auditQueryService = auditQueryService;
+        this.dataReadinessService = dataReadinessService;
     }
 
     @GetMapping("/api/admin/integrations")
@@ -146,6 +150,16 @@ public class AdminController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
+    }
+
+    @GetMapping("/api/admin/data-mappings")
+    public List<DataReadinessService.DataElementMapping> listDataMappings() {
+        return dataReadinessService.listMappings();
+    }
+
+    @PostMapping("/api/admin/data-mappings/validate")
+    public List<DataReadinessService.DataElementMapping> validateDataMappings() {
+        return dataReadinessService.validateMappings();
     }
 
     @GetMapping("/api/admin/audit-events")
