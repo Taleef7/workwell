@@ -13,6 +13,7 @@ import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.audit.AuditQueryService;
 import com.workwell.admin.SchedulerAdminService;
+import com.workwell.measure.ValueSetGovernanceService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -48,6 +49,9 @@ class AdminControllerTest {
 
     @MockBean
     private DataReadinessService dataReadinessService;
+
+    @MockBean
+    private ValueSetGovernanceService valueSetGovernanceService;
 
     @Test
     void listsIntegrationHealth() throws Exception {
@@ -258,6 +262,27 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$[0].canonicalElement").value("employee.role"))
                 .andExpect(jsonPath("$[0].mappingStatus").value("MAPPED"))
                 .andExpect(jsonPath("$[0].lastValidatedAt").isNotEmpty());
+    }
+
+    @Test
+    void listTerminologyMappingsReturnsOk() throws Exception {
+        UUID mappingId = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+        when(valueSetGovernanceService.listTerminologyMappings()).thenReturn(List.of(
+                new ValueSetGovernanceService.TerminologyMapping(
+                        mappingId,
+                        "LOCAL-AUD-001", "Baseline audiogram", "urn:workwell:demo",
+                        "92557", "Comprehensive audiometry evaluation", "http://www.ama-assn.org/go/cpt",
+                        "APPROVED", 0.90, "occupational-health-team",
+                        Instant.parse("2026-05-09T00:00:00Z"),
+                        "Demo mapping"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/terminology-mappings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].localCode").value("LOCAL-AUD-001"))
+                .andExpect(jsonPath("$[0].standardCode").value("92557"))
+                .andExpect(jsonPath("$[0].mappingStatus").value("APPROVED"));
     }
 
     @Test
