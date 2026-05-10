@@ -194,3 +194,31 @@ Release tab should have:
 - impact preview exists.
 - activation flow references preview.
 - preview is dry-run only.
+
+## Implementation Progress (2026-05-09)
+
+Status: **Complete**
+
+### Backend — Part A (Traceability)
+
+- `backend/src/main/java/com/workwell/measure/MeasureTraceabilityService.java` — new service; builds policy-to-evidence matrix from spec JSON, parsed CQL defines (regex), linked value sets, test fixtures, and known runtime evidence keys. Gap checks: missing policy citation, bad compile status, no test fixtures, missing MISSING_DATA/EXCLUDED fixture coverage, value sets not referenced in CQL.
+- `backend/src/main/java/com/workwell/web/MeasureController.java` — `GET /api/measures/{id}/traceability` wired.
+- `backend/src/test/java/com/workwell/measure/MeasureTraceabilityIntegrationTest.java` — 5 integration tests (Testcontainers, requires Docker).
+- `backend/src/test/java/com/workwell/web/MeasureControllerTest.java` — controller unit tests for traceability endpoint added.
+
+### Backend — Part B (Impact Preview)
+
+- `backend/src/main/java/com/workwell/measure/MeasureImpactPreviewService.java` — new service; dry-run via `cqlEvaluationService.evaluate()` only; never calls `runPersistenceService` or `caseFlowService`; estimates case impact from existing open cases; writes `MEASURE_IMPACT_PREVIEWED` audit event.
+- `backend/src/main/java/com/workwell/web/MeasureController.java` — `POST /api/measures/{id}/impact-preview` wired.
+- `backend/src/test/java/com/workwell/measure/MeasureImpactPreviewIntegrationTest.java` — 7 integration tests verifying dry-run invariants (no outcomes/cases/runs written, audit event written, Testcontainers, requires Docker).
+- `backend/src/test/java/com/workwell/web/MeasureControllerTest.java` — controller unit test for impact-preview endpoint added.
+
+### Frontend
+
+- `frontend/features/studio/types.ts` — added `TraceabilityValueSetRef`, `TestFixtureRef`, `TraceabilityRow`, `TraceabilityGap`, `TraceabilityResponse`, `CaseImpact`, `ImpactPreviewResponse`.
+- `frontend/features/studio/components/TraceabilityTab.tsx` — summary card, error/warning gap panels, 7-column policy-to-evidence matrix table, Export JSON button.
+- `frontend/features/studio/components/ImpactPreviewPanel.tsx` — "Preview Activation Impact" button, outcome count cards, case impact summary, warnings panel, "preview only" note.
+- `frontend/features/studio/components/ReleaseApprovalTab.tsx` — `ImpactPreviewPanel` embedded above Activate Measure button when measure is Approved.
+- `frontend/app/(dashboard)/studio/[id]/page.tsx` — "Traceability" tab added to Tab union and tab bar.
+
+Verification: lint exit 0, build all 12 routes ✓.
