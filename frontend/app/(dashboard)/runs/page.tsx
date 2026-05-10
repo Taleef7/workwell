@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { outcomeStatusClass } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useApi } from "@/lib/api/hooks";
 
 type RunListItem = {
   runId: string;
@@ -82,10 +83,7 @@ type RunInsightResponse = {
 };
 
 export default function RunsPage() {
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
+  const api = useApi();
 
   const [statusFilter, setStatusFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
@@ -109,17 +107,13 @@ export default function RunsPage() {
 
   const loadMeasures = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/measures`, { cache: "no-store" });
-      if (!response.ok) {
-        return;
-      }
-      const data = (await response.json()) as MeasureOption[];
+      const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data);
       setRunMeasureId((current) => current || (data.length > 0 ? data[0].id : ""));
     } catch {
       setMeasures([]);
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -133,9 +127,7 @@ export default function RunsPage() {
       if (siteId) query.set("site", siteId);
       if (from) query.set("from", from);
       if (to) query.set("to", to);
-      const response = await fetch(`${apiBase}/api/runs?${query.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load runs (${response.status})`);
-      const data = (await response.json()) as RunListItem[];
+      const data = await api.get<RunListItem[]>(`/api/runs?${query.toString()}`);
       setRuns(data);
       if (!selectedRunId && data.length) {
         setSelectedRunId(data[0].runId);
@@ -145,58 +137,52 @@ export default function RunsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+  }, [api, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
     try {
-      const [summaryResponse, logsResponse] = await Promise.all([
-        fetch(`${apiBase}/api/runs/${selectedRunId}`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/runs/${selectedRunId}/logs?limit=200`, { cache: "no-store" })
+      const [summary, logs] = await Promise.all([
+        api.get<RunSummary>(`/api/runs/${selectedRunId}`),
+        api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`)
       ]);
-      if (!summaryResponse.ok) throw new Error(`Failed to load run detail (${summaryResponse.status})`);
-      if (!logsResponse.ok) throw new Error(`Failed to load run logs (${logsResponse.status})`);
-      setSelectedRun((await summaryResponse.json()) as RunSummary);
-      setRunLogs((await logsResponse.json()) as RunLogEntry[]);
-      const outcomesResponse = await fetch(`${apiBase}/api/runs/${selectedRunId}/outcomes`, { cache: "no-store" });
-      if (outcomesResponse.ok) {
-        setRunOutcomes((await outcomesResponse.json()) as RunOutcomeRow[]);
-      } else {
+      setSelectedRun(summary);
+      setRunLogs(logs);
+      try {
+        const outcomes = await api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`);
+        setRunOutcomes(outcomes);
+      } catch {
         setRunOutcomes([]);
       }
       setInsightDismissed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase, selectedRunId]);
+  }, [api, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
     if (!selectedRunId) return;
     try {
-      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/ai/insight`, { method: "POST" });
-      if (!response.ok) return;
-      const data = (await response.json()) as RunInsightResponse;
+      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${selectedRunId}/ai/insight`);
       setRunInsight(data);
     } catch {
       setRunInsight(null);
     }
-  }, [apiBase, selectedRunId]);
+  }, [api, selectedRunId]);
 
   useEffect(() => {
-    if (apiBase) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadRuns();
-      void loadMeasures();
-    }
-  }, [apiBase, loadMeasures, loadRuns]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRuns();
+    void loadMeasures();
+  }, [loadMeasures, loadRuns]);
 
   useEffect(() => {
-    if (apiBase && selectedRunId) {
+    if (selectedRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadSelectedRun();
       void loadRunInsight();
     }
-  }, [apiBase, selectedRunId, loadSelectedRun, loadRunInsight]);
+  }, [selectedRunId, loadSelectedRun, loadRunInsight]);
 
   async function runManualScope() {
     setError(null);
@@ -219,13 +205,7 @@ export default function RunsPage() {
       if (runEvaluationDate) {
         payload.evaluationDate = runEvaluationDate;
       }
-      const response = await fetch(`${apiBase}/api/runs/manual`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(`Manual run failed (${response.status})`);
-      const data = (await response.json()) as ManualRunResponse;
+      const data = await api.post<typeof payload, ManualRunResponse>("/api/runs/manual", payload);
       emitToast(`${data.scopeLabel} - ${data.message}`);
       setSelectedRunId(data.runId);
       await loadRuns();
@@ -239,9 +219,7 @@ export default function RunsPage() {
     if (!selectedRunId) return;
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/runs/${selectedRunId}/rerun`, { method: "POST" });
-      if (!response.ok) throw new Error(`Rerun failed (${response.status})`);
-      const data = (await response.json()) as ManualRunResponse;
+      const data = await api.post<undefined, ManualRunResponse>(`/api/runs/${selectedRunId}/rerun`);
       emitToast("Rerun started");
       setSelectedRunId(data.runId);
       await loadRuns();
@@ -252,11 +230,7 @@ export default function RunsPage() {
   }
 
   async function downloadCsv(path: string, filename: string) {
-    const response = await fetch(`${apiBase}${path}`);
-    if (!response.ok) {
-      throw new Error(`Export failed (${response.status})`);
-    }
-    const blob = await response.blob();
+    const blob = await api.downloadBlob(path);
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;

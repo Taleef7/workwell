@@ -32,30 +32,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, router, token]);
 
-  useEffect(() => {
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const nextInit: RequestInit = { ...(init ?? {}) };
-      const headers = new Headers(nextInit.headers ?? {});
-      if (token) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
-      nextInit.headers = headers;
-
-      const response = await originalFetch(input, nextInit);
-      if (response.status === 401 && !pathname?.startsWith("/login")) {
-        setToken(null);
-        setUser(null);
-        router.replace("/login");
-      }
-      return response;
-    };
-
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, [pathname, router, token]);
-
   const value = useMemo<AuthContextValue>(
     () => ({
       token,

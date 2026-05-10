@@ -159,3 +159,40 @@ Rerun-to-verify messaging must say closure depends on actual new CQL outcome.
 - runs page supports scoped run controls.
 - case detail separates evidence/actions/verification.
 - `npm run lint` and `npm run build` pass.
+
+## Implementation Progress
+
+### Part A: API client — COMPLETE (2026-05-09)
+
+- [x] `frontend/lib/api/errors.ts` — `ApiError` with typed status helpers
+- [x] `frontend/lib/api/client.ts` — `ApiClient` with `get/post/put/delete/postForm/downloadBlob`
+- [x] `frontend/lib/api/hooks.ts` — `useApi()` composing `useAuth()` + `ApiClient`
+- [x] `frontend/components/auth-provider.tsx` — `window.fetch` monkey-patch removed
+- [x] `app/(dashboard)/layout.tsx` migrated
+- [x] `app/(dashboard)/measures/page.tsx` migrated
+- [x] `app/(dashboard)/programs/page.tsx` migrated
+- [x] `app/(dashboard)/programs/[measureId]/page.tsx` migrated
+- [x] `app/(dashboard)/runs/page.tsx` migrated (evidence download via `downloadBlob`)
+- [x] `app/(dashboard)/cases/page.tsx` migrated
+- [x] `app/(dashboard)/cases/[id]/page.tsx` migrated (evidence download via `downloadBlob`)
+- [x] `app/(dashboard)/studio/[id]/page.tsx` migrated
+- [x] `app/(dashboard)/admin/page.tsx` migrated
+- [x] `app/login/page.tsx` intentionally unchanged (no token at login time)
+- [x] lint exit 0, build all 12 routes pass
+
+### Part B: Measure Studio componentization — PENDING
+
+- [ ] `frontend/features/studio/hooks/useMeasureDetail.ts`
+- [ ] `frontend/features/studio/hooks/useMeasureActions.ts`
+- [ ] `frontend/features/studio/hooks/useValueSets.ts`
+- [ ] `frontend/features/studio/hooks/useOshaReferences.ts`
+- [ ] `frontend/features/studio/hooks/useActivationReadiness.ts`
+- [ ] `frontend/features/studio/components/StudioHeader.tsx`
+- [ ] `frontend/features/studio/components/StudioTabs.tsx`
+- [ ] `frontend/features/studio/components/ActivationReadinessCard.tsx`
+- [ ] `frontend/features/studio/components/SpecTab.tsx`
+- [ ] `frontend/features/studio/components/CqlTab.tsx`
+- [ ] `frontend/features/studio/components/ValueSetsTab.tsx`
+- [ ] `frontend/features/studio/components/TestsTab.tsx`
+- [ ] `frontend/features/studio/components/ReleaseApprovalTab.tsx`
+- [ ] Route page `studio/[id]/page.tsx` trimmed to param parsing + shell render

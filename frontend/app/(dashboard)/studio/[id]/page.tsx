@@ -3,11 +3,12 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Monaco, OnChange, OnMount } from "@monaco-editor/react";
 import { measureStatusClass } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
+import { useApi } from "@/lib/api/hooks";
 import { OshaReferenceCombobox, type OshaReferenceOption } from "@/components/osha-reference-combobox";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -100,12 +101,9 @@ type DraftSpecResponse = {
 
 export default function StudioMeasurePage() {
   const { user } = useAuth();
+  const api = useApi();
   const params = useParams<{ id: string }>();
   const measureId = typeof params?.id === "string" ? params.id : "";
-  const apiBase = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-    return raw.trim().replace(/\/+$/, "");
-  }, []);
   const [tab, setTab] = useState<"spec" | "cql" | "valuesets" | "tests" | "release">("spec");
   const [measure, setMeasure] = useState<MeasureDetail | null>(null);
   const [allValueSets, setAllValueSets] = useState<ValueSetRef[]>([]);
@@ -147,9 +145,7 @@ export default function StudioMeasurePage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/measures/${measureId}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load measure (${response.status})`);
-      const data = (await response.json()) as MeasureDetail;
+      const data = await api.get<MeasureDetail>(`/api/measures/${measureId}`);
       setMeasure(data);
       setPolicyRef(data.policyRef ?? "");
       setOshaReferenceId(data.oshaReferenceId ?? null);
@@ -163,53 +159,51 @@ export default function StudioMeasurePage() {
       setRequiredDataElementsText((data.requiredDataElements ?? []).join("\n"));
       setCqlText(data.cqlText ?? "");
       setTestFixtures(data.testFixtures ?? []);
-      const readinessResponse = await fetch(`${apiBase}/api/measures/${measureId}/activation-readiness`, { cache: "no-store" });
-      if (readinessResponse.ok) {
-        const readiness = (await readinessResponse.json()) as ActivationReadiness;
+      try {
+        const readiness = await api.get<ActivationReadiness>(`/api/measures/${measureId}/activation-readiness`);
         setActivationReadiness(readiness);
+      } catch {
+        // non-fatal
       }
-      const versionsResponse = await fetch(`${apiBase}/api/measures/${measureId}/versions`, { cache: "no-store" });
-      if (versionsResponse.ok) {
-        const versions = (await versionsResponse.json()) as VersionHistoryItem[];
+      try {
+        const versions = await api.get<VersionHistoryItem[]>(`/api/measures/${measureId}/versions`);
         setVersionHistory(versions);
+      } catch {
+        // non-fatal
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [apiBase, measureId]);
+  }, [api, measureId]);
 
   const loadValueSets = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/value-sets`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load value sets (${response.status})`);
-      const data = (await response.json()) as ValueSetRef[];
+      const data = await api.get<ValueSetRef[]>("/api/value-sets");
       setAllValueSets(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   const loadOshaReferences = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBase}/api/osha-references`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Failed to load OSHA references (${response.status})`);
-      const data = (await response.json()) as OshaReference[];
+      const data = await api.get<OshaReference[]>("/api/osha-references");
       setOshaReferences(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [apiBase]);
+  }, [api]);
 
   useEffect(() => {
-    if (apiBase && measureId) {
+    if (measureId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadMeasure();
       void loadValueSets();
       void loadOshaReferences();
     }
-  }, [apiBase, measureId, loadMeasure, loadValueSets, loadOshaReferences]);
+  }, [measureId, loadMeasure, loadValueSets, loadOshaReferences]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -258,10 +252,8 @@ export default function StudioMeasurePage() {
         ? [{ label: exclusionLabel.trim(), criteriaText: exclusionCriteria.trim() }]
         : [];
 
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/spec`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await api.put(`/api/measures/${measureId}/spec`, {
         policyRef: policyRef.trim(),
         oshaReferenceId,
         description,
@@ -269,68 +261,58 @@ export default function StudioMeasurePage() {
         exclusions,
         complianceWindow,
         requiredDataElements
-      })
-    });
-
-    if (!response.ok) {
-      setError(`Spec save failed (${response.status})`);
-      return;
+      });
+      emitToast("Spec saved");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Spec save failed");
     }
-    emitToast("Spec saved");
-    await loadMeasure();
   }
 
   async function draftSpecWithAi() {
     setError(null);
     setAiDraftBanner(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/ai/draft-spec`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const payload = await api.post<object, DraftSpecResponse>(`/api/measures/${measureId}/ai/draft-spec`, {
         measureName: measure?.name ?? "",
         policyText
-      })
-    });
-    if (!response.ok) {
-      setError(`AI draft failed (${response.status})`);
-      return;
+      });
+      if (!payload.success) {
+        setAiDraftBanner(payload.fallback ?? "AI temporarily unavailable. Please fill the spec manually.");
+        return;
+      }
+      const suggestion = payload.suggestion ?? {};
+      setDescription(suggestion.description ?? "");
+      setRoleFilter(suggestion.eligibilityCriteria?.roleFilter ?? "");
+      setSiteFilter(suggestion.eligibilityCriteria?.siteFilter ?? "");
+      setProgramEnrollmentText(suggestion.eligibilityCriteria?.programEnrollmentText ?? "");
+      setExclusionLabel(suggestion.exclusions?.[0]?.label ?? "");
+      setExclusionCriteria(suggestion.exclusions?.[0]?.criteriaText ?? "");
+      setComplianceWindow(suggestion.complianceWindow ?? "");
+      setRequiredDataElementsText((suggestion.requiredDataElements ?? []).join("\n"));
+      setAiDraftBanner("AI-generated draft - review and edit before saving.");
+      emitToast("AI draft applied to spec form");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI draft failed");
     }
-    const payload = (await response.json()) as DraftSpecResponse;
-    if (!payload.success) {
-      setAiDraftBanner(payload.fallback ?? "AI temporarily unavailable. Please fill the spec manually.");
-      return;
-    }
-    const suggestion = payload.suggestion ?? {};
-    setDescription(suggestion.description ?? "");
-    setRoleFilter(suggestion.eligibilityCriteria?.roleFilter ?? "");
-    setSiteFilter(suggestion.eligibilityCriteria?.siteFilter ?? "");
-    setProgramEnrollmentText(suggestion.eligibilityCriteria?.programEnrollmentText ?? "");
-    setExclusionLabel(suggestion.exclusions?.[0]?.label ?? "");
-    setExclusionCriteria(suggestion.exclusions?.[0]?.criteriaText ?? "");
-    setComplianceWindow(suggestion.complianceWindow ?? "");
-    setRequiredDataElementsText((suggestion.requiredDataElements ?? []).join("\n"));
-    setAiDraftBanner("AI-generated draft - review and edit before saving.");
-    emitToast("AI draft applied to spec form");
   }
 
   async function compileCql() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/cql/compile`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cqlText })
-    });
-    const payload = (await response.json()) as { status: string; errors?: string[]; warnings?: string[] };
-    if (!response.ok) {
-      setError(`Compile failed (${response.status})`);
-      return;
+    try {
+      const payload = await api.post<object, { status: string; errors?: string[]; warnings?: string[] }>(
+        `/api/measures/${measureId}/cql/compile`,
+        { cqlText }
+      );
+      setCompileWarnings(payload.warnings ?? []);
+      setCompileErrors(payload.errors ?? []);
+      if ((payload.errors ?? []).length === 0) {
+        emitToast("CQL compiled successfully");
+      }
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Compile failed");
     }
-    setCompileWarnings(payload.warnings ?? []);
-    setCompileErrors(payload.errors ?? []);
-    if ((payload.errors ?? []).length === 0) {
-      emitToast("CQL compiled successfully");
-    }
-    await loadMeasure();
   }
 
   const handleCqlMount = useCallback<OnMount>((editor, monaco) => {
@@ -365,78 +347,62 @@ export default function StudioMeasurePage() {
 
   async function createValueSet() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/value-sets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ oid: valueSetOid, name: valueSetName, version: valueSetVersion })
-    });
-    if (!response.ok) {
-      setError(`Value set create failed (${response.status})`);
-      return;
+    try {
+      await api.post("/api/value-sets", { oid: valueSetOid, name: valueSetName, version: valueSetVersion });
+      setValueSetOid("");
+      setValueSetName("");
+      setValueSetVersion("");
+      await loadValueSets();
+      emitToast("Value set created");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Value set create failed");
     }
-    setValueSetOid("");
-    setValueSetName("");
-    setValueSetVersion("");
-    await loadValueSets();
-    emitToast("Value set created");
   }
 
   async function attachValueSet(valueSetId: string) {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/value-sets/${valueSetId}`, {
-      method: "POST"
-    });
-    if (!response.ok) {
-      setError(`Value set link failed (${response.status})`);
-      return;
+    try {
+      await api.post(`/api/measures/${measureId}/value-sets/${valueSetId}`);
+      await loadMeasure();
+      emitToast("Value set attached");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Value set link failed");
     }
-    await loadMeasure();
-    emitToast("Value set attached");
   }
 
   async function detachValueSet(valueSetId: string) {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/value-sets/${valueSetId}`, {
-      method: "DELETE"
-    });
-    if (!response.ok) {
-      setError(`Value set unlink failed (${response.status})`);
-      return;
+    try {
+      await api.delete(`/api/measures/${measureId}/value-sets/${valueSetId}`);
+      await loadMeasure();
+      emitToast("Value set removed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Value set unlink failed");
     }
-    await loadMeasure();
-    emitToast("Value set removed");
   }
 
   async function approveForRelease() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/approve`, {
-      method: "POST"
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      setError(body || `Approve failed (${response.status})`);
-      return;
+    try {
+      await api.post(`/api/measures/${measureId}/approve`);
+      setShowApproveConfirm(false);
+      emitToast("Measure approved for release");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approve failed");
     }
-    setShowApproveConfirm(false);
-    emitToast("Measure approved for release");
-    await loadMeasure();
   }
 
   async function activateMeasure() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetStatus: "Active" })
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      setError(body || `Activation failed (${response.status})`);
-      return;
+    try {
+      await api.post(`/api/measures/${measureId}/status`, { targetStatus: "Active" });
+      setShowActivateConfirm(false);
+      emitToast("Measure activated");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Activation failed");
     }
-    setShowActivateConfirm(false);
-    emitToast("Measure activated");
-    await loadMeasure();
   }
 
   async function deprecateMeasure() {
@@ -445,35 +411,26 @@ export default function StudioMeasurePage() {
       setError("Deprecation reason is required.");
       return;
     }
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/deprecate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: deprecateReason.trim() })
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      setError(body || `Deprecation failed (${response.status})`);
-      return;
+    try {
+      await api.post(`/api/measures/${measureId}/deprecate`, { reason: deprecateReason.trim() });
+      setShowDeprecateConfirm(false);
+      setDeprecateReason("");
+      emitToast("Measure deprecated");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Deprecation failed");
     }
-    setShowDeprecateConfirm(false);
-    setDeprecateReason("");
-    emitToast("Measure deprecated");
-    await loadMeasure();
   }
 
   async function saveTests() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/tests`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fixtures: testFixtures })
-    });
-    if (!response.ok) {
-      setError(`Tests save failed (${response.status})`);
-      return;
+    try {
+      await api.put(`/api/measures/${measureId}/tests`, { fixtures: testFixtures });
+      emitToast("Test fixtures saved");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Tests save failed");
     }
-    emitToast("Test fixtures saved");
-    await loadMeasure();
   }
 
   async function createNewVersion() {
@@ -482,33 +439,25 @@ export default function StudioMeasurePage() {
       setError("Change summary is required to create a new version.");
       return;
     }
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/versions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ changeSummary: changeSummary.trim() })
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      setError(body || `Version clone failed (${response.status})`);
-      return;
+    try {
+      await api.post(`/api/measures/${measureId}/versions`, { changeSummary: changeSummary.trim() });
+      setChangeSummary("");
+      emitToast("New draft version created");
+      await loadMeasure();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Version clone failed");
     }
-    setChangeSummary("");
-    emitToast("New draft version created");
-    await loadMeasure();
   }
 
   async function validateTests() {
     setError(null);
-    const response = await fetch(`${apiBase}/api/measures/${measureId}/tests/validate`, {
-      method: "POST"
-    });
-    if (!response.ok) {
-      setError(`Test validation failed (${response.status})`);
-      return;
+    try {
+      const payload = await api.post<undefined, { passed: boolean; failures: string[] }>(`/api/measures/${measureId}/tests/validate`);
+      setTestFailures(payload.failures ?? []);
+      emitToast(payload.passed ? "Test fixtures are valid" : "Test fixtures need fixes");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Test validation failed");
     }
-    const payload = (await response.json()) as { passed: boolean; failures: string[] };
-    setTestFailures(payload.failures ?? []);
-    emitToast(payload.passed ? "Test fixtures are valid" : "Test fixtures need fixes");
   }
 
   function updateFixture(index: number, field: keyof TestFixture, value: string) {
