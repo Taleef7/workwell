@@ -15,8 +15,9 @@ import { CqlTab } from "@/features/studio/components/CqlTab";
 import { ValueSetsTab } from "@/features/studio/components/ValueSetsTab";
 import { TestsTab } from "@/features/studio/components/TestsTab";
 import { ReleaseApprovalTab } from "@/features/studio/components/ReleaseApprovalTab";
+import { TraceabilityTab } from "@/features/studio/components/TraceabilityTab";
 
-type Tab = "spec" | "cql" | "valuesets" | "tests" | "release";
+type Tab = "spec" | "cql" | "valuesets" | "tests" | "release" | "traceability";
 
 export default function StudioMeasurePage() {
   const { user } = useAuth();
@@ -70,8 +71,8 @@ export default function StudioMeasurePage() {
   const canActivate = activationReadiness?.ready ?? false;
   const canAdminDeprecate = user?.role === "ROLE_ADMIN";
 
-  const tabs: Tab[] = ["spec", "cql", "valuesets", "tests", "release"];
-  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval" };
+  const tabs: Tab[] = ["spec", "cql", "valuesets", "tests", "release", "traceability"];
+  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
 
   return (
     <section className="space-y-4">
@@ -190,6 +191,10 @@ export default function StudioMeasurePage() {
           onChanged={load}
           onError={(msg) => setError(msg || null)}
         />
+      ) : null}
+
+      {measureId && tab === "traceability" ? (
+        <TraceabilityTab measureId={measureId} api={api} />
       ) : null}
     </section>
   );
