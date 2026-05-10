@@ -2,6 +2,28 @@
 
 ## 2026-05-09
 
+### Data Readiness and Integration Mapping Cockpit (README_05)
+
+Completed:
+
+Backend:
+- Migration `V012__data_readiness.sql` — adds `integration_sources`, `data_element_mappings`, and `data_readiness_snapshots` tables; seeds 4 integration sources (hris, fhir, ai, mcp) and 15 canonical element mappings covering all 4 demo measures.
+- Added `DataReadinessService` (`com.workwell.admin`) — `listMappings()`, `validateMappings()` (syncs from `integration_health`, marks STALE on degraded source), `computeReadiness(UUID measureId)` (per-element missingness + freshness + blocker/warning classification).
+- Added `GET /api/admin/data-mappings` and `POST /api/admin/data-mappings/validate` to `AdminController`.
+- Added `GET /api/measures/{id}/data-readiness` to `MeasureController`.
+- Integration tests: `DataReadinessIntegrationTest` (6 tests, Testcontainers, requires Docker).
+- Controller unit tests updated: `AdminControllerTest` (2 new tests), `MeasureControllerTest` (1 new test).
+
+Frontend:
+- Added `DataElementMapping`, `RequiredElementReadiness`, `DataReadinessResponse` types to `features/studio/types.ts`.
+- Created `DataReadinessPanel.tsx` — loads data-readiness, shows overall status badge, blockers, warnings, per-element table (canonical, source, mapping status, freshness, missingness with sample employees), link to Admin.
+- Embedded `DataReadinessPanel` in `ReleaseApprovalTab` above version history.
+- Added Data Readiness Cockpit section to `admin/page.tsx` — data element mappings table with Validate Mappings button.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: all 12 routes compiled, TypeScript clean
+
 ### Policy Traceability and Activation Impact Preview (README_04)
 
 Completed:

@@ -218,3 +218,26 @@ Missing data is not overdue. If required evidence is missing, outcome should be 
 - missing data remains distinct.
 - seeded demo mappings exist.
 - tests cover mapped/unmapped/stale/missing scenarios.
+
+## Implementation Progress (2026-05-09)
+
+Status: **Complete**
+
+### Backend
+
+- `backend/src/main/resources/db/migration/V012__data_readiness.sql` — creates `integration_sources`, `data_element_mappings`, `data_readiness_snapshots`; seeds 4 sources and 15 canonical element mappings for all 4 demo measures.
+- `backend/src/main/java/com/workwell/admin/DataReadinessService.java` — `listMappings()`, `validateMappings()`, `computeReadiness(UUID)`. Freshness from `integration_health.last_sync_at`, missingness from `outcomes` table, blockers/warnings classification.
+- `backend/src/main/java/com/workwell/web/AdminController.java` — `GET /api/admin/data-mappings`, `POST /api/admin/data-mappings/validate`.
+- `backend/src/main/java/com/workwell/web/MeasureController.java` — `GET /api/measures/{id}/data-readiness`.
+- `backend/src/test/java/com/workwell/admin/DataReadinessIntegrationTest.java` — 6 integration tests (Testcontainers, requires Docker).
+- `backend/src/test/java/com/workwell/web/AdminControllerTest.java` — 2 new controller unit tests.
+- `backend/src/test/java/com/workwell/web/MeasureControllerTest.java` — 1 new controller unit test.
+
+### Frontend
+
+- `frontend/features/studio/types.ts` — `DataElementMapping`, `RequiredElementReadiness`, `DataReadinessResponse` types added.
+- `frontend/features/studio/components/DataReadinessPanel.tsx` — overall status badge, blocker/warning panels, per-element table (label, canonical, source, mapping status, freshness, missingness + sample employees), Admin link.
+- `frontend/features/studio/components/ReleaseApprovalTab.tsx` — `DataReadinessPanel` embedded in readiness checklist.
+- `frontend/app/(dashboard)/admin/page.tsx` — Data Readiness Cockpit section with mappings table and Validate Mappings button.
+
+Verification: lint exit 0, build all 12 routes ✓.

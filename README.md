@@ -71,6 +71,9 @@ pnpm dev
 - `POST /api/measures/{id}/cql/compile`
 - `PUT /api/measures/{id}/tests`
 - `POST /api/measures/{id}/tests/validate`
+- `GET /api/measures/{id}/data-readiness` — per-measure data readiness: required element mapping status, source freshness, missingness rate, blockers and warnings
+- `GET /api/admin/data-mappings` — list all canonical data element source mappings
+- `POST /api/admin/data-mappings/validate` — cross-reference integration health into mapping statuses (marks STALE on degraded source)
 - `GET /api/measures/{id}/traceability` — policy-to-evidence traceability matrix with gap detection
 - `POST /api/measures/{id}/impact-preview` — dry-run activation impact: outcome counts, case impact, no DB writes; writes `MEASURE_IMPACT_PREVIEWED` audit event
 - `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
