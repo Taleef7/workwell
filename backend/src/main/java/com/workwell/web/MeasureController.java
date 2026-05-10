@@ -1,6 +1,8 @@
 package com.workwell.web;
 
+import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
+import com.workwell.measure.MeasureTraceabilityService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -22,9 +24,17 @@ import org.springframework.web.server.ResponseStatusException;
 @Validated
 public class MeasureController {
     private final MeasureService measureService;
+    private final MeasureTraceabilityService traceabilityService;
+    private final MeasureImpactPreviewService impactPreviewService;
 
-    public MeasureController(MeasureService measureService) {
+    public MeasureController(
+            MeasureService measureService,
+            MeasureTraceabilityService traceabilityService,
+            MeasureImpactPreviewService impactPreviewService
+    ) {
         this.measureService = measureService;
+        this.traceabilityService = traceabilityService;
+        this.impactPreviewService = impactPreviewService;
     }
 
     @GetMapping("/api/measures")
@@ -170,6 +180,27 @@ public class MeasureController {
     @GetMapping("/api/measures/{id}/activation-readiness")
     public MeasureService.ActivationReadiness activationReadiness(@PathVariable UUID id) {
         return measureService.activationReadiness(id);
+    }
+
+    @GetMapping("/api/measures/{id}/traceability")
+    public MeasureTraceabilityService.TraceabilityResponse getTraceability(@PathVariable UUID id) {
+        try {
+            return traceabilityService.generate(id);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/measures/{id}/impact-preview")
+    public MeasureImpactPreviewService.ImpactPreviewResponse impactPreview(
+            @PathVariable UUID id,
+            @RequestBody(required = false) MeasureImpactPreviewService.ImpactPreviewRequest request
+    ) {
+        try {
+            return impactPreviewService.preview(id, request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
     }
 
     public record CreateMeasureRequest(
