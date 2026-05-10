@@ -6,7 +6,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
+import com.workwell.measure.MeasureTraceabilityService;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,12 @@ class MeasureControllerTest {
 
     @MockBean
     private MeasureService measureService;
+
+    @MockBean
+    private MeasureTraceabilityService traceabilityService;
+
+    @MockBean
+    private MeasureImpactPreviewService impactPreviewService;
 
     @Test
     void createsNewMeasureVersion() throws Exception {
@@ -47,6 +55,47 @@ class MeasureControllerTest {
                         .contentType("application/json")
                         .content("{\"changeSummary\":\"\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void traceabilityEndpointReturnsOk() throws Exception {
+        UUID measureId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID versionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(traceabilityService.generate(measureId)).thenReturn(
+                new MeasureTraceabilityService.TraceabilityResponse(
+                        measureId, versionId, "Test Measure", "v1.0",
+                        List.of(), List.of()
+                )
+        );
+
+        mockMvc.perform(get("/api/measures/{id}/traceability", measureId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.measureId").value(measureId.toString()))
+                .andExpect(jsonPath("$.measureName").value("Test Measure"))
+                .andExpect(jsonPath("$.version").value("v1.0"))
+                .andExpect(jsonPath("$.rows").isArray())
+                .andExpect(jsonPath("$.gaps").isArray());
+    }
+
+    @Test
+    void impactPreviewEndpointReturnsOk() throws Exception {
+        UUID measureId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID versionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(impactPreviewService.preview(measureId, null)).thenReturn(
+                new MeasureImpactPreviewService.ImpactPreviewResponse(
+                        measureId, versionId, "2026-05-09",
+                        10, java.util.Map.of("COMPLIANT", 7, "OVERDUE", 3),
+                        new MeasureImpactPreviewService.CaseImpact(3, 0, 0, 0),
+                        List.of(), List.of(), List.of()
+                )
+        );
+
+        mockMvc.perform(post("/api/measures/{id}/impact-preview", measureId)
+                        .contentType("application/json"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.measureId").value(measureId.toString()))
+                .andExpect(jsonPath("$.populationEvaluated").value(10))
+                .andExpect(jsonPath("$.caseImpact.wouldCreate").value(3));
     }
 
     @Test
