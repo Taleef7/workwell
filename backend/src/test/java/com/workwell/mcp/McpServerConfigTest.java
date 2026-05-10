@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.admin.DataReadinessService;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.measure.MeasureService;
+import com.workwell.measure.MeasureTraceabilityService;
 import com.workwell.run.RunPersistenceService;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
@@ -25,12 +27,14 @@ class McpServerConfigTest {
                 mock(CaseFlowService.class),
                 mock(RunPersistenceService.class),
                 mock(MeasureService.class),
+                mock(MeasureTraceabilityService.class),
+                mock(DataReadinessService.class),
                 mock(JdbcTemplate.class)
         );
 
         assertThat(server).isNotNull();
         assertThat(server.getServerInfo().name()).isEqualTo("workwell-mcp");
-        assertThat(server.getServerInfo().version()).isEqualTo("1.1.0");
+        assertThat(server.getServerInfo().version()).isEqualTo("2.0.0");
         assertThat(server.getServerCapabilities()).isNotNull();
     }
 }

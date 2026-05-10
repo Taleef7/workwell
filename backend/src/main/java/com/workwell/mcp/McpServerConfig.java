@@ -3,8 +3,10 @@ package com.workwell.mcp;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.admin.DataReadinessService;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.measure.MeasureService;
+import com.workwell.measure.MeasureTraceabilityService;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.security.SecurityActor;
 import io.modelcontextprotocol.server.McpServer;
@@ -54,6 +56,8 @@ public class McpServerConfig {
             CaseFlowService caseFlowService,
             RunPersistenceService runPersistenceService,
             MeasureService measureService,
+            MeasureTraceabilityService traceabilityService,
+            DataReadinessService dataReadinessService,
             JdbcTemplate jdbcTemplate
     ) {
         Tool getCase = new Tool(
@@ -416,8 +420,327 @@ public class McpServerConfig {
                 }
         );
 
+        // — v2 tools —
+
+        Tool getEmployee = new Tool(
+                "get_employee",
+                "Get employee summary and latest compliance outcomes by employeeExternalId",
+                "{\"type\":\"object\",\"properties\":{\"employeeExternalId\":{\"type\":\"string\"}},\"required\":[\"employeeExternalId\"]}"
+        );
+
+        Tool checkCompliance = new Tool(
+                "check_compliance",
+                "Return latest or preview compliance status for an employee/measure. mode=latest retrieves the persisted outcome; mode=preview returns the same data labeled as preview (no official records created). AI is never used.",
+                "{\"type\":\"object\",\"properties\":{\"employeeExternalId\":{\"type\":\"string\"},\"measureName\":{\"type\":\"string\"},\"evaluationDate\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"latest\",\"preview\"]}},\"required\":[\"employeeExternalId\",\"measureName\"]}"
+        );
+
+        Tool listNoncompliant = new Tool(
+                "list_noncompliant",
+                "List non-compliant open cases filtered by measureName, site, and outcome status. Default limit 25, max 100.",
+                "{\"type\":\"object\",\"properties\":{\"measureName\":{\"type\":\"string\"},\"site\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"DUE_SOON\",\"OVERDUE\",\"MISSING_DATA\"]},\"limit\":{\"type\":\"number\"}}}"
+        );
+
+        Tool explainRule = new Tool(
+                "explain_rule",
+                "Explain measure rule logic from deterministic measure metadata: policy ref, description, eligibility, compliance window, required data elements, CQL defines, and value sets. Does not use AI.",
+                "{\"type\":\"object\",\"properties\":{\"measureName\":{\"type\":\"string\"},\"measureId\":{\"type\":\"string\"}},\"required\":[]}"
+        );
+
+        Tool getMeasureTraceability = new Tool(
+                "get_measure_traceability",
+                "Return policy-to-evidence traceability matrix rows and gaps for a measure. Uses the same backend as the traceability endpoint.",
+                "{\"type\":\"object\",\"properties\":{\"measureName\":{\"type\":\"string\"},\"measureId\":{\"type\":\"string\"}}}"
+        );
+
+        Tool listDataQualityGaps = new Tool(
+                "list_data_quality_gaps",
+                "Return data readiness gaps and blockers for a measure. Uses the data readiness backend service.",
+                "{\"type\":\"object\",\"properties\":{\"measureName\":{\"type\":\"string\"},\"measureId\":{\"type\":\"string\"}}}"
+        );
+
+        McpServerFeatures.SyncToolSpecification getEmployeeSpec = new McpServerFeatures.SyncToolSpecification(
+                getEmployee,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "get_employee", "restricted", args, () -> {
+                    String externalId = stringArg(args, "employeeExternalId");
+                    List<Map<String, Object>> empRows = jdbcTemplate.query(
+                            "SELECT id, external_id, name, role, site, active FROM employees WHERE external_id = ?",
+                            (rs, i) -> {
+                                Map<String, Object> row = new LinkedHashMap<>();
+                                row.put("employeeInternalId", rs.getObject("id", UUID.class));
+                                row.put("employeeExternalId", rs.getString("external_id"));
+                                row.put("name", rs.getString("name"));
+                                row.put("role", rs.getString("role"));
+                                row.put("site", rs.getString("site"));
+                                row.put("active", rs.getBoolean("active"));
+                                return row;
+                            }, externalId
+                    );
+                    if (empRows.isEmpty()) {
+                        return safeError("EMPLOYEE_NOT_FOUND", "Employee not found: " + externalId);
+                    }
+                    Map<String, Object> emp = empRows.get(0);
+                    UUID internalId = (UUID) emp.get("employeeInternalId");
+                    List<Map<String, Object>> latestOutcomes = jdbcTemplate.query(
+                            """
+                            SELECT m.name AS measure_name, mv.version, o.status, o.evaluation_period, o.evaluated_at
+                            FROM outcomes o
+                            JOIN measure_versions mv ON mv.id = o.measure_version_id
+                            JOIN measures m ON m.id = mv.measure_id
+                            WHERE o.employee_id = ?
+                            ORDER BY o.evaluated_at DESC
+                            LIMIT 5
+                            """,
+                            (rs, i) -> {
+                                Map<String, Object> row = new LinkedHashMap<>();
+                                row.put("measureName", rs.getString("measure_name"));
+                                row.put("version", rs.getString("version"));
+                                row.put("status", rs.getString("status"));
+                                row.put("evaluationPeriod", rs.getString("evaluation_period"));
+                                row.put("evaluatedAt", rs.getTimestamp("evaluated_at") == null ? null : rs.getTimestamp("evaluated_at").toInstant());
+                                return row;
+                            }, internalId
+                    );
+                    Map<String, Object> payload = new LinkedHashMap<>(emp);
+                    payload.remove("employeeInternalId");
+                    payload.put("latestOutcomes", latestOutcomes);
+                    return payload;
+                })
+        );
+
+        McpServerFeatures.SyncToolSpecification checkComplianceSpec = new McpServerFeatures.SyncToolSpecification(
+                checkCompliance,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "check_compliance", "restricted", args, () -> {
+                    String externalId = stringArg(args, "employeeExternalId");
+                    String measureName = stringArg(args, "measureName");
+                    String mode = args.get("mode") == null ? "latest" : args.get("mode").toString();
+                    if (!"latest".equals(mode) && !"preview".equals(mode)) {
+                        return safeError("INVALID_ARGUMENT", "mode must be 'latest' or 'preview'");
+                    }
+                    List<Map<String, Object>> rows = jdbcTemplate.query(
+                            """
+                            SELECT o.status, o.evaluation_period, o.evaluated_at,
+                                   m.name AS measure_name, mv.version,
+                                   c.id AS case_id
+                            FROM outcomes o
+                            JOIN measure_versions mv ON mv.id = o.measure_version_id
+                            JOIN measures m ON m.id = mv.measure_id
+                            JOIN employees e ON e.id = o.employee_id
+                            LEFT JOIN cases c ON c.employee_id = o.employee_id
+                              AND c.measure_version_id = o.measure_version_id
+                              AND c.evaluation_period = o.evaluation_period
+                              AND c.status = 'OPEN'
+                            WHERE e.external_id = ?
+                              AND LOWER(m.name) = LOWER(?)
+                            ORDER BY o.evaluated_at DESC
+                            LIMIT 1
+                            """,
+                            (rs, i) -> {
+                                Map<String, Object> row = new LinkedHashMap<>();
+                                row.put("status", rs.getString("status"));
+                                row.put("evaluationPeriod", rs.getString("evaluation_period"));
+                                row.put("evaluatedAt", rs.getTimestamp("evaluated_at") == null ? null : rs.getTimestamp("evaluated_at").toInstant());
+                                row.put("measureName", rs.getString("measure_name"));
+                                row.put("measureVersion", rs.getString("version"));
+                                row.put("caseId", rs.getObject("case_id", UUID.class));
+                                return row;
+                            }, externalId, measureName
+                    );
+                    if (rows.isEmpty()) {
+                        Map<String, Object> empty = new LinkedHashMap<>();
+                        empty.put("employeeExternalId", externalId);
+                        empty.put("measureName", measureName);
+                        empty.put("status", "NO_OUTCOME");
+                        empty.put("source", mode);
+                        empty.put("message", "No outcome found. Run a measure evaluation first.");
+                        return empty;
+                    }
+                    Map<String, Object> result = new LinkedHashMap<>(rows.get(0));
+                    result.put("employeeExternalId", externalId);
+                    result.put("source", mode);
+                    // AI is never consulted — status comes from persisted CQL outcome only
+                    result.put("complianceDecisionSource", "cql_outcome");
+                    return result;
+                })
+        );
+
+        McpServerFeatures.SyncToolSpecification listNoncompliantSpec = new McpServerFeatures.SyncToolSpecification(
+                listNoncompliant,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "list_noncompliant", "restricted", args, () -> {
+                    int limit = args.get("limit") == null ? 25 : Math.max(1, Math.min(100, Integer.parseInt(args.get("limit").toString())));
+                    String measureNameFilter = args.get("measureName") == null ? null : args.get("measureName").toString().trim();
+                    String siteFilter = args.get("site") == null ? null : args.get("site").toString().trim();
+                    String statusFilter = args.get("status") == null ? null : args.get("status").toString().trim();
+                    if (statusFilter != null && !List.of("DUE_SOON", "OVERDUE", "MISSING_DATA").contains(statusFilter)) {
+                        return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
+                    }
+                    StringBuilder sql = new StringBuilder("""
+                            SELECT c.id AS case_id, e.external_id AS employee_external_id, e.name AS employee_name,
+                                   e.site, m.name AS measure_name, mv.version, c.evaluation_period,
+                                   c.current_outcome_status, c.priority, c.next_action, c.assignee, c.updated_at
+                            FROM cases c
+                            JOIN employees e ON e.id = c.employee_id
+                            JOIN measure_versions mv ON mv.id = c.measure_version_id
+                            JOIN measures m ON m.id = mv.measure_id
+                            WHERE c.status = 'OPEN'
+                              AND c.current_outcome_status IN ('DUE_SOON', 'OVERDUE', 'MISSING_DATA')
+                            """);
+                    List<Object> params = new java.util.ArrayList<>();
+                    if (measureNameFilter != null && !measureNameFilter.isBlank()) {
+                        sql.append(" AND LOWER(m.name) = LOWER(?)");
+                        params.add(measureNameFilter);
+                    }
+                    if (siteFilter != null && !siteFilter.isBlank()) {
+                        sql.append(" AND LOWER(COALESCE(e.site, '')) = LOWER(?)");
+                        params.add(siteFilter);
+                    }
+                    if (statusFilter != null) {
+                        sql.append(" AND c.current_outcome_status = ?");
+                        params.add(statusFilter);
+                    }
+                    sql.append(" ORDER BY c.updated_at DESC LIMIT ?");
+                    params.add(limit);
+                    List<Map<String, Object>> results = jdbcTemplate.query(sql.toString(), (rs, i) -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("caseId", rs.getObject("case_id", UUID.class));
+                        row.put("employeeExternalId", rs.getString("employee_external_id"));
+                        row.put("employeeName", rs.getString("employee_name"));
+                        row.put("site", rs.getString("site"));
+                        row.put("measureName", rs.getString("measure_name"));
+                        row.put("measureVersion", rs.getString("version"));
+                        row.put("evaluationPeriod", rs.getString("evaluation_period"));
+                        row.put("outcomeStatus", rs.getString("current_outcome_status"));
+                        row.put("priority", rs.getString("priority"));
+                        row.put("nextAction", rs.getString("next_action"));
+                        row.put("assignee", rs.getString("assignee"));
+                        row.put("updatedAt", rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant());
+                        return row;
+                    }, params.toArray());
+                    Map<String, Object> response = new LinkedHashMap<>();
+                    response.put("results", results);
+                    response.put("returned", results.size());
+                    response.put("limit", limit);
+                    response.put("filters", Map.of(
+                            "measureName", measureNameFilter == null ? "" : measureNameFilter,
+                            "site", siteFilter == null ? "" : siteFilter,
+                            "status", statusFilter == null ? "" : statusFilter
+                    ));
+                    return response;
+                })
+        );
+
+        McpServerFeatures.SyncToolSpecification explainRuleSpec = new McpServerFeatures.SyncToolSpecification(
+                explainRule,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "explain_rule", "internal", args, () -> {
+                    UUID measureId;
+                    if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                    } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
+                        measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
+                    } else {
+                        return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
+                    }
+                    var detail = measureService.getMeasure(measureId);
+                    if (detail == null) {
+                        return safeError("MEASURE_NOT_FOUND", "Measure not found");
+                    }
+                    String cqlText = detail.cqlText() == null ? "" : detail.cqlText();
+                    List<String> defineNames = java.util.regex.Pattern
+                            .compile("define\\s+\"([^\"]+)\"\\s*:", java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.MULTILINE)
+                            .matcher(cqlText)
+                            .results()
+                            .map(mr -> mr.group(1))
+                            .toList();
+                    List<Map<String, Object>> valueSets = detail.valueSets().stream().map(vs -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("name", vs.name());
+                        row.put("oid", vs.oid());
+                        row.put("version", vs.version() == null ? "" : vs.version());
+                        return row;
+                    }).toList();
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("measureName", detail.name());
+                    payload.put("policyRef", detail.policyRef());
+                    payload.put("description", detail.description());
+                    payload.put("eligibility", detail.eligibilityCriteria());
+                    payload.put("exclusions", detail.exclusions());
+                    payload.put("complianceWindow", detail.complianceWindow());
+                    payload.put("requiredDataElements", detail.requiredDataElements());
+                    payload.put("cqlDefines", defineNames);
+                    payload.put("attachedValueSets", valueSets);
+                    payload.put("source", "deterministic_metadata");
+                    return payload;
+                })
+        );
+
+        McpServerFeatures.SyncToolSpecification getMeasureTraceabilitySpec = new McpServerFeatures.SyncToolSpecification(
+                getMeasureTraceability,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "get_measure_traceability", "internal", args, () -> {
+                    UUID measureId;
+                    if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                    } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
+                        measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
+                    } else {
+                        return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
+                    }
+                    var traceability = traceabilityService.generate(measureId);
+                    List<Map<String, Object>> rows = traceability.rows().stream().map(row -> {
+                        Map<String, Object> r = new LinkedHashMap<>();
+                        r.put("policyCitation", row.policyCitation());
+                        r.put("policyRequirement", row.policyRequirement());
+                        r.put("specField", row.specField());
+                        r.put("specValue", row.specValue());
+                        r.put("cqlDefine", row.cqlDefine());
+                        r.put("runtimeEvidenceKeys", row.runtimeEvidenceKeys());
+                        return r;
+                    }).toList();
+                    List<Map<String, Object>> gaps = traceability.gaps().stream().map(gap -> Map.of(
+                            "severity", (Object) gap.severity(),
+                            "message", gap.message()
+                    )).toList();
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("measureId", traceability.measureId());
+                    payload.put("measureName", traceability.measureName());
+                    payload.put("version", traceability.version());
+                    payload.put("rows", rows);
+                    payload.put("gaps", gaps);
+                    return payload;
+                })
+        );
+
+        McpServerFeatures.SyncToolSpecification listDataQualityGapsSpec = new McpServerFeatures.SyncToolSpecification(
+                listDataQualityGaps,
+                (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "list_data_quality_gaps", "internal", args, () -> {
+                    UUID measureId;
+                    if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                    } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
+                        measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
+                    } else {
+                        return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
+                    }
+                    var readiness = dataReadinessService.computeReadiness(measureId);
+                    List<Map<String, Object>> elements = readiness.requiredElements().stream().map(el -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("canonicalElement", el.canonicalElement());
+                        row.put("label", el.label());
+                        row.put("mappingStatus", el.mappingStatus());
+                        row.put("freshnessStatus", el.freshnessStatus());
+                        row.put("missingnessRate", el.missingnessRate());
+                        return row;
+                    }).toList();
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("measureId", measureId);
+                    payload.put("overallStatus", readiness.overallStatus());
+                    payload.put("blockers", readiness.blockers());
+                    payload.put("warnings", readiness.warnings());
+                    payload.put("elementReadiness", elements);
+                    return payload;
+                })
+        );
+
         return McpServer.sync(transportProvider)
-                .serverInfo("workwell-mcp", "1.1.0")
+                .serverInfo("workwell-mcp", "2.0.0")
                 .tools(
                         getCaseSpec,
                         listCasesSpec,
@@ -425,9 +748,23 @@ public class McpServerConfig {
                         listMeasuresSpec,
                         getMeasureVersionSpec,
                         listRunsSpec,
-                        explainOutcomeSpec
+                        explainOutcomeSpec,
+                        getEmployeeSpec,
+                        checkComplianceSpec,
+                        listNoncompliantSpec,
+                        explainRuleSpec,
+                        getMeasureTraceabilitySpec,
+                        listDataQualityGapsSpec
                 )
                 .build();
+    }
+
+    private Map<String, Object> safeError(String code, String message) {
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("error", true);
+        err.put("code", code);
+        err.put("message", message);
+        return err;
     }
 
     private UUID lookupMeasureIdByName(MeasureService measureService, String requestedMeasureName) {

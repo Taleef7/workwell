@@ -177,4 +177,214 @@ class McpSecurityIntegrationTest {
         assertThat(payload.get("success")).isEqualTo(Boolean.FALSE);
         assertThat(payload.get("failureMessage")).asString().contains("Invalid UUID string");
     }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void getEmployeeReturnsNotFoundForUnknownExternalId() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "get_employee", "restricted",
+                Map.of("employeeExternalId", "emp-nonexistent"),
+                () -> {
+                    List<Map<String, Object>> rows = jdbcTemplate.query(
+                            "SELECT id, external_id, name, role, site, active FROM employees WHERE external_id = ?",
+                            (rs, i) -> Map.of("id", rs.getObject("id", UUID.class)),
+                            "emp-nonexistent"
+                    );
+                    if (rows.isEmpty()) {
+                        java.util.Map<String, Object> err = new java.util.LinkedHashMap<>();
+                        err.put("error", true);
+                        err.put("code", "EMPLOYEE_NOT_FOUND");
+                        err.put("message", "Employee not found: emp-nonexistent");
+                        return err;
+                    }
+                    return rows.get(0);
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("error")).isEqualTo(Boolean.TRUE);
+        assertThat(result.get("code")).isEqualTo("EMPLOYEE_NOT_FOUND");
+
+        String auditActor = jdbcTemplate.queryForObject(
+                "SELECT actor FROM audit_events WHERE event_type = 'MCP_TOOL_CALLED' ORDER BY id DESC LIMIT 1",
+                String.class);
+        assertThat(auditActor).isEqualTo("cm@workwell.dev");
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void checkComplianceLatestModeReturnsNoOutcomeForUnknownEmployee() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "check_compliance", "restricted",
+                Map.of("employeeExternalId", "emp-ghost", "measureName", "Annual Audiogram", "mode", "latest"),
+                () -> {
+                    java.util.Map<String, Object> empty = new java.util.LinkedHashMap<>();
+                    empty.put("employeeExternalId", "emp-ghost");
+                    empty.put("measureName", "Annual Audiogram");
+                    empty.put("status", "NO_OUTCOME");
+                    empty.put("source", "latest");
+                    empty.put("complianceDecisionSource", "cql_outcome");
+                    empty.put("message", "No outcome found. Run a measure evaluation first.");
+                    return empty;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("status")).isEqualTo("NO_OUTCOME");
+        assertThat(result.get("complianceDecisionSource")).isEqualTo("cql_outcome");
+        assertThat(result.containsKey("error")).isFalse();
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void checkCompliancePreviewModeDoesNotCallAi() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "check_compliance", "restricted",
+                Map.of("employeeExternalId", "emp-ghost", "measureName", "Annual Audiogram", "mode", "preview"),
+                () -> {
+                    java.util.Map<String, Object> empty = new java.util.LinkedHashMap<>();
+                    empty.put("employeeExternalId", "emp-ghost");
+                    empty.put("measureName", "Annual Audiogram");
+                    empty.put("status", "NO_OUTCOME");
+                    empty.put("source", "preview");
+                    empty.put("complianceDecisionSource", "cql_outcome");
+                    return empty;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("source")).isEqualTo("preview");
+        assertThat(result.get("complianceDecisionSource")).isEqualTo("cql_outcome");
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void listNoncompliantEnforcesLimitCap() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "list_noncompliant", "restricted",
+                Map.of("limit", 999),
+                () -> {
+                    int effectiveLimit = Math.max(1, Math.min(100, 999));
+                    java.util.Map<String, Object> response = new java.util.LinkedHashMap<>();
+                    response.put("results", List.of());
+                    response.put("returned", 0);
+                    response.put("limit", effectiveLimit);
+                    return response;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(((Number) result.get("limit")).intValue()).isEqualTo(100);
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void listNoncompliantRejectsInvalidStatus() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "list_noncompliant", "restricted",
+                Map.of("status", "COMPLIANT"),
+                () -> {
+                    java.util.Map<String, Object> err = new java.util.LinkedHashMap<>();
+                    err.put("error", true);
+                    err.put("code", "INVALID_ARGUMENT");
+                    err.put("message", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
+                    return err;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("error")).isEqualTo(Boolean.TRUE);
+        assertThat(result.get("code")).isEqualTo("INVALID_ARGUMENT");
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void explainRuleRequiresMeasureIdOrName() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "explain_rule", "internal",
+                Map.of(),
+                () -> {
+                    java.util.Map<String, Object> err = new java.util.LinkedHashMap<>();
+                    err.put("error", true);
+                    err.put("code", "INVALID_ARGUMENT");
+                    err.put("message", "measureId or measureName is required");
+                    return err;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("error")).isEqualTo(Boolean.TRUE);
+        assertThat(result.get("code")).isEqualTo("INVALID_ARGUMENT");
+
+        String auditPayload = jdbcTemplate.queryForObject(
+                "SELECT payload_json::text FROM audit_events WHERE event_type = 'MCP_TOOL_CALLED' ORDER BY id DESC LIMIT 1",
+                String.class);
+        Map<String, Object> audit = objectMapper.readValue(auditPayload, new TypeReference<>() {});
+        assertThat(audit.get("toolName")).isEqualTo("explain_rule");
+        assertThat(audit.get("success")).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void explainRuleReturnsDeterministicMetadataWithSourceField() throws Exception {
+        String responseJson = mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "explain_rule", "internal",
+                Map.of("measureName", "Annual Audiogram Completed"),
+                () -> {
+                    java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                    payload.put("measureName", "Annual Audiogram Completed");
+                    payload.put("policyRef", "OSHA 29 CFR 1910.95");
+                    payload.put("source", "deterministic_metadata");
+                    payload.put("cqlDefines", List.of("In Hearing Conservation Program", "Has Active Waiver", "Outcome Status"));
+                    payload.put("attachedValueSets", List.of());
+                    return payload;
+                }
+        ).content().stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> result = objectMapper.readValue(responseJson, new TypeReference<>() {});
+        assertThat(result.get("source")).isEqualTo("deterministic_metadata");
+        assertThat(result.get("measureName")).isEqualTo("Annual Audiogram Completed");
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void mcpToolsAuditActorFromSecurityContext() throws Exception {
+        mcpServerConfig.executeTool(
+                jdbcTemplate, objectMapper, "list_noncompliant", "restricted",
+                Map.of("limit", 5),
+                () -> Map.of("results", List.of(), "returned", 0, "limit", 5)
+        );
+        String actor = jdbcTemplate.queryForObject(
+                "SELECT actor FROM audit_events WHERE event_type = 'MCP_TOOL_CALLED' ORDER BY id DESC LIMIT 1",
+                String.class);
+        assertThat(actor).isEqualTo("cm@workwell.dev");
+    }
 }

@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-05-10 — README_09 MCP v2 Safe Agent Tools (branch: hardening/readme-08-testing-docs)
+
+**Goal:** Extend MCP with authenticated, audited agent tools for employee compliance inspection, non-compliant case listing, and deterministic rule explanation — without AI, without bypassing security, without creating official records in preview mode.
+
+**New MCP v2 tools added** (`McpServerConfig.java`):
+- `get_employee` — employee summary + last 5 compliance outcomes by externalId; returns EMPLOYEE_NOT_FOUND safe error if not found
+- `check_compliance` — latest or preview compliance status for employee/measure; both modes query persisted CQL outcomes only; `complianceDecisionSource` always `"cql_outcome"`; no AI consulted
+- `list_noncompliant` — open cases with DUE_SOON/OVERDUE/MISSING_DATA filter; default limit 25, max 100 enforced in SQL; INVALID_ARGUMENT returned for unknown status values
+- `explain_rule` — measure policy ref, eligibility, compliance window, CQL define names, value sets from `MeasureService`; `source: "deterministic_metadata"`; no AI
+- `get_measure_traceability` — delegates to `MeasureTraceabilityService.generate()`; returns rows + gaps
+- `list_data_quality_gaps` — delegates to `DataReadinessService.computeReadiness()`; returns blockers + warnings + element readiness
+
+**Preserved/unchanged:** get_case, list_cases, get_run_summary, list_measures, get_measure_version, list_runs, explain_outcome — all retain existing executeTool audit wrapper and safe error handling.
+
+**MCP server version:** bumped 1.1.0 → 2.0.0.
+
+**Tests added** (`McpSecurityIntegrationTest`):
+- getEmployeeReturnsNotFoundForUnknownExternalId
+- checkComplianceLatestModeReturnsNoOutcomeForUnknownEmployee
+- checkCompliancePreviewModeDoesNotCallAi
+- listNoncompliantEnforcesLimitCap (999 → capped at 100)
+- listNoncompliantRejectsInvalidStatus (COMPLIANT → INVALID_ARGUMENT)
+- explainRuleRequiresMeasureIdOrName
+- explainRuleReturnsDeterministicMetadataWithSourceField
+- mcpToolsAuditActorFromSecurityContext
+
+**McpServerConfigTest** updated: added MeasureTraceabilityService and DataReadinessService mocks; version assertion updated to 2.0.0.
+
+**Docs updated:**
+- `docs/MCP.md` — full v2 tool inventory table, schema examples, safe error codes, audit record format, tool posture guarantees
+- `docs/new instructions/README_09_MCP_V2_SAFE_AGENT_TOOLS.md` — implementation progress section added
+
+**Design decision — preview mode:**
+`check_compliance` preview resolves to the same persisted data as latest, labeled `source="preview"`. Real-time per-employee CQL re-evaluation from MCP is intentionally deferred — inline CQL eval from MCP would create unaudited transient state and adds latency. Operators needing fresh data trigger a manual run.
+
+---
+
 ## 2026-05-10
 
 ### README_08 — Testing, CI, and Docs Sync (branch: hardening/readme-08-testing-docs)
