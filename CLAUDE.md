@@ -2,13 +2,13 @@
 
 ## What this is
 - Single-developer Spring Boot + Next.js monorepo
-- Goal: ship full WorkWell Measure Studio MVP scope by May 17, 2026, before internship starts May 18
-- 16-day pre-internship sprint, two agents in parallel + me reviewing
+- Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
+- Historical sprint window: May 2-17, 2026; active work is now post-merge closeout and polish
 
 ## Read first, every session
-`@docs/SPIKE_PLAN.md` is the canonical scope, schedule, daily rhythm, risks, rollback rules. If anything here conflicts with the spike plan, the plan wins. Always check the schedule table to confirm which spike we're in before starting work.
+`@docs/archive/SPIKE_PLAN.md` is the archived sprint plan and historical context. `docs/JOURNAL.md` is the current source of truth for recent work, and `README.md` is the public-facing overview.
 
-`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contanins the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
+`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contains the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21 + Spring Boot 3.x + Gradle Kotlin DSL + PostgreSQL 16 + Flyway
@@ -17,22 +17,22 @@
 - AI: Spring AI (Anthropic starter); MCP via `io.modelcontextprotocol/java-sdk`
 - Infra: Docker Compose locally; Fly.io + Vercel + Neon for deploy; GitHub Actions CI; pnpm
 
-## Hard rules (16-day sprint)
-- No new dependencies after D5 (May 6, 2026)
+## Hard rules
+- Avoid new dependencies unless they are explicitly approved and documented
 - One Spring Boot app, modular packages — no microservices
 - Spring Application Events + DB audit log — no Kafka or external streaming
-- Stubbed auth — no production-grade auth this sprint
+- Stubbed auth — no production-grade auth in the demo stack
 - Simulated email — no real delivery
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
 - Every state change writes `audit_event` — no exceptions
 - No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
-- No UI changes after D14 EOD except bug fixes
+- Keep UI changes surgical; only bug fixes or explicitly requested polish
 
 ## Branch + ownership
 - Backend agent owns `backend/` only
 - Frontend agent owns `frontend/` only
 - Schema migrations (`backend/src/main/resources/db/migration/`) are mine, never delegated
-- Feature branch per spike: `spike/s2-catalog`, etc.
+- Use a feature branch for follow-up work
 - Merge after my review — no auto-merge
 
 ## Definition of done (every PR)
@@ -41,7 +41,7 @@
 - Affected docs updated in same PR (ARCHITECTURE, DATA_MODEL, MEASURES, DECISIONS, DEPLOY)
 - JOURNAL.md entry started for the day
 - ADR added to DECISIONS.md if non-obvious
-- Conventional commit with spike tag: `feat(measure): catalog CRUD [S2]`
+- Conventional commit with a clear scope: `feat(measure): catalog CRUD`
 
 ## Working style
 - Plan mode for any task touching >2 files
@@ -57,14 +57,12 @@
 - Decisions: `docs/DECISIONS.md` (numbered ADRs, dated)
 
 ## Daily rhythm
-- **Morning (15 min):** update Current focus below, brief agents, open JOURNAL.md skeleton
-- **Throughout:** commit per ticket, push every 2h
-- **End of day (30–45 min):** finalize JOURNAL.md, update affected docs, record YT short if UI changed visibly
-
-Doc PR ships with code PR. Always.
+- **Morning:** review `docs/JOURNAL.md` and the current focus block before starting
+- **Throughout:** keep changes small and verify what you touch
+- **End of day:** make sure `docs/JOURNAL.md` and affected docs are current
 
 ## Stop and ask if
-- A spike's stop condition (in SPIKE_PLAN.md) appears to trigger
+- A spike's stop condition (in `docs/archive/SPIKE_PLAN.md`) appears to trigger
 - A library version doesn't match what CQF_FHIR_CR_REFERENCE.md says works
 - A schema migration would break existing data
 - An AI call is being asked to return a compliance decision
@@ -72,7 +70,7 @@ Doc PR ships with code PR. Always.
 - The plan would slip more than half a day
 
 ## Other docs to consult on demand
-- @docs/SPIKE_PLAN.md — 16-day schedule, per-spike acceptance, risks, rhythm
+- @docs/archive/SPIKE_PLAN.md — archived sprint context
 - @docs/DEPLOY.md — Vercel + Fly + Neon setup, env vars, rollback
 - @docs/MEASURES.md — the 4 demo measures in plain English
 - @docs/ARCHITECTURE.md — system architecture diagrams + boundaries
@@ -83,11 +81,12 @@ Doc PR ships with code PR. Always.
 
 ## Current Focus (as of 2026-05-08)
 
-**PR review follow-up and bugfix-only hardening.**
+**Post-merge closeout and showcase polish.**
 
-The sprint feature set is in place and this branch is being tightened for review. The remaining work right now is:
-- Clear review feedback on the sprint-closeout branch
-- Keep CI green and verify the affected surfaces end-to-end
-- Update docs/journal entries for any behavior changes
-- Stay in bugfix/polish mode unless the spike plan explicitly changes
+The feature set is shipped and merged. The current posture is:
+- Keep docs current when behavior changes
+- Fix any post-merge regressions quickly and surgically
+- Preserve the audit trail and deterministic CQL behavior
+- Avoid scope expansion unless you explicitly ask for it
+- Treat `docs/archive/SPIKE_PLAN.md` as historical context, not an active build plan
 

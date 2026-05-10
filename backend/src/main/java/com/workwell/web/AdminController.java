@@ -1,10 +1,12 @@
 package com.workwell.web;
 
+import com.workwell.admin.DataReadinessService;
 import com.workwell.admin.IntegrationHealthService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.audit.AuditQueryService;
 import com.workwell.admin.SchedulerAdminService;
+import com.workwell.measure.ValueSetGovernanceService;
 import com.workwell.security.SecurityActor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -31,19 +33,25 @@ public class AdminController {
     private final OutreachTemplateService outreachTemplateService;
     private final WaiverService waiverService;
     private final AuditQueryService auditQueryService;
+    private final DataReadinessService dataReadinessService;
+    private final ValueSetGovernanceService valueSetGovernanceService;
 
     public AdminController(
             IntegrationHealthService integrationHealthService,
             SchedulerAdminService schedulerAdminService,
             OutreachTemplateService outreachTemplateService,
             WaiverService waiverService,
-            AuditQueryService auditQueryService
+            AuditQueryService auditQueryService,
+            DataReadinessService dataReadinessService,
+            ValueSetGovernanceService valueSetGovernanceService
     ) {
         this.integrationHealthService = integrationHealthService;
         this.schedulerAdminService = schedulerAdminService;
         this.outreachTemplateService = outreachTemplateService;
         this.waiverService = waiverService;
         this.auditQueryService = auditQueryService;
+        this.dataReadinessService = dataReadinessService;
+        this.valueSetGovernanceService = valueSetGovernanceService;
     }
 
     @GetMapping("/api/admin/integrations")
@@ -53,13 +61,12 @@ public class AdminController {
 
     @PostMapping("/api/admin/integrations/{integration}/sync")
     public IntegrationHealthService.IntegrationHealth syncIntegration(
-            @PathVariable String integration,
-            @RequestParam(name = "actor", required = false) String actor
+            @PathVariable String integration
     ) {
         try {
             return integrationHealthService.triggerManualSync(
                     integration,
-                    actor == null || actor.isBlank() ? SecurityActor.currentActorOr("admin-user") : actor
+                    SecurityActor.currentActor()
             );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -89,7 +96,7 @@ public class AdminController {
                     request.subject(),
                     request.bodyText(),
                     request.type(),
-                    SecurityActor.currentActorOr("admin-user")
+                    SecurityActor.currentActor()
             );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -139,12 +146,42 @@ public class AdminController {
                     request.employeeExternalId(),
                     request.measureId(),
                     request.exclusionReason(),
-                    SecurityActor.currentActorOr("admin-user"),
+                    SecurityActor.currentActor(),
                     request.expiresAt(),
                     request.notes(),
                     request.active()
             );
         } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/data-mappings")
+    public List<DataReadinessService.DataElementMapping> listDataMappings() {
+        return dataReadinessService.listMappings();
+    }
+
+    @PostMapping("/api/admin/data-mappings/validate")
+    public List<DataReadinessService.DataElementMapping> validateDataMappings() {
+        return dataReadinessService.validateMappings();
+    }
+
+    @GetMapping("/api/admin/terminology-mappings")
+    public List<ValueSetGovernanceService.TerminologyMapping> listTerminologyMappings() {
+        return valueSetGovernanceService.listTerminologyMappings();
+    }
+
+    @PostMapping("/api/admin/terminology-mappings")
+    public ValueSetGovernanceService.TerminologyMapping createTerminologyMapping(
+            @Valid @RequestBody CreateTerminologyMappingRequest request
+    ) {
+        try {
+            return valueSetGovernanceService.createTerminologyMapping(
+                    request.localCode(), request.localDisplay(), request.localSystem(),
+                    request.standardCode(), request.standardDisplay(), request.standardSystem(),
+                    request.mappingStatus(), request.mappingConfidence(), request.notes()
+            );
+        } catch (Exception ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
     }
@@ -182,6 +219,19 @@ public class AdminController {
             Instant expiresAt,
             String notes,
             Boolean active
+    ) {
+    }
+
+    public record CreateTerminologyMappingRequest(
+            @NotBlank String localCode,
+            String localDisplay,
+            @NotBlank String localSystem,
+            @NotBlank String standardCode,
+            String standardDisplay,
+            @NotBlank String standardSystem,
+            String mappingStatus,
+            Double mappingConfidence,
+            String notes
     ) {
     }
 

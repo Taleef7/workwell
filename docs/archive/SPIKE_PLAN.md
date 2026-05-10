@@ -1,9 +1,10 @@
-# WorkWell Measure Studio — 16-Day Sprint Plan
+# WorkWell Measure Studio — 16-Day Sprint Plan (Archived)
 
-**Window:** May 2 – May 17, 2026
-**Goal:** Ship full MVP scope, deployed and demoable, before internship starts May 18.
-**Canonical plan:** `docs/SPIKE_PLAN.md` is the active execution plan; any legacy `PROJECT_PLAN` / `PROJECT_PLAN_v1` references are obsolete and should not be used for current work.
-**Author:** Taleef Tamsal
+Archived: 2026-05-08
+Status: Historical only
+Author: Taleef Tamsal
+
+This plan was replaced by the merged closeout docs and the current project overview.
 
 ---
 

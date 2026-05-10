@@ -1,5 +1,256 @@
 # Journal
 
+## 2026-05-10
+
+### Security and correctness review fixes (post-PR Codex review)
+
+Five blocking fixes applied to `fix/p0-secure-mcp` after Codex review of PR #5:
+
+**Fix 1 — Protect evidence metadata listing (ROLE_CASE_MANAGER | ROLE_ADMIN only)**
+- `EvidenceService.list()` — added `ensureListAllowed()` service-layer guard throwing `AccessDeniedException` for unauthorized roles.
+- `SecurityConfig` — added explicit `GET /api/cases/*/evidence` rule with `hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")` before the broad `GET /api/**` permit-all rule.
+- `EvidenceAccessIntegrationTest` — 5 new tests: CASE_MANAGER and ADMIN can list (200), AUTHOR and APPROVER cannot (403), unauthenticated gets 401/403.
+
+**Fix 2 — Apply impact preview scope filtering**
+- `MeasureImpactPreviewService.preview()` — `request.scope()` was accepted but never applied. Now routes all outcomes through `applyScope(outcomes, scope)` before counting and building breakdowns. Adds a warning when the scope matches zero employees.
+
+**Fix 3 — Filter case impact by evaluation period**
+- `estimateCaseImpact` SQL — added `AND c.evaluation_period = ?` clause so existing open cases from prior evaluation periods don't inflate "would update" counts for the preview period.
+
+**Fix 4 — Return 400 for invalid evaluationDate**
+- `resolveEvaluationDate()` — now throws `IllegalArgumentException` with "evaluationDate" in the message instead of silently defaulting to today.
+- `MeasureController.impactPreview()` — catch block distinguishes 400 (message contains "evaluationDate") from 404 (measure not found).
+
+**Fix 5 — Resolve case reruns from persisted requested_scope_json**
+- `AllProgramsRunService.loadCaseIdForRun()` — reads `(requested_scope_json->>'caseId')::uuid` first; falls back to the legacy `last_run_id` lookup only when the JSON path is absent. Prevents rerun failure after a second rerun advances `last_run_id` past the source run.
+- Fix 5b (discovered during test run): the JSON existence check used `requested_scope_json ? 'caseId'` which JDBC interprets as a second parameter placeholder, causing `PSQLException: No value specified for parameter 2`. Replaced with `jsonb_exists(requested_scope_json, 'caseId')` — consistent with the pattern documented in DEPLOY.md.
+
+**Regression tests added:**
+- `MeasureImpactPreviewIntegrationTest` — 9 new tests: scope filtering (site, employee, nonexistent), invalid date throws + returns 400, blank date defaults to today, case impact counts for fresh preview (uses far-future date), case impact ignores cases from a different evaluation period. Test for the period-isolation case inserts a synthetic employee row (CQL evaluator uses in-memory FHIR, not the employees table) and queries `measure_versions` by `measure_id` UUID rather than by name.
+- `ScopedRunIntegrationTest` — new `caseRerunSameScopeSucceedsEvenAfterLastRunIdIsStale`: runs CASE scope, SQL-advances `cases.last_run_id` to a synthetic later run, then calls `rerunSameScope` on the original run ID and asserts success via JSON-based caseId resolution.
+
+### Auditor Mode and Export Packet (README_07)
+
+Completed:
+
+Backend:
+- Migration `V014__audit_packet_exports.sql` — creates `audit_packet_exports` table (id, packet_type, entity_id, format, generated_by, generated_at, payload_hash, payload_size_bytes). Records each packet generation for accountability.
+- Added `AuditPacketService` (`com.workwell.audit`) — assembles and serializes audit export packets for 3 entity types:
+  - `buildCasePacket(caseId, actor, format)` — case summary, employee context, measure/version, CQL decision evidence, timeline split into actions/audit events/AI assistance, appointments, attachment metadata, outreach records, disclaimers.
+  - `buildRunPacket(runId, actor, format)` — run metadata, scope, summary counters, run logs, audit events, disclaimers.
+  - `buildMeasureVersionPacket(measureVersionId, actor, format)` — measure metadata, spec, CQL text+SHA-256 hash, compile result, value sets, VS governance check, traceability matrix, data readiness, approval history, audit events, disclaimers.
+  - Each packet serialized to JSON bytes (or HTML with a table overview + JSON appendix). SHA-256 payload hash stored in `audit_packet_exports`. Writes `AUDIT_PACKET_GENERATED` audit event on every generation.
+  - Optional services (traceability, data readiness, VS governance) wrapped in safe try-catch; failures return empty section rather than aborting the packet.
+- Added `AuditorController` (`com.workwell.web`) — 3 GET endpoints: `/api/auditor/cases/{caseId}/packet`, `/api/auditor/runs/{runId}/packet`, `/api/auditor/measure-versions/{measureVersionId}/packet`. Query param `format=json|html` (default json). Unsupported format → 400. Missing entity (IllegalArgumentException) → 404. Role checks via `SecurityActor.hasAnyAuthority`: CASE/RUN → `ROLE_CASE_MANAGER|ROLE_ADMIN`; MEASURE_VERSION → `ROLE_APPROVER|ROLE_ADMIN`.
+- Tests: `AuditorControllerTest` (6 tests, `@WebMvcTest`, `@WithMockUser` role annotations): json/html/run/measure-version OK, unsupported-format 400, missing-entity 404.
+
+Frontend:
+- `runs/page.tsx` — added `exportRunAuditPacket()` helper and "Export Run Audit Packet" button in the Run Detail panel, visible when a run is selected.
+- `cases/[id]/page.tsx` — added `exportCaseAuditPacket()` helper and "Export Case Audit Packet" button in the page header alongside the case ID.
+- `ReleaseApprovalTab.tsx` — derives current measure version ID from `versionHistory.find(v => v.version === measure.version)?.id`; added `exportMeasurePacket()` helper and "Export Measure Audit Packet" button above the lifecycle action buttons.
+
+Verification:
+- Backend AuditorControllerTest: 6/6 pass
+- Backend full test suite: no regressions
+- Frontend lint: exit 0
+- Frontend build: all routes compiled, TypeScript clean
+
+### Value Set and Terminology Governance (README_06)
+
+Completed:
+
+Backend:
+- Migration `V013__value_set_governance.sql` — extends `value_sets` with 7 governance columns (`canonical_url`, `code_systems`, `source`, `status`, `expansion_hash`, `resolution_status`, `resolution_error`). Seeds 4 demo value sets with fixed UUIDs and non-empty `codes_json` (RESOLVED status). Creates `terminology_mappings` table; seeds 5 demo mappings (3 APPROVED, 1 REVIEWED, 1 PROPOSED).
+- Added `ValueSetGovernanceService` (`com.workwell.measure`) — `resolveCheck(measureId)`, `diff(fromId, toId)`, `getValueSetDetail(id)`, `listTerminologyMappings()`, `createTerminologyMapping(...)`. Lazy demo value set linking via `ensureDemoValueSetLinks()` called on resolve-check. CQL unattached reference detection via line-scan for `valueset "Name"` declarations.
+- Extended `MeasureController.activationReadiness()` to merge VS governance blockers into the base readiness result. Added `POST /api/measures/{id}/value-sets/resolve-check`, `GET /api/value-sets/{id}/diff`, `GET /api/value-sets/{id}/detail`.
+- Extended `AdminController` — added `GET /api/admin/terminology-mappings` and `POST /api/admin/terminology-mappings`.
+- Integration tests: `ValueSetGovernanceIntegrationTest` (6 tests, Testcontainers, requires Docker).
+- Controller unit tests updated: `MeasureControllerTest` (2 new tests), `AdminControllerTest` (1 new test).
+
+Frontend:
+- Added `ValueSetCodeEntry`, `ValueSetDetail`, `ValueSetCheckItem`, `ResolveCheckResponse`, `AffectedMeasure`, `ValueSetDiffResponse`, `TerminologyMapping` types to `features/studio/types.ts`.
+- Created `ValueSetGovernancePanel.tsx` — auto-loads on mount, Re-check button, overall ALL RESOLVED / BLOCKERS FOUND badge, blockers list, warnings list, per-value-set table (name, version, resolution status badge, code count).
+- Embedded `ValueSetGovernancePanel` in `ValueSetsTab` (authoring view) and `ReleaseApprovalTab` (after DataReadinessPanel).
+- Added Terminology Governance section to `admin/page.tsx` — table of all mappings with status badge, confidence %, reviewed by, notes.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: all 12 routes compiled, TypeScript clean
+- Controller unit tests: MeasureControllerTest + AdminControllerTest pass (WebMvcTest, no Docker)
+- Integration tests: ValueSetGovernanceIntegrationTest (6 tests, Testcontainers with Docker Desktop)
+
+## 2026-05-09
+
+### Data Readiness and Integration Mapping Cockpit (README_05)
+
+Completed:
+
+Backend:
+- Migration `V012__data_readiness.sql` — adds `integration_sources`, `data_element_mappings`, and `data_readiness_snapshots` tables; seeds 4 integration sources (hris, fhir, ai, mcp) and 15 canonical element mappings covering all 4 demo measures.
+- Added `DataReadinessService` (`com.workwell.admin`) — `listMappings()`, `validateMappings()` (syncs from `integration_health`, marks STALE on degraded source), `computeReadiness(UUID measureId)` (per-element missingness + freshness + blocker/warning classification).
+- Added `GET /api/admin/data-mappings` and `POST /api/admin/data-mappings/validate` to `AdminController`.
+- Added `GET /api/measures/{id}/data-readiness` to `MeasureController`.
+- Integration tests: `DataReadinessIntegrationTest` (6 tests, Testcontainers, requires Docker).
+- Controller unit tests updated: `AdminControllerTest` (2 new tests), `MeasureControllerTest` (1 new test).
+
+Frontend:
+- Added `DataElementMapping`, `RequiredElementReadiness`, `DataReadinessResponse` types to `features/studio/types.ts`.
+- Created `DataReadinessPanel.tsx` — loads data-readiness, shows overall status badge, blockers, warnings, per-element table (canonical, source, mapping status, freshness, missingness with sample employees), link to Admin.
+- Embedded `DataReadinessPanel` in `ReleaseApprovalTab` above version history.
+- Added Data Readiness Cockpit section to `admin/page.tsx` — data element mappings table with Validate Mappings button.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: all 12 routes compiled, TypeScript clean
+
+### Policy Traceability and Activation Impact Preview (README_04)
+
+Completed:
+
+Backend — Traceability:
+- Added `MeasureTraceabilityService` — builds a policy-to-evidence matrix from spec fields, CQL defines (parsed via regex), value sets, test fixtures, and runtime evidence keys. Generates gaps: missing policy citation, bad compile status, missing test fixtures, missing MISSING_DATA/EXCLUDED fixture coverage, unlinked value sets.
+- Added `GET /api/measures/{id}/traceability` in `MeasureController`.
+- Integration tests: `MeasureTraceabilityIntegrationTest` (5 tests, Testcontainers).
+- Controller unit tests added in `MeasureControllerTest`.
+
+Backend — Impact Preview:
+- Added `MeasureImpactPreviewService` — dry-run CQL evaluation; does NOT call `runPersistenceService` or `caseFlowService`. Counts outcomes, estimates case impact by querying existing open cases, builds site/role breakdown maps, writes `MEASURE_IMPACT_PREVIEWED` audit event.
+- Added `POST /api/measures/{id}/impact-preview` in `MeasureController`.
+- Integration tests: `MeasureImpactPreviewIntegrationTest` (7 tests, Testcontainers + `@WithMockUser`).
+- Note: Testcontainers integration tests require Docker Desktop; they pass in CI but are skipped when Docker is unavailable.
+
+Frontend:
+- Added `TraceabilityValueSetRef`, `TestFixtureRef`, `TraceabilityRow`, `TraceabilityGap`, `TraceabilityResponse`, `CaseImpact`, `ImpactPreviewResponse` to `features/studio/types.ts`.
+- Created `features/studio/components/TraceabilityTab.tsx` — loads traceability matrix, renders summary card, error/warning gap panels, 7-column policy-to-evidence table, Export JSON button.
+- Created `features/studio/components/ImpactPreviewPanel.tsx` — "Preview Activation Impact" button, outcome count cards (COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED), case impact summary, warnings panel, "preview only" disclaimer note.
+- Embedded `ImpactPreviewPanel` in `ReleaseApprovalTab` above the Activate Measure button (shown when measure is in Approved state).
+- Added "Traceability" tab to `studio/[id]/page.tsx` Tab union and tab bar.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: `✓ Compiled successfully`, all 12 routes built
+- `MeasureControllerTest` (WebMvcTest, no Docker): all 5 tests pass
+
+### Frontend: Studio page split into hooks and tab components (README_03 Part B)
+
+Completed:
+- Extracted all types into `frontend/features/studio/types.ts`.
+- Extracted pure helper functions into `frontend/features/studio/utils.ts` (`parseCompileIssue`, `formatIssue`, `compileStatusClass`, `valueSetBadgeClass`).
+- Created `hooks/useMeasureDetail.ts` — loads measure + activation readiness + version history; returns state + `load` refresh callback.
+- Created `hooks/useValueSets.ts` — loads global value set catalog; returns `allValueSets` + `load`.
+- Created `hooks/useOshaReferences.ts` — loads OSHA reference options; returns `oshaReferences` + `load`.
+- Created tab components that own their own local state and take `api`/`measureId`/callbacks as props:
+  - `components/SpecTab.tsx` — spec form with AI draft, owns policyRef/description/etc.
+  - `components/CqlTab.tsx` — Monaco editor + compile error markers.
+  - `components/ValueSetsTab.tsx` — attach/detach/create value sets.
+  - `components/TestsTab.tsx` — fixture CRUD + validate.
+  - `components/ReleaseApprovalTab.tsx` — readiness checklist, version history, lifecycle confirmation modals.
+- Route page `studio/[id]/page.tsx` reduced from 944 to ~120 lines: param parsing, hook composition, tab navigation, and shell rendering only.
+
+Verification:
+- Frontend lint: `frontend\\corepack pnpm lint` -> exit 0
+- Frontend build: `frontend\\corepack pnpm build` -> `✓ Compiled successfully`, all 12 routes built
+
+### Frontend: typed API client introduced, global fetch monkey-patch removed
+
+Completed:
+- Created `frontend/lib/api/errors.ts` — `ApiError` class with typed status helpers (`isUnauthorized`, `isForbidden`, `isNotFound`, `isClientError`, `isServerError`).
+- Created `frontend/lib/api/client.ts` — `ApiClient` class that reads `NEXT_PUBLIC_API_BASE_URL`, attaches `Authorization: Bearer <token>`, handles 401 via `onUnauthorized` callback, and throws `ApiError` on non-OK responses. Methods: `get`, `post`, `put`, `delete`, `postForm`, `downloadBlob`.
+- Created `frontend/lib/api/hooks.ts` — `useApi()` hook composing `useAuth()` + `ApiClient`; recreates client only when token or logout changes.
+- Removed the entire `window.fetch` monkey-patch `useEffect` from `frontend/components/auth-provider.tsx`. Auth-provider is now a clean context provider with no global side effects.
+- Migrated all 9 dashboard pages from bare `fetch()` + inline `apiBase` patterns to `useApi()`:
+  - `app/(dashboard)/layout.tsx`
+  - `app/(dashboard)/measures/page.tsx`
+  - `app/(dashboard)/programs/page.tsx`
+  - `app/(dashboard)/programs/[measureId]/page.tsx`
+  - `app/(dashboard)/runs/page.tsx`
+  - `app/(dashboard)/cases/page.tsx`
+  - `app/(dashboard)/cases/[id]/page.tsx`
+  - `app/(dashboard)/studio/[id]/page.tsx`
+  - `app/(dashboard)/admin/page.tsx`
+- Evidence download in `cases/[id]` converted from plain `<a href>` to a button calling `api.downloadBlob()` so the Authorization header is sent (role-protected endpoint).
+- Fixed two rounds of lint: re-added `// eslint-disable-next-line react-hooks/set-state-in-effect` before `void loadXxx()` calls in effects; added missing stable setState refs to `useCallback` dep arrays in `cases/page.tsx` per `react-hooks/preserve-manual-memoization`.
+- `login/page.tsx` intentionally left using bare `fetch()` — no token at login time, correct behavior.
+
+Verification:
+- Frontend lint: `frontend\\corepack pnpm lint` -> exit 0 (0 errors, 0 warnings)
+- Frontend build: `frontend\\corepack pnpm build` -> `✓ Compiled successfully`, all 12 routes built
+
+### Scoped runs and run job model phase 1 completed
+
+Completed:
+- Added a typed `ManualRunRequest`/`RunScopeType` contract and routed `/api/runs/manual` through the shared scoped-run executor.
+- Preserved `ALL_PROGRAMS` behavior, added `MEASURE` scope, added `CASE` scope, and made CASE reuse the structured rerun-to-verify path.
+- Persisted scoped-run request metadata, run lifecycle status, failure summary, and partial-failure counts in the `runs` table.
+- Added durable run logs for requested, scope resolved, evaluation, persistence, and completion steps.
+- Updated the runs/programs UI to send `scopeType` payloads and expose a simple scoped run control surface.
+- Added regression tests for scoped measure runs, case reruns, unsupported scopes, and existing run-controller behavior.
+
+Verification:
+- Focused backend tests: `backend\\./gradlew.bat test --tests "com.workwell.run.ScopedRunIntegrationTest" --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.run.Major1PopulationIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+
+### Final P0 completion pass: MCP auth and actor spoofing hardening completed
+
+Completed:
+- Confirmed MCP routes are authenticated and role-gated at `/sse` and `/mcp/**`, with `MCP_TOOL_CALLED` audit rows using the authenticated security-context actor.
+- Removed the spoofable `actor` query parameter from the admin integration sync endpoint.
+- Removed the spoofable `resolvedBy` request-body field from manual case resolution and normalized closed-by bookkeeping to the authenticated actor.
+- Updated the frontend case detail resolve action to stop sending a caller-controlled actor field.
+- Added regression tests for spoofed admin sync requests, spoofed case-resolution bodies, authenticated run reruns, authenticated manual run triggers, authenticated measure-status audit rows, and safe MCP invalid-argument handling.
+
+Verification:
+- Backend targeted tests: `backend\\./gradlew.bat test --tests "com.workwell.web.AdminControllerTest" --tests "com.workwell.web.CaseControllerTest" --tests "com.workwell.web.EvalControllerTest" --tests "com.workwell.web.RunControllerTest" --tests "com.workwell.measure.MeasureServiceIntegrationTest" --tests "com.workwell.mcp.McpSecurityIntegrationTest"` -> PASS
+- Backend full suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+
+### P0 production CORS tightening and startup safety checks completed
+
+Completed:
+- Replaced the hardcoded CORS origin patterns with exact-origin configuration driven by `WORKWELL_CORS_ALLOWED_ORIGINS`.
+- Added `StartupSafetyValidator` to fail startup in production-like deployments when auth is disabled, the JWT secret is weak or missing, localhost/wildcard CORS is configured, or backend demo mode is enabled without an explicit public-demo override.
+- Added backend tests for production-like auth disablement, wildcard and localhost CORS rejection, weak JWT secret rejection, exact-origin success, and demo-mode override behavior.
+- Added frontend production-build enforcement so `NEXT_PUBLIC_DEMO_MODE=true` fails `next build`.
+
+Verification:
+- Focused backend config tests: `backend\\./gradlew.bat test --tests "com.workwell.config.StartupSafetyValidatorTest" --tests "com.workwell.config.SecurityConfigCorsTest"` -> PASS
+- Full backend suite: `backend\\./gradlew.bat test --console=plain` -> PASS
+- Backend build: `backend\\./gradlew.bat build --console=plain` -> PASS
+- Frontend lint: `frontend\\corepack pnpm lint` -> PASS
+- Frontend build: `frontend\\corepack pnpm build` -> PASS
+- Frontend negative guard check: `NEXT_PUBLIC_DEMO_MODE=true frontend\\corepack pnpm build` -> FAIL as expected with the explicit unsafe-configuration error
+
+### P0 rerun sanity check and evidence authorization completed
+
+Completed:
+- Sanity-checked the rerun-to-verify path after commit `518f378` and confirmed the case rerun now flows through the structured CQL evaluator instead of fabricating a COMPLIANT outcome.
+- Hardened evidence access so uploads and downloads are restricted to `ROLE_CASE_MANAGER` and `ROLE_ADMIN`, downloads resolve the linked case first, and download responses are audited as `EVIDENCE_DOWNLOADED`.
+- Added regression coverage for compliant, excluded, due-soon, overdue, and missing-data rerun branches plus evidence upload/download authorization, sanitization, and audit logging.
+
+Verification:
+- Focused backend slice: `backend\\./gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest" --tests "com.workwell.caseflow.CaseFlowRerunIntegrationTest" --tests "com.workwell.web.EvidenceAccessIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test` -> PASS
+- Backend build: `backend\\./gradlew.bat build` -> PASS
+
+### P0 rerun-to-verify hardening completed
+
+Completed:
+- Replaced the case rerun-to-verify shortcut with a real structured CQL evaluation of the case subject using the persisted measure CQL and evaluation period.
+- Preserved non-compliant reruns as open/in-progress cases and only close on structured compliant or excluded outcomes.
+- Added a single-subject evaluation path to `CqlEvaluationService` and a regression test proving it matches the batch evaluator for the same employee.
+- Added an integration test that seeds an open case, reruns it, and verifies the case does not fake COMPLIANT, persists the actual rerun outcome, and avoids `CASE_RESOLVED` on non-compliant reruns.
+- Updated the product docs to describe the real rerun-to-verify behavior.
+
+Verification:
+- Targeted backend regression tests: `backend\\./gradlew.bat test --tests "com.workwell.compile.CqlEvaluationServiceTest" --tests "com.workwell.caseflow.CaseFlowRerunIntegrationTest"` -> PASS
+- Full backend test suite: `backend\\./gradlew.bat test` -> PASS
+- Backend build: `backend\\./gradlew.bat build` -> PASS
+
 ## 2026-05-08
 
 ### PR review fixes completed — backend CI restored and review comments addressed

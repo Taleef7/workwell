@@ -57,43 +57,43 @@ public class CqlEvaluationService {
         List<DemoOutcome> outcomes = new ArrayList<>();
 
         for (SeededInput input : seededInputs) {
-            try {
-                if (shouldFailEmployeeForTesting(input.employee().externalId())) {
-                    throw new IllegalStateException("Forced employee evaluation failure for testing");
-                }
-                EvaluationResult eval = evaluateEmployee(measureName, measureVersion, cqlText, evaluationDate, input);
-                Map<String, ?> expressionResultsMap = eval.expressionResults == null ? Map.of() : eval.expressionResults;
-                String outcomeStatus = normalizeOutcomeStatus(expressionResultsMap.get("Outcome Status"));
-                Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate);
-
-                outcomes.add(new DemoOutcome(
-                        input.employee().externalId(),
-                        input.employee().name(),
-                        input.employee().role(),
-                        input.employee().site(),
-                        outcomeStatus,
-                        "Outcome derived from CQL define 'Outcome Status'.",
-                        evidenceJson
-                ));
-            } catch (Exception ex) {
-                String fallbackOutcome = "MISSING_DATA";
-                outcomes.add(new DemoOutcome(
-                        input.employee().externalId(),
-                        input.employee().name(),
-                        input.employee().role(),
-                        input.employee().site(),
-                        fallbackOutcome,
-                        "CQL evaluation failed for this employee; recorded as MISSING_DATA.",
-                        Map.of(
-                                "evaluationError", "CQL engine failure",
-                                "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(),
-                                "fallbackOutcome", fallbackOutcome
-                        )
-                ));
-            }
+            outcomes.add(evaluateSeededInput(measureName, measureVersion, cqlText, evaluationDate, input));
         }
 
         return new DemoRunPayload(runId, measureName, measureVersion, evaluationDate.toString(), outcomes);
+    }
+
+    public DemoOutcome evaluateSubject(
+            String measureName,
+            String measureVersion,
+            String cqlText,
+            LocalDate evaluationDate,
+            String subjectId
+    ) {
+        try {
+            SeededInput input = seededInputFor(measureName, subjectId);
+            return evaluateSeededInput(measureName, measureVersion, cqlText, evaluationDate, input);
+        } catch (Exception ex) {
+            SyntheticEmployeeCatalog.EmployeeProfile employee = new SyntheticEmployeeCatalog.EmployeeProfile(
+                    subjectId,
+                    subjectId,
+                    "",
+                    ""
+            );
+            return new DemoOutcome(
+                    employee.externalId(),
+                    employee.name(),
+                    employee.role(),
+                    employee.site(),
+                    "MISSING_DATA",
+                    "CQL evaluation failed for this employee; recorded as MISSING_DATA.",
+                    Map.of(
+                            "evaluationError", "CQL engine failure",
+                            "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(),
+                            "fallbackOutcome", "MISSING_DATA"
+                    )
+            );
+        }
     }
 
     protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
@@ -166,6 +166,49 @@ public class CqlEvaluationService {
             throw new IllegalStateException("No evaluation result returned for " + subjectId + ". keys=" + bySubject.keySet());
         }
         return eval;
+    }
+
+    private DemoOutcome evaluateSeededInput(
+            String measureName,
+            String measureVersion,
+            String cqlText,
+            LocalDate evaluationDate,
+            SeededInput input
+    ) {
+        try {
+            if (shouldFailEmployeeForTesting(input.employee().externalId())) {
+                throw new IllegalStateException("Forced employee evaluation failure for testing");
+            }
+            EvaluationResult eval = evaluateEmployee(measureName, measureVersion, cqlText, evaluationDate, input);
+            Map<String, ?> expressionResultsMap = eval.expressionResults == null ? Map.of() : eval.expressionResults;
+            String outcomeStatus = normalizeOutcomeStatus(expressionResultsMap.get("Outcome Status"));
+            Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate);
+
+            return new DemoOutcome(
+                    input.employee().externalId(),
+                    input.employee().name(),
+                    input.employee().role(),
+                    input.employee().site(),
+                    outcomeStatus,
+                    "Outcome derived from CQL define 'Outcome Status'.",
+                    evidenceJson
+            );
+        } catch (Exception ex) {
+            String fallbackOutcome = "MISSING_DATA";
+            return new DemoOutcome(
+                    input.employee().externalId(),
+                    input.employee().name(),
+                    input.employee().role(),
+                    input.employee().site(),
+                    fallbackOutcome,
+                    "CQL evaluation failed for this employee; recorded as MISSING_DATA.",
+                    Map.of(
+                            "evaluationError", "CQL engine failure",
+                            "message", ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(),
+                            "fallbackOutcome", fallbackOutcome
+                    )
+            );
+        }
     }
 
     private Map<String, Object> buildEvidenceJson(
@@ -366,9 +409,7 @@ public class CqlEvaluationService {
             return List.of();
         }
 
-        List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployees = SyntheticEmployeeCatalog.allEmployees().stream()
-                .sorted(Comparator.comparingInt(employee -> Math.floorMod((spec.rateKey() + "|" + employee.externalId()).hashCode(), Integer.MAX_VALUE)))
-                .toList();
+        List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployees = orderedEmployeesFor(spec);
         int populationSize = orderedEmployees.size();
         int compliantCount = Math.max(0, Math.min(populationSize, (int) Math.round(populationSize * complianceRate(spec.rateKey()))));
         int excludedCount = Math.min(EXCLUDED_COUNT, Math.max(0, populationSize - compliantCount));
@@ -394,6 +435,48 @@ public class CqlEvaluationService {
             seededInputs.add(input(employee, spec, seededOutcome));
         }
         return seededInputs;
+    }
+
+    private SeededInput seededInputFor(String measureName, String subjectId) {
+        MeasureSeedSpec spec = measureSeedSpecFor(measureName);
+        if (spec == null) {
+            throw new IllegalArgumentException("Unsupported measure: " + measureName);
+        }
+
+        List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployees = orderedEmployeesFor(spec);
+        SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(subjectId);
+        int employeeIndex = orderedEmployees.indexOf(employee);
+        if (employeeIndex < 0) {
+            throw new IllegalArgumentException("Unknown employee id: " + subjectId);
+        }
+
+        int populationSize = orderedEmployees.size();
+        int compliantCount = Math.max(0, Math.min(populationSize, (int) Math.round(populationSize * complianceRate(spec.rateKey()))));
+        int excludedCount = Math.min(EXCLUDED_COUNT, Math.max(0, populationSize - compliantCount));
+        int missingCount = Math.min(MISSING_DATA_COUNT, Math.max(0, populationSize - compliantCount - excludedCount));
+        int remaining = Math.max(0, populationSize - compliantCount - excludedCount - missingCount);
+        int dueSoonCount = remaining / 2;
+
+        SeededOutcome seededOutcome;
+        if (employeeIndex < compliantCount) {
+            seededOutcome = SeededOutcome.COMPLIANT;
+        } else if (employeeIndex < compliantCount + excludedCount) {
+            seededOutcome = SeededOutcome.EXCLUDED;
+        } else if (employeeIndex < compliantCount + excludedCount + missingCount) {
+            seededOutcome = SeededOutcome.MISSING_DATA;
+        } else if (employeeIndex < compliantCount + excludedCount + missingCount + dueSoonCount) {
+            seededOutcome = SeededOutcome.DUE_SOON;
+        } else {
+            seededOutcome = SeededOutcome.OVERDUE;
+        }
+
+        return input(employee, spec, seededOutcome);
+    }
+
+    private List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployeesFor(MeasureSeedSpec spec) {
+        return SyntheticEmployeeCatalog.allEmployees().stream()
+                .sorted(Comparator.comparingInt(employee -> Math.floorMod((spec.rateKey() + "|" + employee.externalId()).hashCode(), Integer.MAX_VALUE)))
+                .toList();
     }
 
     private double complianceRate(String rateKey) {

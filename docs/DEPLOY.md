@@ -1,7 +1,8 @@
 # Deployment Guide
 
 **Stack:** Vercel (frontend) + Fly.io (backend) + Neon (Postgres) + Anthropic API.
-**Cost target:** under $25 through May 17, 2026.
+**Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
+**Cost target:** keep the live stack under about $25/month.
 
 ## Stack
 
@@ -25,7 +26,7 @@ Fallback if Fly cost is a problem: Render free tier (cold-start tradeoff, ~30s f
 - Neon account + project created
 - Anthropic API key with $20/mo hard cap set in console billing
 
-## One-time setup (D1)
+## One-time setup
 
 ### Neon
 
@@ -34,7 +35,7 @@ Fallback if Fly cost is a problem: Render free tier (cold-start tradeoff, ~30s f
 3. Copy **direct** connection string (for Flyway migrations)
 4. Save as repo secrets: `DATABASE_URL`, `DATABASE_URL_DIRECT`
 
-Do not use `neonctl projects create` unless it supports `pg_version=16`; the current CLI defaults to Postgres 17 and is not compliant with the locked sprint stack.
+Do not use `neonctl projects create` unless it supports `pg_version=16`; the current CLI defaults to Postgres 17 and is not compliant with the locked stack.
 
 ### Fly.io
 
@@ -51,9 +52,9 @@ fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
 
 Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`).
 
-D1 stops here. Do **not** deploy until D2/S0.
+Stop after wiring the secrets and project settings. Deploy only after the stack is provisioned and verified.
 
-D2 deploy verification:
+First deploy verification:
 
 ```bash
 fly deploy
@@ -68,7 +69,7 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
    - `NEXT_PUBLIC_API_BASE_URL` = Fly app URL (e.g., `https://workwell-measure-studio-api.fly.dev`)
    - `NEXT_PUBLIC_APP_NAME` = `WorkWell Measure Studio`
    - `NEXT_PUBLIC_DEMO_MODE` = `true` only for local/demo builds that should prefill the login form
-4. D1 stops after project connection and env configuration. First deploy from `main` happens during D2/S0.
+4. Stop after project connection and env configuration. First deploy from `main` happens after the stack is provisioned and verified.
 
 ### Anthropic
 
@@ -145,7 +146,7 @@ Each schema migration creates a branch. Promote previous branch to main from Neo
 
 ## Cost monitoring
 
-Daily check from D2 onwards:
+Daily check while the stack is live:
 
 - **Fly dashboard:** Usage tab, projected monthly
 - **Neon dashboard:** storage + compute consumed
@@ -198,7 +199,7 @@ Vercel subdomain `workwell-measure-studio.vercel.app` is fine for the demo. If b
 3. Fly: `fly certs add api.<your-domain>`, follow DNS instructions
 4. Update `NEXT_PUBLIC_API_BASE_URL` to new backend domain
 
-## D2 notes (S0)
+## Initial deployment notes
 
 - Confirm the active Vercel project is `workwell-measure-studio`.
 - Confirm Vercel Root Directory is `frontend`.

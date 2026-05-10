@@ -4,6 +4,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.workwell.measure.AudiogramDemoService;
 import com.workwell.measure.FluVaccineDemoService;
@@ -20,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
@@ -132,23 +135,71 @@ class EvalControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void runsAllProgramsScopeUsingActiveMeasureVersions() throws Exception {
         UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(allProgramsRunService.runAllPrograms("All Programs", "system")).thenReturn(
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev"))).thenReturn(
                 new EvalController.ManualRunResponse(
                         runId.toString(),
+                        "ALL_PROGRAMS",
                         "All Programs",
+                        "COMPLETED",
                         2,
+                        200L,
+                        180L,
+                        20L,
+                        "Run completed",
                         List.of("Audiogram", "TB Surveillance")
                 )
         );
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"scope\":\"All Programs\"}"))
+                        .content("{\"scopeType\":\"ALL_PROGRAMS\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
-                .andExpect(jsonPath("$.scope").value("All Programs"))
-                .andExpect(jsonPath("$.activeMeasuresExecuted").value(2));
+                .andExpect(jsonPath("$.scopeType").value("ALL_PROGRAMS"))
+                .andExpect(jsonPath("$.scopeLabel").value("All Programs"))
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.activeMeasuresExecuted").value(2))
+                .andExpect(jsonPath("$.totalEvaluated").value(200))
+                .andExpect(jsonPath("$.compliant").value(180))
+                .andExpect(jsonPath("$.nonCompliant").value(20));
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void rejectsMeasureScopeWithoutMeasureIdentifier() throws Exception {
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
+                .thenThrow(new IllegalArgumentException("measureId or measureVersionId is required for MEASURE scope"));
+
+        mockMvc.perform(post("/api/runs/manual")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scopeType\":\"MEASURE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void rejectsSiteScopeUntilImplemented() throws Exception {
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
+                .thenThrow(new IllegalArgumentException("Scope SITE is not implemented yet"));
+
+        mockMvc.perform(post("/api/runs/manual")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scopeType\":\"SITE\",\"site\":\"Plant A\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void rejectsEmployeeScopeUntilImplemented() throws Exception {
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
+                .thenThrow(new IllegalArgumentException("Scope EMPLOYEE is not implemented yet"));
+
+        mockMvc.perform(post("/api/runs/manual")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scopeType\":\"EMPLOYEE\",\"employeeExternalId\":\"emp-001\"}"))
+                .andExpect(status().isBadRequest());
     }
 }
