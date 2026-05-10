@@ -6,6 +6,7 @@ import { measureStatusClass } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ActivationReadiness, VersionHistoryItem } from "../types";
 import { ImpactPreviewPanel } from "./ImpactPreviewPanel";
+import { DataReadinessPanel } from "./DataReadinessPanel";
 
 type Props = {
   measure: MeasureDetail;
@@ -104,6 +105,8 @@ export function ReleaseApprovalTab({
           </p>
           <p>Required Spec Fields: <span className={requiredSpecComplete ? "text-emerald-700" : "text-red-700"}>{requiredSpecComplete ? "✅ Complete" : "❌ Incomplete"}</span></p>
         </div>
+
+        <DataReadinessPanel measureId={measureId} api={api} />
 
         <h3 className="mt-2 text-sm font-semibold text-slate-900">Version History</h3>
         {versionHistory.length === 0 ? (
