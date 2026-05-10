@@ -4,7 +4,7 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for occupational-hea
 
 ## What it includes
 
-- Measure catalog + Studio authoring for Spec, CQL, Value Sets, and Tests
+- Measure catalog + Studio authoring for Spec, CQL, Value Sets, Tests, Traceability, and Activation Impact Preview
 - Lifecycle flow: `Draft -> Approved -> Active -> Deprecated`
 - Compile gate and test-fixture validation gate before activation
 - Manual runs for ALL_PROGRAMS, MEASURE, and CASE scopes across Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine, and all-program views
@@ -71,6 +71,8 @@ pnpm dev
 - `POST /api/measures/{id}/cql/compile`
 - `PUT /api/measures/{id}/tests`
 - `POST /api/measures/{id}/tests/validate`
+- `GET /api/measures/{id}/traceability` — policy-to-evidence traceability matrix with gap detection
+- `POST /api/measures/{id}/impact-preview` — dry-run activation impact: outcome counts, case impact, no DB writes; writes `MEASURE_IMPACT_PREVIEWED` audit event
 - `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
 - `GET /api/runs?limit=1`
 - `GET /api/cases?status=open`

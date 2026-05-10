@@ -2,6 +2,34 @@
 
 ## 2026-05-09
 
+### Policy Traceability and Activation Impact Preview (README_04)
+
+Completed:
+
+Backend — Traceability:
+- Added `MeasureTraceabilityService` — builds a policy-to-evidence matrix from spec fields, CQL defines (parsed via regex), value sets, test fixtures, and runtime evidence keys. Generates gaps: missing policy citation, bad compile status, missing test fixtures, missing MISSING_DATA/EXCLUDED fixture coverage, unlinked value sets.
+- Added `GET /api/measures/{id}/traceability` in `MeasureController`.
+- Integration tests: `MeasureTraceabilityIntegrationTest` (5 tests, Testcontainers).
+- Controller unit tests added in `MeasureControllerTest`.
+
+Backend — Impact Preview:
+- Added `MeasureImpactPreviewService` — dry-run CQL evaluation; does NOT call `runPersistenceService` or `caseFlowService`. Counts outcomes, estimates case impact by querying existing open cases, builds site/role breakdown maps, writes `MEASURE_IMPACT_PREVIEWED` audit event.
+- Added `POST /api/measures/{id}/impact-preview` in `MeasureController`.
+- Integration tests: `MeasureImpactPreviewIntegrationTest` (7 tests, Testcontainers + `@WithMockUser`).
+- Note: Testcontainers integration tests require Docker Desktop; they pass in CI but are skipped when Docker is unavailable.
+
+Frontend:
+- Added `TraceabilityValueSetRef`, `TestFixtureRef`, `TraceabilityRow`, `TraceabilityGap`, `TraceabilityResponse`, `CaseImpact`, `ImpactPreviewResponse` to `features/studio/types.ts`.
+- Created `features/studio/components/TraceabilityTab.tsx` — loads traceability matrix, renders summary card, error/warning gap panels, 7-column policy-to-evidence table, Export JSON button.
+- Created `features/studio/components/ImpactPreviewPanel.tsx` — "Preview Activation Impact" button, outcome count cards (COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED), case impact summary, warnings panel, "preview only" disclaimer note.
+- Embedded `ImpactPreviewPanel` in `ReleaseApprovalTab` above the Activate Measure button (shown when measure is in Approved state).
+- Added "Traceability" tab to `studio/[id]/page.tsx` Tab union and tab bar.
+
+Verification:
+- Frontend lint: exit 0
+- Frontend build: `✓ Compiled successfully`, all 12 routes built
+- `MeasureControllerTest` (WebMvcTest, no Docker): all 5 tests pass
+
 ### Frontend: Studio page split into hooks and tab components (README_03 Part B)
 
 Completed:
