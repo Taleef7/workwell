@@ -61,6 +61,63 @@ export type VersionHistoryItem = {
   changeSummary: string;
 };
 
+export type TraceabilityValueSetRef = {
+  name: string;
+  oid: string;
+  version: string;
+};
+
+export type TestFixtureRef = {
+  fixtureName: string;
+  expectedOutcome: string;
+};
+
+export type TraceabilityRow = {
+  policyCitation: string;
+  policyRequirement: string;
+  specField: string;
+  specValue: string;
+  cqlDefine: string;
+  cqlSnippet: string;
+  valueSets: TraceabilityValueSetRef[];
+  requiredDataElements: string[];
+  testFixtures: TestFixtureRef[];
+  runtimeEvidenceKeys: string[];
+};
+
+export type TraceabilityGap = {
+  severity: "ERROR" | "WARN" | string;
+  message: string;
+};
+
+export type TraceabilityResponse = {
+  measureId: string;
+  measureVersionId: string;
+  measureName: string;
+  version: string;
+  rows: TraceabilityRow[];
+  gaps: TraceabilityGap[];
+};
+
+export type CaseImpact = {
+  wouldCreate: number;
+  wouldUpdate: number;
+  wouldClose: number;
+  wouldExclude: number;
+};
+
+export type ImpactPreviewResponse = {
+  measureId: string;
+  measureVersionId: string;
+  evaluationDate: string;
+  populationEvaluated: number;
+  outcomeCounts: Record<string, number>;
+  caseImpact: CaseImpact;
+  siteBreakdown: Record<string, unknown>[];
+  roleBreakdown: Record<string, unknown>[];
+  warnings: string[];
+};
+
 export type DraftSpecResponse = {
   success: boolean;
   fallback?: string | null;
