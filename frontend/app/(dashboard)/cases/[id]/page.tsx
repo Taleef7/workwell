@@ -360,6 +360,19 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function exportCaseAuditPacket() {
+    if (!caseId) return;
+    const blob = await api.downloadBlob(`/api/auditor/cases/${caseId}/packet?format=json`);
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `workwell-case-packet-${caseId}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -370,9 +383,17 @@ export default function CaseDetailPage() {
           <h2 className="mt-2 text-3xl font-semibold">Case detail</h2>
           <p className="mt-2 text-slate-600">Structured Why Flagged evidence for the selected case and its waiver context.</p>
         </div>
-        <p className="text-sm text-slate-500">
-          Case: <code>{caseId}</code>
-        </p>
+        <div className="flex flex-col items-end gap-2">
+          <p className="text-sm text-slate-500">
+            Case: <code>{caseId}</code>
+          </p>
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            onClick={() => void exportCaseAuditPacket()}
+          >
+            Export Case Audit Packet
+          </button>
+        </div>
       </div>
 
       {loading ? <p className="text-sm text-slate-600">Loading case...</p> : null}

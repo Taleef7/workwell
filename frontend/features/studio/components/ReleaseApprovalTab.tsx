@@ -39,6 +39,8 @@ export function ReleaseApprovalTab({
   const [showDeprecateConfirm, setShowDeprecateConfirm] = useState(false);
   const [deprecateReason, setDeprecateReason] = useState("");
 
+  const measureVersionId = versionHistory.find(v => v.version === measure.version)?.id ?? "";
+
   const compileReady = !!activationReadiness && ["COMPILED", "WARNINGS"].includes((activationReadiness.compileStatus ?? "").toUpperCase());
   const testsReady = !!activationReadiness && activationReadiness.testValidationPassed;
   const hasValueSets = (measure.valueSets?.length ?? 0) > 0;
@@ -50,6 +52,19 @@ export function ReleaseApprovalTab({
     (measure.requiredDataElements ?? []).filter(Boolean).length > 0;
   const approveEnabled = compileReady && testsReady;
   const approveDisabledReason = !compileReady ? "Compile status must be COMPILED or WARNINGS." : !testsReady ? "Test fixtures must pass validation." : "";
+
+  async function exportMeasurePacket() {
+    if (!measureVersionId) return;
+    const blob = await api.downloadBlob(`/api/auditor/measure-versions/${measureVersionId}/packet?format=json`);
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `workwell-measure-version-packet-${measureVersionId}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
 
   async function approve() {
     onError("");
@@ -139,6 +154,17 @@ export function ReleaseApprovalTab({
             </table>
           </div>
         )}
+
+        {measureVersionId ? (
+          <div className="mt-2">
+            <button
+              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              onClick={() => void exportMeasurePacket()}
+            >
+              Export Measure Audit Packet
+            </button>
+          </div>
+        ) : null}
 
         {measure.status === "Draft" && canApprove ? (
           <div className="mt-2">
