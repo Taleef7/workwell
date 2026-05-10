@@ -2,6 +2,33 @@
 
 ## 2026-05-10
 
+### Security and correctness review fixes (post-PR Codex review)
+
+Five blocking fixes applied to `fix/p0-secure-mcp` after Codex review of PR #5:
+
+**Fix 1 — Protect evidence metadata listing (ROLE_CASE_MANAGER | ROLE_ADMIN only)**
+- `EvidenceService.list()` — added `ensureListAllowed()` service-layer guard throwing `AccessDeniedException` for unauthorized roles.
+- `SecurityConfig` — added explicit `GET /api/cases/*/evidence` rule with `hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")` before the broad `GET /api/**` permit-all rule.
+- `EvidenceAccessIntegrationTest` — 5 new tests: CASE_MANAGER and ADMIN can list (200), AUTHOR and APPROVER cannot (403), unauthenticated gets 401/403.
+
+**Fix 2 — Apply impact preview scope filtering**
+- `MeasureImpactPreviewService.preview()` — `request.scope()` was accepted but never applied. Now routes all outcomes through `applyScope(outcomes, scope)` before counting and building breakdowns. Adds a warning when the scope matches zero employees.
+
+**Fix 3 — Filter case impact by evaluation period**
+- `estimateCaseImpact` SQL — added `AND c.evaluation_period = ?` clause so existing open cases from prior evaluation periods don't inflate "would update" counts for the preview period.
+
+**Fix 4 — Return 400 for invalid evaluationDate**
+- `resolveEvaluationDate()` — now throws `IllegalArgumentException` with "evaluationDate" in the message instead of silently defaulting to today.
+- `MeasureController.impactPreview()` — catch block distinguishes 400 (message contains "evaluationDate") from 404 (measure not found).
+
+**Fix 5 — Resolve case reruns from persisted requested_scope_json**
+- `AllProgramsRunService.loadCaseIdForRun()` — reads `(requested_scope_json->>'caseId')::uuid` first; falls back to the legacy `last_run_id` lookup only when the JSON path is absent. Prevents rerun failure after a second rerun advances `last_run_id` past the source run.
+- Fix 5b (discovered during test run): the JSON existence check used `requested_scope_json ? 'caseId'` which JDBC interprets as a second parameter placeholder, causing `PSQLException: No value specified for parameter 2`. Replaced with `jsonb_exists(requested_scope_json, 'caseId')` — consistent with the pattern documented in DEPLOY.md.
+
+**Regression tests added:**
+- `MeasureImpactPreviewIntegrationTest` — 9 new tests: scope filtering (site, employee, nonexistent), invalid date throws + returns 400, blank date defaults to today, case impact counts for fresh preview (uses far-future date), case impact ignores cases from a different evaluation period. Test for the period-isolation case inserts a synthetic employee row (CQL evaluator uses in-memory FHIR, not the employees table) and queries `measure_versions` by `measure_id` UUID rather than by name.
+- `ScopedRunIntegrationTest` — new `caseRerunSameScopeSucceedsEvenAfterLastRunIdIsStale`: runs CASE scope, SQL-advances `cases.last_run_id` to a synthetic later run, then calls `rerunSameScope` on the original run ID and asserts success via JSON-based caseId resolution.
+
 ### Auditor Mode and Export Packet (README_07)
 
 Completed:

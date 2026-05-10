@@ -174,6 +174,46 @@ class EvidenceAccessIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void caseManagerCanListEvidenceMetadata() throws Exception {
+        UUID caseId = anyCaseId();
+        seedEvidence("cm-list.pdf");
+        mockMvc.perform(get("/api/cases/{caseId}/evidence", caseId))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
+    void adminCanListEvidenceMetadata() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(get("/api/cases/{caseId}/evidence", caseId))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
+    void authorCannotListEvidenceMetadata() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(get("/api/cases/{caseId}/evidence", caseId))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "approver@workwell.dev", roles = "APPROVER")
+    void approverCannotListEvidenceMetadata() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(get("/api/cases/{caseId}/evidence", caseId))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unauthenticatedEvidenceListIsRejected() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(get("/api/cases/{caseId}/evidence", caseId))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isIn(401, 403));
+    }
+
+    @Test
     @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
     void uploadEndpointRejectsUnauthorizedRole() throws Exception {
         UUID caseId = anyCaseId();

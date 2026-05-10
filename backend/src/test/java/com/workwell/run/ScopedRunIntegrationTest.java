@@ -248,6 +248,52 @@ class ScopedRunIntegrationTest {
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void caseRerunSameScopeSucceedsEvenAfterLastRunIdIsStale() {
+        // Regression test for Fix 5.
+        // Scenario: run CASE scope once to produce runB (which stores caseId in requested_scope_json),
+        // then SQL-advance cases.last_run_id to a synthetic later run so runB is now "stale".
+        // rerunSameScope(runB) must still succeed by reading caseId from runB's JSON,
+        // not by looking up cases WHERE last_run_id = runB (which now finds nothing).
+
+        allProgramsRunService.runAllPrograms("All Programs", "admin@workwell.dev");
+
+        UUID caseId = jdbcTemplate.queryForObject(
+                "SELECT id FROM cases WHERE status = 'OPEN' ORDER BY created_at ASC LIMIT 1", UUID.class
+        );
+
+        // CASE-scope run → produces runB; runB stores {"caseId": caseId} in requested_scope_json
+        ManualRunResponse runBResponse = allProgramsRunService.run(
+                new ManualRunRequest(RunScopeType.CASE, null, null, null, null, caseId, null, false),
+                "cm@workwell.dev"
+        );
+        UUID runBId = UUID.fromString(runBResponse.runId());
+
+        // Insert a synthetic later run and point the case's last_run_id at it,
+        // simulating what happens when a subsequent evaluation overwrites last_run_id.
+        UUID laterRunId = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO runs (id, scope_type, trigger_type, status, triggered_by, started_at, " +
+                "total_evaluated, compliant, non_compliant, measurement_period_start, measurement_period_end, requested_scope_json) " +
+                "VALUES (?, 'ALL_PROGRAMS', 'MANUAL', 'COMPLETED', 'test@workwell.dev', NOW(), 0, 0, 0, NOW(), NOW(), '{}')",
+                laterRunId
+        );
+        jdbcTemplate.update("UPDATE cases SET last_run_id = ? WHERE id = ?", laterRunId, caseId);
+
+        UUID currentLastRunId = jdbcTemplate.queryForObject(
+                "SELECT last_run_id FROM cases WHERE id = ?", UUID.class, caseId
+        );
+        assertThat(currentLastRunId).isEqualTo(laterRunId).isNotEqualTo(runBId);
+
+        // rerunSameScope resolves caseId from runB's requested_scope_json — must not throw
+        ManualRunResponse rerunResponse = allProgramsRunService.rerunSameScope(runBId, "cm@workwell.dev");
+
+        assertThat(rerunResponse.scopeType()).isEqualTo("CASE");
+        assertThat(rerunResponse.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(rerunResponse.activeMeasuresExecuted()).isEqualTo(1);
+        assertThat(rerunResponse.totalEvaluated()).isEqualTo(1L);
+    }
+
     private int countCases(UUID employeeId, UUID measureVersionId, String evaluationPeriod) {
         Integer count = jdbcTemplate.queryForObject(
                 """
