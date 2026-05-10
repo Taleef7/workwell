@@ -26,7 +26,7 @@ Production endpoints:
 - Backend: `https://workwell-measure-studio-api.fly.dev`
 
 ## 3) Backend Module Boundaries (`com.workwell.*`)
-- `measure`: measure catalog, versioning, lifecycle transitions, policy traceability matrix (`MeasureTraceabilityService`), and dry-run activation impact preview (`MeasureImpactPreviewService`).
+- `measure`: measure catalog, versioning, lifecycle transitions, policy traceability matrix (`MeasureTraceabilityService`), dry-run activation impact preview (`MeasureImpactPreviewService`), and value set governance + terminology mapping (`ValueSetGovernanceService` — resolve-check, diff, CQL unattached reference detection, terminology mapping CRUD).
 - `admin`: integration health, scheduler, waivers, outreach templates, and data readiness (`DataReadinessService` — source mapping, freshness, missingness computation).
 - `valueset`: value set registry and measure/value-set linkage.
 - `compile`: CQL translator compile validation and compile metadata.

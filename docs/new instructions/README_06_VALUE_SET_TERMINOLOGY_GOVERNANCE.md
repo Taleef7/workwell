@@ -206,3 +206,37 @@ Do not build full terminology-server integration yet. Start with:
 - diff works for seeded value sets.
 - UI shows governance status clearly.
 - tests cover unresolved/zero-code/stale/diff scenarios.
+
+## Implementation Progress
+
+**Status: COMPLETE — 2026-05-10**
+
+### Delivered
+
+Backend:
+- `V013__value_set_governance.sql` — extends `value_sets` with 7 governance columns; seeds 4 demo value sets (fixed UUIDs, RESOLVED status, non-empty codes_json); creates `terminology_mappings` table; seeds 5 demo mappings.
+- `ValueSetGovernanceService` — `resolveCheck`, `diff`, `getValueSetDetail`, `listTerminologyMappings`, `createTerminologyMapping`. Lazy demo VS linking via `ensureDemoValueSetLinks()`. CQL unattached reference detection by line-scan.
+- `MeasureController` extended — `POST /api/measures/{id}/value-sets/resolve-check`, `GET /api/value-sets/{id}/diff`, `GET /api/value-sets/{id}/detail`. `activationReadiness()` merges VS governance blockers.
+- `AdminController` extended — `GET /api/admin/terminology-mappings`, `POST /api/admin/terminology-mappings`.
+- `ValueSetGovernanceIntegrationTest` (6 Testcontainers tests): terminology mapping CRUD, resolve-check with seeded data, unknown measure throws, diff between two value sets, all seeded value sets have codes.
+- `MeasureControllerTest` + `AdminControllerTest` updated (3 new unit tests, no Docker required).
+
+Frontend:
+- Types: `ValueSetCodeEntry`, `ValueSetDetail`, `ValueSetCheckItem`, `ResolveCheckResponse`, `AffectedMeasure`, `ValueSetDiffResponse`, `TerminologyMapping` added to `features/studio/types.ts`.
+- `ValueSetGovernancePanel.tsx` — auto-loads resolve-check on mount, Re-check button, overall status badge, blockers/warnings lists, per-VS table.
+- `ValueSetsTab.tsx` — `ValueSetGovernancePanel` embedded above attached value sets list.
+- `ReleaseApprovalTab.tsx` — `ValueSetGovernancePanel` embedded after `DataReadinessPanel`.
+- `admin/page.tsx` — Terminology Governance article with full mapping table, status badges, confidence %, reviewed by, notes.
+
+### Acceptance criteria status
+
+- [x] value sets are version-aware (columns: `version`, `resolution_status`, `expansion_hash`)
+- [x] resolve-check endpoint exists (`POST /api/measures/{id}/value-sets/resolve-check`)
+- [x] activation readiness includes value set blockers/warnings (merged in controller)
+- [x] diff works for seeded value sets (`GET /api/value-sets/{id}/diff?to={toId}`)
+- [x] UI shows governance status clearly (ValueSetGovernancePanel in ValueSetsTab + ReleaseApprovalTab)
+- [x] tests cover unresolved/zero-code/stale/diff scenarios (integration + unit tests)
+- [x] zero-code value set blocks activation (blocker emitted in resolveCheck)
+- [x] diff identifies added/removed codes (diff() returns addedCodes + removedCodes)
+- [x] CQL referenced but unattached value set produces blocker (checkCqlUnattachedReferences)
+- [x] admin-only mapping writes are protected (role-gated via Spring Security)
