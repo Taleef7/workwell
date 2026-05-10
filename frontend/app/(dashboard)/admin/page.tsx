@@ -56,6 +56,21 @@ type DataElementMapping = {
   notes: string | null;
 };
 
+type TerminologyMapping = {
+  id: string;
+  localCode: string;
+  localDisplay: string | null;
+  localSystem: string;
+  standardCode: string;
+  standardDisplay: string | null;
+  standardSystem: string;
+  mappingStatus: string;
+  mappingConfidence: number | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  notes: string | null;
+};
+
 type AuditEventRow = {
   occurredAt: string;
   eventType: string;
@@ -75,6 +90,7 @@ export default function AdminPage() {
   const [waivers, setWaivers] = useState<WaiverRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEventRow[]>([]);
   const [dataMappings, setDataMappings] = useState<DataElementMapping[]>([]);
+  const [terminologyMappings, setTerminologyMappings] = useState<TerminologyMapping[]>([]);
   const [validatingMappings, setValidatingMappings] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [updatingScheduler, setUpdatingScheduler] = useState(false);
@@ -102,6 +118,15 @@ export default function AdminPage() {
       setDataMappings(data);
     } catch {
       setDataMappings([]);
+    }
+  }, [api]);
+
+  const loadTerminologyMappings = useCallback(async () => {
+    try {
+      const data = await api.get<TerminologyMapping[]>("/api/admin/terminology-mappings");
+      setTerminologyMappings(data);
+    } catch {
+      setTerminologyMappings([]);
     }
   }, [api]);
 
@@ -172,9 +197,10 @@ export default function AdminPage() {
       void loadScheduler();
       void loadMeasures();
       void loadDataMappings();
+      void loadTerminologyMappings();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadIntegrations, loadMeasures, loadScheduler, loadDataMappings]);
+  }, [loadIntegrations, loadMeasures, loadScheduler, loadDataMappings, loadTerminologyMappings]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -389,6 +415,78 @@ export default function AdminPage() {
                   <td className="px-4 py-2 text-xs text-slate-500">
                     {m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—"}
                   </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">terminology governance</p>
+            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Local code mappings</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Local and internal codes mapped to standard terminology (LOINC, CPT, CVX, SNOMED). Demo mappings are
+              labeled as such and do not claim official accuracy.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadTerminologyMappings()}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Local Code</th>
+                <th className="px-4 py-2 font-medium">Local System</th>
+                <th className="px-4 py-2 font-medium">Standard Code</th>
+                <th className="px-4 py-2 font-medium">Standard System</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Confidence</th>
+                <th className="px-4 py-2 font-medium">Reviewed By</th>
+                <th className="px-4 py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {terminologyMappings.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-4 text-sm text-slate-500">No terminology mappings loaded.</td>
+                </tr>
+              ) : null}
+              {terminologyMappings.map((m) => (
+                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.localCode}</code>
+                    {m.localDisplay ? <p className="text-[11px] text-slate-500">{m.localDisplay}</p> : null}
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.localSystem}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.standardCode}</code>
+                    {m.standardDisplay ? <p className="text-[11px] text-slate-500">{m.standardDisplay}</p> : null}
+                  </td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.standardSystem}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(m.mappingStatus)}`}>
+                      {m.mappingStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-600">
+                    {m.mappingConfidence != null ? `${Math.round(m.mappingConfidence * 100)}%` : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.reviewedBy ?? "—"}</td>
                   <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
                 </tr>
               ))}
@@ -653,6 +751,15 @@ export default function AdminPage() {
       </article>
     </section>
   );
+}
+
+function terminologyStatusBadgeClass(status: string) {
+  const s = (status ?? "").toUpperCase();
+  if (s === "APPROVED") return "bg-emerald-100 text-emerald-800";
+  if (s === "REVIEWED") return "bg-blue-100 text-blue-800";
+  if (s === "PROPOSED") return "bg-amber-100 text-amber-800";
+  if (s === "REJECTED") return "bg-red-100 text-red-800";
+  return "bg-slate-100 text-slate-700";
 }
 
 function mappingStatusBadgeClass(status: string) {
