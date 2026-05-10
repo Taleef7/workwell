@@ -39,3 +39,5 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint frontend
         run: pnpm lint
+      - name: Build frontend
+        run: pnpm build

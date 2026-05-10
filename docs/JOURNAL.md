@@ -2,6 +2,30 @@
 
 ## 2026-05-10
 
+### README_08 — Testing, CI, and Docs Sync (branch: hardening/readme-08-testing-docs)
+
+**Goal:** Stabilization and quality pass after the big merge. No new product features.
+
+**CI:**
+- Added `pnpm build` step to frontend CI job (`.github/workflows/ci.yml`). Previously only lint ran; type errors and build failures would slip through.
+
+**Security role integration tests:**
+- Added `SecurityRoleIntegrationTest` (`backend/src/test/java/com/workwell/config/`) — 14 tests exercising role boundaries end-to-end with auth enabled and a real Postgres container.
+- Covers: unauthenticated GET/POST fails (403), VIEWER can read but cannot mutate cases/runs/admin, AUTHOR can edit spec but cannot approve/activate, APPROVER cannot access admin endpoints or case actions, ADMIN can access admin endpoints, `/api/eval` internal-header enforcement.
+- Prior `MeasureControllerTest`, `CaseControllerTest`, `EvalControllerTest` all use `addFilters=false` — they test controller wiring only. This test fills the auth-enforcement gap.
+
+**Manual QA checklist:**
+- Created `docs/DEMO_QA_CHECKLIST.md` — covers Author flow, Approver/Admin flow, Case Manager flow, Security checks, and MCP verification. Each step has an explicit expected outcome and pass column.
+
+**Docs status:**
+- `docs/MCP.md` — verified current (merged in PR #5 and reflects actual endpoint, roles, tool list, audit behavior).
+- `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, `docs/README.md` — all updated in the big merge; spot-checked as current.
+- `docs/TODO.md` — intentionally archived to `docs/archive/TODO_old_v2.md`; no replacement needed (active backlog lives in the README_XX instruction series).
+
+**Remaining README_08 acceptance items:**
+- Actor identity tests for outreach/AI draft/rerun audit actor: partially covered (`CaseControllerTest` spoofed-actor test, `CaseViewAuditIntegrationTest`, `AdminControllerTest` spoofed sync actor). Outreach and AI draft actor assertions can be strengthened in follow-up if regression is observed.
+- Playwright E2E tests: deferred; stack has no Playwright setup yet, README_08 marks these optional.
+
 ### Security and correctness review fixes (post-PR Codex review)
 
 Five blocking fixes applied to `fix/p0-secure-mcp` after Codex review of PR #5:
