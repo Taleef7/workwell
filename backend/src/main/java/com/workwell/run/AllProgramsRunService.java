@@ -151,6 +151,25 @@ public class AllProgramsRunService {
     }
 
     private UUID loadCaseIdForRun(UUID sourceRunId, UUID measureVersionId) {
+        // Preferred: read caseId from requested_scope_json persisted with the run
+        try {
+            UUID caseIdFromJson = jdbcTemplate.queryForObject(
+                    """
+                            SELECT (requested_scope_json->>'caseId')::uuid
+                            FROM runs
+                            WHERE id = ?
+                              AND jsonb_exists(requested_scope_json, 'caseId')
+                            """,
+                    UUID.class,
+                    sourceRunId
+            );
+            if (caseIdFromJson != null) {
+                return caseIdFromJson;
+            }
+        } catch (EmptyResultDataAccessException ignored) {
+            // no caseId in requested_scope_json — fall through to legacy lookup
+        }
+        // Legacy fallback: look up via last_run_id for older runs without caseId in JSON
         try {
             return jdbcTemplate.queryForObject(
                     """

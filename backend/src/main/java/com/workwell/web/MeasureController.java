@@ -249,7 +249,10 @@ public class MeasureController {
         try {
             return impactPreviewService.preview(id, request);
         } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+            String msg = ex.getMessage();
+            HttpStatus status = (msg != null && msg.contains("evaluationDate"))
+                    ? HttpStatus.BAD_REQUEST : HttpStatus.NOT_FOUND;
+            throw new ResponseStatusException(status, msg);
         }
     }
 
