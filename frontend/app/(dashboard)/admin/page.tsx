@@ -45,6 +45,17 @@ type WaiverRecord = {
   expired: boolean;
 };
 
+type DataElementMapping = {
+  id: string;
+  sourceId: string;
+  sourceDisplayName: string;
+  canonicalElement: string;
+  sourceField: string;
+  mappingStatus: string;
+  lastValidatedAt: string | null;
+  notes: string | null;
+};
+
 type AuditEventRow = {
   occurredAt: string;
   eventType: string;
@@ -63,6 +74,8 @@ export default function AdminPage() {
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [waivers, setWaivers] = useState<WaiverRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEventRow[]>([]);
+  const [dataMappings, setDataMappings] = useState<DataElementMapping[]>([]);
+  const [validatingMappings, setValidatingMappings] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [updatingScheduler, setUpdatingScheduler] = useState(false);
   const [loadingWaivers, setLoadingWaivers] = useState(false);
@@ -82,6 +95,15 @@ export default function AdminPage() {
   const [grantingWaiver, setGrantingWaiver] = useState(false);
   const { siteId } = useGlobalFilters();
   const api = useApi();
+
+  const loadDataMappings = useCallback(async () => {
+    try {
+      const data = await api.get<DataElementMapping[]>("/api/admin/data-mappings");
+      setDataMappings(data);
+    } catch {
+      setDataMappings([]);
+    }
+  }, [api]);
 
   const loadIntegrations = useCallback(async () => {
     setError(null);
@@ -149,9 +171,10 @@ export default function AdminPage() {
       void loadIntegrations();
       void loadScheduler();
       void loadMeasures();
+      void loadDataMappings();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadIntegrations, loadMeasures, loadScheduler]);
+  }, [loadIntegrations, loadMeasures, loadScheduler, loadDataMappings]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -166,6 +189,19 @@ export default function AdminPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadAuditEvents]);
+
+  async function validateMappings() {
+    setValidatingMappings(true);
+    setError(null);
+    try {
+      const data = await api.post<undefined, DataElementMapping[]>("/api/admin/data-mappings/validate");
+      setDataMappings(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Validation failed");
+    } finally {
+      setValidatingMappings(false);
+    }
+  }
 
   async function triggerSync(integration: string) {
     setSyncing(integration);
@@ -297,6 +333,69 @@ export default function AdminPage() {
           </div>
         </article>
       </div>
+
+      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">data readiness</p>
+            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Source mappings</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Required data elements for each measure must be mapped to a source system before a measure can safely activate.
+              Run Validate Mappings to sync source health into mapping statuses.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void validateMappings()}
+            disabled={validatingMappings}
+            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60"
+          >
+            {validatingMappings ? "Validating…" : "Validate Mappings"}
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Canonical Element</th>
+                <th className="px-4 py-2 font-medium">Source</th>
+                <th className="px-4 py-2 font-medium">Source Field</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Last Validated</th>
+                <th className="px-4 py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dataMappings.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-4 text-sm text-slate-500">No mappings loaded.</td>
+                </tr>
+              ) : null}
+              {dataMappings.map((m) => (
+                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-700">{m.canonicalElement}</code>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{m.sourceDisplayName}</td>
+                  <td className="px-4 py-2">
+                    <code className="text-[11px] text-slate-500">{m.sourceField}</code>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(m.mappingStatus)}`}>
+                      {m.mappingStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">
+                    {m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -554,6 +653,14 @@ export default function AdminPage() {
       </article>
     </section>
   );
+}
+
+function mappingStatusBadgeClass(status: string) {
+  const s = (status ?? "").toUpperCase();
+  if (s === "MAPPED") return "bg-emerald-100 text-emerald-800";
+  if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800";
+  if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800";
+  return "bg-slate-100 text-slate-700";
 }
 
 function statusBadgeClass(status: string) {

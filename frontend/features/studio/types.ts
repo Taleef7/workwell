@@ -118,6 +118,38 @@ export type ImpactPreviewResponse = {
   warnings: string[];
 };
 
+export type DataElementMapping = {
+  id: string;
+  sourceId: string;
+  sourceDisplayName: string;
+  sourceType: string;
+  canonicalElement: string;
+  sourceField: string;
+  fhirResourceType: string | null;
+  fhirPath: string | null;
+  codeSystem: string | null;
+  mappingStatus: string;
+  lastValidatedAt: string | null;
+  notes: string | null;
+};
+
+export type RequiredElementReadiness = {
+  canonicalElement: string;
+  label: string;
+  sourceId: string | null;
+  mappingStatus: string;
+  freshnessStatus: string;
+  missingnessRate: number;
+  sampleMissingEmployees: string[];
+};
+
+export type DataReadinessResponse = {
+  overallStatus: string;
+  requiredElements: RequiredElementReadiness[];
+  blockers: string[];
+  warnings: string[];
+};
+
 export type DraftSpecResponse = {
   success: boolean;
   fallback?: string | null;
