@@ -150,6 +150,83 @@ export type DataReadinessResponse = {
   warnings: string[];
 };
 
+export type ValueSetCodeEntry = {
+  code: string;
+  display: string;
+  system: string;
+};
+
+export type ValueSetDetail = {
+  id: string;
+  oid: string;
+  name: string;
+  version: string;
+  lastResolvedAt: string | null;
+  canonicalUrl: string;
+  source: string;
+  governanceStatus: string;
+  resolutionStatus: string;
+  resolutionError: string;
+  expansionHash: string;
+  codeCount: number;
+  codeSystems: string[];
+  codes: ValueSetCodeEntry[];
+};
+
+export type ValueSetCheckItem = {
+  id: string;
+  name: string;
+  oid: string;
+  version: string;
+  resolutionStatus: string;
+  codeCount: number;
+  warnings: string[];
+  blocker: boolean;
+};
+
+export type ResolveCheckResponse = {
+  measureId: string;
+  measureVersionId: string;
+  allResolved: boolean;
+  valueSets: ValueSetCheckItem[];
+  blockers: string[];
+  warnings: string[];
+};
+
+export type AffectedMeasure = {
+  measureId: string;
+  measureName: string;
+  version: string;
+};
+
+export type ValueSetDiffResponse = {
+  fromId: string;
+  fromName: string;
+  fromVersion: string;
+  toId: string;
+  toName: string;
+  toVersion: string;
+  addedCodes: ValueSetCodeEntry[];
+  removedCodes: ValueSetCodeEntry[];
+  affectedMeasures: AffectedMeasure[];
+  warnings: string[];
+};
+
+export type TerminologyMapping = {
+  id: string;
+  localCode: string;
+  localDisplay: string | null;
+  localSystem: string;
+  standardCode: string;
+  standardDisplay: string | null;
+  standardSystem: string;
+  mappingStatus: string;
+  mappingConfidence: number | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  notes: string | null;
+};
+
 export type DraftSpecResponse = {
   success: boolean;
   fallback?: string | null;

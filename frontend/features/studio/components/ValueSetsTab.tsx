@@ -5,6 +5,7 @@ import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ValueSetRef } from "../types";
 import { valueSetBadgeClass } from "../utils";
+import { ValueSetGovernancePanel } from "./ValueSetGovernancePanel";
 
 type Props = {
   measure: MeasureDetail;
@@ -63,7 +64,10 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
 
   return (
     <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-900">Attached Value Sets</h3>
+      <h3 className="text-sm font-semibold text-slate-900">Value Set Governance</h3>
+      <ValueSetGovernancePanel measureId={measureId} api={api} />
+
+      <h3 className="mt-2 text-sm font-semibold text-slate-900">Attached Value Sets</h3>
       {attached.length ? (
         <ul className="space-y-2">
           {attached.map((vs) => (

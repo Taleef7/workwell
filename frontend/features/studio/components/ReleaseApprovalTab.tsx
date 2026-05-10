@@ -7,6 +7,7 @@ import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ActivationReadiness, VersionHistoryItem } from "../types";
 import { ImpactPreviewPanel } from "./ImpactPreviewPanel";
 import { DataReadinessPanel } from "./DataReadinessPanel";
+import { ValueSetGovernancePanel } from "./ValueSetGovernancePanel";
 
 type Props = {
   measure: MeasureDetail;
@@ -107,6 +108,7 @@ export function ReleaseApprovalTab({
         </div>
 
         <DataReadinessPanel measureId={measureId} api={api} />
+        <ValueSetGovernancePanel measureId={measureId} api={api} />
 
         <h3 className="mt-2 text-sm font-semibold text-slate-900">Version History</h3>
         {versionHistory.length === 0 ? (
