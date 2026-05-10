@@ -2,6 +2,32 @@
 
 ## 2026-05-10
 
+### Auditor Mode and Export Packet (README_07)
+
+Completed:
+
+Backend:
+- Migration `V014__audit_packet_exports.sql` — creates `audit_packet_exports` table (id, packet_type, entity_id, format, generated_by, generated_at, payload_hash, payload_size_bytes). Records each packet generation for accountability.
+- Added `AuditPacketService` (`com.workwell.audit`) — assembles and serializes audit export packets for 3 entity types:
+  - `buildCasePacket(caseId, actor, format)` — case summary, employee context, measure/version, CQL decision evidence, timeline split into actions/audit events/AI assistance, appointments, attachment metadata, outreach records, disclaimers.
+  - `buildRunPacket(runId, actor, format)` — run metadata, scope, summary counters, run logs, audit events, disclaimers.
+  - `buildMeasureVersionPacket(measureVersionId, actor, format)` — measure metadata, spec, CQL text+SHA-256 hash, compile result, value sets, VS governance check, traceability matrix, data readiness, approval history, audit events, disclaimers.
+  - Each packet serialized to JSON bytes (or HTML with a table overview + JSON appendix). SHA-256 payload hash stored in `audit_packet_exports`. Writes `AUDIT_PACKET_GENERATED` audit event on every generation.
+  - Optional services (traceability, data readiness, VS governance) wrapped in safe try-catch; failures return empty section rather than aborting the packet.
+- Added `AuditorController` (`com.workwell.web`) — 3 GET endpoints: `/api/auditor/cases/{caseId}/packet`, `/api/auditor/runs/{runId}/packet`, `/api/auditor/measure-versions/{measureVersionId}/packet`. Query param `format=json|html` (default json). Unsupported format → 400. Missing entity (IllegalArgumentException) → 404. Role checks via `SecurityActor.hasAnyAuthority`: CASE/RUN → `ROLE_CASE_MANAGER|ROLE_ADMIN`; MEASURE_VERSION → `ROLE_APPROVER|ROLE_ADMIN`.
+- Tests: `AuditorControllerTest` (6 tests, `@WebMvcTest`, `@WithMockUser` role annotations): json/html/run/measure-version OK, unsupported-format 400, missing-entity 404.
+
+Frontend:
+- `runs/page.tsx` — added `exportRunAuditPacket()` helper and "Export Run Audit Packet" button in the Run Detail panel, visible when a run is selected.
+- `cases/[id]/page.tsx` — added `exportCaseAuditPacket()` helper and "Export Case Audit Packet" button in the page header alongside the case ID.
+- `ReleaseApprovalTab.tsx` — derives current measure version ID from `versionHistory.find(v => v.version === measure.version)?.id`; added `exportMeasurePacket()` helper and "Export Measure Audit Packet" button above the lifecycle action buttons.
+
+Verification:
+- Backend AuditorControllerTest: 6/6 pass
+- Backend full test suite: no regressions
+- Frontend lint: exit 0
+- Frontend build: all routes compiled, TypeScript clean
+
 ### Value Set and Terminology Governance (README_06)
 
 Completed:
