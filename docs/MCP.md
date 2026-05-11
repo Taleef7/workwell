@@ -4,11 +4,19 @@ WorkWell exposes a read-only MCP surface for programmatic inspection of cases, r
 
 ## Security boundary
 
-- `/sse` and `/mcp/**` are protected by Spring Security.
-- MCP access is role-gated to `ROLE_ADMIN`, `ROLE_CASE_MANAGER`, or `ROLE_MCP_CLIENT`.
+MCP security is enforced at two layers:
+
+**Transport access** — `/sse` and `/mcp/**` require one of:
+- `ROLE_ADMIN`
+- `ROLE_CASE_MANAGER`
+- `ROLE_MCP_CLIENT`
+
+**Tool execution** — each tool enforces its own application-role policy before running any query. `ROLE_MCP_CLIENT` alone is **not** sufficient to read employee, case, or compliance data. A service account that needs to call restricted tools must also hold a data-access role (`ROLE_CASE_MANAGER` or `ROLE_ADMIN`).
+
 - There is no public MCP mode in production.
-- MCP tool calls are audited as `MCP_TOOL_CALLED`.
+- MCP tool calls are audited as `MCP_TOOL_CALLED` regardless of outcome (including access-denied).
 - The audit actor comes from the authenticated security context, not a hardcoded transport identity.
+- Denied tool calls return a structured `ACCESS_DENIED` safe error and are audited with `success=false`.
 
 ## Tool posture
 
@@ -21,28 +29,27 @@ WorkWell exposes a read-only MCP surface for programmatic inspection of cases, r
 
 ## Tool inventory (v2.0.0)
 
-### Operational read tools (v1 — preserved)
+### Tool role matrix
 
-| Tool | Purpose | Role |
-|------|---------|------|
-| `get_case` | Full case detail by caseId | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `list_cases` | Case summaries with status/measure filter | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `get_run_summary` | Run metadata and outcome counts | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `list_runs` | Run history with optional measure filter, bounded limit | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `list_measures` | Measure catalog with lifecycle-status filter | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `get_measure_version` | Latest active measure spec and CQL summary | CASE_MANAGER, ADMIN, MCP_CLIENT |
-| `explain_outcome` | Deterministic explanation from case evidence fields | CASE_MANAGER, ADMIN, MCP_CLIENT |
+The table below shows **tool-execution** roles (transport access is separate — see above).
 
-### Agent tools (v2 — new)
+| Tool | Required application roles | Data sensitivity |
+|------|---------------------------|-----------------|
+| `get_case` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
+| `list_cases` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
+| `get_run_summary` | CASE_MANAGER, ADMIN | Restricted — run/outcome data |
+| `list_runs` | CASE_MANAGER, ADMIN | Restricted — run/outcome data |
+| `explain_outcome` | CASE_MANAGER, ADMIN | Restricted — employee/case evidence |
+| `get_employee` | CASE_MANAGER, ADMIN | Restricted — employee/compliance data |
+| `check_compliance` | CASE_MANAGER, ADMIN | Restricted — employee/compliance data |
+| `list_noncompliant` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
+| `list_measures` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — measure catalog |
+| `get_measure_version` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — measure spec/CQL |
+| `explain_rule` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — deterministic metadata |
+| `get_measure_traceability` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — traceability matrix |
+| `list_data_quality_gaps` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — data readiness |
 
-| Tool | Purpose | Role |
-|------|---------|------|
-| `get_employee` | Employee summary + last 5 compliance outcomes | CASE_MANAGER, ADMIN |
-| `check_compliance` | Latest or preview compliance status by employee/measure — no AI, no case creation | CASE_MANAGER, ADMIN |
-| `list_noncompliant` | Non-compliant open cases with measure/site/status filter; default limit 25, max 100 | CASE_MANAGER, ADMIN |
-| `explain_rule` | Deterministic measure rule: policy ref, eligibility, compliance window, CQL defines, value sets — no AI | CASE_MANAGER, ADMIN |
-| `get_measure_traceability` | Policy-to-evidence traceability matrix rows and gaps | CASE_MANAGER, ADMIN |
-| `list_data_quality_gaps` | Data readiness gaps and blockers for a measure | CASE_MANAGER, ADMIN |
+`ROLE_MCP_CLIENT` alone does not grant access to any tool. It only permits connection to the MCP transport. A service account must additionally hold the relevant data-access role.
 
 ## Tool schema examples
 
@@ -61,7 +68,7 @@ Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes
   "mode": "latest"
 }
 ```
-`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`.
+`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`. `decisionAvailable` is `true` when an outcome row exists and `false` when the status is `NO_OUTCOME`.
 
 ### `list_noncompliant`
 ```json
@@ -101,7 +108,7 @@ Invalid arguments or missing records return a structured error — no stack trac
 }
 ```
 
-Error codes used: `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
+Error codes used: `ACCESS_DENIED`, `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
 
 ## Audit record (MCP_TOOL_CALLED)
 
