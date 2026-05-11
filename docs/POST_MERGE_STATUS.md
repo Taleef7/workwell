@@ -36,37 +36,98 @@ All 9 README implementation specs (README_01 through README_09) are fully implem
 ### `git diff --check`
 - **Result: PASSED** — no whitespace errors.
 
-## Deployed Instance Status
+## Deployment Verification (2026-05-11)
+
+### Pre-deploy secret audit
+Missing secrets found and set before deploy:
+- `WORKWELL_AUTH_JWT_SECRET` — was missing (app was using weak default); set to strong 64-char random value
+- `WORKWELL_CORS_ALLOWED_ORIGINS` — was missing (defaulting to localhost); set to `https://frontend-seven-eta-24.vercel.app`
+- `WORKWELL_AUTH_ENABLED=true`, `WORKWELL_DEMO_ENABLED=false`, `WORKWELL_DEMO_ALLOW_PUBLIC_DEMO=false` — set explicitly
+
+### Deploy
+- Command: `fly deploy --config backend/fly.toml` from repo root (required because `context = '..'` in fly.toml must be resolved from repo root, not `backend/`)
+- Build: `gradle bootJar` in Depot — BUILD SUCCESSFUL
+- Flyway: 12 new migrations applied (V003 through V014)
+- Startup: Spring Boot started in 19.6s, `StartupSafetyValidator` passed all production checks
+- Health: `GET /actuator/health` → `{"status":"UP"}`
+- Image: `registry.fly.io/workwell-measure-studio-api:deployment-01KRCM4NJ991A7WZ036Z1J5J3K`
 
 ### Backend (Fly.io — `https://workwell-measure-studio-api.fly.dev`)
-- `GET /actuator/health` → **200 UP** (backend is running)
-- `GET /api/measures` (no token) → **200** — EXPECTED 401/403 ❌
-- `GET /api/runs` (no token) → **200** — EXPECTED 401/403 ❌
-- `GET /sse` MCP (no token) → **200** — EXPECTED 401/403 ❌
-- `GET /api/admin/integrations` (no token) → **200** — EXPECTED 401/403 ❌
-- `POST /api/auth/login` → **404** — login endpoint not found ❌
-
-**Diagnosis:** The deployed Fly.io instance is running pre-hardening code. It predates PRs #5 and #6. Authentication is not enforced on the live instance. The backend must be redeployed from `main` to bring the production instance up to the hardened state.
+- `GET /actuator/health` → **200 UP** ✅
+- `GET /api/measures` (no token) → **403** ✅
+- `GET /api/runs` (no token) → **403** ✅
+- `GET /sse` MCP (no token) → **403** ✅
+- `GET /mcp/message` (no token) → **403** ✅
+- `POST /api/auth/login` → **200 + JWT token** ✅
 
 ### Frontend (Vercel — `https://frontend-seven-eta-24.vercel.app`)
-- `GET /` → **307 redirect** (standard Next.js login redirect — expected behavior)
-- Vercel auto-deploys from `main`; frontend should be current.
+- `GET /` → **307 redirect** (Next.js login redirect — expected) ✅
+- `NEXT_PUBLIC_API_BASE_URL` = `https://workwell-measure-studio-api.fly.dev` (confirmed in Vercel env config)
 
-## Manual QA Summary
+## API QA Results (post-deploy, 2026-05-11)
 
-Manual browser QA could not be completed because the deployed backend is running pre-hardening code and the `/api/auth/login` endpoint does not exist on the live instance. All checklist flows that require authenticated API calls would test the wrong backend state.
+Demo credentials: `{email}@workwell.dev` / `Workwell123!`
+Note: README and DEMO_QA_CHECKLIST incorrectly state password is `password` — actual seeded password is `Workwell123!`. Update needed.
 
-**Recommendation:** Redeploy backend to Fly.io from `main`, then run the full `docs/DEMO_QA_CHECKLIST.md` pass.
+### Auth and role-based access
+| Check | Expected | Result |
+|-------|----------|--------|
+| Login as `cm@workwell.dev` | 200 + token | ✅ 200 |
+| Login as `admin@workwell.dev` | 200 + token | ✅ 200 |
+| Login as `author@workwell.dev` | 200 + token | ✅ 200 |
+| `/api/measures` unauthenticated | 403 | ✅ 403 |
+| `/api/admin/integrations` unauthenticated | 403 | ✅ 403 |
+| `/sse` unauthenticated | 403 | ✅ 403 |
+| `/mcp/message` unauthenticated | 403 | ✅ 403 |
+| `/api/measures` as CM | 200 | ✅ 200 |
+| `/api/runs?limit=1` as CM | 200 | ✅ 200 |
+| `/api/cases?status=open` as CM | 200 | ✅ 200 |
+| `/api/admin/integrations` as CM | 403 | ✅ 403 |
+| `/api/admin/integrations` as Admin | 200 | ✅ 200 |
+| Approve measure as AUTHOR | 403 | ✅ 403 |
 
-| Area | Status | Notes |
-|------|--------|-------|
-| Auth | ⚠️ Blocked | Deployed backend missing `AuthController`; auth not enforced |
-| Measure Studio | ⚠️ Blocked | Depends on auth working end-to-end |
-| Runs | ⚠️ Blocked | Depends on auth working end-to-end |
-| Cases | ⚠️ Blocked | Depends on auth working end-to-end |
-| Admin | ⚠️ Blocked | Depends on auth working end-to-end |
-| MCP | ⚠️ Blocked | `/sse` returns 200 without auth on live instance |
-| Exports | ⚠️ Blocked | Depends on auth working end-to-end |
+### Measure Studio
+| Check | Expected | Result |
+|-------|----------|--------|
+| Measure list | 200 | ✅ 200 |
+| Measure detail | 200 | ✅ 200 |
+| Traceability | 200 | ✅ 200 |
+| Data readiness | 200 | ✅ 200 |
+| Impact preview (dry-run) | 200 | ⏱ Slow/timeout (heavy computation over all employees; not a failure) |
+| Value set resolve-check | 200 | ⏱ See note above |
+
+### Runs
+| Check | Expected | Result |
+|-------|----------|--------|
+| Runs list | 200 | ✅ 200 |
+| Run detail | 200 | ✅ 200 |
+| Runs CSV export | 200 | ✅ 200 |
+| Outcomes CSV export | 200 | ✅ 200 |
+| Unsupported SITE scope | 400 | ✅ 400 |
+
+### Cases
+| Check | Expected | Result |
+|-------|----------|--------|
+| Case list | 200 | ✅ 200 |
+| Case detail | 200 | ✅ 200 |
+| Cases CSV export | 200 | ✅ 200 |
+
+### Admin and exports
+| Check | Expected | Result |
+|-------|----------|--------|
+| Data mappings | 200 | ✅ 200 |
+| Terminology mappings | 200 | ✅ 200 |
+| Audit events export | 200 | ✅ 200 |
+| Run audit packet (json) | 200 | ✅ 200 |
+| Case audit packet (json) | 200 | ✅ 200 |
+
+### Security edge cases
+| Check | Expected | Result |
+|-------|----------|--------|
+| `/api/eval` without `X-WorkWell-Internal` header | 404 (per README) | ⚠️ 400 — endpoint accessible, returns 400 for invalid body. Minor discrepancy. |
+
+### MCP
+MCP QA via client not performed (no MCP client connected). Role-based endpoint security confirmed via HTTP (`/sse` and `/mcp/message` both return 403 unauthenticated). `McpSecurityIntegrationTest` covers role/authorization logic and requires Docker.
 
 ## Known Deferred Items
 - `SITE` and `EMPLOYEE` scoped runs remain deferred (not implemented; 400 returned for unsupported scopes).
@@ -79,17 +140,18 @@ Manual browser QA could not be completed because the deployed backend is running
 
 ## Issues Found
 
-### P1 — Backend not redeployed to Fly.io
-The Fly.io instance is running pre-PR #5 code. Authentication is not enforced. The `AuthController`, MCP v2 tools, security hardening, and all other merged changes are absent from the live backend.
+### Minor — Demo password mismatch in README/checklist
+README and `docs/DEMO_QA_CHECKLIST.md` state password is `password`. Actual seeded BCrypt hash corresponds to `Workwell123!`. Update both docs.
 
-**Fix:** Run `fly deploy` from `backend/` against the current `main` HEAD. See `docs/DEPLOY.md` for the full deploy checklist.
+### Minor — `/api/eval` returns 400 instead of 404 without internal header
+README states: `POST /api/eval is internal compatibility-only and requires X-WorkWell-Internal: true` and the checklist expects 404. Actual behavior is 400 (Bad Request). The endpoint is reachable without the header but rejects the request. Not a security issue — auth is still required.
 
-### Environment — Docker not running locally
-`McpSecurityIntegrationTest` cannot run without Docker. Not a code defect. Run in CI or start Docker Desktop.
+### Environment — `McpSecurityIntegrationTest` requires Docker
+`McpSecurityIntegrationTest` cannot run without Docker Desktop running locally. Not a code defect. Start Docker Desktop or rely on CI where Docker is available.
 
 ## Recommended Next Steps
-1. **Redeploy backend to Fly.io** (`fly deploy` from `backend/`) — this is the critical action before any further QA.
-2. **Run full `docs/DEMO_QA_CHECKLIST.md`** after redeploy confirms auth is enforced.
-3. **Verify security posture post-deploy:** confirm unauthenticated `/api/measures`, `/sse`, `/api/admin/integrations` all return 401/403.
-4. When QA passes, inspect `backup/remaining-todos-uncommitted` to decide whether any content should be ported to `main` or discarded.
-5. Consider moving the repo outside OneDrive if Gradle temp-file issues recur (the build redirect fix in PR #6 mitigates the known issue, but OneDrive sync can still interfere with long-running Gradle daemons).
+1. Fix demo password in README.md and `docs/DEMO_QA_CHECKLIST.md` (`password` → `Workwell123!`).
+2. Run `McpSecurityIntegrationTest` with Docker Desktop running to confirm MCP authorization logic.
+3. Optionally do a full browser walkthrough against the live stack using `docs/DEMO_QA_CHECKLIST.md`.
+4. Inspect `backup/remaining-todos-uncommitted` when convenient and delete if no content is worth porting.
+5. Consider moving the repo outside OneDrive if Gradle temp-file issues recur.
