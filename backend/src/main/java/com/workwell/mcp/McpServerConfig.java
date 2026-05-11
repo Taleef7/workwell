@@ -18,17 +18,24 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.HexFormat;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.ServerResponse;
 
@@ -100,7 +107,11 @@ public class McpServerConfig {
                 getCase,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "get_case", "restricted", args, () -> {
+                        requireAnyAuthority("get_case", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                         String caseId = stringArg(args, "caseId");
+                        if (!UUID_PATTERN.matcher(caseId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
+                        }
                         var detail = caseFlowService.loadCase(UUID.fromString(caseId))
                                 .orElseThrow(() -> new IllegalArgumentException("Case not found: " + caseId));
                         Map<String, Object> payload = objectMapper.convertValue(detail, new TypeReference<Map<String, Object>>() {
@@ -124,6 +135,7 @@ public class McpServerConfig {
                 listCases,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "list_cases", "restricted", args, () -> {
+                        requireAnyAuthority("list_cases", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                         String status = args.get("status") == null ? "open" : args.get("status").toString();
                         UUID measureId = null;
                         if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
@@ -173,11 +185,17 @@ public class McpServerConfig {
                 getRunSummary,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "get_run_summary", "internal", args, () -> {
-                        var summary = args.get("runId") == null || args.get("runId").toString().isBlank()
+                        requireAnyAuthority("get_run_summary", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
+                        String rawRunId = args.get("runId") == null || args.get("runId").toString().isBlank()
+                                ? null : args.get("runId").toString().trim();
+                        if (rawRunId != null && !UUID_PATTERN.matcher(rawRunId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "runId must be a valid UUID");
+                        }
+                        var summary = rawRunId == null
                                 ? runPersistenceService.loadLatestRun()
                                         .orElseThrow(() -> new IllegalArgumentException("No runs found"))
-                                : runPersistenceService.loadRunById(UUID.fromString(args.get("runId").toString()))
-                                        .orElseThrow(() -> new IllegalArgumentException("Run not found: " + args.get("runId")));
+                                : runPersistenceService.loadRunById(UUID.fromString(rawRunId))
+                                        .orElseThrow(() -> new IllegalArgumentException("Run not found: " + rawRunId));
                         Map<String, Object> payload = new LinkedHashMap<>();
                         payload.put("run_id", summary.runId());
                         payload.put("scope", summary.scopeType());
@@ -198,6 +216,7 @@ public class McpServerConfig {
                 listMeasures,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "list_measures", "internal", args, () -> {
+                        requireAnyAuthority("list_measures", "ROLE_AUTHOR", "ROLE_APPROVER", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                         String requestedStatus = args.get("status") == null || args.get("status").toString().isBlank()
                                 ? "Active"
                                 : args.get("status").toString().trim();
@@ -252,9 +271,14 @@ public class McpServerConfig {
                 getMeasureVersion,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "get_measure_version", "restricted", args, () -> {
+                        requireAnyAuthority("get_measure_version", "ROLE_AUTHOR", "ROLE_APPROVER", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                         UUID measureId;
                         if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
-                            measureId = UUID.fromString(args.get("measureId").toString().trim());
+                            String rawId = args.get("measureId").toString().trim();
+                            if (!UUID_PATTERN.matcher(rawId).matches()) {
+                                return safeError("INVALID_ARGUMENT", "measureId must be a valid UUID");
+                            }
+                            measureId = UUID.fromString(rawId);
                         } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
                             measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
                         } else {
@@ -301,10 +325,30 @@ public class McpServerConfig {
                 listRuns,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "list_runs", "internal", args, () -> {
-                        UUID measureId = args.get("measureId") == null || args.get("measureId").toString().isBlank()
-                                ? null
-                                : UUID.fromString(args.get("measureId").toString().trim());
-                        int limit = args.get("limit") == null ? 10 : Math.max(1, Math.min(200, Integer.parseInt(args.get("limit").toString())));
+                        requireAnyAuthority("list_runs", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
+                        UUID measureId = null;
+                        if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
+                            String rawId = args.get("measureId").toString().trim();
+                            if (!UUID_PATTERN.matcher(rawId).matches()) {
+                                return safeError("INVALID_ARGUMENT", "measureId must be a valid UUID");
+                            }
+                            measureId = UUID.fromString(rawId);
+                        }
+                        int limit;
+                        if (args.get("limit") == null) {
+                            limit = 10;
+                        } else {
+                            String limitStr = args.get("limit").toString().trim();
+                            try {
+                                limit = Integer.parseInt(limitStr);
+                            } catch (NumberFormatException e) {
+                                return safeError("INVALID_ARGUMENT", "limit must be a numeric value");
+                            }
+                            if (limit <= 0) {
+                                return safeError("INVALID_ARGUMENT", "limit must be a positive number");
+                            }
+                            limit = Math.min(limit, 200);
+                        }
                         List<Object> queryArgs = new java.util.ArrayList<>();
                         StringBuilder sql = new StringBuilder("""
                                 SELECT
@@ -382,7 +426,11 @@ public class McpServerConfig {
                 explainOutcome,
                 (exchange, args) -> {
                     return executeTool(jdbcTemplate, objectMapper, "explain_outcome", "restricted", args, () -> {
+                        requireAnyAuthority("explain_outcome", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                         String caseId = stringArg(args, "caseId");
+                        if (!UUID_PATTERN.matcher(caseId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
+                        }
                         var caseDetail = caseFlowService.loadCase(UUID.fromString(caseId))
                                 .orElseThrow(() -> new IllegalArgumentException("Case not found: " + caseId));
                         Map<String, Object> whyFlagged = caseDetail.evidenceJson() == null
@@ -461,6 +509,7 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification getEmployeeSpec = new McpServerFeatures.SyncToolSpecification(
                 getEmployee,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "get_employee", "restricted", args, () -> {
+                    requireAnyAuthority("get_employee", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                     String externalId = stringArg(args, "employeeExternalId");
                     List<Map<String, Object>> empRows = jdbcTemplate.query(
                             "SELECT id, external_id, name, role, site, active FROM employees WHERE external_id = ?",
@@ -510,6 +559,7 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification checkComplianceSpec = new McpServerFeatures.SyncToolSpecification(
                 checkCompliance,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "check_compliance", "restricted", args, () -> {
+                    requireAnyAuthority("check_compliance", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                     String externalId = stringArg(args, "employeeExternalId");
                     String measureName = stringArg(args, "measureName");
                     String mode = args.get("mode") == null ? "latest" : args.get("mode").toString();
@@ -551,6 +601,9 @@ public class McpServerConfig {
                         empty.put("measureName", measureName);
                         empty.put("status", "NO_OUTCOME");
                         empty.put("source", mode);
+                        // Always present so clients can rely on this field regardless of path.
+                        empty.put("complianceDecisionSource", "cql_outcome");
+                        empty.put("decisionAvailable", false);
                         empty.put("message", "No outcome found. Run a measure evaluation first.");
                         return empty;
                     }
@@ -559,6 +612,7 @@ public class McpServerConfig {
                     result.put("source", mode);
                     // AI is never consulted — status comes from persisted CQL outcome only
                     result.put("complianceDecisionSource", "cql_outcome");
+                    result.put("decisionAvailable", true);
                     return result;
                 })
         );
@@ -566,7 +620,19 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification listNoncompliantSpec = new McpServerFeatures.SyncToolSpecification(
                 listNoncompliant,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "list_noncompliant", "restricted", args, () -> {
-                    int limit = args.get("limit") == null ? 25 : Math.max(1, Math.min(100, Integer.parseInt(args.get("limit").toString())));
+                    requireAnyAuthority("list_noncompliant", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
+                    int limit;
+                    if (args.get("limit") == null) {
+                        limit = 25;
+                    } else {
+                        String limitStr = args.get("limit").toString().trim();
+                        try {
+                            limit = Integer.parseInt(limitStr);
+                        } catch (NumberFormatException e) {
+                            return safeError("INVALID_ARGUMENT", "limit must be a numeric value");
+                        }
+                        limit = Math.max(1, Math.min(100, limit));
+                    }
                     String measureNameFilter = args.get("measureName") == null ? null : args.get("measureName").toString().trim();
                     String siteFilter = args.get("site") == null ? null : args.get("site").toString().trim();
                     String statusFilter = args.get("status") == null ? null : args.get("status").toString().trim();
@@ -631,9 +697,14 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification explainRuleSpec = new McpServerFeatures.SyncToolSpecification(
                 explainRule,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "explain_rule", "internal", args, () -> {
+                    requireAnyAuthority("explain_rule", "ROLE_AUTHOR", "ROLE_APPROVER", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                     UUID measureId;
                     if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
-                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                        String rawId = args.get("measureId").toString().trim();
+                        if (!UUID_PATTERN.matcher(rawId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "measureId must be a valid UUID");
+                        }
+                        measureId = UUID.fromString(rawId);
                     } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
                         measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
                     } else {
@@ -675,9 +746,14 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification getMeasureTraceabilitySpec = new McpServerFeatures.SyncToolSpecification(
                 getMeasureTraceability,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "get_measure_traceability", "internal", args, () -> {
+                    requireAnyAuthority("get_measure_traceability", "ROLE_AUTHOR", "ROLE_APPROVER", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                     UUID measureId;
                     if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
-                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                        String rawId = args.get("measureId").toString().trim();
+                        if (!UUID_PATTERN.matcher(rawId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "measureId must be a valid UUID");
+                        }
+                        measureId = UUID.fromString(rawId);
                     } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
                         measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
                     } else {
@@ -711,9 +787,14 @@ public class McpServerConfig {
         McpServerFeatures.SyncToolSpecification listDataQualityGapsSpec = new McpServerFeatures.SyncToolSpecification(
                 listDataQualityGaps,
                 (exchange, args) -> executeTool(jdbcTemplate, objectMapper, "list_data_quality_gaps", "internal", args, () -> {
+                    requireAnyAuthority("list_data_quality_gaps", "ROLE_AUTHOR", "ROLE_APPROVER", "ROLE_CASE_MANAGER", "ROLE_ADMIN");
                     UUID measureId;
                     if (args.get("measureId") != null && !args.get("measureId").toString().isBlank()) {
-                        measureId = UUID.fromString(args.get("measureId").toString().trim());
+                        String rawId = args.get("measureId").toString().trim();
+                        if (!UUID_PATTERN.matcher(rawId).matches()) {
+                            return safeError("INVALID_ARGUMENT", "measureId must be a valid UUID");
+                        }
+                        measureId = UUID.fromString(rawId);
                     } else if (args.get("measureName") != null && !args.get("measureName").toString().isBlank()) {
                         measureId = lookupMeasureIdByName(measureService, args.get("measureName").toString().trim());
                     } else {
@@ -757,6 +838,21 @@ public class McpServerConfig {
                         listDataQualityGapsSpec
                 )
                 .build();
+    }
+
+    // Package-private so integration tests can call it directly to verify role enforcement.
+    void requireAnyAuthority(String toolName, String... allowedAuthorities) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new AccessDeniedException("MCP tool requires authentication: " + toolName);
+        }
+        Set<String> authorities = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+        boolean allowed = Arrays.stream(allowedAuthorities).anyMatch(authorities::contains);
+        if (!allowed) {
+            throw new AccessDeniedException("Not authorized to call MCP tool: " + toolName);
+        }
     }
 
     private Map<String, Object> safeError(String code, String message) {
@@ -821,6 +917,14 @@ public class McpServerConfig {
             Object payload = payloadSupplier.get();
             recordMcpAudit(jdbcTemplate, objectMapper, toolName, actor, safeArgs, payload, true, sensitivityLabel, timestamp, null);
             return new CallToolResult(toJson(objectMapper, payload), false);
+        } catch (AccessDeniedException ex) {
+            // Audit the denial then return a structured error instead of propagating the exception.
+            try {
+                recordMcpAudit(jdbcTemplate, objectMapper, toolName, actor, safeArgs, Map.of(), false, sensitivityLabel, timestamp, "ACCESS_DENIED: " + ex.getMessage());
+            } catch (RuntimeException auditEx) {
+                ex.addSuppressed(auditEx);
+            }
+            return new CallToolResult(toJson(objectMapper, safeError("ACCESS_DENIED", ex.getMessage())), false);
         } catch (RuntimeException ex) {
             try {
                 recordMcpAudit(jdbcTemplate, objectMapper, toolName, actor, safeArgs, Map.of(), false, sensitivityLabel, timestamp, ex.getMessage());
