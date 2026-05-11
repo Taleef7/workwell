@@ -56,4 +56,9 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// Keep binary in-progress results outside the OneDrive tree so sync cannot
+	// race against Gradle's rename of these short-lived files (NoSuchFileException).
+	binaryResultsDirectory.set(
+		file("${System.getProperty("java.io.tmpdir")}/workwell-test-binary-results/${name}")
+	)
 }
