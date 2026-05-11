@@ -205,3 +205,44 @@ Add Admin MCP page/section:
 - limits enforced.
 - tests cover auth/audit/invalid input/no-AI decision.
 - docs list tools, roles, examples, and safety guarantees.
+
+---
+
+## Implementation Progress
+
+### Status
+Complete
+
+### Completed
+- [x] Existing MCP tools inspected (get_case, list_cases, get_run_summary, list_measures, get_measure_version, list_runs, explain_outcome)
+- [x] Existing MCP tools preserved — no regressions; executeTool wrapper already audits all calls
+- [x] get_employee added — returns employee summary + last 5 outcomes; returns EMPLOYEE_NOT_FOUND safe error if not found
+- [x] check_compliance added — latest and preview modes both return persisted CQL outcome; complianceDecisionSource always "cql_outcome"; no AI called
+- [x] list_noncompliant added — open cases with DUE_SOON/OVERDUE/MISSING_DATA filter; default limit 25, max 100 enforced; INVALID_ARGUMENT returned for unknown status values
+- [x] explain_rule added — deterministic from MeasureService spec + CQL define parsing; source field is "deterministic_metadata"; no AI
+- [x] get_measure_traceability added — delegates to MeasureTraceabilityService.generate(); returns rows + gaps
+- [x] list_data_quality_gaps added — delegates to DataReadinessService.computeReadiness(); returns blockers + warnings + element readiness
+- [x] MCP tool auth/role behavior verified — existing security tests pass; unauthenticated and unauthorized roles still denied
+- [x] MCP audit behavior verified — all new tools use executeTool wrapper, writing MCP_TOOL_CALLED with actor from security context
+- [x] Safe errors implemented — error/code/message shape used throughout new tools
+- [x] Tests added — 8 new tests in McpSecurityIntegrationTest covering: EMPLOYEE_NOT_FOUND, check_compliance no-outcome path, preview mode source, limit cap enforcement, invalid status rejection, explain_rule missing args, explain_rule deterministic source, audit actor from security context
+- [x] McpServerConfigTest updated — added MeasureTraceabilityService and DataReadinessService mocks, updated version assertion to 2.0.0
+- [x] Backend test suite passes
+- [x] Frontend lint passes
+- [x] MCP.md updated with full v2 tool inventory, schemas, error codes, and audit record format
+
+### Notes from implementation
+- MCP server version bumped to 2.0.0.
+- executeTool wrapper reused for all new tools — no new audit path needed.
+- check_compliance preview mode resolves to same persisted data as latest, labeled with source="preview". Real-time per-employee CQL re-evaluation from MCP is not implemented to avoid creating unaudited transient state; operators who need fresh evaluation should trigger a manual run.
+- listNoncompliant queries cases directly (not CaseFlowService.listCases) to avoid loading the full outreach/waiver join and to enforce limit in SQL.
+- get_employee returns internal UUID in the response for cross-referencing; it is not used for routing.
+
+### Tests/verification
+- McpSecurityIntegrationTest: 4 original + 8 new = 12 tests total
+- McpServerConfigTest: 1 test (tool registration + version)
+- Backend full suite: all tests pass
+- Frontend lint: clean
+
+### Commit
+- feat(mcp): add MCP v2 agent tools — get_employee, check_compliance, list_noncompliant, explain_rule, get_measure_traceability, list_data_quality_gaps
