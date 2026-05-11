@@ -14,7 +14,7 @@
 
 | # | Step | Expected | Pass? |
 |---|------|----------|-------|
-| 1 | Log in as `author@workwell.dev` (password: `password`) | Redirected to Programs dashboard | |
+| 1 | Log in as `author@workwell.dev` (password: `Workwell123!`) | Redirected to Programs dashboard | |
 | 2 | Navigate to `/measures` | Measure list loads with at least 4 seeded measures | |
 | 3 | Click a measure → go to Studio | Studio tabs visible: Spec, CQL, Value Sets, Tests, Traceability, Activation Impact | |
 | 4 | Edit the Spec tab (update description) and save | Save succeeds, no error toast | |
@@ -31,7 +31,7 @@
 
 | # | Step | Expected | Pass? |
 |---|------|----------|-------|
-| 1 | Log in as `admin@workwell.dev` (password: `password`) | Redirected to Programs dashboard | |
+| 1 | Log in as `admin@workwell.dev` (password: `Workwell123!`) | Redirected to Programs dashboard | |
 | 2 | Open Studio for a Draft measure | Activation Impact Preview tab visible | |
 | 3 | Click "Preview Impact" | Dry-run outcome counts shown; no DB write occurs | |
 | 4 | Go to Value Sets tab → run Resolve Check | Blockers or warnings shown for unresolved value sets | |
@@ -47,7 +47,7 @@
 
 | # | Step | Expected | Pass? |
 |---|------|----------|-------|
-| 1 | Log in as `cm@workwell.dev` (password: `password`) | Redirected to Programs dashboard | |
+| 1 | Log in as `cm@workwell.dev` (password: `Workwell123!`) | Redirected to Programs dashboard | |
 | 2 | Navigate to `/runs` | Run history table loads | |
 | 3 | Trigger a run: click "Run Now" or `POST /api/runs/manual` with `ALL_PROGRAMS` | Run appears in list with status `COMPLETED` or `PARTIAL_FAILURE` | |
 | 4 | Open the run detail | Outcome counts per measure shown (Compliant, Overdue, etc.) | |
