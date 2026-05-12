@@ -143,7 +143,7 @@ export default function ProgramsPage() {
         <KpiCard label="Last run" value={lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-700">Unable to load program data. Please try again.</p> : null}
       {loading ? <p className="text-sm text-slate-600">Loading programs...</p> : null}
       {!loading && programs.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">

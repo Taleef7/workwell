@@ -3,7 +3,7 @@
 # Demo Runbook (Production)
 
 ## Production Surfaces
-- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Frontend: `https://workwell-measure-studio.vercel.app`
 - Backend API: `https://workwell-measure-studio-api.fly.dev`
 
 ## Pinned Production IDs
@@ -42,7 +42,7 @@ Expected:
 
 ## 30-Minute Pre-Demo Checklist
 - Verify backend is up (`/actuator/health` is UP).
-- Verify frontend opens at `https://frontend-seven-eta-24.vercel.app/programs`.
+- Verify frontend opens at `https://workwell-measure-studio.vercel.app/programs`.
 - Verify all 4 measures are Active in `GET /api/measures`.
 - Verify at least one open Audiogram case exists.
 - Verify MCP server is running and can execute:

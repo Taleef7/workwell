@@ -41,7 +41,7 @@ All 9 README implementation specs (README_01 through README_09) are fully implem
 ### Pre-deploy secret audit
 Missing secrets found and set before deploy:
 - `WORKWELL_AUTH_JWT_SECRET` — was missing (app was using weak default); set to strong 64-char random value
-- `WORKWELL_CORS_ALLOWED_ORIGINS` — was missing (defaulting to localhost); set to `https://frontend-seven-eta-24.vercel.app`
+- `WORKWELL_CORS_ALLOWED_ORIGINS` — set to `https://workwell-measure-studio.vercel.app` (initially set to `https://frontend-seven-eta-24.vercel.app`, corrected 2026-05-12)
 - `WORKWELL_AUTH_ENABLED=true`, `WORKWELL_DEMO_ENABLED=false`, `WORKWELL_DEMO_ALLOW_PUBLIC_DEMO=false` — set explicitly
 
 ### Deploy
@@ -60,7 +60,7 @@ Missing secrets found and set before deploy:
 - `GET /mcp/message` (no token) → **403** ✅
 - `POST /api/auth/login` → **200 + JWT token** ✅
 
-### Frontend (Vercel — `https://frontend-seven-eta-24.vercel.app`)
+### Frontend (Vercel — `https://workwell-measure-studio.vercel.app`)
 - `GET /` → **307 redirect** (Next.js login redirect — expected) ✅
 - `NEXT_PUBLIC_API_BASE_URL` = `https://workwell-measure-studio-api.fly.dev` (confirmed in Vercel env config)
 
@@ -149,9 +149,22 @@ README states: `POST /api/eval is internal compatibility-only and requires X-Wor
 ### Environment — `McpSecurityIntegrationTest` requires Docker
 `McpSecurityIntegrationTest` cannot run without Docker Desktop running locally. Not a code defect. Start Docker Desktop or rely on CI where Docker is available.
 
+## Corrections Applied (2026-05-12)
+
+### Frontend URL correction
+The Vercel project `workwell-measure-studio` (`https://workwell-measure-studio.vercel.app`) is the canonical frontend — it has GitHub auto-deploy integration connected to `main`. A duplicate project named `frontend` (`https://frontend-seven-eta-24.vercel.app`) existed from an earlier CLI deploy and was mistakenly referenced in CORS config and docs.
+
+Fixes applied:
+- `WORKWELL_CORS_ALLOWED_ORIGINS` Fly secret updated to `https://workwell-measure-studio.vercel.app`
+- `NEXT_PUBLIC_API_BASE_URL` in the `workwell-measure-studio` Vercel project had a UTF-8 BOM prepended — removed and re-added cleanly
+- `frontend/.vercel/project.json` updated to point at `prj_d18xpsaGvibOHQweh238zQhFWhoN` (`workwell-measure-studio`)
+- README.md, ARCHITECTURE.md, DEMO_RUNBOOK.md updated to canonical URL
+
+Login verified working at `https://workwell-measure-studio.vercel.app/login` with all demo credentials.
+
 ## Recommended Next Steps
-1. Fix demo password in README.md and `docs/DEMO_QA_CHECKLIST.md` (`password` → `Workwell123!`).
+1. ~~Fix demo password in README.md and `docs/DEMO_QA_CHECKLIST.md`~~ — Done.
 2. Run `McpSecurityIntegrationTest` with Docker Desktop running to confirm MCP authorization logic.
-3. Optionally do a full browser walkthrough against the live stack using `docs/DEMO_QA_CHECKLIST.md`.
+3. Do a full browser walkthrough against `https://workwell-measure-studio.vercel.app` using `docs/DEMO_QA_CHECKLIST.md`.
 4. Inspect `backup/remaining-todos-uncommitted` when convenient and delete if no content is worth porting.
 5. Consider moving the repo outside OneDrive if Gradle temp-file issues recur.
