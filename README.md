@@ -15,7 +15,7 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for occupational-hea
 
 ## Production surfaces
 
-- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Frontend: `https://workwell-measure-studio.vercel.app`
 - Backend API: `https://workwell-measure-studio-api.fly.dev`
 
 ## Stack

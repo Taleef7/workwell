@@ -49,9 +49,9 @@ public class ProgramService {
                     FROM outcomes o
                     JOIN employees e ON e.id = o.employee_id
                     JOIN runs r ON r.id = o.run_id
-                    WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
-                      AND (? IS NULL OR r.started_at >= ?)
-                      AND (? IS NULL OR r.started_at <= ?)
+                    WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                 ), latest_run AS (
                     SELECT fo.measure_version_id,
                            fo.run_id,
@@ -75,9 +75,9 @@ public class ProgramService {
                            COUNT(*) FILTER (WHERE c.status = 'OPEN') AS open_case_count
                     FROM cases c
                     JOIN employees e ON e.id = c.employee_id
-                    WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
-                      AND (? IS NULL OR c.created_at >= ?)
-                      AND (? IS NULL OR c.created_at <= ?)
+                    WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR c.created_at >= CAST(? AS TIMESTAMPTZ))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR c.created_at <= CAST(? AS TIMESTAMPTZ))
                     GROUP BY c.measure_version_id
                 )
                 SELECT av.measure_id,
@@ -146,9 +146,9 @@ public class ProgramService {
                 JOIN runs r ON r.id = o.run_id
                 JOIN employees e ON e.id = o.employee_id
                 JOIN active_measure_version amv ON amv.id = o.measure_version_id
-                WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
-                  AND (? IS NULL OR r.started_at >= ?)
-                  AND (? IS NULL OR r.started_at <= ?)
+                WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
+                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                 GROUP BY o.run_id, r.started_at
                 ORDER BY r.started_at DESC
                 LIMIT 10
@@ -182,9 +182,9 @@ public class ProgramService {
                 JOIN runs r ON r.id = o.run_id
                 JOIN employees e ON e.id = o.employee_id
                 JOIN active_measure_version amv ON amv.id = o.measure_version_id
-                WHERE (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
-                  AND (? IS NULL OR r.started_at >= ?)
-                  AND (? IS NULL OR r.started_at <= ?)
+                WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
+                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                 GROUP BY o.run_id, r.started_at
                 ORDER BY r.started_at DESC
                 LIMIT 1
@@ -206,7 +206,7 @@ public class ProgramService {
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status = 'OVERDUE'
-                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY e.site
                 ORDER BY overdue_count DESC, e.site ASC
                 LIMIT 5
@@ -225,7 +225,7 @@ public class ProgramService {
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status = 'OVERDUE'
-                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY e.role
                 ORDER BY overdue_count DESC, e.role ASC
                 LIMIT 5
@@ -238,7 +238,7 @@ public class ProgramService {
         );
 
         long totalFlagged = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA') AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))",
+                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA') AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))",
                 Long.class,
                 latestRunId, site, site
         );
@@ -249,7 +249,7 @@ public class ProgramService {
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
                 WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA')
-                  AND (? IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(?))
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY o.status
                 ORDER BY cnt DESC
                 """,

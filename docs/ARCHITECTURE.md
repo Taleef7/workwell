@@ -22,7 +22,7 @@ Browser
 ```
 
 Production endpoints:
-- Frontend: `https://frontend-seven-eta-24.vercel.app`
+- Frontend: `https://workwell-measure-studio.vercel.app`
 - Backend: `https://workwell-measure-studio-api.fly.dev`
 
 ## 3) Backend Module Boundaries (`com.workwell.*`)
