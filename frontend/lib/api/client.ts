@@ -28,15 +28,26 @@ export class ApiClient {
     if (response.status === 401) {
       this.onUnauthorized?.();
       const body = await response.text().catch(() => "");
-      throw new ApiError(401, body, "Unauthorized");
+      throw new ApiError(401, body, "Session expired. Please sign in again.");
     }
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new ApiError(
-        response.status,
-        body,
-        body || `Request failed (${response.status})`
-      );
+      const raw = await response.text().catch(() => "");
+      let message = `Request failed (${response.status})`;
+      try {
+        const json = JSON.parse(raw) as Record<string, unknown>;
+        if (typeof json.message === "string" && json.message) {
+          message = json.message;
+        } else if (response.status === 403) {
+          message = "You don't have permission to perform this action.";
+        } else if (response.status === 404) {
+          message = "Resource not found.";
+        } else if (raw) {
+          message = raw;
+        }
+      } catch {
+        if (raw) message = raw;
+      }
+      throw new ApiError(response.status, raw, message);
     }
     if (response.status === 204 || response.headers.get("content-length") === "0") {
       return undefined as T;
