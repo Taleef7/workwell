@@ -17,6 +17,10 @@ export default function LoginPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      setError("Please enter your email and password.");
+      return;
+    }
     setPending(true);
     setError(null);
     try {
@@ -26,14 +30,22 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password })
       });
       if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || "Invalid credentials");
+        let message = "Invalid email or password.";
+        try {
+          const json = await response.json() as { message?: string; error?: string };
+          if (json.message) message = json.message;
+          else if (response.status === 401 || response.status === 403) message = "Invalid email or password.";
+          else if (response.status === 400) message = "Please enter a valid email and password.";
+        } catch {
+          // non-JSON body — use the default message above
+        }
+        throw new Error(message);
       }
       const payload = (await response.json()) as { token: string; email: string; role: string };
       login(payload.token, payload.email, payload.role);
       router.replace("/programs");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
     } finally {
       setPending(false);
     }

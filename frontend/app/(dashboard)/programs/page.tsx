@@ -43,6 +43,7 @@ export default function ProgramsPage() {
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
   const [driversByMeasure, setDriversByMeasure] = useState<Record<string, TopDrivers>>({});
   const [error, setError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -106,13 +107,13 @@ export default function ProgramsPage() {
   }, [loadAll]);
 
   async function runAllMeasuresNow() {
-    setError(null);
+    setRunError(null);
     try {
       await api.post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
-      emitToast("Run completed - All Programs refreshed");
+      emitToast("Run completed — All Programs refreshed");
       await loadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setRunError(err instanceof Error ? err.message : "Run failed. Please try again.");
     }
   }
 
@@ -143,7 +144,16 @@ export default function ProgramsPage() {
         <KpiCard label="Last run" value={lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
 
-      {error ? <p className="text-sm text-red-700">Unable to load program data. Please try again.</p> : null}
+      {error ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+          Failed to load program data: {error}
+        </p>
+      ) : null}
+      {runError ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Run failed: {runError}
+        </p>
+      ) : null}
       {loading ? <p className="text-sm text-slate-600">Loading programs...</p> : null}
       {!loading && programs.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
