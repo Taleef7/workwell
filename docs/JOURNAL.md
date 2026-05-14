@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-05-13 — CI speedup pass for backend Gradle builds
+
+**Goal:** Cut down backend GitHub Actions time on repeated pushes without changing product behavior.
+
+**CI optimizations:**
+- Added `gradle/actions/setup-gradle@v4` to the backend job so Gradle wrapper, dependency, and build cache state can be reused between runs.
+- Enabled Gradle caching and configuration caching in `backend/gradle.properties`.
+- Set `maxParallelForks = 2` for CI test runs so Spring/Testcontainers classes can overlap a bit on the hosted runner.
+- Added pnpm caching for the frontend job and top-level workflow concurrency so newer pushes cancel stale in-progress runs.
+
+**Verification:**
+- `./gradlew help`
+- `./gradlew build --configuration-cache --dry-run`
+
 ## 2026-05-13 — Fly MCP stability and remote auth
 
 **Goal:** Stabilize the deployed backend for remote MCP clients and document the required Claude Desktop configuration.
