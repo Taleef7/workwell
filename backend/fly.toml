@@ -19,7 +19,8 @@ primary_region = 'ord'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
+  # Keep one machine warm so remote MCP clients do not lose the SSE transport on cold start.
+  min_machines_running = 1
   processes = ['app']
 
   [[http_service.checks]]

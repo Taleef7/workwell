@@ -50,7 +50,7 @@ fly secrets set WORKWELL_AUTH_ENABLED=true
 fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
 ```
 
-Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`).
+Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`), and keep `min_machines_running = 1` if you need a stable remote MCP connection.
 
 Stop after wiring the secrets and project settings. Deploy only after the stack is provisioned and verified.
 
@@ -189,7 +189,8 @@ If any approaches limit, fix that day. Don't wait.
 **MCP server can't be reached**
 - MCP runs as separate process or endpoint (`/mcp`)
 - Check Fly machine has port exposed if using stdio over HTTP
-- Verify Claude Desktop config points to deployed URL
+- Verify Claude Desktop config points to the deployed URL and sends an `Authorization` header with a valid WorkWell JWT
+- If the machine is scaling to zero, keep `min_machines_running = 1` so the SSE transport stays available for remote clients
 
 ## Domain (optional)
 

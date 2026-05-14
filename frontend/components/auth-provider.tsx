@@ -35,19 +35,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [token, setToken] = useState<string | null>(() => readStorage<string>(TOKEN_KEY));
   const [user, setUser] = useState<AuthUser | null>(() => readStorage<AuthUser>(USER_KEY));
-  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
     if (pathname?.startsWith("/login")) return;
     if (!token) {
       router.replace("/login");
     }
-  }, [hydrated, pathname, router, token]);
+  }, [pathname, router, token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
