@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-05-13 — Fly MCP stability and remote auth
+
+**Goal:** Stabilize the deployed backend for remote MCP clients and document the required Claude Desktop configuration.
+
+**Fly config change:**
+- `backend/fly.toml` now keeps `min_machines_running = 1` so the backend stays warm for long-lived MCP SSE connections instead of scaling to zero and dropping the transport.
+
+**MCP auth note:**
+- Verified the remote SSE endpoint returns `200` with a valid `ROLE_ADMIN` JWT from `/api/auth/login`.
+- `mcp-remote` works with `--header Authorization:${AUTH_HEADER}` and `--transport sse-only` for this backend.
+
+**Docs updated:**
+- `docs/MCP.md` now includes the exact Claude Desktop / `mcp-remote` config with bearer auth.
+- `docs/DEPLOY.md` now calls out the warm-machine requirement and the authenticated MCP connection requirement.
+
 ## 2026-05-10 — README_09 MCP v2 Safe Agent Tools (branch: hardening/readme-08-testing-docs)
 
 **Goal:** Extend MCP with authenticated, audited agent tools for employee compliance inspection, non-compliant case listing, and deterministic rule explanation — without AI, without bypassing security, without creating official records in preview mode.

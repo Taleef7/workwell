@@ -18,6 +18,36 @@ MCP security is enforced at two layers:
 - The audit actor comes from the authenticated security context, not a hardcoded transport identity.
 - Denied tool calls return a structured `ACCESS_DENIED` safe error and are audited with `success=false`.
 
+## Claude Desktop / `mcp-remote`
+
+`mcp-remote` supports custom headers, and WorkWell's remote MCP transport expects an authenticated bearer token.
+Use a JWT minted from `/api/auth/login` for a `ROLE_ADMIN` or `ROLE_CASE_MANAGER` account.
+
+```jsonc
+{
+  "mcpServers": {
+    "workwell": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://workwell-measure-studio-api.fly.dev/sse",
+        "--transport",
+        "sse-only",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <JWT from /api/auth/login>"
+      }
+    }
+  }
+}
+```
+
+Use `Authorization:${AUTH_HEADER}` rather than `Authorization: Bearer ...` directly in `args` on Windows, because Claude Desktop / `npx` can mangle spaces in the command line.
+If the token expires, mint a fresh JWT and update the environment value.
+
 ## Tool posture
 
 - MCP tools are read-only.
