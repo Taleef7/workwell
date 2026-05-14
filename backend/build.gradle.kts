@@ -56,6 +56,9 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// CI gets two forks so long-running Spring/Testcontainers classes can overlap
+	// without turning the runner into a noisy stampede.
+	maxParallelForks = if (System.getenv("CI") == "true") 2 else 1
 	// Keep binary in-progress results outside the OneDrive tree so sync cannot
 	// race against Gradle's rename of these short-lived files (NoSuchFileException).
 	binaryResultsDirectory.set(
