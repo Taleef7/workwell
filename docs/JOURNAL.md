@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.5 login branding and demo fill
+
+**Goal:** Make the login page look intentional and give reviewers a one-click path into the shared demo account.
+
+**Frontend branding:**
+- Reworked the login page into a branded split-panel auth screen with a WW monogram, product name, and tagline.
+- Added a visible demo credential hint for `cm@workwell.dev / Workwell123!`.
+- Added a `Use demo credentials` button that fills the login form without needing the demo mode flag.
+- Kept the existing login flow intact so sign-in still posts to the same auth endpoint.
+
+**Verification:**
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- `Select-String` confirmed the brand copy and the demo credential fill handler in `frontend/app/login/page.tsx`.
+
 ## 2026-05-14 — Sprint 0 Issue 0.4 admin visibility gate
 
 **Goal:** Hide the Admin entry from non-admin users and replace the broken admin skeleton/error state with a calm access-denied screen.
