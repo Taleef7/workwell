@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.8 run history pagination and timestamp compaction
+
+**Goal:** Keep the run history view readable by limiting the initial fetch, adding a progressive load-more control, and shrinking timestamp/ID copy.
+
+**Frontend run history update:**
+- Added `limit=20` to the initial runs fetch and a `Load more runs` control that increases the limit in 20-row increments.
+- Preserved the selected run when more rows are fetched so the detail pane stays stable.
+- Switched the runs table to fixed layout, added a `Started` column with relative timestamps, and shortened run IDs with hover titles for the full ID.
+- Added compact absolute timestamp helpers for hover text and detail-view timestamp formatting.
+
+**Verification:**
+- `git diff --check`
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- Playwright browser harness on `http://localhost:3004/runs` with mocked API/session: initial 20 rows, `Load more runs` fetched 40 rows, requests observed `limit=20` then `limit=40`
+- Playwright browser harness verified the first run timestamp rendered as `2h ago` with the full timestamp in the hover title and stable header widths at 1280px
+
 ## 2026-05-14 — Sprint 0 Issue 0.7 login console errors eliminated
 
 **Goal:** Stop the login entry path from triggering protected dashboard fetches so reviewers see zero console errors before they sign in.
