@@ -191,11 +191,13 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 ### Current behavior
 The outreach action (`POST /api/cases/{id}/actions/outreach`) creates a `case_actions` row and writes an audit event but never sends an email. The `simulated` mode means the email is only logged to the backend console with `log.info("SIMULATED EMAIL TO {}: {}", recipient, subject)`. During a demo where you want to show "an email was sent," this requires digging through backend logs — which are not visible to a demo audience.
 
+> **⚠️ Constraint note:** CLAUDE.md hard rule: "Simulated email — no real delivery." Wiring real outbound delivery (SendGrid/Mailtrap) violates the demo stack constraints and adds external-provider operational overhead. **The correct demo approach is:** keep `provider=simulated` but write every simulated send to the `outreach_delivery_log` table and surface it in the Admin UI, so the demo audience can see a visible delivery history without any actual email being sent. SendGrid integration is documented below for post-demo use only — do not configure `SENDGRID_API_KEY` on the demo stack.
+
 ### Desired behavior
-- **Development/demo mode:** Outreach emails are delivered to a real inbox using Mailhog (local) or Mailtrap (hosted) — these accept any email address for testing without real delivery.
-- **Production mode:** Outreach emails are delivered via SendGrid, enabled only when `SENDGRID_API_KEY` is set.
+- **Demo mode (implement now):** `WORKWELL_EMAIL_PROVIDER=simulated` (default). Every outreach action creates an `outreach_delivery_log` row with `status=SIMULATED`. The Admin page shows this log with recipient, subject, sent time — visible to a demo audience without sending any real email.
+- **Production mode (post-demo only):** When `SENDGRID_API_KEY` is set and `WORKWELL_EMAIL_PROVIDER=sendgrid`, outreach emails are delivered via SendGrid.
 - The Admin panel shows the outreach delivery log — last N emails sent with recipient, subject, sent time, and delivery status.
-- The outreach send flow updates `case_actions.payload_json` with `{"emailId": "...", "deliveryProvider": "sendgrid|mailtrap|simulated"}`.
+- The outreach send flow updates `case_actions.payload_json` with `{"emailId": "...", "deliveryProvider": "sendgrid|simulated"}`.
 - The case detail timeline shows "Email sent to [recipient] via [provider]" for outreach actions.
 
 ### Root cause
@@ -676,26 +678,27 @@ public class DemoResetService {
 
     private final JdbcClient jdbc;
 
-    private static final List<String> VOLATILE_TABLES = List.of(
-        "outreach_delivery_log",
-        "audit_events",
-        "case_actions",
-        "cases",
-        "outcomes",
-        "run_logs",
-        "runs"
-    );
-
     public DemoResetService(JdbcClient jdbc) {
         this.jdbc = jdbc;
     }
 
     @Transactional
     public void reset() {
-        // Truncate in dependency order (FK constraints)
-        for (String table : VOLATILE_TABLES) {
-            jdbc.sql("TRUNCATE TABLE " + table + " CASCADE").update();
-        }
+        // Truncate tables in FK dependency order using RESTRICT (not CASCADE).
+        // Using CASCADE would silently widen the truncate if new FKs referencing these
+        // tables are added later — potentially clearing preserved tables like employees
+        // or measures. Explicit ordering with RESTRICT makes any new FK a deliberate decision.
+        //
+        // Tables preserved: employees, measures, measure_versions, value_sets,
+        //                   osha_references, measure_value_set_links, integration_health.
+        jdbc.sql("TRUNCATE TABLE outreach_delivery_log RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE audit_events RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE case_actions RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE cases RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE outcomes RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE run_logs RESTRICT").update();
+        jdbc.sql("TRUNCATE TABLE runs RESTRICT").update();
+
         // Reset integration health to initial state
         jdbc.sql("""
             UPDATE integration_health

@@ -243,7 +243,7 @@ void manualRunReturnsImmediatelyWithRequestedStatus() throws Exception {
     mockMvc.perform(post("/api/runs/manual")
             .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_CASE_MANAGER")))
             .contentType(MediaType.APPLICATION_JSON)
-            .content("""{"scopeType":"ALL_PROGRAMS"}"""))
+            .content("{\"scopeType\":\"ALL_PROGRAMS\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.status").value("REQUESTED"))
         .andExpect(jsonPath("$.runId").isNotEmpty());
