@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.2 programs overview redirect
+
+**Goal:** Prevent `/programs/overview` from being handled as a measure detail route and hanging on invalid API requests.
+
+**Frontend routing fix:**
+- Added a Next.js request-level redirect from `/programs/overview` to `/programs`.
+- Left UUID-based program detail routing unchanged so valid measure detail links continue to resolve through `/programs/[measureId]`.
+- Confirmed the frontend source does not generate a browser link to `/programs/overview`; existing `/api/programs/overview` calls are backend API calls from the real programs overview page.
+
+**Verification:**
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- Local production server check: `GET /programs/overview` returned `307` with `Location=/programs`.
+
 ## 2026-05-14 — Sprint 0 Issue 0.1 sidebar branding
 
 **Goal:** Remove visible scaffold branding from the dashboard shell before demo review.
