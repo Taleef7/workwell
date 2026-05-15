@@ -21,12 +21,12 @@
 - Avoid new dependencies unless they are explicitly approved and documented
 - One Spring Boot app, modular packages — no microservices
 - Spring Application Events + DB audit log — no Kafka or external streaming
-- Stubbed auth — no production-grade auth in the demo stack
-- Simulated email — no real delivery
+- Auth: user accounts remain hardcoded (no SSO, no real user directory). JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and implemented in Sprint 4 — this replaces the prior "stub auth only" constraint.
+- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stack. SendGrid wiring exists in the code (Sprint 6) but must not be activated unless `SENDGRID_API_KEY` is explicitly set in a non-demo environment.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
 - Every state change writes `audit_event` — no exceptions
 - No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
-- Keep UI changes surgical; only bug fixes or explicitly requested polish
+- Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 
 ## Branch + ownership
 - Backend agent owns `backend/` only
@@ -79,14 +79,25 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-05-08)
+## Current Focus (as of 2026-05-15)
 
-**Post-merge closeout and showcase polish.**
+**Sprint-based feature implementation — working through `docs/sprints/` sequentially.**
 
-The feature set is shipped and merged. The current posture is:
-- Keep docs current when behavior changes
-- Fix any post-merge regressions quickly and surgically
-- Preserve the audit trail and deterministic CQL behavior
-- Avoid scope expansion unless you explicitly ask for it
-- Treat `docs/archive/SPIKE_PLAN.md` as historical context, not an active build plan
+The sprint files in `docs/sprints/` are the active source of truth. Read `docs/sprints/README.md` for ordering. The critical path is:
+
+```
+Sprint 0 (bugs) → Sprint 2 (data) → Sprint 1 (pipeline) → Sprint 3 (employee/SLA)
+                                                         → Sprint 4 (security)
+                                                         → Sprint 5 (tests/CI)
+                                  → Sprint 6 (admin)
+Sprint 7 (overdelivery) — begins after Sprint 3
+```
+
+Current posture:
+- One sprint at a time, one issue at a time within each sprint
+- Every issue has an acceptance criteria checklist — do not mark done until all boxes pass
+- Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
+- Backend agent owns `backend/`; frontend agent owns `frontend/`; never cross boundaries in one PR
+- After each sprint, update `docs/JOURNAL.md` with what shipped
+- Treat `docs/archive/SPIKE_PLAN.md` as historical context only
 
