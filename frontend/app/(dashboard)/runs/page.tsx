@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import {
   MEASURE_STATUS_LABELS,
@@ -93,12 +93,50 @@ type RunInsightResponse = {
   insights: string[];
 };
 
+const RUN_PAGE_SIZE = 20;
+
+function formatAbsoluteTimestamp(dateString: string | null): string {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
+}
+
+function formatRelativeTimestamp(dateString: string | null): string {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const diffMs = Date.now() - date.getTime();
+  const absMinutes = Math.floor(Math.abs(diffMs) / 60_000);
+  if (absMinutes < 1) return "just now";
+
+  if (absMinutes < 60) {
+    const suffix = diffMs >= 0 ? "ago" : "from now";
+    return `${absMinutes}m ${suffix}`;
+  }
+
+  const absHours = Math.floor(absMinutes / 60);
+  if (absHours < 24) {
+    const suffix = diffMs >= 0 ? "ago" : "from now";
+    return `${absHours}h ${suffix}`;
+  }
+
+  const absDays = Math.floor(absHours / 24);
+  if (absDays < 7) {
+    const suffix = diffMs >= 0 ? "ago" : "from now";
+    return `${absDays}d ${suffix}`;
+  }
+
+  return date.toLocaleDateString();
+}
+
 export default function RunsPage() {
   const api = useApi();
 
   const [statusFilter, setStatusFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
   const [triggerFilter, setTriggerFilter] = useState("");
+  const [limit, setLimit] = useState(RUN_PAGE_SIZE);
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
@@ -115,6 +153,11 @@ export default function RunsPage() {
   const [insightDismissed, setInsightDismissed] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
   const rerunSupported = selectedRun ? ["ALL_PROGRAMS", "MEASURE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType)) : false;
+  const selectedRunIdRef = useRef<string | null>(selectedRunId);
+
+  useEffect(() => {
+    selectedRunIdRef.current = selectedRunId;
+  }, [selectedRunId]);
 
   const loadMeasures = useCallback(async () => {
     try {
@@ -131,7 +174,7 @@ export default function RunsPage() {
     setError(null);
     try {
       const query = new URLSearchParams();
-      query.set("limit", "100");
+      query.set("limit", String(limit));
       if (statusFilter) query.set("status", statusFilter);
       if (scopeFilter) query.set("scopeType", scopeFilter);
       if (triggerFilter) query.set("triggerType", triggerFilter);
@@ -140,15 +183,20 @@ export default function RunsPage() {
       if (to) query.set("to", to);
       const data = await api.get<RunListItem[]>(`/api/runs?${query.toString()}`);
       setRuns(data);
-      if (!selectedRunId && data.length) {
-        setSelectedRunId(data[0].runId);
+      const currentSelectedRunId = selectedRunIdRef.current;
+      const nextSelectedRunId =
+        currentSelectedRunId && data.some((run) => run.runId === currentSelectedRunId)
+          ? currentSelectedRunId
+          : data[0]?.runId ?? null;
+      if (nextSelectedRunId !== currentSelectedRunId) {
+        setSelectedRunId(nextSelectedRunId);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [api, selectedRunId, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+  }, [api, limit, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
@@ -390,13 +438,21 @@ export default function RunsPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-[40%]" />
+              <col className="w-[14%]" />
+              <col className="w-[16%]" />
+              <col className="w-[10%]" />
+              <col className="w-[20%]" />
+            </colgroup>
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
                 <th className="px-3 py-2">Run</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Scope</th>
                 <th className="px-3 py-2">Duration</th>
+                <th className="px-3 py-2">Started</th>
               </tr>
             </thead>
             <tbody>
@@ -406,18 +462,33 @@ export default function RunsPage() {
                   className={`cursor-pointer border-t border-slate-200 ${selectedRunId === run.runId ? "bg-slate-100" : "hover:bg-slate-50"}`}
                   onClick={() => setSelectedRunId(run.runId)}
                 >
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 align-top">
                     <p className="font-medium text-slate-800">{run.measureName}</p>
-                    <p className="text-xs text-slate-500">{run.runId}</p>
-                    <p className="text-xs text-slate-500">{run.startedAt ? new Date(run.startedAt).toLocaleString() : "-"}</p>
+                    <p className="text-xs text-slate-500" title={run.runId}>
+                      {run.runId.slice(0, 8)}...
+                    </p>
                   </td>
-                  <td className="px-3 py-2">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
-                  <td className="px-3 py-2">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
-                  <td className="px-3 py-2">{Math.round(run.durationMs / 1000)}s</td>
+                  <td className="px-3 py-2 align-top">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
+                  <td className="px-3 py-2 align-top">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
+                  <td className="px-3 py-2 align-top">{Math.round(run.durationMs / 1000)}s</td>
+                  <td className="px-3 py-2 align-top text-slate-600" title={formatAbsoluteTimestamp(run.startedAt)}>
+                    {formatRelativeTimestamp(run.startedAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {runs.length >= limit ? (
+            <div className="border-t border-slate-200 px-3 py-3">
+              <button
+                className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+                onClick={() => setLimit((current) => current + RUN_PAGE_SIZE)}
+                disabled={loading}
+              >
+                Load more runs
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
