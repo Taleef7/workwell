@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.4 admin visibility gate
+
+**Goal:** Hide the Admin entry from non-admin users and replace the broken admin skeleton/error state with a calm access-denied screen.
+
+**Frontend auth/UI gate:**
+- Conditioned the dashboard nav so the Admin link only renders for `ROLE_ADMIN`.
+- Added a clean `Admin access required` empty state for non-admin users on `/admin`.
+- Guarded admin page data-loading callbacks so non-admin visits do not trigger the error banner or fetch the admin data panels.
+
+**Verification:**
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- `Select-String` confirmed the Admin nav gate in `layout.tsx` and the access-denied gate in `admin/page.tsx`.
+
 ## 2026-05-14 — Sprint 0 Issue 0.3 global search hidden
 
 **Goal:** Remove the non-functional global search bar from the dashboard header so the UI no longer advertises a broken interaction.
