@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatStatusLabel } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { ImpactPreviewResponse } from "../types";
 
@@ -71,7 +72,7 @@ export function ImpactPreviewPanel({ measureId, api }: Props) {
                 className={`rounded border px-3 py-2 text-center ${OUTCOME_CARD_CLASS[status] ?? "border-slate-200 bg-slate-50 text-slate-700"}`}
               >
                 <p className="text-lg font-bold">{count}</p>
-                <p className="text-[11px] font-medium">{OUTCOME_LABELS[status] ?? status}</p>
+                <p className="text-[11px] font-medium">{OUTCOME_LABELS[status] ?? formatStatusLabel(status)}</p>
               </div>
             ))}
           </div>

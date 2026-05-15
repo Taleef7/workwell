@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { ResolveCheckResponse } from "../types";
 
@@ -10,7 +11,7 @@ type Props = {
 };
 
 function resolutionStatusClass(status: string) {
-  const s = (status ?? "").toUpperCase();
+  const s = normalizeEnumValue(status ?? "");
   if (s === "RESOLVED") return "bg-emerald-100 text-emerald-800";
   if (s === "STALE") return "bg-amber-100 text-amber-800";
   if (s === "UNRESOLVED" || s === "EMPTY" || s === "ERROR") return "bg-red-100 text-red-800";
@@ -64,7 +65,7 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
         <>
           <div className="mt-2 flex items-center gap-2">
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${data.allResolved ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
-              {data.allResolved ? "ALL RESOLVED" : "BLOCKERS FOUND"}
+              {data.allResolved ? "All Resolved" : "Blockers Found"}
             </span>
             <span className="text-xs text-slate-600">{data.valueSets.length} value set(s) checked</span>
           </div>
@@ -109,7 +110,7 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
                       <td className="px-2 py-1 text-slate-600">{vs.version ?? "—"}</td>
                       <td className="px-2 py-1">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${resolutionStatusClass(vs.resolutionStatus)}`}>
-                          {vs.resolutionStatus}
+                          {formatStatusLabel(vs.resolutionStatus)}
                         </span>
                       </td>
                       <td className="px-2 py-1 text-slate-600">{vs.codeCount}</td>

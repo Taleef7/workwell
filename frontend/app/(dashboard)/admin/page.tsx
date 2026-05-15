@@ -5,6 +5,7 @@ import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 
 type IntegrationHealth = {
   integration: string;
@@ -162,7 +163,7 @@ export default function AdminPage() {
     if (!isAdmin) return;
     try {
       const data = await api.get<MeasureOption[]>("/api/measures");
-      setMeasures(data.filter((item) => item.status === "Active"));
+      setMeasures(data.filter((item) => normalizeEnumValue(item.status) === "ACTIVE"));
     } catch {
       setMeasures([]);
     }
@@ -343,7 +344,7 @@ export default function AdminPage() {
             Next fire: {scheduler?.nextFireAt ? new Date(scheduler.nextFireAt).toLocaleString() : "-"}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Last scheduled run: {scheduler?.lastRunAt ? new Date(scheduler.lastRunAt).toLocaleString() : "Never"} ({scheduler?.lastRunStatus ?? "never"})
+            Last scheduled run: {scheduler?.lastRunAt ? new Date(scheduler.lastRunAt).toLocaleString() : "Never"} ({formatStatusLabel(scheduler?.lastRunStatus ?? "never")})
           </p>
           <div className="mt-4 flex gap-2">
             <button
@@ -372,7 +373,7 @@ export default function AdminPage() {
               <div key={item.integration} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.displayName}</p>
                 <p className="mt-2">
-                  <span className={statusBadgeClass(item.status)}>{item.status}</span>
+                  <span className={statusBadgeClass(item.status)}>{formatStatusLabel(item.status)}</span>
                 </p>
                 <p className="mt-2 text-xs text-slate-500">
                   Last sync: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "Never"}
@@ -441,7 +442,7 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(m.mappingStatus)}`}>
-                      {m.mappingStatus}
+                      {formatStatusLabel(m.mappingStatus)}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-500">
@@ -512,7 +513,7 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(m.mappingStatus)}`}>
-                      {m.mappingStatus}
+                      {formatStatusLabel(m.mappingStatus)}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-600">

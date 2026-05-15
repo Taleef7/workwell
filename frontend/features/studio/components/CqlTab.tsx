@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import type { Monaco, OnChange, OnMount } from "@monaco-editor/react";
 import { emitToast } from "@/lib/toast";
+import { formatStatusLabel } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail } from "../types";
 import { compileStatusClass, formatIssue, parseCompileIssue } from "../utils";
@@ -141,10 +142,10 @@ export function CqlTab({
           Compile
         </button>
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(measure.compileStatus ?? "")}`}>
-          {measure.compileStatus ?? "UNKNOWN"}
+          {formatStatusLabel(measure.compileStatus ?? "UNKNOWN")}
         </span>
       </div>
-      {measure.compileStatus === "WARNINGS" ? (
+      {(measure.compileStatus ?? "").toUpperCase() === "WARNINGS" ? (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
           Compile completed with warnings. Activation is allowed, but review warnings before moving to Active.
         </p>
