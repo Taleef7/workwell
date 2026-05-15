@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 
 type ProgramSummary = {
   measureId: string;
@@ -176,11 +177,11 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge label={`COMPLIANT ${program.compliant}`} tone="green" />
-                <Badge label={`DUE_SOON ${program.dueSoon}`} tone="amber" />
-                <Badge label={`OVERDUE ${program.overdue}`} tone="red" />
-                <Badge label={`MISSING_DATA ${program.missingData}`} tone="violet" />
-                <Badge label={`EXCLUDED ${program.excluded}`} tone="slate" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${program.compliant}`} tone="green" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${program.dueSoon}`} tone="amber" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${program.overdue}`} tone="red" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${program.missingData}`} tone="violet" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${program.excluded}`} tone="slate" />
               </div>
 
               <div className="mt-4">
@@ -195,7 +196,7 @@ export default function ProgramsPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-slate-800">Top Roles</p>
-                  {drivers.byRole.length === 0 ? <p>-</p> : drivers.byRole.map((r) => <p key={r.role}>{r.role}: {r.overdueCount}</p>)}
+                  {drivers.byRole.length === 0 ? <p>-</p> : drivers.byRole.map((r) => <p key={r.role}>{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
                 </div>
               </div>
 

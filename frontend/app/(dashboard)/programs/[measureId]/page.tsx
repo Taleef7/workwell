@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
+import { ROLE_LABELS, labelFor } from "@/lib/status";
 
 type ProgramSummary = {
   measureId: string;
@@ -104,7 +105,7 @@ export default function ProgramDetailPage() {
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-900">Top roles</p>
-              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-slate-500">-</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{r.role}: {r.overdueCount}</p>)}
+              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-slate-500">-</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-900">Reason mix</p>

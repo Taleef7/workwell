@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { emitToast } from "@/lib/toast";
+import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ValueSetRef } from "../types";
 import { valueSetBadgeClass } from "../utils";
@@ -76,9 +77,9 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
                 <p className="font-medium text-slate-800">{vs.name}</p>
                 <p className="text-xs text-slate-600">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
-                  {vs.resolvabilityLabel}
+                  {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
-                {vs.resolvabilityStatus === "UNRESOLVED" ? <p className="mt-1 text-xs text-amber-700">{vs.resolvabilityNote}</p> : null}
+                {normalizeEnumValue(vs.resolvabilityStatus) === "UNRESOLVED" ? <p className="mt-1 text-xs text-amber-700">{vs.resolvabilityNote}</p> : null}
               </div>
               <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={() => detach(vs.id)}>Remove</button>
             </li>
@@ -105,7 +106,7 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
                 <p className="font-medium text-slate-800">{vs.name}</p>
                 <p className="text-xs text-slate-600">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
-                  {vs.resolvabilityLabel}
+                  {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
               </div>
               <button className="rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white" onClick={() => attach(vs.id)}>Attach</button>

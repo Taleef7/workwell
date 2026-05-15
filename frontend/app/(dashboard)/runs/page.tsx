@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
-import { outcomeStatusClass } from "@/lib/status";
+import {
+  MEASURE_STATUS_LABELS,
+  OUTCOME_LABELS,
+  RUN_STATUS_LABELS,
+  SCOPE_LABELS,
+  ROLE_LABELS,
+  TRIGGER_LABELS,
+  formatStatusLabel,
+  labelFor,
+  normalizeEnumValue,
+  outcomeStatusClass
+} from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 
@@ -103,7 +114,7 @@ export default function RunsPage() {
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
-  const rerunSupported = selectedRun ? ["all_programs", "measure", "case"].includes(selectedRun.scopeType) : false;
+  const rerunSupported = selectedRun ? ["ALL_PROGRAMS", "MEASURE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType)) : false;
 
   const loadMeasures = useCallback(async () => {
     try {
@@ -289,21 +300,21 @@ export default function RunsPage() {
       <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="">All Statuses</option>
-          <option value="completed">completed</option>
-          <option value="running">running</option>
-          <option value="failed">failed</option>
-          <option value="partial">partial</option>
+          <option value="completed">{labelFor(RUN_STATUS_LABELS, "COMPLETED")}</option>
+          <option value="running">{labelFor(RUN_STATUS_LABELS, "RUNNING")}</option>
+          <option value="failed">{labelFor(RUN_STATUS_LABELS, "FAILED")}</option>
+          <option value="partial">{labelFor(RUN_STATUS_LABELS, "PARTIAL")}</option>
         </select>
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
           <option value="">All Scope Types</option>
-          <option value="all_programs">all_programs</option>
-          <option value="measure">measure</option>
-          <option value="case">case</option>
+          <option value="all_programs">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
+          <option value="measure">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
+          <option value="case">{labelFor(SCOPE_LABELS, "CASE")}</option>
         </select>
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
           <option value="">All Trigger Types</option>
-          <option value="manual">manual</option>
-          <option value="scheduler">scheduler</option>
+          <option value="manual">{labelFor(TRIGGER_LABELS, "MANUAL")}</option>
+          <option value="scheduler">{labelFor(TRIGGER_LABELS, "SCHEDULER")}</option>
         </select>
         <button className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700" onClick={() => void loadRuns()}>
           Refresh
@@ -319,9 +330,9 @@ export default function RunsPage() {
               value={runScopeType}
               onChange={(e) => setRunScopeType(e.target.value as "ALL_PROGRAMS" | "MEASURE" | "CASE")}
             >
-              <option value="ALL_PROGRAMS">ALL_PROGRAMS</option>
-              <option value="MEASURE">MEASURE</option>
-              <option value="CASE">CASE</option>
+              <option value="ALL_PROGRAMS">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
+              <option value="MEASURE">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
+              <option value="CASE">{labelFor(SCOPE_LABELS, "CASE")}</option>
             </select>
           </div>
           <div>
@@ -335,7 +346,7 @@ export default function RunsPage() {
               <option value="">Select a measure</option>
               {measures.map((measure) => (
                 <option key={measure.id} value={measure.id}>
-                  {measure.name} v{measure.version} ({measure.status})
+                  {measure.name} v{measure.version} ({labelFor(MEASURE_STATUS_LABELS, measure.status)})
                 </option>
               ))}
             </select>
@@ -400,8 +411,8 @@ export default function RunsPage() {
                     <p className="text-xs text-slate-500">{run.runId}</p>
                     <p className="text-xs text-slate-500">{run.startedAt ? new Date(run.startedAt).toLocaleString() : "-"}</p>
                   </td>
-                  <td className="px-3 py-2">{run.status}</td>
-                  <td className="px-3 py-2">{run.scopeType}</td>
+                  <td className="px-3 py-2">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
+                  <td className="px-3 py-2">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
                   <td className="px-3 py-2">{Math.round(run.durationMs / 1000)}s</td>
                 </tr>
               ))}
@@ -429,9 +440,9 @@ export default function RunsPage() {
           {selectedRun ? (
             <>
               <p className="text-sm text-slate-700">
-                {selectedRun.measureName} ({selectedRun.scopeType}) - {selectedRun.status}
+                {selectedRun.measureName} ({labelFor(SCOPE_LABELS, selectedRun.scopeType)}) - {labelFor(RUN_STATUS_LABELS, selectedRun.status)}
               </p>
-              <p className="text-xs text-slate-600">Trigger: {selectedRun.triggerType}</p>
+              <p className="text-xs text-slate-600">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
               <p className="text-xs text-slate-600">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-slate-600">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-slate-600">Duration: {Math.round(selectedRun.durationMs / 1000)}s</p>
@@ -449,7 +460,7 @@ export default function RunsPage() {
                 <ul className="text-xs text-slate-600">
                   {selectedRun.outcomeCounts.map((item) => (
                     <li key={item.status}>
-                      {item.status}: {item.count}
+                      {labelFor(OUTCOME_LABELS, item.status)}: {item.count}
                     </li>
                   ))}
                 </ul>
@@ -475,7 +486,7 @@ export default function RunsPage() {
           <ul className="space-y-1 text-xs">
             {runLogs.map((entry, idx) => (
               <li key={`${entry.timestamp}-${idx}`} className="rounded border border-slate-200 px-2 py-1">
-                <span className="font-semibold text-slate-700">{entry.level}</span>{" "}
+                <span className="font-semibold text-slate-700">{formatStatusLabel(entry.level)}</span>{" "}
                 <span className="text-slate-500">{new Date(entry.timestamp).toLocaleString()}</span>{" "}
                 <span className="text-slate-700">{entry.message}</span>
               </li>
@@ -509,15 +520,15 @@ export default function RunsPage() {
                       <p className="font-medium text-slate-800">{row.employeeName}</p>
                       <p className="text-slate-500">{row.employeeExternalId}</p>
                     </td>
-                    <td className="px-2 py-2">{row.role}</td>
+                    <td className="px-2 py-2">{labelFor(ROLE_LABELS, row.role)}</td>
                     <td className="px-2 py-2">{row.site}</td>
                     <td className="px-2 py-2">
                       <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${outcomeStatusClass(row.outcomeStatus)}`}>
-                        {row.outcomeStatus}
+                        {labelFor(OUTCOME_LABELS, row.outcomeStatus)}
                       </span>
                     </td>
                     <td className="px-2 py-2">{row.daysSinceExam ?? "-"}</td>
-                    <td className="px-2 py-2">{row.waiverStatus ?? "-"}</td>
+                    <td className="px-2 py-2">{formatStatusLabel(row.waiverStatus)}</td>
                     <td className="px-2 py-2">
                       {row.caseId ? (
                         <a className="text-blue-700 underline" href={`/cases/${row.caseId}`}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OUTCOME_LABELS, labelFor } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
 import type { TestFixture } from "../types";
@@ -72,11 +73,11 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
           <select className="rounded border border-slate-300 px-3 py-2 text-sm" value={fixture.expectedOutcome} onChange={(e) => update(index, "expectedOutcome", e.target.value)}>
-            <option value="COMPLIANT">COMPLIANT</option>
-            <option value="DUE_SOON">DUE_SOON</option>
-            <option value="OVERDUE">OVERDUE</option>
-            <option value="MISSING_DATA">MISSING_DATA</option>
-            <option value="EXCLUDED">EXCLUDED</option>
+            <option value="COMPLIANT">{labelFor(OUTCOME_LABELS, "COMPLIANT")}</option>
+            <option value="DUE_SOON">{labelFor(OUTCOME_LABELS, "DUE_SOON")}</option>
+            <option value="OVERDUE">{labelFor(OUTCOME_LABELS, "OVERDUE")}</option>
+            <option value="MISSING_DATA">{labelFor(OUTCOME_LABELS, "MISSING_DATA")}</option>
+            <option value="EXCLUDED">{labelFor(OUTCOME_LABELS, "EXCLUDED")}</option>
           </select>
           <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Notes" value={fixture.notes} onChange={(e) => update(index, "notes", e.target.value)} />
         </div>

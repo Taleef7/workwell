@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 import { useParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
-import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
+import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, formatStatusLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
 
 type AuditEvent = {
@@ -129,6 +129,7 @@ export default function CaseDetailPage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   const loadCase = useCallback(async () => {
     try {
@@ -411,10 +412,10 @@ export default function CaseDetailPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(caseDetail.status)}`}>
-                    {caseDetail.status}
+                    {labelFor(CASE_STATUS_LABELS, caseDetail.status)}
                   </span>
                   <span className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {caseDetail.priority}
+                    {labelFor(PRIORITY_LABELS, caseDetail.priority)}
                   </span>
                 </div>
               </div>
@@ -424,7 +425,7 @@ export default function CaseDetailPage() {
                   label="Outcome"
                   value={
                     <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(caseDetail.currentOutcomeStatus)}`}>
-                      {caseDetail.currentOutcomeStatus}
+                      {labelFor(OUTCOME_LABELS, caseDetail.currentOutcomeStatus)}
                     </span>
                   }
                 />
@@ -439,10 +440,10 @@ export default function CaseDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-xs text-amber-800">
                   <span>Outreach delivery:</span>
                   <span className={deliveryBadgeClass(caseDetail.latestOutreachDeliveryStatus)}>
-                    {caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT"}
+                    {formatStatusLabel(caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT")}
                   </span>
                 </div>
-                {caseDetail.status === "EXCLUDED" ? (
+                {caseStatus === "EXCLUDED" ? (
                   <div className={`mt-4 rounded-2xl border p-4 ${caseDetail.waiverExpired ? "border-rose-200 bg-rose-50" : "border-indigo-200 bg-indigo-50"}`}>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700">Waiver status</p>
                     <p className="mt-2 text-sm font-semibold text-slate-900">
@@ -496,7 +497,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => void previewOutreach()}
-                    disabled={previewing || caseDetail.status === "EXCLUDED"}
+                    disabled={previewing || caseStatus === "EXCLUDED"}
                     className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {previewing ? "Previewing..." : "Preview outreach"}
@@ -504,7 +505,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseDetail.status === "CLOSED" || caseDetail.status === "EXCLUDED" || outreachPreview === null}
+                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
@@ -520,7 +521,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => void runAction("rerun")}
-                    disabled={acting !== null || caseDetail.status === "CLOSED"}
+                    disabled={acting !== null || caseStatus === "CLOSED"}
                     className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
@@ -528,7 +529,7 @@ export default function CaseDetailPage() {
                   <button
                     type="button"
                     onClick={() => setResolveModalOpen(true)}
-                    disabled={caseDetail.status === "CLOSED" || caseDetail.status === "RESOLVED"}
+                    disabled={caseStatus === "CLOSED" || caseStatus === "RESOLVED"}
                     className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Mark Resolved
@@ -912,13 +913,14 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function deliveryBadgeClass(status: string | null) {
-  if (status === "SENT") {
+  const normalized = normalizeEnumValue(status ?? "");
+  if (normalized === "SENT") {
     return "rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-900";
   }
-  if (status === "FAILED") {
+  if (normalized === "FAILED") {
     return "rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-semibold text-rose-900";
   }
-  if (status === "QUEUED") {
+  if (normalized === "QUEUED") {
     return "rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900";
   }
   return "rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-semibold text-slate-700";
