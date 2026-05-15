@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.6 status enum labels humanized
+
+**Goal:** Replace raw API/status enum strings with title-case labels across the visible frontend surfaces.
+
+**Frontend status cleanup:**
+- Added shared label helpers in `frontend/lib/status.ts`, including enum normalization and a reusable fallback formatter.
+- Humanized the dashboard header role badge, programs overview role breakdown, runs filters/list/detail, case list/detail badges, measure list badges, studio measure header, and the admin integration/mapping badges.
+- Updated the studio subpanels so compile status, readiness status, resolvability status, traceability severity, value-set labels, and test-fixture outcomes render as readable labels instead of all-caps enums.
+
+**Verification:**
+- `git diff --check`
+- `corepack pnpm lint`
+- `corepack pnpm build`
+
 ## 2026-05-14 — Sprint 0 Issue 0.5 login branding and demo fill
 
 **Goal:** Make the login page look intentional and give reviewers a one-click path into the shared demo account.

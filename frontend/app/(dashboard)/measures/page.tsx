@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { measureStatusClass } from "@/lib/status";
+import { MEASURE_STATUS_LABELS, labelFor, measureStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
 
 type Measure = {
@@ -164,7 +164,7 @@ export default function MeasuresPage() {
                 <td className="px-3 py-2">{item.policyRef}</td>
                 <td className="px-3 py-2">{item.version}</td>
                 <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(item.status)}`}>{item.status}</span>
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(item.status)}`}>{labelFor(MEASURE_STATUS_LABELS, item.status)}</span>
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-600">
                   {new Date(item.statusUpdatedAt).toLocaleString()} by {item.statusUpdatedBy || "-"}
