@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
@@ -18,13 +18,10 @@ const nav = [
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const { user, logout } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [search, setSearch] = useState("");
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
 
@@ -66,27 +63,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     };
   }, [api, siteId, from, to]);
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const term = search.trim();
-    if (!term) return;
-    const params = new URLSearchParams();
-    if (siteId) params.set("site", siteId);
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
-    if (pathname?.startsWith("/cases")) {
-      for (const key of ["status", "measureId", "priority", "assignee"] as const) {
-        const value = searchParams.get(key);
-        if (value) {
-          params.set(key, value);
-        }
-      }
-    }
-    params.set("search", term);
-    router.push(`/cases?${params.toString()}`);
-    setMenuOpen(false);
-  }
-
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (siteId) params.set("site", siteId);
@@ -116,45 +92,39 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               <span className="text-xs leading-tight text-slate-500">Measure Studio</span>
             </span>
           </Link>
-          <form className="ml-auto w-full max-w-md" onSubmit={submitSearch}>
-            <input
-              className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
-              placeholder="Global search by employee name or ID"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </form>
-          {user ? (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{user.email}</span>
-              <span className="rounded-full bg-emerald-100 px-2 py-1 font-medium text-emerald-800">{user.role.replace("ROLE_", "")}</span>
-              <button type="button" onClick={logout} className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-100">
-                Logout
-              </button>
-            </div>
-          ) : null}
-          <select
-            className="rounded border border-slate-300 px-2 py-2 text-xs text-slate-700"
-            value={siteId}
-            onChange={(e) => setSiteId(e.target.value)}
-          >
-            <option value="">All Sites</option>
-            {sites.map((site) => (
-              <option key={site} value={site}>
-                {site}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded border border-slate-300 px-2 py-2 text-xs text-slate-700"
-            value={datePreset}
-            onChange={(e) => setDatePreset(e.target.value as "7d" | "30d" | "90d" | "all")}
-          >
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-            <option value="90d">Last 90 Days</option>
-            <option value="all">All Time</option>
-          </select>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {user ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{user.email}</span>
+                <span className="rounded-full bg-emerald-100 px-2 py-1 font-medium text-emerald-800">{user.role.replace("ROLE_", "")}</span>
+                <button type="button" onClick={logout} className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-100">
+                  Logout
+                </button>
+              </div>
+            ) : null}
+            <select
+              className="rounded border border-slate-300 px-2 py-2 text-xs text-slate-700"
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+            >
+              <option value="">All Sites</option>
+              {sites.map((site) => (
+                <option key={site} value={site}>
+                  {site}
+                </option>
+              ))}
+            </select>
+            <select
+              className="rounded border border-slate-300 px-2 py-2 text-xs text-slate-700"
+              value={datePreset}
+              onChange={(e) => setDatePreset(e.target.value as "7d" | "30d" | "90d" | "all")}
+            >
+              <option value="7d">Last 7 Days</option>
+              <option value="30d">Last 30 Days</option>
+              <option value="90d">Last 90 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
         </div>
       </header>
 
