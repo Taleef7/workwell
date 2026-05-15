@@ -107,10 +107,15 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           >
             ☰
           </button>
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold">WorkWell Studio</h1>
-            <p className="text-xs text-slate-500">MVP Dashboard Shell</p>
-          </div>
+          <Link href="/programs" className="flex shrink-0 items-center gap-2 rounded-md pr-2 focus:outline-none focus:ring-2 focus:ring-slate-400">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
+              WW
+            </span>
+            <span className="flex flex-col">
+              <span className="text-base font-semibold leading-tight text-slate-950">WorkWell</span>
+              <span className="text-xs leading-tight text-slate-500">Measure Studio</span>
+            </span>
+          </Link>
           <form className="ml-auto w-full max-w-md" onSubmit={submitSearch}>
             <input
               className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
