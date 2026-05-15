@@ -11,6 +11,11 @@ type AuthUser = {
   role: string;
 };
 
+type StoredSession = {
+  token: string | null;
+  user: AuthUser | null;
+};
+
 type AuthContextValue = {
   token: string | null;
   user: AuthUser | null;
@@ -30,11 +35,41 @@ function readStorage<T>(key: string): T | null {
   }
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const base64Url = parts[1];
+  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  return JSON.parse(atob(padded)) as Record<string, unknown>;
+}
+
+function readStoredSession(): StoredSession {
+  const token = readStorage<string>(TOKEN_KEY);
+  const user = readStorage<AuthUser>(USER_KEY);
+  if (!token || !user) {
+    return { token: null, user: null };
+  }
+
+  try {
+    const payload = decodeJwtPayload(token);
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp) || Date.now() >= exp * 1000) {
+      return { token: null, user: null };
+    }
+  } catch {
+    return { token: null, user: null };
+  }
+
+  return { token, user };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [token, setToken] = useState<string | null>(() => readStorage<string>(TOKEN_KEY));
-  const [user, setUser] = useState<AuthUser | null>(() => readStorage<AuthUser>(USER_KEY));
+  const [session, setSession] = useState<StoredSession>(() => readStoredSession());
+  const token = session.token;
+  const user = session.user;
 
   useEffect(() => {
     if (pathname?.startsWith("/login")) return;
@@ -43,6 +78,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, router, token]);
 
+  useEffect(() => {
+    if (token) return;
+    const storedToken = readStorage<string>(TOKEN_KEY);
+    const storedUser = readStorage<AuthUser>(USER_KEY);
+    if (!storedToken && !storedUser) return;
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }, [token]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
@@ -50,14 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login: (nextToken, email, role) => {
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
-        setToken(nextToken);
-        setUser({ email, role });
+        setSession({ token: nextToken, user: { email, role } });
       },
       logout: () => {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
-        setToken(null);
-        setUser(null);
+        setSession({ token: null, user: null });
         router.replace("/login");
       }
     }),

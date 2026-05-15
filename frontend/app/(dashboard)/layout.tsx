@@ -19,7 +19,7 @@ const nav = [
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { token, user, logout } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const isAdmin = user?.role === "ROLE_ADMIN";
@@ -29,6 +29,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const [worklistGapCount, setWorklistGapCount] = useState(0);
 
   useEffect(() => {
+    if (!token) return;
     let mounted = true;
     async function loadSites() {
       try {
@@ -42,9 +43,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api]);
+  }, [api, token]);
 
   useEffect(() => {
+    if (!token) return;
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
@@ -64,7 +66,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api, siteId, from, to]);
+  }, [api, siteId, from, to, token]);
 
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -73,6 +75,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     if (to) params.set("to", to);
     return params.toString();
   }, [siteId, from, to]);
+
+  if (!token) {
+    return <div className="min-h-screen bg-slate-50" />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
