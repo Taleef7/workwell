@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.7 login console errors eliminated
+
+**Goal:** Stop the login entry path from triggering protected dashboard fetches so reviewers see zero console errors before they sign in.
+
+**Frontend auth/session gate:**
+- Added JWT expiration validation to the auth provider bootstrap so stale `ww_token` values are treated as logged out before the UI renders.
+- Cleared any stored auth payloads that no longer represent a live session, without surfacing a visible error state.
+- Routed the app root into the login flow and added a login-page redirect for already-authenticated sessions.
+- Short-circuited the dashboard shell when no live session exists so the protected site and worklist fetches never run on unauthenticated entry.
+
+**Verification:**
+- `git diff --check`
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- Playwright console on `http://localhost:3000/login` with no session: zero errors
+- Playwright console on `http://localhost:3000/login` with an expired token in localStorage: zero errors
+
 ## 2026-05-14 — Sprint 0 Issue 0.6 status enum labels humanized
 
 **Goal:** Replace raw API/status enum strings with title-case labels across the visible frontend surfaces.
