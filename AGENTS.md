@@ -4,13 +4,25 @@ Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) work
 
 ## What this project is
 - Single-developer Spring Boot + Next.js monorepo
-- Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
-- Historical sprint window: May 2-17, 2026; active work is now post-merge maintenance and polish
+- Goal: implement the gaps and improvements identified in `docs/sprints/` to showcase and overdeliver on the project's original vision
+- Build phase: sprint-based feature implementation — see `docs/sprints/README.md` for the ordered work queue
 
 ## Read before any task
-`@docs/archive/SPIKE_PLAN.md` is the archived sprint plan. Use `docs/JOURNAL.md` for the latest state and `README.md` for the public project overview.
+1. `docs/sprints/README.md` — sprint index and critical path. This is your active work queue.
+2. The specific sprint file for the issue you're working on (e.g., `docs/sprints/SPRINT_00_critical_demo_fixes.md`)
+3. `docs/JOURNAL.md` — latest state of the project
+4. `README.md` — public project overview and API surface
 
-`docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contains the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
+`docs/archive/SPIKE_PLAN.md` and `docs/archive/PROJECT_PLAN_v1.md` are historical only — do not act on them.
+
+## Sprint execution protocol
+- Work **one sprint at a time**, in the order defined in `docs/sprints/README.md`
+- Within a sprint, work **one issue at a time** from top to bottom
+- Every issue has an **Acceptance Criteria** checklist — every box must pass before the issue is done
+- Create a feature branch per issue: `fix/sprint-0-<slug>` or `feat/sprint-1-<slug>`
+- Open a PR for review after each issue — do not batch multiple issues into one PR unless they are tightly coupled (e.g., a migration + the service that uses it)
+- **Stop and ask** before starting the next sprint — Taleef reviews before proceeding
+- Update `docs/JOURNAL.md` with a dated entry for everything that ships
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
@@ -20,22 +32,23 @@ Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) work
 - Infra: Docker Compose local; Fly.io + Vercel + Neon prod; GitHub Actions; pnpm
 
 ## Hard rules
-- Avoid new dependencies unless they are explicitly approved and documented
+- Avoid new dependencies unless explicitly approved — if a sprint file calls for a dependency, it is pre-approved; anything else requires asking first
 - One Spring Boot app, modular packages — no microservices
 - Spring Application Events + DB audit log — no Kafka or external streaming
-- Stubbed auth — no production-grade auth in the demo stack
-- Simulated email — no real delivery
+- Auth: JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and specified in Sprint 4. User accounts remain hardcoded — no SSO, no real user directory.
+- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the mandatory default on the demo stack. Do not set `SENDGRID_API_KEY` in any demo environment config.
 - AI never decides compliance (docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
 - Every state change writes `audit_event` — no exceptions
-- No silent scope changes. Stop conditions and fallbacks documented in JOURNAL.md.
-- Keep UI changes surgical; only bug fixes or explicitly requested polish
+- No silent scope changes — if something in a sprint file doesn't match the codebase, stop and report before proceeding
+- **Schema migrations are owned by Taleef.** Write the SQL and show it for approval — never run `flyway migrate` autonomously or create a `V0xx__*.sql` file and apply it without explicit instruction.
 
 ## Branch + ownership
-- Backend agent owns `backend/` only
-- Frontend agent owns `frontend/` only
-- Schema migrations (`backend/src/main/resources/db/migration/`) are human-only — never delegated
-- Use a feature branch for follow-up work
-- Merge after human review — no auto-merge
+- Backend agent owns `backend/` only — never touch `frontend/`
+- Frontend agent owns `frontend/` only — never touch `backend/`
+- Schema migrations (`backend/src/main/resources/db/migration/`) are Taleef-only — write the SQL and present it; never apply autonomously
+- Branch naming: `fix/sprint-0-<slug>`, `feat/sprint-1-<slug>`, etc.
+- One PR per issue (or tightly coupled issue pair); merge after Taleef reviews
+- No auto-merge under any circumstances
 
 ## Definition of done (per PR)
 - Tests pass; idempotency + audit invariants have real tests, rest is smoke-only
