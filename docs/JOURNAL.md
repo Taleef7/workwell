@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.3 global search hidden
+
+**Goal:** Remove the non-functional global search bar from the dashboard header so the UI no longer advertises a broken interaction.
+
+**Frontend cleanup:**
+- Removed the global search form from the dashboard shell header.
+- Deleted the unused local search state and submit handler from `layout.tsx`.
+- Kept the site/date filters and account controls aligned in the header.
+
+**Verification:**
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- Confirmed `frontend/app/(dashboard)/layout.tsx` no longer contains the global search placeholder or submit handler.
+
 ## 2026-05-14 — Sprint 0 Issue 0.2 programs overview redirect
 
 **Goal:** Prevent `/programs/overview` from being handled as a measure detail route and hanging on invalid API requests.
