@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { TraceabilityResponse, TraceabilityGap } from "../types";
 
@@ -10,7 +11,7 @@ type Props = {
 };
 
 function gapBadgeClass(severity: string) {
-  if (severity === "ERROR") return "bg-red-100 text-red-800 border border-red-300";
+  if (normalizeEnumValue(severity) === "ERROR") return "bg-red-100 text-red-800 border border-red-300";
   return "bg-amber-50 text-amber-800 border border-amber-300";
 }
 
@@ -52,8 +53,8 @@ export function TraceabilityTab({ measureId, api }: Props) {
   if (error) return <p className="text-sm text-red-700">Error: {error}</p>;
   if (!data) return null;
 
-  const errors = data.gaps.filter((g) => g.severity === "ERROR");
-  const warnings = data.gaps.filter((g) => g.severity !== "ERROR");
+  const errors = data.gaps.filter((g) => normalizeEnumValue(g.severity) === "ERROR");
+  const warnings = data.gaps.filter((g) => normalizeEnumValue(g.severity) !== "ERROR");
 
   return (
     <div className="space-y-4">
@@ -155,7 +156,7 @@ export function TraceabilityTab({ measureId, api }: Props) {
                         {row.testFixtures.map((f, j) => (
                           <li key={j} className="text-[11px]">
                             <span className="text-slate-500">{f.fixtureName || "—"}</span>
-                            {f.expectedOutcome ? <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">{f.expectedOutcome}</span> : null}
+                            {f.expectedOutcome ? <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">{formatStatusLabel(f.expectedOutcome)}</span> : null}
                           </li>
                         ))}
                       </ul>
@@ -184,7 +185,7 @@ function GapRow({ gap }: { gap: TraceabilityGap }) {
   return (
     <li className="flex items-start gap-2">
       <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${gapBadgeClass(gap.severity)}`}>
-        {gap.severity}
+        {formatStatusLabel(gap.severity)}
       </span>
       <span className="text-sm text-slate-700">{gap.message}</span>
     </li>

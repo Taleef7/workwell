@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect } from "react";
-import { measureStatusClass } from "@/lib/status";
+import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
 import { useApi } from "@/lib/api/hooks";
@@ -82,7 +82,7 @@ export default function StudioMeasurePage() {
           <h2 className="text-2xl font-semibold">{measure?.name ?? "Measure Studio"}</h2>
           {measure ? (
             <p className="mt-1 text-sm text-slate-600">
-              {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(measure.status)}`}>{measure.status}</span>
+              {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(measure.status)}`}>{labelFor(MEASURE_STATUS_LABELS, measure.status)}</span>
             </p>
           ) : null}
         </div>
@@ -113,10 +113,10 @@ export default function StudioMeasurePage() {
       {!measureId ? <p className="text-sm text-red-700">Invalid measure route ID.</p> : null}
       {loading ? <p className="text-sm text-slate-600">Loading...</p> : null}
 
-      {measure?.status === "Approved" && activationReadiness ? (
+      {normalizeEnumValue(measure?.status ?? "") === "APPROVED" && activationReadiness ? (
         <div className="rounded-md border border-slate-200 bg-white p-3 text-sm">
           <p className="font-semibold text-slate-800">Activation Readiness</p>
-          <p className="text-slate-700">Compile: {activationReadiness.compileStatus}</p>
+          <p className="text-slate-700">Compile: {formatStatusLabel(activationReadiness.compileStatus)}</p>
           <p className="text-slate-700">Fixtures: {activationReadiness.testFixtureCount}</p>
           <p className="text-slate-700">Value Sets: {activationReadiness.valueSetCount}</p>
           {!activationReadiness.ready && activationReadiness.activationBlockers.length > 0 ? (

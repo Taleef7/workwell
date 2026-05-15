@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { DataReadinessResponse } from "../types";
 
@@ -11,22 +12,25 @@ type Props = {
 };
 
 function overallStatusClass(status: string) {
-  if (status === "READY") return "bg-emerald-100 text-emerald-800 border border-emerald-300";
-  if (status === "READY_WITH_WARNINGS") return "bg-amber-100 text-amber-800 border border-amber-300";
+  const normalized = normalizeEnumValue(status);
+  if (normalized === "READY") return "bg-emerald-100 text-emerald-800 border border-emerald-300";
+  if (normalized === "READY_WITH_WARNINGS") return "bg-amber-100 text-amber-800 border border-amber-300";
   return "bg-red-100 text-red-800 border border-red-300";
 }
 
 function mappingBadgeClass(status: string) {
-  if (status === "MAPPED") return "bg-emerald-50 text-emerald-800";
-  if (status === "STALE" || status === "PARTIAL") return "bg-amber-50 text-amber-800";
-  if (status === "UNMAPPED" || status === "ERROR") return "bg-red-50 text-red-800";
+  const normalized = normalizeEnumValue(status);
+  if (normalized === "MAPPED") return "bg-emerald-50 text-emerald-800";
+  if (normalized === "STALE" || normalized === "PARTIAL") return "bg-amber-50 text-amber-800";
+  if (normalized === "UNMAPPED" || normalized === "ERROR") return "bg-red-50 text-red-800";
   return "bg-slate-100 text-slate-600";
 }
 
 function freshnessBadgeClass(status: string) {
-  if (status === "FRESH") return "text-emerald-700";
-  if (status === "STALE") return "text-amber-700";
-  if (status === "VERY_STALE") return "text-red-700";
+  const normalized = normalizeEnumValue(status);
+  if (normalized === "FRESH") return "text-emerald-700";
+  if (normalized === "STALE") return "text-amber-700";
+  if (normalized === "VERY_STALE") return "text-red-700";
   return "text-slate-500";
 }
 
@@ -65,7 +69,7 @@ export function DataReadinessPanel({ measureId, api }: Props) {
         <div className="flex items-center gap-2">
           {data ? (
             <span className={`rounded px-2 py-1 text-[11px] font-semibold ${overallStatusClass(data.overallStatus)}`}>
-              {data.overallStatus.replace(/_/g, " ")}
+              {formatStatusLabel(data.overallStatus)}
             </span>
           ) : null}
           <button
@@ -126,11 +130,11 @@ export function DataReadinessPanel({ measureId, api }: Props) {
                       <td className="px-3 py-2 text-slate-600">{el.sourceId ?? "—"}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${mappingBadgeClass(el.mappingStatus)}`}>
-                          {el.mappingStatus}
+                          {formatStatusLabel(el.mappingStatus)}
                         </span>
                       </td>
                       <td className={`px-3 py-2 text-[11px] font-medium ${freshnessBadgeClass(el.freshnessStatus)}`}>
-                        {el.freshnessStatus}
+                        {formatStatusLabel(el.freshnessStatus)}
                       </td>
                       <td className="px-3 py-2">
                         {el.missingnessRate > 0 ? (

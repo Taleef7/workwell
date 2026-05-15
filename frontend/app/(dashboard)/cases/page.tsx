@@ -4,7 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
-import { caseStatusClass, outcomeStatusClass } from "@/lib/status";
+import {
+  CASE_STATUS_LABELS,
+  OUTCOME_LABELS,
+  PRIORITY_LABELS,
+  caseStatusClass,
+  labelFor,
+  normalizeEnumValue,
+  outcomeStatusClass
+} from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 
@@ -314,9 +322,9 @@ export default function CasesPage() {
             onChange={(e) => setPriorityFilter(e.target.value)}
           >
             <option value="">All Priorities</option>
-            <option value="HIGH">HIGH</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="LOW">LOW</option>
+            <option value="HIGH">{labelFor(PRIORITY_LABELS, "HIGH")}</option>
+            <option value="MEDIUM">{labelFor(PRIORITY_LABELS, "MEDIUM")}</option>
+            <option value="LOW">{labelFor(PRIORITY_LABELS, "LOW")}</option>
           </select>
         </label>
         <label className="text-sm text-slate-600">
@@ -419,77 +427,83 @@ export default function CasesPage() {
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filteredCases.map((item) => (
-          <div key={item.caseId} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <label className="flex items-center gap-2 text-xs text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={selectedCaseIds.includes(item.caseId)}
-                  onChange={() => toggleCase(item.caseId)}
-                />
-                Select
-              </label>
-              <div className="flex flex-wrap justify-end gap-2">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{item.status}</span>
-                <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{item.priority}</span>
+        {filteredCases.map((item) => {
+          const caseStatus = normalizeEnumValue(item.status);
+          const caseStatusLabel = labelFor(CASE_STATUS_LABELS, item.status);
+          const priorityLabel = labelFor(PRIORITY_LABELS, item.priority);
+          const outcomeLabel = labelFor(OUTCOME_LABELS, item.currentOutcomeStatus);
+          return (
+            <div key={item.caseId} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={selectedCaseIds.includes(item.caseId)}
+                    onChange={() => toggleCase(item.caseId)}
+                  />
+                  Select
+                </label>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{caseStatusLabel}</span>
+                  <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{priorityLabel}</span>
+                </div>
               </div>
+
+              <div className="mt-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
+                <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
+                <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
+                <p className="mt-1 text-xs text-slate-500">{item.site}</p>
+              </div>
+
+              <dl className="mt-4 space-y-2 text-sm text-slate-700">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Status</dt>
+                  <dd className="font-medium">{caseStatusLabel}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Why flagged</dt>
+                  <dd>
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
+                      {outcomeLabel}
+                    </span>
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Period</dt>
+                  <dd className="font-medium">{item.evaluationPeriod}</dd>
+                </div>
+                {caseStatus === "EXCLUDED" ? (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-slate-500">Exclusion reason</dt>
+                      <dd className="max-w-[220px] text-right text-xs text-slate-700">
+                        {item.exclusionReason ?? "Excluded by active waiver or exemption."}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-slate-500">Waiver</dt>
+                      <dd className="text-right text-xs font-medium text-slate-700">
+                        {item.waiverExpiresAt ? (
+                          <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800" : "bg-indigo-100 text-indigo-800"}`}>
+                            {item.waiverExpired ? "Expired" : "Expires"} {new Date(item.waiverExpiresAt).toLocaleDateString()}
+                          </span>
+                        ) : (
+                          "No expiry on file"
+                        )}
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
+              </dl>
+
+              <p className="mt-4 text-sm text-slate-600">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
+              <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-slate-900 hover:underline">
+                View structured evidence →
+              </Link>
             </div>
-
-            <div className="mt-2">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
-              <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
-              <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
-              <p className="mt-1 text-xs text-slate-500">{item.site}</p>
-            </div>
-
-            <dl className="mt-4 space-y-2 text-sm text-slate-700">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-slate-500">Status</dt>
-                <dd className="font-medium">{item.status}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-slate-500">Why flagged</dt>
-                <dd>
-                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
-                    {item.currentOutcomeStatus}
-                  </span>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-slate-500">Period</dt>
-                <dd className="font-medium">{item.evaluationPeriod}</dd>
-              </div>
-              {item.status === "EXCLUDED" ? (
-                <>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="text-slate-500">Exclusion reason</dt>
-                    <dd className="max-w-[220px] text-right text-xs text-slate-700">
-                      {item.exclusionReason ?? "Excluded by active waiver or exemption."}
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <dt className="text-slate-500">Waiver</dt>
-                    <dd className="text-right text-xs font-medium text-slate-700">
-                      {item.waiverExpiresAt ? (
-                        <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800" : "bg-indigo-100 text-indigo-800"}`}>
-                          {item.waiverExpired ? "Expired" : "Expires"} {new Date(item.waiverExpiresAt).toLocaleDateString()}
-                        </span>
-                      ) : (
-                        "No expiry on file"
-                      )}
-                    </dd>
-                  </div>
-                </>
-              ) : null}
-            </dl>
-
-            <p className="mt-4 text-sm text-slate-600">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
-            <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-slate-900 hover:underline">
-              View structured evidence →
-            </Link>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
