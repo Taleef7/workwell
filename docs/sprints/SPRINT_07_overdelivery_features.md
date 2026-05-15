@@ -239,7 +239,7 @@ async function handleDraftCql() {
 - [ ] `POST /api/measures/{id}/ai/draft-cql` returns valid CQL text (or fallback template)
 - [ ] Returned CQL includes `library`, `using FHIR`, `context Patient`, and `Outcome Status` define
 - [ ] AI draft CQL is inserted into Monaco editor with amber warning banner
-- [ ] Banner is visible and cannot be dismissed until user manually edits the CQL
+- [ ] Banner is visible after generation and can be dismissed by the user (via the ✕ button)
 - [ ] `AI_DRAFT_CQL_GENERATED` audit event is written with `fallbackUsed` field
 - [ ] Fallback template is returned when AI call fails — no error thrown to user
 
@@ -421,11 +421,19 @@ public class RiskOutlookService {
     }
 
     public RiskOutlookResult getOutlook(UUID measureId, int horizonDays) {
-        // Upcoming non-compliance: employees currently COMPLIANT
-        // where the exam_date + 365 days falls within the next horizonDays
+        // Upcoming non-compliance: employees currently COMPLIANT whose last exam date
+        // will expire within the next horizonDays. The date predicate is pushed into SQL
+        // so the database does the filtering rather than loading all compliant employees
+        // and filtering in Java (which would return the full compliant population when the
+        // Java filter is hardcoded to true).
+        //
+        // evidence_json->>'why_flagged'->>'last_exam_date' contains the ISO date string
+        // from the CQL evidence payload. The compliance window is assumed to be 365 days;
+        // adjust the interval constant if the measure uses a different window.
         var upcoming = jdbc.sql("""
             SELECT e.external_id, e.name, e.role, e.site,
-                   o.evidence_json->>'why_flagged' AS why_json
+                   (o.evidence_json->'why_flagged'->>'last_exam_date')::date AS last_exam_date,
+                   (o.evidence_json->'why_flagged'->>'compliance_window_days')::int AS window_days
             FROM outcomes o
             JOIN employees e ON e.id = o.employee_id
             JOIN measure_versions mv ON mv.id = o.measure_version_id
@@ -437,19 +445,28 @@ public class RiskOutlookService {
                 WHERE o2.employee_id = o.employee_id
                   AND o2.measure_version_id = o.measure_version_id
               )
-            ORDER BY e.name
+              AND (o.evidence_json->'why_flagged'->>'last_exam_date') IS NOT NULL
+              AND (
+                (o.evidence_json->'why_flagged'->>'last_exam_date')::date
+                + COALESCE((o.evidence_json->'why_flagged'->>'compliance_window_days')::int, 365) * INTERVAL '1 day'
+              ) BETWEEN NOW() AND NOW() + :horizonDays * INTERVAL '1 day'
+            ORDER BY last_exam_date ASC
             """)
             .param("measureId", measureId)
+            .param("horizonDays", horizonDays)
             .query(Map.class)
-            .list()
-            .stream()
-            .filter(row -> isExpiringWithin(row, horizonDays))
-            .toList();
+            .list();
 
-        // Repeat non-compliers: employees with 3+ consecutive non-compliant outcomes
+        // Repeat non-compliers: employees with 3+ total non-compliant outcomes.
+        // Note: COUNT(*) counts total non-compliant outcomes across all time, not
+        // consecutive periods. An employee with alternating COMPLIANT/OVERDUE outcomes
+        // will still appear here once they hit 3 total. The UI label uses "×" (times)
+        // rather than "in a row" to accurately reflect the total-count semantics.
+        // To detect true consecutive streaks, use a gaps-and-islands window function
+        // with LAG() on evaluation_period — that is left as a post-demo enhancement.
         var repeatNonCompliers = jdbc.sql("""
             SELECT e.external_id, e.name, e.site,
-                   COUNT(*) AS streak
+                   COUNT(*) AS non_compliant_count
             FROM outcomes o
             JOIN employees e ON e.id = o.employee_id
             JOIN measure_versions mv ON mv.id = o.measure_version_id
@@ -458,7 +475,7 @@ public class RiskOutlookService {
               AND o.status IN ('OVERDUE', 'MISSING_DATA')
             GROUP BY e.external_id, e.name, e.site
             HAVING COUNT(*) >= 3
-            ORDER BY streak DESC
+            ORDER BY non_compliant_count DESC
             LIMIT 10
             """)
             .param("measureId", measureId)
@@ -487,12 +504,6 @@ public class RiskOutlookService {
             .list();
 
         return new RiskOutlookResult(upcoming.size(), upcoming, repeatNonCompliers, siteRates);
-    }
-
-    private boolean isExpiringWithin(Map<String,Object> row, int horizonDays) {
-        // Parse why_json.last_exam_date and check if exam_date + 365 < today + horizonDays
-        // Simplified: return true for demo purposes — implement proper JSON parsing
-        return true; // TODO: implement proper expiry computation from evidence JSON
     }
 
     public record RiskOutlookResult(
@@ -557,7 +568,7 @@ public ResponseEntity<RiskOutlookService.RiskOutlookResult> getRiskOutlook(
                   </Link>
                 </td>
                 <td>{e.site}</td>
-                <td className="text-red-600 font-medium">{e.streak}× in a row</td>
+                <td className="text-red-600 font-medium">{e.nonCompliantCount}× total non-compliant</td>
               </tr>
             ))}
           </tbody>
@@ -682,7 +693,10 @@ public class MeasureExportService {
         if (cqlText != null && !cqlText.isBlank()) {
             Attachment attachment = new Attachment();
             attachment.setContentType("text/cql");
-            attachment.setData(Base64.getEncoder().encode(cqlText.getBytes()));
+            // Pass raw bytes — HAPI FHIR handles base64 encoding internally when
+            // serializing to XML/JSON. Calling Base64.encode() here would cause
+            // double base64 encoding and produce unreadable CQL when imported into MAT.
+            attachment.setData(cqlText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             lib.addContent(attachment);
         }
         return lib;
@@ -743,7 +757,7 @@ public ResponseEntity<byte[]> exportMat(
 ### Acceptance criteria
 - [ ] `GET /api/measures/{id}/versions/{versionId}/export/mat` returns a `Content-Type: application/fhir+xml` response
 - [ ] The bundle contains Library, Measure, and ValueSet resources
-- [ ] Library.content[0].data is base64-encoded CQL text
+- [ ] Library.content[0].data contains the CQL text as raw bytes (HAPI FHIR serializes it as base64 — do NOT pre-encode)
 - [ ] The XML validates as a FHIR R4 Bundle (test with HAPI FHIR validator)
 - [ ] Export button appears in Studio for APPROVER and ADMIN roles
 

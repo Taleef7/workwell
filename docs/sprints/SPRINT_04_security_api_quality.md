@@ -10,10 +10,22 @@
 
 ## Issue 4.1 — JWT Access Tokens Expire and Silently Log the User Out
 
+> **⚠️ Constraint note:** CLAUDE.md hard rule: "Stubbed auth — no production-grade auth in the demo stack." The full refresh-token architecture below (HttpOnly cookies, token rotation, `/api/auth/refresh` endpoint) is production-grade and expands the auth surface beyond what the project rules allow for the demo stack. **For the demo, use the simpler approach: extend the access token expiry to 8 hours in `JwtService`** (a one-line change). This eliminates mid-demo logouts without introducing any new auth infrastructure. The full refresh-token flow below is documented for post-demo hardening only — do not implement it on the demo stack.
+>
+> **Demo-safe fix (implement now):** In `JwtService`, change the token expiry constant from 1 hour to 8 hours:
+> ```java
+> // JwtService.java — change:
+> private static final long ACCESS_TOKEN_EXPIRY_HOURS = 1;
+> // to:
+> private static final long ACCESS_TOKEN_EXPIRY_HOURS = 8;
+> ```
+>
+> **Production refresh flow (implement post-demo):** See steps below.
+
 ### Current behavior
 JWT access tokens are issued at login with a fixed expiry (e.g., 1 hour). When a token expires mid-session, the next API call returns HTTP 401. The frontend `ApiClient` catches the 401, calls `onUnauthorized()`, which redirects to `/login` — losing any unsaved work. There is no refresh token mechanism. During a live demo this is catastrophic: if a demo runs more than 60 minutes, the presenter gets silently ejected mid-flow.
 
-### Desired behavior
+### Desired behavior (post-demo hardening)
 - Short-lived access tokens (15 minutes) paired with long-lived refresh tokens (8 hours).
 - When `ApiClient` receives a 401 on any request, it automatically attempts one silent refresh against `POST /api/auth/refresh`.
 - If refresh succeeds, the original request is retried once with the new access token.
@@ -39,6 +51,12 @@ Only one token type is issued. The frontend does not retry on 401. Refresh infra
 ### Implementation steps
 
 **Step 1: Add refresh token generation to `JwtService`**
+
+> **jjwt version check:** The API changed in jjwt 0.12.x. Confirm which version is on the classpath before implementing:
+> - jjwt ≤ 0.11.x: use `Jwts.builder().setSubject(...)`, `setIssuedAt(...)`, `setExpiration(...)`
+> - jjwt ≥ 0.12.x: use `Jwts.builder().subject(...)`, `issuedAt(...)`, `expiration(...)`
+> The snippet below uses the 0.11.x API. Adjust to match the actual version in `build.gradle.kts`.
+
 ```java
 // In JwtService.java, add:
 private static final long REFRESH_EXPIRY_HOURS = 8;
@@ -46,7 +64,7 @@ private static final long REFRESH_EXPIRY_HOURS = 8;
 public String generateRefreshToken(String username) {
     return Jwts.builder()
         .setSubject(username)
-        .claim("type", "refresh")
+        .claim("refresh", true)  // custom claim — avoid shadowing the standard "typ" header
         .setIssuedAt(new Date())
         .setExpiration(new Date(System.currentTimeMillis() + REFRESH_EXPIRY_HOURS * 3_600_000L))
         .signWith(getSigningKey(), SignatureAlgorithm.HS256)
@@ -56,7 +74,7 @@ public String generateRefreshToken(String username) {
 public boolean validateRefreshToken(String token) {
     try {
         Claims claims = parseClaims(token);
-        return "refresh".equals(claims.get("type", String.class));
+        return Boolean.TRUE.equals(claims.get("refresh", Boolean.class));
     } catch (JwtException e) {
         return false;
     }
@@ -79,7 +97,7 @@ public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest req, HttpSe
     ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
         .httpOnly(true)
         .secure(true)
-        .path("/api/auth/refresh")
+        .path("/api/auth")
         .maxAge(Duration.ofHours(8))
         .sameSite("Strict")
         .build();
@@ -113,7 +131,7 @@ public ResponseEntity<LoginResponse> refresh(HttpServletRequest request, HttpSer
     // Rotate refresh token
     String newRefreshToken = jwtService.generateRefreshToken(username);
     ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", newRefreshToken)
-        .httpOnly(true).secure(true).path("/api/auth/refresh")
+        .httpOnly(true).secure(true).path("/api/auth")
         .maxAge(Duration.ofHours(8)).sameSite("Strict").build();
     response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
 
@@ -123,7 +141,7 @@ public ResponseEntity<LoginResponse> refresh(HttpServletRequest request, HttpSer
 @PostMapping("/api/auth/logout")
 public ResponseEntity<Void> logout(HttpServletResponse response) {
     ResponseCookie clear = ResponseCookie.from("refresh_token", "")
-        .httpOnly(true).secure(true).path("/api/auth/refresh")
+        .httpOnly(true).secure(true).path("/api/auth")
         .maxAge(0).sameSite("Strict").build();
     response.addHeader(HttpHeaders.SET_COOKIE, clear.toString());
     return ResponseEntity.noContent().build();
@@ -131,13 +149,20 @@ public ResponseEntity<Void> logout(HttpServletResponse response) {
 ```
 
 **Step 4: Add silent retry in `ApiClient`**
+
+> Use a boolean parameter `retried` rather than inspecting headers to guard against infinite retry loops. `HeadersInit` can be a `Headers` object, a record, or a tuple array — indexing with `['X-Retry']` only works for the plain-object form and will silently evaluate to `undefined` for `Headers` instances, potentially allowing unbounded retries.
+
 ```typescript
 // In frontend/lib/api/client.ts, modify the fetch wrapper:
 
-private async fetchWithAuth(url: string, init: RequestInit): Promise<Response> {
+private async fetchWithAuth(
+  url: string,
+  init: RequestInit,
+  retried = false   // boolean guard — never recurse more than once
+): Promise<Response> {
   let res = await fetch(url, init);
 
-  if (res.status === 401 && !init.headers?.['X-Retry']) {
+  if (res.status === 401 && !retried) {
     // Attempt silent refresh
     const refreshRes = await fetch(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
@@ -147,17 +172,10 @@ private async fetchWithAuth(url: string, init: RequestInit): Promise<Response> {
     if (refreshRes.ok) {
       const { token } = await refreshRes.json();
       this.token = token;
-      // Retry original request once with new token
-      const retryInit: RequestInit = {
-        ...init,
-        headers: {
-          ...init.headers,
-          'Authorization': `Bearer ${token}`,
-          'X-Retry': '1',
-        },
-        credentials: 'include',
-      };
-      res = await fetch(url, retryInit);
+      // Retry original request once with new token — pass retried=true to prevent recursion
+      const headers = new Headers(init.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      res = await this.fetchWithAuth(url, { ...init, headers, credentials: 'include' }, true);
     } else {
       this.onUnauthorized?.();
     }
@@ -178,7 +196,7 @@ private async fetchWithAuth(url: string, init: RequestInit): Promise<Response> {
 ```
 
 ### Acceptance criteria
-- [ ] Login response sets `refresh_token` as `HttpOnly` cookie on `/api/auth/refresh` path
+- [ ] Login response sets `refresh_token` as `HttpOnly` cookie scoped to `/api/auth` path (covers both `/refresh` and `/logout`)
 - [ ] `POST /api/auth/refresh` with a valid cookie returns a new access token
 - [ ] When access token expires mid-session, `ApiClient` silently refreshes and retries — user never sees a logout
 - [ ] `POST /api/auth/logout` clears the refresh token cookie
@@ -330,7 +348,15 @@ public class RateLimitFilter implements Filter {
 
     private String buildKey(HttpServletRequest req) {
         String user = req.getRemoteUser() != null ? req.getRemoteUser() : req.getRemoteAddr();
-        return req.getMethod() + ":" + req.getRequestURI() + ":" + user;
+        String uri = req.getRequestURI();
+        // Per-endpoint buckets include the URI so each endpoint is tracked separately.
+        // The default bucket keys by user only — so the 200 req/min limit applies across
+        // the whole API per user, not per URI. Embedding the URI in the default key would
+        // effectively give each endpoint its own 200/min quota instead of a shared one.
+        if (uri.contains("/auth/login")) return "login:" + req.getRemoteAddr();
+        if (uri.contains("/runs/manual")) return "runs-manual:" + user;
+        if (uri.contains("/exports/")) return "exports:" + user;
+        return "default:" + user;
     }
 
     private Bucket selectBucket(HttpServletRequest req) {
@@ -575,8 +601,15 @@ public class EvidenceValidationService {
         }
     }
 
-    public record EvidenceValidationException(String message, Set<String> accepted)
-        extends RuntimeException(message) {}
+    // Records cannot extend classes other than java.lang.Record — use a regular class here.
+    public static class EvidenceValidationException extends RuntimeException {
+        private final Set<String> accepted;
+        public EvidenceValidationException(String message, Set<String> accepted) {
+            super(message);
+            this.accepted = accepted;
+        }
+        public Set<String> accepted() { return accepted; }
+    }
 }
 ```
 
