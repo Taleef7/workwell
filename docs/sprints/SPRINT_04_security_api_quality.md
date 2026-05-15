@@ -10,22 +10,10 @@
 
 ## Issue 4.1 — JWT Access Tokens Expire and Silently Log the User Out
 
-> **⚠️ Constraint note:** CLAUDE.md hard rule: "Stubbed auth — no production-grade auth in the demo stack." The full refresh-token architecture below (HttpOnly cookies, token rotation, `/api/auth/refresh` endpoint) is production-grade and expands the auth surface beyond what the project rules allow for the demo stack. **For the demo, use the simpler approach: extend the access token expiry to 8 hours in `JwtService`** (a one-line change). This eliminates mid-demo logouts without introducing any new auth infrastructure. The full refresh-token flow below is documented for post-demo hardening only — do not implement it on the demo stack.
->
-> **Demo-safe fix (implement now):** In `JwtService`, change the token expiry constant from 1 hour to 8 hours:
-> ```java
-> // JwtService.java — change:
-> private static final long ACCESS_TOKEN_EXPIRY_HOURS = 1;
-> // to:
-> private static final long ACCESS_TOKEN_EXPIRY_HOURS = 8;
-> ```
->
-> **Production refresh flow (implement post-demo):** See steps below.
-
 ### Current behavior
 JWT access tokens are issued at login with a fixed expiry (e.g., 1 hour). When a token expires mid-session, the next API call returns HTTP 401. The frontend `ApiClient` catches the 401, calls `onUnauthorized()`, which redirects to `/login` — losing any unsaved work. There is no refresh token mechanism. During a live demo this is catastrophic: if a demo runs more than 60 minutes, the presenter gets silently ejected mid-flow.
 
-### Desired behavior (post-demo hardening)
+### Desired behavior
 - Short-lived access tokens (15 minutes) paired with long-lived refresh tokens (8 hours).
 - When `ApiClient` receives a 401 on any request, it automatically attempts one silent refresh against `POST /api/auth/refresh`.
 - If refresh succeeds, the original request is retried once with the new access token.
