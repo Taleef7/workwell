@@ -8,7 +8,15 @@ if (isProductionBuild && demoModeEnabled) {
 }
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async redirects() {
+    return [
+      {
+        source: "/programs/overview",
+        destination: "/programs",
+        permanent: false
+      }
+    ];
+  }
 };
 
 export default nextConfig;
