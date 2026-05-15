@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 
@@ -11,11 +11,16 @@ const demoPassword = "Workwell123!";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { token, user, login } = useAuth();
   const [email, setEmail] = useState(() => (demoMode ? demoEmail : ""));
   const [password, setPassword] = useState(() => (demoMode ? demoPassword : ""));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    router.replace("/programs");
+  }, [router, token, user]);
 
   function fillDemoCredentials() {
     setEmail(demoEmail);
@@ -51,7 +56,6 @@ export default function LoginPage() {
       }
       const payload = (await response.json()) as { token: string; email: string; role: string };
       login(payload.token, payload.email, payload.role);
-      router.replace("/programs");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed. Please try again.");
     } finally {
