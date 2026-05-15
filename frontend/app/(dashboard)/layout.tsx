@@ -21,6 +21,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
+  const isAdmin = user?.role === "ROLE_ADMIN";
   const [menuOpen, setMenuOpen] = useState(false);
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
@@ -132,6 +133,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         <aside className={`${menuOpen ? "block" : "hidden"} border-r border-slate-200 bg-white p-4 md:block`}>
           <nav className="space-y-2">
             {nav.map((item) => {
+              if (item.href === "/admin" && !isAdmin) {
+                return null;
+              }
               const active = pathname?.startsWith(item.href);
               return (
                 <Link

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ShieldAlert } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 
@@ -84,6 +86,8 @@ type AuditEventRow = {
 };
 
 export default function AdminPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ROLE_ADMIN";
   const [integrations, setIntegrations] = useState<IntegrationHealth[]>([]);
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
@@ -113,24 +117,27 @@ export default function AdminPage() {
   const api = useApi();
 
   const loadDataMappings = useCallback(async () => {
+    if (!isAdmin) return;
     try {
       const data = await api.get<DataElementMapping[]>("/api/admin/data-mappings");
       setDataMappings(data);
     } catch {
       setDataMappings([]);
     }
-  }, [api]);
+  }, [api, isAdmin]);
 
   const loadTerminologyMappings = useCallback(async () => {
+    if (!isAdmin) return;
     try {
       const data = await api.get<TerminologyMapping[]>("/api/admin/terminology-mappings");
       setTerminologyMappings(data);
     } catch {
       setTerminologyMappings([]);
     }
-  }, [api]);
+  }, [api, isAdmin]);
 
   const loadIntegrations = useCallback(async () => {
+    if (!isAdmin) return;
     setError(null);
     try {
       const data = await api.get<IntegrationHealth[]>("/api/admin/integrations");
@@ -138,9 +145,10 @@ export default function AdminPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [api]);
+  }, [api, isAdmin]);
 
   const loadScheduler = useCallback(async () => {
+    if (!isAdmin) return;
     setError(null);
     try {
       const data = await api.get<SchedulerStatus>("/api/admin/scheduler");
@@ -148,18 +156,20 @@ export default function AdminPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [api]);
+  }, [api, isAdmin]);
 
   const loadMeasures = useCallback(async () => {
+    if (!isAdmin) return;
     try {
       const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data.filter((item) => item.status === "Active"));
     } catch {
       setMeasures([]);
     }
-  }, [api]);
+  }, [api, isAdmin]);
 
   const loadWaivers = useCallback(async () => {
+    if (!isAdmin) return;
     setLoadingWaivers(true);
     setError(null);
     try {
@@ -176,9 +186,10 @@ export default function AdminPage() {
     } finally {
       setLoadingWaivers(false);
     }
-  }, [api, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter]);
+  }, [api, siteId, waiverMeasureFilter, waiverExpiresAfter, waiverExpiresBefore, waiverActiveFilter, isAdmin]);
 
   const loadAuditEvents = useCallback(async () => {
+    if (!isAdmin) return;
     setLoadingAudit(true);
     setError(null);
     try {
@@ -189,7 +200,7 @@ export default function AdminPage() {
     } finally {
       setLoadingAudit(false);
     }
-  }, [api, auditScope]);
+  }, [api, auditScope, isAdmin]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -217,6 +228,7 @@ export default function AdminPage() {
   }, [loadAuditEvents]);
 
   async function validateMappings() {
+    if (!isAdmin) return;
     setValidatingMappings(true);
     setError(null);
     try {
@@ -230,6 +242,7 @@ export default function AdminPage() {
   }
 
   async function triggerSync(integration: string) {
+    if (!isAdmin) return;
     setSyncing(integration);
     setError(null);
     try {
@@ -243,6 +256,7 @@ export default function AdminPage() {
   }
 
   async function toggleScheduler(enabled: boolean) {
+    if (!isAdmin) return;
     setUpdatingScheduler(true);
     setError(null);
     try {
@@ -256,6 +270,7 @@ export default function AdminPage() {
   }
 
   async function grantWaiver() {
+    if (!isAdmin) return;
     if (!waiverEmployeeExternalId.trim() || !waiverMeasureId) {
       setError("Employee external ID and measure are required");
       return;
@@ -287,6 +302,23 @@ export default function AdminPage() {
     } finally {
       setGrantingWaiver(false);
     }
+  }
+
+  if (!isAdmin) {
+    return (
+      <section className="flex min-h-[60vh] items-center justify-center px-4">
+        <div className="max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
+            <ShieldAlert className="h-7 w-7 text-slate-700" />
+          </div>
+          <h2 className="mt-4 text-2xl font-semibold text-slate-900">Admin access required</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Your current role does not have access to this section. If you expected to see admin tools, please sign in with an
+            administrator account.
+          </p>
+        </div>
+      </section>
+    );
   }
 
   return (
