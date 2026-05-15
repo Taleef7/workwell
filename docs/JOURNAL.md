@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-05-14 — Sprint 0 Issue 0.1 sidebar branding
+
+**Goal:** Remove visible scaffold branding from the dashboard shell before demo review.
+
+**Frontend polish:**
+- Replaced the dashboard shell placeholder text with a compact WW mark and two-line `WorkWell / Measure Studio` product identity.
+- Removed the truncating product-name class so the visible brand no longer renders as an ellipsis or scaffold label.
+- Confirmed `MVP Dashboard Shell` no longer appears in the frontend source.
+
+**Verification:**
+- `corepack pnpm lint`
+- `corepack pnpm build`
+
 ## 2026-05-13 — CI speedup pass for backend Gradle builds
 
 **Goal:** Cut down backend GitHub Actions time on repeated pushes without changing product behavior.
