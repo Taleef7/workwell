@@ -22,7 +22,7 @@
 **Verification:**
 - `corepack pnpm lint` ✅
 - `corepack pnpm build` ✅
-- `./gradlew.bat test` (in progress)
+- `./gradlew.bat test` ✅ (all tests pass including V015 Flyway migration via Testcontainers)
 - `git diff --check` ✅
 
 ## 2026-05-14 — Sprint 0 Issue 0.8 run history pagination and timestamp compaction
