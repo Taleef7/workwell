@@ -156,13 +156,17 @@ public class ProgramService {
                     GROUP BY o.run_id, r.started_at
                 ),
                 run_based AS (
+                    -- Excluded when site filter is active: aggregate runs carry no per-site
+                    -- breakdown, so they cannot be filtered correctly and must not pollute
+                    -- site-specific trend charts.
                     SELECT r.id    AS run_id,
                            r.started_at,
                            COALESCE(r.total_evaluated, 0) AS total_evaluated,
                            COALESCE(r.compliant, 0)        AS compliant
                     FROM runs r
                     JOIN active_measure_version amv ON amv.id = r.scope_id
-                    WHERE r.scope_type = 'MEASURE'
+                    WHERE CAST(? AS TEXT) IS NULL
+                      AND r.scope_type = 'MEASURE'
                       AND r.status    = 'COMPLETED'
                       AND r.dry_run   = false
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
@@ -191,6 +195,7 @@ public class ProgramService {
         }, measureId, site, site,
                 from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
                 to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to),
+                site,  // run_based: skip branch when site filter is active
                 from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
                 to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to));
     }
