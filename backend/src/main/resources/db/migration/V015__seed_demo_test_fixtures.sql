@@ -15,7 +15,7 @@ SET spec_json = jsonb_set(
       {"fixtureName": "Excluded — active audiogram waiver on file", "employeeExternalId": "emp-005", "expectedOutcome": "EXCLUDED", "notes": "Valid waiver exempts from annual requirement"}
     ]'::jsonb
 )
-WHERE measure_id = (SELECT id FROM measures WHERE name = 'Audiogram')
+WHERE measure_id IN (SELECT id FROM measures WHERE name = 'Audiogram')
   AND status = 'Active'
   AND (spec_json -> 'testFixtures' IS NULL
        OR jsonb_array_length(COALESCE(spec_json -> 'testFixtures', '[]'::jsonb)) = 0);
@@ -33,7 +33,7 @@ SET spec_json = jsonb_set(
       {"fixtureName": "Excluded — HAZWOPER medical exemption on file", "employeeExternalId": "emp-023", "expectedOutcome": "EXCLUDED", "notes": "Medical exemption exempts from annual requirement"}
     ]'::jsonb
 )
-WHERE measure_id = (SELECT id FROM measures WHERE name = 'HAZWOPER Surveillance')
+WHERE measure_id IN (SELECT id FROM measures WHERE name = 'HAZWOPER Surveillance')
   AND status = 'Active'
   AND (spec_json -> 'testFixtures' IS NULL
        OR jsonb_array_length(COALESCE(spec_json -> 'testFixtures', '[]'::jsonb)) = 0);
@@ -51,7 +51,7 @@ SET spec_json = jsonb_set(
       {"fixtureName": "Excluded — TB medical exemption on file", "employeeExternalId": "emp-050", "expectedOutcome": "EXCLUDED", "notes": "Medical exemption exempts from TB screening requirement"}
     ]'::jsonb
 )
-WHERE measure_id = (SELECT id FROM measures WHERE name = 'TB Surveillance')
+WHERE measure_id IN (SELECT id FROM measures WHERE name = 'TB Surveillance')
   AND status = 'Active'
   AND (spec_json -> 'testFixtures' IS NULL
        OR jsonb_array_length(COALESCE(spec_json -> 'testFixtures', '[]'::jsonb)) = 0);
@@ -68,7 +68,7 @@ SET spec_json = jsonb_set(
       {"fixtureName": "Excluded — documented vaccine contraindication", "employeeExternalId": "emp-032", "expectedOutcome": "EXCLUDED", "notes": "Valid medical contraindication exempts from flu vaccine requirement"}
     ]'::jsonb
 )
-WHERE measure_id = (SELECT id FROM measures WHERE name = 'Flu Vaccine')
+WHERE measure_id IN (SELECT id FROM measures WHERE name = 'Flu Vaccine')
   AND status = 'Active'
   AND (spec_json -> 'testFixtures' IS NULL
        OR jsonb_array_length(COALESCE(spec_json -> 'testFixtures', '[]'::jsonb)) = 0);
