@@ -16,6 +16,7 @@ import {
 } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { SkeletonRow } from "@/components/skeleton-loader";
 
 type RunListItem = {
   runId: string;
@@ -433,7 +434,13 @@ export default function RunsPage() {
       {selectedRun && !rerunSupported ? (
         <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, or case-scoped runs.</p>
       ) : null}
-      {loading ? <p className="text-sm text-slate-600">Loading runs...</p> : null}
+      {loading ? (
+        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <tbody>{Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} cols={7} />)}</tbody>
+          </table>
+        </div>
+      ) : null}
       {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Use the run controls above to start one.</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">

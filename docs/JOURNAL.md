@@ -1,5 +1,47 @@
 # Journal
 
+## 2026-05-16 — Sprint 2: Demo Data & Visual Quality
+
+**Goal:** Replace system-generated placeholder data with realistic personas, enrich the measure catalog, and make the trend charts interpretable.
+
+**Issue 2.1 — Measure owners and tags (V016):**
+- V016 migration updates owner to J. Chen (Audiogram), M. Patel (HAZWOPER), K. Williams (TB + Flu Vaccine).
+- Sets `approved_by = 'Dr. R. Patel (Medical Director)'` on all active measure versions.
+- Adds realistic tag arrays per measure (e.g., `['surveillance','hearing','osha']`).
+- Frontend: Tags in measures list now render as inline chip spans instead of comma-joined text.
+
+**Issue 2.2 — Additional measures catalog (V017):**
+- V017 migration adds Respirator Fit Test (Draft v0.9, J. Chen), Hepatitis B Vaccination Series (Approved v2.0, K. Williams), Lead Medical Surveillance (Deprecated v1.1, M. Patel).
+- Catalog now shows 7 measures across all lifecycle states — matches v0 prototype richness.
+- Each insert is wrapped in an idempotent DO $$ block.
+
+**Issue 2.3 — Trend charts with axes, tooltips, delta (V018 + backend + frontend):**
+- V018 migration seeds 5 months of MEASURE-scoped historical runs for all 4 active measures with gradual compliance decline for visual interest.
+- `ProgramService.trend()` extended with a UNION branch: outcome-based data (existing behavior) + run-level aggregate data for MEASURE-scoped runs that have no outcome rows — historical seed runs appear without needing full outcome data.
+- Replaced bare SVG `Sparkline` with Recharts `LineChart`: X-axis month labels, Y-axis percentage scale, hover tooltip with exact %, and a delta badge showing ↑/↓ % change from last run.
+- Added recharts 3.8.1.
+
+**Issue 2.4 — Top drivers reason code breakdown:**
+- Backend: `byOutcomeReason` query now includes DUE_SOON (was OVERDUE + MISSING_DATA only); `totalFlagged` denominator updated to match.
+- Frontend: Rendered a new "By Reason" section below site/role drivers with color-coded chips (rose for Overdue, amber for Due Soon, slate for Missing Data) and count + percentage.
+
+**Issue 2.5 — Case assignees (V019):**
+- V019 migration assigns ~30% of open cases to Sarah Mitchell, ~30% to James Torres, ~40% remain unassigned.
+- Idempotent: only updates rows where assignee IS NULL.
+
+**Issue 2.6 — Skeleton loading states:**
+- New shared `frontend/components/skeleton-loader.tsx` with `SkeletonCard` and `SkeletonRow` using Tailwind `animate-pulse`.
+- Programs Overview: 4 skeleton cards while loading (matches measure card shape).
+- Cases list: 10 skeleton rows (8 cols) while loading.
+- Runs list: 10 skeleton rows (7 cols) while loading.
+
+**Branch:** `feat/sprint-2-demo-data-visual`
+
+**Verification:**
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅
+- Backend tests running (Testcontainers + Flyway V016–V019 applied).
+
 ## 2026-05-16 — Live QA polish fixes
 
 **Goal:** Resolve the three non-blocking issues found during the automated live QA pass on the canonical Vercel deployment.

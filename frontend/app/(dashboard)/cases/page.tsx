@@ -15,6 +15,7 @@ import {
 } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { SkeletonRow } from "@/components/skeleton-loader";
 
 type CaseSummary = {
   caseId: string;
@@ -404,7 +405,13 @@ export default function CasesPage() {
         </div>
       ) : null}
 
-      {loading ? <p className="text-sm text-slate-600">Loading cases...</p> : null}
+      {loading ? (
+        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <tbody>{Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} cols={8} />)}</tbody>
+          </table>
+        </div>
+      ) : null}
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
 
       {!loading && !error && filteredCases.length === 0 ? (
