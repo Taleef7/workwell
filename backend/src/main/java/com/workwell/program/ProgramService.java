@@ -266,7 +266,7 @@ public class ProgramService {
         );
 
         long totalFlagged = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA') AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))",
+                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON') AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))",
                 Long.class,
                 latestRunId, site, site
         );
@@ -276,7 +276,7 @@ public class ProgramService {
                 SELECT o.status AS reason, COUNT(*) AS cnt
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
-                WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA')
+                WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON')
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY o.status
                 ORDER BY cnt DESC

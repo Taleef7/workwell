@@ -196,13 +196,53 @@ export default function ProgramsPage() {
               <div className="mt-4 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
                 <div>
                   <p className="font-semibold text-slate-800">Top Sites</p>
-                  {drivers.bySite.length === 0 ? <p>-</p> : drivers.bySite.map((s) => <p key={s.site}>{s.site}: {s.overdueCount}</p>)}
+                  {drivers.bySite.length === 0 ? (
+                    <p className="text-slate-400">—</p>
+                  ) : (
+                    drivers.bySite.map((s) => (
+                      <p key={s.site} className="flex justify-between">
+                        <span>{s.site}</span>
+                        <span className="text-slate-500">{s.overdueCount} overdue</span>
+                      </p>
+                    ))
+                  )}
                 </div>
                 <div>
                   <p className="font-semibold text-slate-800">Top Roles</p>
-                  {drivers.byRole.length === 0 ? <p>-</p> : drivers.byRole.map((r) => <p key={r.role}>{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+                  {drivers.byRole.length === 0 ? (
+                    <p className="text-slate-400">—</p>
+                  ) : (
+                    drivers.byRole.map((r) => (
+                      <p key={r.role} className="flex justify-between">
+                        <span>{labelFor(ROLE_LABELS, r.role)}</span>
+                        <span className="text-slate-500">{r.overdueCount} overdue</span>
+                      </p>
+                    ))
+                  )}
                 </div>
               </div>
+
+              {drivers.byOutcomeReason && drivers.byOutcomeReason.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">By Reason</p>
+                  <div className="space-y-1">
+                    {drivers.byOutcomeReason.map((r) => (
+                      <div key={r.reason} className="flex items-center justify-between text-xs">
+                        <span className={`rounded px-1.5 py-0.5 font-medium ${
+                          r.reason === "OVERDUE"
+                            ? "bg-rose-100 text-rose-700"
+                            : r.reason === "DUE_SOON"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {labelFor(OUTCOME_LABELS, r.reason)}
+                        </span>
+                        <span className="text-slate-500">{r.count} cases ({r.pct}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 flex items-center justify-between">
                 <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-blue-700 hover:underline">
