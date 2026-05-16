@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 const TOKEN_KEY = "ww_token";
@@ -64,39 +64,46 @@ function readStoredSession(): StoredSession {
   return { token, user };
 }
 
+// Module-level listener bus for same-tab localStorage changes.
+// useSyncExternalStore requires a subscribe function; we emit here on login/logout.
+const sessionListeners = new Set<() => void>();
+function notifySessionChange() {
+  for (const fn of sessionListeners) fn();
+}
+function subscribeToSession(callback: () => void) {
+  sessionListeners.add(callback);
+  return () => { sessionListeners.delete(callback); };
+}
+
+// Server snapshot: always null during SSR so server and client initial renders match,
+// eliminating React hydration error #418. React transitions to readStoredSession()
+// on the client after hydration via useSyncExternalStore.
+const serverSnapshot: StoredSession = { token: null, user: null };
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  // Always initialize with null so server and client initial renders match (prevents hydration error #418).
-  // localStorage is read after mount in the effect below.
-  const [session, setSession] = useState<StoredSession>({ token: null, user: null });
-  const [mounted, setMounted] = useState(false);
+
+  const session = useSyncExternalStore(subscribeToSession, readStoredSession, () => serverSnapshot);
   const token = session.token;
   const user = session.user;
 
   useEffect(() => {
-    const stored = readStoredSession();
-    setSession(stored);
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
     if (pathname?.startsWith("/login")) return;
     if (!token) {
       router.replace("/login");
     }
-  }, [pathname, router, token, mounted]);
+  }, [pathname, router, token]);
 
   useEffect(() => {
-    if (!mounted) return;
     if (token) return;
     const storedToken = readStorage<string>(TOKEN_KEY);
     const storedUser = readStorage<AuthUser>(USER_KEY);
     if (!storedToken && !storedUser) return;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  }, [token, mounted]);
+    notifySessionChange();
+  }, [token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -105,12 +112,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login: (nextToken, email, role) => {
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
-        setSession({ token: nextToken, user: { email, role } });
+        notifySessionChange();
       },
       logout: () => {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
-        setSession({ token: null, user: null });
+        notifySessionChange();
         router.replace("/login");
       }
     }),
