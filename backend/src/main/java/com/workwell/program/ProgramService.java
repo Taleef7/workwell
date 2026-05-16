@@ -130,6 +130,9 @@ public class ProgramService {
     }
 
     public List<ProgramTrendPoint> trend(UUID measureId, String site, Instant from, Instant to) {
+        // Union of outcome-level data (real runs with employee rows) and run-level aggregate
+        // data (MEASURE-scoped seeded/historical runs that have no outcome rows). Deduplicates
+        // by excluding run IDs already covered by the outcome-based branch.
         String sql = """
                 WITH active_measure_version AS (
                     SELECT mv.id
@@ -137,20 +140,41 @@ public class ProgramService {
                     WHERE mv.measure_id = ?
                     ORDER BY mv.created_at DESC
                     LIMIT 1
+                ),
+                outcome_based AS (
+                    SELECT o.run_id,
+                           r.started_at,
+                           COUNT(*)                                        AS total_evaluated,
+                           COUNT(*) FILTER (WHERE o.status = 'COMPLIANT') AS compliant
+                    FROM outcomes o
+                    JOIN runs r ON r.id = o.run_id
+                    JOIN employees e ON e.id = o.employee_id
+                    JOIN active_measure_version amv ON amv.id = o.measure_version_id
+                    WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
+                    GROUP BY o.run_id, r.started_at
+                ),
+                run_based AS (
+                    SELECT r.id    AS run_id,
+                           r.started_at,
+                           COALESCE(r.total_evaluated, 0) AS total_evaluated,
+                           COALESCE(r.compliant, 0)        AS compliant
+                    FROM runs r
+                    JOIN active_measure_version amv ON amv.id = r.scope_id
+                    WHERE r.scope_type = 'MEASURE'
+                      AND r.status    = 'COMPLETED'
+                      AND r.dry_run   = false
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
+                      AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
+                      AND r.id NOT IN (SELECT run_id FROM outcome_based)
                 )
-                SELECT o.run_id,
-                       r.started_at,
-                       COUNT(*) AS total_evaluated,
-                       COUNT(*) FILTER (WHERE o.status = 'COMPLIANT') AS compliant
-                FROM outcomes o
-                JOIN runs r ON r.id = o.run_id
-                JOIN employees e ON e.id = o.employee_id
-                JOIN active_measure_version amv ON amv.id = o.measure_version_id
-                WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
-                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
-                  AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
-                GROUP BY o.run_id, r.started_at
-                ORDER BY r.started_at DESC
+                SELECT run_id, started_at, total_evaluated, compliant
+                FROM outcome_based
+                UNION ALL
+                SELECT run_id, started_at, total_evaluated, compliant
+                FROM run_based
+                ORDER BY started_at DESC
                 LIMIT 10
                 """;
 
@@ -164,7 +188,11 @@ public class ProgramService {
                     complianceRate,
                     totalEvaluated
             );
-        }, measureId, site, site, from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from), to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to));
+        }, measureId, site, site,
+                from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
+                to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to),
+                from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
+                to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to));
     }
 
     public TopDrivers topDrivers(UUID measureId, String site, Instant from, Instant to) {
