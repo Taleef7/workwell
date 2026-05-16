@@ -10,6 +10,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
 } from "recharts";
+import { SkeletonCard } from "@/components/skeleton-loader";
 
 type ProgramSummary = {
   measureId: string;
@@ -159,7 +160,11 @@ export default function ProgramsPage() {
           Run failed: {runError}
         </p>
       ) : null}
-      {loading ? <p className="text-sm text-slate-600">Loading programs...</p> : null}
+      {loading ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : null}
       {!loading && programs.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
           No active measures. Create and release a measure to begin.
