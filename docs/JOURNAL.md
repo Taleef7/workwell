@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-05-16 — Live QA polish fixes
+
+**Goal:** Resolve the three non-blocking issues found during the automated live QA pass on the canonical Vercel deployment.
+
+**React hydration error #418 (frontend):**
+- Root cause: `AuthProvider` initialized session state with a lazy initializer that reads `localStorage` — a mismatch because the server-side initializer returns null but the client-side re-initialization finds a stored token.
+- Fix: initialize with `{ token: null, user: null }` always. A dedicated `useEffect` reads `localStorage` after mount and sets a `mounted` flag. Redirect and cleanup effects gate on `mounted` so they wait until the localStorage check completes.
+- Effect: server and client initial renders match, hydration succeeds, no React error #418.
+
+**MCP health cosmetic issue (backend):**
+- Root cause: `IntegrationHealthService.checkMcpHealth()` classified HTTP 401/403 from the SSE endpoint as `degraded`. But 403 means the endpoint is reachable and correctly secured — not broken.
+- Fix: 401/403 responses now return `status=healthy` with detail "MCP SSE reachable and secured by auth". Real failures (timeouts, 5xx, connection refused) still return `degraded`.
+
+**Demo test fixtures missing (backend migration):**
+- Added `V015__seed_demo_test_fixtures.sql` which updates `spec_json->'testFixtures'` for all 4 active measures.
+- Audiogram and HAZWOPER: 5 fixtures each (COMPLIANT, DUE_SOON, OVERDUE, MISSING_DATA, EXCLUDED).
+- TB Surveillance: 5 fixtures (same coverage). Flu Vaccine: 3 fixtures (COMPLIANT, MISSING_DATA, EXCLUDED — matching current CQL outcomes).
+- Migration is idempotent: only updates rows where `testFixtures` is currently empty.
+
+**Verification:**
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅
+- `./gradlew.bat test` ✅ (all tests pass including V015 Flyway migration via Testcontainers)
+- `git diff --check` ✅
+
 ## 2026-05-14 — Sprint 0 Issue 0.8 run history pagination and timestamp compaction
 
 **Goal:** Keep the run history view readable by limiting the initial fetch, adding a progressive load-more control, and shrinking timestamp/ID copy.
