@@ -67,25 +67,36 @@ function readStoredSession(): StoredSession {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [session, setSession] = useState<StoredSession>(() => readStoredSession());
+  // Always initialize with null so server and client initial renders match (prevents hydration error #418).
+  // localStorage is read after mount in the effect below.
+  const [session, setSession] = useState<StoredSession>({ token: null, user: null });
+  const [mounted, setMounted] = useState(false);
   const token = session.token;
   const user = session.user;
 
   useEffect(() => {
+    const stored = readStoredSession();
+    setSession(stored);
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     if (pathname?.startsWith("/login")) return;
     if (!token) {
       router.replace("/login");
     }
-  }, [pathname, router, token]);
+  }, [pathname, router, token, mounted]);
 
   useEffect(() => {
+    if (!mounted) return;
     if (token) return;
     const storedToken = readStorage<string>(TOKEN_KEY);
     const storedUser = readStorage<AuthUser>(USER_KEY);
     if (!storedToken && !storedUser) return;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  }, [token]);
+  }, [token, mounted]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
