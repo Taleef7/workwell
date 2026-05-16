@@ -156,8 +156,9 @@ public class IntegrationHealthService {
     }
 
     private SyncResult checkMcpHealth() {
+        HttpURLConnection connection = null;
         try {
-            HttpURLConnection connection = (HttpURLConnection) URI.create(mcpSseUrl).toURL().openConnection();
+            connection = (HttpURLConnection) URI.create(mcpSseUrl).toURL().openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
@@ -172,6 +173,15 @@ public class IntegrationHealthService {
                         "contentType", contentType == null ? "" : contentType
                 ));
             }
+            // 401/403 means the SSE endpoint is reachable and correctly secured by auth —
+            // not a connectivity failure. Report as healthy with a note.
+            if (statusCode == 401 || statusCode == 403) {
+                return new SyncResult("healthy", "MCP SSE reachable and secured by auth (HTTP " + statusCode + ")", Map.of(
+                        "sseUrl", mcpSseUrl,
+                        "statusCode", statusCode,
+                        "note", "Unauthenticated health probe returns auth challenge — endpoint is protected as expected"
+                ));
+            }
             return new SyncResult("degraded", "MCP SSE not reachable (HTTP " + statusCode + ")", Map.of(
                     "sseUrl", mcpSseUrl,
                     "statusCode", statusCode,
@@ -179,6 +189,10 @@ public class IntegrationHealthService {
             ));
         } catch (Exception ex) {
             return new SyncResult("degraded", "MCP SSE check failed: " + ex.getMessage(), Map.of("sseUrl", mcpSseUrl));
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
