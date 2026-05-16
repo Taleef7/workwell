@@ -171,7 +171,19 @@ export default function MeasuresPage() {
                 </td>
                 <td className="px-3 py-2">{item.owner}</td>
                 <td className="px-3 py-2">{new Date(item.lastUpdated).toLocaleString()}</td>
-                <td className="px-3 py-2">{item.tags?.join(", ") || "-"}</td>
+                <td className="px-3 py-2">
+                  {item.tags && item.tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.map((tag) => (
+                        <span key={tag} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

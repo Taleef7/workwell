@@ -6,6 +6,11 @@ import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip,
+  CartesianGrid, ResponsiveContainer,
+} from "recharts";
+import { SkeletonCard } from "@/components/skeleton-loader";
 
 type ProgramSummary = {
   measureId: string;
@@ -155,7 +160,11 @@ export default function ProgramsPage() {
           Run failed: {runError}
         </p>
       ) : null}
-      {loading ? <p className="text-sm text-slate-600">Loading programs...</p> : null}
+      {loading ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : null}
       {!loading && programs.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
           No active measures. Create and release a measure to begin.
@@ -186,19 +195,59 @@ export default function ProgramsPage() {
 
               <div className="mt-4">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Trend</p>
-                <Sparkline points={trend.map((t) => t.complianceRate)} />
+                <TrendChart data={trend} />
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
                 <div>
                   <p className="font-semibold text-slate-800">Top Sites</p>
-                  {drivers.bySite.length === 0 ? <p>-</p> : drivers.bySite.map((s) => <p key={s.site}>{s.site}: {s.overdueCount}</p>)}
+                  {drivers.bySite.length === 0 ? (
+                    <p className="text-slate-400">—</p>
+                  ) : (
+                    drivers.bySite.map((s) => (
+                      <p key={s.site} className="flex justify-between">
+                        <span>{s.site}</span>
+                        <span className="text-slate-500">{s.overdueCount} overdue</span>
+                      </p>
+                    ))
+                  )}
                 </div>
                 <div>
                   <p className="font-semibold text-slate-800">Top Roles</p>
-                  {drivers.byRole.length === 0 ? <p>-</p> : drivers.byRole.map((r) => <p key={r.role}>{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+                  {drivers.byRole.length === 0 ? (
+                    <p className="text-slate-400">—</p>
+                  ) : (
+                    drivers.byRole.map((r) => (
+                      <p key={r.role} className="flex justify-between">
+                        <span>{labelFor(ROLE_LABELS, r.role)}</span>
+                        <span className="text-slate-500">{r.overdueCount} overdue</span>
+                      </p>
+                    ))
+                  )}
                 </div>
               </div>
+
+              {drivers.byOutcomeReason && drivers.byOutcomeReason.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">By Reason</p>
+                  <div className="space-y-1">
+                    {drivers.byOutcomeReason.map((r) => (
+                      <div key={r.reason} className="flex items-center justify-between text-xs">
+                        <span className={`rounded px-1.5 py-0.5 font-medium ${
+                          r.reason === "OVERDUE"
+                            ? "bg-rose-100 text-rose-700"
+                            : r.reason === "DUE_SOON"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {labelFor(OUTCOME_LABELS, r.reason)}
+                        </span>
+                        <span className="text-slate-500">{r.count} cases ({r.pct}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 flex items-center justify-between">
                 <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-blue-700 hover:underline">
@@ -238,27 +287,60 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
   return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
 }
 
-function Sparkline({ points }: { points: number[] }) {
-  const width = 240;
-  const height = 60;
-  if (!points.length) {
-    return <div className="h-[60px] rounded border border-dashed border-slate-300 bg-slate-50" />;
+function TrendChart({ data }: { data: TrendPoint[] }) {
+  if (!data || data.length < 2) {
+    return (
+      <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
+        <span className="text-xs text-slate-400">Not enough run history for trend</span>
+      </div>
+    );
   }
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const step = points.length === 1 ? 0 : width / (points.length - 1);
-  const d = points
-    .map((p, i) => {
-      const x = i * step;
-      const y = height - ((p - min) / range) * height;
-      return `${i === 0 ? "M" : "L"}${x},${y}`;
-    })
-    .join(" ");
+
+  const sorted = [...data].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
+  const chartData = sorted.map((t) => ({
+    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short" }),
+    rate: Math.round(t.complianceRate * 10) / 10,
+  }));
+
+  const last = chartData[chartData.length - 1].rate;
+  const prev = chartData[chartData.length - 2].rate;
+  const delta = (last - prev).toFixed(1);
+  const deltaPositive = parseFloat(delta) >= 0;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[60px] w-full rounded border border-slate-200 bg-white">
-      <path d={d} fill="none" stroke="#334155" strokeWidth="2" />
-    </svg>
+    <div className="space-y-1">
+      <div className="flex items-center gap-1">
+        <span className={`text-xs font-medium ${deltaPositive ? "text-emerald-600" : "text-rose-600"}`}>
+          {deltaPositive ? "↑" : "↓"} {Math.abs(parseFloat(delta))}% from last run
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={80}>
+        <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+          <YAxis
+            tickFormatter={(v: number) => `${v}%`}
+            domain={["auto", 100]}
+            tick={{ fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={36}
+          />
+          <Tooltip
+            formatter={(v) => [`${v}%`, "Compliance"]}
+            contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+          />
+          <Line
+            type="monotone"
+            dataKey="rate"
+            stroke="#2563eb"
+            strokeWidth={2}
+            dot={{ r: 3, fill: "#2563eb" }}
+            activeDot={{ r: 4 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
