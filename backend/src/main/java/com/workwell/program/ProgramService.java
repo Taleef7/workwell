@@ -276,6 +276,11 @@ public class ProgramService {
                 latestRunId, site, site
         );
 
+        org.springframework.jdbc.core.RowMapper<DriverOutcomeReason> reasonMapper = (rs, rowNum) -> {
+            long count = rs.getLong("cnt");
+            double pct = totalFlagged == 0 ? 0d : Math.round((count * 1000.0 / totalFlagged)) / 10.0;
+            return new DriverOutcomeReason(rs.getString("reason"), count, pct);
+        };
         List<DriverOutcomeReason> byOutcomeReason = jdbcTemplate.query(
                 """
                 SELECT o.status AS reason, COUNT(*) AS cnt
@@ -286,15 +291,7 @@ public class ProgramService {
                 GROUP BY o.status
                 ORDER BY cnt DESC
                 """,
-                (rs, rowNum) -> {
-                    long count = rs.getLong("cnt");
-                    double pct = totalFlagged == 0 ? 0d : Math.round((count * 1000.0 / totalFlagged)) / 10.0;
-                    return new DriverOutcomeReason(
-                            rs.getString("reason"),
-                            count,
-                            pct
-                    );
-                },
+                reasonMapper,
                 latestRunId, site, site
         );
 
