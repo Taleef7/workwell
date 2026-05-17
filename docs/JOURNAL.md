@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-05-16 — Sprint 2 merged; Sprint 1: Run Pipeline & Operational Correctness
+
+**Goal:** Transform the run pipeline from synchronous-blocking to async with polling, enable the scheduler, implement SITE/EMPLOYEE scoped runs, and add cases pagination.
+
+**Sprint 2 merged:** PR #17 (`feat/sprint-2-demo-data-visual`) merged to main. All V016–V019 migrations, trend charts, skeleton loaders, assignee personas, and reason code breakdown shipped.
+
+**Issue 1.1 + 1.4 — Async run execution & auto-refresh (backend + frontend):**
+- Created `AsyncConfig.java`: `runExecutor` ThreadPoolTaskExecutor (core=2, max=4, queue=20, graceful shutdown 120s).
+- Added `createPendingRun()`, `updateRunStatus()`, `setFailureSummary()`, and `finalizeAsyncRun()` to `RunPersistenceService`. `finalizeAsyncRun` replicates the post-INSERT logic of `persistAllProgramsRun` (outcomes, case upserts, audit events, run finalization) on a pre-existing run row.
+- Added `createRunRecord()` and `@Async("runExecutor") executeRunAsync()` to `AllProgramsRunService`. Private `evaluateForScopeAsync()` handles ALL_PROGRAMS, MEASURE, SITE, and EMPLOYEE dispatch.
+- `EvalController.POST /api/runs/manual`: CASE scope stays synchronous (200 OK); all other scopes return HTTP 202 immediately with `{runId, status: "REQUESTED", message}`.
+- Frontend `programs/page.tsx`: after triggering a run, stores `activeRunId` and polls `GET /api/runs/{id}` every 5s. Button disabled while polling with "Running…" label. Auto-calls `loadAll()` on COMPLETED/PARTIAL_FAILURE. Toast on success/failure.
+
+**Issue 1.2 — Scheduler enabled:**
+- `application.yml`: scheduler default changed to `enabled: true`, cron `0 0 2 * * *` (2AM UTC daily).
+- `ScheduledRunService.runScheduledAllPrograms()` now uses the async path (`createRunRecord` + `executeRunAsync`) instead of blocking `runAllPrograms()`.
+
+**Issue 1.3 — SITE and EMPLOYEE scoped runs:**
+- `evaluateForScopeAsync()` in `AllProgramsRunService` handles SITE (filters outcomes by `site`) and EMPLOYEE (filters by `subjectId`) scopes. Both require corresponding request fields or return 400.
+- Missing required field validation returns 400 via `IllegalArgumentException` → `ResponseStatusException`.
+
+**Issue 1.5 — Cases load-more pagination:**
+- `CaseFlowService.listCases()` extended with `limit` and `offset` parameters; SQL query appended with `LIMIT ? OFFSET ?`. Existing call sites default to limit=50, offset=0.
+- `CaseController.GET /api/cases` now accepts `limit` (default 25) and `offset` (default 0).
+- Frontend `cases/page.tsx`: initial load fetches 25 cases; "Load more" button appends the next 25. `hasMore` flag hides the button when a page returns fewer than 25.
+
+**Branch:** `feat/sprint-1-run-pipeline`
+
+**Verification:**
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅
+- Backend tests running (Testcontainers).
+
 ## 2026-05-16 — Sprint 2: Demo Data & Visual Quality
 
 **Goal:** Replace system-generated placeholder data with realistic personas, enrich the measure catalog, and make the trend charts interpretable.
