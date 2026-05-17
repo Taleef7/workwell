@@ -27,6 +27,10 @@ workwell:
     cookie-secure: ${WORKWELL_AUTH_COOKIE_SECURE:false}
   cors:
     allowed-origins: ${WORKWELL_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
+  ratelimit:
+    enabled: ${WORKWELL_RATELIMIT_ENABLED:true}
+  swagger:
+    enabled: ${SWAGGER_ENABLED:false}
   demo:
     enabled: ${WORKWELL_DEMO_ENABLED:false}
     allow-public-demo: ${WORKWELL_DEMO_ALLOW_PUBLIC_DEMO:false}
