@@ -138,39 +138,20 @@ class EvalControllerTest {
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void runsAllProgramsScopeUsingActiveMeasureVersions() throws Exception {
         UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(allProgramsRunService.run(any(), eq("cm@workwell.dev"))).thenReturn(
-                new EvalController.ManualRunResponse(
-                        runId.toString(),
-                        "ALL_PROGRAMS",
-                        "All Programs",
-                        "COMPLETED",
-                        2,
-                        200L,
-                        180L,
-                        20L,
-                        "Run completed",
-                        List.of("Audiogram", "TB Surveillance")
-                )
-        );
+        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"scopeType\":\"ALL_PROGRAMS\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
-                .andExpect(jsonPath("$.scopeType").value("ALL_PROGRAMS"))
-                .andExpect(jsonPath("$.scopeLabel").value("All Programs"))
-                .andExpect(jsonPath("$.status").value("COMPLETED"))
-                .andExpect(jsonPath("$.activeMeasuresExecuted").value(2))
-                .andExpect(jsonPath("$.totalEvaluated").value(200))
-                .andExpect(jsonPath("$.compliant").value(180))
-                .andExpect(jsonPath("$.nonCompliant").value(20));
+                .andExpect(jsonPath("$.status").value("REQUESTED"));
     }
 
     @Test
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rejectsMeasureScopeWithoutMeasureIdentifier() throws Exception {
-        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
+        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev")))
                 .thenThrow(new IllegalArgumentException("measureId or measureVersionId is required for MEASURE scope"));
 
         mockMvc.perform(post("/api/runs/manual")
@@ -181,25 +162,29 @@ class EvalControllerTest {
 
     @Test
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
-    void rejectsSiteScopeUntilImplemented() throws Exception {
-        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
-                .thenThrow(new IllegalArgumentException("Scope SITE is not implemented yet"));
+    void acceptsSiteScopeForAsyncExecution() throws Exception {
+        UUID runId = UUID.fromString("55555555-5555-5555-5555-555555555555");
+        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"scopeType\":\"SITE\",\"site\":\"Plant A\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.status").value("REQUESTED"));
     }
 
     @Test
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
-    void rejectsEmployeeScopeUntilImplemented() throws Exception {
-        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
-                .thenThrow(new IllegalArgumentException("Scope EMPLOYEE is not implemented yet"));
+    void acceptsEmployeeScopeForAsyncExecution() throws Exception {
+        UUID runId = UUID.fromString("66666666-6666-6666-6666-666666666666");
+        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"scopeType\":\"EMPLOYEE\",\"employeeExternalId\":\"emp-001\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.status").value("REQUESTED"));
     }
 }
