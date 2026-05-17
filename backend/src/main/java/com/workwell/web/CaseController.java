@@ -50,7 +50,9 @@ public class CaseController {
             @RequestParam(name = "assignee", required = false) String assignee,
             @RequestParam(name = "site", required = false) String site,
             @RequestParam(name = "from", required = false) String from,
-            @RequestParam(name = "to", required = false) String to
+            @RequestParam(name = "to", required = false) String to,
+            @RequestParam(name = "limit", defaultValue = "50") int limit,
+            @RequestParam(name = "offset", defaultValue = "0") int offset
     ) {
         try {
             return caseFlowService.listCases(
@@ -60,7 +62,9 @@ public class CaseController {
                     assignee,
                     site,
                     parseFromDate(from),
-                    parseToDate(to)
+                    parseToDate(to),
+                    limit,
+                    offset
             );
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
