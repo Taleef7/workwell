@@ -7,14 +7,13 @@ import com.workwell.measure.MeasureService;
 import com.workwell.web.EvalController.ManualRunResponse;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
 
 @SpringBootTest
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class Major1PopulationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -29,9 +28,11 @@ class Major1PopulationIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
+    void setUp() { resetTables(); }
+
     @Test
     void manualRunPersistsOneHundredOutcomesPerMeasureAndTbHighCompliance() {
-        resetTables();
         ManualRunResponse response = allProgramsRunService.runAllPrograms("All Programs", "cm@workwell.dev");
 
         List<Map<String, Object>> counts = jdbcTemplate.queryForList(
@@ -63,7 +64,6 @@ class Major1PopulationIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void manualRunAutoQueuesOutreachForNonCompliantOutcomesAndSkipsExcluded() {
-        resetTables();
         ManualRunResponse response = allProgramsRunService.runAllPrograms("All Programs", "cm@workwell.dev");
         java.util.UUID runId = java.util.UUID.fromString(response.runId());
 
@@ -179,7 +179,6 @@ class Major1PopulationIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void historicalSeedCreatesFiveRunsWithTrendVariance() {
-        resetTables();
         measureService.listMeasures();
         seedHistoricalRunsService.seedHistoricalRunsIfEmpty();
         Integer runCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM runs", Integer.class);

@@ -15,12 +15,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.annotation.DirtiesContext;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class CaseViewAuditIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -32,10 +31,12 @@ class CaseViewAuditIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @BeforeEach
+    void setUp() { resetTables(); }
+
     @Test
     @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
     void openingCaseWritesAccessAuditEventAndAdminFilterShowsIt() throws Exception {
-        resetTables();
         allProgramsRunService.runAllPrograms("All Programs", "admin@workwell.dev");
 
         UUID caseId = jdbcTemplate.queryForObject(
