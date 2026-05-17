@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-05-17 — Sprint 3: Employee Profile, Cross-Program View, SLA Tracking
+
+**Goal:** Clickable employee profiles aggregating cross-program compliance posture, functional global search, SLA countdowns on cases, and a My Cases view.
+
+**Sprint 1 merged (PR #18):** Async run pipeline, scheduler, SITE/EMPLOYEE scoped runs, cases pagination — all shipped to main.
+
+**Issue 3.1 — Employee profile page (backend + frontend):**
+- Created `EmployeeProfileResponse.java` DTO in `com.workwell.web.dto` with nested records: `MeasureOutcomeSummary`, `OpenCaseSummary`, `AuditEventSummary`.
+- Created `EmployeeProfileService.java` in `com.workwell.run` with `getProfile(externalId)` (4 SQL queries: employee base, latest outcome per measure via `DISTINCT ON (mv.measure_id)`, open cases, last 20 audit events) and `search(q, limit)` (LIKE pattern on name/externalId/role). Uses `JdbcTemplate` + `ObjectMapper` for JSONB evidence parsing.
+- Created `EmployeeProfileController.java` at `/api/employees/{externalId}/profile` and `/api/employees/search`. Both `@PreAuthorize("isAuthenticated()")`.
+- Created `frontend/features/employee/hooks/useEmployeeProfile.ts` — fetches the profile endpoint.
+- Created `frontend/features/employee/components/ComplianceSummaryBar.tsx` — color-coded pill row per measure outcome.
+- Created `frontend/app/(dashboard)/employees/[externalId]/page.tsx` — full profile page: header, compliance posture bar, open cases table (with SLA chip placeholder), measure detail accordion, recent activity timeline.
+
+**Issue 3.2 — Global search:**
+- Created `frontend/components/GlobalSearch.tsx` — debounced (300ms) type-ahead search, calls `/api/employees/search?q=...`, shows name/role/site/outcome badge in dropdown, navigates to `/employees/:externalId`, closes on Escape or outside click.
+- Wired `<GlobalSearch />` into the dashboard header in `layout.tsx`.
+- Added `{ href: "/cases", label: "Cases" }` nav item to the sidebar.
+
+**Issue 3.3 — SLA tracking (complete):**
+- Created `CaseSlaService.java` in `com.workwell.caseflow` with:
+  - `computeSlaDueDate(outcomeStatus)`: OVERDUE→14d, DUE_SOON→30d, MISSING_DATA→21d from now.
+  - `@Scheduled(cron = "0 0 */6 * * *") escalateBreachedCases()`: bumps priority one level, sets `sla_breached=TRUE`, writes `CASE_SLA_BREACHED` audit event. `BadSqlGrammarException` (missing column) silently skipped for mixed-deployment safety; other `DataAccessException` logged at ERROR.
+- `V020__add_case_sla_due_date.sql` adds columns and backfills with outcome-specific windows (OVERDUE 14d, MISSING_DATA 21d, DUE_SOON 30d via CASE expression).
+- `CaseFlowService.upsertOpenCase` injects `CaseSlaService` and writes `sla_due_date` on INSERT/reopen; preserves existing `sla_due_date` and `sla_breached` on update of already-open cases to prevent SLA resets by regular runs.
+- `CaseSummary` record and `listCases()` query updated: `sla_due_date`, `sla_breached`, and computed `slaRemainingDays` now included in the cases API response.
+- `OpenCaseSummary` DTO and `EmployeeProfileService` updated: `slaBreached` flag included alongside `slaDueDate`/`slaRemainingDays`.
+- Frontend: `SlaChip` on employee profile page now receives `breached={c.slaBreached}`, so already-breached cases show "Breached" rather than "0d left".
+
+**Issue 3.4 — My Cases tab:**
+- Added "All Cases / My Cases" tab row to `cases/page.tsx`. "My Cases" filters `/api/cases?assignee={user.email}&view=mine`.
+- Employee names in cases list, case detail, and runs page now link to `/employees/{employeeId}`.
+
+**Branch:** `feat/sprint-3-employee-profile`
+
+**Verification:**
+- `./gradlew.bat compileJava` ✅
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅ — `/employees/[externalId]` live in route table
+
 ## 2026-05-16 — Sprint 2 merged; Sprint 1: Run Pipeline & Operational Correctness
 
 **Goal:** Transform the run pipeline from synchronous-blocking to async with polling, enable the scheduler, implement SITE/EMPLOYEE scoped runs, and add cases pagination.

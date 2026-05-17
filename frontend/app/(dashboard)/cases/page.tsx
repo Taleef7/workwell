@@ -16,6 +16,7 @@ import {
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
+import { useAuth } from "@/components/auth-provider";
 
 type CaseSummary = {
   caseId: string;
@@ -35,6 +36,8 @@ type CaseSummary = {
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
   updatedAt: string;
+  slaRemainingDays?: number | null;
+  slaBreached?: boolean;
 };
 
 type MeasureOption = {
@@ -65,6 +68,8 @@ export default function CasesPage() {
   const searchParams = useSearchParams();
   const urlStatus = searchParams.get("status");
   const urlSearch = searchParams.get("search") ?? "";
+  const view = searchParams.get("view") ?? "all";
+  const { user } = useAuth();
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,7 +113,8 @@ export default function CasesPage() {
       params.set("status", statusFilter);
       if (measureFilter) params.set("measureId", measureFilter);
       if (priorityFilter) params.set("priority", priorityFilter);
-      if (assigneeFilter) params.set("assignee", assigneeFilter);
+      const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
+      if (effectiveAssignee) params.set("assignee", effectiveAssignee);
       if (siteFilter) {
         params.set("site", siteFilter);
       } else if (siteId) {
@@ -127,7 +133,7 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter, setLoading, setError, setCases, setSelectedCaseIds]);
+  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -306,6 +312,39 @@ export default function CasesPage() {
           onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
         >
           Export audit CSV
+        </button>
+      </div>
+
+      <div className="flex gap-0 border-b border-slate-200 mb-4">
+        <button
+          type="button"
+          onClick={() => {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('view', 'all');
+            router.push(`/cases?${params.toString()}`);
+          }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            view !== 'mine'
+              ? 'border-slate-900 text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          All Cases
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('view', 'mine');
+            router.push(`/cases?${params.toString()}`);
+          }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            view === 'mine'
+              ? 'border-slate-900 text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          My Cases
         </button>
       </div>
 
@@ -488,7 +527,11 @@ export default function CasesPage() {
 
               <div className="mt-2">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
-                <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.employeeName}</h4>
+                <h4 className="mt-1 text-lg font-semibold text-slate-900">
+                  <Link href={`/employees/${item.employeeId}`} className="hover:underline hover:text-blue-700">
+                    {item.employeeName}
+                  </Link>
+                </h4>
                 <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
                 <p className="mt-1 text-xs text-slate-500">{item.site}</p>
               </div>
@@ -510,6 +553,22 @@ export default function CasesPage() {
                   <dt className="text-slate-500">Period</dt>
                   <dd className="font-medium">{item.evaluationPeriod}</dd>
                 </div>
+                {item.slaRemainingDays != null ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-slate-500">SLA</dt>
+                    <dd className={
+                      item.slaBreached
+                        ? 'font-semibold text-red-700'
+                        : item.slaRemainingDays <= 2
+                        ? 'font-medium text-red-600'
+                        : item.slaRemainingDays <= 7
+                        ? 'text-yellow-600'
+                        : 'text-slate-500'
+                    }>
+                      {item.slaBreached ? 'Breached' : `${item.slaRemainingDays}d`}
+                    </dd>
+                  </div>
+                ) : null}
                 {caseStatus === "EXCLUDED" ? (
                   <>
                     <div className="flex items-start justify-between gap-3">

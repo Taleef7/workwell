@@ -62,6 +62,9 @@ class CaseControllerTest {
                         null,
                         false,
                         0,
+                        null,
+                        false,
+                        14,
                         Instant.parse("2026-05-04T12:00:00Z")
                 )
         ));
@@ -96,6 +99,9 @@ class CaseControllerTest {
                         Instant.parse("2026-06-04T00:00:00Z"),
                         false,
                         0,
+                        null,
+                        false,
+                        null,
                         Instant.parse("2026-05-04T12:00:00Z")
                 )
         ));
