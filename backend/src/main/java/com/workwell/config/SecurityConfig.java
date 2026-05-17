@@ -36,6 +36,7 @@ public class SecurityConfig {
     private final Cache<String, Bucket> rateLimitCache;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SecurityConfig(
             ObjectProvider<JwtService> jwtServiceProvider,
             @Value("${workwell.auth.enabled:true}") boolean authEnabled,

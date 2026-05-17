@@ -202,6 +202,36 @@ class EvidenceAccessIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void uploadRejectsUnsupportedTypeWith415() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(multipart("/api/cases/{caseId}/evidence", caseId)
+                        .file(new MockMultipartFile(
+                                "file",
+                                "malware.exe",
+                                "application/pdf",
+                                new byte[] {0x4D, 0x5A, (byte) 0x90, 0x00, 0x03}
+                        )))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.error").value("unsupported_media_type"))
+                .andExpect(jsonPath("$.accepted").isArray());
+    }
+
+    @Test
+    @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
+    void uploadAcceptsCsvEvidence() throws Exception {
+        UUID caseId = anyCaseId();
+        mockMvc.perform(multipart("/api/cases/{caseId}/evidence", caseId)
+                        .file(new MockMultipartFile(
+                                "file",
+                                "results.csv",
+                                "text/csv",
+                                "employee,status\nE1,COMPLIANT\n".getBytes(StandardCharsets.UTF_8)
+                        )))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
     void uploadEndpointRejectsUnauthorizedRole() throws Exception {
         UUID caseId = anyCaseId();

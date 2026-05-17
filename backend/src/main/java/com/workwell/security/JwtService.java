@@ -24,6 +24,7 @@ public class JwtService {
     private final long accessTtlSeconds;
     private final long refreshTtlSeconds;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public JwtService(
             ObjectMapper objectMapper,
             @Value("${workwell.auth.jwt-secret:" + DEFAULT_SECRET + "}") String secret,
