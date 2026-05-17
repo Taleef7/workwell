@@ -31,7 +31,7 @@ public class ScheduledRunService {
             ManualRunRequest request = new ManualRunRequest(
                     RunScopeType.ALL_PROGRAMS, null, null, null, null, null, null, false
             );
-            UUID runId = allProgramsRunService.createRunRecord(request, "scheduler");
+            UUID runId = allProgramsRunService.createRunRecord(request, "scheduler", "scheduler");
             allProgramsRunService.executeRunAsync(runId, request, "scheduler");
             log.info("Scheduled all-programs run dispatched. runId={}", runId);
         } catch (RuntimeException ex) {

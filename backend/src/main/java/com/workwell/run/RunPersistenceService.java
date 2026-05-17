@@ -264,20 +264,25 @@ public class RunPersistenceService {
     }
 
     @Transactional
-    public void createPendingRun(UUID runId, String scopeType, String triggerType, String actor, String requestedScopeJson) {
+    public void createPendingRun(UUID runId, String scopeType, String triggerType, String actor,
+                                 String requestedScopeJson, UUID scopeId, java.time.LocalDate evaluationDate) {
         Instant now = Instant.now();
+        java.time.Instant periodStart = (evaluationDate != null ? evaluationDate.minusYears(1) : java.time.LocalDate.now().minusYears(1))
+                .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        java.time.Instant periodEnd = (evaluationDate != null ? evaluationDate : java.time.LocalDate.now())
+                .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
         jdbcTemplate.update(
                 """
                 INSERT INTO runs (
-                    id, scope_type, trigger_type, status, triggered_by,
+                    id, scope_type, scope_id, trigger_type, status, triggered_by,
                     started_at, measurement_period_start, measurement_period_end,
                     requested_scope_json, dry_run, partial_failure_count
-                ) VALUES (?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?::jsonb, false, 0)
+                ) VALUES (?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?::jsonb, false, 0)
                 """,
-                runId, scopeType, triggerType, actor,
+                runId, scopeType, scopeId, triggerType, actor,
                 java.sql.Timestamp.from(now),
-                java.sql.Timestamp.from(now.minus(365, ChronoUnit.DAYS)),
-                java.sql.Timestamp.from(now),
+                java.sql.Timestamp.from(periodStart),
+                java.sql.Timestamp.from(periodEnd),
                 requestedScopeJson
         );
     }
@@ -409,21 +414,27 @@ public class RunPersistenceService {
                     """
                             UPDATE runs
                             SET status = ?,
+                                started_at = ?,
                                 completed_at = ?,
                                 total_evaluated = ?,
                                 compliant = ?,
                                 non_compliant = ?,
+                                measurement_period_start = ?,
+                                measurement_period_end = ?,
                                 duration_ms = ?,
                                 failure_summary = ?,
                                 partial_failure_count = ?
                             WHERE id = ?
                             """,
                     finalStatus,
+                    Timestamp.from(startedAt),
                     Timestamp.from(completedAt),
                     totalEvaluated,
                     compliant,
                     nonCompliant,
-                    60_000L,
+                    Timestamp.from(startedAt),
+                    Timestamp.from(completedAt),
+                    completedAt.toEpochMilli() - startedAt.toEpochMilli(),
                     failureSummary,
                     partialFailureCount,
                     runId

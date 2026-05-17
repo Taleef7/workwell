@@ -51,7 +51,7 @@ public class CaseController {
             @RequestParam(name = "site", required = false) String site,
             @RequestParam(name = "from", required = false) String from,
             @RequestParam(name = "to", required = false) String to,
-            @RequestParam(name = "limit", defaultValue = "50") int limit,
+            @RequestParam(name = "limit", defaultValue = "25") int limit,
             @RequestParam(name = "offset", defaultValue = "0") int offset
     ) {
         try {
