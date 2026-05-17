@@ -26,12 +26,23 @@
 - `CaseController.GET /api/cases` now accepts `limit` (default 25) and `offset` (default 0).
 - Frontend `cases/page.tsx`: initial load fetches 25 cases; "Load more" button appends the next 25. `hasMore` flag hides the button when a page returns fewer than 25.
 
+**PR review fixes (Copilot/Codex findings on PR #18):**
+- `AllProgramsRunService`: added `validateScopeRequest()` — enforces required fields (site/employeeExternalId/measureId) before any DB write; throws `IllegalArgumentException` → 400. Added `resolveScopeId()` to persist `scope_id` in `runs` for MEASURE-scoped runs. Added 3-arg `createRunRecord` overload so `ScheduledRunService` can pass `triggerType="scheduler"` (previously hardcoded to "manual").
+- `RunPersistenceService.createPendingRun`: extended to accept `scopeId (UUID)` and `evaluationDate (LocalDate)` so `measurement_period_start/end` and `scope_id` are written at INSERT time rather than deferred.
+- `finalizeAsyncRun`: now writes `started_at`, `measurement_period_start/end`, and `duration_ms` in the final UPDATE to prevent timestamp drift in completed run records.
+- `CaseController`: fixed `limit` `defaultValue` to `"25"` (was `"50"`) to match frontend `PAGE_SIZE`.
+- `runs/page.tsx`: `ManualRunResponse` fields made optional — the 202 async response only returns `{runId, status, message}`. Toast now uses `data.message` directly when `scopeLabel` is absent, preventing "undefined - Run queued…".
+
+**CI speed fix:**
+- Created `AbstractIntegrationTest.java` with a single JVM-wide `static PostgreSQLContainer` started via a static initialiser. All 15 integration test classes now extend it and no longer spin up their own container. Spring context caching reuses a single `ApplicationContext` across the 10 plain `@SpringBootTest` classes. Expected CI improvement: ~30 min → ~8 min.
+
 **Branch:** `feat/sprint-1-run-pipeline`
 
 **Verification:**
 - `corepack pnpm lint` ✅
 - `corepack pnpm build` ✅
-- Backend tests running (Testcontainers).
+- `./gradlew.bat compileTestJava` ✅ (review fixes + AbstractIntegrationTest compile clean)
+- CI run pending on PR #18 push.
 
 ## 2026-05-16 — Sprint 2: Demo Data & Visual Quality
 
