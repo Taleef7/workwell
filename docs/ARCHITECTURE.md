@@ -27,7 +27,7 @@ Production endpoints:
 
 ## 3) Backend Module Boundaries (`com.workwell.*`)
 - `measure`: measure catalog, versioning, lifecycle transitions, policy traceability matrix (`MeasureTraceabilityService`), dry-run activation impact preview (`MeasureImpactPreviewService`), and value set governance + terminology mapping (`ValueSetGovernanceService` — resolve-check, diff, CQL unattached reference detection, terminology mapping CRUD).
-- `admin`: integration health, scheduler, waivers, outreach templates, and data readiness (`DataReadinessService` — source mapping, freshness, missingness computation).
+- `admin`: integration health (`IntegrationHealthService` — scheduled 15-min fhir/mcp/hris refresh, reactive AI status, distinct `simulated` HRIS status), scheduler, waivers, outreach templates (list/create/update/preview), outreach delivery log (`OutreachDeliveryLogService`), non-prod demo reset (`DemoResetService`, `@Profile("!prod")`), and data readiness (`DataReadinessService` — source mapping, freshness, missingness computation).
 - `valueset`: value set registry and measure/value-set linkage.
 - `compile`: CQL translator compile validation and compile metadata.
 - `fhir`: measure library/resource assembly used by evaluation runtime.
@@ -39,7 +39,7 @@ Production endpoints:
 - `admin`: scheduler settings, integration health, outreach template APIs.
 - `ai`: AI draft spec, explain-why-flagged, run insight surfaces with deterministic fallback.
 - `mcp`: read-only MCP tools and tool-call audit logging.
-- `notification`: outreach preview/composition support.
+- `notification`: outreach email delivery (`EmailService` — provider switch, default `simulated`; SendGrid wiring inert unless explicitly configured) + `EmailDeliveryRecord`.
 - `config`: cross-cutting app/security/CORS/runtime configuration.
 - `security`: HTTP security policy and allowed origins.
 - `web`: REST controllers and request/response contracts.
