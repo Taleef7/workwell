@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
@@ -21,16 +22,20 @@ public class ScheduledRunService {
         this.allProgramsRunService = allProgramsRunService;
     }
 
-    @Scheduled(cron = "${workwell.scheduler.cron:0 0 6 * * *}")
+    @Scheduled(cron = "${workwell.scheduler.cron:0 0 2 * * *}")
     public void runScheduledAllPrograms() {
         if (!isSchedulerEnabled()) {
             return;
         }
         try {
-            var result = allProgramsRunService.runAllPrograms("All Programs", "scheduler");
-            log.info("Scheduled all-programs run completed. runId={}, measures={}", result.runId(), result.activeMeasuresExecuted());
+            ManualRunRequest request = new ManualRunRequest(
+                    RunScopeType.ALL_PROGRAMS, null, null, null, null, null, null, false
+            );
+            UUID runId = allProgramsRunService.createRunRecord(request, "scheduler");
+            allProgramsRunService.executeRunAsync(runId, request, "scheduler");
+            log.info("Scheduled all-programs run dispatched. runId={}", runId);
         } catch (RuntimeException ex) {
-            log.error("Scheduled all-programs run failed: {}", ex.getMessage(), ex);
+            log.error("Failed to dispatch scheduled all-programs run: {}", ex.getMessage(), ex);
         }
     }
 

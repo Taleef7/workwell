@@ -34,8 +34,8 @@ workwell:
       hazwoper: 0.65
       flu_vaccine: 0.84
   scheduler:
-    enabled: ${WORKWELL_SCHEDULER_ENABLED:false}
-    cron: ${WORKWELL_SCHEDULER_CRON:0 0 6 * * *}
+    enabled: ${WORKWELL_SCHEDULER_ENABLED:true}
+    cron: ${WORKWELL_SCHEDULER_CRON:0 0 2 * * *}
   ai:
     openai:
       fallback-model: gpt-4o-mini
