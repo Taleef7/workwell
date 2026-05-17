@@ -1,7 +1,11 @@
 package com.workwell.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.workwell.security.JwtAuthFilter;
 import com.workwell.security.JwtService;
+import com.workwell.web.filter.RateLimitFilter;
+import io.github.bucket4j.Bucket;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -27,15 +31,40 @@ public class SecurityConfig {
     private final ObjectProvider<JwtService> jwtServiceProvider;
     private final boolean authEnabled;
     private final String allowedOriginsConfig;
+    private final boolean swaggerEnabled;
+    private final boolean rateLimitEnabled;
+    private final Cache<String, Bucket> rateLimitCache;
+    private final ObjectMapper objectMapper;
 
     public SecurityConfig(
             ObjectProvider<JwtService> jwtServiceProvider,
             @Value("${workwell.auth.enabled:true}") boolean authEnabled,
-            @Value("${workwell.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}") String allowedOriginsConfig
+            @Value("${workwell.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}") String allowedOriginsConfig,
+            @Value("${workwell.swagger.enabled:false}") boolean swaggerEnabled,
+            @Value("${workwell.ratelimit.enabled:true}") boolean rateLimitEnabled,
+            Cache<String, Bucket> rateLimitCache,
+            ObjectMapper objectMapper
     ) {
         this.jwtServiceProvider = jwtServiceProvider;
         this.authEnabled = authEnabled;
         this.allowedOriginsConfig = allowedOriginsConfig;
+        this.swaggerEnabled = swaggerEnabled;
+        this.rateLimitEnabled = rateLimitEnabled;
+        this.rateLimitCache = rateLimitCache;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Backward-compatible constructor used by focused unit tests that only exercise
+     * CORS. Rate limiting is disabled and Swagger is off in this form.
+     */
+    SecurityConfig(
+            ObjectProvider<JwtService> jwtServiceProvider,
+            boolean authEnabled,
+            String allowedOriginsConfig
+    ) {
+        this(jwtServiceProvider, authEnabled, allowedOriginsConfig, false, false,
+                new RateLimitConfig().rateLimitCache(), new ObjectMapper());
     }
 
     @Bean
@@ -46,8 +75,19 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(basic -> basic.disable());
 
+        // Gate Swagger UI / OpenAPI docs unless explicitly enabled (production keeps them off).
+        if (!swaggerEnabled) {
+            http.authorizeHttpRequests(auth -> auth
+                    .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/v3/api-docs")
+                    .denyAll()
+            );
+        }
+
+        RateLimitFilter rateLimitFilter = new RateLimitFilter(rateLimitCache, objectMapper, rateLimitEnabled);
+
         if (!authEnabled) {
             http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+            http.addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class);
         } else {
             http.authorizeHttpRequests(auth -> auth
                     .requestMatchers("/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/actuator/health", "/api/health", "/api/version").permitAll()
@@ -72,7 +112,12 @@ public class SecurityConfig {
             );
             JwtService jwtService = jwtServiceProvider.getIfAvailable();
             if (jwtService != null) {
-                http.addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
+                JwtAuthFilter jwtAuthFilter = new JwtAuthFilter(jwtService);
+                http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                // Run rate limiting after auth so per-user keys see the resolved principal.
+                http.addFilterAfter(rateLimitFilter, JwtAuthFilter.class);
+            } else {
+                http.addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class);
             }
         }
         return http.build();
