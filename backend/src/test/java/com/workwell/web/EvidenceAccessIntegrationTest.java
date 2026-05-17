@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.AbstractIntegrationTest;
 import com.workwell.caseflow.EvidenceService;
 import com.workwell.run.AllProgramsRunService;
 import java.io.IOException;
@@ -30,31 +31,18 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "workwell.auth.enabled=true",
         "workwell.auth.jwt-secret=test-secret-for-evidence-security"
 })
 @AutoConfigureMockMvc
-@Testcontainers
-class EvidenceAccessIntegrationTest {
-
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+class EvidenceAccessIntegrationTest extends AbstractIntegrationTest {
 
     private static final Path evidenceRoot = createEvidenceRoot();
 
     @DynamicPropertySource
-    static void datasource(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.flyway.url", postgres::getJdbcUrl);
-        registry.add("spring.flyway.user", postgres::getUsername);
-        registry.add("spring.flyway.password", postgres::getPassword);
+    static void evidenceProperties(DynamicPropertyRegistry registry) {
         registry.add("workwell.storage.evidence-root", () -> evidenceRoot.toString());
     }
 

@@ -75,6 +75,22 @@ public class CaseFlowService {
             Instant from,
             Instant to
     ) {
+        return listCases(statusFilter, measureId, priority, assignee, site, from, to, 50, 0);
+    }
+
+    public List<CaseSummary> listCases(
+            String statusFilter,
+            UUID measureId,
+            String priority,
+            String assignee,
+            String site,
+            Instant from,
+            Instant to,
+            int limit,
+            int offset
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        int safeOffset = Math.max(0, offset);
         String normalizedStatusFilter = normalizeStatusFilter(statusFilter);
         StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
@@ -148,6 +164,9 @@ public class CaseFlowService {
         }
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
+        sql.append(" LIMIT ? OFFSET ?");
+        params.add(safeLimit);
+        params.add(safeOffset);
 
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
                 (UUID) rs.getObject("case_id"),

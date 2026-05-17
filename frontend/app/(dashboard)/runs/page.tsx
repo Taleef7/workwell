@@ -71,15 +71,15 @@ type RunOutcomeRow = {
 
 type ManualRunResponse = {
   runId: string;
-  scopeType: string;
-  scopeLabel: string;
+  scopeType?: string;
+  scopeLabel?: string;
   status: string;
-  activeMeasuresExecuted: number;
-  totalEvaluated: number;
-  compliant: number;
-  nonCompliant: number;
+  activeMeasuresExecuted?: number;
+  totalEvaluated?: number;
+  compliant?: number;
+  nonCompliant?: number;
   message: string;
-  measuresExecuted: string[];
+  measuresExecuted?: string[];
 };
 
 type MeasureOption = {
@@ -266,7 +266,7 @@ export default function RunsPage() {
         payload.evaluationDate = runEvaluationDate;
       }
       const data = await api.post<typeof payload, ManualRunResponse>("/api/runs/manual", payload);
-      emitToast(`${data.scopeLabel} - ${data.message}`);
+      emitToast(data.scopeLabel ? `${data.scopeLabel} - ${data.message}` : data.message);
       setSelectedRunId(data.runId);
       await loadRuns();
       await loadSelectedRun();

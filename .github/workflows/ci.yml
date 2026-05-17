@@ -23,8 +23,10 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - name: Build backend
-        run: ./gradlew build
+        run: ./gradlew test --build-cache --no-daemon
 
   frontend:
     runs-on: ubuntu-latest

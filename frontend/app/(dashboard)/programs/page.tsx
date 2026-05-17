@@ -51,6 +51,8 @@ export default function ProgramsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRunStatus, setActiveRunStatus] = useState<string>("IDLE");
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -112,12 +114,40 @@ export default function ProgramsPage() {
     return () => clearTimeout(timer);
   }, [loadAll]);
 
+  useEffect(() => {
+    if (!activeRunId) return;
+    const terminal = ["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"];
+    if (terminal.includes(activeRunStatus)) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const run = await api.get<{ status: string }>(`/api/runs/${activeRunId}`);
+        setActiveRunStatus(run.status);
+        if (run.status === "COMPLETED" || run.status === "PARTIAL_FAILURE") {
+          setActiveRunId(null);
+          void loadAll();
+          emitToast("Run completed — Programs refreshed");
+        } else if (run.status === "FAILED" || run.status === "CANCELLED") {
+          setActiveRunId(null);
+          setRunError("Run failed. Check the Runs page for details.");
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeRunId, activeRunStatus, api, loadAll]);
+
   async function runAllMeasuresNow() {
     setRunError(null);
     try {
-      await api.post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
-      emitToast("Run completed — All Programs refreshed");
-      await loadAll();
+      const result = await api.post<{ scopeType: string }, { runId: string; status: string }>(
+        "/api/runs/manual", { scopeType: "ALL_PROGRAMS" }
+      );
+      setActiveRunId(result.runId);
+      setActiveRunStatus("REQUESTED");
+      emitToast("Run started — will refresh when complete");
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Run failed. Please try again.");
     }
@@ -138,9 +168,20 @@ export default function ProgramsPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Programs Overview</h2>
-        <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white" onClick={() => void runAllMeasuresNow()}>
-          Run All Measures Now
-        </button>
+        <div className="flex items-center gap-3">
+          {activeRunId ? (
+            <span className="text-sm text-slate-500 animate-pulse">
+              {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
+            </span>
+          ) : null}
+          <button
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            onClick={() => void runAllMeasuresNow()}
+            disabled={activeRunId !== null}
+          >
+            {activeRunId ? "Running…" : "Run All Measures Now"}
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
