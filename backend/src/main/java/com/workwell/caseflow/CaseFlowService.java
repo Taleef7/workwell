@@ -89,6 +89,8 @@ public class CaseFlowService {
             int limit,
             int offset
     ) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        int safeOffset = Math.max(0, offset);
         String normalizedStatusFilter = normalizeStatusFilter(statusFilter);
         StringBuilder sql = new StringBuilder("""
                 SELECT c.id AS case_id,
@@ -163,8 +165,8 @@ public class CaseFlowService {
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
         sql.append(" LIMIT ? OFFSET ?");
-        params.add(limit <= 0 ? 50 : limit);
-        params.add(offset < 0 ? 0 : offset);
+        params.add(safeLimit);
+        params.add(safeOffset);
 
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
                 (UUID) rs.getObject("case_id"),

@@ -65,11 +65,65 @@ public class AllProgramsRunService {
     }
 
     public UUID createRunRecord(ManualRunRequest request, String actor) {
+        return createRunRecord(request, actor, "manual");
+    }
+
+    public UUID createRunRecord(ManualRunRequest request, String actor, String triggerType) {
+        validateScopeRequest(request);
         UUID runId = UUID.randomUUID();
+        UUID scopeId = resolveScopeId(request);
         String scopeTypeStr = request.scopeType().name().toLowerCase();
         String requestedScopeJson = buildRequestedScopeJson(request);
-        runPersistenceService.createPendingRun(runId, scopeTypeStr, "manual", actor, requestedScopeJson);
+        runPersistenceService.createPendingRun(runId, scopeTypeStr, triggerType, actor,
+                requestedScopeJson, scopeId, effectiveEvaluationDate(request));
         return runId;
+    }
+
+    private void validateScopeRequest(ManualRunRequest request) {
+        switch (request.scopeType()) {
+            case SITE -> {
+                if (request.site() == null || request.site().isBlank()) {
+                    throw new IllegalArgumentException("SITE scope requires 'site' field");
+                }
+            }
+            case EMPLOYEE -> {
+                if (request.employeeExternalId() == null || request.employeeExternalId().isBlank()) {
+                    throw new IllegalArgumentException("EMPLOYEE scope requires 'employeeExternalId' field");
+                }
+            }
+            case MEASURE -> {
+                if (request.measureId() == null && request.measureVersionId() == null) {
+                    throw new IllegalArgumentException("MEASURE scope requires 'measureId' or 'measureVersionId' field");
+                }
+            }
+            default -> { /* ALL_PROGRAMS / CASE: no extra fields required */ }
+        }
+    }
+
+    private UUID resolveScopeId(ManualRunRequest request) {
+        if (request.scopeType() != RunScopeType.MEASURE) return null;
+        // measureVersionId takes priority
+        if (request.measureVersionId() != null) return request.measureVersionId();
+        // fall back to looking up the active version for the measure
+        if (request.measureId() != null) {
+            try {
+                return jdbcTemplate.queryForObject(
+                        """
+                        SELECT mv.id
+                        FROM measure_versions mv
+                        WHERE mv.measure_id = ?
+                          AND mv.status = 'Active'
+                        ORDER BY mv.created_at DESC
+                        LIMIT 1
+                        """,
+                        UUID.class,
+                        request.measureId()
+                );
+            } catch (org.springframework.dao.EmptyResultDataAccessException ex) {
+                return null;
+            }
+        }
+        return null;
     }
 
     @Async("runExecutor")
