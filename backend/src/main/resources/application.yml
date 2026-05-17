@@ -12,6 +12,17 @@ spring:
   flyway:
     enabled: true
     url: ${DATABASE_URL_DIRECT:${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}}
+springdoc:
+  swagger-ui:
+    path: /swagger-ui
+    operations-sorter: alpha
+    tags-sorter: alpha
+    disable-swagger-default-url: true
+  api-docs:
+    path: /v3/api-docs
+  show-actuator: false
+  packages-to-scan: com.workwell.web
+
 management:
   endpoints:
     web:

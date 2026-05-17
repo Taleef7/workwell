@@ -12,6 +12,8 @@ import com.workwell.run.ManualRunRequest;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.run.RunScopeType;
 import com.workwell.security.SecurityActor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +31,7 @@ import org.springframework.http.HttpStatus;
 
 @RestController
 @Validated
+@Tag(name = "Runs", description = "Trigger compliance evaluation runs (manual, scoped, and per-measure)")
 public class EvalController {
     private final AudiogramDemoService audiogramDemoService;
     private final TBSurveillanceDemoService tbSurveillanceDemoService;
@@ -103,6 +106,11 @@ public class EvalController {
         return fluVaccineDemoService.run();
     }
 
+    @Operation(
+            summary = "Trigger a manual run",
+            description = "Starts an evaluation run over the requested scope (ALL_PROGRAMS, MEASURE, or CASE). "
+                    + "Rate limited to 5 triggers per user per hour."
+    )
     @PostMapping("/api/runs/manual")
     public ResponseEntity<Object> runAllPrograms(@RequestBody(required = false) ManualRunRequest request) {
         if (request == null || request.scopeType() == null) {
