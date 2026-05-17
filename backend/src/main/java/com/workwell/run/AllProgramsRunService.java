@@ -1,5 +1,7 @@
 package com.workwell.run;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.compile.CqlEvaluationService;
 import com.workwell.measure.MeasureService;
@@ -17,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -28,19 +31,22 @@ public class AllProgramsRunService {
     private final JdbcTemplate jdbcTemplate;
     private final CqlEvaluationService cqlEvaluationService;
     private final CaseFlowService caseFlowService;
+    private final ObjectMapper objectMapper;
 
     public AllProgramsRunService(
             RunPersistenceService runPersistenceService,
             MeasureService measureService,
             JdbcTemplate jdbcTemplate,
             CqlEvaluationService cqlEvaluationService,
-            CaseFlowService caseFlowService
+            CaseFlowService caseFlowService,
+            ObjectMapper objectMapper
     ) {
         this.runPersistenceService = runPersistenceService;
         this.measureService = measureService;
         this.jdbcTemplate = jdbcTemplate;
         this.cqlEvaluationService = cqlEvaluationService;
         this.caseFlowService = caseFlowService;
+        this.objectMapper = objectMapper;
     }
 
     public ManualRunResponse run(ManualRunRequest request, String triggerActor) {
@@ -56,6 +62,33 @@ public class AllProgramsRunService {
             case SITE -> throw new IllegalArgumentException("Scope SITE is not implemented yet");
             case EMPLOYEE -> throw new IllegalArgumentException("Scope EMPLOYEE is not implemented yet");
         };
+    }
+
+    public UUID createRunRecord(ManualRunRequest request, String actor) {
+        UUID runId = UUID.randomUUID();
+        String scopeTypeStr = request.scopeType().name().toLowerCase();
+        String requestedScopeJson = buildRequestedScopeJson(request);
+        runPersistenceService.createPendingRun(runId, scopeTypeStr, "manual", actor, requestedScopeJson);
+        return runId;
+    }
+
+    @Async("runExecutor")
+    public void executeRunAsync(UUID runId, ManualRunRequest request, String actor) {
+        try {
+            runPersistenceService.updateRunStatus(runId, "RUNNING");
+            LocalDate evaluationDate = effectiveEvaluationDate(request);
+            List<DemoRunPayload> payloads = evaluateForScopeAsync(request, runId, evaluationDate);
+            String scopeLabel = buildScopeLabel(request);
+            runPersistenceService.finalizeAsyncRun(runId, scopeLabel, payloads, actor);
+        } catch (Exception e) {
+            log.error("Async run {} failed: {}", runId, e.getMessage(), e);
+            try {
+                runPersistenceService.updateRunStatus(runId, "FAILED");
+                runPersistenceService.setFailureSummary(runId, e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            } catch (Exception inner) {
+                log.error("Failed to mark run {} as FAILED: {}", runId, inner.getMessage());
+            }
+        }
     }
 
     public ManualRunResponse runAllPrograms(String scopeLabel, String triggerActor) {
@@ -450,6 +483,93 @@ public class AllProgramsRunService {
                 evaluationDate.toString(),
                 outcomes
         );
+    }
+
+    private List<DemoRunPayload> evaluateForScopeAsync(ManualRunRequest request, UUID runId, LocalDate evaluationDate) {
+        return switch (request.scopeType()) {
+            case ALL_PROGRAMS -> {
+                measureService.listMeasures();
+                yield runPersistenceService.loadActiveMeasureScopes().stream()
+                        .map(scopeRow -> evaluateMeasureScope(runId, scopeRow.measureName(), scopeRow.measureVersionId(), evaluationDate))
+                        .filter(payload -> payload != null)
+                        .toList();
+            }
+            case MEASURE -> {
+                ResolvedMeasureTarget target = resolveMeasureTarget(request);
+                DemoRunPayload payload;
+                try {
+                    payload = cqlEvaluationService.evaluate(runId.toString(), target.measureName(), target.measureVersion(), target.cqlText(), evaluationDate);
+                } catch (Exception ex) {
+                    payload = fallbackPayload(runId, target.measureName(), target.measureVersion(), evaluationDate, ex);
+                }
+                yield List.of(payload);
+            }
+            case SITE -> {
+                if (request.site() == null || request.site().isBlank()) {
+                    throw new IllegalArgumentException("SITE scope requires 'site' field");
+                }
+                measureService.listMeasures();
+                String site = request.site();
+                yield runPersistenceService.loadActiveMeasureScopes().stream()
+                        .map(scopeRow -> {
+                            DemoRunPayload fullPayload = evaluateMeasureScope(runId, scopeRow.measureName(), scopeRow.measureVersionId(), evaluationDate);
+                            if (fullPayload == null) return null;
+                            List<DemoOutcome> filtered = fullPayload.outcomes().stream()
+                                    .filter(o -> site.equalsIgnoreCase(o.site()))
+                                    .toList();
+                            return new DemoRunPayload(fullPayload.runId(), fullPayload.measureName(), fullPayload.measureVersion(), fullPayload.evaluationDate(), filtered);
+                        })
+                        .filter(payload -> payload != null && !payload.outcomes().isEmpty())
+                        .toList();
+            }
+            case EMPLOYEE -> {
+                if (request.employeeExternalId() == null || request.employeeExternalId().isBlank()) {
+                    throw new IllegalArgumentException("EMPLOYEE scope requires 'employeeExternalId' field");
+                }
+                measureService.listMeasures();
+                String empId = request.employeeExternalId();
+                yield runPersistenceService.loadActiveMeasureScopes().stream()
+                        .map(scopeRow -> {
+                            DemoRunPayload fullPayload = evaluateMeasureScope(runId, scopeRow.measureName(), scopeRow.measureVersionId(), evaluationDate);
+                            if (fullPayload == null) return null;
+                            List<DemoOutcome> filtered = fullPayload.outcomes().stream()
+                                    .filter(o -> empId.equals(o.subjectId()))
+                                    .toList();
+                            return new DemoRunPayload(fullPayload.runId(), fullPayload.measureName(), fullPayload.measureVersion(), fullPayload.evaluationDate(), filtered);
+                        })
+                        .filter(payload -> payload != null && !payload.outcomes().isEmpty())
+                        .toList();
+            }
+            case CASE -> throw new IllegalArgumentException("CASE scope is handled synchronously");
+        };
+    }
+
+    private String buildScopeLabel(ManualRunRequest request) {
+        return switch (request.scopeType()) {
+            case ALL_PROGRAMS -> "All Programs";
+            case MEASURE -> "Measure";
+            case SITE -> "Site: " + request.site();
+            case EMPLOYEE -> "Employee: " + request.employeeExternalId();
+            case CASE -> "Case";
+        };
+    }
+
+    private String buildRequestedScopeJson(ManualRunRequest request) {
+        try {
+            Map<String, Object> scope = requestedScope(
+                    request.scopeType().name(),
+                    request.measureId(),
+                    request.measureVersionId(),
+                    request.site(),
+                    request.employeeExternalId(),
+                    request.caseId(),
+                    effectiveEvaluationDate(request),
+                    request.dryRun()
+            );
+            return objectMapper.writeValueAsString(scope);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 
     private record ResolvedMeasureTarget(

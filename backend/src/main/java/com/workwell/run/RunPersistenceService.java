@@ -263,6 +263,202 @@ public class RunPersistenceService {
         }
     }
 
+    @Transactional
+    public void createPendingRun(UUID runId, String scopeType, String triggerType, String actor, String requestedScopeJson) {
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+                """
+                INSERT INTO runs (
+                    id, scope_type, trigger_type, status, triggered_by,
+                    started_at, measurement_period_start, measurement_period_end,
+                    requested_scope_json, dry_run, partial_failure_count
+                ) VALUES (?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?::jsonb, false, 0)
+                """,
+                runId, scopeType, triggerType, actor,
+                java.sql.Timestamp.from(now),
+                java.sql.Timestamp.from(now.minus(365, ChronoUnit.DAYS)),
+                java.sql.Timestamp.from(now),
+                requestedScopeJson
+        );
+    }
+
+    @Transactional
+    public void updateRunStatus(UUID runId, String status) {
+        List<String> terminal = List.of("COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED");
+        if (terminal.contains(status)) {
+            jdbcTemplate.update(
+                    "UPDATE runs SET status = ?, completed_at = NOW() WHERE id = ?",
+                    status, runId
+            );
+        } else {
+            jdbcTemplate.update(
+                    "UPDATE runs SET status = ? WHERE id = ?",
+                    status, runId
+            );
+        }
+    }
+
+    @Transactional
+    public void setFailureSummary(UUID runId, String summary) {
+        jdbcTemplate.update("UPDATE runs SET failure_summary = ? WHERE id = ?", summary, runId);
+    }
+
+    @Transactional
+    public void finalizeAsyncRun(UUID runId, String scopeLabel, List<DemoRunPayload> measureRuns, String actor) {
+        if (measureRuns.isEmpty()) {
+            updateRunStatus(runId, "FAILED");
+            setFailureSummary(runId, "No active measures found to execute.");
+            return;
+        }
+
+        String stage = "start";
+        try {
+            seedSyntheticEmployees();
+            Instant startedAt = LocalDate.parse(measureRuns.get(0).evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
+            Instant completedAt = Instant.now();
+            String evaluationPeriod = measureRuns.get(0).evaluationDate();
+
+            long totalEvaluated = measureRuns.stream().mapToLong(payload -> payload.outcomes().size()).sum();
+            long compliant = measureRuns.stream()
+                    .flatMap(payload -> payload.outcomes().stream())
+                    .filter(outcome -> "COMPLIANT".equals(outcome.outcome()))
+                    .count();
+            long nonCompliant = totalEvaluated - compliant;
+            long partialFailureCount = countPartialFailuresAcrossRuns(measureRuns);
+            String finalStatus = partialFailureCount > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
+            String failureSummary = partialFailureCount > 0
+                    ? partialFailureCount + " measure evaluation(s) returned evaluationError"
+                    : null;
+
+            insertAuditEvent(
+                    "RUN_STARTED",
+                    "run",
+                    runId,
+                    actor,
+                    runId,
+                    null,
+                    null,
+                    Map.of(
+                            "scope", scopeLabel,
+                            "activeMeasures", measureRuns.stream().map(DemoRunPayload::measureName).toList()
+                    )
+            );
+
+            stage = "insert-run-log";
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Async all-programs run started with " + measureRuns.size() + " measures."
+            );
+
+            for (DemoRunPayload payload : measureRuns) {
+                stage = "ensure-measure";
+                UUID measureId = ensureMeasure(payload.measureName());
+                stage = "ensure-measure-version";
+                UUID measureVersionId = ensureMeasureVersion(measureId, payload.measureVersion(), payload.measureName());
+                List<UUID> employeeIds = ensureEmployees(payload.outcomes());
+
+                stage = "insert-outcomes";
+                for (int i = 0; i < payload.outcomes().size(); i++) {
+                    DemoOutcome outcome = payload.outcomes().get(i);
+                    UUID outcomeId = UUID.randomUUID();
+                    UUID employeeId = employeeIds.get(i);
+
+                    jdbcTemplate.update(
+                            "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)",
+                            ps -> {
+                                ps.setObject(1, outcomeId);
+                                ps.setObject(2, runId);
+                                ps.setObject(3, employeeId);
+                                ps.setObject(4, measureVersionId);
+                                ps.setString(5, evaluationPeriod);
+                                ps.setString(6, outcome.outcome());
+                                ps.setString(7, toJsonb(outcome.evidenceJson()));
+                                ps.setObject(8, Timestamp.from(Instant.now()));
+                            }
+                    );
+
+                    insertAuditEvent(
+                            "OUTCOME_PERSISTED",
+                            "outcome",
+                            outcomeId,
+                            actor,
+                            runId,
+                            null,
+                            measureVersionId,
+                            Map.of(
+                                    "subjectId", outcome.subjectId(),
+                                    "status", outcome.outcome(),
+                                    "summary", outcome.summary()
+                            )
+                    );
+                }
+
+                stage = "upsert-cases";
+                caseFlowService.upsertCases(
+                        runId,
+                        measureVersionId,
+                        evaluationPeriod,
+                        employeeIds,
+                        payload.outcomes()
+                );
+            }
+
+            jdbcTemplate.update(
+                    """
+                            UPDATE runs
+                            SET status = ?,
+                                completed_at = ?,
+                                total_evaluated = ?,
+                                compliant = ?,
+                                non_compliant = ?,
+                                duration_ms = ?,
+                                failure_summary = ?,
+                                partial_failure_count = ?
+                            WHERE id = ?
+                            """,
+                    finalStatus,
+                    Timestamp.from(completedAt),
+                    totalEvaluated,
+                    compliant,
+                    nonCompliant,
+                    60_000L,
+                    failureSummary,
+                    partialFailureCount,
+                    runId
+            );
+            insertAuditEvent(
+                    "RUN_COMPLETED",
+                    "run",
+                    runId,
+                    actor,
+                    runId,
+                    null,
+                    null,
+                    Map.of(
+                            "scope", scopeLabel,
+                            "evaluationDate", measureRuns.get(0).evaluationDate(),
+                            "totalEvaluated", totalEvaluated,
+                            "compliant", compliant,
+                            "nonCompliant", nonCompliant,
+                            "status", finalStatus,
+                            "partialFailureCount", partialFailureCount
+                    )
+            );
+            jdbcTemplate.update(
+                    "INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)",
+                    runId,
+                    "INFO",
+                    "Run completed with status " + finalStatus + "."
+            );
+        } catch (RuntimeException ex) {
+            markRunFailed(runId, actor, stage, ex);
+            log.error("Failed to finalize async run {} at stage {}: {}", runId, stage, ex.getMessage(), ex);
+            throw ex;
+        }
+    }
+
     public List<ActiveMeasureScope> loadActiveMeasureScopes() {
         String sql = """
                 SELECT DISTINCT m.id,

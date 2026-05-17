@@ -10,11 +10,14 @@ import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.ManualRunRequest;
 import com.workwell.run.RunPersistenceService;
+import com.workwell.run.RunScopeType;
 import com.workwell.security.SecurityActor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -101,12 +104,23 @@ public class EvalController {
     }
 
     @PostMapping("/api/runs/manual")
-    public ManualRunResponse runAllPrograms(@RequestBody(required = false) ManualRunRequest request) {
+    public ResponseEntity<Object> runAllPrograms(@RequestBody(required = false) ManualRunRequest request) {
         if (request == null || request.scopeType() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "scopeType is required.");
         }
+        String actor = SecurityActor.currentActor();
         try {
-            return allProgramsRunService.run(request, SecurityActor.currentActor());
+            if (request.scopeType() == RunScopeType.CASE) {
+                ManualRunResponse result = allProgramsRunService.run(request, actor);
+                return ResponseEntity.ok(result);
+            }
+            UUID runId = allProgramsRunService.createRunRecord(request, actor);
+            allProgramsRunService.executeRunAsync(runId, request, actor);
+            return ResponseEntity.accepted().body(Map.of(
+                    "runId", runId.toString(),
+                    "status", "REQUESTED",
+                    "message", "Run queued for execution. Poll GET /api/runs/" + runId + " for status."
+            ));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
