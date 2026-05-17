@@ -116,6 +116,8 @@ public class CaseFlowService {
                            ELSE FALSE
                        END AS waiver_expired,
                        COALESCE((SELECT COUNT(*) FROM outreach_records orw WHERE orw.case_id = c.id), 0) AS outreach_record_count,
+                       c.sla_due_date,
+                       c.sla_breached,
                        c.updated_at
                 FROM cases c
                 JOIN employees e ON c.employee_id = e.id
@@ -189,6 +191,9 @@ public class CaseFlowService {
                 toInstant(rs.getObject("waiver_expires_at")),
                 rs.getBoolean("waiver_expired"),
                 rs.getInt("outreach_record_count"),
+                toInstant(rs.getObject("sla_due_date")),
+                rs.getBoolean("sla_breached"),
+                slaRemainingDays(toInstant(rs.getObject("sla_due_date"))),
                 rs.getTimestamp("updated_at").toInstant()
         ), params.toArray());
     }
@@ -903,8 +908,14 @@ public class CaseFlowService {
                             next_action = EXCLUDED.next_action,
                             current_outcome_status = EXCLUDED.current_outcome_status,
                             last_run_id = EXCLUDED.last_run_id,
-                            sla_due_date = EXCLUDED.sla_due_date,
-                            sla_breached = FALSE,
+                            sla_due_date = CASE WHEN cases.status IN ('RESOLVED', 'CLOSED', 'EXCLUDED')
+                                                     THEN EXCLUDED.sla_due_date
+                                                ELSE COALESCE(cases.sla_due_date, EXCLUDED.sla_due_date)
+                                           END,
+                            sla_breached = CASE WHEN cases.status IN ('RESOLVED', 'CLOSED', 'EXCLUDED')
+                                                     THEN FALSE
+                                                ELSE cases.sla_breached
+                                           END,
                             updated_at = NOW(),
                             closed_at = NULL,
                             closed_reason = NULL,
@@ -1671,6 +1682,11 @@ public class CaseFlowService {
         throw new IllegalStateException("Unexpected timestamp value type: " + value.getClass());
     }
 
+    private Integer slaRemainingDays(Instant slaDueDate) {
+        if (slaDueDate == null) return null;
+        return (int) java.time.Duration.between(Instant.now(), slaDueDate).toDays();
+    }
+
     private String outcomeSummaryFor(String outcome) {
         return switch (outcome) {
             case "COMPLIANT" -> "Measure outcome is compliant for the current window.";
@@ -1700,6 +1716,9 @@ public class CaseFlowService {
             Instant waiverExpiresAt,
             boolean waiverExpired,
             int outreachRecordCount,
+            Instant slaDueDate,
+            boolean slaBreached,
+            Integer slaRemainingDays,
             Instant updatedAt
     ) {
     }

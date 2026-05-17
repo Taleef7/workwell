@@ -113,7 +113,7 @@ export default function EmployeeProfilePage() {
                   </td>
                   <td className="py-2 text-slate-500">{c.assignee ?? '—'}</td>
                   <td className="py-2">
-                    <SlaChip days={c.slaRemainingDays} />
+                    <SlaChip days={c.slaRemainingDays} breached={c.slaBreached} />
                   </td>
                 </tr>
               ))}

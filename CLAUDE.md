@@ -97,10 +97,9 @@ Sprints merged: 0, 2, 1 (PRs #16, #17, #18)
 Current branch: `feat/sprint-3-employee-profile`
 
 Current posture:
-- Sprint 3 in progress — Issues 3.1 (profile), 3.2 (search), 3.3 (SLA service), 3.4 (My Cases) implemented
-- Sprint 3 Issue 3.3 SLA is **partially blocked**: V020 migration needed before `sla_due_date` wiring in CaseFlowService activates
-- V020 SQL is documented in JOURNAL.md 2026-05-17 entry — Taleef writes it
-- After V020 + PR for Sprint 3: Sprint 4 (security) and Sprint 6 (admin) can run in parallel
+- Sprint 3 complete — Issues 3.1 (profile), 3.2 (search), 3.3 (SLA tracking), 3.4 (My Cases) all shipped in PR #19
+- V020 migration is in PR #19 (backfill uses outcome-specific SLA windows); `CaseFlowService` writes `sla_due_date` on upsert
+- After PR #19 merges: Sprint 4 (security) and Sprint 6 (admin) can run in parallel
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - After each sprint, update `docs/JOURNAL.md` with what shipped
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only

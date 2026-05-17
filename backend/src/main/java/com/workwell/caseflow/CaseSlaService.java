@@ -3,6 +3,7 @@ package com.workwell.caseflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -87,9 +88,11 @@ public class CaseSlaService {
             if (!breachedCases.isEmpty()) {
                 log.info("SLA escalation: {} case(s) escalated", breachedCases.size());
             }
-        } catch (DataAccessException ex) {
-            // V020 migration (sla_due_date and sla_breached columns) not yet applied — skip silently
+        } catch (BadSqlGrammarException ex) {
+            // Defensive guard for mixed-deployment windows where the V020 migration hasn't run yet.
             log.debug("SLA escalation skipped (V020 migration pending): {}", ex.getMessage());
+        } catch (DataAccessException ex) {
+            log.error("SLA escalation failed — cases may not be escalated: {}", ex.getMessage(), ex);
         }
     }
 }
