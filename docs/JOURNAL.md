@@ -19,31 +19,19 @@
 - Wired `<GlobalSearch />` into the dashboard header in `layout.tsx`.
 - Added `{ href: "/cases", label: "Cases" }` nav item to the sidebar.
 
-**Issue 3.3 — SLA tracking (partial — awaiting V020 migration):**
+**Issue 3.3 — SLA tracking (complete):**
 - Created `CaseSlaService.java` in `com.workwell.caseflow` with:
   - `computeSlaDueDate(outcomeStatus)`: OVERDUE→14d, DUE_SOON→30d, MISSING_DATA→21d from now.
-  - `@Scheduled(cron = "0 0 */6 * * *") escalateBreachedCases()`: bumps priority one level, sets `sla_breached=TRUE`, writes `CASE_SLA_BREACHED` audit event. Wrapped in `catch(DataAccessException)` → logs at DEBUG level, no crash if V020 not yet applied.
-- **BLOCKED:** `CaseFlowService.upsertOpenCase` INSERT and case list query NOT modified yet — the `sla_due_date` and `sla_breached` columns don't exist until V020 migration runs.
-- Frontend: Added `slaRemainingDays?` and `slaBreached?` to `CaseSummary` type; SLA column renders "—" until columns land.
+  - `@Scheduled(cron = "0 0 */6 * * *") escalateBreachedCases()`: bumps priority one level, sets `sla_breached=TRUE`, writes `CASE_SLA_BREACHED` audit event. `BadSqlGrammarException` (missing column) silently skipped for mixed-deployment safety; other `DataAccessException` logged at ERROR.
+- `V020__add_case_sla_due_date.sql` adds columns and backfills with outcome-specific windows (OVERDUE 14d, MISSING_DATA 21d, DUE_SOON 30d via CASE expression).
+- `CaseFlowService.upsertOpenCase` injects `CaseSlaService` and writes `sla_due_date` on INSERT/reopen; preserves existing `sla_due_date` and `sla_breached` on update of already-open cases to prevent SLA resets by regular runs.
+- `CaseSummary` record and `listCases()` query updated: `sla_due_date`, `sla_breached`, and computed `slaRemainingDays` now included in the cases API response.
+- `OpenCaseSummary` DTO and `EmployeeProfileService` updated: `slaBreached` flag included alongside `slaDueDate`/`slaRemainingDays`.
+- Frontend: `SlaChip` on employee profile page now receives `breached={c.slaBreached}`, so already-breached cases show "Breached" rather than "0d left".
 
 **Issue 3.4 — My Cases tab:**
 - Added "All Cases / My Cases" tab row to `cases/page.tsx`. "My Cases" filters `/api/cases?assignee={user.email}&view=mine`.
 - Employee names in cases list, case detail, and runs page now link to `/employees/{employeeId}`.
-
-**V020 migration required (Taleef to write):**
-```sql
--- backend/src/main/resources/db/migration/V020__add_case_sla_due_date.sql
-ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_due_date TIMESTAMPTZ;
-ALTER TABLE cases ADD COLUMN IF NOT EXISTS sla_breached BOOLEAN NOT NULL DEFAULT FALSE;
-UPDATE cases SET sla_due_date = created_at + INTERVAL '14 days'
-WHERE sla_due_date IS NULL AND status IN ('OPEN', 'IN_PROGRESS');
-CREATE INDEX IF NOT EXISTS cases_sla_due_date_idx ON cases(sla_due_date)
-  WHERE status IN ('OPEN', 'IN_PROGRESS');
-```
-After V020 is applied:
-1. Add `sla_due_date` to `CaseFlowService.upsertOpenCase` INSERT, calling `slaService.computeSlaDueDate(outcomeStatus)`.
-2. Add `sla_due_date`, `sla_breached`, and computed `slaRemainingDays` to the cases list query and `CaseSummary` record.
-3. Remove the `try-catch` guard in `CaseSlaService.escalateBreachedCases()` or let it run clean.
 
 **Branch:** `feat/sprint-3-employee-profile`
 

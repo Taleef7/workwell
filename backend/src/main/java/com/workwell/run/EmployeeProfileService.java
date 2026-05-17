@@ -68,7 +68,7 @@ public class EmployeeProfileService {
         List<Map<String, Object>> caseRows = jdbcTemplate.queryForList("""
             SELECT c.id, m.name AS measure_name,
                    c.current_outcome_status, c.priority, c.assignee,
-                   c.created_at, c.sla_due_date
+                   c.created_at, c.sla_due_date, c.sla_breached
             FROM cases c
             JOIN measure_versions mv ON mv.id = c.measure_version_id
             JOIN measures m ON m.id = mv.measure_id
@@ -150,6 +150,7 @@ public class EmployeeProfileService {
             Integer slaRemainingDays = slaTs != null
                 ? (int) java.time.Duration.between(Instant.now(), slaTs.toInstant()).toDays()
                 : null;
+            boolean slaBreached = Boolean.TRUE.equals(row.get("sla_breached"));
             openCases.add(new OpenCaseSummary(
                 (UUID) row.get("id"),
                 (String) row.get("measure_name"),
@@ -157,7 +158,8 @@ public class EmployeeProfileService {
                 (String) row.get("priority"),
                 (String) row.get("assignee"),
                 slaDueDate,
-                slaRemainingDays
+                slaRemainingDays,
+                slaBreached
             ));
         }
 

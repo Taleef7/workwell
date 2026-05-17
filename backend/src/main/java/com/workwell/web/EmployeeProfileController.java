@@ -33,6 +33,7 @@ public class EmployeeProfileController {
     public ResponseEntity<List<EmployeeProfileService.EmployeeSearchResult>> search(
             @RequestParam String q,
             @RequestParam(defaultValue = "10") int limit) {
-        return ResponseEntity.ok(service.search(q, limit));
+        int safeLimit = Math.max(1, Math.min(limit, 50));
+        return ResponseEntity.ok(service.search(q, safeLimit));
     }
 }

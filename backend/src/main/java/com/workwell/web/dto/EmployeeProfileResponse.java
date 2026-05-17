@@ -36,7 +36,8 @@ public record EmployeeProfileResponse(
         String priority,
         String assignee,
         String slaDueDate,
-        Integer slaRemainingDays
+        Integer slaRemainingDays,
+        boolean slaBreached
     ) {}
 
     public record AuditEventSummary(

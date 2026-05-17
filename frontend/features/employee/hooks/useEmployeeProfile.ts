@@ -20,6 +20,7 @@ export interface OpenCaseSummary {
   assignee: string | null;
   slaDueDate: string | null;
   slaRemainingDays: number | null;
+  slaBreached: boolean;
 }
 
 export interface EmployeeProfile {
