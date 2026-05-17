@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.compile.CqlEvaluationService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
+import com.workwell.notification.EmailDeliveryRecord;
+import com.workwell.notification.EmailService;
 import com.workwell.security.SecurityActor;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import java.io.IOException;
@@ -32,6 +34,7 @@ public class CaseFlowService {
     private final WaiverService waiverService;
     private final CqlEvaluationService cqlEvaluationService;
     private final CaseSlaService caseSlaService;
+    private final EmailService emailService;
 
     public CaseFlowService(
             JdbcTemplate jdbcTemplate,
@@ -39,7 +42,8 @@ public class CaseFlowService {
             OutreachTemplateService outreachTemplateService,
             WaiverService waiverService,
             CqlEvaluationService cqlEvaluationService,
-            CaseSlaService caseSlaService
+            CaseSlaService caseSlaService,
+            EmailService emailService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -47,6 +51,7 @@ public class CaseFlowService {
         this.waiverService = waiverService;
         this.cqlEvaluationService = cqlEvaluationService;
         this.caseSlaService = caseSlaService;
+        this.emailService = emailService;
     }
 
     public void upsertCases(
@@ -347,16 +352,42 @@ public class CaseFlowService {
                 caseId
         );
 
+        // Render the outreach message and dispatch it through the EmailService. On the demo
+        // stack the provider is simulated, so no real email is sent — the attempt is recorded
+        // in outreach_delivery_log so it is visible in the Admin UI.
+        Optional<CaseDetail> renderDetail = loadCase(caseId);
+        String employeeName = renderDetail.map(CaseDetail::employeeName).orElse("");
+        String measureName = renderDetail.map(CaseDetail::measureName).orElse("");
+        String dueDate = renderDetail.map(this::computeDueDate).orElse(existing.evaluationPeriod());
+        String subjectTemplate = template == null ? "Outreach Reminder for {{measureName}}" : template.subject();
+        String bodyTemplate = template == null
+                ? "Hello {{employeeName}}, please complete required follow-up for {{measureName}}."
+                : template.bodyText();
+        String renderedSubject = renderTemplate(
+                subjectTemplate, employeeName, measureName, dueDate, existing.currentOutcomeStatus());
+        String renderedBody = renderTemplate(
+                bodyTemplate, employeeName, measureName, dueDate, existing.currentOutcomeStatus());
+        String toAddress = syntheticEmailAddress(existing.employeeId());
+
+        EmailDeliveryRecord delivery = emailService.send(toAddress, renderedSubject, renderedBody);
+
         Map<String, Object> actionPayload = new LinkedHashMap<>();
         actionPayload.put("autoTriggered", false);
         actionPayload.put("channel", "SIMULATED_EMAIL");
         actionPayload.put("template", template == null ? "default-template" : template.name());
         actionPayload.put("templateName", template == null ? "Default Template" : template.name());
         actionPayload.put("templateId", template == null ? null : template.id());
-        actionPayload.put("subject", template == null ? "Outreach Reminder" : template.subject());
+        actionPayload.put("subject", renderedSubject);
         actionPayload.put("deliveryStatus", "QUEUED");
-        actionPayload.put("note", "Demo outreach recorded without external delivery.");
-        insertCaseAction(caseId, "OUTREACH_SENT", actor, actionPayload);
+        actionPayload.put("note", "Outreach dispatched via " + delivery.provider() + " provider ("
+                + delivery.status() + ").");
+        actionPayload.put("emailMessageId", delivery.messageId());
+        actionPayload.put("deliveryProvider", delivery.provider());
+        actionPayload.put("emailDeliveryStatus", delivery.status());
+        actionPayload.put("toAddress", delivery.toAddress());
+        actionPayload.put("sentAt", delivery.sentAt().toString());
+        UUID actionId = insertCaseAction(caseId, "OUTREACH_SENT", actor, actionPayload);
+        insertOutreachDeliveryLog(caseId, actionId, delivery);
         insertOutreachRecord(
                 caseId,
                 "OUTREACH",
@@ -1375,14 +1406,60 @@ public class CaseFlowService {
         };
     }
 
-    private void insertCaseAction(UUID caseId, String actionType, String actor, Map<String, Object> payload) {
+    private UUID insertCaseAction(UUID caseId, String actionType, String actor, Map<String, Object> payload) {
+        UUID actionId = UUID.randomUUID();
         jdbcTemplate.update(
                 "INSERT INTO case_actions (id, case_id, action_type, payload_json, performed_by) VALUES (?, ?, ?, ?::jsonb, ?)",
-                UUID.randomUUID(),
+                actionId,
                 caseId,
                 actionType,
                 toJsonb(payload),
                 actor
+        );
+        return actionId;
+    }
+
+    /**
+     * Employees carry no email column in the seeded schema, so a deterministic synthetic
+     * address is derived from the immutable employee external id:
+     * {@code <external_id>@workwell-demo.dev}. Deterministic so reruns/log entries are stable
+     * and obviously non-routable for the simulated demo provider.
+     */
+    private String syntheticEmailAddress(UUID employeeId) {
+        String externalId;
+        try {
+            externalId = jdbcTemplate.queryForObject(
+                    "SELECT external_id FROM employees WHERE id = ?",
+                    String.class,
+                    employeeId
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            externalId = null;
+        }
+        String local = externalId == null || externalId.isBlank()
+                ? "employee-" + employeeId
+                : externalId.trim();
+        return local + "@workwell-demo.dev";
+    }
+
+    private void insertOutreachDeliveryLog(UUID caseId, UUID caseActionId, EmailDeliveryRecord delivery) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO outreach_delivery_log
+                            (id, case_id, case_action_id, to_address, subject, provider, status, sent_at, error_detail)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                ps -> {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, caseId);
+                    ps.setObject(3, caseActionId);
+                    ps.setString(4, delivery.toAddress());
+                    ps.setString(5, delivery.subject());
+                    ps.setString(6, delivery.provider());
+                    ps.setString(7, delivery.status());
+                    ps.setObject(8, Timestamp.from(delivery.sentAt()));
+                    ps.setString(9, delivery.errorDetail());
+                }
         );
     }
 
