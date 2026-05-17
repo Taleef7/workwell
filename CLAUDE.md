@@ -79,7 +79,7 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-05-15)
+## Current Focus (as of 2026-05-17)
 
 **Sprint-based feature implementation — working through `docs/sprints/` sequentially.**
 
@@ -93,11 +93,14 @@ Sprint 0 (bugs) → Sprint 2 (data) → Sprint 1 (pipeline) → Sprint 3 (employ
 Sprint 7 (overdelivery) — begins after Sprint 3
 ```
 
+Sprints merged: 0, 2, 1 (PRs #16, #17, #18)
+Current branch: `feat/sprint-3-employee-profile`
+
 Current posture:
-- One sprint at a time, one issue at a time within each sprint
-- Every issue has an acceptance criteria checklist — do not mark done until all boxes pass
+- Sprint 3 complete — Issues 3.1 (profile), 3.2 (search), 3.3 (SLA tracking), 3.4 (My Cases) all shipped in PR #19
+- V020 migration is in PR #19 (backfill uses outcome-specific SLA windows); `CaseFlowService` writes `sla_due_date` on upsert
+- After PR #19 merges: Sprint 4 (security) and Sprint 6 (admin) can run in parallel
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
-- Backend agent owns `backend/`; frontend agent owns `frontend/`; never cross boundaries in one PR
 - After each sprint, update `docs/JOURNAL.md` with what shipped
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only
 
