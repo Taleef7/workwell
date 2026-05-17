@@ -8,7 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.admin.DataReadinessService;
+import com.workwell.admin.DemoResetService;
 import com.workwell.admin.IntegrationHealthService;
+import com.workwell.admin.OutreachDeliveryLogService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.audit.AuditQueryService;
@@ -52,6 +54,12 @@ class AdminControllerTest {
 
     @MockBean
     private ValueSetGovernanceService valueSetGovernanceService;
+
+    @MockBean
+    private OutreachDeliveryLogService outreachDeliveryLogService;
+
+    @MockBean
+    private DemoResetService demoResetService;
 
     @Test
     void listsIntegrationHealth() throws Exception {
@@ -289,5 +297,66 @@ class AdminControllerTest {
     void rejectsInvalidWaiverDates() throws Exception {
         mockMvc.perform(get("/api/admin/waivers").param("expiresAfter", "not-a-date"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void previewsOutreachTemplate() throws Exception {
+        UUID templateId = UUID.fromString("11111111-0000-0000-0000-000000000001");
+        when(outreachTemplateService.previewTemplate(templateId)).thenReturn(
+                new OutreachTemplateService.TemplatePreview(
+                        templateId,
+                        "Hearing Conservation Overdue Outreach",
+                        "Action Required: Annual Audiogram Compliance Due",
+                        "Dear Jane Smith, your Annual Audiogram is overdue. Due: 2026-05-30."
+                )
+        );
+
+        mockMvc.perform(get("/api/admin/outreach-templates/" + templateId + "/preview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subject").value("Action Required: Annual Audiogram Compliance Due"))
+                .andExpect(jsonPath("$.bodyText").value("Dear Jane Smith, your Annual Audiogram is overdue. Due: 2026-05-30."));
+    }
+
+    @Test
+    void returnsNotFoundForMissingTemplatePreview() throws Exception {
+        UUID templateId = UUID.fromString("11111111-0000-0000-0000-0000000000ff");
+        when(outreachTemplateService.previewTemplate(templateId))
+                .thenThrow(new IllegalArgumentException("Outreach template not found: " + templateId));
+
+        mockMvc.perform(get("/api/admin/outreach-templates/" + templateId + "/preview"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listsOutreachDeliveryLog() throws Exception {
+        when(outreachDeliveryLogService.recent(20)).thenReturn(List.of(
+                new OutreachDeliveryLogService.DeliveryLogEntry(
+                        UUID.fromString("22222222-0000-0000-0000-000000000001"),
+                        UUID.fromString("33333333-0000-0000-0000-000000000001"),
+                        "patient-006@workwell-demo.dev",
+                        "Action Needed: Overdue Audiogram Follow-up",
+                        "simulated",
+                        "SIMULATED",
+                        Instant.parse("2026-05-17T12:00:00Z"),
+                        null,
+                        "Annual Audiogram"
+                )
+        ));
+
+        mockMvc.perform(get("/api/admin/outreach/delivery-log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].toAddress").value("patient-006@workwell-demo.dev"))
+                .andExpect(jsonPath("$[0].provider").value("simulated"))
+                .andExpect(jsonPath("$[0].status").value("SIMULATED"))
+                .andExpect(jsonPath("$[0].measureName").value("Annual Audiogram"));
+    }
+
+    @Test
+    void demoResetSucceedsWhenServicePresent() throws Exception {
+        mockMvc.perform(post("/api/admin/demo-reset"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("reset_complete"));
+
+        verify(demoResetService).reset();
     }
 }

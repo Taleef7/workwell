@@ -20,6 +20,7 @@ All tables below reflect active backend behavior as of 2026-05-10.
 - `audit_events`: append-only audit ledger.
 - `integration_health`: persisted admin health state per integration.
 - `outreach_templates`: optional DB-backed message templates (runtime falls back to built-ins if table absent).
+- `outreach_delivery_log`: append-only record of every outreach email send attempt (recipient, subject, provider, status). Demo stack records `SIMULATED` rows only.
 - `audit_packet_exports`: record of every audit packet generation (type, entity, format, actor, timestamp, payload hash, size).
 
 ## 3) Full Table Schemas
@@ -253,6 +254,27 @@ payload_size_bytes BIGINT
 `format` values: `json`, `html`.
 `payload_hash` is a SHA-256 hex digest of the serialized packet bytes for integrity verification.
 Written by `AuditPacketService` on every successful packet generation alongside an `AUDIT_PACKET_GENERATED` audit event.
+
+### 3.16 `outreach_delivery_log`
+```sql
+id UUID PK DEFAULT gen_random_uuid()
+case_id UUID NOT NULL REFERENCES cases(id)
+case_action_id UUID REFERENCES case_actions(id)
+to_address TEXT NOT NULL
+subject TEXT NOT NULL
+provider TEXT NOT NULL
+status TEXT NOT NULL
+sent_at TIMESTAMPTZ NOT NULL
+error_detail TEXT
+INDEX outreach_log_case_id_idx(case_id)
+INDEX outreach_log_sent_at_idx(sent_at DESC)
+```
+One row per outreach email send attempt, written by `CaseFlowService.sendOutreach` via `EmailService`.
+`provider` values: `simulated` (demo default), `sendgrid`.
+`status` values: `SIMULATED` (no real email sent), `SENT`, `FAILED`.
+`to_address` is a deterministic synthetic address `<employee.external_id>@workwell-demo.dev` (employees carry no email column; address is non-routable and stable across reruns).
+Created by migration `V021__add_outreach_delivery_log.sql`. Surfaced read-only via `GET /api/admin/outreach/delivery-log` (`OutreachDeliveryLogService`, joined to measure name through cases→measure_versions→measures).
+Truncated by the non-prod `DemoResetService`.
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
