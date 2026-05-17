@@ -78,8 +78,11 @@ export default function CasesPage() {
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
   const api = useApi();
+  const PAGE_SIZE = 25;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -113,8 +116,11 @@ export default function CasesPage() {
       }
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", "0");
       const data = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
       setCases(data);
+      setHasMore(data.length === PAGE_SIZE);
       setSelectedCaseIds((existing) => existing.filter((id) => data.some((item) => item.caseId === id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -172,6 +178,30 @@ export default function CasesPage() {
     const ids = new Set(selectedCaseIds);
     filteredCases.forEach((item) => ids.add(item.caseId));
     setSelectedCaseIds(Array.from(ids));
+  }
+
+  async function loadMoreCases() {
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("status", statusFilter);
+      if (measureFilter) params.set("measureId", measureFilter);
+      if (priorityFilter) params.set("priority", priorityFilter);
+      if (assigneeFilter) params.set("assignee", assigneeFilter);
+      if (siteFilter) params.set("site", siteFilter);
+      else if (siteId) params.set("site", siteId);
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(cases.length));
+      const next = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
+      setCases((prev) => [...prev, ...next]);
+      setHasMore(next.length === PAGE_SIZE);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function exportCsv(urlPath: string, filename: string) {
@@ -512,6 +542,18 @@ export default function CasesPage() {
           );
         })}
       </div>
+
+      {hasMore ? (
+        <div className="flex justify-center">
+          <button
+            className="rounded-md border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => void loadMoreCases()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Load more cases"}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
