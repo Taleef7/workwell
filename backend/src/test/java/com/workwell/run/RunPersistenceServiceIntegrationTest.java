@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.workwell.AbstractIntegrationTest;
 import com.workwell.measure.AudiogramDemoService;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,6 +22,11 @@ class RunPersistenceServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void reset() {
+        jdbcTemplate.execute("TRUNCATE TABLE runs, outcomes, cases, case_actions, run_logs, audit_events, outreach_records, scheduled_appointments, waivers CASCADE");
+    }
 
     @Test
     void audiogramRunsUpsertCasesIdempotently() {
