@@ -7,9 +7,11 @@ import { useAuth } from "@/components/auth-provider";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
+import { GlobalSearch } from "@/components/GlobalSearch";
 
 const nav = [
   { href: "/programs", label: "Programs" },
+  { href: "/cases", label: "Cases" },
   { href: "/worklist", label: "Worklist" },
   { href: "/measures", label: "Measures" },
   { href: "/studio", label: "Studio" },
@@ -102,6 +104,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <GlobalSearch />
             {user ? (
               <div className="flex items-center gap-2 text-xs">
                 <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{user.email}</span>

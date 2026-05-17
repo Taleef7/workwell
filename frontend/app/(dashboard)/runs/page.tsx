@@ -595,7 +595,9 @@ export default function RunsPage() {
                 {runOutcomes.map((row) => (
                   <tr key={`${row.employeeExternalId}-${row.caseId ?? "none"}`} className="border-t border-slate-200">
                     <td className="px-2 py-2">
-                      <p className="font-medium text-slate-800">{row.employeeName}</p>
+                      <a href={`/employees/${row.employeeExternalId}`} className="font-medium text-slate-800 hover:underline hover:text-blue-700">
+                        {row.employeeName}
+                      </a>
                       <p className="text-slate-500">{row.employeeExternalId}</p>
                     </td>
                     <td className="px-2 py-2">{labelFor(ROLE_LABELS, row.role)}</td>

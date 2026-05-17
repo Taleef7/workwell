@@ -407,7 +407,11 @@ export default function CaseDetailPage() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{caseDetail.measureName}</p>
-                  <h3 className="mt-1 text-2xl font-semibold text-slate-900">{caseDetail.employeeName}</h3>
+                  <h3 className="mt-1 text-2xl font-semibold text-slate-900">
+                    <Link href={`/employees/${caseDetail.employeeId}`} className="hover:underline hover:text-blue-700">
+                      {caseDetail.employeeName}
+                    </Link>
+                  </h3>
                   <p className="mt-1 text-sm text-slate-500">{caseDetail.employeeId}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
