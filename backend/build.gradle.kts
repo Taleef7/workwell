@@ -34,6 +34,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 	implementation("org.springframework.ai:spring-ai-openai-spring-boot-starter:1.0.0-M6")
+	implementation("com.sendgrid:sendgrid-java:4.10.2")
 	implementation("org.mapstruct:mapstruct:1.6.3")
 	annotationProcessor("org.mapstruct:mapstruct-processor:1.6.3")
 	implementation("org.flywaydb:flyway-core")
