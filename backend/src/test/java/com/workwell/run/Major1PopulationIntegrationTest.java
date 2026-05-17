@@ -2,38 +2,19 @@ package com.workwell.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.workwell.AbstractIntegrationTest;
 import com.workwell.measure.MeasureService;
 import com.workwell.web.EvalController.ManualRunResponse;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest
-@Testcontainers
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class Major1PopulationIntegrationTest {
-
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void datasource(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.flyway.url", postgres::getJdbcUrl);
-        registry.add("spring.flyway.user", postgres::getUsername);
-        registry.add("spring.flyway.password", postgres::getPassword);
-    }
+class Major1PopulationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AllProgramsRunService allProgramsRunService;
@@ -47,9 +28,11 @@ class Major1PopulationIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
+    void setUp() { resetTables(); }
+
     @Test
     void manualRunPersistsOneHundredOutcomesPerMeasureAndTbHighCompliance() {
-        resetTables();
         ManualRunResponse response = allProgramsRunService.runAllPrograms("All Programs", "cm@workwell.dev");
 
         List<Map<String, Object>> counts = jdbcTemplate.queryForList(
@@ -81,7 +64,6 @@ class Major1PopulationIntegrationTest {
 
     @Test
     void manualRunAutoQueuesOutreachForNonCompliantOutcomesAndSkipsExcluded() {
-        resetTables();
         ManualRunResponse response = allProgramsRunService.runAllPrograms("All Programs", "cm@workwell.dev");
         java.util.UUID runId = java.util.UUID.fromString(response.runId());
 
@@ -197,7 +179,6 @@ class Major1PopulationIntegrationTest {
 
     @Test
     void historicalSeedCreatesFiveRunsWithTrendVariance() {
-        resetTables();
         measureService.listMeasures();
         seedHistoricalRunsService.seedHistoricalRunsIfEmpty();
         Integer runCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM runs", Integer.class);

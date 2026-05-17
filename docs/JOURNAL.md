@@ -1,5 +1,49 @@
 # Journal
 
+## 2026-05-16 — Sprint 2 merged; Sprint 1: Run Pipeline & Operational Correctness
+
+**Goal:** Transform the run pipeline from synchronous-blocking to async with polling, enable the scheduler, implement SITE/EMPLOYEE scoped runs, and add cases pagination.
+
+**Sprint 2 merged:** PR #17 (`feat/sprint-2-demo-data-visual`) merged to main. All V016–V019 migrations, trend charts, skeleton loaders, assignee personas, and reason code breakdown shipped.
+
+**Issue 1.1 + 1.4 — Async run execution & auto-refresh (backend + frontend):**
+- Created `AsyncConfig.java`: `runExecutor` ThreadPoolTaskExecutor (core=2, max=4, queue=20, graceful shutdown 120s).
+- Added `createPendingRun()`, `updateRunStatus()`, `setFailureSummary()`, and `finalizeAsyncRun()` to `RunPersistenceService`. `finalizeAsyncRun` replicates the post-INSERT logic of `persistAllProgramsRun` (outcomes, case upserts, audit events, run finalization) on a pre-existing run row.
+- Added `createRunRecord()` and `@Async("runExecutor") executeRunAsync()` to `AllProgramsRunService`. Private `evaluateForScopeAsync()` handles ALL_PROGRAMS, MEASURE, SITE, and EMPLOYEE dispatch.
+- `EvalController.POST /api/runs/manual`: CASE scope stays synchronous (200 OK); all other scopes return HTTP 202 immediately with `{runId, status: "REQUESTED", message}`.
+- Frontend `programs/page.tsx`: after triggering a run, stores `activeRunId` and polls `GET /api/runs/{id}` every 5s. Button disabled while polling with "Running…" label. Auto-calls `loadAll()` on COMPLETED/PARTIAL_FAILURE. Toast on success/failure.
+
+**Issue 1.2 — Scheduler enabled:**
+- `application.yml`: scheduler default changed to `enabled: true`, cron `0 0 2 * * *` (2AM UTC daily).
+- `ScheduledRunService.runScheduledAllPrograms()` now uses the async path (`createRunRecord` + `executeRunAsync`) instead of blocking `runAllPrograms()`.
+
+**Issue 1.3 — SITE and EMPLOYEE scoped runs:**
+- `evaluateForScopeAsync()` in `AllProgramsRunService` handles SITE (filters outcomes by `site`) and EMPLOYEE (filters by `subjectId`) scopes. Both require corresponding request fields or return 400.
+- Missing required field validation returns 400 via `IllegalArgumentException` → `ResponseStatusException`.
+
+**Issue 1.5 — Cases load-more pagination:**
+- `CaseFlowService.listCases()` extended with `limit` and `offset` parameters; SQL query appended with `LIMIT ? OFFSET ?`. Existing call sites default to limit=50, offset=0.
+- `CaseController.GET /api/cases` now accepts `limit` (default 25) and `offset` (default 0).
+- Frontend `cases/page.tsx`: initial load fetches 25 cases; "Load more" button appends the next 25. `hasMore` flag hides the button when a page returns fewer than 25.
+
+**PR review fixes (Copilot/Codex findings on PR #18):**
+- `AllProgramsRunService`: added `validateScopeRequest()` — enforces required fields (site/employeeExternalId/measureId) before any DB write; throws `IllegalArgumentException` → 400. Added `resolveScopeId()` to persist `scope_id` in `runs` for MEASURE-scoped runs. Added 3-arg `createRunRecord` overload so `ScheduledRunService` can pass `triggerType="scheduler"` (previously hardcoded to "manual").
+- `RunPersistenceService.createPendingRun`: extended to accept `scopeId (UUID)` and `evaluationDate (LocalDate)` so `measurement_period_start/end` and `scope_id` are written at INSERT time rather than deferred.
+- `finalizeAsyncRun`: now writes `started_at`, `measurement_period_start/end`, and `duration_ms` in the final UPDATE to prevent timestamp drift in completed run records.
+- `CaseController`: fixed `limit` `defaultValue` to `"25"` (was `"50"`) to match frontend `PAGE_SIZE`.
+- `runs/page.tsx`: `ManualRunResponse` fields made optional — the 202 async response only returns `{runId, status, message}`. Toast now uses `data.message` directly when `scopeLabel` is absent, preventing "undefined - Run queued…".
+
+**CI speed fix:**
+- Created `AbstractIntegrationTest.java` with a single JVM-wide `static PostgreSQLContainer` started via a static initialiser. All 15 integration test classes now extend it and no longer spin up their own container. Spring context caching reuses a single `ApplicationContext` across the 10 plain `@SpringBootTest` classes. Expected CI improvement: ~30 min → ~8 min.
+
+**Branch:** `feat/sprint-1-run-pipeline`
+
+**Verification:**
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅
+- `./gradlew.bat compileTestJava` ✅ (review fixes + AbstractIntegrationTest compile clean)
+- CI run pending on PR #18 push.
+
 ## 2026-05-16 — Sprint 2: Demo Data & Visual Quality
 
 **Goal:** Replace system-generated placeholder data with realistic personas, enrich the measure catalog, and make the trend charts interpretable.

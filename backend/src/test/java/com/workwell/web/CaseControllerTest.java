@@ -43,7 +43,7 @@ class CaseControllerTest {
     @Test
     void listsCases() throws Exception {
         UUID caseId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(caseFlowService.listCases("open", null, null, null, null, null, null)).thenReturn(List.of(
+        when(caseFlowService.listCases("open", null, null, null, null, null, null, 25, 0)).thenReturn(List.of(
                 new CaseFlowService.CaseSummary(
                         caseId,
                         "patient-003",
@@ -77,7 +77,7 @@ class CaseControllerTest {
     @Test
     void listsExcludedCases() throws Exception {
         UUID caseId = UUID.fromString("22222222-2222-2222-2222-222222222222");
-        when(caseFlowService.listCases("excluded", null, null, null, null, null, null)).thenReturn(List.of(
+        when(caseFlowService.listCases("excluded", null, null, null, null, null, null, 25, 0)).thenReturn(List.of(
                 new CaseFlowService.CaseSummary(
                         caseId,
                         "patient-010",
@@ -108,7 +108,7 @@ class CaseControllerTest {
 
     @Test
     void rejectsUnsupportedCaseStatus() throws Exception {
-        when(caseFlowService.listCases("bogus", null, null, null, null, null, null))
+        when(caseFlowService.listCases("bogus", null, null, null, null, null, null, 25, 0))
                 .thenThrow(new IllegalArgumentException("status must be one of open, closed, excluded, all"));
 
         mockMvc.perform(get("/api/cases").param("status", "bogus"))
