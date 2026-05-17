@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
 type AuthUser = {
   email: string;
@@ -115,6 +116,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         notifySessionChange();
       },
       logout: () => {
+        // Best-effort: clear the HttpOnly refresh cookie server-side. The local
+        // session is cleared regardless of whether the network call succeeds.
+        void fetch(`${API_BASE}/api/auth/logout`, {
+          method: "POST",
+          credentials: "include"
+        }).catch(() => {
+          /* ignore network errors on logout */
+        });
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
         notifySessionChange();

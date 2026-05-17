@@ -8,7 +8,7 @@ export type ApiClientOptions = {
 };
 
 export class ApiClient {
-  private readonly token: string | null;
+  private token: string | null;
   private readonly onUnauthorized: (() => void) | undefined;
 
   constructor({ token, onUnauthorized }: ApiClientOptions = {}) {
@@ -24,9 +24,56 @@ export class ApiClient {
     return headers;
   }
 
+  /**
+   * Attempts one silent access-token refresh against /api/auth/refresh using the
+   * HttpOnly refresh cookie. Returns true if a fresh access token was obtained.
+   */
+  private async tryRefresh(): Promise<boolean> {
+    try {
+      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!refreshRes.ok) {
+        return false;
+      }
+      const payload = (await refreshRes.json()) as { token?: string };
+      if (!payload.token) {
+        return false;
+      }
+      this.token = payload.token;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Executes a fetch and, on a 401, attempts exactly one silent refresh + retry.
+   * The `retried` boolean (NOT header inspection) guards against unbounded recursion.
+   */
+  private async fetchWithAuth(
+    url: string,
+    build: () => RequestInit,
+    retried = false
+  ): Promise<Response> {
+    const res = await fetch(url, build());
+    if (res.status === 401 && !retried) {
+      const refreshed = await this.tryRefresh();
+      if (refreshed) {
+        return this.fetchWithAuth(url, build, true);
+      }
+      this.onUnauthorized?.();
+      return res;
+    }
+    if (res.status === 401) {
+      this.onUnauthorized?.();
+    }
+    return res;
+  }
+
   private async handleResponse<T>(response: Response): Promise<T> {
     if (response.status === 401) {
-      this.onUnauthorized?.();
       const body = await response.text().catch(() => "");
       throw new ApiError(401, body, "Session expired. Please sign in again.");
     }
@@ -60,65 +107,74 @@ export class ApiClient {
   }
 
   get<T>(path: string, init?: RequestInit): Promise<T> {
-    return fetch(`${API_BASE}${path}`, {
+    return this.fetchWithAuth(`${API_BASE}${path}`, () => ({
       ...init,
       method: "GET",
       headers: this.buildHeaders(init?.headers),
-      cache: "no-store"
-    }).then((r) => this.handleResponse<T>(r));
+      cache: "no-store",
+      credentials: "include"
+    })).then((r) => this.handleResponse<T>(r));
   }
 
   post<TBody = unknown, TResponse = unknown>(path: string, body?: TBody, init?: RequestInit): Promise<TResponse> {
     const hasBody = body !== undefined;
-    const headers = this.buildHeaders(init?.headers);
-    if (hasBody) {
-      headers.set("Content-Type", "application/json");
-    }
-    return fetch(`${API_BASE}${path}`, {
-      ...init,
-      method: "POST",
-      headers,
-      body: hasBody ? JSON.stringify(body) : undefined
+    return this.fetchWithAuth(`${API_BASE}${path}`, () => {
+      const headers = this.buildHeaders(init?.headers);
+      if (hasBody) {
+        headers.set("Content-Type", "application/json");
+      }
+      return {
+        ...init,
+        method: "POST",
+        headers,
+        body: hasBody ? JSON.stringify(body) : undefined,
+        credentials: "include"
+      };
     }).then((r) => this.handleResponse<TResponse>(r));
   }
 
   postForm(path: string, formData: FormData, init?: RequestInit): Promise<unknown> {
-    return fetch(`${API_BASE}${path}`, {
+    return this.fetchWithAuth(`${API_BASE}${path}`, () => ({
       ...init,
       method: "POST",
       headers: this.buildHeaders(init?.headers),
-      body: formData
-    }).then((r) => this.handleResponse<unknown>(r));
+      body: formData,
+      credentials: "include"
+    })).then((r) => this.handleResponse<unknown>(r));
   }
 
   put<TBody = unknown, TResponse = unknown>(path: string, body?: TBody, init?: RequestInit): Promise<TResponse> {
     const hasBody = body !== undefined;
-    const headers = this.buildHeaders(init?.headers);
-    if (hasBody) {
-      headers.set("Content-Type", "application/json");
-    }
-    return fetch(`${API_BASE}${path}`, {
-      ...init,
-      method: "PUT",
-      headers,
-      body: hasBody ? JSON.stringify(body) : undefined
+    return this.fetchWithAuth(`${API_BASE}${path}`, () => {
+      const headers = this.buildHeaders(init?.headers);
+      if (hasBody) {
+        headers.set("Content-Type", "application/json");
+      }
+      return {
+        ...init,
+        method: "PUT",
+        headers,
+        body: hasBody ? JSON.stringify(body) : undefined,
+        credentials: "include"
+      };
     }).then((r) => this.handleResponse<TResponse>(r));
   }
 
   delete<TResponse = unknown>(path: string, init?: RequestInit): Promise<TResponse> {
-    return fetch(`${API_BASE}${path}`, {
+    return this.fetchWithAuth(`${API_BASE}${path}`, () => ({
       ...init,
       method: "DELETE",
-      headers: this.buildHeaders(init?.headers)
-    }).then((r) => this.handleResponse<TResponse>(r));
+      headers: this.buildHeaders(init?.headers),
+      credentials: "include"
+    })).then((r) => this.handleResponse<TResponse>(r));
   }
 
   async downloadBlob(path: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      headers: this.buildHeaders()
-    });
+    const response = await this.fetchWithAuth(`${API_BASE}${path}`, () => ({
+      headers: this.buildHeaders(),
+      credentials: "include"
+    }));
     if (response.status === 401) {
-      this.onUnauthorized?.();
       throw new ApiError(401, "", "Unauthorized");
     }
     if (!response.ok) {
