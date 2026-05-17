@@ -4,6 +4,8 @@ import com.workwell.caseflow.CaseFlowService;
 import com.workwell.caseflow.EvidenceService;
 import com.workwell.audit.CaseAccessAuditService;
 import com.workwell.security.SecurityActor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
@@ -27,6 +29,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
+@Tag(name = "Cases", description = "Worklist, case detail, actions, evidence, and timeline")
 public class CaseController {
     private final CaseFlowService caseFlowService;
     private final EvidenceService evidenceService;
@@ -42,6 +45,7 @@ public class CaseController {
         this.caseAccessAuditService = caseAccessAuditService;
     }
 
+    @Operation(summary = "List cases", description = "Worklist with status, measure, priority, assignee, and site filters.")
     @GetMapping("/api/cases")
     public List<CaseFlowService.CaseSummary> listCases(
             @RequestParam(name = "status", defaultValue = "open") String status,
@@ -132,6 +136,11 @@ public class CaseController {
         return caseFlowService.listAppointments(caseId);
     }
 
+    @Operation(
+            summary = "Upload case evidence",
+            description = "Uploads an evidence file. Content type is detected from magic bytes; "
+                    + "unsupported types return 415 and files over 10MB return 415."
+    )
     @PostMapping(value = "/api/cases/{caseId}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public EvidenceService.EvidenceAttachment uploadEvidence(
             @PathVariable UUID caseId,
