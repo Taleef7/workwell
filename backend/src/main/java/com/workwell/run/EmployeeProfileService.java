@@ -64,11 +64,11 @@ public class EmployeeProfileService {
             ORDER BY mv.measure_id, o.evaluated_at DESC
             """, employeeId);
 
-        // 3. Open cases (sla_due_date not available until V020 migration)
+        // 3. Open cases
         List<Map<String, Object>> caseRows = jdbcTemplate.queryForList("""
             SELECT c.id, m.name AS measure_name,
                    c.current_outcome_status, c.priority, c.assignee,
-                   c.created_at
+                   c.created_at, c.sla_due_date
             FROM cases c
             JOIN measure_versions mv ON mv.id = c.measure_version_id
             JOIN measures m ON m.id = mv.measure_id
@@ -145,16 +145,19 @@ public class EmployeeProfileService {
         // Build open case summaries
         List<OpenCaseSummary> openCases = new ArrayList<>();
         for (var row : caseRows) {
-            // TODO(V020): once sla_due_date and sla_breached columns exist (V020 migration),
-            // compute slaDueDate and slaRemainingDays from the sla_due_date column here.
+            java.sql.Timestamp slaTs = (java.sql.Timestamp) row.get("sla_due_date");
+            String slaDueDate = slaTs != null ? slaTs.toInstant().toString() : null;
+            Integer slaRemainingDays = slaTs != null
+                ? (int) java.time.Duration.between(Instant.now(), slaTs.toInstant()).toDays()
+                : null;
             openCases.add(new OpenCaseSummary(
                 (UUID) row.get("id"),
                 (String) row.get("measure_name"),
                 (String) row.get("current_outcome_status"),
                 (String) row.get("priority"),
                 (String) row.get("assignee"),
-                null, // slaDueDate — available after V020 migration
-                null  // slaRemainingDays — available after V020 migration
+                slaDueDate,
+                slaRemainingDays
             ));
         }
 

@@ -31,19 +31,22 @@ public class CaseFlowService {
     private final OutreachTemplateService outreachTemplateService;
     private final WaiverService waiverService;
     private final CqlEvaluationService cqlEvaluationService;
+    private final CaseSlaService caseSlaService;
 
     public CaseFlowService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             OutreachTemplateService outreachTemplateService,
             WaiverService waiverService,
-            CqlEvaluationService cqlEvaluationService
+            CqlEvaluationService cqlEvaluationService,
+            CaseSlaService caseSlaService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.outreachTemplateService = outreachTemplateService;
         this.waiverService = waiverService;
         this.cqlEvaluationService = cqlEvaluationService;
+        this.caseSlaService = caseSlaService;
     }
 
     public void upsertCases(
@@ -887,11 +890,12 @@ public class CaseFlowService {
     ) {
         String priority = priorityFor(outcome.outcome());
         String nextAction = nextActionFor(outcome.outcome(), measureVersionId);
+        Instant slaDueDate = caseSlaService.computeSlaDueDate(outcome.outcome());
         UUID candidateCaseId = UUID.randomUUID();
         Map<String, Object> upserted = jdbcTemplate.queryForMap(
                 """
-                        INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)
+                        INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, sla_due_date, created_at, updated_at, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULL)
                         ON CONFLICT (employee_id, measure_version_id, evaluation_period)
                         DO UPDATE SET
                             status = EXCLUDED.status,
@@ -899,6 +903,8 @@ public class CaseFlowService {
                             next_action = EXCLUDED.next_action,
                             current_outcome_status = EXCLUDED.current_outcome_status,
                             last_run_id = EXCLUDED.last_run_id,
+                            sla_due_date = EXCLUDED.sla_due_date,
+                            sla_breached = FALSE,
                             updated_at = NOW(),
                             closed_at = NULL,
                             closed_reason = NULL,
@@ -914,7 +920,8 @@ public class CaseFlowService {
                 null,
                 nextAction,
                 outcome.outcome(),
-                runId
+                runId,
+                Timestamp.from(slaDueDate)
         );
         UUID caseId = (UUID) upserted.get("id");
         boolean created = Boolean.TRUE.equals(upserted.get("created"));
