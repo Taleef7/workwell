@@ -11,6 +11,14 @@ async function loginAs(page: Page, email: string, password: string) {
   await expect(page).toHaveURL(/\/programs/);
 }
 
+// Wait for the cases page to finish loading by waiting for an employee link
+// (rendered only after the async /api/cases fetch resolves) or the empty state.
+async function waitForCasesLoaded(page: Page) {
+  await expect(
+    page.locator("a[href^='/employees/'], [data-testid='no-cases'], .rounded-2xl.border:not(.border-dashed)").first()
+  ).toBeVisible({ timeout: 20_000 });
+}
+
 test.describe("Golden demo path", () => {
 
   test("programs overview loads without 500", async ({ page }) => {
@@ -19,25 +27,26 @@ test.describe("Golden demo path", () => {
     expect(response?.status()).toBe(200);
     await expect(page.locator("text=500")).not.toBeVisible();
     await expect(page.locator("text=Internal Server Error")).not.toBeVisible();
-    await expect(page.locator("[data-testid='program-card'], h1, h2").first()).toBeVisible();
+    await expect(page.locator("h1, h2").first()).toBeVisible();
   });
 
-  test("cases list renders at least one row", async ({ page }) => {
+  test("cases list renders at least one case after data loads", async ({ page }) => {
     await loginAs(page, DEMO_EMAIL, DEMO_PASSWORD);
     await page.goto("/cases");
-    // Wait for data to load (either a table row or a no-cases message)
-    await expect(page.locator("table tbody tr, [data-testid='no-cases']").first()).toBeVisible({ timeout: 15_000 });
+    // Wait for async /api/cases to resolve — employee links only appear after cards render
+    await waitForCasesLoaded(page);
+    const caseCards = page.locator("a[href^='/employees/']");
+    await expect(caseCards.first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("employee profile page loads from cases list", async ({ page }) => {
     await loginAs(page, DEMO_EMAIL, DEMO_PASSWORD);
     await page.goto("/cases");
+    // Wait for cases to fully load before checking for employee links
+    await waitForCasesLoaded(page);
+
     const employeeLink = page.locator("a[href^='/employees/']").first();
-    // Only run if there is at least one employee link
-    if (await employeeLink.count() === 0) {
-      test.skip();
-      return;
-    }
+    await expect(employeeLink).toBeVisible({ timeout: 5_000 });
     await employeeLink.click();
     await expect(page).toHaveURL(/\/employees\//);
     await expect(page.locator("h1, h2").first()).toBeVisible();
@@ -56,17 +65,15 @@ test.describe("Golden demo path", () => {
 
     // 3. Navigate to cases
     await page.goto("/cases");
-    await expect(page.locator("h1, h2, table").first()).toBeVisible();
+    await waitForCasesLoaded(page);
 
     // 4. Studio — measure list
     await page.goto("/measures");
     await expect(page.locator("h1, h2, table").first()).toBeVisible();
 
-    // 5. Logout
-    const logoutBtn = page.getByRole("button", { name: /logout|sign out/i });
-    if (await logoutBtn.count() > 0) {
-      await logoutBtn.click();
-      await expect(page).toHaveURL(/\/login/);
-    }
+    // 5. Logout — required step, not optional
+    await expect(page.getByRole("button", { name: /logout|sign out/i })).toBeVisible({ timeout: 5_000 });
+    await page.getByRole("button", { name: /logout|sign out/i }).click();
+    await expect(page).toHaveURL(/\/login/);
   });
 });
