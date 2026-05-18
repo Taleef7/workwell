@@ -45,24 +45,41 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   return JSON.parse(atob(padded)) as Record<string, unknown>;
 }
 
+// Module-level snapshot cache — useSyncExternalStore uses Object.is to detect
+// changes, so returning a new object on every call causes an infinite re-render
+// loop in React 19. We return the same reference when values haven't changed.
+let _lastSession: StoredSession = { token: null, user: null };
+
 function readStoredSession(): StoredSession {
-  const token = readStorage<string>(TOKEN_KEY);
-  const user = readStorage<AuthUser>(USER_KEY);
-  if (!token || !user) {
-    return { token: null, user: null };
-  }
+  const rawToken = readStorage<string>(TOKEN_KEY);
+  const rawUser = readStorage<AuthUser>(USER_KEY);
 
-  try {
-    const payload = decodeJwtPayload(token);
-    const exp = Number(payload?.exp);
-    if (!Number.isFinite(exp) || Date.now() >= exp * 1000) {
-      return { token: null, user: null };
+  let nextToken: string | null = null;
+  let nextUser: AuthUser | null = null;
+
+  if (rawToken && rawUser) {
+    try {
+      const payload = decodeJwtPayload(rawToken);
+      const exp = Number(payload?.exp);
+      if (Number.isFinite(exp) && Date.now() < exp * 1000) {
+        nextToken = rawToken;
+        nextUser = rawUser;
+      }
+    } catch {
+      // invalid token — keep nulls
     }
-  } catch {
-    return { token: null, user: null };
   }
 
-  return { token, user };
+  if (
+    _lastSession.token === nextToken &&
+    _lastSession.user?.email === nextUser?.email &&
+    _lastSession.user?.role === nextUser?.role
+  ) {
+    return _lastSession;
+  }
+
+  _lastSession = { token: nextToken, user: nextUser };
+  return _lastSession;
 }
 
 // Module-level listener bus for same-tab localStorage changes.
