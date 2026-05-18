@@ -53,6 +53,7 @@ export default function ProgramsPage() {
   const [loading, setLoading] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRunStatus, setActiveRunStatus] = useState<string>("IDLE");
+  const [showRunConfirm, setShowRunConfirm] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -173,14 +174,33 @@ export default function ProgramsPage() {
             <span className="text-sm text-slate-500 animate-pulse">
               {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
             </span>
-          ) : null}
-          <button
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            onClick={() => void runAllMeasuresNow()}
-            disabled={activeRunId !== null}
-          >
-            {activeRunId ? "Running…" : "Run All Measures Now"}
-          </button>
+          ) : showRunConfirm ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-slate-700">Run all 4 active programs now?</span>
+              <button
+                type="button"
+                onClick={() => { setShowRunConfirm(false); void runAllMeasuresNow(); }}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRunConfirm(false)}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer transition-colors"
+              onClick={() => setShowRunConfirm(true)}
+            >
+              Run All Measures Now
+            </button>
+          )}
         </div>
       </div>
 
@@ -329,7 +349,11 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
 }
 
 function TrendChart({ data }: { data: TrendPoint[] }) {
-  if (!data || data.length < 2) {
+  const sorted = [...(data ?? [])]
+    .filter((t) => t.totalEvaluated > 0)
+    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
+  if (sorted.length < 2) {
     return (
       <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
         <span className="text-xs text-slate-400">Not enough run history for trend</span>
@@ -337,10 +361,8 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
     );
   }
 
-  const sorted = [...data].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-
   const chartData = sorted.map((t) => ({
-    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short" }),
+    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short", day: "numeric" }),
     rate: Math.round(t.complianceRate * 10) / 10,
   }));
 
