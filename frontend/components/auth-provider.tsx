@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 const TOKEN_KEY = "ww_token";
@@ -106,22 +106,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const token = session.token;
   const user = session.user;
 
-  useEffect(() => {
-    if (pathname?.startsWith("/login")) return;
-    if (!token) {
-      router.replace("/login");
-    }
-  }, [pathname, router, token]);
+  // Tracks whether a silent refresh has already been attempted in this mount cycle.
+  // Reset when token becomes valid so the next expiry gets a fresh attempt.
+  const silentRefreshAttempted = useRef(false);
 
   useEffect(() => {
-    if (token) return;
-    const storedToken = readStorage<string>(TOKEN_KEY);
-    const storedUser = readStorage<AuthUser>(USER_KEY);
-    if (!storedToken && !storedUser) return;
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    notifySessionChange();
+    if (token) {
+      silentRefreshAttempted.current = false;
+    }
   }, [token]);
+
+  useEffect(() => {
+    if (pathname?.startsWith("/login")) return;
+    if (token) return;
+
+    // Before redirecting, attempt one silent refresh using the HttpOnly cookie.
+    if (silentRefreshAttempted.current) {
+      router.replace("/login");
+      return;
+    }
+    silentRefreshAttempted.current = true;
+
+    // Clear stale expired token from storage so readStoredSession stays consistent.
+    const storedToken = readStorage<string>(TOKEN_KEY);
+    if (storedToken) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      notifySessionChange();
+    }
+
+    fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<{ token?: string; email?: string; role?: string }>) : null))
+      .then((payload) => {
+        if (payload?.token && payload.email && payload.role) {
+          localStorage.setItem(TOKEN_KEY, JSON.stringify(payload.token));
+          localStorage.setItem(USER_KEY, JSON.stringify({ email: payload.email, role: payload.role }));
+          notifySessionChange();
+        } else {
+          router.replace("/login");
+        }
+      })
+      .catch(() => {
+        router.replace("/login");
+      });
+  }, [pathname, router, token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
