@@ -105,7 +105,7 @@ export default function EmployeeProfilePage() {
                   </td>
                   <td className="py-2 text-slate-500">{c.assignee ?? '—'}</td>
                   <td className="py-2">
-                    <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} />
+                    <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} /> {c.slaRemainingDays == null && <span className="text-slate-400">—</span>}
                   </td>
                 </tr>
               ))}

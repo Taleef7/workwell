@@ -6,7 +6,12 @@ type Props = {
 export function SlaChip({ slaRemainingDays, slaBreached }: Props) {
   if (slaRemainingDays == null) return null;
 
-  const colorClass = slaBreached
+  // Treat negative days as breached — sla_breached is set asynchronously by the
+  // scheduler every 6 hours, so the UI can receive a negative count before the
+  // flag is flipped on the backend.
+  const effectivelyBreached = slaBreached || slaRemainingDays < 0;
+
+  const colorClass = effectivelyBreached
     ? "font-semibold text-red-700"
     : slaRemainingDays <= 2
       ? "font-medium text-red-600"
@@ -15,8 +20,8 @@ export function SlaChip({ slaRemainingDays, slaBreached }: Props) {
         : "text-slate-500";
 
   return (
-    <dd className={colorClass} data-testid="sla-chip">
-      {slaBreached ? "Breached" : `${slaRemainingDays}d`}
-    </dd>
+    <span className={colorClass} data-testid="sla-chip">
+      {effectivelyBreached ? "Breached" : `${slaRemainingDays}d`}
+    </span>
   );
 }

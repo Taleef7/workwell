@@ -1,36 +1,31 @@
 import { http, HttpResponse } from "msw";
 
+// Matches the actual backend contract: /api/cases returns CaseSummary[]
 export const handlers = [
-  http.get("*/api/cases", ({ request }) => {
-    const url = new URL(request.url);
-    const slaBreached = url.searchParams.get("slaBreached") === "true";
-    return HttpResponse.json({
-      content: [
-        {
-          caseId: "case-001",
-          employeeId: "EMP-001",
-          employeeName: "Jane Smith",
-          site: "Site A",
-          measureVersionId: "mv-001",
-          measureName: "Annual Audiogram",
-          measureVersion: "1.0",
-          evaluationPeriod: "2026-05-01",
-          status: "OPEN",
-          priority: "HIGH",
-          assignee: "cm@workwell.dev",
-          currentOutcomeStatus: "OVERDUE",
-          lastRunId: "run-001",
-          exclusionReason: null,
-          waiverExpiresAt: null,
-          waiverExpired: false,
-          updatedAt: new Date().toISOString(),
-          slaRemainingDays: slaBreached ? -3 : 5,
-          slaBreached: slaBreached,
-        },
-      ],
-      totalElements: 1,
-      totalPages: 1,
-    });
+  http.get("*/api/cases", () => {
+    return HttpResponse.json([
+      {
+        caseId: "case-001",
+        employeeId: "EMP-001",
+        employeeName: "Jane Smith",
+        site: "Site A",
+        measureVersionId: "mv-001",
+        measureName: "Annual Audiogram",
+        measureVersion: "1.0",
+        evaluationPeriod: "2026-05-01",
+        status: "OPEN",
+        priority: "HIGH",
+        assignee: "cm@workwell.dev",
+        currentOutcomeStatus: "OVERDUE",
+        lastRunId: "run-001",
+        exclusionReason: null,
+        waiverExpiresAt: null,
+        waiverExpired: false,
+        updatedAt: new Date().toISOString(),
+        slaRemainingDays: 5,
+        slaBreached: false,
+      },
+    ]);
   }),
 
   http.get("*/api/cases/:id", ({ params }) => {
@@ -64,19 +59,18 @@ export const handlers = [
     });
   }),
 
+  // /api/measures returns MeasureOption[] directly; status uses title-case "Active"
   http.get("*/api/measures", () => {
-    return HttpResponse.json({
-      content: [
-        {
-          id: "m-001",
-          name: "Annual Audiogram",
-          status: "ACTIVE",
-          version: "1.0",
-          owner: "admin",
-          tags: [],
-          updatedAt: new Date().toISOString(),
-        },
-      ],
-    });
+    return HttpResponse.json([
+      {
+        id: "m-001",
+        name: "Annual Audiogram",
+        status: "Active",
+        version: "1.0",
+        owner: "admin",
+        tags: [],
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
   }),
 ];

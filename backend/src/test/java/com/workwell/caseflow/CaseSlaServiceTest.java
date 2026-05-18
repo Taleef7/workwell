@@ -31,7 +31,6 @@ class CaseSlaServiceTest extends AbstractIntegrationTest {
 
     @Test
     void breachedCaseGetsPriorityEscalatedAndAuditEventWritten() {
-        // Find an open MEDIUM-priority case, backdate its SLA to yesterday
         var openCases = jdbcTemplate.queryForList("""
                 SELECT id, priority FROM cases
                 WHERE status IN ('OPEN', 'IN_PROGRESS')
@@ -39,23 +38,15 @@ class CaseSlaServiceTest extends AbstractIntegrationTest {
                   AND sla_breached = FALSE
                 LIMIT 1
                 """);
-        if (openCases.isEmpty()) {
-            // Seed a case manually with an expired SLA
-            allProgramsRunService.runAllPrograms("All Programs", "admin@workwell.dev");
-            openCases = jdbcTemplate.queryForList("""
-                    SELECT id, priority FROM cases
-                    WHERE status IN ('OPEN', 'IN_PROGRESS') LIMIT 1
-                    """);
-        }
-        if (openCases.isEmpty()) {
-            // No eligible cases in current seed — skip without failure
-            return;
-        }
+
+        assertThat(openCases)
+                .as("@BeforeEach must produce open cases with sla_due_date set — check seed/run logic")
+                .isNotEmpty();
 
         UUID caseId = (UUID) openCases.get(0).get("id");
         String originalPriority = (String) openCases.get(0).get("priority");
 
-        // Backdate the SLA to yesterday so it counts as breached
+        // Backdate SLA to yesterday so the scheduler treats this case as breached
         jdbcTemplate.update("""
                 UPDATE cases SET sla_due_date = NOW() - INTERVAL '1 day', sla_breached = FALSE
                 WHERE id = ?
@@ -65,18 +56,28 @@ class CaseSlaServiceTest extends AbstractIntegrationTest {
 
         caseSlaService.escalateBreachedCases();
 
-        // Priority must have been escalated (or capped at CRITICAL)
         String newPriority = jdbcTemplate.queryForObject(
                 "SELECT priority FROM cases WHERE id = ?", String.class, caseId);
         boolean slaBreachedFlag = Boolean.TRUE.equals(
                 jdbcTemplate.queryForObject("SELECT sla_breached FROM cases WHERE id = ?", Boolean.class, caseId));
 
-        assertThat(slaBreachedFlag).isTrue();
-        // Priority must be at least as high as before (escalated or already CRITICAL)
-        assertThat(priorityLevel(newPriority)).isGreaterThanOrEqualTo(priorityLevel(originalPriority));
+        assertThat(slaBreachedFlag)
+                .as("sla_breached flag must be set to TRUE after escalation")
+                .isTrue();
+
+        // Strict escalation: priority must increase unless it was already CRITICAL
+        if ("CRITICAL".equals(originalPriority)) {
+            assertThat(newPriority).isEqualTo("CRITICAL");
+        } else {
+            assertThat(priorityLevel(newPriority))
+                    .as("Priority must increase by at least one level (was %s)", originalPriority)
+                    .isGreaterThan(priorityLevel(originalPriority));
+        }
 
         int auditsAfter = auditCount(caseId, "CASE_SLA_BREACHED");
-        assertThat(auditsAfter).isEqualTo(auditsBefore + 1);
+        assertThat(auditsAfter)
+                .as("Exactly one CASE_SLA_BREACHED audit event must be written")
+                .isEqualTo(auditsBefore + 1);
     }
 
     @Test
@@ -84,7 +85,10 @@ class CaseSlaServiceTest extends AbstractIntegrationTest {
         var openCases = jdbcTemplate.queryForList("""
                 SELECT id FROM cases WHERE status = 'OPEN' LIMIT 1
                 """);
-        if (openCases.isEmpty()) return;
+
+        assertThat(openCases)
+                .as("@BeforeEach must produce open cases — check seed/run logic")
+                .isNotEmpty();
 
         UUID caseId = (UUID) openCases.get(0).get("id");
 
@@ -100,9 +104,12 @@ class CaseSlaServiceTest extends AbstractIntegrationTest {
         caseSlaService.escalateBreachedCases();
 
         int auditsAfter = auditCount(caseId, "CASE_SLA_BREACHED");
-        // Already-breached case must not be escalated again
-        assertThat(auditsAfter).isEqualTo(auditsBefore);
+        assertThat(auditsAfter)
+                .as("Already-breached case must not generate a second CASE_SLA_BREACHED event")
+                .isEqualTo(auditsBefore);
     }
+
+    // ---- helpers ----
 
     private int auditCount(UUID caseId, String eventType) {
         Integer count = jdbcTemplate.queryForObject(
