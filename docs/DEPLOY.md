@@ -90,8 +90,25 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel | Backend URL for fetch calls |
 | `NEXT_PUBLIC_APP_NAME` | Vercel | App display name |
 | `NEXT_PUBLIC_DEMO_MODE` | Vercel | Prefill login form for local/demo builds only |
+| `WORKWELL_EMAIL_PROVIDER` | Fly | Outreach email provider. **Stays `simulated` on the demo stack (default + CLAUDE.md hard rule).** |
+| `WORKWELL_EMAIL_SENDGRID_API_KEY` | Fly | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
+| `WORKWELL_EMAIL_FROM_ADDRESS` | Fly | From address for outreach (default `noreply@workwell-demo.dev`). |
+| `WORKWELL_EMAIL_FROM_NAME` | Fly | From display name (default `WorkWell Measure Studio`). |
 
 `.env.example` at repo root mirrors this list (without values). At present, env vars must be verified manually before deploy; the existing CI workflow does not validate deployment secrets or Vercel env configuration.
+
+### Email delivery (Sprint 6)
+
+The demo stack runs `WORKWELL_EMAIL_PROVIDER=simulated`. Outreach actions never send a real
+email — each attempt is logged and written to `outreach_delivery_log` with `status=SIMULATED`,
+visible in the Admin → Outreach Delivery Log panel. SendGrid wiring (`com.workwell.notification.EmailService`)
+exists for post-demo / non-demo use only and is exercised solely when both
+`WORKWELL_EMAIL_PROVIDER=sendgrid` and `WORKWELL_EMAIL_SENDGRID_API_KEY` are set; if the
+provider is `sendgrid` but no key is configured it degrades safely back to a simulated send.
+Do not set `WORKWELL_EMAIL_SENDGRID_API_KEY` on the demo stack.
+
+The non-prod `POST /api/admin/demo-reset` endpoint (admin-only, `@Profile("!prod")`) truncates
+volatile demo tables including `audit_events`; it returns 403 under the `prod` profile.
 
 ## CI/CD
 

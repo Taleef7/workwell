@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.admin.IntegrationHealthService;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.run.RunPersistenceService;
 import java.time.Instant;
@@ -50,6 +51,7 @@ class AiServiceIntegrationTest {
                 runPersistenceService,
                 jdbcTemplate,
                 new ObjectMapper(),
+                mock(IntegrationHealthService.class),
                 provider,
                 "gpt-5.4-nano",
                 "gpt-4o-mini"
@@ -118,6 +120,7 @@ class AiServiceIntegrationTest {
                 runPersistenceService,
                 jdbcTemplate,
                 new ObjectMapper(),
+                mock(IntegrationHealthService.class),
                 provider,
                 "gpt-5.4-nano",
                 "gpt-4o-mini"

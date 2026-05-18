@@ -3,6 +3,7 @@ package com.workwell.ai;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.admin.IntegrationHealthService;
 import com.workwell.caseflow.CaseFlowService;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.security.SecurityActor;
@@ -26,6 +27,7 @@ public class AiAssistService {
     private final RunPersistenceService runPersistenceService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final IntegrationHealthService integrationHealthService;
     private final ChatClient chatClient;
     private final String modelName;
     private final String fallbackModelName;
@@ -36,6 +38,7 @@ public class AiAssistService {
             RunPersistenceService runPersistenceService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
+            IntegrationHealthService integrationHealthService,
             ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
             @Value("${spring.ai.openai.chat.options.model:gpt-5.4-nano}") String modelName,
             @Value("${workwell.ai.openai.fallback-model:gpt-4o-mini}") String fallbackModelName
@@ -44,6 +47,7 @@ public class AiAssistService {
         this.runPersistenceService = runPersistenceService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.integrationHealthService = integrationHealthService;
         ChatClient.Builder chatClientBuilder = chatClientBuilderProvider.getIfAvailable();
         this.chatClient = chatClientBuilder == null ? null : chatClientBuilder.build();
         this.modelName = modelName;
@@ -271,6 +275,17 @@ public class AiAssistService {
     }
 
     private String callWithModelFallback(String systemPrompt, String userPrompt) {
+        try {
+            String content = invokeChat(systemPrompt, userPrompt);
+            integrationHealthService.recordAiHealth(true, "Last AI call succeeded (" + modelName + ")");
+            return content;
+        } catch (RuntimeException ex) {
+            integrationHealthService.recordAiHealth(false, "Last AI call failed: " + rootMessage(ex));
+            throw ex;
+        }
+    }
+
+    private String invokeChat(String systemPrompt, String userPrompt) {
         if (chatClient == null) {
             throw new IllegalStateException("OpenAI ChatClient is not configured.");
         }
@@ -300,6 +315,15 @@ public class AiAssistService {
         } catch (Exception fallbackError) {
             throw new IllegalStateException("Primary and fallback model calls failed.", fallbackError);
         }
+    }
+
+    private String rootMessage(Throwable ex) {
+        Throwable cursor = ex;
+        while (cursor.getCause() != null && cursor.getCause() != cursor) {
+            cursor = cursor.getCause();
+        }
+        String message = cursor.getMessage();
+        return message == null || message.isBlank() ? cursor.getClass().getSimpleName() : message;
     }
 
     private List<String> parseBullets(String content) {

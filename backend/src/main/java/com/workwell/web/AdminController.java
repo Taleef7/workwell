@@ -1,7 +1,9 @@
 package com.workwell.web;
 
 import com.workwell.admin.DataReadinessService;
+import com.workwell.admin.DemoResetService;
 import com.workwell.admin.IntegrationHealthService;
+import com.workwell.admin.OutreachDeliveryLogService;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.audit.AuditQueryService;
@@ -15,8 +17,11 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,6 +40,8 @@ public class AdminController {
     private final AuditQueryService auditQueryService;
     private final DataReadinessService dataReadinessService;
     private final ValueSetGovernanceService valueSetGovernanceService;
+    private final OutreachDeliveryLogService outreachDeliveryLogService;
+    private final Optional<DemoResetService> demoResetService;
 
     public AdminController(
             IntegrationHealthService integrationHealthService,
@@ -43,7 +50,9 @@ public class AdminController {
             WaiverService waiverService,
             AuditQueryService auditQueryService,
             DataReadinessService dataReadinessService,
-            ValueSetGovernanceService valueSetGovernanceService
+            ValueSetGovernanceService valueSetGovernanceService,
+            OutreachDeliveryLogService outreachDeliveryLogService,
+            Optional<DemoResetService> demoResetService
     ) {
         this.integrationHealthService = integrationHealthService;
         this.schedulerAdminService = schedulerAdminService;
@@ -52,6 +61,8 @@ public class AdminController {
         this.auditQueryService = auditQueryService;
         this.dataReadinessService = dataReadinessService;
         this.valueSetGovernanceService = valueSetGovernanceService;
+        this.outreachDeliveryLogService = outreachDeliveryLogService;
+        this.demoResetService = demoResetService;
     }
 
     @GetMapping("/api/admin/integrations")
@@ -123,6 +134,35 @@ public class AdminController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }
+    }
+
+    @GetMapping("/api/admin/outreach-templates/{id}/preview")
+    public OutreachTemplateService.TemplatePreview previewOutreachTemplate(@PathVariable UUID id) {
+        try {
+            return outreachTemplateService.previewTemplate(id);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/outreach/delivery-log")
+    public List<OutreachDeliveryLogService.DeliveryLogEntry> outreachDeliveryLog(
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        return outreachDeliveryLogService.recent(limit);
+    }
+
+    @PostMapping("/api/admin/demo-reset")
+    public ResponseEntity<Map<String, String>> demoReset() {
+        if (demoResetService.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Demo reset is not available in production"));
+        }
+        demoResetService.get().reset();
+        return ResponseEntity.ok(Map.of(
+                "status", "reset_complete",
+                "message", "Demo data has been reset"
+        ));
     }
 
     @GetMapping("/api/admin/waivers")
