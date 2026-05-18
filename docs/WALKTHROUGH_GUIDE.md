@@ -85,30 +85,32 @@ The Programs dashboard is the **operational command center**. It shows a real-ti
 ### Steps
 
 1. After login, you should already be on `/programs`. If not, click **Programs** in the left sidebar.
+   > **Sidebar labels:** The Runs page is labelled **Test Runs** in the sidebar, not "Runs". The cases worklist has two sidebar entries: **Cases** and **Worklist** — both navigate to `/cases`.
 2. At the top, you will see a **KPI row** (Key Performance Indicators) with four metric cards:
-   - **Total Employees Evaluated** — how many employees were assessed in the most recent run across all measures
-   - **Overall Pass Rate** — percentage currently compliant across all active programs (e.g., 72%)
-   - **Open Cases** — total non-compliance work items that need action
-   - **Trend indicator** — whether compliance is improving or declining vs. the previous run
+   - **Employees tracked** — total employees assessed in the most recent run across all measures
+   - **Overall compliance** — percentage currently compliant across all active programs (e.g., 72.0%)
+   - **Open cases** — total non-compliance work items that need action
+   - **Last run** — timestamp of the most recent completed run across all programs
 3. Below the KPI row, you will see **four measure program cards**, one per active measure:
-   - Annual Audiogram (OSHA 1910.95)
-   - HAZWOPER Annual Medical Surveillance (OSHA 1910.120)
-   - Annual TB Screening (CDC guidance)
+   - Annual Audiogram Completed (OSHA 1910.95)
    - Flu Vaccine This Season
+   - HAZWOPER Annual Medical Surveillance (OSHA 1910.120)
+   - Annual TB Screening
 4. Each card shows:
-   - Current pass rate (e.g., "68% compliant")
-   - A sparkline chart showing the trend over recent runs
-   - Last run timestamp
-   - Outcome breakdown (Compliant / Due Soon / Overdue / Missing Data / Excluded counts)
-5. Below the cards, find the **Top Non-Compliance Drivers** table — a ranked list of the most common reasons employees are flagged (e.g., "Exam overdue by 30–90 days" → 14 employees).
+   - Current compliance rate (e.g., "68.0%")
+   - Outcome badge counts: Compliant / Due Soon / Overdue / Missing Data / Excluded
+   - **Trend** sparkline — compliance rate over recent runs (requires ≥ 2 completed runs with evaluated employees to render)
+   - **Top Sites** and **Top Roles** — the sites/roles with the most overdue employees for this program
+   - **By Reason** — breakdown of flagged employees by outcome type (OVERDUE / DUE_SOON / MISSING_DATA)
+5. Driver breakdowns are **per-card** — there is no global drivers table. Look inside each program card for the **By Reason**, **Top Sites**, and **Top Roles** sections. These show data scoped to that program's most recent run only.
 
 ### Running all measures at once
 
 6. Click the **Run All Measures Now** button (top right of the programs page).
-7. A confirmation modal will appear: _"This will evaluate all 4 active programs against all enrolled employees. Continue?"_
+7. An inline confirmation appears in the header: _"Run all 4 active programs now?"_ with **Confirm** and **Cancel** buttons.
 8. Click **Confirm**.
 9. The system will trigger a run with scope `ALL_PROGRAMS`. Watch the measure cards refresh — pass rates, timestamps, and outcome counts will update.
-10. This takes approximately 5–15 seconds depending on server load.
+10. This takes approximately 5–15 seconds on a warm server. If the backend has been idle, Fly.io may cold-start the machine — allow up to 30–45 seconds for the first request. Subsequent requests in the session will be fast.
 
 ### What just happened
 The backend executed all four CQL measure libraries against the synthetic employee dataset (~50 employees). For each employee/measure combination, the CQL engine evaluated conditions like "Is the employee enrolled in this program?", "When was their last qualifying exam?", and "How many days ago was that?" — then classified the result into one of five outcome buckets: COMPLIANT, DUE_SOON, OVERDUE, MISSING_DATA, or EXCLUDED.
