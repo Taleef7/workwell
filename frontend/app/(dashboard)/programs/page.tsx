@@ -329,7 +329,11 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
 }
 
 function TrendChart({ data }: { data: TrendPoint[] }) {
-  if (!data || data.length < 2) {
+  const sorted = [...(data ?? [])]
+    .filter((t) => t.totalEvaluated > 0)
+    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
+  if (sorted.length < 2) {
     return (
       <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
         <span className="text-xs text-slate-400">Not enough run history for trend</span>
@@ -337,10 +341,8 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
     );
   }
 
-  const sorted = [...data].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-
   const chartData = sorted.map((t) => ({
-    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short" }),
+    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short", day: "numeric" }),
     rate: Math.round(t.complianceRate * 10) / 10,
   }));
 
