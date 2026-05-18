@@ -1,10 +1,11 @@
 name: CI
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    branches: [main, "claude/**", "fix/**", "feat/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,6 +13,7 @@ concurrency:
 
 jobs:
   backend:
+    name: Backend — Test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,10 +27,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
-      - name: Build backend
+      - name: Run backend tests
         run: ./gradlew test --build-cache --no-daemon
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Backend Tests
+          path: backend/build/test-results/test/*.xml
+          reporter: java-junit
 
   frontend:
+    name: Frontend — Lint, Test, Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -46,7 +56,43 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install deps
         run: pnpm install --frozen-lockfile
-      - name: Lint frontend
+      - name: Lint
         run: pnpm lint
-      - name: Build frontend
+      - name: Unit tests
+        run: pnpm test
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://workwell-measure-studio-api.fly.dev
+          NEXT_PUBLIC_APP_NAME: WorkWell Measure Studio
+          NEXT_PUBLIC_DEMO_MODE: "false"
         run: pnpm build
+
+  e2e:
+    name: Playwright E2E (manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: pnpm install
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install chromium --with-deps
+      - name: Run E2E tests
+        working-directory: e2e
+        env:
+          PLAYWRIGHT_BASE_URL: https://workwell-measure-studio.vercel.app
+        run: npx playwright test
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/

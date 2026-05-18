@@ -17,6 +17,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
+import { SlaChip } from "@/components/SlaChip";
 
 type CaseSummary = {
   caseId: string;
@@ -556,17 +557,7 @@ export default function CasesPage() {
                 {item.slaRemainingDays != null ? (
                   <div className="flex items-center justify-between gap-3">
                     <dt className="text-slate-500">SLA</dt>
-                    <dd className={
-                      item.slaBreached
-                        ? 'font-semibold text-red-700'
-                        : item.slaRemainingDays <= 2
-                        ? 'font-medium text-red-600'
-                        : item.slaRemainingDays <= 7
-                        ? 'text-yellow-600'
-                        : 'text-slate-500'
-                    }>
-                      {item.slaBreached ? 'Breached' : `${item.slaRemainingDays}d`}
-                    </dd>
+                    <SlaChip slaRemainingDays={item.slaRemainingDays} slaBreached={item.slaBreached} />
                   </div>
                 ) : null}
                 {caseStatus === "EXCLUDED" ? (
