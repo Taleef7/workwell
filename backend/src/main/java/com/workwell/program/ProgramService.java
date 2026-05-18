@@ -201,21 +201,30 @@ public class ProgramService {
     }
 
     public TopDrivers topDrivers(UUID measureId, String site, Instant from, Instant to) {
+        UUID measureVersionId = jdbcTemplate.query(
+                """
+                SELECT mv.id
+                FROM measure_versions mv
+                WHERE mv.measure_id = ?
+                ORDER BY mv.created_at DESC
+                LIMIT 1
+                """,
+                rs -> rs.next() ? (UUID) rs.getObject("id") : null,
+                measureId
+        );
+
+        if (measureVersionId == null) {
+            return new TopDrivers(List.of(), List.of(), List.of());
+        }
+
         UUID latestRunId = jdbcTemplate.query(
                 """
-                WITH active_measure_version AS (
-                    SELECT mv.id
-                    FROM measure_versions mv
-                    WHERE mv.measure_id = ?
-                    ORDER BY mv.created_at DESC
-                    LIMIT 1
-                )
                 SELECT o.run_id
                 FROM outcomes o
                 JOIN runs r ON r.id = o.run_id
                 JOIN employees e ON e.id = o.employee_id
-                JOIN active_measure_version amv ON amv.id = o.measure_version_id
-                WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                WHERE o.measure_version_id = ?
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                   AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
                   AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                 GROUP BY o.run_id, r.started_at
@@ -223,7 +232,7 @@ public class ProgramService {
                 LIMIT 1
                 """,
                 rs -> rs.next() ? (UUID) rs.getObject("run_id") : null,
-                measureId,
+                measureVersionId,
                 site, site,
                 from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
                 to == null ? null : Timestamp.from(to), to == null ? null : Timestamp.from(to)
@@ -238,7 +247,7 @@ public class ProgramService {
                 SELECT e.site, COUNT(*) AS overdue_count
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
-                WHERE o.run_id = ? AND o.status = 'OVERDUE'
+                WHERE o.run_id = ? AND o.measure_version_id = ? AND o.status = 'OVERDUE'
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY e.site
                 ORDER BY overdue_count DESC, e.site ASC
@@ -249,7 +258,7 @@ public class ProgramService {
                         rs.getLong("overdue_count"),
                         "High overdue concentration"
                 ),
-                latestRunId, site, site
+                latestRunId, measureVersionId, site, site
         );
 
         List<DriverRole> byRole = jdbcTemplate.query(
@@ -257,7 +266,7 @@ public class ProgramService {
                 SELECT e.role, COUNT(*) AS overdue_count
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
-                WHERE o.run_id = ? AND o.status = 'OVERDUE'
+                WHERE o.run_id = ? AND o.measure_version_id = ? AND o.status = 'OVERDUE'
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY e.role
                 ORDER BY overdue_count DESC, e.role ASC
@@ -267,13 +276,20 @@ public class ProgramService {
                         rs.getString("role"),
                         rs.getLong("overdue_count")
                 ),
-                latestRunId, site, site
+                latestRunId, measureVersionId, site, site
         );
 
         long totalFlagged = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM outcomes o JOIN employees e ON e.id = o.employee_id WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON') AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))",
+                """
+                SELECT COUNT(*)
+                FROM outcomes o
+                JOIN employees e ON e.id = o.employee_id
+                WHERE o.run_id = ? AND o.measure_version_id = ?
+                  AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON')
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
+                """,
                 Long.class,
-                latestRunId, site, site
+                latestRunId, measureVersionId, site, site
         );
 
         org.springframework.jdbc.core.RowMapper<DriverOutcomeReason> reasonMapper = (rs, rowNum) -> {
@@ -286,13 +302,14 @@ public class ProgramService {
                 SELECT o.status AS reason, COUNT(*) AS cnt
                 FROM outcomes o
                 JOIN employees e ON e.id = o.employee_id
-                WHERE o.run_id = ? AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON')
+                WHERE o.run_id = ? AND o.measure_version_id = ?
+                  AND o.status IN ('OVERDUE', 'MISSING_DATA', 'DUE_SOON')
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                 GROUP BY o.status
                 ORDER BY cnt DESC
                 """,
                 reasonMapper,
-                latestRunId, site, site
+                latestRunId, measureVersionId, site, site
         );
 
         return new TopDrivers(bySite, byRole, byOutcomeReason);
