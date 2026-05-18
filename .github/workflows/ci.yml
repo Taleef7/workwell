@@ -15,6 +15,9 @@ jobs:
   backend:
     name: Backend — Test
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
     defaults:
       run:
         working-directory: backend
