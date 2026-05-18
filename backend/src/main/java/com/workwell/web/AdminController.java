@@ -69,7 +69,10 @@ public class AdminController {
                     SecurityActor.currentActor()
             );
         } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+            // Unknown integration IDs are not a client malformed-request (400) but a
+            // missing resource (404) per Sprint 4.6. The service whitelists
+            // {fhir,mcp,ai,hris} and throws for anything else.
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
     }
 

@@ -4,6 +4,8 @@ import com.workwell.run.RunPersistenceService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.security.SecurityActor;
 import com.workwell.web.EvalController.ManualRunResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
+@Tag(name = "Runs", description = "Query compliance evaluation runs, logs, outcomes, and rerun a scope")
 public class RunController {
     private final RunPersistenceService runPersistenceService;
     private final AllProgramsRunService allProgramsRunService;
@@ -28,12 +31,14 @@ public class RunController {
         this.allProgramsRunService = allProgramsRunService;
     }
 
+    @Operation(summary = "Get run summary by id", description = "Returns the aggregate run summary, or 404 if not found.")
     @GetMapping("/api/runs/{id}")
     public RunPersistenceService.RunSummaryResponse runById(@PathVariable UUID id) {
         return runPersistenceService.loadRunById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
     }
 
+    @Operation(summary = "List runs", description = "Lists recent runs with optional status, scope, trigger, site, and date filters.")
     @GetMapping("/api/runs")
     public List<RunPersistenceService.RunListItem> listRuns(
             @RequestParam(name = "status", required = false) String status,

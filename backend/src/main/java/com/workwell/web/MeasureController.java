@@ -5,6 +5,8 @@ import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
 import com.workwell.measure.ValueSetGovernanceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @Validated
+@Tag(name = "Measures", description = "Measure catalog, versioning, spec/CQL authoring, and governance")
 public class MeasureController {
     private final MeasureService measureService;
     private final MeasureTraceabilityService traceabilityService;
@@ -46,6 +49,7 @@ public class MeasureController {
         this.valueSetGovernanceService = valueSetGovernanceService;
     }
 
+    @Operation(summary = "List measures", description = "Catalog of measures with optional status and search filters.")
     @GetMapping("/api/measures")
     public List<MeasureService.MeasureCatalogItem> listMeasures(
             @RequestParam(name = "status", required = false) String status,
@@ -54,6 +58,7 @@ public class MeasureController {
         return measureService.listMeasures(status, search);
     }
 
+    @Operation(summary = "Create a measure", description = "Creates a new measure (Draft v1.0) and returns its id.")
     @PostMapping("/api/measures")
     public Map<String, String> createMeasure(@Valid @RequestBody CreateMeasureRequest request) {
         UUID id = measureService.createMeasure(request.name(), request.policyRef(), request.owner());

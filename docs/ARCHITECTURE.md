@@ -119,3 +119,18 @@ Public API actions derive audit identity from the authenticated security context
 - Neon hosts all relational persistence used by backend.
 
 No microservice decomposition is used in MVP; package boundaries are the future extraction seam.
+
+## 9) API Versioning Convention
+- The current API contract is **v1**. `GET /api/version` returns
+  `{"api":"v1","build":"<impl-version-or-unknown>","uptime":"<seconds>s"}`
+  and is unauthenticated for health/discovery use.
+- Existing endpoints remain under the unprefixed `/api/...` path for the MVP
+  demo; they are logically v1. Migrating controllers to an explicit `/api/v1/...`
+  prefix is intentionally deferred (Sprint 4 note) to avoid churn across
+  Actuator, Swagger, CORS, and the frontend client.
+- **Convention for future breaking changes:** when a response shape change cannot
+  be made backward-compatible, introduce the new endpoint under `/api/v2/...`
+  rather than mutating the v1 path. The old `/api/v1/...` (or current unprefixed)
+  path must be retained for at least one minor version cycle so integrators have
+  a migration window. Additive, backward-compatible changes stay on v1.
+- The OpenAPI document (`workwell.swagger.enabled=true`) advertises version `v1`.

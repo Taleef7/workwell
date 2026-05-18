@@ -81,12 +81,12 @@ class AdminControllerTest {
     }
 
     @Test
-    void returnsBadRequestForUnsupportedIntegration() throws Exception {
+    void returnsNotFoundForUnsupportedIntegration() throws Exception {
         when(integrationHealthService.triggerManualSync("unknown", "admin@workwell.dev"))
                 .thenThrow(new IllegalArgumentException("Unsupported integration: unknown"));
 
         mockMvc.perform(post("/api/admin/integrations/unknown/sync"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isNotFound());
     }
 
     @Test
