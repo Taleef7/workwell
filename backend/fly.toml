@@ -7,8 +7,8 @@ app = 'workwell-measure-studio-api'
 primary_region = 'ord'
 
 [build]
-  dockerfile = '../infra/backend.Dockerfile'
-  context = '..'
+  dockerfile = 'Dockerfile'
+  context = '.'
 
 [env]
   JAVA_OPTS = '-Xmx768m -Xms256m -Xss256k'
