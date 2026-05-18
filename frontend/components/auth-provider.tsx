@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 const TOKEN_KEY = "ww_token";
@@ -106,33 +106,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const token = session.token;
   const user = session.user;
 
-  useEffect(() => {
-    if (pathname?.startsWith("/login")) return;
-    if (!token) {
-      router.replace("/login");
-    }
-  }, [pathname, router, token]);
+  // Prevents the silent refresh from racing with an explicit logout: set before
+  // clearing storage so the re-render triggered by notifySessionChange() skips refresh.
+  // Reset by login() so the next token expiry after re-authentication still tries refresh.
+  const logoutInProgress = useRef(false);
+
+  // Prevents looping: only one silent-refresh attempt per unauthenticated state.
+  // Reset when token becomes valid (after login or successful refresh).
+  const silentRefreshAttempted = useRef(false);
 
   useEffect(() => {
+    if (token) {
+      silentRefreshAttempted.current = false;
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (pathname?.startsWith("/login")) return;
     if (token) return;
+
+    // logout() already called router.replace("/login") and will handle the redirect.
+    if (logoutInProgress.current) return;
+
+    // Only one refresh attempt per unauthenticated epoch.
+    if (silentRefreshAttempted.current) {
+      router.replace("/login");
+      return;
+    }
+    silentRefreshAttempted.current = true;
+
+    // Clear stale expired credentials (either key missing = inconsistent state).
     const storedToken = readStorage<string>(TOKEN_KEY);
     const storedUser = readStorage<AuthUser>(USER_KEY);
-    if (!storedToken && !storedUser) return;
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    notifySessionChange();
-  }, [token]);
+    if (storedToken || storedUser) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      notifySessionChange();
+    }
+
+    fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<{ token?: string; email?: string; role?: string }>) : null))
+      .then((payload) => {
+        if (payload?.token && payload.email && payload.role) {
+          localStorage.setItem(TOKEN_KEY, JSON.stringify(payload.token));
+          localStorage.setItem(USER_KEY, JSON.stringify({ email: payload.email, role: payload.role }));
+          notifySessionChange();
+        } else {
+          router.replace("/login");
+        }
+      })
+      .catch(() => {
+        router.replace("/login");
+      });
+  }, [pathname, router, token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
       user,
       login: (nextToken, email, role) => {
+        logoutInProgress.current = false;
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
         notifySessionChange();
       },
       logout: () => {
+        // Gate the refresh effect before clearing storage so the re-render it
+        // triggers does not race to re-authenticate the user.
+        logoutInProgress.current = true;
         // Best-effort: clear the HttpOnly refresh cookie server-side. The local
         // session is cleared regardless of whether the network call succeeds.
         void fetch(`${API_BASE}/api/auth/logout`, {

@@ -2,6 +2,11 @@ import { http, HttpResponse } from "msw";
 
 // Matches the actual backend contract: /api/cases returns CaseSummary[]
 export const handlers = [
+  // Default: refresh cookie absent/invalid → 401. Override per-test with server.use() for success paths.
+  http.post("*/api/auth/refresh", () => HttpResponse.json({ error: "invalid refresh token" }, { status: 401 })),
+
+  http.post("*/api/auth/logout", () => new HttpResponse(null, { status: 204 })),
+
   http.get("*/api/cases", () => {
     return HttpResponse.json([
       {
