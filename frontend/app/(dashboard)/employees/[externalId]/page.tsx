@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
 import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceSummaryBar';
 import { SkeletonCard } from '@/components/skeleton-loader';
+import { SlaChip } from '@/components/SlaChip';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-800',
@@ -12,15 +13,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   MEDIUM: 'bg-yellow-100 text-yellow-800',
   LOW: 'bg-slate-100 text-slate-700',
 };
-
-function SlaChip({ days, breached }: { days: number | null; breached?: boolean }) {
-  if (days === null) return <span className="text-slate-400">—</span>;
-  if (breached || days < 0)
-    return <span className="font-semibold text-red-700">Breached</span>;
-  if (days <= 2) return <span className="font-medium text-red-600">{days}d left</span>;
-  if (days <= 7) return <span className="font-medium text-yellow-600">{days}d left</span>;
-  return <span className="text-slate-500">{days}d left</span>;
-}
 
 export default function EmployeeProfilePage() {
   const { externalId } = useParams<{ externalId: string }>();
@@ -113,7 +105,7 @@ export default function EmployeeProfilePage() {
                   </td>
                   <td className="py-2 text-slate-500">{c.assignee ?? '—'}</td>
                   <td className="py-2">
-                    <SlaChip days={c.slaRemainingDays} breached={c.slaBreached} />
+                    <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} />
                   </td>
                 </tr>
               ))}
