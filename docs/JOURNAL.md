@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-05-17 — Sprint 5: Test Suite and CI Gates
+
+**Goal:** Add meaningful test coverage and make CI block merges on failures.
+
+**Branch:** `feat/sprint-5-tests-ci`
+
+**Issue 5.2 — Backend integration tests:**
+- Created `CaseUpsertIntegrationTest` (2 tests): verifies that re-running `AllProgramsRunService` produces 0 duplicate case rows and that the unique-key constraint holds across all composite keys.
+- Created `CaseSlaServiceTest` (2 tests): backdates `sla_due_date` to yesterday on a seeded open case, calls `escalateBreachedCases()`, asserts priority was escalated and a `CASE_SLA_BREACHED` audit event was written; second test verifies already-breached cases are not escalated again.
+- Both extend `AbstractIntegrationTest` (existing TestContainers PostgreSQL 16 infrastructure).
+- Note: evidence MIME tests already covered by existing `EvidenceServiceTest` and `EvidenceAccessIntegrationTest` (Sprint 4 work).
+
+**Issue 5.1 — Frontend unit tests:**
+- Installed: `vitest @vitest/coverage-v8 @testing-library/react @testing-library/jest-dom @testing-library/user-event msw jsdom @vitejs/plugin-react`.
+- Extracted `SlaChip` from inline cases-page logic to `frontend/components/SlaChip.tsx` (also replaces the local copy in the employee profile page); adds `data-testid="sla-chip"` for test targeting.
+- Created `vitest.config.ts`, `test/setup.ts`, `test/msw/handlers.ts`, `test/msw/server.ts`.
+- Tests written (17 passing):
+  - `__tests__/components/SlaChip.test.tsx` — 8 tests: null guard, Breached text, day count, color classes per urgency tier
+  - `__tests__/auth/AuthProvider.test.tsx` — 5 tests: renders children, null when empty localStorage, real token read, expired token guard, login stores to localStorage
+  - `__tests__/lib/ApiClient.test.ts` — 4 tests: Authorization header, 401 → onUnauthorized, ApiError on 404, POST JSON body + Content-Type; all API calls intercepted by MSW (no real network)
+- Added `test`, `test:watch`, `test:coverage` scripts to `package.json`.
+- `pnpm test` exits 0 ✅
+
+**Issue 5.3 — CI gates:**
+- Updated `.github/workflows/ci.yml`: added `pnpm test` step to the frontend job (between lint and build); added `workflow_dispatch` trigger; added `dorny/test-reporter` for backend JUnit XML results.
+- Backend `./gradlew test` was already in CI. Frontend build/lint already in CI. Unit tests now gate frontend job.
+
+**Issue 5.4 — Playwright E2E:**
+- Created `e2e/` directory with `package.json`, `playwright.config.ts`, and `e2e/tests/golden-path.spec.ts`.
+- 4 tests: programs overview loads without 500, cases list renders rows, employee profile loads, full login→programs→cases→studio→logout flow.
+- CI `e2e` job triggers only on `workflow_dispatch` (manual) to avoid billing on every PR.
+
+**Verification:**
+- `corepack pnpm test` ✅ (17 tests, 3 files)
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅ (all 14 routes, including new `/employees/[externalId]`)
+
 ## 2026-05-17 — Sprint 6: Admin Polish, Email Delivery, Integration Completeness
 
 **Goal:** Make the Admin panel demo-useful — meaningful integration health, a visible outreach delivery log (no real email on the demo stack), UI-editable notification templates, and a non-prod demo-reset tool.
