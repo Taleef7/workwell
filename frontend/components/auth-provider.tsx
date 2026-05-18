@@ -106,8 +106,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const token = session.token;
   const user = session.user;
 
-  // Tracks whether a silent refresh has already been attempted in this mount cycle.
-  // Reset when token becomes valid so the next expiry gets a fresh attempt.
+  // Prevents the silent refresh from racing with an explicit logout: set before
+  // clearing storage so the re-render triggered by notifySessionChange() skips refresh.
+  // Reset by login() so the next token expiry after re-authentication still tries refresh.
+  const logoutInProgress = useRef(false);
+
+  // Prevents looping: only one silent-refresh attempt per unauthenticated state.
+  // Reset when token becomes valid (after login or successful refresh).
   const silentRefreshAttempted = useRef(false);
 
   useEffect(() => {
@@ -120,16 +125,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (pathname?.startsWith("/login")) return;
     if (token) return;
 
-    // Before redirecting, attempt one silent refresh using the HttpOnly cookie.
+    // logout() already called router.replace("/login") and will handle the redirect.
+    if (logoutInProgress.current) return;
+
+    // Only one refresh attempt per unauthenticated epoch.
     if (silentRefreshAttempted.current) {
       router.replace("/login");
       return;
     }
     silentRefreshAttempted.current = true;
 
-    // Clear stale expired token from storage so readStoredSession stays consistent.
+    // Clear stale expired credentials (either key missing = inconsistent state).
     const storedToken = readStorage<string>(TOKEN_KEY);
-    if (storedToken) {
+    const storedUser = readStorage<AuthUser>(USER_KEY);
+    if (storedToken || storedUser) {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
       notifySessionChange();
@@ -159,11 +168,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       user,
       login: (nextToken, email, role) => {
+        logoutInProgress.current = false;
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
         notifySessionChange();
       },
       logout: () => {
+        // Gate the refresh effect before clearing storage so the re-render it
+        // triggers does not race to re-authenticate the user.
+        logoutInProgress.current = true;
         // Best-effort: clear the HttpOnly refresh cookie server-side. The local
         // session is cleared regardless of whether the network call succeeds.
         void fetch(`${API_BASE}/api/auth/logout`, {

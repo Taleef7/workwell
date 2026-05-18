@@ -67,7 +67,7 @@ The login screen is the entry point to the application. WorkWell uses demo accou
 5. You should be redirected to the Programs dashboard at `/programs`.
 
 ### What just happened
-The application sent your credentials to the backend, which verified them against its user database and returned a **JWT (JSON Web Token)** — a secure, time-limited credential stored in an HttpOnly cookie. This cookie is automatically attached to every subsequent request. You never handle it directly.
+The application sent your credentials to the backend, which verified them and returned two tokens: a **short-lived access token** (15 minutes) stored in `localStorage` and attached as a Bearer header on every API call, and a **long-lived refresh token** (8 hours) stored in an HttpOnly cookie that the browser sends automatically when the access token needs to be renewed. You never handle either directly — the app refreshes the access token silently in the background.
 
 ### Try other roles
 To understand how role-based access works, log out (bottom of the sidebar) and log in with each role:
