@@ -57,4 +57,13 @@ workwell:
   ai:
     openai:
       fallback-model: gpt-4o-mini
+  email:
+    # Demo stack hard rule (CLAUDE.md): provider stays `simulated`. SendGrid wiring exists
+    # but must NOT be activated unless an explicit non-demo deployment sets both
+    # WORKWELL_EMAIL_PROVIDER=sendgrid and WORKWELL_EMAIL_SENDGRID_API_KEY.
+    provider: ${WORKWELL_EMAIL_PROVIDER:simulated}
+    from-address: ${WORKWELL_EMAIL_FROM_ADDRESS:noreply@workwell-demo.dev}
+    from-name: ${WORKWELL_EMAIL_FROM_NAME:WorkWell Measure Studio}
+    sendgrid:
+      api-key: ${WORKWELL_EMAIL_SENDGRID_API_KEY:}
 

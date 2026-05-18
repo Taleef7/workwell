@@ -16,13 +16,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
 public class IntegrationHealthService {
+    private static final Logger log = LoggerFactory.getLogger(IntegrationHealthService.class);
     private static final Set<String> INTEGRATIONS = Set.of("fhir", "mcp", "ai", "hris");
+    private static final String HRIS_SIMULATED_MESSAGE =
+            "Integration not connected — synthetic data only";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -71,8 +77,8 @@ public class IntegrationHealthService {
         SyncResult syncResult = switch (integrationId) {
             case "ai" -> checkAiHealth();
             case "mcp" -> checkMcpHealth();
-            case "fhir" -> new SyncResult("healthy", "Manual sync triggered", Map.of("mode", "manual-stub"));
-            case "hris" -> new SyncResult("healthy", "Manual sync triggered", Map.of("mode", "manual-stub"));
+            case "fhir" -> checkFhirHealth();
+            case "hris" -> hrisSimulatedResult();
             default -> throw new IllegalArgumentException("Unsupported integration: " + integration);
         };
 
@@ -194,6 +200,94 @@ public class IntegrationHealthService {
                 connection.disconnect();
             }
         }
+    }
+
+    private SyncResult checkFhirHealth() {
+        // The backend evaluates measures against an in-memory synthetic FHIR bundle, so there
+        // is no external endpoint to ping. A meaningful smoke test is confirming the HAPI FHIR
+        // R4 context (the foundation of the CQL engine) can be instantiated.
+        try {
+            ca.uhn.fhir.context.FhirContext.forR4Cached();
+            return new SyncResult("healthy", "In-memory CQL evaluation engine responsive", Map.of(
+                    "mode", "in-memory",
+                    "fhirVersion", "R4"
+            ));
+        } catch (Exception ex) {
+            return new SyncResult("unhealthy", "CQL engine initialization failed: " + ex.getMessage(), Map.of(
+                    "mode", "in-memory"
+            ));
+        }
+    }
+
+    private SyncResult hrisSimulatedResult() {
+        // No real HRIS integration exists. Report a distinct "simulated" status so the demo is
+        // transparent that workforce data is synthetic rather than sourced from a live HRIS.
+        return new SyncResult("simulated", HRIS_SIMULATED_MESSAGE, Map.of(
+                "mode", "synthetic",
+                "connected", false
+        ));
+    }
+
+    /**
+     * Background refresh for the integrations that have a deterministic health signal
+     * (FHIR + MCP + HRIS). AI health is updated reactively from {@link #recordAiHealth}
+     * after each real AI call, so it is intentionally excluded here.
+     */
+    @Scheduled(fixedDelay = 900_000L)
+    public void scheduledRefresh() {
+        try {
+            persistStatus("fhir", checkFhirHealth());
+            persistStatus("mcp", checkMcpHealth());
+            persistStatus("hris", hrisSimulatedResult());
+        } catch (Exception ex) {
+            log.warn("Scheduled integration health refresh failed: {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * Lightweight reactive status update used by {@code AiAssistService} after every AI call.
+     * Intentionally does NOT write an audit event (status only) to avoid audit spam on each
+     * AI invocation.
+     */
+    public void recordAiHealth(boolean success, String detail) {
+        String status = success ? "healthy" : "degraded";
+        String message = detail == null || detail.isBlank()
+                ? (success ? "Last AI call succeeded" : "Last AI call failed")
+                : detail;
+        try {
+            jdbcTemplate.update(
+                    """
+                            UPDATE integration_health
+                            SET status = ?,
+                                last_sync_at = ?,
+                                last_sync_result = ?
+                            WHERE id = 'ai'
+                            """,
+                    status,
+                    java.sql.Timestamp.from(Instant.now()),
+                    message
+            );
+        } catch (Exception ex) {
+            log.warn("Unable to record AI integration health: {}", ex.getMessage());
+        }
+    }
+
+    private void persistStatus(String integrationId, SyncResult result) {
+        jdbcTemplate.update(
+                """
+                        UPDATE integration_health
+                        SET status = ?,
+                            last_sync_at = ?,
+                            last_sync_result = ?,
+                            config_json = ?::jsonb
+                        WHERE id = ?
+                        """,
+                result.status(),
+                java.sql.Timestamp.from(Instant.now()),
+                result.message(),
+                toJson(result.config()),
+                integrationId
+        );
     }
 
     private String normalizeIntegration(String integration) {

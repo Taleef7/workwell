@@ -144,6 +144,52 @@ public class OutreachTemplateService {
         );
     }
 
+    public TemplatePreview previewTemplate(UUID id) {
+        OutreachTemplate template;
+        try {
+            template = jdbcTemplate.queryForObject(
+                    """
+                            SELECT id, name, subject, body_text, type, created_by, created_at, updated_at, active
+                            FROM outreach_templates
+                            WHERE id = ?
+                            """,
+                    (rs, rowNum) -> new OutreachTemplate(
+                            (UUID) rs.getObject("id"),
+                            rs.getString("name"),
+                            rs.getString("subject"),
+                            rs.getString("body_text"),
+                            rs.getString("type"),
+                            rs.getString("created_by"),
+                            rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant(),
+                            rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant(),
+                            rs.getBoolean("active")
+                    ),
+                    id
+            );
+        } catch (org.springframework.dao.EmptyResultDataAccessException ex) {
+            throw new IllegalArgumentException("Outreach template not found: " + id);
+        }
+        return new TemplatePreview(
+                template.id(),
+                template.name(),
+                render(template.subject()),
+                render(template.bodyText())
+        );
+    }
+
+    private String render(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        // Sample placeholder values for the Admin preview. Plain-text string replacement is
+        // sufficient for the fixed variable set used by the demo templates.
+        return raw
+                .replace("{employee_name}", "Jane Smith")
+                .replace("{measure_name}", "Annual Audiogram")
+                .replace("{due_date}", "2026-05-30")
+                .replace("{assignee_name}", "Sarah Mitchell");
+    }
+
     private String normalizeType(String type) {
         if (type == null || type.isBlank()) {
             return "OUTREACH";
@@ -165,6 +211,14 @@ public class OutreachTemplateService {
             Instant createdAt,
             Instant updatedAt,
             boolean active
+    ) {
+    }
+
+    public record TemplatePreview(
+            UUID id,
+            String name,
+            String subject,
+            String bodyText
     ) {
     }
 }

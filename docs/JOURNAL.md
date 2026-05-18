@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-05-17 — Sprint 6: Admin Polish, Email Delivery, Integration Completeness
+
+**Goal:** Make the Admin panel demo-useful — meaningful integration health, a visible outreach delivery log (no real email on the demo stack), UI-editable notification templates, and a non-prod demo-reset tool.
+
+**Branch:** `feat/sprint-6-admin` (worktree `C:\workwell-wt\sprint-6-admin`). Sprint doc V020/V021 numbering is stale; `V021__add_outreach_delivery_log.sql` was pre-authored by Taleef and used as-is. No migrations written/edited by the agent.
+
+**Issue 6.1 — Live integration health:**
+- Extended `IntegrationHealthService` (not a new sync service): added `@Scheduled(fixedDelay=900_000)` `scheduledRefresh()` refreshing fhir+mcp+hris (AI is reactive). `@EnableScheduling` already present in `BackendApplication`.
+- FHIR check now instantiates `FhirContext.forR4Cached()` (real CQL-engine smoke) → `healthy`/`unhealthy`.
+- HRIS is now a distinct first-class `simulated` status with message "Integration not connected — synthetic data only" (was a "healthy" stub).
+- Added `recordAiHealth(success, detail)` lightweight status setter (no audit write — avoids per-call audit spam). `AiAssistService.callWithModelFallback` now calls it: success → `healthy`, both-models-failed → `degraded` with root-cause reason.
+- `IntegrationHealth` record JSON unchanged. Frontend `admin/page.tsx` `statusBadgeClass` extended: green=healthy, sky=simulated, amber=degraded/stale, red=unhealthy, gray=unknown. Existing per-integration "Manual Sync" button already re-fetches.
+
+**Issue 6.2 — Outreach delivery log + EmailService:**
+- Added `com.sendgrid:sendgrid-java:4.10.2`. Created `com.workwell.notification.EmailService` + `EmailDeliveryRecord`. Provider switch on `workwell.email.provider` (default `simulated`); sendgrid path only active when both provider=sendgrid AND api-key set (degrades to simulated otherwise). **CLAUDE.md hard rule honored: `simulated` stays default; SendGrid not enabled.**
+- Synthetic recipient: employees have no email column, so address is deterministic `<external_id>@workwell-demo.dev` (obviously non-routable, stable across reruns).
+- Wired into `CaseFlowService.sendOutreach`: renders subject/body, sends via `EmailService`, inserts an `outreach_delivery_log` row, augments the `case_actions` payload with `emailMessageId`/`deliveryProvider`/`emailDeliveryStatus`/`toAddress`/`sentAt`. `insertCaseAction` now returns the action UUID for FK linkage.
+- New `OutreachDeliveryLogService` + `GET /api/admin/outreach/delivery-log?limit=20` (joins cases→measure_versions→measures for measure name). Admin UI delivery-log table with status colors. Case-detail timeline already surfaces OUTREACH_SENT payload, which now includes provider/status (no separate timeline change needed).
+
+**Issue 6.3 — Notification templates editable:**
+- `outreach_templates` + list/create/update endpoints already existed. Added `OutreachTemplateService.previewTemplate(id)` + `GET /api/admin/outreach-templates/{id}/preview` substituting `{employee_name}`/`{measure_name}`/`{due_date}`/`{assignee_name}`. Admin UI section: list + inline edit (subject, body) via existing PUT + preview. "Reset to default" not shipped (optional per corrected scope; edit+preview covers the demo need).
+
+**Issue 6.4 — Demo reset:**
+- Created `com.workwell.admin.DemoResetService` `@Profile("!prod")` `@Transactional`; truncates volatile tables in FK order with RESTRICT (also includes `scheduled_appointments`, `outreach_records`, `evidence_attachments`, `data_readiness_snapshots` which FK to cases/runs — required so RESTRICT does not fail), then resets `integration_health` to unknown/null.
+- `POST /api/admin/demo-reset` injects `Optional<DemoResetService>` → 403 when absent (prod). `/api/admin/**` is already ROLE_ADMIN path-gated in SecurityConfig; no `@EnableMethodSecurity` present so no method-level annotation added. Admin UI two-step-confirm "Reset Demo Data" button with inline success message (no toast component in repo).
+
+**Audit caveat:** demo reset truncates `audit_events` — in tension with the audit-integrity rule, but it is an explicitly sprint-sanctioned non-prod-only tool (`@Profile("!prod")`, 403 in prod).
+
+**Tests added:** `AdminControllerTest` (preview ok/404, delivery-log, demo-reset success) + new `AdminControllerDemoResetAbsentTest` (403 when bean absent). Updated `AiServiceIntegrationTest` and `AdminControllerTest` constructors for new dependencies.
+
+**Verification:** see end-of-entry. Docs updated same change: `DATA_MODEL.md` (outreach_delivery_log table), `DEPLOY.md` (email provider stays simulated), `ARCHITECTURE.md` (notification module note).
+
 ## 2026-05-17 — Sprint 3: Employee Profile, Cross-Program View, SLA Tracking
 
 **Goal:** Clickable employee profiles aggregating cross-program compliance posture, functional global search, SLA countdowns on cases, and a My Cases view.
