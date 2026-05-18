@@ -2,6 +2,7 @@ package com.workwell.caseflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.security.SecurityActor;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,7 +10,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.security.access.AccessDeniedException;
@@ -21,6 +24,16 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class EvidenceService {
     private static final long MAX_BYTES = 10L * 1024L * 1024L;
+    static final Set<String> ALLOWED_MIME_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "application/pdf",
+            "text/plain",
+            "text/csv",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    private final Tika tika = new Tika();
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -41,7 +54,10 @@ public class EvidenceService {
             throw new IllegalArgumentException("File is required");
         }
         if (file.getSize() > MAX_BYTES) {
-            throw new IllegalArgumentException("Files larger than 10 MB are not allowed");
+            throw new UnsupportedEvidenceTypeException(
+                    "File size " + file.getSize() + " exceeds the 10MB limit",
+                    ALLOWED_MIME_TYPES
+            );
         }
 
         byte[] bytes;
@@ -51,9 +67,12 @@ public class EvidenceService {
             throw new IllegalStateException("Unable to read evidence file", ex);
         }
 
-        String mimeType = detectMimeType(bytes);
-        if (mimeType == null) {
-            throw new IllegalArgumentException("Only PDF, PNG, and JPG files are allowed");
+        String mimeType = detectMimeType(bytes, file.getOriginalFilename());
+        if (mimeType == null || !ALLOWED_MIME_TYPES.contains(mimeType)) {
+            throw new UnsupportedEvidenceTypeException(
+                    "Unsupported file type" + (mimeType == null ? "" : ": " + mimeType),
+                    ALLOWED_MIME_TYPES
+            );
         }
 
         ensureCaseExists(caseId);
@@ -254,7 +273,15 @@ public class EvidenceService {
         return candidate.isBlank() ? "evidence" : candidate;
     }
 
-    private String detectMimeType(byte[] bytes) {
+    /**
+     * Detects the content type from file content (magic bytes via Apache Tika),
+     * never trusting the client-supplied Content-Type header. The original
+     * filename is only used as a Tika hint to disambiguate text/csv and xlsx;
+     * binary signatures still take precedence so a renamed file is detected by
+     * its real bytes.
+     */
+    private String detectMimeType(byte[] bytes, String originalFilename) {
+        // Strong binary signatures: trust content, ignore any filename hint.
         if (bytes.length >= 8
                 && (bytes[0] & 0xFF) == 0x89
                 && bytes[1] == 'P'
@@ -280,7 +307,21 @@ public class EvidenceService {
                 && bytes[4] == '-') {
             return "application/pdf";
         }
-        return null;
+
+        // Fall back to Tika for text/plain, text/csv, and xlsx. Tika still detects
+        // ZIP/PE/etc. from content, so a spoofed extension is rejected by the
+        // allow-list check in upload(...).
+        try (ByteArrayInputStream in = new ByteArrayInputStream(bytes)) {
+            String detected = tika.detect(in, originalFilename == null ? "" : originalFilename);
+            if (detected == null) {
+                return null;
+            }
+            // Tika may report a charset parameter (e.g. "text/plain; charset=...").
+            int semi = detected.indexOf(';');
+            return semi >= 0 ? detected.substring(0, semi).trim() : detected.trim();
+        } catch (IOException ex) {
+            return null;
+        }
     }
 
     public record EvidenceAttachment(

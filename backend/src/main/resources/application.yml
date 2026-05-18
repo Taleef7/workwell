@@ -12,6 +12,17 @@ spring:
   flyway:
     enabled: true
     url: ${DATABASE_URL_DIRECT:${DATABASE_URL:jdbc:postgresql://localhost:5432/workwell}}
+springdoc:
+  swagger-ui:
+    path: /swagger-ui
+    operations-sorter: alpha
+    tags-sorter: alpha
+    disable-swagger-default-url: true
+  api-docs:
+    path: /v3/api-docs
+  show-actuator: false
+  packages-to-scan: com.workwell.web
+
 management:
   endpoints:
     web:
@@ -22,8 +33,15 @@ workwell:
   auth:
     enabled: ${WORKWELL_AUTH_ENABLED:true}
     jwt-secret: ${WORKWELL_AUTH_JWT_SECRET:workwell-demo-secret-change-me}
+    access-ttl-seconds: ${WORKWELL_AUTH_ACCESS_TTL_SECONDS:900}
+    refresh-ttl-seconds: ${WORKWELL_AUTH_REFRESH_TTL_SECONDS:28800}
+    cookie-secure: ${WORKWELL_AUTH_COOKIE_SECURE:false}
   cors:
     allowed-origins: ${WORKWELL_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
+  ratelimit:
+    enabled: ${WORKWELL_RATELIMIT_ENABLED:true}
+  swagger:
+    enabled: ${SWAGGER_ENABLED:false}
   demo:
     enabled: ${WORKWELL_DEMO_ENABLED:false}
     allow-public-demo: ${WORKWELL_DEMO_ALLOW_PUBLIC_DEMO:false}
