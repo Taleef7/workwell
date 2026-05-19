@@ -23,9 +23,18 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   // Restore focus to whatever was focused before the dialog opened.
   const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  // Latest-ref so the open effect depends only on `open`. Callers pass inline
+  // lambdas, and the Programs page re-renders on a polling interval; depending
+  // on onCancel directly would tear down focus/scroll-lock mid-dialog.
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +45,30 @@ export function ConfirmDialog({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onCancel();
+        onCancelRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      // Focus trap: keep Tab / Shift+Tab within the dialog while it is modal.
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusable = root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey) {
+        if (active === first || !root.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !root.contains(active)) {
+        e.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -49,7 +81,7 @@ export function ConfirmDialog({
       document.body.style.overflow = overflow;
       previouslyFocused.current?.focus();
     };
-  }, [open, onCancel]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -58,9 +90,10 @@ export function ConfirmDialog({
       <div
         className="absolute inset-0 bg-slate-900/40"
         aria-hidden="true"
-        onClick={onCancel}
+        onClick={() => onCancelRef.current()}
       />
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
