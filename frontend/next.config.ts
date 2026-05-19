@@ -8,6 +8,7 @@ if (isProductionBuild && demoModeEnabled) {
 }
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   async redirects() {
     return [
       {

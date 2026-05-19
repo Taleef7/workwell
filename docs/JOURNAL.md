@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-05-19 — OS MIEWeb deployment branch
+
+**Goal:** Prepare an additive, review-only deployment path for WorkWell Measure Studio on MIE's open source Proxmox cluster without disturbing the existing Vercel + Fly deployment.
+
+**Branch:** `os-mieweb-deploy`
+
+**What changed:**
+- `backend/Dockerfile`
+  - Kept the repo's Gradle Kotlin DSL build instead of switching to Maven, because this project has no Maven build and the stack is fixed to Gradle.
+  - Builds a Spring Boot jar in a Gradle stage, copies the runnable jar into `eclipse-temurin:21-jre-alpine`, exposes `8080`, and adds the required MIE default-port label.
+  - Uses process env for runtime configuration and preserves `JAVA_OPTS`.
+- `frontend/Dockerfile`
+  - Added a Node 20 Alpine multi-stage build with `NEXT_PUBLIC_API_URL` defaulting to `https://workwell-api.os.mieweb.org`.
+  - Enables standalone Next.js output and runs the generated standalone server on port `3000`.
+  - Exposes `3000` and adds the required MIE default-port label.
+- `.github/workflows/deploy-os-mieweb.yml`
+  - Added additive GHCR build jobs for `ghcr.io/taleef7/workwell-api` and `ghcr.io/taleef7/workwell`.
+  - Added launchpad deploy jobs wired to `mieweb/launchpad@main`, gated naturally by `push` to `main` or manual dispatch.
+- `docs/DEPLOY_OS_MIEWEB.md`
+  - Added setup, secrets, public GHCR visibility, health verification, rollback, and pre-first-deploy clarification notes.
+
+**Needs clarification before first deploy:**
+- `mieweb/launchpad@main` appears to derive the container hostname from `owner-repo-branch`, with no documented override. MIE admins should confirm how to deploy two distinct LXC containers from the same repo/branch before this workflow runs on `main`.
+- Confirm `LAUNCHPAD_API_URL` and whether `site_id: 1` is the intended Phoenix DC target.
+
 ## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
 
 **Goal:** Fix the three Section 3 code bugs and correct the Section 3 walkthrough-guide inaccuracies (UAT #23, comment 4).
