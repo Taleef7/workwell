@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      replace_existing:
+        description: Delete and recreate existing MIE containers if the hostnames already exist.
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: deploy-os-mieweb-${{ github.ref }}
@@ -15,6 +24,8 @@ env:
   FRONTEND_IMAGE: ghcr.io/taleef7/workwell
   FRONTEND_URL: https://workwell.os.mieweb.org
   BACKEND_URL: https://workwell-api.os.mieweb.org
+  API_HOSTNAME: workwell-api
+  FRONTEND_HOSTNAME: workwell
   SITE_ID: 1
 
 jobs:
@@ -76,74 +87,329 @@ jobs:
     name: Deploy backend container
     runs-on: ubuntu-latest
     needs: build-backend
+    env:
+      API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare backend environment JSON
-        id: backend-env
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET }}
+      - name: Validate required secrets
         run: |
-          {
-            echo 'json<<EOF'
-            jq -nc \
-              --arg databaseUrl "$DATABASE_URL" \
-              --arg anthropicApiKey "$ANTHROPIC_API_KEY" \
-              --arg openAiApiKey "$OPENAI_API_KEY" \
-              --arg jwtSecret "$WORKWELL_AUTH_JWT_SECRET" \
-              --arg frontendUrl "${{ env.FRONTEND_URL }}" \
-              '{
-                DATABASE_URL: $databaseUrl,
-                ANTHROPIC_API_KEY: $anthropicApiKey,
-                OPENAI_API_KEY: $openAiApiKey,
-                SANDBOX_MODE: "false",
-                JAVA_OPTS: "-Xmx768m -Xms256m -Xss256k",
-                SPRING_PROFILES_ACTIVE: "production",
-                WORKWELL_CORS_ALLOWED_ORIGINS: $frontendUrl,
-                WORKWELL_AUTH_COOKIE_SAME_SITE: "None",
-                WORKWELL_AUTH_COOKIE_SECURE: "true",
-                WORKWELL_AUTH_JWT_SECRET: $jwtSecret
-              }'
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          missing=()
+          [ -z "$API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL")
+          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
 
-      - uses: mieweb/launchpad@main
-        with:
-          api_key: ${{ secrets.LAUNCHPAD_API_KEY }}
-          api_url: ${{ secrets.LAUNCHPAD_API_URL }}
-          site_id: ${{ env.SITE_ID }}
-          template_name: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
-          container_env_vars: ${{ steps.backend-env.outputs.json }}
+      - name: Deploy backend through Create-a-Container API
+        run: |
+          set -euo pipefail
+
+          api_root="${API_URL%/}"
+          if [[ "$api_root" == */api ]]; then
+            api_base="$api_root"
+          else
+            api_base="$api_root/api"
+          fi
+          image="${BACKEND_IMAGE}:sha-${GITHUB_SHA}"
+          hostname="${API_HOSTNAME}"
+
+          request() {
+            local method="$1"
+            local path="$2"
+            local body_file="${3:-}"
+            local response_file
+            response_file="$(mktemp)"
+
+            if [ -n "$body_file" ]; then
+              status=$(curl -sS -o "$response_file" -w "%{http_code}" \
+                -X "$method" "${api_base}${path}" \
+                -H "Authorization: Bearer ${API_KEY}" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                --data-binary "@$body_file")
+            else
+              status=$(curl -sS -o "$response_file" -w "%{http_code}" \
+                -X "$method" "${api_base}${path}" \
+                -H "Authorization: Bearer ${API_KEY}" \
+                -H "Accept: application/json")
+            fi
+
+            if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+              echo "::error::${method} ${path} failed with HTTP ${status}"
+              cat "$response_file"
+              exit 1
+            fi
+
+            cat "$response_file"
+          }
+
+          echo "Confirming site ${SITE_ID} exists..."
+          sites_json="$(request GET /sites)"
+          echo "$sites_json" | jq -e --argjson site_id "$SITE_ID" '.sites[] | select(.id == $site_id)' >/dev/null
+
+          echo "Resolving external domain for site ${SITE_ID}..."
+          template_context="$(request GET "/sites/${SITE_ID}/containers/new")"
+          external_domain_id="$(
+            echo "$template_context" |
+              jq -r '([.domains[] | select(.name == "os.mieweb.org") | .id] | first) // .domains[0].id // empty'
+          )"
+          if [ -z "$external_domain_id" ] || [ "$external_domain_id" = "null" ]; then
+            echo "::error::No external domain is available for site ${SITE_ID}."
+            exit 1
+          fi
+
+          existing_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
+          existing_id="$(echo "$existing_json" | jq -r '.containers[0].id // empty')"
+          if [ -n "$existing_id" ]; then
+            if [ "$REPLACE_EXISTING" != "true" ]; then
+              echo "::error::Container '${hostname}' already exists as ID ${existing_id}. Re-run workflow_dispatch with replace_existing=true or merge to main intentionally."
+              exit 1
+            fi
+            echo "Deleting existing backend container '${hostname}' (ID ${existing_id}) before recreate..."
+            request DELETE "/sites/${SITE_ID}/containers/${existing_id}" >/dev/null
+          fi
+
+          payload_file="$(mktemp)"
+          jq -n \
+            --arg hostname "$hostname" \
+            --arg image "$image" \
+            --argjson domain_id "$external_domain_id" \
+            --arg database_url "$DATABASE_URL" \
+            --arg openai_api_key "$OPENAI_API_KEY" \
+            --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+            --arg frontend_url "$FRONTEND_URL" \
+            '{
+              hostname: $hostname,
+              template_name: $image,
+              services: {
+                web: {
+                  type: "http",
+                  internalPort: 8080,
+                  externalHostname: $hostname,
+                  externalDomainId: $domain_id,
+                  authRequired: false
+                }
+              },
+              environmentVars: [
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "JAVA_OPTS", value: "-Xmx768m -Xms256m -Xss256k"},
+                {key: "SPRING_PROFILES_ACTIVE", value: "prod,production"},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret}
+              ],
+              nvidiaRequested: false
+            }' > "$payload_file"
+
+          echo "Creating backend container '${hostname}' from ${image}..."
+          create_json="$(request POST "/sites/${SITE_ID}/containers" "$payload_file")"
+          job_id="$(echo "$create_json" | jq -r '.jobId // empty')"
+          if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
+            echo "::error::Create response did not include jobId."
+            echo "$create_json"
+            exit 1
+          fi
+
+          echo "Waiting for backend job ${job_id}..."
+          for attempt in $(seq 1 30); do
+            job_json="$(request GET "/jobs/${job_id}")"
+            job_status="$(echo "$job_json" | jq -r '.status // "unknown"')"
+            echo "Attempt ${attempt}/30: ${job_status}"
+            case "$job_status" in
+              success|completed)
+                break
+                ;;
+              failed|error|cancelled)
+                echo "::error::Backend deploy job failed with status ${job_status}."
+                request GET "/jobs/${job_id}/status?limit=1000" || true
+                exit 1
+                ;;
+            esac
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::Timed out waiting for backend deploy job."
+              request GET "/jobs/${job_id}/status?limit=1000" || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
+          status="$(echo "$final_json" | jq -r '.containers[0].status // "unknown"')"
+          url="$(echo "$final_json" | jq -r '.containers[0].httpExternalUrl // empty')"
+          echo "Backend status: ${status}"
+          echo "Backend URL: ${url:-$BACKEND_URL}"
+          if [ "$status" != "running" ]; then
+            echo "::error::Backend container is '${status}', expected running."
+            exit 1
+          fi
 
   deploy-frontend:
     name: Deploy frontend container
     runs-on: ubuntu-latest
     needs: [build-frontend, deploy-backend]
+    env:
+      API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare frontend environment JSON
-        id: frontend-env
+      - name: Validate required secrets
         run: |
-          {
-            echo 'json<<EOF'
-            jq -nc \
-              --arg apiUrl "${{ env.BACKEND_URL }}" \
-              '{
-                NODE_ENV: "production",
-                NEXT_PUBLIC_API_URL: $apiUrl,
-                NEXT_PUBLIC_API_BASE_URL: $apiUrl
-              }'
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          missing=()
+          [ -z "$API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
 
-      - uses: mieweb/launchpad@main
-        with:
-          api_key: ${{ secrets.LAUNCHPAD_API_KEY }}
-          api_url: ${{ secrets.LAUNCHPAD_API_URL }}
-          site_id: ${{ env.SITE_ID }}
-          template_name: ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
-          container_env_vars: ${{ steps.frontend-env.outputs.json }}
+      - name: Deploy frontend through Create-a-Container API
+        run: |
+          set -euo pipefail
+
+          api_root="${API_URL%/}"
+          if [[ "$api_root" == */api ]]; then
+            api_base="$api_root"
+          else
+            api_base="$api_root/api"
+          fi
+          image="${FRONTEND_IMAGE}:sha-${GITHUB_SHA}"
+          hostname="${FRONTEND_HOSTNAME}"
+
+          request() {
+            local method="$1"
+            local path="$2"
+            local body_file="${3:-}"
+            local response_file
+            response_file="$(mktemp)"
+
+            if [ -n "$body_file" ]; then
+              status=$(curl -sS -o "$response_file" -w "%{http_code}" \
+                -X "$method" "${api_base}${path}" \
+                -H "Authorization: Bearer ${API_KEY}" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                --data-binary "@$body_file")
+            else
+              status=$(curl -sS -o "$response_file" -w "%{http_code}" \
+                -X "$method" "${api_base}${path}" \
+                -H "Authorization: Bearer ${API_KEY}" \
+                -H "Accept: application/json")
+            fi
+
+            if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+              echo "::error::${method} ${path} failed with HTTP ${status}"
+              cat "$response_file"
+              exit 1
+            fi
+
+            cat "$response_file"
+          }
+
+          echo "Confirming site ${SITE_ID} exists..."
+          sites_json="$(request GET /sites)"
+          echo "$sites_json" | jq -e --argjson site_id "$SITE_ID" '.sites[] | select(.id == $site_id)' >/dev/null
+
+          echo "Resolving external domain for site ${SITE_ID}..."
+          template_context="$(request GET "/sites/${SITE_ID}/containers/new")"
+          external_domain_id="$(
+            echo "$template_context" |
+              jq -r '([.domains[] | select(.name == "os.mieweb.org") | .id] | first) // .domains[0].id // empty'
+          )"
+          if [ -z "$external_domain_id" ] || [ "$external_domain_id" = "null" ]; then
+            echo "::error::No external domain is available for site ${SITE_ID}."
+            exit 1
+          fi
+
+          existing_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
+          existing_id="$(echo "$existing_json" | jq -r '.containers[0].id // empty')"
+          if [ -n "$existing_id" ]; then
+            if [ "$REPLACE_EXISTING" != "true" ]; then
+              echo "::error::Container '${hostname}' already exists as ID ${existing_id}. Re-run workflow_dispatch with replace_existing=true or merge to main intentionally."
+              exit 1
+            fi
+            echo "Deleting existing frontend container '${hostname}' (ID ${existing_id}) before recreate..."
+            request DELETE "/sites/${SITE_ID}/containers/${existing_id}" >/dev/null
+          fi
+
+          payload_file="$(mktemp)"
+          jq -n \
+            --arg hostname "$hostname" \
+            --arg image "$image" \
+            --argjson domain_id "$external_domain_id" \
+            --arg backend_url "$BACKEND_URL" \
+            '{
+              hostname: $hostname,
+              template_name: $image,
+              services: {
+                web: {
+                  type: "http",
+                  internalPort: 3000,
+                  externalHostname: $hostname,
+                  externalDomainId: $domain_id,
+                  authRequired: false
+                }
+              },
+              environmentVars: [
+                {key: "NODE_ENV", value: "production"},
+                {key: "NEXT_PUBLIC_API_URL", value: $backend_url},
+                {key: "NEXT_PUBLIC_API_BASE_URL", value: $backend_url}
+              ],
+              nvidiaRequested: false
+            }' > "$payload_file"
+
+          echo "Creating frontend container '${hostname}' from ${image}..."
+          create_json="$(request POST "/sites/${SITE_ID}/containers" "$payload_file")"
+          job_id="$(echo "$create_json" | jq -r '.jobId // empty')"
+          if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
+            echo "::error::Create response did not include jobId."
+            echo "$create_json"
+            exit 1
+          fi
+
+          echo "Waiting for frontend job ${job_id}..."
+          for attempt in $(seq 1 30); do
+            job_json="$(request GET "/jobs/${job_id}")"
+            job_status="$(echo "$job_json" | jq -r '.status // "unknown"')"
+            echo "Attempt ${attempt}/30: ${job_status}"
+            case "$job_status" in
+              success|completed)
+                break
+                ;;
+              failed|error|cancelled)
+                echo "::error::Frontend deploy job failed with status ${job_status}."
+                request GET "/jobs/${job_id}/status?limit=1000" || true
+                exit 1
+                ;;
+            esac
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::Timed out waiting for frontend deploy job."
+              request GET "/jobs/${job_id}/status?limit=1000" || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
+          status="$(echo "$final_json" | jq -r '.containers[0].status // "unknown"')"
+          url="$(echo "$final_json" | jq -r '.containers[0].httpExternalUrl // empty')"
+          echo "Frontend status: ${status}"
+          echo "Frontend URL: ${url:-$FRONTEND_URL}"
+          if [ "$status" != "running" ]; then
+            echo "::error::Frontend container is '${status}', expected running."
+            exit 1
+          fi

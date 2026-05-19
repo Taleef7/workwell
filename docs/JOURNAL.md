@@ -25,6 +25,12 @@
 - `mieweb/launchpad@main` appears to derive the container hostname from `owner-repo-branch`, with no documented override. MIE admins should confirm how to deploy two distinct LXC containers from the same repo/branch before this workflow runs on `main`.
 - Confirm `LAUNCHPAD_API_URL` and whether `site_id: 1` is the intended Phoenix DC target.
 
+**Follow-up update:**
+- Confirmed `https://manager.os.mieweb.org/api/openapi.json` exposes direct Create-a-Container REST endpoints for explicit `hostname`, `services`, and `environmentVars`.
+- Reworked `.github/workflows/deploy-os-mieweb.yml` away from `mieweb/launchpad@main` to direct REST calls so the same repo/branch can create both `workwell-api` and `workwell`.
+- Set site `1` as the Phoenix target and removed `ANTHROPIC_API_KEY` from the required MIE workflow secrets because the current backend configuration uses OpenAI.
+- Documented the remaining owner steps in `docs/DEPLOY_OS_MIEWEB.md`: Neon JDBC `DATABASE_URL`, `WORKWELL_AUTH_JWT_SECRET`, and making GHCR packages public after first image push.
+
 ## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
 
 **Goal:** Fix the three Section 3 code bugs and correct the Section 3 walkthrough-guide inaccuracies (UAT #23, comment 4).
