@@ -17,8 +17,13 @@
   - Corrected Section 3 inaccuracies 6–11: AI Run Insight is on `/runs` (auto-loads, real disclaimer wording), duration shown in seconds, real outcomes-table columns, measure labelled "Audiogram". Synced the matching Section 6 duration/label mentions. CSV `durationMs` column name left intact (real column).
 
 **Verification:**
-- `pnpm lint` / `pnpm build` — see entry below once run
-- Browser smoke of `/programs/[measureId]` and `/runs` deep-link + row click
+- `pnpm lint` / `pnpm build` ✅
+- Production data-shape validation via browser (changed code can't run on a preview: prod CORS allowlist excludes non-prod origins by design, and the preview is behind Vercel deployment protection).
+
+**PR #35 review follow-up (automated reviewers):**
+- Codex P2 + Copilot: `/runs?runId=` with an invalid/stale id no longer strands the user on an error path — `loadSelectedRun` now drops the URL preservation, cleans the query param (`router.replace`), and falls back to the newest run.
+- Copilot: row-level `onKeyDown` on outcome rows now guards `event.target === event.currentTarget`, so Enter/Space on the nested Employee/Case links keeps their own navigation.
+- Copilot: reconciled the Audiogram naming inconsistency — Section 2's card list now shows the real UI labels (Audiogram / Flu Vaccine / HAZWOPER Surveillance / TB Surveillance) with the long policy titles marked documentation-only, matching the Section 3 note.
 
 ## 2026-05-19 — Auth reload-session hardening follow-up
 

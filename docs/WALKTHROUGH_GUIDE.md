@@ -91,11 +91,11 @@ The Programs dashboard is the **operational command center**. It shows a real-ti
    - **Overall compliance** — percentage currently compliant across all active programs (e.g., 72.0%)
    - **Open cases** — total non-compliance work items that need action
    - **Last run** — timestamp of the most recent completed run across all programs
-3. Below the KPI row, you will see **four measure program cards**, one per active measure:
-   - Annual Audiogram Completed (OSHA 1910.95)
-   - Flu Vaccine This Season
-   - HAZWOPER Annual Medical Surveillance (OSHA 1910.120)
-   - Annual TB Screening
+3. Below the KPI row, you will see **four measure program cards**, one per active measure. The **bold name is the exact card label rendered in the UI**; the quoted phrase is the longer policy title used only in the measure documentation:
+   - **Audiogram** (OSHA 1910.95) — "Annual Audiogram Completed"
+   - **Flu Vaccine** — "Flu Vaccine This Season"
+   - **HAZWOPER Surveillance** (OSHA 1910.120) — "HAZWOPER Annual Medical Surveillance"
+   - **TB Surveillance** (CDC) — "Annual TB Screening"
 4. Each card shows:
    - Current compliance rate (e.g., "68.0%")
    - Outcome badge counts: Compliant / Due Soon / Overdue / Missing Data / Excluded
@@ -125,7 +125,7 @@ Each program card on the dashboard links to a **measure-specific detail view** s
 ### Steps
 
 1. From `/programs`, click the **Audiogram** card (or click its title).
-   > **Naming note:** The measure is labelled **Audiogram** throughout the running application (cards, run history, outcomes). The longer policy title "Annual Audiogram Completed" appears only in the measure documentation, not in the UI.
+   > **Naming note:** Consistent with the Section 2 card list, the measure is labelled **Audiogram** throughout the running application (cards, run history, outcomes). The longer policy title "Annual Audiogram Completed" appears only in the measure documentation, not in the UI.
 2. You land on `/programs/4ae5d865-3d64-4a17-905d-f1b315a037e2`.
 3. The page shows:
    - **Compliance trend (last 10)** — a line chart of compliance rate across recent runs
