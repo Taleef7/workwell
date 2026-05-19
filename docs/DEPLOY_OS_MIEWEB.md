@@ -7,7 +7,7 @@ This runbook covers the additive OS MIEWeb deployment path for WorkWell Measure 
 - Frontend: `https://workwell.os.mieweb.org` from `ghcr.io/taleef7/workwell`
 - Backend API: `https://workwell-api.os.mieweb.org` from `ghcr.io/taleef7/workwell-api`
 - Database: existing Neon Postgres, unchanged
-- Container manager: MIE Create-a-Container REST API at `https://manager.os.mieweb.org/api`
+- Container manager: MIE Create-a-Container REST API at `https://manager.os.mieweb.org`
 - Site: `1` (Phoenix DC)
 
 ## Why the Workflow Uses the REST API Directly
@@ -38,7 +38,7 @@ The API base URL secret should be:
 LAUNCHPAD_API_URL=https://manager.os.mieweb.org
 ```
 
-The workflow accepts this base URL and appends `/api` internally. If the secret is accidentally set to `https://manager.os.mieweb.org/api`, the workflow also handles that safely.
+Use the manager origin, not the Swagger UI route. The Swagger/OpenAPI console is visible at `/api`, but the JSON REST endpoints are served from the manager origin (`/sites`, `/sites/{siteId}/containers`, `/jobs`, and so on). If the secret is accidentally set to `https://manager.os.mieweb.org/api`, the workflow strips the trailing `/api` before making REST requests.
 
 ## GitHub Secrets To Add
 
