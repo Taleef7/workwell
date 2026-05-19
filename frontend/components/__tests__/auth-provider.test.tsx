@@ -71,6 +71,31 @@ function renderProvider(onAuth?: (ctx: ReturnType<typeof useAuth>) => void) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("AuthProvider — silent refresh on page load", () => {
+  it("keeps an already-valid local session without forcing refresh or redirect", async () => {
+    const validToken = freshToken;
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(validToken));
+    localStorage.setItem(USER_KEY, JSON.stringify({ email: "admin@workwell.dev", role: "ADMIN" }));
+
+    let refreshCallCount = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        refreshCallCount++;
+        return HttpResponse.json({}, { status: 401 });
+      })
+    );
+
+    renderProvider();
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(validToken));
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(refreshCallCount).toBe(0);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
   it("writes new token/user to localStorage and does NOT redirect when refresh succeeds", async () => {
     storeExpiredSession();
 

@@ -128,6 +128,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // logout() already called router.replace("/login") and will handle the redirect.
     if (logoutInProgress.current) return;
 
+    // Hydration can briefly render token=null before the external-store snapshot
+    // reconciles with localStorage. If a valid session already exists there,
+    // re-emit a session change instead of clearing credentials or forcing refresh.
+    const latestSession = readStoredSession();
+    if (latestSession.token && latestSession.user) {
+      notifySessionChange();
+      return;
+    }
+
     // Only one refresh attempt per unauthenticated epoch.
     if (silentRefreshAttempted.current) {
       router.replace("/login");

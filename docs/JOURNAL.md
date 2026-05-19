@@ -1,5 +1,26 @@
 # Journal
 
+## 2026-05-19 — Auth reload-session hardening follow-up
+
+**Goal:** Eliminate the remaining page-refresh logout path by hardening frontend session bootstrap and login cookie persistence.
+
+**Branch:** `fix/section-1-refresh-reload-session`
+
+**What changed:**
+- `frontend/components/auth-provider.tsx`
+  - Added a hydration-safe guard in the unauthenticated effect: if the render sees `token=null` but a valid session still exists in localStorage, the provider now re-emits session state instead of clearing storage and forcing refresh.
+  - This removes the race where hard reload could clear a still-valid access token and bounce users to `/login`.
+- `frontend/app/login/page.tsx`
+  - Added `credentials: "include"` to `POST /api/auth/login` so the browser persists the HttpOnly refresh cookie in cross-origin mode (`vercel.app` frontend to `fly.dev` backend).
+- Tests:
+  - Added regression in `frontend/components/__tests__/auth-provider.test.tsx` to verify valid local session is retained without refresh/redirect.
+  - Added `frontend/app/login/__tests__/page.test.tsx` to verify login fetch includes credentials and still logs in.
+
+**Verification:**
+- `corepack pnpm test` ✅ (37/37)
+- `corepack pnpm lint` ✅
+- `corepack pnpm build` ✅
+
 ## 2026-05-19 — UAT re-verification: Section 1 cross-site cookie regression
 
 **Goal:** Verify UAT #23 Section 1 (#24) and Section 2 (#25) fixes are *actually* complete in production.
