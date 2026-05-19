@@ -138,6 +138,7 @@ export default function RunsPage() {
   const searchParams = useSearchParams();
   const urlRunId = searchParams.get("runId");
   const urlRunIdRef = useRef<string | null>(urlRunId);
+  const runsRef = useRef<RunListItem[]>([]);
 
   const [statusFilter, setStatusFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
@@ -189,6 +190,7 @@ export default function RunsPage() {
       if (to) query.set("to", to);
       const data = await api.get<RunListItem[]>(`/api/runs?${query.toString()}`);
       setRuns(data);
+      runsRef.current = data;
       const currentSelectedRunId = selectedRunIdRef.current;
       const nextSelectedRunId =
         currentSelectedRunId &&
@@ -223,9 +225,22 @@ export default function RunsPage() {
       }
       setInsightDismissed(false);
     } catch (err) {
+      // A deep-linked runId (?runId=...) that no longer exists or is invalid
+      // must not strand the user on an error path: drop the URL preservation,
+      // clean the query param, and fall back to the newest available run.
+      if (selectedRunId === urlRunIdRef.current) {
+        urlRunIdRef.current = null;
+        router.replace("/runs");
+        const fallbackRunId = runsRef.current.find((run) => run.runId !== selectedRunId)?.runId ?? null;
+        setSelectedRun(null);
+        setRunLogs([]);
+        setRunOutcomes([]);
+        setSelectedRunId(fallbackRunId);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [api, selectedRunId]);
+  }, [api, router, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
     if (!selectedRunId) return;
@@ -624,6 +639,10 @@ export default function RunsPage() {
                       onKeyDown={
                         caseHref
                           ? (event) => {
+                              // Only act when the row itself is focused — keydown
+                              // bubbles from nested links (Employee / Case), and
+                              // those must keep their own navigation.
+                              if (event.target !== event.currentTarget) return;
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
                                 router.push(caseHref);
