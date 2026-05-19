@@ -36,6 +36,7 @@ workwell:
     access-ttl-seconds: ${WORKWELL_AUTH_ACCESS_TTL_SECONDS:900}
     refresh-ttl-seconds: ${WORKWELL_AUTH_REFRESH_TTL_SECONDS:28800}
     cookie-secure: ${WORKWELL_AUTH_COOKIE_SECURE:false}
+    cookie-same-site: ${WORKWELL_AUTH_COOKIE_SAME_SITE:Lax}
   cors:
     allowed-origins: ${WORKWELL_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   ratelimit:

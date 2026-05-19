@@ -126,11 +126,46 @@ class StartupSafetyValidatorTest {
                 STRONG_JWT_SECRET,
                 EXACT_FRONTEND_ORIGIN,
                 false,
-                false
+                false,
+                "None",
+                true
         );
 
         assertThatThrownBy(() -> validator.run(new DefaultApplicationArguments()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("workwell.auth.enabled=false");
+    }
+
+    @Test
+    void localDevelopmentAllowsLaxNonSecureCookie() {
+        assertThatCode(() -> StartupSafetyValidator.validateCookiePolicy(false, "Lax", false))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void sameSiteNoneWithoutSecureIsRejectedEvenInLocalDevelopment() {
+        assertThatThrownBy(() -> StartupSafetyValidator.validateCookiePolicy(false, "None", false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cookie-same-site=None requires");
+    }
+
+    @Test
+    void productionRejectsLaxRefreshCookieBecauseItBreaksCrossSiteRefresh() {
+        assertThatThrownBy(() -> StartupSafetyValidator.validateCookiePolicy(true, "Lax", true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cookie-same-site must be 'None'");
+    }
+
+    @Test
+    void productionRejectsSameSiteNoneWithoutSecure() {
+        assertThatThrownBy(() -> StartupSafetyValidator.validateCookiePolicy(true, "None", false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cookie-same-site=None requires");
+    }
+
+    @Test
+    void productionAllowsSameSiteNoneSecureRefreshCookie() {
+        assertThatCode(() -> StartupSafetyValidator.validateCookiePolicy(true, "None", true))
+                .doesNotThrowAnyException();
     }
 }
