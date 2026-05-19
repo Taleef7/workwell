@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
+
+**Goal:** Fix the three Section 3 code bugs and correct the Section 3 walkthrough-guide inaccuracies (UAT #23, comment 4).
+
+**Branch:** `fix/section-3-measure-drilldown`
+
+**What changed:**
+- `frontend/app/(dashboard)/programs/[measureId]/page.tsx`
+  - Bug 8: added a **Run history** table (from `/api/programs/{measureId}/trend`, newest first) with per-run links to `/runs?runId=...` and a "View all runs →" link. No backend change needed (trend is already measure-scoped).
+  - Bug 9: added a **recharts donut** of the latest-run outcome breakdown (Compliant/Due Soon/Overdue/Missing/Excluded) and converted the plain-text **Reason mix** card into proportion bars.
+- `frontend/app/(dashboard)/runs/page.tsx`
+  - Bug 8 (cont.): `/runs?runId=` now pre-selects that run in Run Detail (`useSearchParams`; deep-linked run preserved even when not in the current list page).
+  - Bug 10: non-compliant outcome rows (those with a `caseId`) are now clickable → `/cases/[caseId]` (pointer + hover, keyboard accessible, inner links stopPropagation). Compliant/Excluded rows are muted and non-clickable.
+- `docs/WALKTHROUGH_GUIDE.md`
+  - Corrected Section 3 inaccuracies 6–11: AI Run Insight is on `/runs` (auto-loads, real disclaimer wording), duration shown in seconds, real outcomes-table columns, measure labelled "Audiogram". Synced the matching Section 6 duration/label mentions. CSV `durationMs` column name left intact (real column).
+
+**Verification:**
+- `pnpm lint` / `pnpm build` ✅
+- Production data-shape validation via browser (changed code can't run on a preview: prod CORS allowlist excludes non-prod origins by design, and the preview is behind Vercel deployment protection).
+
+**PR #35 review follow-up (automated reviewers):**
+- Codex P2 + Copilot: `/runs?runId=` with an invalid/stale id no longer strands the user on an error path — `loadSelectedRun` now drops the URL preservation, cleans the query param (`router.replace`), and falls back to the newest run.
+- Copilot: row-level `onKeyDown` on outcome rows now guards `event.target === event.currentTarget`, so Enter/Space on the nested Employee/Case links keeps their own navigation.
+- Copilot: reconciled the Audiogram naming inconsistency — Section 2's card list now shows the real UI labels (Audiogram / Flu Vaccine / HAZWOPER Surveillance / TB Surveillance) with the long policy titles marked documentation-only, matching the Section 3 note.
+
 ## 2026-05-19 — Auth reload-session hardening follow-up
 
 **Goal:** Eliminate the remaining page-refresh logout path by hardening frontend session bootstrap and login cookie persistence.
