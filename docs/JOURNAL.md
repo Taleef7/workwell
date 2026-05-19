@@ -1,5 +1,24 @@
 # Journal
 
+## 2026-05-19 — UAT re-verification: Section 1 cross-site cookie regression
+
+**Goal:** Verify UAT #23 Section 1 (#24) and Section 2 (#25) fixes are *actually* complete in production.
+
+**Branch:** `fix/section-1-cross-site-refresh-cookie` (PR #33); the Section 2 modal follow-up is `fix/section-2-run-all-confirm-modal` (PR #34)
+
+**Findings (end-to-end test against production, real browser):**
+- **Section 1 / #24 — NOT fixed in production.** Frontend silent-refresh code (`auth-provider.tsx`) is correct and the backend `/api/auth/refresh` contract matches, but the refresh cookie was issued `SameSite=Lax` with no `Secure`. Frontend (`vercel.app`) and backend (`fly.dev`) are different sites, so the browser never sends a `SameSite=Lax` cookie on the cross-site `POST /api/auth/refresh` fetch. Reproduced: cleared `ww_token`, reloaded `/programs` → redirected to `/login`, console shows `401 @ /api/auth/refresh`.
+- **Section 2 / #25 — code correct but backend not redeployed.** Bug 1/2/3/6 (frontend) are live via Vercel. Bug 5 (driver scoping) and Bug 7 (`fly.toml min_machines_running=1`) are merged to `main` but the Fly backend was never redeployed (uptime ≈21h predates the 2026-05-18 18:54 fix commit). Live API still returns identical driver data for Flu/HAZWOPER/TB.
+
+**Fix applied (Section 1 cookie):**
+- `AuthController` — refresh/logout cookie `SameSite` now configurable (`workwell.auth.cookie-same-site`, default `Lax`); `Secure` auto-forced when `SameSite=None` (browser hard requirement).
+- `application.yml` — added `cookie-same-site: ${WORKWELL_AUTH_COOKIE_SAME_SITE:Lax}`.
+- `StartupSafetyValidator` — new `validateCookiePolicy`: production-like startup now **fails fast** unless `SameSite=None` + `Secure=true` (prod is cross-site by design); plus universal `None ⇒ Secure` rule. 5 new tests; existing tests green.
+- Docs: `.env.example`, `docs/DEPLOY.md` (Fly secrets + env table) updated.
+
+**Still required (owner action — not auto-applied):**
+- Set Fly secrets `WORKWELL_AUTH_COOKIE_SAME_SITE=None` and `WORKWELL_AUTH_COOKIE_SECURE=true`, then **redeploy the Fly backend**. This single redeploy also activates the merged Bug 5 and Bug 7 fixes. Frontend needs no change.
+
 ## 2026-05-17 — Sprint 5: Test Suite and CI Gates
 
 **Goal:** Add meaningful test coverage and make CI block merges on failures.
