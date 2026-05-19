@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
-import { ROLE_LABELS, labelFor } from "@/lib/status";
+import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 
 type ProgramSummary = {
   measureId: string;
@@ -36,6 +37,20 @@ type TopDrivers = {
   byRole: Array<{ role: string; overdueCount: number }>;
   byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
 };
+
+const OUTCOME_COLORS: Record<string, string> = {
+  COMPLIANT: "#059669",
+  DUE_SOON: "#d97706",
+  OVERDUE: "#e11d48",
+  MISSING_DATA: "#7c3aed",
+  EXCLUDED: "#64748b"
+};
+
+function formatTimestamp(value: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
+}
 
 export default function ProgramDetailPage() {
   const params = useParams<{ measureId: string }>();
@@ -75,6 +90,20 @@ export default function ProgramDetailPage() {
   const prevRate = trend.length > 1 ? trend[1].complianceRate : program?.complianceRate ?? 0;
   const delta = (program?.complianceRate ?? 0) - prevRate;
 
+  const outcomeBreakdown = program
+    ? [
+        { key: "COMPLIANT", value: program.compliant },
+        { key: "DUE_SOON", value: program.dueSoon },
+        { key: "OVERDUE", value: program.overdue },
+        { key: "MISSING_DATA", value: program.missingData },
+        { key: "EXCLUDED", value: program.excluded }
+      ].filter((slice) => slice.value > 0)
+    : [];
+
+  const runHistory = [...trend].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+  );
+
   return (
     <section className="space-y-4">
       <Link href="/programs" className="text-sm text-slate-500 hover:underline">← Back to Programs</Link>
@@ -93,9 +122,46 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 bg-white p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Compliance trend (last 10)</p>
-            <Sparkline points={trend.map((t) => t.complianceRate)} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Compliance trend (last 10)</p>
+              <Sparkline points={trend.map((t) => t.complianceRate)} />
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Outcome breakdown (latest run)</p>
+              {outcomeBreakdown.length === 0 ? (
+                <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
+                  <span className="text-xs text-slate-400">No outcomes for the latest run</span>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={outcomeBreakdown}
+                      dataKey="value"
+                      nameKey="key"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={75}
+                      paddingAngle={2}
+                    >
+                      {outcomeBreakdown.map((slice) => (
+                        <Cell key={slice.key} fill={OUTCOME_COLORS[slice.key] ?? "#94a3b8"} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name) => [value, labelFor(OUTCOME_LABELS, String(name))]}
+                      contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+                    />
+                    <Legend
+                      formatter={(value) => labelFor(OUTCOME_LABELS, String(value))}
+                      wrapperStyle={{ fontSize: 11 }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">
@@ -109,8 +175,73 @@ export default function ProgramDetailPage() {
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-900">Reason mix</p>
-              {drivers.byOutcomeReason.length === 0 ? <p className="mt-2 text-xs text-slate-500">-</p> : drivers.byOutcomeReason.map((r) => <p key={r.reason} className="mt-1 text-xs">{r.reason}: {r.count} ({r.pct.toFixed(1)}%)</p>)}
+              {drivers.byOutcomeReason.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">-</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {drivers.byOutcomeReason.map((r) => (
+                    <div key={r.reason}>
+                      <div className="flex justify-between text-xs">
+                        <span>{labelFor(OUTCOME_LABELS, r.reason)}</span>
+                        <span className="text-slate-500">{r.count} ({r.pct.toFixed(1)}%)</span>
+                      </div>
+                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, Math.max(0, r.pct))}%`,
+                            backgroundColor: OUTCOME_COLORS[r.reason] ?? "#94a3b8"
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-slate-900">Run history</p>
+              <Link href="/runs" className="text-xs font-medium text-blue-700 hover:underline">
+                View all runs →
+              </Link>
+            </div>
+            {runHistory.length === 0 ? (
+              <p className="mt-2 text-xs text-slate-500">No runs recorded for this measure yet.</p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="text-left text-slate-600">
+                    <tr>
+                      <th className="py-1 pr-3">Run</th>
+                      <th className="py-1 pr-3">Started</th>
+                      <th className="py-1 pr-3">Compliance</th>
+                      <th className="py-1 pr-3">Evaluated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runHistory.map((run) => (
+                      <tr key={run.runId} className="border-t border-slate-200 hover:bg-slate-50">
+                        <td className="py-1 pr-3">
+                          <Link
+                            href={`/runs?runId=${encodeURIComponent(run.runId)}`}
+                            className="font-medium text-blue-700 hover:underline"
+                            title={run.runId}
+                          >
+                            {run.runId.slice(0, 8)}...
+                          </Link>
+                        </td>
+                        <td className="py-1 pr-3 text-slate-600">{formatTimestamp(run.startedAt)}</td>
+                        <td className="py-1 pr-3">{run.complianceRate.toFixed(1)}%</td>
+                        <td className="py-1 pr-3">{run.totalEvaluated}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border border-slate-200 bg-white p-4">
