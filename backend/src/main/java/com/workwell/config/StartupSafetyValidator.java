@@ -122,6 +122,17 @@ public class StartupSafetyValidator implements ApplicationRunner {
     static void validateCookiePolicy(boolean productionLike, String cookieSameSite, boolean cookieSecure) {
         String normalized = cookieSameSite == null ? "" : cookieSameSite.trim();
 
+        boolean known = normalized.equalsIgnoreCase("None")
+                || normalized.equalsIgnoreCase("Lax")
+                || normalized.equalsIgnoreCase("Strict");
+        if (!known) {
+            throw new IllegalStateException(
+                    "Unsafe WorkWell configuration: workwell.auth.cookie-same-site must be one of "
+                            + "None, Lax, or Strict (got '" + normalized + "'). An unknown value emits "
+                            + "a malformed Set-Cookie SameSite attribute and breaks auth."
+            );
+        }
+
         boolean sameSiteNone = "none".equalsIgnoreCase(normalized);
         if (sameSiteNone && !cookieSecure) {
             throw new IllegalStateException(

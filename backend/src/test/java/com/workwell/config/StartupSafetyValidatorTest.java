@@ -168,4 +168,24 @@ class StartupSafetyValidatorTest {
         assertThatCode(() -> StartupSafetyValidator.validateCookiePolicy(true, "None", true))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void unknownSameSiteValueIsRejectedEvenInLocalDevelopment() {
+        assertThatThrownBy(() -> StartupSafetyValidator.validateCookiePolicy(false, "banana", false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must be one of");
+    }
+
+    @Test
+    void blankSameSiteValueIsRejected() {
+        assertThatThrownBy(() -> StartupSafetyValidator.validateCookiePolicy(true, "  ", true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must be one of");
+    }
+
+    @Test
+    void whitespacePaddedSameSiteValueIsAccepted() {
+        assertThatCode(() -> StartupSafetyValidator.validateCookiePolicy(true, "  None  ", true))
+                .doesNotThrowAnyException();
+    }
 }

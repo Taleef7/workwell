@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,10 +50,25 @@ public class AuthController {
         this.demoUserService = demoUserService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
-        this.cookieSameSite = cookieSameSite;
+        // Trim + canonicalize so a stray-whitespace or odd-case env value
+        // (e.g. "None ") cannot emit a malformed SameSite attribute or skip the
+        // Secure auto-force below. StartupSafetyValidator fails fast on unknown
+        // values; this is the defense-in-depth fallback to a safe default.
+        this.cookieSameSite = normalizeSameSite(cookieSameSite);
         // SameSite=None cookies are silently dropped by browsers unless they are
         // also Secure, so force Secure whenever the cross-site policy is in effect.
-        this.cookieSecure = cookieSecure || "none".equalsIgnoreCase(cookieSameSite);
+        this.cookieSecure = cookieSecure || "None".equals(this.cookieSameSite);
+    }
+
+    private static String normalizeSameSite(String raw) {
+        if (raw == null) {
+            return "Lax";
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "none" -> "None";
+            case "strict" -> "Strict";
+            default -> "Lax";
+        };
     }
 
     @Operation(

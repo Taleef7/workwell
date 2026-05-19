@@ -4,7 +4,7 @@
 
 **Goal:** Verify UAT #23 Section 1 (#24) and Section 2 (#25) fixes are *actually* complete in production.
 
-**Branch:** `fix/section-2-programs-dashboard`
+**Branch:** `fix/section-1-cross-site-refresh-cookie` (PR #33); the Section 2 modal follow-up is `fix/section-2-run-all-confirm-modal` (PR #34)
 
 **Findings (end-to-end test against production, real browser):**
 - **Section 1 / #24 — NOT fixed in production.** Frontend silent-refresh code (`auth-provider.tsx`) is correct and the backend `/api/auth/refresh` contract matches, but the refresh cookie was issued `SameSite=Lax` with no `Secure`. Frontend (`vercel.app`) and backend (`fly.dev`) are different sites, so the browser never sends a `SameSite=Lax` cookie on the cross-site `POST /api/auth/refresh` fetch. Reproduced: cleared `ww_token`, reloaded `/programs` → redirected to `/login`, console shows `401 @ /api/auth/refresh`.
