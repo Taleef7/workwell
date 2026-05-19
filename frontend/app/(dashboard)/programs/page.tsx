@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
@@ -174,24 +175,6 @@ export default function ProgramsPage() {
             <span className="text-sm text-slate-500 animate-pulse">
               {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
             </span>
-          ) : showRunConfirm ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-medium text-slate-700">Run all 4 active programs now?</span>
-              <button
-                type="button"
-                onClick={() => { setShowRunConfirm(false); void runAllMeasuresNow(); }}
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors"
-              >
-                Confirm
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowRunConfirm(false)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
           ) : (
             <button
               type="button"
@@ -322,6 +305,19 @@ export default function ProgramsPage() {
           );
         })}
       </div>
+
+      <ConfirmDialog
+        open={showRunConfirm}
+        title="Run all active programs?"
+        description="This evaluates every tracked employee across all 4 active measures. It cannot be undone, though results are recomputed on each run."
+        confirmLabel="Run all measures"
+        cancelLabel="Cancel"
+        onCancel={() => setShowRunConfirm(false)}
+        onConfirm={() => {
+          setShowRunConfirm(false);
+          void runAllMeasuresNow();
+        }}
+      />
     </section>
   );
 }
