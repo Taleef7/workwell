@@ -17,7 +17,9 @@
   - Exposes `3000` and adds the required MIE default-port label.
 - `.github/workflows/deploy-os-mieweb.yml`
   - Added additive GHCR build jobs for `ghcr.io/taleef7/workwell-api` and `ghcr.io/taleef7/workwell`.
-  - Added launchpad deploy jobs wired to `mieweb/launchpad@main`, gated naturally by `push` to `main` or manual dispatch.
+  - Added direct Create-a-Container REST deploy jobs for explicit `workwell-api` and `workwell` hostnames, gated naturally by `push` to `main` or manual dispatch.
+- `.github/scripts/deploy-mieweb-container.sh`
+  - Centralized the shared MIE REST API deployment flow so backend and frontend deploys use the same site/domain lookup, replace-existing handling, job polling, and API error handling.
 - `docs/DEPLOY_OS_MIEWEB.md`
   - Added setup, secrets, public GHCR visibility, health verification, rollback, and pre-first-deploy clarification notes.
 
@@ -30,6 +32,7 @@
 - Reworked `.github/workflows/deploy-os-mieweb.yml` away from `mieweb/launchpad@main` to direct REST calls so the same repo/branch can create both `workwell-api` and `workwell`.
 - Set site `1` as the Phoenix target and removed `ANTHROPIC_API_KEY` from the required MIE workflow secrets because the current backend configuration uses OpenAI.
 - Documented the remaining owner steps in `docs/DEPLOY_OS_MIEWEB.md`: Neon JDBC `DATABASE_URL`, `WORKWELL_AUTH_JWT_SECRET`, and making GHCR packages public after first image push.
+- Addressed PR review follow-up: backend image default profile is now `prod,production`, and shared MIE API bash moved into `.github/scripts/deploy-mieweb-container.sh`.
 
 ## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
 
