@@ -36,18 +36,23 @@ public class AuthController {
     private final DemoUserService demoUserService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final String cookieSameSite;
     private final boolean cookieSecure;
 
     public AuthController(
             DemoUserService demoUserService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
+            @Value("${workwell.auth.cookie-same-site:Lax}") String cookieSameSite,
             @Value("${workwell.auth.cookie-secure:false}") boolean cookieSecure
     ) {
         this.demoUserService = demoUserService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
-        this.cookieSecure = cookieSecure;
+        this.cookieSameSite = cookieSameSite;
+        // SameSite=None cookies are silently dropped by browsers unless they are
+        // also Secure, so force Secure whenever the cross-site policy is in effect.
+        this.cookieSecure = cookieSecure || "none".equalsIgnoreCase(cookieSameSite);
     }
 
     @Operation(
@@ -109,7 +114,7 @@ public class AuthController {
                 .secure(cookieSecure)
                 .path(COOKIE_PATH)
                 .maxAge(0)
-                .sameSite("Lax")
+                .sameSite(cookieSameSite)
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, clear.toString());
         return ResponseEntity.noContent().build();
@@ -121,7 +126,7 @@ public class AuthController {
                 .secure(cookieSecure)
                 .path(COOKIE_PATH)
                 .maxAge(Duration.ofSeconds(jwtService.refreshTtlSeconds()))
-                .sameSite("Lax")
+                .sameSite(cookieSameSite)
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
