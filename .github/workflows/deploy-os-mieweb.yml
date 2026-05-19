@@ -1,0 +1,149 @@
+name: Deploy OS MIEWeb
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-os-mieweb-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/taleef7/workwell-api
+  FRONTEND_IMAGE: ghcr.io/taleef7/workwell
+  FRONTEND_URL: https://workwell.os.mieweb.org
+  BACKEND_URL: https://workwell-api.os.mieweb.org
+  SITE_ID: 1
+
+jobs:
+  build-backend:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+
+  build-frontend:
+    name: Build frontend image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.BACKEND_URL }}
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+
+  deploy-backend:
+    name: Deploy backend container
+    runs-on: ubuntu-latest
+    needs: build-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare backend environment JSON
+        id: backend-env
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET }}
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg databaseUrl "$DATABASE_URL" \
+              --arg anthropicApiKey "$ANTHROPIC_API_KEY" \
+              --arg openAiApiKey "$OPENAI_API_KEY" \
+              --arg jwtSecret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontendUrl "${{ env.FRONTEND_URL }}" \
+              '{
+                DATABASE_URL: $databaseUrl,
+                ANTHROPIC_API_KEY: $anthropicApiKey,
+                OPENAI_API_KEY: $openAiApiKey,
+                SANDBOX_MODE: "false",
+                JAVA_OPTS: "-Xmx768m -Xms256m -Xss256k",
+                SPRING_PROFILES_ACTIVE: "production",
+                WORKWELL_CORS_ALLOWED_ORIGINS: $frontendUrl,
+                WORKWELL_AUTH_COOKIE_SAME_SITE: "None",
+                WORKWELL_AUTH_COOKIE_SECURE: "true",
+                WORKWELL_AUTH_JWT_SECRET: $jwtSecret
+              }'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: mieweb/launchpad@main
+        with:
+          api_key: ${{ secrets.LAUNCHPAD_API_KEY }}
+          api_url: ${{ secrets.LAUNCHPAD_API_URL }}
+          site_id: ${{ env.SITE_ID }}
+          template_name: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+          container_env_vars: ${{ steps.backend-env.outputs.json }}
+
+  deploy-frontend:
+    name: Deploy frontend container
+    runs-on: ubuntu-latest
+    needs: [build-frontend, deploy-backend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare frontend environment JSON
+        id: frontend-env
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg apiUrl "${{ env.BACKEND_URL }}" \
+              '{
+                NODE_ENV: "production",
+                NEXT_PUBLIC_API_URL: $apiUrl,
+                NEXT_PUBLIC_API_BASE_URL: $apiUrl
+              }'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: mieweb/launchpad@main
+        with:
+          api_key: ${{ secrets.LAUNCHPAD_API_KEY }}
+          api_url: ${{ secrets.LAUNCHPAD_API_URL }}
+          site_id: ${{ env.SITE_ID }}
+          template_name: ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+          container_env_vars: ${{ steps.frontend-env.outputs.json }}
