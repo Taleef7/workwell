@@ -12,7 +12,7 @@ RUN ./gradlew bootJar --no-daemon \
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-ENV SPRING_PROFILES_ACTIVE=production
+ENV SPRING_PROFILES_ACTIVE=prod,production
 
 COPY --from=build /workspace/app.jar /app/app.jar
 
