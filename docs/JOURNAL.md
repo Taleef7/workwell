@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-05-19 — OS MIEWeb deployment branch
+
+**Goal:** Prepare an additive, review-only deployment path for WorkWell Measure Studio on MIE's open source Proxmox cluster without disturbing the existing Vercel + Fly deployment.
+
+**Branch:** `os-mieweb-deploy`
+
+**What changed:**
+- `backend/Dockerfile`
+  - Kept the repo's Gradle Kotlin DSL build instead of switching to Maven, because this project has no Maven build and the stack is fixed to Gradle.
+  - Builds a Spring Boot jar in a Gradle stage, copies the runnable jar into `eclipse-temurin:21-jre-alpine`, exposes `8080`, and adds the required MIE default-port label.
+  - Uses process env for runtime configuration and preserves `JAVA_OPTS`.
+- `frontend/Dockerfile`
+  - Added a Node 20 Alpine multi-stage build with `NEXT_PUBLIC_API_URL` defaulting to `https://workwell-api.os.mieweb.org`.
+  - Enables standalone Next.js output and runs the generated standalone server on port `3000`.
+  - Exposes `3000` and adds the required MIE default-port label.
+- `.github/workflows/deploy-os-mieweb.yml`
+  - Added additive GHCR build jobs for `ghcr.io/taleef7/workwell-api` and `ghcr.io/taleef7/workwell`.
+  - Added direct Create-a-Container REST deploy jobs for explicit `workwell-api` and `workwell` hostnames, gated naturally by `push` to `main` or manual dispatch.
+- `.github/scripts/deploy-mieweb-container.sh`
+  - Centralized the shared MIE REST API deployment flow so backend and frontend deploys use the same site/domain lookup, replace-existing handling, job polling, and API error handling.
+- `docs/DEPLOY_OS_MIEWEB.md`
+  - Added setup, secrets, public GHCR visibility, health verification, rollback, and pre-first-deploy clarification notes.
+
+**Needs clarification before first deploy:**
+- `mieweb/launchpad@main` appears to derive the container hostname from `owner-repo-branch`, with no documented override. MIE admins should confirm how to deploy two distinct LXC containers from the same repo/branch before this workflow runs on `main`.
+- Confirm `LAUNCHPAD_API_URL` and whether `site_id: 1` is the intended Phoenix DC target.
+
+**Follow-up update:**
+- Confirmed `https://manager.os.mieweb.org/api/openapi.json` exposes direct Create-a-Container REST endpoints for explicit `hostname`, `services`, and `environmentVars`.
+- Reworked `.github/workflows/deploy-os-mieweb.yml` away from `mieweb/launchpad@main` to direct REST calls so the same repo/branch can create both `workwell-api` and `workwell`.
+- Set site `1` as the Phoenix target and removed `ANTHROPIC_API_KEY` from the required MIE workflow secrets because the current backend configuration uses OpenAI.
+- Documented the remaining owner steps in `docs/DEPLOY_OS_MIEWEB.md`: Neon JDBC `DATABASE_URL`, `WORKWELL_AUTH_JWT_SECRET`, and making GHCR packages public after first image push.
+- Addressed PR review follow-up: backend image default profile is now `prod,production`, and shared MIE API bash moved into `.github/scripts/deploy-mieweb-container.sh`.
+
 ## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
 
 **Goal:** Fix the three Section 3 code bugs and correct the Section 3 walkthrough-guide inaccuracies (UAT #23, comment 4).

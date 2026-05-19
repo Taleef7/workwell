@@ -1,0 +1,10 @@
+# Ignore local and generated files in Docker build contexts.
+node_modules
+.next
+.vercel
+coverage
+*.log
+*.tsbuildinfo
+Dockerfile
+.dockerignore
+.env*
