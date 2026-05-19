@@ -66,6 +66,10 @@ request() {
     return 1
   fi
 
+  if [ "$status" = "204" ] || { [ "$method" = "DELETE" ] && [ ! -s "$response_file" ]; }; then
+    return 0
+  fi
+
   if ! jq -e . "$response_file" >/dev/null 2>&1; then
     echo "::error::${method} ${path} returned a non-JSON response from ${api_base}${path}." >&2
     echo "::error::Check LAUNCHPAD_API_URL. The Swagger UI lives at /api, but REST requests must target the manager origin." >&2
