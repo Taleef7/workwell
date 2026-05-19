@@ -33,6 +33,7 @@
 - Set site `1` as the Phoenix target and removed `ANTHROPIC_API_KEY` from the required MIE workflow secrets because the current backend configuration uses OpenAI.
 - Documented the remaining owner steps in `docs/DEPLOY_OS_MIEWEB.md`: Neon JDBC `DATABASE_URL`, `WORKWELL_AUTH_JWT_SECRET`, and making GHCR packages public after first image push.
 - Addressed PR review follow-up: backend image default profile is now `prod,production`, and shared MIE API bash moved into `.github/scripts/deploy-mieweb-container.sh`.
+- After the first `main` deploy attempt, corrected the MIE API base handling: `/api` serves Swagger UI, while JSON REST endpoints are rooted at `https://manager.os.mieweb.org`.
 
 ## 2026-05-19 — UAT Section 3: Measure drill-down (issue #26)
 

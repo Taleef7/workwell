@@ -23,9 +23,10 @@ done
 
 api_root="${MIEWEB_API_URL%/}"
 if [[ "$api_root" == */api ]]; then
-  api_base="$api_root"
+  # /api is the Swagger UI route; the JSON endpoints are served from the manager origin.
+  api_base="${api_root%/api}"
 else
-  api_base="$api_root/api"
+  api_base="$api_root"
 fi
 
 request() {
@@ -62,6 +63,19 @@ request() {
   if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
     echo "::error::${method} ${path} failed with HTTP ${status}" >&2
     cat "$response_file" >&2
+    return 1
+  fi
+
+  if [ "$status" = "204" ] || { [ "$method" = "DELETE" ] && [ ! -s "$response_file" ]; }; then
+    return 0
+  fi
+
+  if ! jq -e . "$response_file" >/dev/null 2>&1; then
+    echo "::error::${method} ${path} returned a non-JSON response from ${api_base}${path}." >&2
+    echo "::error::Check LAUNCHPAD_API_URL. The Swagger UI lives at /api, but REST requests must target the manager origin." >&2
+    echo "Response preview:" >&2
+    head -c 500 "$response_file" >&2 || true
+    echo >&2
     return 1
   fi
 
