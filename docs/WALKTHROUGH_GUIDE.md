@@ -124,31 +124,33 @@ Each program card on the dashboard links to a **measure-specific detail view** s
 
 ### Steps
 
-1. From `/programs`, click the **Annual Audiogram** card (or click its title).
+1. From `/programs`, click the **Audiogram** card (or click its title).
+   > **Naming note:** The measure is labelled **Audiogram** throughout the running application (cards, run history, outcomes). The longer policy title "Annual Audiogram Completed" appears only in the measure documentation, not in the UI.
 2. You land on `/programs/4ae5d865-3d64-4a17-905d-f1b315a037e2`.
 3. The page shows:
-   - **Pass rate trend chart** — a bar or line chart showing compliance rates across recent runs
-   - **Outcome breakdown donut/bar** — proportion of COMPLIANT vs. DUE_SOON vs. OVERDUE vs. MISSING_DATA vs. EXCLUDED for the latest run
-   - **Run history table** — each row is one run: run ID, triggered by whom, start time, duration, total evaluated, outcome counts
+   - **Compliance trend (last 10)** — a line chart of compliance rate across recent runs
+   - **Outcome breakdown (latest run)** — a donut chart showing the proportion of COMPLIANT vs. DUE_SOON vs. OVERDUE vs. MISSING_DATA vs. EXCLUDED for the latest run
+   - **Top sites**, **Top roles**, and **Reason mix** — the sites/roles driving non-compliance and a visual bar breakdown of flagged outcomes by reason
+   - **Run history** — a table of recent runs for this measure: run ID, start time, compliance rate, and total evaluated, with a **View all runs →** link to the full Runs page
 
 ### Viewing a run
 
-4. Click any row in the run history to open the **Run Detail** view.
-5. You see:
-   - **Run metadata** — scope type (ALL_PROGRAMS or MEASURE), trigger type (MANUAL), run status (COMPLETED), start/end time, duration in milliseconds
-   - **Outcome summary** — counts for each outcome bucket with pass rate percentage
-   - **Outcomes table** — one row per employee: name, role, site, evaluation period, status, days overdue (if applicable), waiver status
-6. Click any outcome row to navigate to that employee's case detail.
+4. In the **Run history** table, click any run ID. This opens the **Runs page** (`/runs`) with that run pre-selected in the **Run Detail** panel.
+5. On `/runs` you see:
+   - **Run Detail panel** — measure name, scope type (ALL_PROGRAMS or MEASURE), trigger type (MANUAL), run status (COMPLETED), start/completed time, **duration in seconds**, total evaluated, total cases, pass rate, data freshness, and an **Outcome Counts** list
+   - **Run Logs** — timestamped INFO-level log entries for the run
+   - **Outcomes table** — one row per employee with the columns **Employee**, **Role**, **Site**, **Outcome**, **Days Since Exam**, **Waiver**, and **Case** (there is no "evaluation period" column)
+6. Click any **non-compliant** outcome row (DUE_SOON / OVERDUE / MISSING_DATA — these have a Case ID) to navigate to that employee's case detail. Compliant and Excluded rows have no case and are shown muted and non-clickable.
 
 ### AI Run Insight
 
-7. Look for the **AI Run Insight** panel on the run detail page (may appear as "Run Analysis" or with a sparkle icon).
-8. Click **Generate Insight** (or the insight may auto-load).
+7. The **AI Run Insight** panel lives on the **Runs page** run detail (`/runs`), not on `/programs/[measureId]`. It appears above the Run Detail panel as a blue callout.
+8. The insight **auto-loads** when a run is selected — there is no "Generate Insight" button.
 9. Within 3–5 seconds, 3–5 bullet points appear in plain English, for example:
    - _"68% of enrolled employees are currently compliant — a 4-point improvement over the previous run."_
    - _"The primary driver of non-compliance is exam recency: 11 employees have not had an audiogram within the past 365 days."_
    - _"2 employees are classified MISSING_DATA, indicating their exam records could not be located in the current period."_
-10. Note the label at the bottom: **"AI-generated summary — compliance decisions are made by CQL only."** This is the AI guardrail in action.
+10. The panel header reads: **"AI-generated operational insight - verify before acting"**, and the panel can be dismissed with the **Dismiss** link. This is the AI guardrail in action — compliance is decided only by the CQL engine.
 
 ### Repeat for other measures
 Follow the same steps for:
@@ -318,10 +320,10 @@ The Runs page shows every execution of every measure — a permanent history of 
 1. Click **Runs** in the left sidebar. You land on `/runs`.
 2. You see a table of all runs:
    - Run ID (partial UUID)
-   - Measure name and scope (e.g., "ALL_PROGRAMS", "Annual Audiogram")
+   - Measure name and scope (e.g., "ALL_PROGRAMS", "Audiogram")
    - Trigger type (MANUAL or SCHEDULED)
    - Status (COMPLETED, PARTIAL_FAILURE, FAILED)
-   - Started at, Completed at, Duration (ms)
+   - Started at, Duration (shown in **seconds**, not milliseconds)
    - Evaluated / Compliant / Non-compliant counts
    - Pass rate
 
@@ -331,7 +333,7 @@ The Runs page shows every execution of every measure — a permanent history of 
 4. A scope selection dialog opens. Options:
    - **All Programs** — evaluate all 4 active measures for all enrolled employees
    - **Single Measure** — select one measure from the dropdown
-5. Select **Single Measure** and choose **Annual Audiogram** from the dropdown.
+5. Select **Single Measure** and choose **Audiogram** from the dropdown.
 6. Click **Confirm**.
 7. A new row appears at the top of the table with status `RUNNING`. Within 5–15 seconds it updates to `COMPLETED`.
 
