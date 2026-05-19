@@ -32,6 +32,8 @@ public class StartupSafetyValidator implements ApplicationRunner {
     private final String allowedOriginsConfig;
     private final boolean demoEnabled;
     private final boolean allowPublicDemo;
+    private final String cookieSameSite;
+    private final boolean cookieSecure;
 
     public StartupSafetyValidator(
             Environment environment,
@@ -39,7 +41,9 @@ public class StartupSafetyValidator implements ApplicationRunner {
             @Value("${workwell.auth.jwt-secret:" + DEFAULT_JWT_SECRET + "}") String jwtSecret,
             @Value("${workwell.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}") String allowedOriginsConfig,
             @Value("${workwell.demo.enabled:false}") boolean demoEnabled,
-            @Value("${workwell.demo.allow-public-demo:false}") boolean allowPublicDemo
+            @Value("${workwell.demo.allow-public-demo:false}") boolean allowPublicDemo,
+            @Value("${workwell.auth.cookie-same-site:Lax}") String cookieSameSite,
+            @Value("${workwell.auth.cookie-secure:false}") boolean cookieSecure
     ) {
         this.environment = environment;
         this.authEnabled = authEnabled;
@@ -47,18 +51,22 @@ public class StartupSafetyValidator implements ApplicationRunner {
         this.allowedOriginsConfig = allowedOriginsConfig;
         this.demoEnabled = demoEnabled;
         this.allowPublicDemo = allowPublicDemo;
+        this.cookieSameSite = cookieSameSite;
+        this.cookieSecure = cookieSecure;
     }
 
     @Override
     public void run(ApplicationArguments args) {
+        boolean productionLike = isProductionLike(environment);
         validate(
-                isProductionLike(environment),
+                productionLike,
                 authEnabled,
                 jwtSecret,
                 allowedOriginsConfig,
                 demoEnabled,
                 allowPublicDemo
         );
+        validateCookiePolicy(productionLike, cookieSameSite, cookieSecure);
     }
 
     static void validate(
@@ -99,6 +107,56 @@ public class StartupSafetyValidator implements ApplicationRunner {
         if (demoEnabled && !allowPublicDemo) {
             throw new IllegalStateException(
                     "Unsafe WorkWell configuration: workwell.demo.enabled=true is not allowed in production unless workwell.demo.allow-public-demo=true."
+            );
+        }
+    }
+
+    /**
+     * The supported production topology is a split frontend (Vercel) and backend
+     * (Fly) on different registrable domains, so every browser call to the API is
+     * cross-site. A {@code SameSite=Lax} (or {@code Strict}) refresh cookie is never
+     * sent on the cross-site {@code POST /api/auth/refresh} fetch, which silently
+     * breaks silent token refresh and logs users out on every page reload. Fail
+     * fast so this cannot ship unnoticed (it already regressed once).
+     */
+    static void validateCookiePolicy(boolean productionLike, String cookieSameSite, boolean cookieSecure) {
+        String normalized = cookieSameSite == null ? "" : cookieSameSite.trim();
+
+        boolean known = normalized.equalsIgnoreCase("None")
+                || normalized.equalsIgnoreCase("Lax")
+                || normalized.equalsIgnoreCase("Strict");
+        if (!known) {
+            throw new IllegalStateException(
+                    "Unsafe WorkWell configuration: workwell.auth.cookie-same-site must be one of "
+                            + "None, Lax, or Strict (got '" + normalized + "'). An unknown value emits "
+                            + "a malformed Set-Cookie SameSite attribute and breaks auth."
+            );
+        }
+
+        boolean sameSiteNone = "none".equalsIgnoreCase(normalized);
+        if (sameSiteNone && !cookieSecure) {
+            throw new IllegalStateException(
+                    "Unsafe WorkWell configuration: workwell.auth.cookie-same-site=None requires "
+                            + "workwell.auth.cookie-secure=true (browsers drop non-Secure SameSite=None cookies)."
+            );
+        }
+
+        if (!productionLike) {
+            return;
+        }
+
+        if (!sameSiteNone) {
+            throw new IllegalStateException(
+                    "Unsafe WorkWell configuration: production uses a cross-site frontend/backend split, "
+                            + "so workwell.auth.cookie-same-site must be 'None' (got '" + normalized
+                            + "'). A Lax/Strict refresh cookie is never sent on the cross-site refresh "
+                            + "request and silently breaks session persistence."
+            );
+        }
+
+        if (!cookieSecure) {
+            throw new IllegalStateException(
+                    "Unsafe WorkWell configuration: workwell.auth.cookie-secure must be true in production."
             );
         }
     }

@@ -48,7 +48,17 @@ fly secrets set ANTHROPIC_API_KEY=<key>
 fly secrets set SPRING_PROFILES_ACTIVE=prod
 fly secrets set WORKWELL_AUTH_ENABLED=true
 fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
+fly secrets set WORKWELL_AUTH_COOKIE_SAME_SITE=None
+fly secrets set WORKWELL_AUTH_COOKIE_SECURE=true
 ```
+
+> The frontend (Vercel) and backend (Fly) are different registrable domains, so
+> every browser→API call is **cross-site**. The refresh-token cookie must be
+> `SameSite=None; Secure` or the browser never sends it on the cross-site
+> `POST /api/auth/refresh` fetch — silent token refresh fails and users are
+> logged out on every page reload. Production startup now **fails fast** if
+> `WORKWELL_AUTH_COOKIE_SAME_SITE` is not `None` or `WORKWELL_AUTH_COOKIE_SECURE`
+> is not `true`.
 
 Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`), and keep `min_machines_running = 1` if you need a stable remote MCP connection.
 
@@ -87,6 +97,8 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 | `SPRING_PROFILES_ACTIVE` | Fly | Always `prod` in deployed env |
 | `WORKWELL_AUTH_ENABLED` | Fly | Enable stub auth; set `true` in deployed env |
 | `WORKWELL_AUTH_JWT_SECRET` | Fly | Required when auth is enabled; use a strong secret |
+| `WORKWELL_AUTH_COOKIE_SAME_SITE` | Fly | Refresh-cookie SameSite. **Must be `None` in production** (cross-site Vercel↔Fly). Default `Lax` for local same-origin dev. |
+| `WORKWELL_AUTH_COOKIE_SECURE` | Fly | Refresh-cookie Secure flag. **Must be `true` in production** (required for SameSite=None). Default `false` for local HTTP dev. |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel | Backend URL for fetch calls |
 | `NEXT_PUBLIC_APP_NAME` | Vercel | App display name |
 | `NEXT_PUBLIC_DEMO_MODE` | Vercel | Prefill login form for local/demo builds only |
