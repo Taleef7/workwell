@@ -135,37 +135,81 @@ jq -n \
     nvidiaRequested: false
   }' > "$payload_file"
 
-echo "Creating container '${CONTAINER_HOSTNAME}' from ${CONTAINER_IMAGE}..."
-create_json="$(request POST "/sites/${SITE_ID}/containers" "$payload_file")"
-job_id="$(echo "$create_json" | jq -r '.jobId // empty')"
-if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
-  echo "::error::Create response did not include jobId." >&2
-  echo "$create_json" >&2
-  exit 1
-fi
+cleanup_existing_for_retry() {
+  local retry_existing_json retry_existing_id
+  retry_existing_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}" || echo '{}')"
+  retry_existing_id="$(echo "$retry_existing_json" | jq -r '.containers[0].id // empty')"
+  if [ -n "$retry_existing_id" ]; then
+    echo "Cleaning up container '${CONTAINER_HOSTNAME}' (ID ${retry_existing_id}) before retry..."
+    request DELETE "/sites/${SITE_ID}/containers/${retry_existing_id}" >/dev/null || true
+  fi
+}
 
-echo "Waiting for job ${job_id}..."
-for attempt in $(seq 1 30); do
-  job_json="$(request GET "/jobs/${job_id}")"
-  job_status="$(echo "$job_json" | jq -r '.status // "unknown"')"
-  echo "Attempt ${attempt}/30: ${job_status}"
-  case "$job_status" in
-    success|completed)
-      break
-      ;;
-    failure|failed|error|cancelled)
-      echo "::error::Deploy job failed with status ${job_status}." >&2
+# Returns 0 on success, 2 on transient failure (caller may retry), 1 on permanent failure.
+create_and_wait() {
+  local create_json job_id job_json job_status status_log
+  create_json="$(request POST "/sites/${SITE_ID}/containers" "$payload_file")"
+  job_id="$(echo "$create_json" | jq -r '.jobId // empty')"
+  if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
+    echo "::error::Create response did not include jobId." >&2
+    echo "$create_json" >&2
+    return 1
+  fi
+
+  echo "Waiting for job ${job_id}..."
+  for attempt in $(seq 1 30); do
+    job_json="$(request GET "/jobs/${job_id}")"
+    job_status="$(echo "$job_json" | jq -r '.status // "unknown"')"
+    echo "Attempt ${attempt}/30: ${job_status}"
+    case "$job_status" in
+      success|completed)
+        return 0
+        ;;
+      failure|failed|error|cancelled)
+        echo "::error::Deploy job ${job_id} ended with status ${job_status}." >&2
+        status_log="$(request GET "/jobs/${job_id}/status?limit=1000" 2>/dev/null || true)"
+        echo "$status_log" >&2
+        if echo "$status_log" | grep -qiE 'request timeout|fetching digest|econnrefused|enotfound|etimedout|eai_again|socket hang up|getaddrinfo|temporarily unavailable|503|502|504'; then
+          echo "::warning::Detected transient MIE/registry error; this attempt is eligible for retry." >&2
+          return 2
+        fi
+        return 1
+        ;;
+    esac
+    if [ "$attempt" -eq 30 ]; then
+      echo "::error::Timed out waiting for deploy job ${job_id}." >&2
       request GET "/jobs/${job_id}/status?limit=1000" >&2 || true
-      exit 1
-      ;;
-  esac
-  if [ "$attempt" -eq 30 ]; then
-    echo "::error::Timed out waiting for deploy job." >&2
-    request GET "/jobs/${job_id}/status?limit=1000" >&2 || true
+      return 2
+    fi
+    sleep 10
+  done
+}
+
+echo "Creating container '${CONTAINER_HOSTNAME}' from ${CONTAINER_IMAGE}..."
+max_create_attempts=3
+create_result=1
+for create_try in $(seq 1 "$max_create_attempts"); do
+  if [ "$create_try" -gt 1 ]; then
+    backoff=$(( 20 * (create_try - 1) ))
+    echo "Retry ${create_try}/${max_create_attempts} after ${backoff}s backoff..."
+    sleep "$backoff"
+    cleanup_existing_for_retry
+  fi
+  set +e
+  create_and_wait
+  create_result=$?
+  set -e
+  if [ "$create_result" -eq 0 ]; then
+    break
+  fi
+  if [ "$create_result" -eq 1 ]; then
     exit 1
   fi
-  sleep 10
 done
+if [ "$create_result" -ne 0 ]; then
+  echo "::error::Container creation failed after ${max_create_attempts} attempts with transient errors." >&2
+  exit 1
+fi
 
 final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}")"
 container_status="$(echo "$final_json" | jq -r '.containers[0].status // "unknown"')"
