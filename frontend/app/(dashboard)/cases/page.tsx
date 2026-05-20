@@ -91,6 +91,11 @@ export default function CasesPage() {
   const PAGE_SIZE = 25;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSearchTerm((current) => (current === urlSearch ? current : urlSearch));
+  }, [urlSearch]);
+
+  useEffect(() => {
     if (searchTerm === urlSearch) {
       return;
     }

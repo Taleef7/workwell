@@ -13,6 +13,7 @@
 - `backend/src/main/java/com/workwell/measure/ValueSetGovernanceService.java` — Renamed `ensureDemoValueSetLinks()` to `ensureDemoValueSets()` and expanded it to seed all 4 demo value sets (audiogram, TB, HAZWOPER, flu vaccine) with their correct CQL-matching canonical OIDs and local codes so `resolveCheck` finds matching codes.
 - `frontend/app/(dashboard)/admin/page.tsx` — Added confirmation dialog before disabling the scheduler to prevent accidental disables during a demo.
 - `frontend/features/studio/components/CqlTab.tsx` — Added "New Version" button with a modal dialog for entering a change summary and cloning the current CQL into a new draft measure version.
+- PR review follow-up: wired the CQL-tab modal summary directly into the version-clone request so it no longer depends on asynchronous React state, added a Runs/Run Detail display guard that renders anomalous `durationMs` values over 1 hour as `-` or `Stalled`, and restored Cases search state synchronization when browser history changes the `search` URL parameter.
 
 **Verification:**
 - `backend/gradlew.bat test --tests com.workwell.export.* --tests com.workwell.web.RunControllerTest` — BUILD SUCCESSFUL (21s).
