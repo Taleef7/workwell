@@ -83,7 +83,7 @@ public class CaseFlowService {
             Instant from,
             Instant to
     ) {
-        return listCases(statusFilter, measureId, priority, assignee, site, from, to, 50, 0);
+        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, 50, 0);
     }
 
     public List<CaseSummary> listCases(
@@ -94,6 +94,21 @@ public class CaseFlowService {
             String site,
             Instant from,
             Instant to,
+            int limit,
+            int offset
+    ) {
+        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, limit, offset);
+    }
+
+    public List<CaseSummary> listCases(
+            String statusFilter,
+            UUID measureId,
+            String priority,
+            String assignee,
+            String site,
+            Instant from,
+            Instant to,
+            String search,
             int limit,
             int offset
     ) {
@@ -171,6 +186,12 @@ public class CaseFlowService {
         if (to != null) {
             sql.append(" AND c.created_at <= ?");
             params.add(Timestamp.from(to));
+        }
+        if (search != null && !search.isBlank()) {
+            sql.append(" AND (LOWER(e.name) LIKE ? OR LOWER(e.external_id) LIKE ?)");
+            String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+            params.add(pattern);
+            params.add(pattern);
         }
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");
