@@ -104,7 +104,7 @@ export default function HomePage() {
             <a
               href={videoUrl}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/75 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
             >
               <Video className="h-4 w-4" />
@@ -113,7 +113,7 @@ export default function HomePage() {
             <a
               href={repoUrl}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/75 px-4 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
             >
               <ExternalLink className="h-4 w-4" />
@@ -170,7 +170,7 @@ export default function HomePage() {
               <a
                 href={videoUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
               >
                 Watch the walkthrough
@@ -178,7 +178,7 @@ export default function HomePage() {
               <a
                 href={repoUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
               >
                 View on GitHub
@@ -315,7 +315,7 @@ export default function HomePage() {
             <a
               href={videoUrl}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="group relative block aspect-video overflow-hidden"
               aria-label="Open the WorkWell walkthrough video on YouTube"
             >
@@ -350,7 +350,7 @@ export default function HomePage() {
               <a
                 href={videoUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 font-medium text-white transition hover:bg-white/10"
               >
                 Open in YouTube
@@ -367,7 +367,7 @@ export default function HomePage() {
             <Link href="/sandbox" className="font-medium text-slate-700 transition hover:text-slate-950">
               Try sandbox
             </Link>
-            <a href={repoUrl} target="_blank" rel="noreferrer" className="font-medium text-slate-700 transition hover:text-slate-950">
+            <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-700 transition hover:text-slate-950">
               GitHub
             </a>
             <Link href="/login" className="font-medium text-slate-700 transition hover:text-slate-950">
