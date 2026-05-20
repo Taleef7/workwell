@@ -110,8 +110,7 @@ No sandbox preview card. No feature card grid. No walkthrough section. No stats 
 ## 9) Acceptance criteria
 
 1. `frontend/app/page.tsx` line count ≤ 130.
-2. Page contains exactly **one** `<Link href="/sandbox">`, **one** `<Link href="/login">`, **one** GitHub anchor, **one** YouTube anchor — confirmed by grep.
-   - Header `Walkthrough` link and the inline "Watch the 5-min walkthrough" link both point to YouTube → that's **two** YouTube anchors total (one in nav, one inline under CTAs, per design Q1 answer). Acceptable; everything else stays at one occurrence.
+2. Page contains exactly **one** `<Link href="/sandbox">`, **one** `<Link href="/login">`, **one** GitHub anchor, and **two** YouTube anchors (header nav `Walkthrough` link + inline "Watch the 5-min walkthrough" link under the CTAs, per design Q1 answer). Confirmed by grep / accessibility tree.
 3. No `backdrop-blur`, no `radial-gradient`, no grid-pattern background utility on `app/page.tsx`.
 4. Fraunces font is imported and applied to the `<h1>` only.
 5. `pnpm lint` clean; `pnpm build` succeeds.

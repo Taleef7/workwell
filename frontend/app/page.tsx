@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Fraunces } from "next/font/google";
-import { ArrowRight, ExternalLink } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const fraunces = Fraunces({ subsets: ["latin"], weight: ["600", "700"] });
 
@@ -99,10 +99,9 @@ export default function HomePage() {
             href={videoUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-5 inline-flex w-fit items-center gap-1.5 text-sm text-slate-500 underline-offset-4 transition-colors hover:text-slate-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+            className="mt-5 w-fit text-sm text-slate-500 underline-offset-4 transition-colors hover:text-slate-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
           >
-            Watch the 5-min walkthrough
-            <ExternalLink className="h-3.5 w-3.5" />
+            Watch the 5-min walkthrough →
           </a>
 
           <div className="mt-10 border-t border-slate-200 pt-6">
