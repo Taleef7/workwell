@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-05-20 — UAT Section 5: Case detail fixes (issue #28)
+
+**Goal:** Fix Section 5 case-detail bugs from UAT #23: escalation confirmation, outreach delivery badge refresh, audit packet format selectors, and walkthrough-guide inaccuracies.
+
+**Branch:** `fix/section-5-case-detail`
+
+**What changed:**
+
+- `backend/src/main/java/com/workwell/caseflow/CaseFlowService.java` — Outreach sends now persist the actual email delivery status (`SIMULATED` on the demo stack) in the `OUTREACH_SENT` action payload and outreach record; latest delivery status now considers both initial outreach sends and later manual delivery updates.
+- `backend/src/test/java/com/workwell/caseflow/CaseUpsertIntegrationTest.java` — Added regression coverage proving a successful outreach send immediately returns `latestOutreachDeliveryStatus=SIMULATED`.
+- `frontend/app/(dashboard)/cases/[id]/page.tsx` — Added an accessible confirmation dialog before escalation fires; added JSON/HTML selector for case audit packet export; added `SIMULATED` delivery badge styling.
+- `frontend/app/(dashboard)/runs/page.tsx` — Added JSON/HTML selector for run audit packet export.
+- `frontend/app/(dashboard)/studio/[id]/page.tsx` — Added JSON/HTML selector for measure-version audit packet export.
+- `frontend/components/audit-packet-export-button.tsx` — New reusable audit packet export control shared by case, run, and measure version packet entry points.
+- `docs/WALKTHROUGH_GUIDE.md` — Corrected Section 5 and Section 11 wording to match the current UI: no separate Employee & Measure Panel heading, inline assignee field, structured evidence trail labels, appointment/resolution controls, outreach template/preview behavior, auto-updating simulated delivery badge, and packet format selectors.
+
+**Verification:**
+- `backend/gradlew.bat test --tests com.workwell.caseflow.CaseUpsertIntegrationTest` — passed.
+- `backend/gradlew.bat --no-daemon test --tests com.workwell.web.CaseControllerTest --tests com.workwell.web.AuditorControllerTest` — passed.
+- `frontend/corepack pnpm lint` — passed with the existing `test/mocks/next-font.ts` anonymous-default-export warning.
+- `frontend/corepack pnpm test` — 40/40 passed.
+- `frontend/corepack pnpm build` — passed.
+- Playwright local confirmation with mocked API data — verified escalation waits for confirmation, outreach badge updates to `Simulated`, and case/run/measure packet exports honor the selected `format=html`.
+- Attempted full `backend/gradlew.bat test`; it did not return before the 15-minute timeout, so focused backend verification above was used for this issue branch.
+
+---
+
 ## 2026-05-20 — Login redesign, responsive dashboard layout, landing polish
 
 **Goal:** Redesign login page to match landing aesthetic, make the full application responsive across all device sizes, add Sign in to landing page, trim all redundant copy from public surfaces.

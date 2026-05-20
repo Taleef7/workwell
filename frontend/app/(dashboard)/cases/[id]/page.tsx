@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, formatStatusLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
+import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 type AuditEvent = {
   eventType: string;
@@ -129,6 +131,7 @@ export default function CaseDetailPage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const [escalationConfirmOpen, setEscalationConfirmOpen] = useState(false);
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   const loadCase = useCallback(async () => {
@@ -361,21 +364,20 @@ export default function CaseDetailPage() {
     }
   }
 
-  async function exportCaseAuditPacket() {
-    if (!caseId) return;
-    const blob = await api.downloadBlob(`/api/auditor/cases/${caseId}/packet?format=json`);
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `workwell-case-packet-${caseId}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
-  }
-
   return (
     <section className="space-y-6">
+      <ConfirmDialog
+        open={escalationConfirmOpen}
+        title="Escalate this case?"
+        description="This will raise the case priority, update the next action, and write an escalation entry to the audit timeline."
+        confirmLabel={escalating ? "Escalating..." : "Confirm escalation"}
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setEscalationConfirmOpen(false);
+          void escalateCase();
+        }}
+        onCancel={() => setEscalationConfirmOpen(false)}
+      />
       <div className="flex items-center justify-between gap-3">
         <div>
           <Link href="/cases" className="text-sm font-medium text-slate-500 hover:text-slate-900">
@@ -388,12 +390,13 @@ export default function CaseDetailPage() {
           <p className="text-sm text-slate-500">
             Case: <code>{caseId}</code>
           </p>
-          <button
-            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-            onClick={() => void exportCaseAuditPacket()}
-          >
-            Export Case Audit Packet
-          </button>
+          <AuditPacketExportButton
+            api={api}
+            path={`/api/auditor/cases/${caseId}/packet`}
+            filenamePrefix={`workwell-case-packet-${caseId}`}
+            label="Export Case Audit Packet"
+            onError={(message) => setError(message || null)}
+          />
         </div>
       </div>
 
@@ -516,7 +519,7 @@ export default function CaseDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void escalateCase()}
+                    onClick={() => setEscalationConfirmOpen(true)}
                     disabled={escalating}
                     className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-900 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:bg-rose-100 disabled:text-rose-400"
                   >
@@ -926,6 +929,9 @@ function deliveryBadgeClass(status: string | null) {
   }
   if (normalized === "QUEUED") {
     return "rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900";
+  }
+  if (normalized === "SIMULATED") {
+    return "rounded-full border border-sky-300 bg-sky-100 px-2 py-0.5 font-semibold text-sky-900";
   }
   return "rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-semibold text-slate-700";
 }
