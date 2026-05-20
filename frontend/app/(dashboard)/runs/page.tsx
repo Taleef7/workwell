@@ -18,6 +18,7 @@ import {
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
+import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 
 type RunListItem = {
   runId: string;
@@ -331,19 +332,6 @@ export default function RunsPage() {
     window.URL.revokeObjectURL(url);
   }
 
-  async function exportRunAuditPacket() {
-    if (!selectedRunId) return;
-    const blob = await api.downloadBlob(`/api/auditor/runs/${selectedRunId}/packet?format=json`);
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `workwell-run-packet-${selectedRunId}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
-  }
-
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -573,12 +561,15 @@ export default function RunsPage() {
                   ))}
                 </ul>
               </div>
-              <button
-                className="mt-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-                onClick={() => void exportRunAuditPacket()}
-              >
-                Export Run Audit Packet
-              </button>
+              <div className="mt-1">
+                <AuditPacketExportButton
+                  api={api}
+                  path={`/api/auditor/runs/${selectedRunId}/packet`}
+                  filenamePrefix={`workwell-run-packet-${selectedRunId}`}
+                  label="Export Run Audit Packet"
+                  onError={(message) => setError(message || null)}
+                />
+              </div>
             </>
           ) : (
             <p className="text-sm text-slate-600">Select a run to view details.</p>

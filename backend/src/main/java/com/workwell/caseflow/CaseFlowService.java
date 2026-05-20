@@ -399,7 +399,7 @@ public class CaseFlowService {
         actionPayload.put("templateName", template == null ? "Default Template" : template.name());
         actionPayload.put("templateId", template == null ? null : template.id());
         actionPayload.put("subject", renderedSubject);
-        actionPayload.put("deliveryStatus", "QUEUED");
+        actionPayload.put("deliveryStatus", delivery.status());
         actionPayload.put("note", "Outreach dispatched via " + delivery.provider() + " provider ("
                 + delivery.status() + ").");
         actionPayload.put("emailMessageId", delivery.messageId());
@@ -412,7 +412,7 @@ public class CaseFlowService {
         insertOutreachRecord(
                 caseId,
                 "OUTREACH",
-                "QUEUED",
+                delivery.status(),
                 template == null ? "Default Template" : template.name(),
                 false,
                 actionPayload
@@ -1187,7 +1187,7 @@ public class CaseFlowService {
                         SELECT payload_json ->> 'deliveryStatus' AS delivery_status
                         FROM case_actions
                         WHERE case_id = ?
-                          AND action_type = 'OUTREACH_DELIVERY_UPDATED'
+                          AND action_type IN ('OUTREACH_DELIVERY_UPDATED', 'OUTREACH_SENT')
                         ORDER BY performed_at DESC
                         LIMIT 1
                         """,
@@ -1656,8 +1656,8 @@ public class CaseFlowService {
             throw new IllegalArgumentException("deliveryStatus is required");
         }
         String normalized = deliveryStatus.trim().toUpperCase();
-        if (!List.of("QUEUED", "SENT", "FAILED").contains(normalized)) {
-            throw new IllegalArgumentException("deliveryStatus must be one of QUEUED, SENT, FAILED");
+        if (!List.of("QUEUED", "SENT", "FAILED", "SIMULATED").contains(normalized)) {
+            throw new IllegalArgumentException("deliveryStatus must be one of QUEUED, SENT, FAILED, SIMULATED");
         }
         return normalized;
     }

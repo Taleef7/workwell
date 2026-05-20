@@ -235,94 +235,96 @@ The case detail page is the **single source of truth** for one employee's non-co
 
 ### Understanding the page layout
 
-The case detail page has several sections:
+The case detail page has a two-column layout on desktop and stacks on smaller screens:
 
-**Employee & Measure Panel (top left)**
-- Employee name, external ID, role, site, supervisor
-- Measure name and version (e.g., "Annual Audiogram v1.0")
-- Current status (e.g., OVERDUE), Priority (e.g., HIGH), Assignee (if any)
-- Next recommended action
+**Case summary card (top left)**
+- Measure label, employee name link, and employee external ID
+- Status and priority badges
+- Four info cards: **Outcome**, **Evaluation period**, **Outcome summary**, and **Last run**
+- **Next action** text and an **Outreach delivery** badge
+- Outreach template dropdown with the seeded template options
+- Inline assignee field, action buttons, and outreach preview
 
-**Why Flagged (evidence panel)**
-This section shows the structured evidence from the CQL engine:
-- Last exam date (e.g., "2025-03-10")
-- Days since last exam (e.g., "420 days")
-- Compliance window (e.g., "365 days")
-- Days overdue (e.g., "55 days")
-- Program enrolled: Yes
-- Waiver status: None
-- Outcome status: OVERDUE
+**Why Flagged**
+This section is labelled **Why Flagged** with the heading **Structured evidence trail**. It renders raw CQL define names from `expressionResults`, a `why_flagged` summary block, an optional raw evidence toggle, and the evaluated resource JSON. It does not have a separate "Employee & Measure Panel" heading.
 
-**Timeline (right side or below)**
-An append-only log of every action and state change: when the case was created, every action taken, by whom, and when.
+**Right-side support panels**
+- **Metadata** — created/updated/closed timestamps, assignee, and outcome-evaluated timestamp
+- **Appointments** — scheduled appointment entries created by **Schedule Appointment**
+- **Evidence** — upload/download controls for supporting PDFs or images
+- **Audit timeline** — append-only history of state changes, actions, notifications, and payloads
 
 ### AI Explanation
 
-3. Click the **Explain Why Flagged** button (may show a sparkle icon ✨).
+3. Click the **Explain Why Flagged** button.
 4. Wait 2–5 seconds. A 2–3 sentence explanation appears:
    _"Omar Siddiq is enrolled in the Hearing Conservation Program and last completed an audiogram on March 10, 2025 — 420 days ago. The required compliance window is 365 days, placing him 55 days overdue. No active waiver is on file."_
-5. This is AI-generated text grounded in the structured evidence. The AI cannot change the outcome status — it can only explain it.
+5. The explanation appears in a panel labelled **Plain-language explanation (AI-assisted)**. The disclaimer text is returned by the API and displayed under the explanation; the AI cannot change the outcome status — it can only explain it.
 
 ### Assigning a case
 
-6. Click **Assign** (or the Assign button/dropdown in the actions area).
-7. In the dialog, enter an assignee name: `Jane Smith`
-8. Click **Save**. The timeline logs: _"Case assigned to Jane Smith by admin@workwell.dev at [timestamp]"_
+6. Find the inline **Assignee** field in the Next action card.
+7. Enter an assignee value, for example `Jane Smith`.
+8. Click **Assign**. There is no assignment dialog; the field saves inline and the timeline logs the assignment.
 
 ### Escalating a case
 
 9. Click **Escalate**.
-10. An escalation confirmation dialog appears: _"This will mark the case as escalated and notify the assigned supervisor."_
-11. Click **Confirm**. The case priority may increase and the timeline logs the escalation.
+10. A confirmation dialog appears before the API call runs.
+11. Click **Confirm escalation**. The case priority may increase, the next action updates, and the timeline logs the escalation.
 
 ### Sending outreach
 
-12. Click **Send Outreach**.
-13. An outreach preview modal opens showing:
-    - **To:** `emp-006@workwell-demo.dev` (synthetic address — no real email is sent in demo mode)
-    - **Subject:** `Action Required: Annual Audiogram — Omar Siddiq`
-    - **Body:** A template message explaining the compliance gap and requesting the employee schedule their exam
-14. Read the preview body. The message is templated — consistent and reviewable.
-15. Click **Send**.
-16. The modal closes. The timeline logs: _"Outreach sent to emp-006@workwell-demo.dev at [timestamp]"_
-17. The **Delivery Status** badge updates to `QUEUED`.
+12. Choose an outreach template from the dropdown. The demo seed includes multiple template options for different reminder and escalation tones.
+13. Click **Preview outreach**.
+14. An inline **Outreach preview** panel opens showing the template name, subject, due date, and body text. The synthetic recipient is stored in the audit payload after send, not shown as a separate "To" field in the preview.
+15. Read the preview body, then click **Send outreach**.
+16. The preview clears, the timeline logs the outreach, and the **Outreach delivery** badge refreshes immediately.
+17. On the demo stack, the badge updates to `SIMULATED` because `WORKWELL_EMAIL_PROVIDER=simulated` is the mandatory default and no real email leaves the process.
 
-> **Note:** In demo mode (`WORKWELL_EMAIL_PROVIDER=simulated`), no real email is sent. The delivery record is logged in the database as `SIMULATED` and visible in Admin → Outreach Delivery Log. In a production deployment with SendGrid configured, a real email would be sent.
+> **Note:** The manual delivery buttons remain available for follow-up state changes (**Mark queued**, **Mark sent**, **Mark failed**), but they are no longer required just to make the first send visible. The first successful send now updates the badge from `NOT_SENT` to the returned delivery status automatically.
 
 ### Updating delivery status
 
-18. Find the delivery status area on the case detail. Click **Mark as Sent** (or find the delivery status dropdown).
-19. Set delivery status to `SENT`.
+18. Find the manual delivery buttons under the outreach preview area.
+19. Click **Mark sent** if you want to manually record a later delivery-state update.
 20. The badge updates and the timeline logs the state change.
+
+### Scheduling and manual resolution
+
+21. Click **Schedule Appointment** to open the inline appointment panel.
+22. Choose an appointment type, date/time, location, and optional notes, then click **Save Appointment**. The appointment appears in the **Appointments** panel.
+23. Click **Mark Resolved** to open the inline closure panel.
+24. Enter a closure note and click **Confirm Resolve**. A note is required before manual resolution is accepted.
 
 ### Uploading evidence
 
-21. Click **Upload Evidence** (or find the evidence section).
-22. Select any PDF or image file from your computer (e.g., a scanned exam record).
-23. Click **Upload**. The file is linked to the case.
-24. An `EVIDENCE_UPLOADED` audit event is written.
-25. Click **Download** next to the uploaded file — the file downloads and an `EVIDENCE_DOWNLOADED` audit event is written.
+25. In the **Evidence** panel, select any PDF or image file from your computer (e.g., a scanned exam record).
+26. Optionally enter a description.
+27. Click **Upload Evidence**. The file is linked to the case.
+28. An `EVIDENCE_UPLOADED` audit event is written.
+29. Click **Download** next to the uploaded file — the file downloads and an `EVIDENCE_DOWNLOADED` audit event is written.
 
 > **Role check:** If you are logged in as `author@workwell.dev`, the download button will return **403 Forbidden**. Evidence downloads are restricted to ROLE_CASE_MANAGER and ROLE_ADMIN. Log back in as `admin@workwell.dev` to proceed.
 
 ### Rerun to Verify
 
-26. Click **Rerun to Verify**.
-27. This re-evaluates Omar Siddiq's compliance status by running the Audiogram CQL against his current data.
-28. If the data hasn't changed (and it hasn't in the demo dataset), he will still be OVERDUE. The case stays open and the timeline logs: _"Rerun completed: outcome still OVERDUE. Case remains open."_
-29. If his data showed a recent exam (which you could simulate by modifying test data), the outcome would change to COMPLIANT and the case would auto-close with `status=RESOLVED` and `closed_at` set.
+30. Click **Rerun to verify**.
+31. This re-evaluates Omar Siddiq's compliance status by running the Audiogram CQL against his current data.
+32. If the data hasn't changed (and it hasn't in the demo dataset), he will still be OVERDUE. The case stays open and the timeline logs the rerun result.
+33. If his data showed a recent exam (which you could simulate by modifying test data), the outcome would change to COMPLIANT and the case would auto-close with `status=RESOLVED` and `closed_at` set.
 
 ### Audit Packet
 
-30. Look for an **Export Audit Packet** button (may be in a menu or toolbar).
-31. Click it and select format **JSON** or **HTML**.
-32. A file downloads containing:
+34. At the top right, choose **JSON** or **HTML** from the audit packet format selector.
+35. Click **Export Case Audit Packet**.
+36. A file downloads containing:
     - Case summary (employee, measure, status, priority, timeline)
     - Full evidence payload from CQL
     - All actions taken (assign, escalate, outreach, rerun)
     - AI explanation log (what was asked, what was returned)
     - Disclaimers (AI is assistive only; CQL is the compliance source of truth)
-33. This packet is suitable for auditor review or regulatory documentation.
+37. This packet is suitable for auditor review or regulatory documentation.
 
 ---
 
@@ -688,20 +690,20 @@ Audit packets are structured, self-contained documents that bundle all evidence 
 
 **Case audit packet** (includes: case history, evidence, actions, outreach, AI logs, disclaimers):
 1. Open any case detail page (e.g., Omar Siddiq's OVERDUE case).
-2. Click **Export Audit Packet**.
-3. Select **HTML** format.
+2. Select **HTML** in the format dropdown next to **Export Case Audit Packet**.
+3. Click **Export Case Audit Packet**.
 4. An HTML file downloads — formatted for print, with all evidence, actions, and AI logs laid out in audit-friendly sections.
 
 **Run audit packet** (includes: run metadata, outcome summary, logs, audit events):
 5. Open any run detail page.
-6. Click **Export Audit Packet**.
-7. Select **JSON** format.
+6. Select **JSON** in the format dropdown next to **Export Run Audit Packet**.
+7. Click **Export Run Audit Packet**.
 8. A JSON file downloads — machine-readable, with a SHA-256 hash of the payload for integrity verification.
 
 **Measure version packet** (includes: spec, CQL code + hash, compile result, value sets, traceability, approval history):
 9. Open Studio for Annual Audiogram.
-10. With an Active version selected, click **Export Audit Packet**.
-11. The packet includes the complete lifecycle history of that measure version from Draft to Active.
+10. With an Active version selected, choose **JSON** or **HTML** in the format dropdown next to **Export Measure Audit Packet**.
+11. Click **Export Measure Audit Packet**. The packet includes the complete lifecycle history of that measure version from Draft to Active.
 
 Every packet generation writes an `AUDIT_PACKET_GENERATED` event to the audit log.
 
