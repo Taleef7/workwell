@@ -218,7 +218,8 @@ export default function CasesPage() {
       params.set("status", statusFilter);
       if (measureFilter) params.set("measureId", measureFilter);
       if (priorityFilter) params.set("priority", priorityFilter);
-      if (assigneeFilter) params.set("assignee", assigneeFilter);
+      const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
+      if (effectiveAssignee) params.set("assignee", effectiveAssignee);
       if (siteFilter) params.set("site", siteFilter);
       else if (siteId) params.set("site", siteId);
       if (from) params.set("from", from);
