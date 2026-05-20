@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-05-20 — Login redesign, responsive dashboard layout, landing polish
+
+**Goal:** Redesign login page to match landing aesthetic, make the full application responsive across all device sizes, add Sign in to landing page, trim all redundant copy from public surfaces.
+
+**Branch:** `feat/ui-responsive-polish`
+
+**What changed:**
+
+- `frontend/app/login/page.tsx` — Full redesign. Dark left panel (Fraunces headline "Compliance ops, fully in view.", feature list with icons, sandbox shortcut card) + light right form panel. Password show/hide toggle with Eye/EyeOff icons. Mail and Lock icons in inputs. Zap icon on Fill demo credentials. "Skip login — open public sandbox" link with BadgeCheck icon. Email/password labels visible (not placeholder-only). Proper `h-12` touch targets on all inputs. Removed all redundant explanatory text. Mobile: left panel hidden, form panel with light gradient background and compact WW logo.
+- `frontend/app/(dashboard)/layout.tsx` — Full responsive overhaul. Sidebar moved to `fixed` overlay on mobile (`-translate-x-full` → `translate-x-0` on open), with dark backdrop and slide-in animation. Added sidebar close button (X icon) and outside-click handler. Added icon to every nav item (BarChart3, Shield, ClipboardList, BookOpen, FileClock, Activity, Settings). User info + logout moved to sidebar footer (avatar initial + email + role + LogOut icon button). Header stripped to: hamburger (mobile only) + compact logo (mobile only) + GlobalSearch + filters. Filters moved to a dedicated scrollable bar below the header on mobile. Hamburger uses proper Menu icon from lucide.
+- `frontend/app/page.tsx` — Added Sign in link/button to header nav (LogIn icon), hero CTAs, walkthrough section, and footer. Feature card copy trimmed. Hero subparagraph reduced to one tight sentence. Walkthrough section body reduced to one sentence. Removed portal pills section. Operating notes reduced to 3. Sandbox section list items now use BadgeCheck icons. Feature card "AI-assisted authoring" replaces the "Polished demo surfaces" placeholder.
+- `frontend/vitest.config.ts` — Added alias for `next/font/google` → `test/mocks/next-font.ts` so font imports don't break Vitest.
+- `frontend/test/mocks/next-font.ts` — New mock file returning stable className/variable stubs for Fraunces, Geist, GeistMono, Inter.
+
+**Tests:** 40/40 pass. Lint clean.
+
+---
+
 ## 2026-05-19 — Public landing page + sandbox entry (issue #38)
 
 **Goal:** Carry forward the Codex `feat/workwell-landing-sandbox` handover work: polish the public landing page, improve sandbox UX, and clean up all internal-facing copy from the public surface.
