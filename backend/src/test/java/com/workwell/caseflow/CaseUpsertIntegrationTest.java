@@ -115,6 +115,33 @@ class CaseUpsertIntegrationTest extends AbstractIntegrationTest {
                 .isZero();
     }
 
+    @Test
+    void sendingOutreachImmediatelySurfacesSimulatedDeliveryStatus() {
+        allProgramsRunService.runAllPrograms("All Programs", "admin@workwell.dev");
+        UUID caseId = jdbcTemplate.queryForObject(
+                "SELECT id FROM cases WHERE status = 'OPEN' ORDER BY created_at ASC LIMIT 1",
+                UUID.class
+        );
+
+        CaseFlowService.CaseDetail detail = caseFlowService.sendOutreach(caseId, "cm@workwell.dev")
+                .orElseThrow();
+
+        assertThat(detail.latestOutreachDeliveryStatus())
+                .as("The case payload returned after send should refresh the badge with the simulated email status")
+                .isEqualTo("SIMULATED");
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                        SELECT payload_json ->> 'deliveryStatus'
+                        FROM case_actions
+                        WHERE case_id = ? AND action_type = 'OUTREACH_SENT'
+                        ORDER BY performed_at DESC
+                        LIMIT 1
+                        """,
+                String.class,
+                caseId
+        )).isEqualTo("SIMULATED");
+    }
+
     // ---- helpers ----
 
     private int caseCount() {
