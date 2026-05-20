@@ -238,8 +238,9 @@ curl -I https://workwell.os.mieweb.org
 
 Browser checks:
 
-- Open `https://workwell.os.mieweb.org/login`.
-- Sign in with the demo credentials.
+- Open `https://workwell.os.mieweb.org/` and confirm the public landing page loads.
+- Click `Try the sandbox` or open `https://workwell.os.mieweb.org/sandbox` and confirm the demo workspace opens without manual credential entry.
+- If needed, `https://workwell.os.mieweb.org/login` remains available as the explicit sign-in fallback.
 - Confirm dashboard API calls go to `https://workwell-api.os.mieweb.org`.
 - Reload a protected page and confirm the session survives refresh.
 

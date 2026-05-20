@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-05-19 — Public landing page + sandbox entry (issue #38)
+
+**Goal:** Carry forward the Codex `feat/workwell-landing-sandbox` handover work: polish the public landing page, improve sandbox UX, and clean up all internal-facing copy from the public surface.
+
+**Branch:** `feat/workwell-landing-sandbox`
+
+**What changed:**
+
+- `frontend/app/page.tsx`
+  - Added a stats strip in the hero (4 compliance programs, 50+ employees, 5 outcome types, 1-click sandbox entry) to ground the product story in concrete numbers.
+  - Updated the badge to "PUBLIC SANDBOX · NO LOGIN REQUIRED" for clarity.
+  - Cleaned the hero subheading — removed "The landing page keeps the story simple…" meta-commentary; copy now describes what's actually in the product.
+  - Replaced the sandbox preview card heading "Built for review, not for friction." with "Open the dashboard in one click." and replaced the dark section's weak internal copy with the actual app section names (Programs & outcome trends, Case worklist & outreach, CQL Measure Studio, Audit trail & exports).
+  - Tightened the operating-notes pills to short, punchy form.
+  - Fixed the video section: removed "Why the video belongs here" + "Doug's note calls for…" references; heading is now "The full product story in under five minutes." and the body describes the actual walkthrough flow.
+  - Fixed video card footer copy to remove internal-facing commentary.
+  - Fixed a YouTube Short URL typo: `SqzDt4TBd9k` → `SgzDt4TBd9k` (consistent with CLAUDE.md and vision doc).
+  - Footer copy changed from "Built as a public front door for the WorkWell demo and review flow." to "WorkWell Measure Studio — compliance operations for occupational health."
+
+- `frontend/app/sandbox/page.tsx`
+  - Redesigned as a full dark (slate-950) branded loading screen: centered WW monogram, brand label, loading status panel, animated step indicators (Connecting → Authenticating → Opening Programs dashboard), and footer links.
+  - Removed the three info cards that appeared while the user was waiting (redundant during a fast redirect).
+  - All auth logic and state management kept identical to the Codex handover; 40/40 tests still pass.
+
+**Verification:**
+- `corepack pnpm lint` — clean
+- `corepack pnpm test` — 40/40 pass
+- Browser confirmed: landing page renders with stats strip and clean copy; sandbox auto-signs in and redirects to /programs; public routes exempt from auth refresh loop.
+
 ## 2026-05-19 — OS MIEWeb deployment branch
 
 **Goal:** Prepare an additive, review-only deployment path for WorkWell Measure Studio on MIE's open source Proxmox cluster without disturbing the existing Vercel + Fly deployment.

@@ -79,28 +79,22 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-05-17)
+## Current Focus (as of 2026-05-18)
 
-**Sprint-based feature implementation — working through `docs/sprints/` sequentially.**
+**All planned sprints merged. Sprint 7 (overdelivery) is next.**
 
-The sprint files in `docs/sprints/` are the active source of truth. Read `docs/sprints/README.md` for ordering. The critical path is:
-
-```
-Sprint 0 (bugs) → Sprint 2 (data) → Sprint 1 (pipeline) → Sprint 3 (employee/SLA)
-                                                         → Sprint 4 (security)
-                                                         → Sprint 5 (tests/CI)
-                                  → Sprint 6 (admin)
-Sprint 7 (overdelivery) — begins after Sprint 3
-```
-
-Sprints merged: 0, 2, 1 (PRs #16, #17, #18)
-Current branch: `feat/sprint-3-employee-profile`
+Sprints merged (all into `main`):
+- Sprint 0 (bugs) → PR #16
+- Sprint 2 (data) → PR #17
+- Sprint 1 (pipeline) → PR #18
+- Sprint 3 (employee/SLA) → PR #19
+- Sprint 4 (security) → PR #20
+- Sprint 6 (admin) → PR #21
+- Sprint 5 (tests/CI) → PR #22
 
 Current posture:
-- Sprint 3 complete — Issues 3.1 (profile), 3.2 (search), 3.3 (SLA tracking), 3.4 (My Cases) all shipped in PR #19
-- V020 migration is in PR #19 (backfill uses outcome-specific SLA windows); `CaseFlowService` writes `sla_due_date` on upsert
-- After PR #19 merges: Sprint 4 (security) and Sprint 6 (admin) can run in parallel
+- `main` is fully up to date; no open feature branches
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
-- After each sprint, update `docs/JOURNAL.md` with what shipped
+- Sprint 7 spec is in `docs/sprints/SPRINT_07_overdelivery_features.md` — 5 issues (AI Draft CQL, AI Test Fixtures, Risk Scoring, MAT Export, Mobile Responsive)
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only
 
