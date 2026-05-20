@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: "WorkWell Measure Studio",
-  description: "Summer 2026 monorepo scaffold"
+  description: "Public landing page and sandbox entry for WorkWell Measure Studio."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
