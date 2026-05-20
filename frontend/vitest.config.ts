@@ -17,6 +17,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      "next/font/google": path.resolve(__dirname, "test/mocks/next-font.ts"),
+      "next/font/local": path.resolve(__dirname, "test/mocks/next-font.ts"),
     },
   },
 });
