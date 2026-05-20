@@ -8,6 +8,7 @@ import type { MeasureDetail, ActivationReadiness, VersionHistoryItem } from "../
 import { ImpactPreviewPanel } from "./ImpactPreviewPanel";
 import { DataReadinessPanel } from "./DataReadinessPanel";
 import { ValueSetGovernancePanel } from "./ValueSetGovernancePanel";
+import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 
 type Props = {
   measure: MeasureDetail;
@@ -52,19 +53,6 @@ export function ReleaseApprovalTab({
     (measure.requiredDataElements ?? []).filter(Boolean).length > 0;
   const approveEnabled = compileReady && testsReady;
   const approveDisabledReason = !compileReady ? "Compile status must be COMPILED or WARNINGS." : !testsReady ? "Test fixtures must pass validation." : "";
-
-  async function exportMeasurePacket() {
-    if (!measureVersionId) return;
-    const blob = await api.downloadBlob(`/api/auditor/measure-versions/${measureVersionId}/packet?format=json`);
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `workwell-measure-version-packet-${measureVersionId}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
-  }
 
   async function approve() {
     onError("");
@@ -156,13 +144,14 @@ export function ReleaseApprovalTab({
         )}
 
         {measureVersionId ? (
-          <div className="mt-2">
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-              onClick={() => void exportMeasurePacket()}
-            >
-              Export Measure Audit Packet
-            </button>
+          <div className="mt-2 flex justify-start">
+            <AuditPacketExportButton
+              api={api}
+              path={`/api/auditor/measure-versions/${measureVersionId}/packet`}
+              filenamePrefix={`workwell-measure-version-packet-${measureVersionId}`}
+              label="Export Measure Audit Packet"
+              onError={(message) => onError(message)}
+            />
           </div>
         ) : null}
 
