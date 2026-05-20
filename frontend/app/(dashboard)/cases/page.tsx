@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import {
@@ -90,19 +90,37 @@ export default function CasesPage() {
   const api = useApi();
   const PAGE_SIZE = 25;
 
+  // Track the most recent search value we ourselves wrote to the URL so we can
+  // distinguish state-driven URL writes from external URL changes (browser
+  // back/forward, deep links, other controls). Without this guard, an external
+  // URL change would see a mismatch with stale local state and get clobbered
+  // back to the old value after the debounce window.
+  const lastWrittenSearchRef = useRef<string>(urlSearch);
+
+  // URL → state: pull external URL changes into the input state.
   useEffect(() => {
-    if (searchTerm === urlSearch) {
+    if (urlSearch === lastWrittenSearchRef.current) {
+      return;
+    }
+    lastWrittenSearchRef.current = urlSearch;
+    setSearchTerm(urlSearch);
+  }, [urlSearch]);
+
+  // state → URL: debounce-write user input to the URL.
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    if (trimmed === urlSearch.trim()) {
       return;
     }
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams(searchParams.toString());
-      const trimmed = searchTerm.trim();
       if (trimmed) {
         params.set("search", trimmed);
       } else {
         params.delete("search");
       }
       const query = params.toString();
+      lastWrittenSearchRef.current = trimmed;
       router.replace(query ? `${pathname}?${query}` : pathname);
     }, 300);
     return () => window.clearTimeout(timer);
