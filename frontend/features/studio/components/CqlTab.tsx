@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { Monaco, OnChange, OnMount } from "@monaco-editor/react";
 import { emitToast } from "@/lib/toast";
@@ -32,6 +32,8 @@ type Props = {
   onCompileWarnings: (warnings: string[]) => void;
   onCompiled: () => void;
   onError: (msg: string) => void;
+  canClone: boolean;
+  onCreateNewVersion: (summary: string) => Promise<void>;
 };
 
 export function CqlTab({
@@ -45,10 +47,33 @@ export function CqlTab({
   onCompileErrors,
   onCompileWarnings,
   onCompiled,
-  onError
+  onError,
+  canClone,
+  onCreateNewVersion
 }: Props) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
+  const [showNewVersionDialog, setShowNewVersionDialog] = useState(false);
+  const [newVersionSummary, setNewVersionSummary] = useState("");
+  const [creatingVersion, setCreatingVersion] = useState(false);
+
+  async function handleSubmitNewVersion() {
+    if (!newVersionSummary.trim()) {
+      onError("Change summary is required to create a new version.");
+      return;
+    }
+    setCreatingVersion(true);
+    onError("");
+    try {
+      await onCreateNewVersion(newVersionSummary.trim());
+      setNewVersionSummary("");
+      setShowNewVersionDialog(false);
+    } catch (err) {
+      // Error handled by parent
+    } finally {
+      setCreatingVersion(false);
+    }
+  }
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -144,7 +169,60 @@ export function CqlTab({
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(measure.compileStatus ?? "")}`}>
           {formatStatusLabel(measure.compileStatus ?? "UNKNOWN")}
         </span>
+        {canClone && (
+          <button
+            type="button"
+            onClick={() => setShowNewVersionDialog(true)}
+            className="ml-auto rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            New Version
+          </button>
+        )}
       </div>
+
+      {showNewVersionDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">Create New Measure Version</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              This will clone the current CQL logic into a new draft version.
+            </p>
+            <div className="mt-4">
+              <label htmlFor="change-summary-input" className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Change Summary
+              </label>
+              <textarea
+                id="change-summary-input"
+                className="mt-1 w-full rounded-2xl border border-slate-300 p-3 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                placeholder="Describe what changed in this version..."
+                rows={3}
+                value={newVersionSummary}
+                onChange={(e) => setNewVersionSummary(e.target.value)}
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewVersionDialog(false);
+                  setNewVersionSummary("");
+                }}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitNewVersion}
+                disabled={creatingVersion || !newVersionSummary.trim()}
+                className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                {creatingVersion ? "Creating..." : "Create Version"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {(measure.compileStatus ?? "").toUpperCase() === "WARNINGS" ? (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
           Compile completed with warnings. Activation is allowed, but review warnings before moving to Active.
