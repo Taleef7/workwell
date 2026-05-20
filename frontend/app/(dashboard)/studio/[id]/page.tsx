@@ -10,6 +10,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useMeasureDetail } from "@/features/studio/hooks/useMeasureDetail";
 import { useValueSets } from "@/features/studio/hooks/useValueSets";
 import { useOshaReferences } from "@/features/studio/hooks/useOshaReferences";
+import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { SpecTab } from "@/features/studio/components/SpecTab";
 import { CqlTab } from "@/features/studio/components/CqlTab";
 import { ValueSetsTab } from "@/features/studio/components/ValueSetsTab";
@@ -70,6 +71,10 @@ export default function StudioMeasurePage() {
   const canApprove = user?.role === "ROLE_APPROVER" || user?.role === "ROLE_ADMIN";
   const canActivate = activationReadiness?.ready ?? false;
   const canAdminDeprecate = user?.role === "ROLE_ADMIN";
+  const currentMeasureVersionId =
+    versionHistory.find((item) => item.version === measure?.version && normalizeEnumValue(item.status) === normalizeEnumValue(measure?.status ?? ""))?.id
+    ?? versionHistory.find((item) => item.version === measure?.version)?.id
+    ?? null;
 
   const tabs: Tab[] = ["spec", "cql", "valuesets", "tests", "release", "traceability"];
   const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
@@ -86,8 +91,19 @@ export default function StudioMeasurePage() {
             </p>
           ) : null}
         </div>
-        {canClone ? (
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {measure ? (
+            <AuditPacketExportButton
+              api={api}
+              path={currentMeasureVersionId ? `/api/auditor/measure-versions/${currentMeasureVersionId}/packet` : ""}
+              filenamePrefix={`workwell-measure-version-packet-${currentMeasureVersionId ?? measureId}`}
+              label="Export Measure Audit Packet"
+              disabled={!currentMeasureVersionId}
+              onError={(message) => setError(message || null)}
+            />
+          ) : null}
+          {canClone ? (
+            <>
             <input
               className="rounded border border-slate-300 px-2 py-1 text-xs"
               placeholder="Change summary (required)"
@@ -97,8 +113,9 @@ export default function StudioMeasurePage() {
             <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800" onClick={createNewVersion}>
               New Version
             </button>
-          </div>
-        ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
 
       <div className="flex gap-2">
