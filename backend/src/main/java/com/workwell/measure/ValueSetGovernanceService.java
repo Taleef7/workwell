@@ -1,7 +1,9 @@
 package com.workwell.measure;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workwell.security.SecurityActor;
 import java.sql.Array;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -197,6 +199,7 @@ public class ValueSetGovernanceService {
             String mappingStatus, Double mappingConfidence, String notes
     ) {
         UUID id = UUID.randomUUID();
+        String resolvedStatus = mappingStatus != null ? mappingStatus : "PROPOSED";
         jdbcTemplate.update("""
                 INSERT INTO terminology_mappings (id, local_code, local_display, local_system,
                     standard_code, standard_display, standard_system, mapping_status, mapping_confidence, notes)
@@ -204,8 +207,24 @@ public class ValueSetGovernanceService {
                 """,
                 id, localCode, localDisplay, localSystem,
                 standardCode, standardDisplay, standardSystem,
-                mappingStatus != null ? mappingStatus : "PROPOSED",
+                resolvedStatus,
                 mappingConfidence, notes
+        );
+        Map<String, Object> auditPayload = new HashMap<>();
+        auditPayload.put("mappingId", id.toString());
+        auditPayload.put("localCode", localCode);
+        auditPayload.put("localSystem", localSystem);
+        auditPayload.put("standardCode", standardCode);
+        auditPayload.put("standardSystem", standardSystem);
+        auditPayload.put("mappingStatus", resolvedStatus);
+        auditPayload.put("mappingConfidence", mappingConfidence);
+        jdbcTemplate.update(
+                "INSERT INTO audit_events (event_type, entity_type, entity_id, actor, payload_json) VALUES (?, ?, ?, ?, ?::jsonb)",
+                "TERMINOLOGY_MAPPING_CREATED",
+                "terminology_mapping",
+                id,
+                SecurityActor.currentActorOr("system"),
+                toJson(auditPayload)
         );
         return jdbcTemplate.queryForObject("""
                 SELECT id, local_code, local_display, local_system,
@@ -226,6 +245,14 @@ public class ValueSetGovernanceService {
                 toInstant(rs.getObject("reviewed_at")),
                 rs.getString("notes")
         ), id);
+    }
+
+    private String toJson(Map<String, Object> payload) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Unable to serialize audit payload", ex);
+        }
     }
 
     // Private helpers
