@@ -1,5 +1,26 @@
 # Journal
 
+## 2026-05-20 — UAT Sections 6-8: Run history, Studio, Admin fixes (issue #29)
+
+**Goal:** Fix all reported Section 6 (Run History), Section 7 (Studio/CQL), and Section 8 (Admin panel) UAT bugs from GitHub issue #29.
+
+**Branch:** `fix/sprint-1-uat-sections-6-8`
+
+**What changed:**
+
+- `backend/src/main/java/com/workwell/run/RunPersistenceService.java` — Fixed `finalizeAsyncRun()` duration computation: was incorrectly using the evaluationDate (a historical date) to compute `duration_ms`, yielding absurd values like `69068s`. Now fetches the actual `started_at` from the DB and computes real wall-clock duration. Also fixed `measurement_period_start`/`measurement_period_end` to correctly reflect the 1-year evaluation window (evalDate-1yr → evalDate) instead of repeating `startedAt` twice.
+- `backend/src/main/java/com/workwell/BackendApplication.java` — Set JVM default timezone to UTC on startup for consistent timestamp handling.
+- `backend/src/main/java/com/workwell/measure/ValueSetGovernanceService.java` — Renamed `ensureDemoValueSetLinks()` to `ensureDemoValueSets()` and expanded it to seed all 4 demo value sets (audiogram, TB, HAZWOPER, flu vaccine) with their correct CQL-matching canonical OIDs and local codes so `resolveCheck` finds matching codes.
+- `frontend/app/(dashboard)/admin/page.tsx` — Added confirmation dialog before disabling the scheduler to prevent accidental disables during a demo.
+- `frontend/features/studio/components/CqlTab.tsx` — Added "New Version" button with a modal dialog for entering a change summary and cloning the current CQL into a new draft measure version.
+
+**Verification:**
+- `backend/gradlew.bat test --tests com.workwell.export.* --tests com.workwell.web.RunControllerTest` — BUILD SUCCESSFUL (21s).
+- Backend compiles cleanly: `gradlew compileJava` — BUILD SUCCESSFUL (16s).
+- Playwright end-to-end: triggered async All Programs run — completed with `179s` real duration (vs old seeded `60s` constant). Duration correctly reflects actual CQL evaluation time.
+
+---
+
 ## 2026-05-20 — UAT Section 5: Case detail fixes (issue #28)
 
 **Goal:** Fix Section 5 case-detail bugs from UAT #23: escalation confirmation, outreach delivery badge refresh, audit packet format selectors, and walkthrough-guide inaccuracies.
