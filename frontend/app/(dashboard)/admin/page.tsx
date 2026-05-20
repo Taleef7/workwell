@@ -748,16 +748,9 @@ export default function AdminPage() {
               </label>
               <label className="text-xs font-medium text-slate-700">
                 Status
-                <select
-                  value={mappingForm.mappingStatus}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, mappingStatus: e.target.value }))}
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="PROPOSED">PROPOSED</option>
-                  <option value="REVIEWED">REVIEWED</option>
-                  <option value="APPROVED">APPROVED</option>
-                  <option value="REJECTED">REJECTED</option>
-                </select>
+                <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                  PROPOSED — new mappings always start as PROPOSED and require review before promotion
+                </div>
               </label>
               <label className="text-xs font-medium text-slate-700">
                 Confidence (0.0 – 1.0)
