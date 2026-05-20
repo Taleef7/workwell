@@ -45,7 +45,7 @@ public class CaseController {
         this.caseAccessAuditService = caseAccessAuditService;
     }
 
-    @Operation(summary = "List cases", description = "Worklist with status, measure, priority, assignee, and site filters.")
+    @Operation(summary = "List cases", description = "Worklist with status, measure, priority, assignee, site, and search filters.")
     @GetMapping("/api/cases")
     public List<CaseFlowService.CaseSummary> listCases(
             @RequestParam(name = "status", defaultValue = "open") String status,
@@ -55,6 +55,7 @@ public class CaseController {
             @RequestParam(name = "site", required = false) String site,
             @RequestParam(name = "from", required = false) String from,
             @RequestParam(name = "to", required = false) String to,
+            @RequestParam(name = "search", required = false) String search,
             @RequestParam(name = "limit", defaultValue = "25") int limit,
             @RequestParam(name = "offset", defaultValue = "0") int offset
     ) {
@@ -67,6 +68,7 @@ public class CaseController {
                     site,
                     parseFromDate(from),
                     parseToDate(to),
+                    search,
                     limit,
                     offset
             );
