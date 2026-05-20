@@ -170,6 +170,11 @@ export default function StudioMeasurePage() {
           onCompileWarnings={setCompileWarnings}
           onCompiled={load}
           onError={(msg) => setError(msg || null)}
+          canClone={canClone}
+          onCreateNewVersion={async (summary) => {
+            setChangeSummary(summary);
+            await createNewVersion();
+          }}
         />
       ) : null}
 
