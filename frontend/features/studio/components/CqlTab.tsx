@@ -33,7 +33,7 @@ type Props = {
   onCompiled: () => void;
   onError: (msg: string) => void;
   canClone: boolean;
-  onCreateNewVersion: (summary: string) => Promise<void>;
+  onCreateNewVersion: (summary: string) => Promise<boolean>;
 };
 
 export function CqlTab({
@@ -65,11 +65,13 @@ export function CqlTab({
     setCreatingVersion(true);
     onError("");
     try {
-      await onCreateNewVersion(newVersionSummary.trim());
-      setNewVersionSummary("");
-      setShowNewVersionDialog(false);
-    } catch (err) {
-      // Error handled by parent
+      const created = await onCreateNewVersion(newVersionSummary.trim());
+      if (created) {
+        setNewVersionSummary("");
+        setShowNewVersionDialog(false);
+      }
+    } catch {
+      onError("Version clone failed");
     } finally {
       setCreatingVersion(false);
     }
