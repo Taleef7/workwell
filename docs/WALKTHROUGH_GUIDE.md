@@ -630,54 +630,64 @@ The Admin panel gives administrators operational control over the platform's inf
 ### What this is
 Terminology mappings define how local occupational health codes (used internally) map to standard clinical codes (CPT, CVX, SNOMED-CT). These mappings are required for interoperability with external clinical systems and for MAT export.
 
+### Where to find it
+On the Admin page, scroll past **Source mappings** (data readiness panel) to the **Local code mappings** panel (the "terminology governance" section). Both panels are on the same Admin route; only the **Source mappings** panel has a **Validate Mappings** button — the **Local code mappings** panel has **Add Mapping** and **Refresh** actions instead.
+
 ### Steps
 
-1. From Admin, find **Terminology Mappings** (may be a sub-tab or panel).
-2. You see a table of mappings with columns: Local Code, Local System, Standard Code, Standard System, Status, Confidence.
+1. From Admin, scroll to the **Local code mappings** panel.
+2. You see a table with columns: **Local Code**, **Local System**, **Standard Code**, **Standard System**, **Status**, **Confidence**, **Reviewed By**, **Notes**.
 3. Demo data includes 5 pre-seeded mappings:
    - Audiogram exam → CPT 92557 (APPROVED)
    - TB PPD test → CPT 86580 (APPROVED)
    - Flu vaccine → CVX 141 (APPROVED)
    - HAZWOPER physical → internal code (REVIEWED)
    - TB IGRA test → CPT 86480 (PROPOSED)
-4. Click **Add Mapping**:
+4. Click **Add Mapping** in the panel header. An inline form appears below the panel description.
+5. Fill in the form:
    - **Local Code:** `ANNUAL-FIT-TEST`
-   - **Local System:** `workwell-ohs`
+   - **Local Display:** `Annual respirator fit test`
+   - **Local System:** `urn:workwell:demo`
    - **Standard Code:** `415070008`
+   - **Standard Display:** `Fitting of mask (procedure)`
    - **Standard System:** `http://snomed.info/sct`
    - **Status:** `PROPOSED`
    - **Confidence:** `0.90`
-5. Click **Save**. The new mapping appears with status PROPOSED.
-6. Click it, change status to **APPROVED**, click **Save**.
+   - **Notes:** optional context for reviewers
+6. Click **Save mapping**. The new mapping appears at the top of the table (PROPOSED mappings sort first). The inline form closes automatically.
+
+> **Note:** Status promotion (PROPOSED → REVIEWED → APPROVED → REJECTED) is currently performed via the API directly (`POST /api/admin/terminology-mappings`). Inline row-level status editing is not exposed in the UI for this MVP; use a fresh **Add Mapping** call with the updated status, or hit the API directly to update existing mappings in a follow-up sprint.
 
 ---
 
 ## Section 10: CSV Exports
 
 ### What this is
-WorkWell provides CSV exports for runs, outcomes, and cases — suitable for import into Excel, reporting tools, or compliance databases.
+WorkWell provides CSV exports for runs, outcomes, cases, and audit events — suitable for import into Excel, reporting tools, or compliance databases. Each export button label below matches what the UI actually renders today.
 
 ### Steps
 
 **Export Run History:**
 1. Navigate to `/runs`.
-2. Click **Export CSV** (or use the URL: click the export button which calls `/api/exports/runs?format=csv`).
+2. Click **Export runs CSV** in the toolbar.
 3. The file `runs.csv` downloads. Open in Excel — you should see columns including run ID, measure name, pass rate, outcome counts.
 
 **Export Outcomes for a Specific Run:**
-4. Open any run detail page.
-5. Click **Export Outcomes CSV**.
+4. From `/runs`, click a row in the run list to open the right-side run detail panel.
+5. In the panel, click **Export outcomes CSV** (button label may render as `Export outcomes CSV` with the selected run's filter applied).
 6. The file `outcomes.csv` downloads with employee-level data: name, status, last exam date, days overdue, waiver status.
 
 **Export Cases:**
 7. Navigate to `/cases`.
-8. Apply filters (e.g., Status = OPEN).
-9. Click **Export CSV**.
-10. The file `cases.csv` downloads with one row per case including delivery status.
+8. Apply filters (e.g., Status = OPEN, measure filter, etc.).
+9. Click **Export cases CSV** in the worklist toolbar.
+10. The file `cases.csv` (or `cases-selected.csv` when rows are selected) downloads with one row per case including delivery status.
 
 **Export Audit Events:**
-11. Navigate to the audit events export (may be under Admin or via direct URL).
+11. The audit events CSV export is also exposed on the **Cases** page toolbar (next to **Export cases CSV**), not on the Admin page. Click **Export audit CSV**.
 12. The audit CSV contains every state-changing operation with timestamps, actors, and payloads — suitable for regulatory review.
+
+> The audit CSV button lives on the Cases page because operators reviewing cases are the primary consumers; admins can hit the underlying endpoint directly at `/api/audit-events/export?format=csv` from any context.
 
 ---
 
@@ -686,23 +696,26 @@ WorkWell provides CSV exports for runs, outcomes, and cases — suitable for imp
 ### What this is
 Audit packets are structured, self-contained documents that bundle all evidence related to one entity (a case, a run, or a measure version) into a single JSON or HTML file. These are designed for submission to auditors or regulators who need to verify the platform's compliance decisions without direct database access.
 
+### Format selector (consistent across all three entry points)
+Every entry point uses the same control: a small **format dropdown** (JSON / HTML) directly beside the **Export … Audit Packet** button. **You must pick the format first**, then click the export button — clicking the button alone always uses whatever format is currently selected (default: JSON). This dropdown is present in all three places listed below.
+
 ### Types of packets
 
 **Case audit packet** (includes: case history, evidence, actions, outreach, AI logs, disclaimers):
 1. Open any case detail page (e.g., Omar Siddiq's OVERDUE case).
-2. Select **HTML** in the format dropdown next to **Export Case Audit Packet**.
+2. In the case header (top-right), find the **format dropdown** next to **Export Case Audit Packet** and select **HTML**.
 3. Click **Export Case Audit Packet**.
-4. An HTML file downloads — formatted for print, with all evidence, actions, and AI logs laid out in audit-friendly sections.
+4. An HTML file downloads (`workwell-case-packet-<caseId>.html`) — formatted for print, with all evidence, actions, and AI logs laid out in audit-friendly sections.
 
 **Run audit packet** (includes: run metadata, outcome summary, logs, audit events):
-5. Open any run detail page.
-6. Select **JSON** in the format dropdown next to **Export Run Audit Packet**.
+5. Open `/runs` and select a run to open the right-side detail panel.
+6. Near the bottom of the panel, find the **format dropdown** next to **Export Run Audit Packet** and select **JSON**.
 7. Click **Export Run Audit Packet**.
-8. A JSON file downloads — machine-readable, with a SHA-256 hash of the payload for integrity verification.
+8. A JSON file downloads (`workwell-run-packet-<runId>.json`) — machine-readable, with a SHA-256 hash of the payload for integrity verification.
 
 **Measure version packet** (includes: spec, CQL code + hash, compile result, value sets, traceability, approval history):
-9. Open Studio for Annual Audiogram.
-10. With an Active version selected, choose **JSON** or **HTML** in the format dropdown next to **Export Measure Audit Packet**.
+9. Open Studio for any measure (e.g., Annual Audiogram).
+10. Open the **Release & Approval** tab. Below the readiness checklist, find the **format dropdown** next to **Export Measure Audit Packet** and select **JSON** or **HTML**. (The same control is also available in the Studio header for quick access.)
 11. Click **Export Measure Audit Packet**. The packet includes the complete lifecycle history of that measure version from Draft to Active.
 
 Every packet generation writes an `AUDIT_PACKET_GENERATED` event to the audit log.
@@ -715,9 +728,35 @@ Every packet generation writes an `AUDIT_PACKET_GENERATED` event to the audit lo
 WorkWell exposes a **Machine-Callable Protocol (MCP) server** that allows AI agents (like Claude Desktop) to query compliance data programmatically. This means a compliance officer can ask Claude Desktop natural-language questions about workforce compliance and get answers backed by the live WorkWell database.
 
 ### Prerequisites
-- Claude Desktop is installed
-- The MCP server is configured in Claude Desktop's config file with a valid WorkWell JWT
-- The WorkWell backend is running
+- **Claude Desktop is installed.** Download from https://claude.ai/download (macOS and Windows supported).
+- **A valid WorkWell JWT.** Log in to the WorkWell UI as any user with at least `ROLE_CASE_MANAGER` and copy the access token. In the dashboard the access token is held only in memory — easiest path is to sign in via the WorkWell auth API (`POST /api/auth/login` with `{ "email": "...", "password": "..." }`) and capture the `accessToken` from the JSON response.
+- **The WorkWell backend is reachable.** For the deployed demo this is `https://workwell-measure-studio-api.fly.dev`. For local development this is typically `http://localhost:8080`.
+
+### Claude Desktop config file
+
+Edit Claude Desktop's MCP config (path is platform-dependent):
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add (or merge into) an `mcpServers` block pointing at the SSE endpoint with the JWT as a bearer token:
+
+```json
+{
+  "mcpServers": {
+    "workwell": {
+      "url": "https://workwell-measure-studio-api.fly.dev/sse",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer <PASTE_WORKWELL_JWT_HERE>"
+      }
+    }
+  }
+}
+```
+
+Save the file and fully restart Claude Desktop (Quit / `Cmd+Q`, not just close the window). On launch Claude reads the config and connects to the MCP server. If the JWT is missing or expired, every tool call returns `403` and the audit log records the failed access attempt.
+
+> The Fly machine should have `min_machines_running = 1` (see `docs/DEPLOY.md`) so the SSE transport stays warm for remote MCP clients.
 
 ### Available MCP Tools
 | Tool | What it does |
@@ -793,7 +832,7 @@ WorkWell enforces role-based access control throughout the application. This sec
 **Test 3 — Case Manager cannot access Admin:**
 8. Log in as `cm@workwell.dev`
 9. Navigate to `/admin`.
-10. Expected: Access denied or redirect (the Admin nav item may not appear for this role).
+10. Expected: an in-page "Admin access required" panel renders for this role; the Admin nav item is hidden in the sidebar.
 
 **Test 4 — MCP requires authentication:**
 11. In your terminal (if you have curl):
@@ -802,21 +841,45 @@ WorkWell enforces role-based access control throughout the application. This sec
     ```
 12. Expected: `403 Forbidden`.
 
+> **Note on the `/login` redirect you may see during testing:** If during one of these RBAC tests the app forwards you to `/login` instead of showing the access-denied panel, that redirect is *session expiry* (the access token in memory was lost on a hard navigation or refresh) rather than an explicit RBAC denial. This is tracked separately as **Bug 4 — session persistence** in UAT issue #23; it is not a Section 13 / role-enforcement defect.
+
 ---
 
 ## Section 14: Demo Reset (Non-Production Only)
 
 ### What this is
-A non-production endpoint exists to reset the volatile demo data (outreach logs, bulk audit entries, etc.) back to a clean state for repeated demos. **This endpoint does not exist in production** (guarded by `@Profile("!prod")`).
+A non-production endpoint exists to reset the volatile demo data (outreach logs, bulk audit entries, etc.) back to a clean state for repeated demos. **This endpoint does not exist in production** (guarded by `@Profile("!prod")` on the backend, and the Admin UI now hides the entire panel unless the frontend was built with `NEXT_PUBLIC_DEMO_MODE=true`).
 
 > **Only use this in a local development environment — never on the production Fly.io instance.**
 
+### Visibility rules
+- **Backend:** `POST /api/admin/demo-reset` returns `403 Forbidden` whenever the `prod` Spring profile is active (`DemoResetService` is `@Profile("!prod")`).
+- **Frontend:** the **Reset demo data** card on `/admin` renders only when `process.env.NEXT_PUBLIC_DEMO_MODE === "true"` at build time. Production Vercel builds never set `NEXT_PUBLIC_DEMO_MODE=true` (the build fails fast if they do — see `frontend/next.config.ts`), so the card is structurally absent in production, not merely hidden via CSS.
+
 ### Steps (local only)
 1. Log in as `admin@workwell.dev`.
-2. In Admin, find the **Demo Reset** button (only visible in non-prod profile).
-3. Click it. Confirmation dialog appears.
-4. Click **Confirm**.
-5. Tables truncated: audit_events, outreach_delivery_log, case_actions (volatile entries only). Core seed data (employees, measures, outcomes) is preserved.
+2. On `/admin`, scroll to the red-bordered **Reset demo data** card.
+3. Click **Reset Demo Data**. **The confirmation is rendered inline** within the card — *not* a modal dialog. You will see:
+   - A red message: *"Are you sure? This cannot be undone."*
+   - A red **Confirm Reset** button
+   - A neutral **Cancel** button
+4. Click **Confirm Reset**.
+5. Tables truncated: `runs`, `outcomes`, `cases`, `case_actions`, `audit_events`, `outreach_delivery_log`, and other volatile demo tables. Employees, measures (and measure versions), value sets, and integration health rows are preserved.
+
+### Measure catalog after reset
+Demo Reset does **not** touch the measure catalog. After a reset, `/measures` continues to show the seeded catalog of seven measures across four lifecycle states:
+
+| Measure | Lifecycle | Source migration |
+|---------|-----------|------------------|
+| Annual Audiogram | ACTIVE | initial seed |
+| HAZWOPER Annual Medical Surveillance | ACTIVE | initial seed |
+| Annual TB Screening | ACTIVE | initial seed |
+| Flu Vaccine This Season | ACTIVE | initial seed |
+| Hepatitis B Vaccination Series | APPROVED (not yet activated) | `V017__seed_additional_measures.sql` |
+| Respirator Fit Test | DRAFT | `V017__seed_additional_measures.sql` |
+| Lead Medical Surveillance | DEPRECATED | `V017__seed_additional_measures.sql` |
+
+The three non-Active measures from V017 exist to exercise the catalog's lifecycle filtering and the Studio Release & Approval flow without disturbing the four canonical Active measures used by runs and cases.
 
 ---
 

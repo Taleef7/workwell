@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-05-20 — UAT Sections 9-14: Add Mapping UI, Studio packet selector, Demo Reset gating (issue #30)
+
+**Goal:** Fix all reported Section 9 (Terminology Mappings), Section 11 (Audit Packets in Studio Release & Approval tab), and Section 14 (Reset Demo Data prod visibility) UAT bugs from GitHub issue #30, plus correct guide inaccuracies for Sections 9–14.
+
+**Branch:** `fix/sprint-1-uat-sections-9-14`
+
+**What changed:**
+
+- `frontend/app/(dashboard)/admin/page.tsx` — Added "Add Mapping" form/dialog to the Local code mappings panel. The toggleable inline form posts to `POST /api/admin/terminology-mappings` and refreshes the table on success. Form validates required fields (local code/system, standard code/system) and confidence range (0.0–1.0). Also gated the Reset demo data card on `process.env.NEXT_PUBLIC_DEMO_MODE === "true"` so the card is structurally absent in production Vercel builds (production builds never set `NEXT_PUBLIC_DEMO_MODE=true` because `next.config.ts` fails fast if they do).
+- `frontend/features/studio/components/ReleaseApprovalTab.tsx` — Replaced the legacy direct-JSON-download button with the shared `AuditPacketExportButton` so the Studio Release & Approval tab now exposes the same JSON/HTML format selector already used on case detail and runs. The third packet entry point is now consistent with the other two.
+- `docs/WALKTHROUGH_GUIDE.md` — Corrected Sections 9–14 against the current UI: Section 9 renamed panel to "Local code mappings" and documented Reviewed By / Notes columns plus the new Add Mapping inline form (and noted that **Validate Mappings** lives on the **Source mappings** panel, not the terminology panel); Section 10 documented the actual button labels and called out that audit-events CSV export lives on the Cases page (not Admin); Section 11 documents the consistent JSON/HTML format dropdown across all three entry points (case detail, run detail panel, Studio Release & Approval tab); Section 12 added explicit Claude Desktop config-file path, bearer-token JSON snippet, and JWT acquisition instructions; Section 13 added a Bug 4 cross-reference for the `/login` redirect on session expiry; Section 14 documented the inline (non-modal) confirmation, the frontend visibility gate, and the seven-measure / four-lifecycle catalog left after a Demo Reset.
+
+**Verification:**
+
+- `frontend/npm run lint` — passed (only pre-existing `test/mocks/next-font.ts` anonymous-default-export warning).
+- `frontend/npm test` — 40/40 passed.
+- `frontend/npx tsc --noEmit` — clean (no TypeScript errors).
+- Playwright local end-to-end against `localhost:3000` + `localhost:8080`:
+  - Logged in as `admin@workwell.dev`, navigated to `/admin`, opened the new **Add Mapping** form, submitted `ANNUAL-FIT-TEST` → SNOMED `415070008`, observed the new row appearing in the Local code mappings table and the form auto-closing.
+  - With `NEXT_PUBLIC_DEMO_MODE=true`: confirmed the **Reset demo data** card renders on `/admin`.
+  - Restarted the dev server with `NEXT_PUBLIC_DEMO_MODE=false`: confirmed the **Reset demo data** card no longer renders on `/admin` while the Admin page itself, including the Local code mappings panel and Add Mapping button, continues to render normally.
+  - Opened the Audiogram measure in Studio → Release & Approval tab, confirmed both the header and Release & Approval tab `Export Measure Audit Packet` controls expose JSON/HTML in the format dropdown (2 controls, both with `[json, html]` options).
+- Manual /measures inspection — confirmed the seven seeded measures across four lifecycle states (4 Active, 1 Approved, 1 Draft, 1 Deprecated) matching the WALKTHROUGH_GUIDE.md Section 14 table.
+
+---
+
 ## 2026-05-20 — UAT Section 5: Case detail fixes (issue #28)
 
 **Goal:** Fix Section 5 case-detail bugs from UAT #23: escalation confirmation, outreach delivery badge refresh, audit packet format selectors, and walkthrough-guide inaccuracies.
