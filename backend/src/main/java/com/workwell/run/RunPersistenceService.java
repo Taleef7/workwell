@@ -323,6 +323,20 @@ public class RunPersistenceService {
             Instant completedAt = Instant.now();
             String evaluationPeriod = measureRuns.get(0).evaluationDate();
 
+            Instant dbStartedAt = null;
+            try {
+                dbStartedAt = jdbcTemplate.queryForObject(
+                        "SELECT started_at FROM runs WHERE id = ?",
+                        (rs, rowNum) -> rs.getTimestamp("started_at").toInstant(),
+                        runId
+                );
+            } catch (Exception e) {
+                log.warn("Could not retrieve started_at for run {}, defaulting to now", runId);
+            }
+            if (dbStartedAt == null) {
+                dbStartedAt = completedAt;
+            }
+
             long totalEvaluated = measureRuns.stream().mapToLong(payload -> payload.outcomes().size()).sum();
             long compliant = measureRuns.stream()
                     .flatMap(payload -> payload.outcomes().stream())
@@ -427,14 +441,14 @@ public class RunPersistenceService {
                             WHERE id = ?
                             """,
                     finalStatus,
-                    Timestamp.from(startedAt),
+                    Timestamp.from(dbStartedAt),
                     Timestamp.from(completedAt),
                     totalEvaluated,
                     compliant,
                     nonCompliant,
                     Timestamp.from(startedAt),
                     Timestamp.from(completedAt),
-                    completedAt.toEpochMilli() - startedAt.toEpochMilli(),
+                    Math.max(0, completedAt.toEpochMilli() - dbStartedAt.toEpochMilli()),
                     failureSummary,
                     partialFailureCount,
                     runId
