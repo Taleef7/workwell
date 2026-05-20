@@ -116,9 +116,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside
         ref={sidebarRef}
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-out lg:translate-x-0 lg:shadow-none ${
           sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
-        } lg:static lg:z-auto lg:shadow-none`}
+        }`}
       >
         {/* Sidebar header */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-4">
@@ -156,6 +156,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 <li key={item.href}>
                   <Link
                     href={sharedFilterQuery ? `${item.href}?${sharedFilterQuery}` : item.href}
+                    onClick={() => setSidebarOpen(false)}
                     className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                       active
                         ? "bg-slate-900 text-white"

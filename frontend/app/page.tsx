@@ -96,6 +96,7 @@ export default function HomePage() {
               href={videoUrl}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Watch walkthrough"
               className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/75 px-3.5 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
             >
               <Video className="h-3.5 w-3.5" />
@@ -105,6 +106,7 @@ export default function HomePage() {
               href={repoUrl}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="GitHub repository"
               className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/75 px-3.5 py-2 text-slate-700 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -112,6 +114,7 @@ export default function HomePage() {
             </a>
             <Link
               href="/login"
+              aria-label="Sign in"
               className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white/80 px-3.5 py-2 text-slate-700 transition hover:border-slate-400 hover:bg-white hover:text-slate-950"
             >
               <LogIn className="h-3.5 w-3.5" />
