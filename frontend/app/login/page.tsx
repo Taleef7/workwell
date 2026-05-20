@@ -3,17 +3,15 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { DEMO_EMAIL, DEMO_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
-const demoEmail = "cm@workwell.dev";
-const demoPassword = "Workwell123!";
 
 export default function LoginPage() {
   const router = useRouter();
   const { token, user, login } = useAuth();
-  const [email, setEmail] = useState(() => (demoMode ? demoEmail : ""));
-  const [password, setPassword] = useState(() => (demoMode ? demoPassword : ""));
+  const [email, setEmail] = useState(() => (demoMode ? DEMO_EMAIL : ""));
+  const [password, setPassword] = useState(() => (demoMode ? DEMO_PASSWORD : ""));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -23,8 +21,8 @@ export default function LoginPage() {
   }, [router, token, user]);
 
   function fillDemoCredentials() {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
     setError(null);
   }
 
@@ -37,25 +35,7 @@ export default function LoginPage() {
     setPending(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/auth/login`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
-      });
-      if (!response.ok) {
-        let message = "Invalid email or password.";
-        try {
-          const json = await response.json() as { message?: string; error?: string };
-          if (json.message) message = json.message;
-          else if (response.status === 401 || response.status === 403) message = "Invalid email or password.";
-          else if (response.status === 400) message = "Please enter a valid email and password.";
-        } catch {
-          // non-JSON body — use the default message above
-        }
-        throw new Error(message);
-      }
-      const payload = (await response.json()) as { token: string; email: string; role: string };
+      const payload = await signInWithCredentials(email, password);
       login(payload.token, payload.email, payload.role);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed. Please try again.");
@@ -103,8 +83,8 @@ export default function LoginPage() {
           </div>
 
           <p className="text-xs leading-5 text-slate-400">
-            Demo credentials: <span className="font-medium text-slate-200">{demoEmail}</span> /{" "}
-            <span className="font-medium text-slate-200">{demoPassword}</span>
+            Demo credentials: <span className="font-medium text-slate-200">{DEMO_EMAIL}</span> /{" "}
+            <span className="font-medium text-slate-200">{DEMO_PASSWORD}</span>
           </p>
         </section>
 
@@ -154,6 +134,9 @@ export default function LoginPage() {
 
           <p className="text-xs leading-5 text-slate-500">
             The demo account is prefilled when demo mode is enabled, but you can also fill it manually with the button above.
+          </p>
+          <p className="text-xs leading-5 text-slate-500">
+            Prefer a no-login demo entry? Use the public sandbox from the landing page.
           </p>
         </form>
       </div>

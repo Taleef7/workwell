@@ -7,6 +7,7 @@
  *  3. Expired token + network error → router.replace("/login") called.
  *  4. Logout in progress → refresh skipped, redirect not duplicated by the effect.
  *  5. Refresh attempted only once per unauthenticated epoch (silentRefreshAttempted guard).
+ *  6. Public routes (`/` and `/sandbox`) do not trigger refresh or redirect.
  */
 
 import React from "react";
@@ -199,6 +200,42 @@ describe("AuthProvider — silent refresh on page load", () => {
     renderProvider();
 
     // Give effects time to settle.
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(refreshCallCount).toBe(0);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt refresh or redirect on the public landing route", async () => {
+    mockPathname.mockReturnValue("/");
+    let refreshCallCount = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        refreshCallCount++;
+        return HttpResponse.json({}, { status: 401 });
+      })
+    );
+
+    renderProvider();
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(refreshCallCount).toBe(0);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt refresh or redirect on the sandbox route", async () => {
+    mockPathname.mockReturnValue("/sandbox");
+    let refreshCallCount = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        refreshCallCount++;
+        return HttpResponse.json({}, { status: 401 });
+      })
+    );
+
+    renderProvider();
+
     await new Promise((r) => setTimeout(r, 50));
 
     expect(refreshCallCount).toBe(0);
