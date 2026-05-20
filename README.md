@@ -53,6 +53,8 @@ pnpm dev
 
 ## Key routes
 
+- `/` public landing page with GitHub link, walkthrough video, and sandbox CTA
+- `/sandbox` no-manual-login demo entry that routes into the dashboard
 - `/programs` dashboard overview
 - `/programs/[measureId]` measure trend/detail view
 - `/runs` run history and summaries

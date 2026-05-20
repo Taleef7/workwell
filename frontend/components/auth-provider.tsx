@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+const PUBLIC_ROUTES = ["/", "/sandbox"];
 
 type AuthUser = {
   email: string;
@@ -122,6 +123,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
+    if (pathname && PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`))) {
+      return;
+    }
     if (pathname?.startsWith("/login")) return;
     if (token) return;
 
