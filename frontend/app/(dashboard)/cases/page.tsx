@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { emitToast } from "@/lib/toast";
 import {
@@ -90,12 +90,41 @@ export default function CasesPage() {
   const api = useApi();
   const PAGE_SIZE = 25;
 
+  // Track the most recent search value we ourselves wrote to the URL so we can
+  // distinguish state-driven URL writes from external URL changes (browser
+  // back/forward, deep links, other controls). Without this guard, an external
+  // URL change would see a mismatch with stale local state and get clobbered
+  // back to the old value after the debounce window.
+  const lastWrittenSearchRef = useRef<string>(urlSearch);
+
+  // URL → state: pull external URL changes into the input state.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSearchTerm(urlSearch);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    if (urlSearch === lastWrittenSearchRef.current) {
+      return;
+    }
+    lastWrittenSearchRef.current = urlSearch;
+    setSearchTerm(urlSearch);
   }, [urlSearch]);
+
+  // state → URL: debounce-write user input to the URL.
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    if (trimmed === urlSearch.trim()) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (trimmed) {
+        params.set("search", trimmed);
+      } else {
+        params.delete("search");
+      }
+      const query = params.toString();
+      lastWrittenSearchRef.current = trimmed;
+      router.replace(query ? `${pathname}?${query}` : pathname);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm, urlSearch, searchParams, router, pathname]);
 
   const loadMeasures = useCallback(async () => {
     try {
@@ -123,6 +152,7 @@ export default function CasesPage() {
       }
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      if (urlSearch.trim()) params.set("search", urlSearch.trim());
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", "0");
       const data = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
@@ -134,7 +164,7 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
+  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -150,13 +180,7 @@ export default function CasesPage() {
     return () => clearTimeout(timer);
   }, [loadCases]);
 
-  const filteredCases = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) {
-      return cases;
-    }
-    return cases.filter((item) => item.employeeName.toLowerCase().includes(term) || item.employeeId.toLowerCase().includes(term));
-  }, [cases, searchTerm]);
+  const filteredCases = cases;
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
 
@@ -194,11 +218,13 @@ export default function CasesPage() {
       params.set("status", statusFilter);
       if (measureFilter) params.set("measureId", measureFilter);
       if (priorityFilter) params.set("priority", priorityFilter);
-      if (assigneeFilter) params.set("assignee", assigneeFilter);
+      const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
+      if (effectiveAssignee) params.set("assignee", effectiveAssignee);
       if (siteFilter) params.set("site", siteFilter);
       else if (siteId) params.set("site", siteId);
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      if (urlSearch.trim()) params.set("search", urlSearch.trim());
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(cases.length));
       const next = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
@@ -284,15 +310,15 @@ export default function CasesPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold">Why Flagged cases</h2>
         <p className="mt-3 max-w-2xl text-slate-300">
-          Open worklist cases now persist from the seeded measure runs. Each card below links to the structured evidence
-          that explains why the case exists, including excluded-waiver context when it applies.
+          Your daily worklist of employees flagged by the latest measure runs. Each card links to the structured
+          evidence that explains why the case is open, including waiver context when an exclusion applies.
         </p>
       </div>
 
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">Open and recent cases</h3>
-          <p className="text-sm text-slate-500">Loaded from the DB-backed case endpoints.</p>
+          <p className="text-sm text-slate-500">Filter, search, and bulk-act on flagged cases.</p>
         </div>
         <p className="text-sm text-slate-500">
           {cases.length} case{cases.length !== 1 ? "s" : ""} loaded
@@ -486,13 +512,15 @@ export default function CasesPage() {
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600">
-          {statusFilter === "excluded"
-            ? "No excluded cases yet."
-            : statusFilter === "closed"
-              ? "No closed cases yet."
-              : statusFilter === "all"
-                ? "No cases found for the current filters."
-                : "No open cases. Run a measure to generate cases."}
+          {urlSearch.trim()
+            ? `No results match your search "${urlSearch.trim()}".`
+            : statusFilter === "excluded"
+              ? "No excluded cases yet."
+              : statusFilter === "closed"
+                ? "No closed cases yet."
+                : statusFilter === "all"
+                  ? "No cases found for the current filters."
+                  : "No open cases. Run a measure to generate cases."}
         </div>
       ) : null}
 

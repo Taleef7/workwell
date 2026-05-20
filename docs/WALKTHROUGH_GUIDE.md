@@ -163,46 +163,62 @@ Follow the same steps for:
 ## Section 4: The Cases Worklist (`/cases`)
 
 ### What this is
-A **case** is created automatically every time an employee produces a non-compliant outcome (DUE_SOON, OVERDUE, or MISSING_DATA). Cases persist across runs and are resolved when the employee becomes compliant. The worklist is where case managers work through their daily action queue.
+A **case** is created automatically every time an employee produces a non-compliant outcome (DUE_SOON, OVERDUE, or MISSING_DATA). Cases persist across runs and are resolved when the employee becomes compliant. The Cases page is where case managers work through their daily action queue.
+
+> **Sidebar note:** The left navigation has two related items — **Cases** (`/cases`) and **Worklist** (`/worklist`). This walkthrough uses **Cases**, which is the full filterable card grid. **Worklist** is a lighter summary surface for live, excluded, and follow-up cases.
 
 ### Steps
 
 1. Click **Cases** in the left sidebar. You land on `/cases`.
-2. You see a table of all open cases. Default columns include:
-   - Employee Name
-   - Measure Name (which program)
-   - Outcome Status (OVERDUE / DUE_SOON / MISSING_DATA)
-   - Priority (HIGH / MEDIUM / LOW)
-   - Assignee (if assigned)
-   - Next Action (e.g., "Send outreach", "Escalate")
-   - Last Updated
+2. The page header is **"Why Flagged cases"**. Above the filter row you'll see two view tabs — **All Cases** and **My Cases** — that scope the grid to everyone or to cases assigned to your account.
+3. Cases render as **cards in a grid** (not a table), 25 per page. Each card shows:
+   - Status badge (Open / Closed / Excluded) and Priority badge (HIGH / MEDIUM / LOW)
+   - Measure name (e.g., "Annual Audiogram")
+   - Employee name (links to the employee profile) and external ID
+   - Site
+   - Why-flagged outcome chip (OVERDUE / DUE_SOON / MISSING_DATA / COMPLIANT / EXCLUDED)
+   - Evaluation period
+   - SLA chip when applicable
+   - Last updated timestamp
+   - A **View structured evidence →** link to the case detail
+   - For excluded cases, the exclusion reason and waiver expiry are also shown
+   - (Assignee and Next Action are not surfaced on the card; both live on the case detail.)
 
 ### Filtering the worklist
 
-3. Use the filter controls at the top to narrow the list:
-   - **Status filter** — select `OPEN` to see only active cases, `RESOLVED` to see closed ones
-   - **Measure filter** — select "Annual Audiogram" to see only audiogram cases
-   - **Priority filter** — select `HIGH` to see the most urgent
-   - **Site filter** — filter by employee work location
-   - **Assignee filter** — filter to cases assigned to a specific person
+4. Use the filter row to narrow the list:
+   - **Status filter** — pill toggle buttons: **Open** (default), **Closed**, **All**, **Excluded**. "Closed" covers both `CLOSED` and `RESOLVED` states.
+   - **Measure** dropdown — defaults to "All Active Measures" and lists each active measure
+   - **Priority** dropdown — All / High / Medium / Low
+   - **Assignee** dropdown — All Assignees, Unassigned, or any user currently assigned to a loaded case
+   - **Site** dropdown — All Sites or any site present in the loaded cases
+   - **Search** input — case-insensitive partial match on employee name or external ID; server-side, so it spans the whole worklist, not just what's currently on screen
 
-4. Example: Set Status = `OPEN` and Measure = `Annual Audiogram`. The list narrows to show only open audiogram cases.
+5. Example: Set Status = **Open** and Measure = **Annual Audiogram**. The grid narrows to only open audiogram cases.
 
 ### Searching
 
-5. Use the **search bar** to find a specific employee by name. Type `Omar` and press Enter — you should see Omar Siddiq's case appear (emp-006, OVERDUE).
+6. Use the **Search** input to find a specific employee. Type `Omar` — within ~300 ms Omar Siddiq's card (emp-006, OVERDUE) appears, and the URL updates with `?search=Omar` so the query is shareable. Clear the input to restore the full list. If the search has no matches, the empty state reads *"No results match your search "<term>"."*
 
 ### Bulk actions
 
-6. Select 2–3 cases by clicking their checkboxes on the left.
-7. A **Bulk Actions** toolbar appears at the top showing: Bulk Assign, Bulk Escalate, Export Selected.
-8. Click **Bulk Escalate**. A confirmation dialog appears.
-9. Click **Confirm**. The selected cases update to an escalated state and new timeline entries are written for each.
+7. Select 2–3 cards by ticking the **Select** checkbox at the top of each card. Use **Select all in current results** above the grid to toggle every card on screen.
+8. A blue **bulk-actions toolbar** appears with a selected-count chip, an assignee input, and three buttons:
+   - **Assign to…** — applies the assignee in the input to every selected case
+   - **Escalate selected** — escalates each selected case
+   - **Export selected** — downloads a CSV (`cases-selected.csv`) limited to the selected case IDs
+9. Click **Escalate selected**. Each case is escalated in turn and a toast confirms the action.
+
+### Pagination
+
+10. The grid loads 25 cards at a time. If more cases match the filters, a **Load more cases** button appears at the bottom of the grid — click it to append the next 25.
 
 ### Exporting the worklist
 
-10. Click **Export CSV** (top right of the cases list). A file named `cases.csv` downloads to your computer.
-11. Open it — columns include: caseId, employeeExternalId, employeeName, role, site, measureName, status, priority, currentOutcomeStatus, nextAction, createdAt, closedAt, latestOutreachDeliveryStatus.
+11. The top of the page has **two export buttons**:
+    - **Export cases CSV** — downloads `cases.csv` honoring the current Status and Measure filters
+    - **Export audit CSV** — downloads the full audit-event log (`audit-events.csv`)
+12. Open `cases.csv` — columns include: `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus`.
 
 ---
 
