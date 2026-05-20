@@ -138,8 +138,8 @@ class MeasureControllerTest {
                         measureId, versionId, true,
                         List.of(new ValueSetGovernanceService.ValueSetCheckItem(
                                 UUID.fromString("a0000001-0000-0000-0000-000000000001"),
-                                "Audiogram Procedure Codes",
-                                "urn:workwell:vs:audiogram-procedure-codes",
+                                "Audiogram Procedures",
+                                "urn:workwell:vs:audiogram-procedures",
                                 "2025-demo", "RESOLVED", 4, List.of(), false
                         )),
                         List.of(), List.of()
@@ -149,7 +149,7 @@ class MeasureControllerTest {
         mockMvc.perform(post("/api/measures/{id}/value-sets/resolve-check", measureId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.allResolved").value(true))
-                .andExpect(jsonPath("$.valueSets[0].name").value("Audiogram Procedure Codes"))
+                .andExpect(jsonPath("$.valueSets[0].name").value("Audiogram Procedures"))
                 .andExpect(jsonPath("$.valueSets[0].codeCount").value(4))
                 .andExpect(jsonPath("$.blockers").isArray())
                 .andExpect(jsonPath("$.warnings").isArray());
@@ -161,8 +161,8 @@ class MeasureControllerTest {
         UUID toId   = UUID.fromString("a0000001-0000-0000-0000-000000000002");
         when(valueSetGovernanceService.diff(fromId, toId)).thenReturn(
                 new ValueSetGovernanceService.ValueSetDiffResponse(
-                        fromId.toString(), "Audiogram Procedure Codes", "2025-demo",
-                        toId.toString(), "TB Screening Procedure Codes", "2025-demo",
+                        fromId.toString(), "Audiogram Procedures", "2025-demo",
+                        toId.toString(), "TB Screening Procedures", "2025-demo",
                         List.of(new ValueSetGovernanceService.CodeEntry("LOCAL-TB-001", "PPD skin test", "urn:workwell:demo")),
                         List.of(new ValueSetGovernanceService.CodeEntry("LOCAL-AUD-001", "Baseline audiogram", "urn:workwell:demo")),
                         List.of(), List.of("1 code(s) added.", "1 code(s) removed.")
@@ -171,8 +171,8 @@ class MeasureControllerTest {
 
         mockMvc.perform(get("/api/value-sets/{id}/diff", fromId).param("to", toId.toString()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.fromName").value("Audiogram Procedure Codes"))
-                .andExpect(jsonPath("$.toName").value("TB Screening Procedure Codes"))
+                .andExpect(jsonPath("$.fromName").value("Audiogram Procedures"))
+                .andExpect(jsonPath("$.toName").value("TB Screening Procedures"))
                 .andExpect(jsonPath("$.addedCodes[0].code").value("LOCAL-TB-001"))
                 .andExpect(jsonPath("$.removedCodes[0].code").value("LOCAL-AUD-001"));
     }
