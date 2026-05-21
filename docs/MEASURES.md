@@ -9,8 +9,8 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | OSHA occupational safety — fully evaluated | 4 | Active | Full CQL, runnable |
 | OSHA occupational safety — catalog only | 3 | Draft / Approved / Deprecated | Partial or no CQL |
 | HEDIS wellness — fully evaluated | 4 | Active | Full CQL, runnable |
-| CMS eCQM catalog (2025 performance period) | 47 | Draft | Catalog entry only — CQL authoring pending |
-| **Total** | **58** | | |
+| CMS eCQM catalog (2026 performance period) | 49 | Draft | Catalog entry only — CQL authoring pending |
+| **Total** | **60** | | |
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 
@@ -145,31 +145,32 @@ All four wellness measures use the same outcome pattern:
 
 ---
 
-## Category 4 — CMS eCQM Catalog (2025 Performance Period)
+## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 
-47 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v13`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for these measures is future work.
+49 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for these measures is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references.
+
+Two new measures added in 2026 vs 2025: CMS146v14 (Appropriate Testing for Pharyngitis) and CMS154v14 (Appropriate Treatment for URI) in the new Respiratory / Antimicrobial Stewardship domain; CMS1173v1 (Diagnostic Delay of VTE) added to Cardiovascular; CMS1154v1 (Screening for Abnormal Glucose Metabolism) added to Diabetes. CMS249v7 (DXA Scans) retired from 2026 eligible clinician list.
 
 ### Domain breakdown
 
 | Domain | Measures |
 |--------|---------|
-| Mental Health / Behavioral | CMS2v14, CMS128v13, CMS136v14, CMS137v13, CMS149v13, CMS159v13, CMS177v13 |
-| Cardiovascular | CMS22v13, CMS90v14, CMS135v13, CMS144v13, CMS145v13, CMS165v13, CMS347v8 |
-| Diabetes | CMS122v13, CMS131v13, CMS142v13, CMS951v3 |
-| Cancer Screening / Preventive | CMS69v13, CMS124v13, CMS125v13, CMS130v13, CMS138v13, CMS139v13, CMS153v13, CMS155v13 |
-| Pediatric / Immunization | CMS74v14, CMS75v13, CMS117v13 |
-| HIV / Infectious Disease | CMS314v2, CMS349v7, CMS1157v1, CMS1188v2 |
-| Oncology | CMS129v14, CMS157v13, CMS645v8, CMS646v5 |
-| Ophthalmology | CMS131v13, CMS133v13, CMS143v13 |
-| Functional Status / Orthopedic | CMS56v13 |
-| Medication Safety | CMS68v14, CMS156v13 |
-| Care Coordination | CMS50v13 |
-| Nephrology | CMS951v3 |
-| Urology | CMS771v6 |
-| Radiology / Patient Safety | CMS1056v2 |
-| Musculoskeletal | CMS249v7 |
+| Mental Health / Behavioral | CMS2v15, CMS128v14, CMS136v15, CMS137v14, CMS149v14, CMS159v14, CMS177v14 |
+| Cardiovascular | CMS22v14, CMS90v15, CMS135v14, CMS144v14, CMS145v14, CMS165v14, CMS347v9, CMS1173v1 |
+| Diabetes | CMS122v14, CMS131v14, CMS142v14, CMS951v4, CMS1154v1 |
+| Cancer Screening / Preventive | CMS69v14, CMS124v14, CMS125v14, CMS130v14, CMS138v14, CMS139v14, CMS153v14, CMS155v14 |
+| Respiratory / Antimicrobial Stewardship | CMS146v14, CMS154v14 |
+| Pediatric / Immunization | CMS74v15, CMS75v14, CMS117v14 |
+| HIV / Infectious Disease | CMS314v3, CMS349v8, CMS1157v2, CMS1188v3 |
+| Oncology | CMS129v15, CMS157v14, CMS645v9, CMS646v6 |
+| Ophthalmology | CMS133v14, CMS143v14 |
+| Functional Status / Orthopedic | CMS56v14 |
+| Medication Safety | CMS68v15, CMS156v14 |
+| Care Coordination | CMS50v14 |
+| Urology | CMS771v7 |
+| Radiology / Patient Safety | CMS1056v3 |
 
 Full list with MIPS Quality IDs is embedded in `MeasureService.CMS_ECQM_CATALOG` and visible in the measures catalog at `/measures`.
 
@@ -197,4 +198,4 @@ Each outcome evidence payload includes:
 
 - TB and HAZWOPER recency checks use explicit procedure-code filtering in CQL so the seeded in-memory CQF evaluator can resolve the most recent exam date without relying on unsupported value-set token retrieval.
 - All four HEDIS wellness measures are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
-- All 47 CMS eCQM catalog entries are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only and do not participate in CQL evaluation runs until CQL is authored and compiled.
+- All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
