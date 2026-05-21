@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,6 +28,9 @@ import org.springframework.util.FileCopyUtils;
 public class MeasureService {
     private static final String SEEDED_AUDIOGRAM_NAME = "Audiogram";
     private static final String SEEDED_AUDIOGRAM_VERSION = "v1.0";
+
+    @Value("${workwell.instance:workwell}")
+    private String workwellInstance;
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -42,11 +46,23 @@ public class MeasureService {
         this.cqlCompileValidationService = cqlCompileValidationService;
     }
 
+    private void ensureInstanceSeeds() {
+        if ("workwell".equals(workwellInstance) || "twh".equals(workwellInstance)) {
+            ensureAudiogramSeed();
+            ensureTbSeed();
+            ensureHazwoperSeed();
+            ensureFluSeed();
+        }
+        if ("ecqm".equals(workwellInstance) || "twh".equals(workwellInstance)) {
+            ensureHypertensionSeed();
+            ensureDiabetesHbA1cSeed();
+            ensureObesityBmiSeed();
+            ensureCholesterolLdlSeed();
+        }
+    }
+
     public List<MeasureCatalogItem> listMeasures(String statusFilter, String search) {
-        ensureAudiogramSeed();
-        ensureTbSeed();
-        ensureHazwoperSeed();
-        ensureFluSeed();
+        ensureInstanceSeeds();
 
         StringBuilder sql = new StringBuilder("""
                 SELECT m.id,
@@ -160,10 +176,7 @@ public class MeasureService {
     }
 
     public MeasureDetail getMeasure(UUID id) {
-        ensureAudiogramSeed();
-        ensureTbSeed();
-        ensureHazwoperSeed();
-        ensureFluSeed();
+        ensureInstanceSeeds();
 
         String sql = """
                 SELECT m.id,
@@ -1019,6 +1032,226 @@ public class MeasureService {
                 toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                 "Seeded active Flu Vaccine measure for demo",
                 "system"
+        );
+    }
+
+    private void ensureHypertensionSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "Hypertension BP Screening"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Hypertension BP Screening",
+                    "HEDIS BPC / JPMC Wellness Rewards",
+                    "WorkWell Studio",
+                    "{wellness,hypertension,cardiovascular}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("hypertension.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Annual blood pressure screening for employees enrolled in the wellness program.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Wellness Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Medical Exemption", "criteriaText", "Documented medical exemption on file")));
+        spec.put("complianceWindow", "Annual");
+        spec.put("requiredDataElements", List.of("Last BP screening date", "Program enrollment", "Exemption status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("hypertension.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active Hypertension BP Screening measure for demo", "system"
+        );
+    }
+
+    private void ensureDiabetesHbA1cSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "Diabetes HbA1c Monitoring"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Diabetes HbA1c Monitoring",
+                    "HEDIS HBD / JPMC Wellness Rewards",
+                    "WorkWell Studio",
+                    "{wellness,diabetes,hba1c}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("diabetes_hba1c.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Biannual HbA1c lab monitoring for employees enrolled in the diabetes management program.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Diabetes Management Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Medical Exemption", "criteriaText", "Documented medical exemption on file")));
+        spec.put("complianceWindow", "Biannual (180 days)");
+        spec.put("requiredDataElements", List.of("Last HbA1c lab date", "Program enrollment", "Exemption status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("diabetes_hba1c.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active Diabetes HbA1c Monitoring measure for demo", "system"
+        );
+    }
+
+    private void ensureObesityBmiSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "BMI Screening & Counseling"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "BMI Screening & Counseling",
+                    "HEDIS WCC / Cigna Healthcare Wellness",
+                    "WorkWell Studio",
+                    "{wellness,bmi,obesity}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("obesity_bmi.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Annual BMI screening and counseling for employees enrolled in the wellness program.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Wellness Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Medical Exemption", "criteriaText", "Documented medical exemption on file")));
+        spec.put("complianceWindow", "Annual");
+        spec.put("requiredDataElements", List.of("Last BMI screening date", "Program enrollment", "Exemption status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("obesity_bmi.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active BMI Screening & Counseling measure for demo", "system"
+        );
+    }
+
+    private void ensureCholesterolLdlSeed() {
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE name = ?",
+                    UUID.class,
+                    "Cholesterol LDL Screening"
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Cholesterol LDL Screening",
+                    "HEDIS CBP / JPMC Wellness Rewards",
+                    "WorkWell Studio",
+                    "{wellness,cholesterol,cardiovascular}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("cholesterol_ldl.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Annual LDL cholesterol lab screening for employees enrolled in the cardiovascular risk program.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Cholesterol Risk Program"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Medical Exemption", "criteriaText", "Documented medical exemption on file")));
+        spec.put("complianceWindow", "Annual");
+        spec.put("requiredDataElements", List.of("Last LDL lab date", "Program enrollment", "Exemption status"));
+        spec.put("testFixtures", List.of());
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("cholesterol_ldl.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "Seeded active Cholesterol LDL Screening measure for demo", "system"
         );
     }
 
