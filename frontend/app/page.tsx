@@ -8,6 +8,11 @@ const fraunces = Fraunces({ subsets: ["latin"], weight: ["600", "700"] });
 const repoUrl = "https://github.com/Taleef7/workwell";
 const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8";
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
+const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "A clean operating surface for occupational-health compliance.";
+const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
+const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
+
 const capabilities = [
   "Programs & outcomes",
   "Case worklist",
@@ -16,8 +21,8 @@ const capabilities = [
 ];
 
 export const metadata: Metadata = {
-  title: "WorkWell Measure Studio",
-  description: "Occupational-health compliance operations for modern programs.",
+  title: APP_NAME,
+  description: `${APP_NAME} — ${APP_TAGLINE}`,
 };
 
 export default function HomePage() {
@@ -34,8 +39,8 @@ export default function HomePage() {
               WW
             </span>
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-slate-950">WorkWell</span>
-              <span className="text-xs text-slate-500">Measure Studio</span>
+              <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
+              <span className="text-xs text-slate-500">{APP_SUBTITLE}</span>
             </span>
           </Link>
 
@@ -70,7 +75,7 @@ export default function HomePage() {
           <h1
             className={`${fraunces.className} mt-5 max-w-3xl text-4xl leading-[1.05] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl`}
           >
-            A clean operating surface for occupational-health compliance.
+            {APP_TAGLINE}
           </h1>
 
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
@@ -118,7 +123,7 @@ export default function HomePage() {
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
         <footer className="border-t border-slate-200 pt-6 text-xs text-slate-500">
-          © WorkWell Measure Studio — compliance operations for occupational health.
+          © {APP_NAME} — {APP_TAGLINE}
         </footer>
       </div>
     </main>

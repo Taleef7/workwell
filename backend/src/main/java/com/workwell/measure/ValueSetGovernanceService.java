@@ -352,6 +352,62 @@ public class ValueSetGovernanceService {
         ensureLink("Flu Vaccine", DEMO_VS_FLU);
         ensureLink("Flu Vaccine", VS_FLU_ENROLL);
         ensureLink("Flu Vaccine", VS_FLU_WAIVER);
+
+        // 4. Wellness measure value sets (ecqm / twh instances)
+        UUID VS_WELLNESS_ENROLL   = UUID.fromString("b0000001-0000-0000-0000-000000000001");
+        UUID VS_WELLNESS_WAIVER   = UUID.fromString("b0000001-0000-0000-0000-000000000002");
+        UUID VS_BP_SCREEN         = UUID.fromString("b0000001-0000-0000-0000-000000000003");
+        UUID VS_DIABETES_ENROLL   = UUID.fromString("b0000001-0000-0000-0000-000000000004");
+        UUID VS_DIABETES_WAIVER   = UUID.fromString("b0000001-0000-0000-0000-000000000005");
+        UUID VS_HBA1C_LABS        = UUID.fromString("b0000001-0000-0000-0000-000000000006");
+        UUID VS_BMI_SCREEN        = UUID.fromString("b0000001-0000-0000-0000-000000000007");
+        UUID VS_CHOLESTEROL_ENROLL = UUID.fromString("b0000001-0000-0000-0000-000000000008");
+        UUID VS_CHOLESTEROL_WAIVER = UUID.fromString("b0000001-0000-0000-0000-000000000009");
+        UUID VS_LDL_LABS          = UUID.fromString("b0000001-0000-0000-0000-000000000010");
+
+        ensureValueSet(VS_WELLNESS_ENROLL, "urn:workwell:vs:wellness-enrollment", "Wellness Program Enrollment", "2025-demo",
+                "[{\"code\":\"wellness-enrolled\",\"display\":\"Wellness Program Enrollment\",\"system\":\"urn:workwell:vs:wellness-enrollment\"}]");
+        ensureValueSet(VS_WELLNESS_WAIVER, "urn:workwell:vs:wellness-exemption", "Wellness Exemption Conditions", "2025-demo",
+                "[{\"code\":\"wellness-exempt\",\"display\":\"Wellness Exemption Conditions\",\"system\":\"urn:workwell:vs:wellness-exemption\"}]");
+        ensureValueSet(VS_BP_SCREEN, "urn:workwell:vs:bp-screening", "BP Screening Procedures", "2025-demo",
+                "[{\"code\":\"bp-screen\",\"display\":\"Blood Pressure Screening\",\"system\":\"urn:workwell:vs:bp-screening\"}," +
+                "{\"code\":\"99213\",\"display\":\"Office visit established patient\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]");
+
+        ensureValueSet(VS_DIABETES_ENROLL, "urn:workwell:vs:diabetes-program", "Diabetes Management Enrollment", "2025-demo",
+                "[{\"code\":\"diabetes-enrolled\",\"display\":\"Diabetes Management Enrollment\",\"system\":\"urn:workwell:vs:diabetes-program\"}]");
+        ensureValueSet(VS_DIABETES_WAIVER, "urn:workwell:vs:diabetes-exemption", "Diabetes Program Exemption", "2025-demo",
+                "[{\"code\":\"diabetes-exempt\",\"display\":\"Diabetes Program Exemption\",\"system\":\"urn:workwell:vs:diabetes-exemption\"}]");
+        ensureValueSet(VS_HBA1C_LABS, "urn:workwell:vs:hba1c-labs", "HbA1c Lab Procedures", "2025-demo",
+                "[{\"code\":\"hba1c-lab\",\"display\":\"HbA1c Lab\",\"system\":\"urn:workwell:vs:hba1c-labs\"}," +
+                "{\"code\":\"83036\",\"display\":\"Glycosylated hemoglobin test\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]");
+
+        ensureValueSet(VS_BMI_SCREEN, "urn:workwell:vs:bmi-screening", "BMI Screening Procedures", "2025-demo",
+                "[{\"code\":\"bmi-screen\",\"display\":\"BMI Screening\",\"system\":\"urn:workwell:vs:bmi-screening\"}," +
+                "{\"code\":\"99401\",\"display\":\"Preventive medicine counseling\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]");
+
+        ensureValueSet(VS_CHOLESTEROL_ENROLL, "urn:workwell:vs:cholesterol-program", "Cholesterol Risk Program Enrollment", "2025-demo",
+                "[{\"code\":\"cholesterol-enrolled\",\"display\":\"Cholesterol Risk Program Enrollment\",\"system\":\"urn:workwell:vs:cholesterol-program\"}]");
+        ensureValueSet(VS_CHOLESTEROL_WAIVER, "urn:workwell:vs:cholesterol-exemption", "Cholesterol Program Exemption", "2025-demo",
+                "[{\"code\":\"cholesterol-exempt\",\"display\":\"Cholesterol Program Exemption\",\"system\":\"urn:workwell:vs:cholesterol-exemption\"}]");
+        ensureValueSet(VS_LDL_LABS, "urn:workwell:vs:ldl-labs", "LDL Cholesterol Lab Procedures", "2025-demo",
+                "[{\"code\":\"ldl-lab\",\"display\":\"LDL Cholesterol Lab\",\"system\":\"urn:workwell:vs:ldl-labs\"}," +
+                "{\"code\":\"83721\",\"display\":\"LDL cholesterol direct measurement\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]");
+
+        ensureLink("Hypertension BP Screening", VS_BP_SCREEN);
+        ensureLink("Hypertension BP Screening", VS_WELLNESS_ENROLL);
+        ensureLink("Hypertension BP Screening", VS_WELLNESS_WAIVER);
+
+        ensureLink("Diabetes HbA1c Monitoring", VS_HBA1C_LABS);
+        ensureLink("Diabetes HbA1c Monitoring", VS_DIABETES_ENROLL);
+        ensureLink("Diabetes HbA1c Monitoring", VS_DIABETES_WAIVER);
+
+        ensureLink("BMI Screening & Counseling", VS_BMI_SCREEN);
+        ensureLink("BMI Screening & Counseling", VS_WELLNESS_ENROLL);
+        ensureLink("BMI Screening & Counseling", VS_WELLNESS_WAIVER);
+
+        ensureLink("Cholesterol LDL Screening", VS_LDL_LABS);
+        ensureLink("Cholesterol LDL Screening", VS_CHOLESTEROL_ENROLL);
+        ensureLink("Cholesterol LDL Screening", VS_CHOLESTEROL_WAIVER);
     }
 
     private void ensureValueSet(UUID id, String oid, String name, String version, String codesJson) {

@@ -1,5 +1,65 @@
 # Journal
 
+## 2026-05-21 — eCQM and TWH instance support (feat/ecqm-twh-instances)
+
+**Goal:** Add `ecqm.os.mieweb.org` (clinical quality / wellness measures) and `twh.os.mieweb.org` (Total Worker Health — all 8 measures) as independent WorkWell instances. Same backend Docker image, instance-aware seeding via `WORKWELL_INSTANCE` env var, separate Neon databases, separate frontend Docker images with per-instance branding.
+
+**Branch:** `feat/ecqm-twh-instances`
+
+**What changed:**
+
+- `backend/src/main/resources/measures/hypertension.cql` — New CQL library `HypertensionBPScreeningCQL 1.0.0`. Annual BP screening (compliance window 365 days, DueSoon 336–365), wellness-enrollment/exemption value sets.
+- `backend/src/main/resources/measures/diabetes_hba1c.cql` — New CQL library `DiabetesHbA1cMonitoringCQL 1.0.0`. Biannual HbA1c (compliance window 180 days, DueSoon 161–180), diabetes-program/exemption value sets.
+- `backend/src/main/resources/measures/obesity_bmi.cql` — New CQL library `ObesityBMIScreeningCQL 1.0.0`. Annual BMI screening (compliance window 365 days), wellness-enrollment/exemption value sets.
+- `backend/src/main/resources/measures/cholesterol_ldl.cql` — New CQL library `CholesterolLDLScreeningCQL 1.0.0`. Annual LDL screening (compliance window 365 days), cholesterol-program/exemption value sets.
+- `backend/src/main/resources/application.yml` — Added `workwell.instance: ${WORKWELL_INSTANCE:workwell}` property; added 4 new compliance rates (hypertension: 0.72, diabetes_hba1c: 0.68, obesity_bmi: 0.81, cholesterol_ldl: 0.74).
+- `backend/src/main/java/com/workwell/measure/MeasureService.java` — Added `@Value("${workwell.instance:workwell}") private String workwellInstance`; added `ensureInstanceSeeds()` that gates OSHA seeds on `workwell|twh` and wellness seeds on `ecqm|twh`; replaced direct seed calls in `listMeasures()`/`getMeasure()` with `ensureInstanceSeeds()`; added 4 new seed methods (`ensureHypertensionSeed`, `ensureDiabetesHbA1cSeed`, `ensureObesityBmiSeed`, `ensureCholesterolLdlSeed`).
+- `backend/src/main/java/com/workwell/compile/CqlEvaluationService.java` — Added 4 new cases to `measureSeedSpecFor()` switch (Hypertension BP Screening, Diabetes HbA1c Monitoring, BMI Screening & Counseling, Cholesterol LDL Screening). All 4 use `useImmunization=false` (Procedure resources).
+- `backend/src/main/java/com/workwell/measure/ValueSetGovernanceService.java` — Added 10 wellness value sets inside `ensureDemoValueSets()` using `b0000001-...` UUID range (non-colliding with existing `a000...` OSHA UUIDs): wellness-enrollment, wellness-exemption, bp-screening (CPT 99213), diabetes-program, diabetes-exemption, hba1c-labs (CPT 83036), bmi-screening (CPT 99401), cholesterol-program, cholesterol-exemption, ldl-labs (CPT 83721). Added `ensureLink()` calls for all 4 wellness measures.
+- `frontend/Dockerfile` — Added `NEXT_PUBLIC_APP_NAME` and `NEXT_PUBLIC_APP_TAGLINE` build args (default to workwell values); `ENV` statements bake them into each per-instance image at build time.
+- `frontend/app/layout.tsx` — Root metadata uses `NEXT_PUBLIC_APP_NAME`/`NEXT_PUBLIC_APP_TAGLINE` env vars.
+- `frontend/app/page.tsx` — Landing page hero h1, header brand badge/subtitle, and footer copyright all driven by `NEXT_PUBLIC_APP_NAME`/`NEXT_PUBLIC_APP_TAGLINE` constants derived from env vars.
+- `frontend/app/(dashboard)/layout.tsx` — Sidebar and mobile header "WorkWell"/"Measure Studio" spans driven by split of `NEXT_PUBLIC_APP_NAME`.
+- `frontend/app/login/page.tsx` — Left-panel brand badge/subtitle driven by `NEXT_PUBLIC_APP_NAME` split.
+- `frontend/app/sandbox/page.tsx` — "WorkWell Measure Studio" label driven by `NEXT_PUBLIC_APP_NAME`.
+- `frontend/app/sandbox/layout.tsx` — Metadata description driven by `NEXT_PUBLIC_APP_NAME`.
+- `.github/workflows/deploy-ecqm-mieweb.yml` — New workflow: builds same backend image + separate `workwell-ecqm-frontend` image (with eCQM branding build args), deploys to `ecqm-api`/`ecqm` hostnames with `WORKWELL_INSTANCE=ecqm`, uses `DATABASE_URL_ECQM` and `WORKWELL_AUTH_JWT_SECRET_ECQM` secrets.
+- `.github/workflows/deploy-twh-mieweb.yml` — New workflow: builds same backend image + separate `workwell-twh-frontend` image (with TWH branding build args), deploys to `twh-api`/`twh` hostnames with `WORKWELL_INSTANCE=twh`, uses `DATABASE_URL_TWH` and `WORKWELL_AUTH_JWT_SECRET_TWH` secrets.
+- `docs/ECQM_TWH_DEPLOYMENT_PLAN.md` — Full deployment plan committed for project-level visibility.
+
+**Measure assignment per instance:**
+
+| Measure | workwell | ecqm | twh |
+|---|---|---|---|
+| Audiogram (OSHA) | ✓ | — | ✓ |
+| TB Surveillance | ✓ | — | ✓ |
+| HAZWOPER Surveillance | ✓ | — | ✓ |
+| Flu Vaccine | ✓ | — | ✓ |
+| Hypertension Control | — | ✓ | ✓ |
+| Diabetes HbA1c | — | ✓ | ✓ |
+| Obesity BMI Screening | — | ✓ | ✓ |
+| Cholesterol LDL | — | ✓ | ✓ |
+
+**Owner actions required (Taleef) before first deploy:**
+
+1. Create two Neon projects (`workwell-ecqm`, `workwell-twh`), copy pooled connection strings.
+2. Add GitHub repository secrets: `DATABASE_URL_ECQM`, `DATABASE_URL_TWH`, `WORKWELL_AUTH_JWT_SECRET_ECQM`, `WORKWELL_AUTH_JWT_SECRET_TWH`.
+3. Make GHCR packages `workwell-ecqm-frontend` and `workwell-twh-frontend` public after first push.
+
+**Verification (local):**
+```bash
+# ecqm instance — expect Hypertension, Diabetes, BMI, Cholesterol only
+WORKWELL_INSTANCE=ecqm ./gradlew bootRun
+
+# twh instance — expect all 8 measures
+WORKWELL_INSTANCE=twh ./gradlew bootRun
+
+# workwell instance (default) — expect 4 OSHA measures only
+./gradlew bootRun
+```
+
+---
+
 ## 2026-05-20 — UAT Sections 9-14: Add Mapping UI, Studio packet selector, Demo Reset gating (issue #30)
 
 **Goal:** Fix all reported Section 9 (Terminology Mappings), Section 11 (Audit Packets in Studio Release & Approval tab), and Section 14 (Reset Demo Data prod visibility) UAT bugs from GitHub issue #30, plus correct guide inaccuracies for Sections 9–14.

@@ -25,6 +25,10 @@ const fraunces = Fraunces({ subsets: ["latin"], weight: ["600", "700"] });
 
 const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
+const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
+const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
+
 const highlights = [
   { icon: LayoutDashboard, label: "Programs & outcome trends" },
   { icon: ShieldCheck, label: "Case worklist & audit trail" },
@@ -88,8 +92,8 @@ export default function LoginPage() {
             WW
           </span>
           <span className="flex flex-col leading-tight">
-            <span className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-400">WorkWell</span>
-            <span className="text-sm font-medium text-white">Measure Studio</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-400">{APP_BADGE}</span>
+            <span className="text-sm font-medium text-white">{APP_SUBTITLE}</span>
           </span>
         </Link>
 
