@@ -543,7 +543,8 @@ public class CqlEvaluationService {
                     "urn:workwell:vs:diabetes-exemption",
                     "hba1c-lab",
                     "urn:workwell:vs:hba1c-labs",
-                    false
+                    false,
+                    180
             );
             case "BMI Screening & Counseling" -> new MeasureSeedSpec(
                     "obesity_bmi",
@@ -574,12 +575,13 @@ public class CqlEvaluationService {
             MeasureSeedSpec spec,
             SeededOutcome targetOutcome
     ) {
+        int window = spec.complianceWindowDays();
         Integer daysSinceLastExam = switch (targetOutcome) {
-            case COMPLIANT -> 120;
-            case DUE_SOON -> 350;
-            case OVERDUE -> 430;
+            case COMPLIANT -> window / 3;
+            case DUE_SOON -> window - 10;
+            case OVERDUE -> window + 60;
             case MISSING_DATA -> null;
-            case EXCLUDED -> 500;
+            case EXCLUDED -> window + 150;
         };
         boolean hasWaiver = targetOutcome == SeededOutcome.EXCLUDED;
         SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
@@ -626,7 +628,14 @@ public class CqlEvaluationService {
             String waiverVs,
             String examCode,
             String examVs,
-            boolean useImmunization
+            boolean useImmunization,
+            int complianceWindowDays
     ) {
+        MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
+                        String waiverCode, String waiverVs, String examCode, String examVs,
+                        boolean useImmunization) {
+            this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
+                    examCode, examVs, useImmunization, 365);
+        }
     }
 }
