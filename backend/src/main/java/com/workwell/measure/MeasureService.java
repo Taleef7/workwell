@@ -48,67 +48,71 @@ public class MeasureService {
 
     private record CmsEcqmRecord(String name, String cmsId, String mipsId, String tags) {}
 
+    // 2026 Performance Period — 49 Eligible Clinician eCQMs (source: ecqi.healthit.gov)
     private static final List<CmsEcqmRecord> CMS_ECQM_CATALOG = List.of(
         // Mental Health / Behavioral
-        new CmsEcqmRecord("Preventive Care and Screening: Screening for Depression and Follow-Up Plan", "CMS2v14", "134", "{ecqm,cms,mental-health,preventive}"),
-        new CmsEcqmRecord("Antidepressant Medication Management", "CMS128v13", "009", "{ecqm,cms,mental-health,depression}"),
-        new CmsEcqmRecord("Depression Remission at Twelve Months", "CMS159v13", "370", "{ecqm,cms,mental-health,depression}"),
-        new CmsEcqmRecord("Child and Adolescent Major Depressive Disorder (MDD): Suicide Risk Assessment", "CMS177v13", "382", "{ecqm,cms,mental-health,pediatric}"),
-        new CmsEcqmRecord("Dementia: Cognitive Assessment", "CMS149v13", "281", "{ecqm,cms,mental-health,dementia}"),
-        new CmsEcqmRecord("Follow-Up Care for Children Prescribed ADHD Medication (ADD)", "CMS136v14", "366", "{ecqm,cms,mental-health,pediatric}"),
-        new CmsEcqmRecord("Initiation and Engagement of Substance Use Disorder Treatment", "CMS137v13", "305", "{ecqm,cms,substance-use}"),
+        new CmsEcqmRecord("Preventive Care and Screening: Screening for Depression and Follow-Up Plan", "CMS2v15", "134", "{ecqm,cms,mental-health,preventive}"),
+        new CmsEcqmRecord("Antidepressant Medication Management", "CMS128v14", "009", "{ecqm,cms,mental-health,depression}"),
+        new CmsEcqmRecord("Depression Remission at Twelve Months", "CMS159v14", "370", "{ecqm,cms,mental-health,depression}"),
+        new CmsEcqmRecord("Child and Adolescent Major Depressive Disorder (MDD): Suicide Risk Assessment", "CMS177v14", "382", "{ecqm,cms,mental-health,pediatric}"),
+        new CmsEcqmRecord("Dementia: Cognitive Assessment", "CMS149v14", "281", "{ecqm,cms,mental-health,dementia}"),
+        new CmsEcqmRecord("Follow-Up Care for Children Prescribed ADHD Medication", "CMS136v15", "366", "{ecqm,cms,mental-health,pediatric}"),
+        new CmsEcqmRecord("Initiation and Engagement of Substance Use Disorder Treatment", "CMS137v14", "305", "{ecqm,cms,substance-use}"),
         // Cardiovascular
-        new CmsEcqmRecord("Preventive Care and Screening: Screening for High Blood Pressure and Follow-Up Documented", "CMS22v13", "317", "{ecqm,cms,cardiovascular,preventive}"),
-        new CmsEcqmRecord("Heart Failure (HF): ACE Inhibitor or ARB or ARNI Therapy for LVSD", "CMS135v13", "005", "{ecqm,cms,cardiovascular,heart-failure}"),
-        new CmsEcqmRecord("Heart Failure (HF): Beta-Blocker Therapy for LVSD", "CMS144v13", "008", "{ecqm,cms,cardiovascular,heart-failure}"),
-        new CmsEcqmRecord("Coronary Artery Disease (CAD): Beta-Blocker Therapy - Prior MI or LVSD", "CMS145v13", "007", "{ecqm,cms,cardiovascular}"),
-        new CmsEcqmRecord("Controlling High Blood Pressure", "CMS165v13", "236", "{ecqm,cms,cardiovascular,hypertension}"),
-        new CmsEcqmRecord("Statin Therapy for the Prevention and Treatment of Cardiovascular Disease", "CMS347v8", "438", "{ecqm,cms,cardiovascular,statin}"),
-        new CmsEcqmRecord("Functional Status Assessments for Heart Failure", "CMS90v14", "377", "{ecqm,cms,cardiovascular,heart-failure,functional-status}"),
+        new CmsEcqmRecord("Preventive Care and Screening Screening for High Blood Pressure and Follow Up Documented", "CMS22v14", "317", "{ecqm,cms,cardiovascular,preventive}"),
+        new CmsEcqmRecord("Heart Failure (HF): Angiotensin-Converting Enzyme (ACE) Inhibitor or Angiotensin Receptor Blocker (ARB) or Angiotensin Receptor-Neprilysin Inhibitor (ARNI) Therapy for Left Ventricular Systolic Dysfunction (LVSD)", "CMS135v14", "005", "{ecqm,cms,cardiovascular,heart-failure}"),
+        new CmsEcqmRecord("Heart Failure (HF): Beta-Blocker Therapy for Left Ventricular Systolic Dysfunction (LVSD)", "CMS144v14", "008", "{ecqm,cms,cardiovascular,heart-failure}"),
+        new CmsEcqmRecord("Coronary Artery Disease (CAD): Beta-Blocker Therapy-Prior Myocardial Infarction (MI) or Left Ventricular Systolic Dysfunction (LVEF ≤40%)", "CMS145v14", "007", "{ecqm,cms,cardiovascular}"),
+        new CmsEcqmRecord("Controlling High Blood Pressure", "CMS165v14", "236", "{ecqm,cms,cardiovascular,hypertension}"),
+        new CmsEcqmRecord("Statin Therapy for the Prevention and Treatment of Cardiovascular Disease", "CMS347v9", "438", "{ecqm,cms,cardiovascular,statin}"),
+        new CmsEcqmRecord("Functional Status Assessments for Heart Failure", "CMS90v15", "377", "{ecqm,cms,cardiovascular,heart-failure,functional-status}"),
+        new CmsEcqmRecord("Diagnostic Delay of Venous Thromboembolism in Primary Care", "CMS1173v1", "514", "{ecqm,cms,cardiovascular,vascular}"),
         // Diabetes
-        new CmsEcqmRecord("Diabetes: Glycemic Status Assessment Greater Than 9%", "CMS122v13", "001", "{ecqm,cms,diabetes}"),
-        new CmsEcqmRecord("Diabetes: Eye Exam", "CMS131v13", "117", "{ecqm,cms,diabetes,ophthalmology}"),
-        new CmsEcqmRecord("Diabetic Retinopathy: Communication with the Physician Managing Ongoing Diabetes Care", "CMS142v13", "019", "{ecqm,cms,diabetes,ophthalmology}"),
-        new CmsEcqmRecord("Kidney Health Evaluation", "CMS951v3", "488", "{ecqm,cms,nephrology,diabetes}"),
+        new CmsEcqmRecord("Diabetes: Glycemic Status Assessment Greater Than 9%", "CMS122v14", "001", "{ecqm,cms,diabetes}"),
+        new CmsEcqmRecord("Diabetes: Eye Exam", "CMS131v14", "117", "{ecqm,cms,diabetes,ophthalmology}"),
+        new CmsEcqmRecord("Diabetic Retinopathy: Communication with the Physician Managing Ongoing Diabetes Care", "CMS142v14", "019", "{ecqm,cms,diabetes,ophthalmology}"),
+        new CmsEcqmRecord("Kidney Health Evaluation", "CMS951v4", "488", "{ecqm,cms,nephrology,diabetes}"),
+        new CmsEcqmRecord("Screening for Abnormal Glucose Metabolism in Patients at Risk of Developing Diabetes", "CMS1154v1", "515", "{ecqm,cms,diabetes,preventive}"),
         // Cancer Screening / Preventive
-        new CmsEcqmRecord("Cervical Cancer Screening", "CMS124v13", "309", "{ecqm,cms,cancer-screening,preventive}"),
-        new CmsEcqmRecord("Breast Cancer Screening", "CMS125v13", "112", "{ecqm,cms,cancer-screening,preventive}"),
-        new CmsEcqmRecord("Colorectal Cancer Screening", "CMS130v13", "113", "{ecqm,cms,cancer-screening,preventive}"),
-        new CmsEcqmRecord("Preventive Care and Screening: Body Mass Index (BMI) Screening and Follow-Up Plan", "CMS69v13", "128", "{ecqm,cms,preventive,bmi}"),
-        new CmsEcqmRecord("Preventive Care and Screening: Tobacco Use: Screening and Cessation Intervention", "CMS138v13", "226", "{ecqm,cms,preventive,tobacco}"),
-        new CmsEcqmRecord("Falls: Screening for Future Fall Risk", "CMS139v13", "318", "{ecqm,cms,preventive,falls}"),
-        new CmsEcqmRecord("Weight Assessment and Counseling for Nutrition and Physical Activity for Children/Adolescents", "CMS155v13", "239", "{ecqm,cms,preventive,pediatric}"),
-        new CmsEcqmRecord("Chlamydia Screening in Women", "CMS153v13", "310", "{ecqm,cms,preventive,womens-health}"),
+        new CmsEcqmRecord("Cervical Cancer Screening", "CMS124v14", "309", "{ecqm,cms,cancer-screening,preventive}"),
+        new CmsEcqmRecord("Breast Cancer Screening", "CMS125v14", "112", "{ecqm,cms,cancer-screening,preventive}"),
+        new CmsEcqmRecord("Colorectal Cancer Screening", "CMS130v14", "113", "{ecqm,cms,cancer-screening,preventive}"),
+        new CmsEcqmRecord("Preventive Care and Screening Body Mass Index (BMI) Screening and Follow Up Plan", "CMS69v14", "128", "{ecqm,cms,preventive,bmi}"),
+        new CmsEcqmRecord("Preventive Care and Screening: Tobacco Use: Screening and Cessation Intervention", "CMS138v14", "226", "{ecqm,cms,preventive,tobacco}"),
+        new CmsEcqmRecord("Falls: Screening for Future Fall Risk", "CMS139v14", "318", "{ecqm,cms,preventive,falls}"),
+        new CmsEcqmRecord("Weight Assessment and Counseling for Nutrition and Physical Activity for Children/Adolescents", "CMS155v14", "239", "{ecqm,cms,preventive,pediatric}"),
+        new CmsEcqmRecord("Chlamydia Screening in Women", "CMS153v14", "310", "{ecqm,cms,preventive,womens-health}"),
+        // Respiratory / Antimicrobial Stewardship
+        new CmsEcqmRecord("Appropriate Testing for Pharyngitis", "CMS146v14", "066", "{ecqm,cms,respiratory,antimicrobial-stewardship}"),
+        new CmsEcqmRecord("Appropriate Treatment for Upper Respiratory Infection (URI)", "CMS154v14", "065", "{ecqm,cms,respiratory,antimicrobial-stewardship}"),
         // Pediatric / Immunization
-        new CmsEcqmRecord("Childhood Immunization Status", "CMS117v13", "240", "{ecqm,cms,immunization,pediatric}"),
-        new CmsEcqmRecord("Primary Caries Prevention Intervention as Offered by Dentists", "CMS74v14", "379", "{ecqm,cms,dental,pediatric}"),
-        new CmsEcqmRecord("Children Who Have Dental Decay or Cavities", "CMS75v13", "378", "{ecqm,cms,dental,pediatric}"),
+        new CmsEcqmRecord("Childhood Immunization Status", "CMS117v14", "240", "{ecqm,cms,immunization,pediatric}"),
+        new CmsEcqmRecord("Primary Caries Prevention Intervention as Offered by Dentists", "CMS74v15", "379", "{ecqm,cms,dental,pediatric}"),
+        new CmsEcqmRecord("Children Who Have Dental Decay or Cavities", "CMS75v14", "378", "{ecqm,cms,dental,pediatric}"),
         // HIV / Infectious Disease
-        new CmsEcqmRecord("HIV Viral Suppression", "CMS314v2", "338", "{ecqm,cms,infectious-disease,hiv}"),
-        new CmsEcqmRecord("HIV Screening", "CMS349v7", "475", "{ecqm,cms,infectious-disease,hiv,preventive}"),
-        new CmsEcqmRecord("HIV Annual Retention in Care", "CMS1157v1", "340", "{ecqm,cms,infectious-disease,hiv}"),
-        new CmsEcqmRecord("Sexually Transmitted Infection (STI) Testing for People with HIV", "CMS1188v2", "205", "{ecqm,cms,infectious-disease,hiv,sti}"),
+        new CmsEcqmRecord("HIV Viral Suppression", "CMS314v3", "338", "{ecqm,cms,infectious-disease,hiv}"),
+        new CmsEcqmRecord("HIV Screening", "CMS349v8", "475", "{ecqm,cms,infectious-disease,hiv,preventive}"),
+        new CmsEcqmRecord("HIV Annual Retention in Care", "CMS1157v2", "340", "{ecqm,cms,infectious-disease,hiv}"),
+        new CmsEcqmRecord("Sexually Transmitted Infection (STI) Testing for People with HIV", "CMS1188v3", "205", "{ecqm,cms,infectious-disease,hiv,sti}"),
         // Oncology
-        new CmsEcqmRecord("Prostate Cancer: Avoidance of Overuse of Bone Scan for Staging Low Risk Prostate Cancer Patients", "CMS129v14", "102", "{ecqm,cms,oncology}"),
-        new CmsEcqmRecord("Oncology: Medical and Radiation - Pain Intensity Quantified", "CMS157v13", "143", "{ecqm,cms,oncology,pain}"),
-        new CmsEcqmRecord("Intravesical Bacillus-Calmette-Guerin for Non-Muscle Invasive Bladder Cancer", "CMS646v5", "481", "{ecqm,cms,oncology}"),
-        new CmsEcqmRecord("Bone Density Evaluation for Patients with Prostate Cancer and Receiving Androgen Deprivation Therapy", "CMS645v8", "462", "{ecqm,cms,oncology,musculoskeletal}"),
+        new CmsEcqmRecord("Prostate Cancer Avoidance of Overuse of Bone Scan for Staging Low Risk Prostate Cancer Patients", "CMS129v15", "102", "{ecqm,cms,oncology}"),
+        new CmsEcqmRecord("Oncology: Medical and Radiation - Pain Intensity Quantified", "CMS157v14", "143", "{ecqm,cms,oncology,pain}"),
+        new CmsEcqmRecord("Intravesical Bacillus-Calmette-Guerin for Non-Muscle Invasive Bladder Cancer", "CMS646v6", "481", "{ecqm,cms,oncology}"),
+        new CmsEcqmRecord("Bone Density Evaluation for Patients with Prostate Cancer and Receiving Androgen Deprivation Therapy", "CMS645v9", "462", "{ecqm,cms,oncology,musculoskeletal}"),
         // Ophthalmology
-        new CmsEcqmRecord("Cataracts: 20/40 or Better Visual Acuity within 90 Days Following Cataract Surgery", "CMS133v13", "191", "{ecqm,cms,ophthalmology}"),
-        new CmsEcqmRecord("Primary Open-Angle Glaucoma (POAG): Optic Nerve Evaluation", "CMS143v13", "012", "{ecqm,cms,ophthalmology}"),
+        new CmsEcqmRecord("Cataracts: 20/40 or Better Visual Acuity within 90 Days Following Cataract Surgery", "CMS133v14", "191", "{ecqm,cms,ophthalmology}"),
+        new CmsEcqmRecord("Primary Open-Angle Glaucoma (POAG): Optic Nerve Evaluation", "CMS143v14", "012", "{ecqm,cms,ophthalmology}"),
         // Functional Status / Orthopedic
-        new CmsEcqmRecord("Functional Status Assessment for Total Hip Replacement", "CMS56v13", "376", "{ecqm,cms,functional-status,orthopedic}"),
+        new CmsEcqmRecord("Functional Status Assessment for Total Hip Replacement", "CMS56v14", "376", "{ecqm,cms,functional-status,orthopedic}"),
         // Medication Safety
-        new CmsEcqmRecord("Documentation of Current Medications in the Medical Record", "CMS68v14", "130", "{ecqm,cms,medication-safety,patient-safety}"),
-        new CmsEcqmRecord("Use of High-Risk Medications in Older Adults", "CMS156v13", "238", "{ecqm,cms,medication-safety,geriatric}"),
+        new CmsEcqmRecord("Documentation of Current Medications in the Medical Record", "CMS68v15", "130", "{ecqm,cms,medication-safety,patient-safety}"),
+        new CmsEcqmRecord("Use of High-Risk Medications in Older Adults", "CMS156v14", "238", "{ecqm,cms,medication-safety,geriatric}"),
         // Care Coordination
-        new CmsEcqmRecord("Closing the Referral Loop: Receipt of Specialist Report", "CMS50v13", "374", "{ecqm,cms,care-coordination}"),
+        new CmsEcqmRecord("Closing the Referral Loop: Receipt of Specialist Report", "CMS50v14", "374", "{ecqm,cms,care-coordination}"),
         // Urology
-        new CmsEcqmRecord("Urinary Symptom Score Change 6-12 Months After Diagnosis of Benign Prostatic Hyperplasia", "CMS771v6", "476", "{ecqm,cms,urology}"),
-        // Radiology / Safety
-        new CmsEcqmRecord("Excessive Radiation Dose or Inadequate Image Quality for Diagnostic CT in Adults", "CMS1056v2", "494", "{ecqm,cms,radiology,patient-safety}"),
-        // Musculoskeletal
-        new CmsEcqmRecord("Appropriate Use of DXA Scans in Women Under 65 Years Who Do Not Meet the Risk Factor Profile for Osteoporotic Fracture", "CMS249v7", "472", "{ecqm,cms,musculoskeletal,preventive}")
+        new CmsEcqmRecord("Urinary Symptom Score Change 6-12 Months After Diagnosis of Benign Prostatic Hyperplasia", "CMS771v7", "476", "{ecqm,cms,urology}"),
+        // Radiology / Patient Safety
+        new CmsEcqmRecord("Excessive Radiation Dose or Inadequate Image Quality for Diagnostic Computed Tomography (CT) in Adults (Clinician Level)", "CMS1056v3", "494", "{ecqm,cms,radiology,patient-safety}")
     );
 
     private void ensureInstanceSeeds() {
@@ -1103,23 +1107,33 @@ public class MeasureService {
 
     private void ensureCmsEcqmCatalogSeed() {
         for (CmsEcqmRecord ecqm : CMS_ECQM_CATALOG) {
+            // Strip version suffix so CMS128v13 and CMS128v14 both match as "CMS128"
+            String cmsPrefix = ecqm.cmsId().replaceAll("v\\d+$", "");
+
+            List<UUID> byPrefix = jdbcTemplate.queryForList(
+                    "SELECT id FROM measures WHERE policy_ref LIKE ?", UUID.class, cmsPrefix + "v%");
+
             UUID measureId;
-            try {
-                measureId = jdbcTemplate.queryForObject(
-                        "SELECT id FROM measures WHERE name = ?", UUID.class, ecqm.name());
-            } catch (EmptyResultDataAccessException ex) {
+            if (!byPrefix.isEmpty()) {
+                measureId = byPrefix.get(0);
+                // Update to current performance-year name, CMS ID, and tags
+                jdbcTemplate.update(
+                        "UPDATE measures SET name = ?, policy_ref = ?, tags = ?::text[], updated_at = NOW() WHERE id = ?",
+                        ecqm.name(), ecqm.cmsId(), ecqm.tags(), measureId);
+            } else {
                 measureId = UUID.randomUUID();
                 jdbcTemplate.update(
                         "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
                         measureId, ecqm.name(), ecqm.cmsId(), "WorkWell Studio", ecqm.tags());
             }
+
             Integer existing = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
                     Integer.class, measureId, "v1.0");
             if (existing != null && existing > 0) continue;
 
             Map<String, Object> spec = new LinkedHashMap<>();
-            spec.put("description", ecqm.cmsId() + " (MIPS Quality ID " + ecqm.mipsId() + ") — CMS eCQM catalog entry. CQL authoring pending.");
+            spec.put("description", ecqm.cmsId() + " (MIPS Quality ID " + ecqm.mipsId() + ") — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.");
             spec.put("eligibilityCriteria", Map.of("roleFilter", "", "siteFilter", "", "programEnrollmentText", ""));
             spec.put("exclusions", List.of());
             spec.put("complianceWindow", "Annual");
@@ -1133,7 +1147,7 @@ public class MeasureService {
                     UUID.randomUUID(), measureId, "v1.0", "Draft",
                     toJson(spec), "", "NOT_COMPILED",
                     toJson(Map.of("status", "NOT_COMPILED", "errors", List.of("CQL not yet authored"))),
-                    "CMS eCQM catalog seed — " + ecqm.cmsId());
+                    "CMS eCQM 2026 catalog seed — " + ecqm.cmsId());
         }
     }
 
