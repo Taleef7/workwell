@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-05-21 — 2026 eCQM catalog upgrade (49 measures), infra cleanup
+
+### What changed
+
+**CMS eCQM catalog: 2025 → 2026 (46 → 49 measures)**
+
+Fetched the official 2026 eligible clinician eCQM list from ecqi.healthit.gov. The 2026 performance period has 49 measures — 2 net new vs 2025 (46 carried forward minus CMS249v7 retired, plus 4 new).
+
+Changes vs 2025 catalog:
+- **4 new measures:** CMS146v14 (Appropriate Testing for Pharyngitis, MIPS 066), CMS154v14 (Appropriate Treatment for URI, MIPS 065), CMS1173v1 (Diagnostic Delay of VTE in Primary Care, MIPS 514 — new CMS ID), CMS1154v1 (Screening for Abnormal Glucose Metabolism, MIPS 515 — new CMS ID)
+- **1 retired:** CMS249v7 (Appropriate Use of DXA Scans in Women Under 65) — removed from 2026 eligible clinician list
+- **44 version-bumped:** e.g., CMS128v13→CMS128v14, CMS2v14→CMS2v15, CMS951v3→CMS951v4, etc.
+- **New domain:** Respiratory / Antimicrobial Stewardship (CMS146v14, CMS154v14)
+
+**Seed idempotency fix**
+
+Old logic matched existing measures by exact name — fragile when CMS updates measure titles between performance years (e.g., "Heart Failure (HF): ACE Inhibitor or ARB or ARNI Therapy for LVSD" → full expanded title in 2026). New logic strips the version suffix and queries `policy_ref LIKE 'CMS128v%'` so any version of a CMS measure maps to the same DB row. On match, UPDATE the name, policy_ref, and tags to current year's values. On no match, INSERT. This means the next TWH deploy will update all 45 existing measures in-place rather than creating 45 duplicate rows.
+
+**Workflow cleanup: deleted `deploy-os-mieweb.yml`**
+
+The old `Deploy OS MIEWeb` workflow was still triggering on every push to `main`, building `ghcr.io/taleef7/workwell` (generic non-TWH frontend) and deploying to `workwell.os.mieweb.org` / `workwell-api.os.mieweb.org`. These containers used `DATABASE_URL` (not `DATABASE_URL_TWH`) and no `WORKWELL_INSTANCE` — i.e., a separate, partially seeded environment. Deleted the workflow file; Taleef manually deleted the two containers from the MIE manager UI.
+
+**Container inventory post-cleanup (MIE Phoenix DC):**
+
+| Hostname | Image | Purpose | Keep |
+|----------|-------|---------|------|
+| `twh` | `workwell-twh-frontend` | Live TWH frontend | ✓ |
+| `twh-api` | `workwell-api` | Live TWH backend | ✓ |
+| `workwell` | `workwell` | Old non-TWH frontend | Deleted |
+| `workwell-api` | `workwell-api` | Old non-TWH backend | Deleted |
+
+Only `deploy-twh-mieweb.yml` remains as an active workflow. Every push to `main` now builds and deploys exactly one environment.
+
+**MEASURES.md updated:** catalog summary (58→60 total, 47→49 eCQM), domain breakdown table updated to 2026 IDs, implementation note updated. The old CMS249v7 Musculoskeletal row removed; new Respiratory domain added.
+
+### Commits
+
+- `ee3dfd7` — feat(catalog): upgrade CMS eCQMs to 2026 performance period (49 measures)
+
+### What's next
+
+Sprint 7 features — ready to start. Priority order (from `docs/sprints/SPRINT_07_overdelivery_features.md`):
+1. AI Draft CQL (7.1)
+2. AI Test Fixture Generator (7.2)
+3. Risk Outlook / Predictive Analytics (7.3)
+4. MAT Export (7.4)
+5. Mobile Responsive Layout (7.5)
+
+---
+
 ## 2026-05-21 — TWH consolidation, 47 CMS eCQMs, Fly.io decommission, docs overhaul
 
 ### Context and direction
