@@ -13,10 +13,11 @@
 - `backend/src/main/java/com/workwell/measure/MeasureService.java` — Added `CMS_ECQM_CATALOG` static list (47 measures, 2025 CMS eCQMs) and `ensureCmsEcqmCatalogSeed()` method. Called from `ensureInstanceSeeds()` for `ecqm` and `twh` instances. Each eCQM is seeded as Draft v1.0 with its CMS ID in `policy_ref`, clinical domain tags, and `cmsEcqmId`/`mipsQualityId` stored in `spec_json`. Categories covered: mental health, cardiovascular, diabetes, cancer screening, pediatric, HIV/infectious disease, oncology, ophthalmology, functional status, medication safety, care coordination, urology, radiology.
 - `frontend/app/(dashboard)/measures/page.tsx` — Policy Ref column: when value matches `CMS\d+` pattern, renders it as a blue mono badge (`CMS128v13` style) instead of plain text. Makes CMS eCQMs visually distinct from OSHA CFR citations and HEDIS references at a glance.
 
-**You still need to do (manual):**
-- Delete the 4 non-TWH MIE containers: `workwell`, `ecqm`, `workwell-api`, `ecqm-api` from the MIE Create-a-Container UI at os.mieweb.org
-- Drop the two orphaned Neon databases (workwell and ecqm instances) from the Neon dashboard to stay within the free tier
-- The `deploy-twh-mieweb.yml` workflow will deploy both TWH containers automatically on next push to main
+**Manual cleanup completed:**
+- Deleted 4 non-TWH MIE containers (`workwell`, `ecqm`, `workwell-api`, `ecqm-api`) — only `twh` + `twh-api` remain
+- Neon already had only `workwell-twh` project (no orphaned databases to clean up)
+- Destroyed `workwell-measure-studio-api` on Fly.io — old secondary stack, stale, no longer needed
+- MIE TWH is the single deployment target going forward
 
 ---
 
