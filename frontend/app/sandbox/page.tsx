@@ -7,6 +7,8 @@ import { ArrowRight, Circle, Loader2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { DEMO_EMAIL, DEMO_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
+
 type SandboxStatus = "loading" | "error";
 
 const steps = [
@@ -68,7 +70,7 @@ export default function SandboxPage() {
             <span className="text-base font-bold tracking-[0.18em] text-slate-950">WW</span>
           </div>
           <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
-            WorkWell Measure Studio
+            {APP_NAME}
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white">
             Opening the sandbox

@@ -525,6 +525,46 @@ public class CqlEvaluationService {
                     "urn:workwell:vs:flu-vaccines",
                     true
             );
+            case "Hypertension BP Screening" -> new MeasureSeedSpec(
+                    "hypertension",
+                    "wellness-enrolled",
+                    "urn:workwell:vs:wellness-enrollment",
+                    "wellness-exempt",
+                    "urn:workwell:vs:wellness-exemption",
+                    "bp-screen",
+                    "urn:workwell:vs:bp-screening",
+                    false
+            );
+            case "Diabetes HbA1c Monitoring" -> new MeasureSeedSpec(
+                    "diabetes_hba1c",
+                    "diabetes-enrolled",
+                    "urn:workwell:vs:diabetes-program",
+                    "diabetes-exempt",
+                    "urn:workwell:vs:diabetes-exemption",
+                    "hba1c-lab",
+                    "urn:workwell:vs:hba1c-labs",
+                    false
+            );
+            case "BMI Screening & Counseling" -> new MeasureSeedSpec(
+                    "obesity_bmi",
+                    "wellness-enrolled",
+                    "urn:workwell:vs:wellness-enrollment",
+                    "wellness-exempt",
+                    "urn:workwell:vs:wellness-exemption",
+                    "bmi-screen",
+                    "urn:workwell:vs:bmi-screening",
+                    false
+            );
+            case "Cholesterol LDL Screening" -> new MeasureSeedSpec(
+                    "cholesterol_ldl",
+                    "cholesterol-enrolled",
+                    "urn:workwell:vs:cholesterol-program",
+                    "cholesterol-exempt",
+                    "urn:workwell:vs:cholesterol-exemption",
+                    "ldl-lab",
+                    "urn:workwell:vs:ldl-labs",
+                    false
+            );
             default -> null;
         };
     }
