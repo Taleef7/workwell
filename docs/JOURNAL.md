@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-05-21 — Container consolidation to TWH-only; all 47 CMS eCQMs seeded in catalog
+
+**Goal:** Consolidate three separate instances (workwell, ecqm, twh) down to one TWH container per Doug's direction. TWH is all-encompassing — OSHA safety and eCQM wellness both live under it. Also seed all 47 official CMS eCQMs (2025 performance period) as Draft catalog entries, giving the platform visibility into the full CMS quality measure landscape.
+
+**Key decision from Doug:** "TWH is all-encompassing. OSHA and eCQMs come under it." Single container from now on.
+
+**What changed:**
+
+- `.github/workflows/deploy-ecqm-mieweb.yml` — **Deleted.** No longer needed; TWH instance covers everything.
+- `docs/DEPLOY.md` — Added **MIE Create-a-Container Deployment** section as the primary reference. Documents TWH-only architecture: single frontend (`twh.os.mieweb.org`) + backend (`twh-api.os.mieweb.org`). Updated CI/CD section to name `deploy-twh-mieweb.yml` as the active deploy workflow.
+- `backend/src/main/java/com/workwell/measure/MeasureService.java` — Added `CMS_ECQM_CATALOG` static list (47 measures, 2025 CMS eCQMs) and `ensureCmsEcqmCatalogSeed()` method. Called from `ensureInstanceSeeds()` for `ecqm` and `twh` instances. Each eCQM is seeded as Draft v1.0 with its CMS ID in `policy_ref`, clinical domain tags, and `cmsEcqmId`/`mipsQualityId` stored in `spec_json`. Categories covered: mental health, cardiovascular, diabetes, cancer screening, pediatric, HIV/infectious disease, oncology, ophthalmology, functional status, medication safety, care coordination, urology, radiology.
+- `frontend/app/(dashboard)/measures/page.tsx` — Policy Ref column: when value matches `CMS\d+` pattern, renders it as a blue mono badge (`CMS128v13` style) instead of plain text. Makes CMS eCQMs visually distinct from OSHA CFR citations and HEDIS references at a glance.
+
+**You still need to do (manual):**
+- Delete the 4 non-TWH MIE containers: `workwell`, `ecqm`, `workwell-api`, `ecqm-api` from the MIE Create-a-Container UI at os.mieweb.org
+- Drop the two orphaned Neon databases (workwell and ecqm instances) from the Neon dashboard to stay within the free tier
+- The `deploy-twh-mieweb.yml` workflow will deploy both TWH containers automatically on next push to main
+
+---
+
 ## 2026-05-21 — Post-merge fixes: AI health check, real-time run progress, eCQM/TWH branding
 
 **Goal:** Fix AI integration "Degraded" status, add real-time run progress (spinner + live timer + auto-reload on completion), fix Traceability tab 403, fix hardcoded "Four measures" text for multi-instance deployments, and complete eCQM/TWH workflow `NEXT_PUBLIC_APP_DESCRIPTION` build-arg.

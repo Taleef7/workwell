@@ -161,7 +161,15 @@ export default function MeasuresPage() {
                 onClick={() => router.push(`/studio/${item.id}`)}
               >
                 <td className="px-3 py-2">{item.name}</td>
-                <td className="px-3 py-2">{item.policyRef}</td>
+                <td className="px-3 py-2">
+                  {item.policyRef && /^CMS\d+/.test(item.policyRef) ? (
+                    <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                      {item.policyRef}
+                    </span>
+                  ) : (
+                    item.policyRef
+                  )}
+                </td>
                 <td className="px-3 py-2">{item.version}</td>
                 <td className="px-3 py-2">
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(item.status)}`}>{labelFor(MEASURE_STATUS_LABELS, item.status)}</span>
