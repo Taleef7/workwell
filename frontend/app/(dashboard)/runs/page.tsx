@@ -97,6 +97,7 @@ type RunInsightResponse = {
 };
 
 const RUN_PAGE_SIZE = 20;
+const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";
@@ -131,6 +132,14 @@ function formatRelativeTimestamp(dateString: string | null): string {
   }
 
   return date.toLocaleDateString();
+}
+
+function formatRunDuration(durationMs: number, status?: string): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "-";
+  if (durationMs > MAX_DISPLAY_DURATION_MS) {
+    return normalizeEnumValue(status ?? "") === "RUNNING" ? "Stalled" : "-";
+  }
+  return `${Math.round(durationMs / 1000)}s`;
 }
 
 export default function RunsPage() {
@@ -495,7 +504,7 @@ export default function RunsPage() {
                   </td>
                   <td className="px-3 py-2 align-top">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
                   <td className="px-3 py-2 align-top">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
-                  <td className="px-3 py-2 align-top">{Math.round(run.durationMs / 1000)}s</td>
+                  <td className="px-3 py-2 align-top">{formatRunDuration(run.durationMs, run.status)}</td>
                   <td className="px-3 py-2 align-top text-slate-600" title={formatAbsoluteTimestamp(run.startedAt)}>
                     {formatRelativeTimestamp(run.startedAt)}
                   </td>
@@ -541,7 +550,7 @@ export default function RunsPage() {
               <p className="text-xs text-slate-600">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
               <p className="text-xs text-slate-600">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-slate-600">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
-              <p className="text-xs text-slate-600">Duration: {Math.round(selectedRun.durationMs / 1000)}s</p>
+              <p className="text-xs text-slate-600">Duration: {formatRunDuration(selectedRun.durationMs, selectedRun.status)}</p>
               <p className="text-xs text-slate-600">Evaluated: {selectedRun.totalEvaluated}</p>
               <p className="text-xs text-slate-600">Cases: {selectedRun.totalCases}</p>
               <p className="text-xs text-slate-600">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>

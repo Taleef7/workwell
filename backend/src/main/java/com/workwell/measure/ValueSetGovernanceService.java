@@ -35,7 +35,7 @@ public class ValueSetGovernanceService {
     }
 
     public ResolveCheckResult resolveCheck(UUID measureId) {
-        ensureDemoValueSetLinks();
+        ensureDemoValueSets();
         UUID measureVersionId = latestMeasureVersionId(measureId);
         String cqlText = getCqlText(measureVersionId);
 
@@ -230,11 +230,118 @@ public class ValueSetGovernanceService {
 
     // Private helpers
 
-    private void ensureDemoValueSetLinks() {
+    private void ensureDemoValueSets() {
+        // 1. Update/Ensure the main 4 procedure value sets with their correct CQL-matching names & OIDs
+        ensureValueSet(
+                DEMO_VS_AUDIOGRAM,
+                "urn:workwell:vs:audiogram-procedures",
+                "Audiogram Procedures",
+                "2025-demo",
+                "[{\"code\":\"LOCAL-AUD-001\",\"display\":\"Baseline audiogram\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"LOCAL-AUD-002\",\"display\":\"Annual audiogram evaluation\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"LOCAL-AUD-003\",\"display\":\"Audiometric test pure tone\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"audiogram-procedure\",\"display\":\"Audiogram procedure\",\"system\":\"urn:workwell:vs:audiogram-procedures\"}," +
+                "{\"code\":\"92557\",\"display\":\"Comprehensive audiometry evaluation\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]"
+        );
+
+        ensureValueSet(
+                DEMO_VS_TB,
+                "urn:workwell:vs:tb-screening",
+                "TB Screening Procedures",
+                "2025-demo",
+                "[{\"code\":\"LOCAL-TB-001\",\"display\":\"PPD skin test placement\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"LOCAL-TB-002\",\"display\":\"TB IGRA blood test\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"tb-screen\",\"display\":\"TB Screening Procedures\",\"system\":\"urn:workwell:vs:tb-screening\"}," +
+                "{\"code\":\"86580\",\"display\":\"Intradermal skin test\",\"system\":\"http://www.ama-assn.org/go/cpt\"}]"
+        );
+
+        ensureValueSet(
+                DEMO_VS_HAZWOPER,
+                "urn:workwell:vs:hazwoper-exams",
+                "HAZWOPER Surveillance Exams",
+                "2025-demo",
+                "[{\"code\":\"LOCAL-HAZ-001\",\"display\":\"HAZWOPER medical surveillance exam\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"LOCAL-HAZ-002\",\"display\":\"Annual fitness-for-duty evaluation\",\"system\":\"urn:workwell:demo\"}," +
+                "{\"code\":\"hazwoper-exam\",\"display\":\"HAZWOPER Surveillance Exams\",\"system\":\"urn:workwell:vs:hazwoper-exams\"}]"
+        );
+
+        ensureValueSet(
+                DEMO_VS_FLU,
+                "urn:workwell:vs:flu-vaccines",
+                "Influenza Vaccines",
+                "2025-demo",
+                "[{\"code\":\"88\",\"display\":\"Influenza virus vaccine unspecified\",\"system\":\"http://hl7.org/fhir/sid/cvx\"}," +
+                "{\"code\":\"141\",\"display\":\"Influenza seasonal injectable\",\"system\":\"http://hl7.org/fhir/sid/cvx\"}," +
+                "{\"code\":\"flu-vaccine\",\"display\":\"Influenza Vaccines\",\"system\":\"urn:workwell:vs:flu-vaccines\"}," +
+                "{\"code\":\"LOCAL-FLU-001\",\"display\":\"Flu vaccine administered\",\"system\":\"urn:workwell:demo\"}]"
+        );
+
+        // 2. Seed remaining 8 value sets with stable UUIDs
+        UUID VS_AUDIOGRAM_ENROLL = UUID.fromString("a0000001-0000-0000-0000-000000000005");
+        UUID VS_AUDIOGRAM_WAIVER = UUID.fromString("a0000001-0000-0000-0000-000000000006");
+        
+        UUID VS_TB_ENROLL = UUID.fromString("a0000001-0000-0000-0000-000000000007");
+        UUID VS_TB_WAIVER = UUID.fromString("a0000001-0000-0000-0000-000000000008");
+        
+        UUID VS_HAZWOPER_ENROLL = UUID.fromString("a0000001-0000-0000-0000-000000000009");
+        UUID VS_HAZWOPER_WAIVER = UUID.fromString("a0000001-0000-0000-0000-000000000010");
+        
+        UUID VS_FLU_ENROLL = UUID.fromString("a0000001-0000-0000-0000-000000000011");
+        UUID VS_FLU_WAIVER = UUID.fromString("a0000001-0000-0000-0000-000000000012");
+
+        ensureValueSet(VS_AUDIOGRAM_ENROLL, "urn:workwell:vs:hearing-enrollment", "Hearing Conservation Enrollment", "2025-demo",
+                "[{\"code\":\"hearing-enrollment\",\"display\":\"Hearing Conservation Enrollment\",\"system\":\"urn:workwell:vs:hearing-enrollment\"}]");
+        ensureValueSet(VS_AUDIOGRAM_WAIVER, "urn:workwell:vs:audiogram-waiver", "Audiogram Medical Waiver", "2025-demo",
+                "[{\"code\":\"audiogram-waiver\",\"display\":\"Audiogram Medical Waiver\",\"system\":\"urn:workwell:vs:audiogram-waiver\"}]");
+
+        ensureValueSet(VS_TB_ENROLL, "urn:workwell:vs:tb-eligible-roles", "TB Eligible Roles", "2025-demo",
+                "[{\"code\":\"tb-program\",\"display\":\"TB Eligible Roles\",\"system\":\"urn:workwell:vs:tb-eligible-roles\"}]");
+        ensureValueSet(VS_TB_WAIVER, "urn:workwell:vs:tb-exemption", "TB Medical Exemption", "2025-demo",
+                "[{\"code\":\"tb-exemption\",\"display\":\"TB Medical Exemption\",\"system\":\"urn:workwell:vs:tb-exemption\"}]");
+
+        ensureValueSet(VS_HAZWOPER_ENROLL, "urn:workwell:vs:hazwoper-enrollment", "HAZWOPER Program Enrollment", "2025-demo",
+                "[{\"code\":\"hazwoper-program\",\"display\":\"HAZWOPER Program Enrollment\",\"system\":\"urn:workwell:vs:hazwoper-enrollment\"}]");
+        ensureValueSet(VS_HAZWOPER_WAIVER, "urn:workwell:vs:hazwoper-exemption", "HAZWOPER Medical Exemption", "2025-demo",
+                "[{\"code\":\"hazwoper-exemption\",\"display\":\"HAZWOPER Medical Exemption\",\"system\":\"urn:workwell:vs:hazwoper-exemption\"}]");
+
+        ensureValueSet(VS_FLU_ENROLL, "urn:workwell:vs:clinical-roles", "Clinical Facing Roles", "2025-demo",
+                "[{\"code\":\"clinical-role\",\"display\":\"Clinical Facing Roles\",\"system\":\"urn:workwell:vs:clinical-roles\"}]");
+        ensureValueSet(VS_FLU_WAIVER, "urn:workwell:vs:flu-exemption", "Flu Vaccine Exemption", "2025-demo",
+                "[{\"code\":\"flu-exemption\",\"display\":\"Flu Vaccine Exemption\",\"system\":\"urn:workwell:vs:flu-exemption\"}]");
+
+        // 3. Link them all
         ensureLink("Audiogram", DEMO_VS_AUDIOGRAM);
+        ensureLink("Audiogram", VS_AUDIOGRAM_ENROLL);
+        ensureLink("Audiogram", VS_AUDIOGRAM_WAIVER);
+
         ensureLink("TB Surveillance", DEMO_VS_TB);
+        ensureLink("TB Surveillance", VS_TB_ENROLL);
+        ensureLink("TB Surveillance", VS_TB_WAIVER);
+
         ensureLink("HAZWOPER Surveillance", DEMO_VS_HAZWOPER);
+        ensureLink("HAZWOPER Surveillance", VS_HAZWOPER_ENROLL);
+        ensureLink("HAZWOPER Surveillance", VS_HAZWOPER_WAIVER);
+
         ensureLink("Flu Vaccine", DEMO_VS_FLU);
+        ensureLink("Flu Vaccine", VS_FLU_ENROLL);
+        ensureLink("Flu Vaccine", VS_FLU_WAIVER);
+    }
+
+    private void ensureValueSet(UUID id, String oid, String name, String version, String codesJson) {
+        jdbcTemplate.update("DELETE FROM value_sets WHERE oid = ? AND id <> ?", oid, id);
+
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM value_sets WHERE id = ?", Integer.class, id);
+        if (count != null && count > 0) {
+            jdbcTemplate.update(
+                    "UPDATE value_sets SET oid = ?, name = ?, version = ?, codes_json = ?::jsonb, resolution_status = 'RESOLVED', last_resolved_at = NOW() WHERE id = ?",
+                    oid, name, version, codesJson, id
+            );
+        } else {
+            jdbcTemplate.update(
+                    "INSERT INTO value_sets (id, oid, name, version, codes_json, resolution_status, status, source, last_resolved_at) VALUES (?, ?, ?, ?, ?::jsonb, 'RESOLVED', 'ACTIVE', 'WorkWell Demo', NOW())",
+                    id, oid, name, version, codesJson
+            );
+        }
     }
 
     private void ensureLink(String measureName, UUID valueSetId) {
