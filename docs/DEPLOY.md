@@ -4,6 +4,48 @@
 **Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
 **Cost target:** keep the live stack under about $25/month.
 
+---
+
+## MIE Create-a-Container Deployment (Primary Demo Stack)
+
+The primary demo deployment runs on MIE's internal container platform (`os.mieweb.org`).
+**One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
+
+| Service | Hostname | Image |
+|---------|----------|-------|
+| Frontend | `twh.os.mieweb.org` | `ghcr.io/taleef7/workwell-twh-frontend` |
+| Backend API | `twh-api.os.mieweb.org` | `ghcr.io/taleef7/workwell-api` |
+
+### Deployment workflow
+
+Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
+1. Builds the backend image tagged with `latest` + `sha-<SHA>`
+2. Builds the frontend image with TWH branding baked in via build-args
+3. Deploys both containers to MIE via `deploy-mieweb-container.sh`
+
+### Required GitHub Secrets for MIE deploy
+
+| Secret | Purpose |
+|--------|---------|
+| `LAUNCHPAD_API_URL` | MIE Create-a-Container API base URL |
+| `LAUNCHPAD_API_KEY` | MIE API authentication key |
+| `DATABASE_URL_TWH` | Neon pooled connection string for TWH instance |
+| `OPENAI_API_KEY` | AI services (Draft Spec, Explain Why Flagged) |
+| `WORKWELL_AUTH_JWT_SECRET_TWH` | JWT signing secret for TWH instance |
+
+### Instance seeding
+
+The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
+- All 4 OSHA surveillance measures with full CQL (Audiogram, HAZWOPER, TB, Flu)
+- 4 HEDIS wellness catalog measures (Cholesterol, BMI, Diabetes HbA1c, Hypertension)
+- All 47 CMS eCQM catalog entries (Draft, awaiting CQL authoring)
+
+### Manual re-deploy (force update existing containers)
+
+Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
+
+---
+
 ## Stack
 
 | Layer | Service | Tier | Cost |
@@ -124,14 +166,14 @@ volatile demo tables including `audit_events`; it returns 403 under the `prod` p
 
 ## CI/CD
 
-GitHub Actions workflow `.github/workflows/ci.yml` currently:
+**Active deploy workflow:** `.github/workflows/deploy-twh-mieweb.yml`
+- Triggers on every push to `main` and via `workflow_dispatch`
+- Builds backend + frontend Docker images, pushes to GHCR, deploys both containers to MIE
 
-- Runs the backend build
+**CI workflow:** `.github/workflows/ci.yml`
+- Runs backend build + tests
 - Runs frontend lint
-- Does not deploy Fly.io or Vercel
-- Does not gate deploys or validate deployment env vars
-
-Deployments are currently performed outside this workflow (for example, via Fly CLI and Vercel's own deployment flow).
+- Does not deploy (deploy is separate workflow above)
 
 ## Health checks
 
