@@ -98,6 +98,7 @@ type RunInsightResponse = {
 
 const RUN_PAGE_SIZE = 20;
 const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
+const TERMINAL_RUN_STATUSES = new Set(["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"]);
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";
@@ -168,6 +169,10 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
+  const [isRunTriggering, setIsRunTriggering] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRunStartedAt, setActiveRunStartedAt] = useState<Date | null>(null);
+  const [runElapsedSec, setRunElapsedSec] = useState(0);
   const { siteId, from, to } = useGlobalFilters();
   const rerunSupported = selectedRun ? ["ALL_PROGRAMS", "MEASURE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType)) : false;
   const selectedRunIdRef = useRef<string | null>(selectedRunId);
@@ -175,6 +180,7 @@ export default function RunsPage() {
   useEffect(() => {
     selectedRunIdRef.current = selectedRunId;
   }, [selectedRunId]);
+
 
   const loadMeasures = useCallback(async () => {
     try {
@@ -262,6 +268,64 @@ export default function RunsPage() {
     }
   }, [api, selectedRunId]);
 
+  // Poll the active run every 2 s; stop and reload when it reaches a terminal state.
+  useEffect(() => {
+    if (!activeRunId) return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await api.get<RunListItem>(`/api/runs/${activeRunId}`);
+        setRuns((prev) =>
+          prev.map((r) =>
+            r.runId === activeRunId
+              ? { ...r, status: updated.status, durationMs: updated.durationMs, completedAt: updated.completedAt }
+              : r
+          )
+        );
+        if (TERMINAL_RUN_STATUSES.has(normalizeEnumValue(updated.status))) {
+          setActiveRunId(null);
+          setActiveRunStartedAt(null);
+          setIsRunTriggering(false);
+          void loadRuns();
+          if (selectedRunIdRef.current === activeRunId) {
+            void (async () => {
+              try {
+                const [summary, logs] = await Promise.all([
+                  api.get<RunSummary>(`/api/runs/${activeRunId}`),
+                  api.get<RunLogEntry[]>(`/api/runs/${activeRunId}/logs?limit=200`),
+                ]);
+                setSelectedRun(summary);
+                setRunLogs(logs);
+                api
+                  .get<RunOutcomeRow[]>(`/api/runs/${activeRunId}/outcomes`)
+                  .then(setRunOutcomes)
+                  .catch(() => setRunOutcomes([]));
+              } catch {
+                // ignore transient error on completion reload
+              }
+            })();
+          }
+        }
+      } catch {
+        // transient polling error — keep going
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [activeRunId, api, loadRuns]);
+
+  // Live elapsed-second timer while a run is in progress.
+  useEffect(() => {
+    if (!activeRunStartedAt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRunElapsedSec(0);
+      return;
+    }
+    setRunElapsedSec(Math.floor((Date.now() - activeRunStartedAt.getTime()) / 1000));
+    const interval = setInterval(() => {
+      setRunElapsedSec(Math.floor((Date.now() - activeRunStartedAt.getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeRunStartedAt]);
+
   useEffect(() => {
     urlRunIdRef.current = urlRunId;
     if (urlRunId) {
@@ -286,6 +350,7 @@ export default function RunsPage() {
 
   async function runManualScope() {
     setError(null);
+    setIsRunTriggering(true);
     try {
       const payload: Record<string, string | boolean | null> = {
         scopeType: runScopeType,
@@ -308,24 +373,30 @@ export default function RunsPage() {
       const data = await api.post<typeof payload, ManualRunResponse>("/api/runs/manual", payload);
       emitToast(data.scopeLabel ? `${data.scopeLabel} - ${data.message}` : data.message);
       setSelectedRunId(data.runId);
+      setActiveRunId(data.runId);
+      setActiveRunStartedAt(new Date());
       await loadRuns();
-      await loadSelectedRun();
+      // Detail will reload via useEffect([selectedRunId, ...]) — no duplicate call needed.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setIsRunTriggering(false);
     }
   }
 
   async function rerunSameScope() {
     if (!selectedRunId) return;
     setError(null);
+    setIsRunTriggering(true);
     try {
       const data = await api.post<undefined, ManualRunResponse>(`/api/runs/${selectedRunId}/rerun`);
       emitToast("Rerun started");
       setSelectedRunId(data.runId);
+      setActiveRunId(data.runId);
+      setActiveRunStartedAt(new Date());
       await loadRuns();
-      await loadSelectedRun();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setIsRunTriggering(false);
     }
   }
 
@@ -364,11 +435,21 @@ export default function RunsPage() {
             Export outcomes CSV
           </button>
           <button
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
             onClick={() => void rerunSameScope()}
-            disabled={!selectedRunId || !rerunSupported}
+            disabled={!selectedRunId || !rerunSupported || isRunTriggering}
           >
-            Rerun Selected Scope
+            {isRunTriggering ? (
+              <>
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Running…
+              </>
+            ) : (
+              "Rerun Selected Scope"
+            )}
           </button>
         </div>
       </div>
@@ -449,8 +530,22 @@ export default function RunsPage() {
             </div>
           ) : null}
           <div className="flex items-end">
-            <button className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" onClick={() => void runManualScope()}>
-              Run Now
+            <button
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={() => void runManualScope()}
+              disabled={isRunTriggering}
+            >
+              {isRunTriggering ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Running…
+                </>
+              ) : (
+                "Run Now"
+              )}
             </button>
           </div>
         </div>
@@ -504,7 +599,15 @@ export default function RunsPage() {
                   </td>
                   <td className="px-3 py-2 align-top">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
                   <td className="px-3 py-2 align-top">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
-                  <td className="px-3 py-2 align-top">{formatRunDuration(run.durationMs, run.status)}</td>
+                  <td className="px-3 py-2 align-top">
+                    {run.runId === activeRunId ? (
+                      <span className="tabular-nums">
+                        {runElapsedSec}s <span className="animate-pulse text-slate-400">●</span>
+                      </span>
+                    ) : (
+                      formatRunDuration(run.durationMs, run.status)
+                    )}
+                  </td>
                   <td className="px-3 py-2 align-top text-slate-600" title={formatAbsoluteTimestamp(run.startedAt)}>
                     {formatRelativeTimestamp(run.startedAt)}
                   </td>
@@ -550,7 +653,16 @@ export default function RunsPage() {
               <p className="text-xs text-slate-600">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
               <p className="text-xs text-slate-600">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-slate-600">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
-              <p className="text-xs text-slate-600">Duration: {formatRunDuration(selectedRun.durationMs, selectedRun.status)}</p>
+              <p className="text-xs text-slate-600">
+                Duration:{" "}
+                {selectedRunId === activeRunId ? (
+                  <span className="tabular-nums">
+                    {runElapsedSec}s <span className="animate-pulse text-slate-400">●</span>
+                  </span>
+                ) : (
+                  formatRunDuration(selectedRun.durationMs, selectedRun.status)
+                )}
+              </p>
               <p className="text-xs text-slate-600">Evaluated: {selectedRun.totalEvaluated}</p>
               <p className="text-xs text-slate-600">Cases: {selectedRun.totalCases}</p>
               <p className="text-xs text-slate-600">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>

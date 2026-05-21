@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-05-21 — Post-merge fixes: AI health check, real-time run progress, eCQM/TWH branding
+
+**Goal:** Fix AI integration "Degraded" status, add real-time run progress (spinner + live timer + auto-reload on completion), fix Traceability tab 403, fix hardcoded "Four measures" text for multi-instance deployments, and complete eCQM/TWH workflow `NEXT_PUBLIC_APP_DESCRIPTION` build-arg.
+
+**Branch:** `feat/ecqm-twh-instances`
+
+**What changed:**
+
+- `backend/src/main/java/com/workwell/admin/IntegrationHealthService.java` — `checkAiHealth()` was calling `POST /v1/responses` (returned HTTP 400 for `gpt-5.4-nano`). Changed to `GET /v1/models` which validates the API key regardless of model name. Returns healthy if 200, degraded otherwise.
+- `backend/src/main/java/com/workwell/config/SecurityConfig.java` — Added explicit `requestMatchers(HttpMethod.GET, "/api/measures/*/traceability").authenticated()` before the wildcard GET rule as belt-and-suspenders fix for Traceability tab 403 reports.
+- `frontend/app/page.tsx` — Added `NEXT_PUBLIC_APP_DESCRIPTION` env var constant with fallback; replaced hardcoded "Four measures, complete case management..." subtitle with `{APP_DESCRIPTION}`. TWH landing page will now correctly read "Eight measures (OSHA safety + wellness)...".
+- `.github/workflows/deploy-ecqm-mieweb.yml` — Added `APP_DESCRIPTION` env var and `NEXT_PUBLIC_APP_DESCRIPTION` Docker build-arg: "Four clinical quality measures, complete case management, and a full audit trail — one reviewable dashboard."
+- `.github/workflows/deploy-twh-mieweb.yml` — Added `APP_DESCRIPTION` env var and `NEXT_PUBLIC_APP_DESCRIPTION` Docker build-arg: "Eight measures (OSHA safety + wellness), complete case management, and a full audit trail — one reviewable dashboard."
+- `frontend/Dockerfile` — Added `NEXT_PUBLIC_APP_DESCRIPTION` build arg and `ENV` statement (default: workwell 4-measure text) so per-instance workflows can override it at build time.
+- `frontend/app/(dashboard)/runs/page.tsx` — Real-time run progress:
+  - New state: `isRunTriggering`, `activeRunId`, `activeRunStartedAt`, `runElapsedSec`.
+  - Polling effect (`useEffect` on `activeRunId`): polls `GET /api/runs/{id}` every 2 s, updates the run row in the table live, stops and auto-reloads (runs list + run detail + outcomes) when status reaches `COMPLETED|FAILED|PARTIAL_FAILURE|CANCELLED`.
+  - Timer effect (`useEffect` on `activeRunStartedAt`): increments `runElapsedSec` every second.
+  - Run Now button: spinner + "Running…" label while `isRunTriggering`; disabled during run to prevent double-submit.
+  - Rerun Selected Scope button: same spinner treatment; disabled while a run is in progress.
+  - Duration column: shows live `{runElapsedSec}s ●` (animated dot) for the active run row; static formatted duration for all others.
+  - Detail panel Duration field: same live/static treatment.
+- `frontend/features/studio/components/TestsTab.tsx` — Validate button shows spinner + "Validating…" while the `/tests/validate` POST is in flight; disabled during the call.
+
+**Verification:** Frontend TypeScript check clean; ESLint clean (0 errors, 0 warnings). Backend tests running.
+
+---
+
 ## 2026-05-21 — eCQM and TWH instance support (feat/ecqm-twh-instances)
 
 **Goal:** Add `ecqm.os.mieweb.org` (clinical quality / wellness measures) and `twh.os.mieweb.org` (Total Worker Health — all 8 measures) as independent WorkWell instances. Same backend Docker image, instance-aware seeding via `WORKWELL_INSTANCE` env var, separate Neon databases, separate frontend Docker images with per-instance branding.

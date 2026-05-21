@@ -138,22 +138,18 @@ public class IntegrationHealthService {
             return new SyncResult("degraded", "OPENAI_API_KEY not configured", Map.of("model", openAiModel));
         }
 
-        String body = toJson(Map.of(
-                "model", openAiModel,
-                "input", "ping",
-                "max_output_tokens", 1
-        ));
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.openai.com/v1/responses"))
+        // Use the models list endpoint — a simple GET that validates the API key
+        // without requiring a specific model name to exist.
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.openai.com/v1/models"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + openAiApiKey)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .GET()
                 .build();
 
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                return new SyncResult("healthy", "Manual sync triggered", Map.of("model", openAiModel, "statusCode", response.statusCode()));
+                return new SyncResult("healthy", "OpenAI API key valid", Map.of("model", openAiModel, "statusCode", response.statusCode()));
             }
             return new SyncResult("degraded", "OpenAI health check failed (HTTP " + response.statusCode() + ")", Map.of("model", openAiModel, "statusCode", response.statusCode()));
         } catch (Exception ex) {
