@@ -294,6 +294,56 @@ class AdminControllerTest {
     }
 
     @Test
+    void createsTerminologyMappingWithProposedStatus() throws Exception {
+        UUID mappingId = UUID.fromString("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+        when(valueSetGovernanceService.createTerminologyMapping(
+                "ANNUAL-FIT-TEST", "Annual respirator fit test", "urn:workwell:demo",
+                "415070008", "Fitting of mask (procedure)", "http://snomed.info/sct",
+                "PROPOSED", 0.90, "Demo fit test mapping"
+        )).thenReturn(new ValueSetGovernanceService.TerminologyMapping(
+                mappingId,
+                "ANNUAL-FIT-TEST", "Annual respirator fit test", "urn:workwell:demo",
+                "415070008", "Fitting of mask (procedure)", "http://snomed.info/sct",
+                "PROPOSED", 0.90, null, null, "Demo fit test mapping"
+        ));
+
+        mockMvc.perform(post("/api/admin/terminology-mappings")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "localCode": "ANNUAL-FIT-TEST",
+                                  "localDisplay": "Annual respirator fit test",
+                                  "localSystem": "urn:workwell:demo",
+                                  "standardCode": "415070008",
+                                  "standardDisplay": "Fitting of mask (procedure)",
+                                  "standardSystem": "http://snomed.info/sct",
+                                  "mappingStatus": "PROPOSED",
+                                  "mappingConfidence": 0.90,
+                                  "notes": "Demo fit test mapping"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.localCode").value("ANNUAL-FIT-TEST"))
+                .andExpect(jsonPath("$.standardCode").value("415070008"))
+                .andExpect(jsonPath("$.mappingStatus").value("PROPOSED"));
+    }
+
+    @Test
+    void rejectsTerminologyMappingMissingRequiredFields() throws Exception {
+        mockMvc.perform(post("/api/admin/terminology-mappings")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "localCode": "",
+                                  "localSystem": "urn:workwell:demo",
+                                  "standardCode": "415070008",
+                                  "standardSystem": "http://snomed.info/sct"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void rejectsInvalidWaiverDates() throws Exception {
         mockMvc.perform(get("/api/admin/waivers").param("expiresAfter", "not-a-date"))
                 .andExpect(status().isBadRequest());

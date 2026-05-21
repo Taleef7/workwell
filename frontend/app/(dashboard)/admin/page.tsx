@@ -114,6 +114,8 @@ type DeliveryLogEntry = {
   measureName: string | null;
 };
 
+const demoResetVisible = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
 export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ROLE_ADMIN";
@@ -152,6 +154,20 @@ export default function AdminPage() {
   const [showDisableSchedulerConfirm, setShowDisableSchedulerConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [showAddMapping, setShowAddMapping] = useState(false);
+  const [mappingForm, setMappingForm] = useState({
+    localCode: "",
+    localDisplay: "",
+    localSystem: "",
+    standardCode: "",
+    standardDisplay: "",
+    standardSystem: "",
+    mappingStatus: "PROPOSED",
+    mappingConfidence: "",
+    notes: ""
+  });
+  const [savingMapping, setSavingMapping] = useState(false);
+  const [mappingError, setMappingError] = useState<string | null>(null);
   const { siteId } = useGlobalFilters();
   const api = useApi();
 
@@ -403,6 +419,61 @@ export default function AdminPage() {
     }
   }
 
+  function resetMappingForm() {
+    setMappingForm({
+      localCode: "",
+      localDisplay: "",
+      localSystem: "",
+      standardCode: "",
+      standardDisplay: "",
+      standardSystem: "",
+      mappingStatus: "PROPOSED",
+      mappingConfidence: "",
+      notes: ""
+    });
+    setMappingError(null);
+  }
+
+  async function submitMapping() {
+    if (!isAdmin) return;
+    if (!mappingForm.localCode.trim() || !mappingForm.localSystem.trim()
+        || !mappingForm.standardCode.trim() || !mappingForm.standardSystem.trim()) {
+      setMappingError("Local Code, Local System, Standard Code, and Standard System are required.");
+      return;
+    }
+    let confidence: number | null = null;
+    if (mappingForm.mappingConfidence.trim()) {
+      const parsed = Number.parseFloat(mappingForm.mappingConfidence.trim());
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+        setMappingError("Confidence must be a number between 0 and 1.");
+        return;
+      }
+      confidence = parsed;
+    }
+    setSavingMapping(true);
+    setMappingError(null);
+    try {
+      await api.post("/api/admin/terminology-mappings", {
+        localCode: mappingForm.localCode.trim(),
+        localDisplay: mappingForm.localDisplay.trim() || null,
+        localSystem: mappingForm.localSystem.trim(),
+        standardCode: mappingForm.standardCode.trim(),
+        standardDisplay: mappingForm.standardDisplay.trim() || null,
+        standardSystem: mappingForm.standardSystem.trim(),
+        mappingStatus: mappingForm.mappingStatus,
+        mappingConfidence: confidence,
+        notes: mappingForm.notes.trim() || null
+      });
+      resetMappingForm();
+      setShowAddMapping(false);
+      await loadTerminologyMappings();
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : "Failed to create mapping");
+    } finally {
+      setSavingMapping(false);
+    }
+  }
+
   async function handleDemoReset() {
     if (!isAdmin) return;
     setResetting(true);
@@ -616,14 +687,151 @@ export default function AdminPage() {
               labeled as such and do not claim official accuracy.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void loadTerminologyMappings()}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (showAddMapping) {
+                  resetMappingForm();
+                }
+                setShowAddMapping((open) => !open);
+              }}
+              className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+            >
+              {showAddMapping ? "Close" : "Add Mapping"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void loadTerminologyMappings()}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+
+        {showAddMapping ? (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <h4 className="text-sm font-semibold text-slate-900">Add terminology mapping</h4>
+            <p className="mt-1 text-xs text-slate-500">
+              Creates a new local-to-standard mapping. New mappings default to <code className="text-[11px]">PROPOSED</code> and
+              require review before promotion.
+            </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-medium text-slate-700">
+                Local Code *
+                <input
+                  type="text"
+                  value={mappingForm.localCode}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localCode: e.target.value }))}
+                  placeholder="e.g. LOCAL-AUD-001"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Local Display
+                <input
+                  type="text"
+                  value={mappingForm.localDisplay}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localDisplay: e.target.value }))}
+                  placeholder="Optional human-readable label"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Local System *
+                <input
+                  type="text"
+                  value={mappingForm.localSystem}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localSystem: e.target.value }))}
+                  placeholder="e.g. urn:workwell:demo"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Standard Code *
+                <input
+                  type="text"
+                  value={mappingForm.standardCode}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardCode: e.target.value }))}
+                  placeholder="e.g. 92557"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Standard Display
+                <input
+                  type="text"
+                  value={mappingForm.standardDisplay}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardDisplay: e.target.value }))}
+                  placeholder="Optional human-readable label"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Standard System *
+                <input
+                  type="text"
+                  value={mappingForm.standardSystem}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardSystem: e.target.value }))}
+                  placeholder="e.g. http://www.ama-assn.org/go/cpt"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Status
+                <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                  PROPOSED — new mappings always start as PROPOSED and require review before promotion
+                </div>
+              </label>
+              <label className="text-xs font-medium text-slate-700">
+                Confidence (0.0 – 1.0)
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={mappingForm.mappingConfidence}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, mappingConfidence: e.target.value }))}
+                  placeholder="e.g. 0.95"
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-700 md:col-span-2">
+                Notes
+                <textarea
+                  value={mappingForm.notes}
+                  onChange={(e) => setMappingForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Optional context for reviewers"
+                  rows={2}
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            {mappingError ? <p className="mt-3 text-sm text-red-700">{mappingError}</p> : null}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void submitMapping()}
+                disabled={savingMapping}
+                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+              >
+                {savingMapping ? "Saving…" : "Save mapping"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetMappingForm();
+                  setShowAddMapping(false);
+                }}
+                disabled={savingMapping}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
           <table className="min-w-full text-left text-sm">
@@ -1025,6 +1233,7 @@ export default function AdminPage() {
         </div>
       </article>
 
+      {demoResetVisible ? (
       <article className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
         <h3 className="mt-1 text-2xl font-semibold text-red-700">Reset demo data</h3>
@@ -1067,6 +1276,7 @@ export default function AdminPage() {
           )}
         </div>
       </article>
+      ) : null}
 
       <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
