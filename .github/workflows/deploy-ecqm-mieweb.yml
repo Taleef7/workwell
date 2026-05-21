@@ -29,6 +29,7 @@ env:
   SITE_ID: 1
   APP_NAME: "WorkWell eCQM Studio"
   APP_TAGLINE: "clinical quality measures for the workforce."
+  APP_DESCRIPTION: "Four clinical quality measures, complete case management, and a full audit trail — one reviewable dashboard."
 
 jobs:
   build-backend:
@@ -83,6 +84,7 @@ jobs:
             NEXT_PUBLIC_API_URL=${{ env.BACKEND_URL }}
             NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
             NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}
+            NEXT_PUBLIC_APP_DESCRIPTION=${{ env.APP_DESCRIPTION }}
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
             ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}

@@ -10,6 +10,7 @@ const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "A clean operating surface for occupational-health compliance.";
+const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION ?? "Four measures, complete case management, and a full audit trail — one reviewable dashboard.";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
 const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 
@@ -79,8 +80,7 @@ export default function HomePage() {
           </h1>
 
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-            Four measures, complete case management, and a full audit trail —
-            one reviewable dashboard.
+            {APP_DESCRIPTION}
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">

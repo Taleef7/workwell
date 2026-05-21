@@ -17,6 +17,7 @@ type Props = {
 export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: Props) {
   const [fixtures, setFixtures] = useState<TestFixture[]>(initialFixtures);
   const [testFailures, setTestFailures] = useState<string[]>([]);
+  const [isValidating, setIsValidating] = useState(false);
 
   function update(index: number, field: keyof TestFixture, value: string) {
     setFixtures((current) => current.map((f, i) => (i === index ? { ...f, [field]: value } : f)));
@@ -43,12 +44,15 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
 
   async function validate() {
     onError("");
+    setIsValidating(true);
     try {
       const payload = await api.post<undefined, { passed: boolean; failures: string[] }>(`/api/measures/${measureId}/tests/validate`);
       setTestFailures(payload.failures ?? []);
       emitToast(payload.passed ? "Test fixtures are valid" : "Test fixtures need fixes");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Test validation failed");
+    } finally {
+      setIsValidating(false);
     }
   }
 
@@ -59,7 +63,23 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
         <div className="flex gap-2">
           <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={add}>Add Fixture</button>
           <button className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white" onClick={save}>Save Tests</button>
-          <button className="rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white" onClick={validate}>Validate</button>
+          <button
+            className="flex items-center gap-1 rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-60"
+            onClick={validate}
+            disabled={isValidating}
+          >
+            {isValidating ? (
+              <>
+                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Validating…
+              </>
+            ) : (
+              "Validate"
+            )}
+          </button>
         </div>
       </div>
 
