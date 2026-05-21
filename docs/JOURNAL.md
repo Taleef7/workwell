@@ -26,6 +26,7 @@
 
 ---
 
+
 ## 2026-05-20 — UAT Sections 6-8: Run history, Studio, Admin fixes (issue #29)
 
 **Goal:** Fix all reported Section 6 (Run History), Section 7 (Studio/CQL), and Section 8 (Admin panel) UAT bugs from GitHub issue #29.
