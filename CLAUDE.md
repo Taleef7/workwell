@@ -79,9 +79,9 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-05-18)
+## Current Focus (as of 2026-05-21)
 
-**All planned sprints merged. Sprint 7 (overdelivery) is next.**
+**All planned sprints merged. TWH consolidation complete. Sprint 7 (overdelivery) is next.**
 
 Sprints merged (all into `main`):
 - Sprint 0 (bugs) → PR #16
@@ -91,8 +91,18 @@ Sprints merged (all into `main`):
 - Sprint 4 (security) → PR #20
 - Sprint 6 (admin) → PR #21
 - Sprint 5 (tests/CI) → PR #22
+- eCQM + TWH instance support → PR #46 (merged to main)
+
+Post-merge work completed (all on `main`):
+- Real-time run progress (spinner, live timer, auto-reload)
+- AI integration health check fix (GET /v1/models)
+- TWH consolidation: single MIE container, 47 CMS eCQMs seeded in catalog
+- Fly.io decommissioned; MIE TWH is sole deployment
 
 Current posture:
+- **Live URL:** `https://twh.os.mieweb.org` — login: `admin@workwell.dev` / `Workwell123!`
+- **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`
+- **Measure catalog:** 58 total — 4 OSHA active (CQL), 3 OSHA catalog, 4 HEDIS wellness active (CQL), 47 CMS eCQM Draft entries
 - `main` is fully up to date; no open feature branches
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - Sprint 7 spec is in `docs/sprints/SPRINT_07_overdelivery_features.md` — 5 issues (AI Draft CQL, AI Test Fixtures, Risk Scoring, MAT Export, Mobile Responsive)

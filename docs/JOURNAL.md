@@ -1,23 +1,91 @@
 # Journal
 
-## 2026-05-21 — Container consolidation to TWH-only; all 47 CMS eCQMs seeded in catalog
+## 2026-05-21 — TWH consolidation, 47 CMS eCQMs, Fly.io decommission, docs overhaul
 
-**Goal:** Consolidate three separate instances (workwell, ecqm, twh) down to one TWH container per Doug's direction. TWH is all-encompassing — OSHA safety and eCQM wellness both live under it. Also seed all 47 official CMS eCQMs (2025 performance period) as Draft catalog entries, giving the platform visibility into the full CMS quality measure landscape.
+### Context and direction
 
-**Key decision from Doug:** "TWH is all-encompassing. OSHA and eCQMs come under it." Single container from now on.
+Doug clarified the product direction: **TWH (Total Worker Health) is all-encompassing.** OSHA occupational safety compliance and clinical quality (eCQMs, HEDIS wellness) are not separate products — they are two sides of the same coin and belong in one platform. The three-instance deployment model (workwell, ecqm, twh) was a development stepping stone, not the product architecture. One TWH instance covers everything.
 
-**What changed:**
+NIOSH's TWH framework is the conceptual foundation: worker health is shaped by both workplace hazards (OSHA safety programs) and general health promotion (chronic disease, preventive care). WorkWell is the platform that manages both in one system with a shared measure catalog, shared case workflow, shared audit trail, and shared CQL evaluation engine.
 
-- `.github/workflows/deploy-ecqm-mieweb.yml` — **Deleted.** No longer needed; TWH instance covers everything.
-- `docs/DEPLOY.md` — Added **MIE Create-a-Container Deployment** section as the primary reference. Documents TWH-only architecture: single frontend (`twh.os.mieweb.org`) + backend (`twh-api.os.mieweb.org`). Updated CI/CD section to name `deploy-twh-mieweb.yml` as the active deploy workflow.
-- `backend/src/main/java/com/workwell/measure/MeasureService.java` — Added `CMS_ECQM_CATALOG` static list (47 measures, 2025 CMS eCQMs) and `ensureCmsEcqmCatalogSeed()` method. Called from `ensureInstanceSeeds()` for `ecqm` and `twh` instances. Each eCQM is seeded as Draft v1.0 with its CMS ID in `policy_ref`, clinical domain tags, and `cmsEcqmId`/`mipsQualityId` stored in `spec_json`. Categories covered: mental health, cardiovascular, diabetes, cancer screening, pediatric, HIV/infectious disease, oncology, ophthalmology, functional status, medication safety, care coordination, urology, radiology.
-- `frontend/app/(dashboard)/measures/page.tsx` — Policy Ref column: when value matches `CMS\d+` pattern, renders it as a blue mono badge (`CMS128v13` style) instead of plain text. Makes CMS eCQMs visually distinct from OSHA CFR citations and HEDIS references at a glance.
+Doug also asked to get all CMS eCQM IDs into the project — the 47 official CMS electronic Clinical Quality Measures from the 2025 performance period (ecqi.healthit.gov). These are the measures hospitals and clinics use for Medicare/Medicaid quality reporting. Having them in the WorkWell catalog positions the platform as a bridge between occupational health and the broader clinical quality infrastructure.
 
-**Manual cleanup completed:**
-- Deleted 4 non-TWH MIE containers (`workwell`, `ecqm`, `workwell-api`, `ecqm-api`) — only `twh` + `twh-api` remain
-- Neon already had only `workwell-twh` project (no orphaned databases to clean up)
-- Destroyed `workwell-measure-studio-api` on Fly.io — old secondary stack, stale, no longer needed
-- MIE TWH is the single deployment target going forward
+### Infrastructure changes
+
+**Deleted:** `.github/workflows/deploy-ecqm-mieweb.yml`
+- The separate eCQM instance (ecqm.os.mieweb.org + ecqm-api) is gone. TWH seeds everything.
+
+**Kept:** `.github/workflows/deploy-twh-mieweb.yml`
+- Now the sole deploy workflow. Triggers on every push to `main`.
+- Builds backend (`ghcr.io/taleef7/workwell-api`) and TWH-branded frontend (`ghcr.io/taleef7/workwell-twh-frontend`).
+- Sets `WORKWELL_INSTANCE=twh` which seeds all 3 measure categories on startup.
+
+**Destroyed:** Fly.io `workwell-measure-studio-api`
+- Old secondary stack from before MIE. Stale — would diverge from main over time since Fly doesn't auto-deploy. Decommissioned via `fly apps destroy`.
+- `workwell-measure-studio.vercel.app` no longer has a working backend; Vercel project left dormant (free tier, harmless).
+
+**Neon:** Already clean — single `workwell-twh` project (45.94 MB). No orphaned databases needed deletion.
+
+**Final infrastructure state:**
+
+| Service | URL | State |
+|---------|-----|-------|
+| Frontend | `https://twh.os.mieweb.org` | Running — latest SHA |
+| Backend API | `https://twh-api.os.mieweb.org` | Running — latest SHA |
+| Database | Neon `workwell-twh` | Active — sole Neon project |
+
+### Code changes
+
+**`MeasureService.java` — CMS eCQM catalog seeding**
+
+Added `CMS_ECQM_CATALOG` — a static `List<CmsEcqmRecord>` of all 47 CMS eCQMs from the 2025 performance period. Each record carries: title, CMS ID (e.g., `CMS128v13`), MIPS Quality ID, and clinical domain tags.
+
+Added `ensureCmsEcqmCatalogSeed()` — iterates the catalog, inserts each measure into `measures` and `measure_versions` if not already present. Idempotent (skips on conflict). Called from `ensureInstanceSeeds()` for `ecqm` and `twh` instances.
+
+Seeding approach (no migration required):
+- `measures.policy_ref` stores the CMS ID — consistent with how OSHA measures store `OSHA 29 CFR 1910.95` and HEDIS measures store `HEDIS CBP / JPMC Wellness Rewards`
+- `measures.tags` carries `ecqm`, `cms`, plus clinical domain (`mental-health`, `cardiovascular`, `diabetes`, `cancer-screening`, `pediatric`, `hiv`, `oncology`, etc.)
+- `measure_versions.spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling and the MAT export (Sprint 7)
+- Status: `Draft`, `compile_status: NOT_COMPILED` — these are catalog entries awaiting CQL authoring
+
+47 measures across 15 clinical domains. Full list in `MeasureService.CMS_ECQM_CATALOG`.
+
+**`measures/page.tsx` — CMS ID badge**
+
+Policy Ref column: regex `/^CMS\d+/` detects CMS eCQM IDs and renders them as a blue monospace ring badge (`CMS128v13` style). OSHA CFR citations and HEDIS refs remain as plain text. Makes the three measure categories visually distinct in the catalog at a glance.
+
+### Docs updated
+
+- `docs/ARCHITECTURE.md` — System overview updated to describe TWH as the product framing; deployment topology updated from Vercel+Fly to MIE Create-a-Container; infra split section updated.
+- `docs/MEASURES.md` — Complete rewrite. Now documents all 58 measures across 4 categories: OSHA full CQL (4), OSHA catalog (3), HEDIS wellness full CQL (4), CMS eCQM Draft catalog (47). Includes domain breakdown table, compliance windows, CQL define logic for all runnable measures.
+- `docs/DEPLOY.md` — Added MIE Create-a-Container primary deployment section with required secrets, instance seeding description, and manual re-deploy instructions.
+- `CLAUDE.md` — Current Focus updated: live URL, all post-merge work itemised, measure catalog count, Sprint 7 as next work.
+
+### Measure catalog total: 58
+
+| # | Name | Category | CQL | Status |
+|---|------|----------|-----|--------|
+| 1 | Audiogram | OSHA | Yes | Active |
+| 2 | HAZWOPER Surveillance | OSHA | Yes | Active |
+| 3 | TB Surveillance | OSHA | Yes | Active |
+| 4 | Flu Vaccine | OSHA | Yes | Active |
+| 5 | Respirator Fit Test | OSHA | No | Draft |
+| 6 | Hepatitis B Vaccination Series | OSHA | Partial | Approved |
+| 7 | Lead Medical Surveillance | OSHA | No | Deprecated |
+| 8 | Hypertension BP Screening | HEDIS Wellness | Yes | Active |
+| 9 | Diabetes HbA1c Monitoring | HEDIS Wellness | Yes | Active |
+| 10 | BMI Screening & Counseling | HEDIS Wellness | Yes | Active |
+| 11 | Cholesterol LDL Screening | HEDIS Wellness | Yes | Active |
+| 12–58 | CMS eCQMs (47) | CMS eCQM | No | Draft |
+
+### What's next
+
+Sprint 7 (`docs/sprints/SPRINT_07_overdelivery_features.md`):
+1. AI Draft CQL — paste OSHA text → generate CQL skeleton
+2. AI Test Fixture Generator — auto-generate 5 fixtures covering all outcome types
+3. Risk Outlook / Predictive Analytics — upcoming expirations, repeat non-compliers, site heatmap
+4. MAT Export — FHIR R4 XML bundle compatible with CMS Measure Authoring Tool
+5. Mobile Responsive Layout — bottom tab bar, card list on mobile, Studio notice
 
 ---
 

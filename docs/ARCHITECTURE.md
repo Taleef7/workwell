@@ -1,9 +1,10 @@
 # WorkWell Measure Studio - Architecture
 
 ## 1) System Overview
-WorkWell Measure Studio is a two-tier web application:
-- Frontend: Next.js App Router dashboard on Vercel.
-- Backend: Spring Boot API on Fly.io.
+WorkWell Measure Studio is a **Total Worker Health (TWH)** compliance platform — a two-tier web application that unifies OSHA occupational safety compliance and CMS/HEDIS clinical quality measures in a single system. TWH is the NIOSH framework recognising that worker health is shaped by both workplace hazards and general health promotion.
+
+- Frontend: Next.js App Router dashboard on MIE Create-a-Container.
+- Backend: Spring Boot API on MIE Create-a-Container.
 - Data: PostgreSQL 16 (Neon) with Flyway migrations.
 - Optional assistive surfaces: OpenAI-backed Spring AI calls for drafting/explanations (never compliance decisions).
 
@@ -13,17 +14,21 @@ Compliance outcomes are determined only by CQL evaluation + structured evidence 
 
 ```text
 Browser
-  -> Vercel (Next.js frontend)
-      -> Fly.io (Spring Boot API)
-          -> Neon Postgres (primary app DB)
+  -> twh.os.mieweb.org  (Next.js frontend — MIE container)
+      -> twh-api.os.mieweb.org  (Spring Boot API — MIE container)
+          -> Neon Postgres / workwell-twh  (primary app DB)
           -> CQL engine in-process (cqf-fhir-cr + HAPI FHIR model)
           -> OpenAI API (assistive text only)
           -> MCP read interface (/sse + tools)
 ```
 
 Production endpoints:
-- Frontend: `https://workwell-measure-studio.vercel.app`
-- Backend: `https://workwell-measure-studio-api.fly.dev`
+- Frontend: `https://twh.os.mieweb.org`
+- Backend API: `https://twh-api.os.mieweb.org`
+
+Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds backend + TWH-branded frontend Docker images, pushes to GHCR, deploys both containers via MIE Create-a-Container API.
+
+Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on startup (OSHA safety, HEDIS wellness, CMS eCQM catalog). A single TWH deployment is the canonical demo environment.
 
 ## 3) Backend Module Boundaries (`com.workwell.*`)
 - `measure`: measure catalog, versioning, lifecycle transitions, policy traceability matrix (`MeasureTraceabilityService`), dry-run activation impact preview (`MeasureImpactPreviewService`), and value set governance + terminology mapping (`ValueSetGovernanceService` — resolve-check, diff, CQL unattached reference detection, terminology mapping CRUD).
@@ -114,9 +119,9 @@ Public API actions derive audit identity from the authenticated security context
 - CSV exports: runs/outcomes/cases + audit export.
 
 ## 8) Current Infra Split
-- Fly.io hosts backend process and serves REST + MCP SSE.
-- Vercel hosts frontend only.
-- Neon hosts all relational persistence used by backend.
+- MIE Create-a-Container hosts both frontend (`twh`) and backend (`twh-api`) processes.
+- Neon (`workwell-twh` project) hosts all relational persistence used by backend.
+- GHCR (`ghcr.io/taleef7/workwell-api`, `ghcr.io/taleef7/workwell-twh-frontend`) stores Docker images.
 
 No microservice decomposition is used in MVP; package boundaries are the future extraction seam.
 
