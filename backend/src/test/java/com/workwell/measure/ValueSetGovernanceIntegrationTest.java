@@ -8,10 +8,12 @@ import com.workwell.measure.ValueSetGovernanceService.ResolveCheckResult;
 import com.workwell.measure.ValueSetGovernanceService.TerminologyMapping;
 import com.workwell.measure.ValueSetGovernanceService.ValueSetDiffResponse;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 
 @SpringBootTest
@@ -22,6 +24,9 @@ class ValueSetGovernanceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private MeasureService measureService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
@@ -49,6 +54,18 @@ class ValueSetGovernanceIntegrationTest extends AbstractIntegrationTest {
 
         List<TerminologyMapping> all = valueSetGovernanceService.listTerminologyMappings();
         assertThat(all).anyMatch(m -> m.id().equals(created.id()));
+
+        // Audit event must be written for every terminology mapping creation (hard rule: every state change writes audit_event)
+        List<Map<String, Object>> auditRows = jdbcTemplate.queryForList(
+                "SELECT event_type, entity_type, entity_id, payload_json::text FROM audit_events WHERE entity_id = ?",
+                created.id());
+        assertThat(auditRows).hasSize(1);
+        Map<String, Object> audit = auditRows.get(0);
+        assertThat(audit.get("event_type")).isEqualTo("TERMINOLOGY_MAPPING_CREATED");
+        assertThat(audit.get("entity_type")).isEqualTo("terminology_mapping");
+        String payload = (String) audit.get("payload_json");
+        assertThat(payload).contains("LOCAL-TEST-001");
+        assertThat(payload).contains("PROPOSED");
     }
 
     @Test
