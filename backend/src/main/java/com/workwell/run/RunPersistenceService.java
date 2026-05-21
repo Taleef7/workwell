@@ -319,9 +319,21 @@ public class RunPersistenceService {
         String stage = "start";
         try {
             seedSyntheticEmployees();
-            Instant startedAt = LocalDate.parse(measureRuns.get(0).evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
+
+            Timestamp dbStartedAtTs = null;
+            try {
+                dbStartedAtTs = jdbcTemplate.queryForObject("SELECT started_at FROM runs WHERE id = ?", Timestamp.class, runId);
+            } catch (Exception ex) {
+                log.warn("Could not query started_at for run {}: {}", runId, ex.getMessage());
+            }
+            Instant actualStart = dbStartedAtTs != null ? dbStartedAtTs.toInstant() : Instant.now();
             Instant completedAt = Instant.now();
+            long durationMs = Math.max(0, completedAt.toEpochMilli() - actualStart.toEpochMilli());
+
             String evaluationPeriod = measureRuns.get(0).evaluationDate();
+            LocalDate evalDate = LocalDate.parse(evaluationPeriod);
+            Instant periodStart = evalDate.minusYears(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+            Instant periodEnd = evalDate.atStartOfDay().toInstant(ZoneOffset.UTC);
 
             long totalEvaluated = measureRuns.stream().mapToLong(payload -> payload.outcomes().size()).sum();
             long compliant = measureRuns.stream()
@@ -427,14 +439,14 @@ public class RunPersistenceService {
                             WHERE id = ?
                             """,
                     finalStatus,
-                    Timestamp.from(startedAt),
+                    Timestamp.from(actualStart),
                     Timestamp.from(completedAt),
                     totalEvaluated,
                     compliant,
                     nonCompliant,
-                    Timestamp.from(startedAt),
-                    Timestamp.from(completedAt),
-                    completedAt.toEpochMilli() - startedAt.toEpochMilli(),
+                    Timestamp.from(periodStart),
+                    Timestamp.from(periodEnd),
+                    durationMs,
                     failureSummary,
                     partialFailureCount,
                     runId

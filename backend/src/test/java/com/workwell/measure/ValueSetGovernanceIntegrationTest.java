@@ -67,7 +67,7 @@ class ValueSetGovernanceIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(result.measureId()).isEqualTo(audiogramId);
         assertThat(result.valueSets()).isNotEmpty();
-        assertThat(result.valueSets()).anyMatch(vs -> "Audiogram Procedure Codes".equals(vs.name()));
+        assertThat(result.valueSets()).anyMatch(vs -> "Audiogram Procedures".equals(vs.name()));
         assertThat(result.valueSets()).anyMatch(vs -> vs.codeCount() > 0);
     }
 
