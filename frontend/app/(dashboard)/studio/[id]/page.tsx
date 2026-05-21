@@ -54,16 +54,22 @@ export default function StudioMeasurePage() {
     return () => window.clearTimeout(timer);
   }, [measureId]);
 
-  async function createNewVersion() {
+  async function createNewVersion(summaryOverride?: string): Promise<boolean> {
+    const summary = (summaryOverride ?? changeSummary).trim();
     setError(null);
-    if (!changeSummary.trim()) { setError("Change summary is required to create a new version."); return; }
+    if (!summary) {
+      setError("Change summary is required to create a new version.");
+      return false;
+    }
     try {
-      await api.post(`/api/measures/${measureId}/versions`, { changeSummary: changeSummary.trim() });
+      await api.post(`/api/measures/${measureId}/versions`, { changeSummary: summary });
       setChangeSummary("");
       emitToast("New draft version created");
       await load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Version clone failed");
+      return false;
     }
   }
 
@@ -110,7 +116,7 @@ export default function StudioMeasurePage() {
               value={changeSummary}
               onChange={(e) => setChangeSummary(e.target.value)}
             />
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800" onClick={createNewVersion}>
+            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800" onClick={() => void createNewVersion()}>
               New Version
             </button>
             </>
@@ -170,6 +176,8 @@ export default function StudioMeasurePage() {
           onCompileWarnings={setCompileWarnings}
           onCompiled={load}
           onError={(msg) => setError(msg || null)}
+          canClone={canClone}
+          onCreateNewVersion={createNewVersion}
         />
       ) : null}
 

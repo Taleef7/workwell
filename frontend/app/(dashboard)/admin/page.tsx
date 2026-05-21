@@ -151,6 +151,7 @@ export default function AdminPage() {
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null);
   const [deliveryLog, setDeliveryLog] = useState<DeliveryLogEntry[]>([]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showDisableSchedulerConfirm, setShowDisableSchedulerConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [showAddMapping, setShowAddMapping] = useState(false);
@@ -535,23 +536,54 @@ export default function AdminPage() {
           <p className="mt-1 text-xs text-slate-500">
             Last scheduled run: {scheduler?.lastRunAt ? new Date(scheduler.lastRunAt).toLocaleString() : "Never"} ({formatStatusLabel(scheduler?.lastRunStatus ?? "never")})
           </p>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={() => void toggleScheduler(true)}
-              disabled={updatingScheduler || scheduler?.enabled === true}
-              className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-            >
-              Enable
-            </button>
-            <button
-              type="button"
-              onClick={() => void toggleScheduler(false)}
-              disabled={updatingScheduler || scheduler?.enabled === false}
-              className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-            >
-              Disable
-            </button>
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDisableSchedulerConfirm(false);
+                  void toggleScheduler(true);
+                }}
+                disabled={updatingScheduler || scheduler?.enabled === true}
+                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                Enable
+              </button>
+              {!showDisableSchedulerConfirm && (
+                <button
+                  type="button"
+                  onClick={() => setShowDisableSchedulerConfirm(true)}
+                  disabled={updatingScheduler || scheduler?.enabled === false}
+                  className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  Disable
+                </button>
+              )}
+            </div>
+            {showDisableSchedulerConfirm && (
+              <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                <p className="text-xs text-amber-800 font-medium">Are you sure you want to disable the scheduler?</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDisableSchedulerConfirm(false);
+                      void toggleScheduler(false);
+                    }}
+                    className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800"
+                  >
+                    Confirm Disable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableSchedulerConfirm(false)}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </article>
 
