@@ -22,6 +22,10 @@ import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filt
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
+const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
+const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
+
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
   { href: "/cases", label: "Cases", icon: Shield },
@@ -130,8 +134,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               WW
             </span>
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-slate-950">WorkWell</span>
-              <span className="text-xs text-slate-500">Measure Studio</span>
+              <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
+              <span className="text-xs text-slate-500">{APP_SUBTITLE}</span>
             </span>
           </Link>
           <button
@@ -223,7 +227,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[9px] font-bold tracking-[0.18em] text-white">
               WW
             </span>
-            <span className="text-sm font-semibold text-slate-950">WorkWell</span>
+            <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
           </Link>
 
           {/* Search — grows to fill */}

@@ -525,6 +525,47 @@ public class CqlEvaluationService {
                     "urn:workwell:vs:flu-vaccines",
                     true
             );
+            case "Hypertension BP Screening" -> new MeasureSeedSpec(
+                    "hypertension",
+                    "wellness-enrolled",
+                    "urn:workwell:vs:wellness-enrollment",
+                    "wellness-exempt",
+                    "urn:workwell:vs:wellness-exemption",
+                    "bp-screen",
+                    "urn:workwell:vs:bp-screening",
+                    false
+            );
+            case "Diabetes HbA1c Monitoring" -> new MeasureSeedSpec(
+                    "diabetes_hba1c",
+                    "diabetes-enrolled",
+                    "urn:workwell:vs:diabetes-program",
+                    "diabetes-exempt",
+                    "urn:workwell:vs:diabetes-exemption",
+                    "hba1c-lab",
+                    "urn:workwell:vs:hba1c-labs",
+                    false,
+                    180
+            );
+            case "BMI Screening & Counseling" -> new MeasureSeedSpec(
+                    "obesity_bmi",
+                    "wellness-enrolled",
+                    "urn:workwell:vs:wellness-enrollment",
+                    "wellness-exempt",
+                    "urn:workwell:vs:wellness-exemption",
+                    "bmi-screen",
+                    "urn:workwell:vs:bmi-screening",
+                    false
+            );
+            case "Cholesterol LDL Screening" -> new MeasureSeedSpec(
+                    "cholesterol_ldl",
+                    "cholesterol-enrolled",
+                    "urn:workwell:vs:cholesterol-program",
+                    "cholesterol-exempt",
+                    "urn:workwell:vs:cholesterol-exemption",
+                    "ldl-lab",
+                    "urn:workwell:vs:ldl-labs",
+                    false
+            );
             default -> null;
         };
     }
@@ -534,12 +575,13 @@ public class CqlEvaluationService {
             MeasureSeedSpec spec,
             SeededOutcome targetOutcome
     ) {
+        int window = spec.complianceWindowDays();
         Integer daysSinceLastExam = switch (targetOutcome) {
-            case COMPLIANT -> 120;
-            case DUE_SOON -> 350;
-            case OVERDUE -> 430;
+            case COMPLIANT -> window / 3;
+            case DUE_SOON -> window - 10;
+            case OVERDUE -> window + 60;
             case MISSING_DATA -> null;
-            case EXCLUDED -> 500;
+            case EXCLUDED -> window + 150;
         };
         boolean hasWaiver = targetOutcome == SeededOutcome.EXCLUDED;
         SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
@@ -586,7 +628,14 @@ public class CqlEvaluationService {
             String waiverVs,
             String examCode,
             String examVs,
-            boolean useImmunization
+            boolean useImmunization,
+            int complianceWindowDays
     ) {
+        MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
+                        String waiverCode, String waiverVs, String examCode, String examVs,
+                        boolean useImmunization) {
+            this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
+                    examCode, examVs, useImmunization, 365);
+        }
     }
 }

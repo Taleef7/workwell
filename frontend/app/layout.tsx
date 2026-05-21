@@ -7,9 +7,12 @@ import { AuthProvider } from "@/components/auth-provider";
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
+const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "occupational-health compliance.";
+
 export const metadata: Metadata = {
-  title: "WorkWell Measure Studio",
-  description: "Public landing page and sandbox entry for WorkWell Measure Studio."
+  title: APP_NAME,
+  description: `${APP_NAME} — ${APP_TAGLINE}`,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
