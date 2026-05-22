@@ -121,6 +121,132 @@ public class AiAssistService {
         return response;
     }
 
+    public DraftCqlResponse draftCql(UUID measureId, String oshaText, String actor) {
+        if (measureId == null) {
+            throw new IllegalArgumentException("measureId is required");
+        }
+        Map<String, Object> measureRow = jdbcTemplate.query(
+                """
+                        SELECT m.name AS name, mv.spec_json::text AS spec_json
+                        FROM measures m
+                        JOIN measure_versions mv ON mv.measure_id = m.id
+                        WHERE m.id = ?
+                        ORDER BY (CASE WHEN mv.status = 'Active' THEN 0 ELSE 1 END), mv.created_at DESC
+                        LIMIT 1
+                        """,
+                rs -> rs.next()
+                        ? Map.of("name", rs.getString("name"), "specJson", rs.getString("spec_json") == null ? "{}" : rs.getString("spec_json"))
+                        : null,
+                measureId
+        );
+        if (measureRow == null) {
+            throw new IllegalArgumentException("Measure not found: " + measureId);
+        }
+        String measureName = String.valueOf(measureRow.get("name"));
+        String specJson = String.valueOf(measureRow.get("specJson"));
+        String safeMeasureName = measureName.replaceAll("\\s+", "");
+        String policyText = oshaText == null ? "" : oshaText.trim();
+
+        String userPrompt = "Generate a CQL library for this occupational health compliance measure.\n\n"
+                + "Measure name: " + measureName + "\n"
+                + "Spec JSON: " + specJson + "\n"
+                + "OSHA/Policy text: " + policyText + "\n\n"
+                + "The CQL must:\n"
+                + "- Define patient eligibility based on program enrollment\n"
+                + "- Define exemption conditions\n"
+                + "- Compute days since last qualifying exam from Procedure resources\n"
+                + "- Map outcome status to: COMPLIANT | DUE_SOON | OVERDUE | MISSING_DATA | EXCLUDED\n";
+
+        DraftCqlResponse response;
+        try {
+            String raw = callWithModelFallback(DRAFT_CQL_SYSTEM_PROMPT, userPrompt);
+            String cql = stripCodeFences(raw);
+            if (cql.isBlank()) {
+                throw new IllegalStateException("Empty CQL response from model");
+            }
+            response = new DraftCqlResponse(true, cql, modelName, false);
+        } catch (Exception ex) {
+            response = new DraftCqlResponse(false, buildFallbackCqlTemplate(safeMeasureName), "fallback-template", true);
+        }
+        insertAiAudit("AI_DRAFT_CQL_GENERATED", actor, null, null, Map.of(
+                "measureId", measureId.toString(),
+                "measureName", measureName,
+                "model", response.provider(),
+                "promptLength", userPrompt.length(),
+                "outputLength", response.cql() == null ? 0 : response.cql().length(),
+                "fallbackUsed", response.fallbackUsed()
+        ));
+        return response;
+    }
+
+    private static final String DRAFT_CQL_SYSTEM_PROMPT = """
+            You are an HL7 CQL (Clinical Quality Language) expert. You generate CQL libraries for FHIR R4 measures.
+
+            Rules:
+            1. Return ONLY valid CQL code — no explanation, no markdown, no code fences.
+            2. Start with: library <MeasureName>CQL version '1.0.0'
+            3. Use: using FHIR version '4.0.1'
+            4. Include: include FHIRHelpers version '4.0.1' called FHIRHelpers
+            5. Define: context Patient
+            6. Eligibility define must evaluate to Boolean
+            7. Exemption define must evaluate to Boolean
+            8. Compliance define must evaluate to Boolean
+            9. Final define named "Outcome Status" must return one of: 'COMPLIANT' | 'DUE_SOON' | 'OVERDUE' | 'MISSING_DATA' | 'EXCLUDED'
+            10. Use value set references via: valueset "ValueSetName": 'urn:oid:...'
+            11. Use FHIRHelpers.ToDate() for date comparisons
+            12. Do NOT hard-code patient IDs or dates
+            13. Do NOT make compliance decisions — only compute from structured FHIR data
+            """;
+
+    private String stripCodeFences(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) trimmed = trimmed.substring(firstNewline + 1);
+            if (trimmed.endsWith("```")) trimmed = trimmed.substring(0, trimmed.length() - 3);
+        }
+        return trimmed.trim();
+    }
+
+    private String buildFallbackCqlTemplate(String safeMeasureName) {
+        return """
+                library %sCQL version '1.0.0'
+
+                using FHIR version '4.0.1'
+                include FHIRHelpers version '4.0.1' called FHIRHelpers
+
+                // TODO: Define value sets
+                // valueset "Program Enrollment": 'urn:oid:...'
+
+                context Patient
+
+                // TODO: Define eligibility criteria
+                define "In Program":
+                  false  // Replace with enrollment condition
+
+                // TODO: Define exemption
+                define "Has Exemption":
+                  false  // Replace with exemption condition
+
+                // TODO: Define recency check
+                define "Most Recent Exam Date":
+                  null as Date  // Replace with procedure lookup
+
+                define "Days Since Last Exam":
+                  if "Most Recent Exam Date" is null then null
+                  else difference in days between "Most Recent Exam Date" and Today()
+
+                define "Outcome Status":
+                  if "Has Exemption" then 'EXCLUDED'
+                  else if not "In Program" then 'EXCLUDED'
+                  else if "Most Recent Exam Date" is null then 'MISSING_DATA'
+                  else if "Days Since Last Exam" > 365 then 'OVERDUE'
+                  else if "Days Since Last Exam" > 335 then 'DUE_SOON'
+                  else 'COMPLIANT'
+                """.formatted(safeMeasureName);
+    }
+
     public CaseExplanationResponse explainCase(UUID caseId, String actor) {
         CaseFlowService.CaseDetail detail = caseFlowService.loadCase(caseId)
                 .orElseThrow(() -> new IllegalArgumentException("Case not found"));
@@ -422,6 +548,14 @@ public class AiAssistService {
             String provider,
             boolean fallbackUsed,
             String fallback
+    ) {
+    }
+
+    public record DraftCqlResponse(
+            boolean success,
+            String cql,
+            String provider,
+            boolean fallbackUsed
     ) {
     }
 
