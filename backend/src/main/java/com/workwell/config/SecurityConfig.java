@@ -108,6 +108,7 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.POST, "/api/runs/**").hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.POST, "/api/cases/**").hasAnyAuthority("ROLE_CASE_MANAGER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.GET, "/api/measures/*/traceability").authenticated()
+                    .requestMatchers(HttpMethod.GET, "/api/measures/*/versions/*/export/mat").hasAnyAuthority("ROLE_APPROVER", "ROLE_ADMIN")
                     .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
                     .requestMatchers("/api/**").authenticated()
                     .anyRequest().permitAll()
