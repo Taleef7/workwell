@@ -18,6 +18,7 @@ import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { SlaChip } from "@/components/SlaChip";
+import { ChevronRight } from "lucide-react";
 
 type CaseSummary = {
   caseId: string;
@@ -525,13 +526,37 @@ export default function CasesPage() {
       ) : null}
 
       {filteredCases.length > 0 ? (
-        <div className="flex items-center gap-2 text-sm text-slate-600">
+        <div className="hidden items-center gap-2 text-sm text-slate-600 md:flex">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="space-y-2 md:hidden">
+        {filteredCases.map((item) => {
+          const outcomeLabel = labelFor(OUTCOME_LABELS, item.currentOutcomeStatus);
+          return (
+            <Link
+              key={item.caseId}
+              href={`/cases/${item.caseId}`}
+              className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">{item.employeeName}</p>
+                <p className="truncate text-xs text-slate-500">{item.measureName}</p>
+              </div>
+              <div className="ml-3 flex items-center gap-2">
+                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
+                  {outcomeLabel}
+                </span>
+                <ChevronRight className="h-4 w-4 text-slate-400" />
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
         {filteredCases.map((item) => {
           const caseStatus = normalizeEnumValue(item.status);
           const caseStatusLabel = labelFor(CASE_STATUS_LABELS, item.status);

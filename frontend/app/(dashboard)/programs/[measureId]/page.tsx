@@ -38,6 +38,36 @@ type TopDrivers = {
   byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
 };
 
+type RiskOutlook = {
+  upcomingNonCompliantCount: number;
+  upcomingExpirations: Array<{
+    externalId: string;
+    name: string;
+    site: string;
+    measureName: string;
+    lastExamDate: string;
+    complianceWindowDays: number;
+    daysSinceLastExam: number;
+    daysUntilDueSoon: number;
+    predictedDueSoonDate: string;
+  }>;
+  repeatNonCompliers: Array<{
+    externalId: string;
+    name: string;
+    site: string;
+    measureName: string;
+    streakCount: number;
+  }>;
+  siteComplianceRates: Array<{
+    site: string;
+    total: number;
+    compliant: number;
+    upcomingExpirations: number;
+    currentComplianceRate: number;
+    predictedComplianceRate: number;
+  }>;
+};
+
 const OUTCOME_COLORS: Record<string, string> = {
   COMPLIANT: "#059669",
   DUE_SOON: "#d97706",
@@ -60,6 +90,7 @@ export default function ProgramDetailPage() {
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [drivers, setDrivers] = useState<TopDrivers>({ bySite: [], byRole: [], byOutcomeReason: [] });
+  const [riskOutlook, setRiskOutlook] = useState<RiskOutlook | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -79,6 +110,12 @@ export default function ProgramDetailPage() {
           setDrivers(d);
         } catch {
           setDrivers({ bySite: [], byRole: [], byOutcomeReason: [] });
+        }
+        try {
+          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=30`);
+          setRiskOutlook(outlook);
+        } catch {
+          setRiskOutlook(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -162,6 +199,90 @@ export default function ProgramDetailPage() {
                 </ResponsiveContainer>
               )}
             </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Risk outlook (next 30 days)</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded border border-orange-200 bg-orange-50 p-3">
+                <p className="text-xs text-orange-800">Upcoming due soon</p>
+                <p className="text-2xl font-semibold text-orange-900">
+                  {riskOutlook?.upcomingNonCompliantCount ?? 0}
+                </p>
+              </div>
+              <div className="rounded border border-rose-200 bg-rose-50 p-3">
+                <p className="text-xs text-rose-800">Repeat non-compliers</p>
+                <p className="text-2xl font-semibold text-rose-900">
+                  {riskOutlook?.repeatNonCompliers.length ?? 0}
+                </p>
+              </div>
+              <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs text-amber-800">Highest-risk site</p>
+                <p className="text-lg font-semibold text-amber-900">
+                  {riskOutlook?.siteComplianceRates?.[0]?.site ?? "—"}
+                </p>
+              </div>
+            </div>
+
+            {riskOutlook?.repeatNonCompliers && riskOutlook.repeatNonCompliers.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Repeat non-compliers</p>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="text-left text-slate-600">
+                      <tr>
+                        <th className="py-1 pr-3">Employee</th>
+                        <th className="py-1 pr-3">Site</th>
+                        <th className="py-1 pr-3">Streak</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {riskOutlook.repeatNonCompliers.map((item) => (
+                        <tr key={`${item.externalId}-${item.streakCount}`} className="border-t border-slate-200">
+                          <td className="py-1 pr-3">
+                            <Link href={`/employees/${item.externalId}`} className="font-medium text-blue-700 hover:underline">
+                              {item.name}
+                            </Link>
+                          </td>
+                          <td className="py-1 pr-3">{item.site}</td>
+                          <td className="py-1 pr-3 text-rose-700">{item.streakCount}x</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-slate-500">No repeat non-compliers detected at the moment.</p>
+            )}
+
+            {riskOutlook?.siteComplianceRates && riskOutlook.siteComplianceRates.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Site risk heatmap</p>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="text-left text-slate-600">
+                      <tr>
+                        <th className="py-1 pr-3">Site</th>
+                        <th className="py-1 pr-3">Current rate</th>
+                        <th className="py-1 pr-3">Predicted 30d</th>
+                        <th className="py-1 pr-3">Expiring</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {riskOutlook.siteComplianceRates.map((site) => (
+                        <tr key={site.site} className="border-t border-slate-200">
+                          <td className="py-1 pr-3">{site.site}</td>
+                          <td className="py-1 pr-3">{site.currentComplianceRate.toFixed(1)}%</td>
+                          <td className="py-1 pr-3">{site.predictedComplianceRate.toFixed(1)}%</td>
+                          <td className="py-1 pr-3">{site.upcomingExpirations}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">
