@@ -56,6 +56,38 @@ export function CqlTab({
   const [showNewVersionDialog, setShowNewVersionDialog] = useState(false);
   const [newVersionSummary, setNewVersionSummary] = useState("");
   const [creatingVersion, setCreatingVersion] = useState(false);
+  const [showDraftCqlDialog, setShowDraftCqlDialog] = useState(false);
+  const [oshaText, setOshaText] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [draftBanner, setDraftBanner] = useState<string | null>(null);
+
+  async function handleDraftCql() {
+    setDrafting(true);
+    onError("");
+    try {
+      const result = await api.post<{ oshaText: string }, { cql: string; fallbackUsed: boolean; provider: string; success: boolean }>(
+        `/api/measures/${measureId}/ai/draft-cql`,
+        { oshaText }
+      );
+      onCqlChange(result.cql);
+      if (editorRef.current) {
+        editorRef.current.setValue(result.cql);
+      }
+      setDraftBanner(
+        result.fallbackUsed
+          ? "AI unavailable — template inserted. Fill in the TODO sections before compiling."
+          : `AI-generated draft (${result.provider}) — review all logic before compiling. Not valid until compiled.`
+      );
+      onCompileErrors([]);
+      onCompileWarnings([]);
+      setShowDraftCqlDialog(false);
+      emitToast(result.fallbackUsed ? "Fallback CQL template inserted" : "AI CQL draft inserted");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "AI Draft CQL failed");
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   async function handleSubmitNewVersion() {
     if (!newVersionSummary.trim()) {
@@ -145,6 +177,20 @@ export function CqlTab({
 
   return (
     <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+      {draftBanner ? (
+        <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span className="mt-0.5 font-semibold uppercase tracking-wider text-amber-700">AI draft</span>
+          <span className="flex-1">{draftBanner}</span>
+          <button
+            type="button"
+            onClick={() => setDraftBanner(null)}
+            className="text-amber-700 hover:text-amber-900"
+            aria-label="Dismiss AI draft banner"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded border border-slate-300" style={{ minHeight: 400, height: "calc(100vh - 24rem)", maxHeight: "calc(100vh - 12rem)" }}>
         <MonacoEditor
           height="100%"
@@ -167,6 +213,13 @@ export function CqlTab({
       <div className="flex items-center gap-2">
         <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white" onClick={compile}>
           Compile
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowDraftCqlDialog(true)}
+          className="rounded-md border border-purple-300 bg-white px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+        >
+          AI Draft CQL
         </button>
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(measure.compileStatus ?? "")}`}>
           {formatStatusLabel(measure.compileStatus ?? "UNKNOWN")}
@@ -246,6 +299,41 @@ export function CqlTab({
           </ul>
         </div>
       ) : null}
+
+      {showDraftCqlDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">AI Draft CQL</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Paste relevant OSHA/policy text below. The AI will use your saved Spec and this text to generate
+              a starting CQL library. You must compile and review before activating.
+            </p>
+            <textarea
+              value={oshaText}
+              onChange={(e) => setOshaText(e.target.value)}
+              className="mt-3 h-48 w-full rounded-2xl border border-slate-300 p-3 font-mono text-xs focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              placeholder="Paste OSHA regulatory text or policy requirements here…"
+            />
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDraftCqlDialog(false)}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDraftCql}
+                disabled={drafting}
+                className="rounded-md bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+              >
+                {drafting ? "Generating…" : "Generate CQL Draft"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
