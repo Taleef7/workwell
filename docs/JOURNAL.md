@@ -1,5 +1,35 @@
 # Journal
 
+## 2026-05-22 — Sprint 7 closeout to `main`, tracker cleanup, and repo metadata refresh
+
+### Repository state updates
+
+- Promoted Sprint 7.2-7.5 from the sprint feature branch chain into `main` via merge commit `95796d7`.
+- Closed remaining Sprint 7 issues: `#48`, `#49`, `#50`, `#51` (with completion notes linked to merged implementation).
+- Removed stale sprint branches locally and remotely; branch state normalized to `main` only on both local and remote.
+
+### Documentation updates
+
+- `README.md` updated to reflect:
+  - TWH framing in the project summary
+  - primary demo surfaces (`twh.os.mieweb.org` / `twh-api.os.mieweb.org`)
+  - Sprint completion status through Sprint 7
+- `docs/sprints/README.md` updated with implementation status across Sprints 0-7.
+- `docs/sprints/SPRINT_07_overdelivery_features.md` acceptance and DoD checklists marked complete for 7.1-7.5.
+- `docs/DEPLOY.md` refreshed for current platform reality:
+  - stack header updated to MIE + Neon + OpenAI
+  - CMS catalog seed count corrected to 49
+  - legacy/public preview section retitled
+  - legacy references migrated from Anthropic secret names to OpenAI equivalents
+- `docs/ARCHITECTURE.md` module boundary notes updated to explicitly include MAT export and risk outlook analytics.
+
+### GitHub repository metadata updates
+
+- Updated repository About metadata:
+  - description
+  - website/homepage URL
+  - topical tags (topics) aligned with TWH, CQL/FHIR, and platform stack.
+
 ## 2026-05-22 — PR #53 review follow-up (security + error mapping + MAT export hygiene)
 
 ### Review threads resolved

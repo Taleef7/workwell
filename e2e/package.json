@@ -2,6 +2,13 @@
   "name": "workwell-e2e",
   "version": "0.1.0",
   "private": true,
+  "description": "Playwright end-to-end test suite for WorkWell Measure Studio.",
+  "homepage": "https://github.com/Taleef7/workwell",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Taleef7/workwell.git",
+    "directory": "e2e"
+  },
   "scripts": {
     "test": "playwright test",
     "test:report": "playwright show-report"

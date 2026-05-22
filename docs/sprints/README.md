@@ -4,20 +4,22 @@
 
 Generated: 2026-05-14 from the full expert audit of the live application, codebase, v0 prototype screenshots, vision document, and competitive landscape research.
 
+Current rollout status (2026-05-22): Sprint 0 through Sprint 7 are implemented; Sprint 7 issues #47-#51 are closed and merged to `main`.
+
 ---
 
 ## Sprint Order & Rationale
 
-| Sprint | File | Focus | Effort | Priority |
-|--------|------|--------|--------|----------|
-| 0 | [SPRINT_00_critical_demo_fixes.md](SPRINT_00_critical_demo_fixes.md) | Visible production bugs that immediately undermine credibility | 1–2 days | **URGENT** |
-| 1 | [SPRINT_01_run_pipeline_operational.md](SPRINT_01_run_pipeline_operational.md) | Async runs, scheduling, pagination, scoped runs | 4–5 days | High |
-| 2 | [SPRINT_02_demo_data_visual_quality.md](SPRINT_02_demo_data_visual_quality.md) | Seed personas, trend charts, measure catalog richness | 2–3 days | High |
-| 3 | [SPRINT_03_employee_profile_case_sla.md](SPRINT_03_employee_profile_case_sla.md) | Employee cross-program view, search, SLA tracking | 4–5 days | High |
-| 4 | [SPRINT_04_security_api_quality.md](SPRINT_04_security_api_quality.md) | JWT refresh, rate limiting, OpenAPI, MIME validation | 2–3 days | Medium |
-| 5 | [SPRINT_05_test_suite_ci.md](SPRINT_05_test_suite_ci.md) | Frontend tests (Vitest + RTL), Playwright E2E, CI gates | 4–5 days | Medium |
-| 6 | [SPRINT_06_admin_integration_completeness.md](SPRINT_06_admin_integration_completeness.md) | Admin polish, email delivery, notification templates | 3–4 days | Medium |
-| 7 | [SPRINT_07_overdelivery_features.md](SPRINT_07_overdelivery_features.md) | OSHA→CQL AI authoring, risk scoring, MAT export, mobile | 6–8 days | Differentiator |
+| Sprint | File | Focus | Effort | Priority | Status |
+|--------|------|--------|--------|----------|--------|
+| 0 | [SPRINT_00_critical_demo_fixes.md](SPRINT_00_critical_demo_fixes.md) | Visible production bugs that immediately undermine credibility | 1–2 days | **URGENT** | Implemented |
+| 1 | [SPRINT_01_run_pipeline_operational.md](SPRINT_01_run_pipeline_operational.md) | Async runs, scheduling, pagination, scoped runs | 4–5 days | High | Implemented |
+| 2 | [SPRINT_02_demo_data_visual_quality.md](SPRINT_02_demo_data_visual_quality.md) | Seed personas, trend charts, measure catalog richness | 2–3 days | High | Implemented |
+| 3 | [SPRINT_03_employee_profile_case_sla.md](SPRINT_03_employee_profile_case_sla.md) | Employee cross-program view, search, SLA tracking | 4–5 days | High | Implemented |
+| 4 | [SPRINT_04_security_api_quality.md](SPRINT_04_security_api_quality.md) | JWT refresh, rate limiting, OpenAPI, MIME validation | 2–3 days | Medium | Implemented |
+| 5 | [SPRINT_05_test_suite_ci.md](SPRINT_05_test_suite_ci.md) | Frontend tests (Vitest + RTL), Playwright E2E, CI gates | 4–5 days | Medium | Implemented |
+| 6 | [SPRINT_06_admin_integration_completeness.md](SPRINT_06_admin_integration_completeness.md) | Admin polish, email delivery, notification templates | 3–4 days | Medium | Implemented |
+| 7 | [SPRINT_07_overdelivery_features.md](SPRINT_07_overdelivery_features.md) | OSHA→CQL AI authoring, risk scoring, MAT export, mobile | 6–8 days | Differentiator | Implemented |
 
 **Total estimated effort:** 26–35 developer days
 

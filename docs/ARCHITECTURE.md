@@ -35,8 +35,8 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `admin`: integration health (`IntegrationHealthService` — scheduled 15-min fhir/mcp/hris refresh, reactive AI status, distinct `simulated` HRIS status), scheduler, waivers, outreach templates (list/create/update/preview), outreach delivery log (`OutreachDeliveryLogService`), non-prod demo reset (`DemoResetService`, `@Profile("!prod")`), and data readiness (`DataReadinessService` — source mapping, freshness, missingness computation).
 - `valueset`: value set registry and measure/value-set linkage.
 - `compile`: CQL translator compile validation and compile metadata.
-- `fhir`: measure library/resource assembly used by evaluation runtime.
-- `run`: run orchestration, run detail/summary read models, rerun scope support.
+- `fhir`: measure library/resource assembly used by evaluation runtime and MAT-compatible FHIR bundle export.
+- `run`: run orchestration, run detail/summary read models, rerun scope support, and predictive risk-outlook analytics.
 - `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline.
 - `audit`: append-only audit event publisher + export/query paths. `AuditPacketService` assembles structured audit export packets (case, run, measure version) as JSON or HTML bytes; writes `AUDIT_PACKET_GENERATED` audit events and records in `audit_packet_exports`.
 - `export`: runs/outcomes/cases CSV contracts.
