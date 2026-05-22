@@ -82,4 +82,25 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.fallback").value(false))
                 .andExpect(jsonPath("$.insights[0]").value("Insight A"));
     }
+
+    @Test
+    @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
+    void generatesTestFixtures() throws Exception {
+        UUID measureId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        when(aiAssistService.generateTestFixtures(measureId, "author@workwell.dev")).thenReturn(
+                java.util.List.of(
+                        new AiAssistService.GeneratedTestFixture(
+                                "Employee with exam 30 days ago",
+                                Map.of("examDate", "2026-04-22", "programEnrolled", true, "hasExemption", false),
+                                "COMPLIANT"
+                        )
+                )
+        );
+
+        mockMvc.perform(post("/api/measures/{measureId}/ai/generate-test-fixtures", measureId)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Employee with exam 30 days ago"))
+                .andExpect(jsonPath("$[0].expectedOutcome").value("COMPLIANT"));
+    }
 }

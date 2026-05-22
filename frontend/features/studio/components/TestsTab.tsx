@@ -6,6 +6,18 @@ import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
 import type { TestFixture } from "../types";
 
+type GeneratedFixture = {
+  name: string;
+  inputData: {
+    examDate: string | null;
+    programEnrolled: boolean;
+    hasExemption: boolean;
+    role?: string;
+    site?: string;
+  };
+  expectedOutcome: string;
+};
+
 type Props = {
   measureId: string;
   api: ApiClient;
@@ -16,8 +28,10 @@ type Props = {
 
 export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: Props) {
   const [fixtures, setFixtures] = useState<TestFixture[]>(initialFixtures);
+  const [generatedFixtures, setGeneratedFixtures] = useState<GeneratedFixture[]>([]);
   const [testFailures, setTestFailures] = useState<string[]>([]);
   const [isValidating, setIsValidating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   function update(index: number, field: keyof TestFixture, value: string) {
     setFixtures((current) => current.map((f, i) => (i === index ? { ...f, [field]: value } : f)));
@@ -29,6 +43,42 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
 
   function remove(index: number) {
     setFixtures((current) => current.filter((_, i) => i !== index));
+  }
+
+  function fixtureFromGenerated(generated: GeneratedFixture, index: number): TestFixture {
+    const inputDataText = JSON.stringify(generated.inputData);
+    const employeeId = `AI-${generated.expectedOutcome}-${index + 1}`;
+    return {
+      fixtureName: generated.name,
+      employeeExternalId: employeeId,
+      expectedOutcome: generated.expectedOutcome,
+      notes: `AI generated inputData: ${inputDataText}`
+    };
+  }
+
+  function addGeneratedFixture(generated: GeneratedFixture, index: number) {
+    setFixtures((current) => [...current, fixtureFromGenerated(generated, index)]);
+  }
+
+  function addAllGeneratedFixtures() {
+    setFixtures((current) => [
+      ...current,
+      ...generatedFixtures.map((fixture, index) => fixtureFromGenerated(fixture, index))
+    ]);
+  }
+
+  async function generateFixtures() {
+    setIsGenerating(true);
+    onError("");
+    try {
+      const payload = await api.post<undefined, GeneratedFixture[]>(`/api/measures/${measureId}/ai/generate-test-fixtures`);
+      setGeneratedFixtures(payload ?? []);
+      emitToast("AI draft fixtures generated");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Fixture generation failed");
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   async function save() {
@@ -62,6 +112,13 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
         <h3 className="text-sm font-semibold text-slate-900">Fixture Validation</h3>
         <div className="flex gap-2">
           <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={add}>Add Fixture</button>
+          <button
+            className="rounded border border-purple-300 bg-white px-2 py-1 text-xs font-medium text-purple-700 disabled:opacity-60"
+            onClick={generateFixtures}
+            disabled={isGenerating}
+          >
+            {isGenerating ? "Generating..." : "Generate Fixtures"}
+          </button>
           <button className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white" onClick={save}>Save Tests</button>
           <button
             className="flex items-center gap-1 rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-60"
@@ -82,6 +139,46 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
           </button>
         </div>
       </div>
+
+      {generatedFixtures.length > 0 ? (
+        <div className="rounded border border-amber-300 bg-amber-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">AI-generated fixtures</p>
+            <button
+              type="button"
+              className="rounded border border-amber-400 bg-white px-2 py-1 text-xs font-semibold text-amber-900"
+              onClick={addAllGeneratedFixtures}
+            >
+              Add All to Drafts
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-amber-900">
+            AI-generated fixtures — verify expected outcomes match your CQL logic before running.
+          </p>
+          <div className="mt-3 grid gap-2">
+            {generatedFixtures.map((fixture, index) => (
+              <div key={`${fixture.name}-${index}`} className="rounded border border-amber-200 bg-white p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900">{fixture.name}</p>
+                    <p className="text-xs text-slate-600">Expected: {labelFor(OUTCOME_LABELS, fixture.expectedOutcome)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                    onClick={() => addGeneratedFixture(fixture, index)}
+                  >
+                    Add to Draft
+                  </button>
+                </div>
+                <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700">
+                  {JSON.stringify(fixture.inputData, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {fixtures.length === 0 ? <p className="text-sm text-slate-600">No fixtures yet. Add at least one before activation.</p> : null}
       {fixtures.map((fixture, index) => (

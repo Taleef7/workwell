@@ -1,5 +1,83 @@
 # Journal
 
+## 2026-05-22 — PR #53 review follow-up (security + error mapping + MAT export hygiene)
+
+### Review threads resolved
+
+1. **MAT export authorization boundary**
+   - `SecurityConfig` now explicitly gates `GET /api/measures/*/versions/*/export/mat` to `ROLE_APPROVER` or `ROLE_ADMIN` before the broad authenticated GET rule.
+   - Prevents author/case-manager/viewer roles from downloading MAT bundles directly by URL.
+
+2. **Risk outlook missing-measure response classification**
+   - `ProgramController.riskOutlook(...)` now maps `IllegalArgumentException` from `RiskOutlookService` to `404 Not Found` via `ResponseStatusException`.
+   - Keeps response semantics aligned with the rest of controller-layer not-found handling.
+
+3. **MAT export ValueSet version handling**
+   - `MeasureExportService` now preserves nullable `value_sets.version` from DB and only sets FHIR `ValueSet.version` when non-blank.
+   - Avoids serializing empty version primitives for value sets that intentionally omit version data.
+
+### Tests added/updated
+
+- `ProgramControllerTest`:
+  - Added `riskOutlookReturnsNotFoundWhenMeasureIsMissing`.
+- `SecurityRoleIntegrationTest`:
+  - Added MAT export role checks:
+    - VIEWER forbidden
+    - AUTHOR forbidden
+    - APPROVER allowed through security layer (request reaches controller; returns 404 for unknown IDs)
+    - ADMIN allowed through security layer (request reaches controller; returns 404 for unknown IDs)
+- `MeasureExportServiceTest`:
+  - Added `omitsValueSetVersionWhenStoredVersionIsBlank` to assert no empty FHIR version output for blank DB values.
+
+### Docs updated
+
+- `README.md` API highlights now annotate MAT export endpoint role requirements (`ROLE_APPROVER`/`ROLE_ADMIN`).
+
+## 2026-05-22 — Sprint 7.2–7.5: AI Fixtures, Risk Outlook, MAT Export, Mobile UX
+
+### What changed
+
+**Issue 7.2 — AI Test Fixture Generator**
+- Backend `AiAssistService` now supports AI fixture generation with `generateTestFixtures(measureId, actor)` and writes `AI_TEST_FIXTURES_GENERATED` audit events.
+- New endpoint: `POST /api/measures/{measureId}/ai/generate-test-fixtures` on `AiController`.
+- Output is normalized to exactly 5 fixtures, one per required outcome (`COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`).
+- Deterministic fallback fixture set is returned when AI output is invalid/unavailable so authoring is never blocked.
+- Frontend `TestsTab` now has **Generate Fixtures** + draft fixture cards and additive controls (`Add to Draft`, `Add All to Drafts`) with explanatory AI review note.
+
+**Issue 7.3 — Risk Outlook / Predictive Analytics**
+- Added `RiskOutlookService` with `getOutlook(measureId, horizonDays)`:
+  - Upcoming due-soon pressure from currently compliant employees nearing threshold.
+  - Repeat non-complier streaks (current consecutive non-compliant periods).
+  - Site-level current vs predicted compliance rates.
+- New endpoint: `GET /api/programs/{measureId}/risk-outlook?horizonDays=30`.
+- Programs detail page now renders a Risk Outlook panel with KPI chips, repeat non-compliers table (employee links to `/employees/[externalId]`), and site heatmap table sorted by current risk.
+
+**Issue 7.4 — MAT-Compatible Export**
+- Added `MeasureExportService` (`com.workwell.fhir`) to build MAT-compatible FHIR R4 `Bundle` XML containing:
+  - `Library` with `contentType=text/cql` and raw CQL bytes (HAPI serializes base64).
+  - `Measure` with metadata and linked library reference.
+  - Linked `ValueSet` resources (including code concepts in compose/include blocks when available).
+- New endpoint: `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml`.
+- Studio Release tab now includes **Export for MAT (FHIR XML)** for APPROVER/ADMIN roles.
+
+**Issue 7.5 — Mobile Responsive UX**
+- Dashboard shell now uses `md` breakpoint behavior for sidebar/hamburger and adds a mobile bottom tab bar (Programs, Cases, Runs, Admin).
+- Cases page now has explicit mobile card rows with compact employee/measure/status/chevron navigation.
+- Case detail page now exposes mobile-first accordion sections (summary, actions, evidence, timeline) for 375px workflows while preserving the full desktop detail layout.
+- Studio measure editor route now shows a mobile notice ("Studio requires a larger screen") and hides the heavy authoring surface on small screens.
+
+**Docs**
+- `README.md` API highlights updated for new Sprint 7 endpoints.
+
+### Verification
+
+- Backend targeted tests:
+  - `.\gradlew.bat test --tests com.workwell.web.AiControllerTest --tests com.workwell.web.ProgramControllerTest --tests com.workwell.web.MeasureControllerTest` → `BUILD SUCCESSFUL`
+- Frontend:
+  - `npm run lint` → success (1 existing warning in `frontend/test/mocks/next-font.ts`)
+  - `npm run build` → success
+- Note: Full backend suite `.\gradlew.bat test` exceeded local timeout windows in this run; targeted controller coverage above passed for all touched backend API surfaces.
+
 ## 2026-05-22 — Sprint 7.1: AI Draft CQL + PR #52 review resolved
 
 ### PR #52 closeout

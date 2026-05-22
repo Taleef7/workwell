@@ -3,10 +3,12 @@ package com.workwell.web;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.admin.DataReadinessService;
+import com.workwell.fhir.MeasureExportService;
 import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
@@ -40,6 +42,9 @@ class MeasureControllerTest {
 
     @MockBean
     private ValueSetGovernanceService valueSetGovernanceService;
+
+    @MockBean
+    private MeasureExportService measureExportService;
 
     @Test
     void createsNewMeasureVersion() throws Exception {
@@ -190,5 +195,19 @@ class MeasureControllerTest {
                 .andExpect(jsonPath("$[0].cfrCitation").value("29 CFR 1910.95"))
                 .andExpect(jsonPath("$[0].title").value("Occupational Noise Exposure"))
                 .andExpect(jsonPath("$[0].programArea").value("Hearing Conservation"));
+    }
+
+    @Test
+    void exportsMatBundleXml() throws Exception {
+        UUID measureId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID versionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        String xml = "<Bundle xmlns=\"http://hl7.org/fhir\"><type value=\"collection\"/></Bundle>";
+        when(measureExportService.exportAsMatBundle(measureId, versionId)).thenReturn(xml);
+
+        mockMvc.perform(get("/api/measures/{measureId}/versions/{versionId}/export/mat", measureId, versionId)
+                        .param("format", "xml"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("application/fhir+xml"))
+                .andExpect(content().string(xml));
     }
 }

@@ -3,6 +3,7 @@ package com.workwell.web;
 import com.workwell.ai.AiAssistService;
 import com.workwell.security.SecurityActor;
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
@@ -42,6 +43,17 @@ public class AiController {
         try {
             String oshaText = request == null ? "" : request.oshaText();
             return aiAssistService.draftCql(measureId, oshaText, SecurityActor.currentActor());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/measures/{measureId}/ai/generate-test-fixtures")
+    public List<AiAssistService.GeneratedTestFixture> generateTestFixtures(
+            @PathVariable UUID measureId
+    ) {
+        try {
+            return aiAssistService.generateTestFixtures(measureId, SecurityActor.currentActor());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         }
