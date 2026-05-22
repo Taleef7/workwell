@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.workwell.program.ProgramService;
+import com.workwell.run.RiskOutlookService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -24,6 +25,9 @@ class ProgramControllerTest {
 
     @MockBean
     private ProgramService programService;
+
+    @MockBean
+    private RiskOutlookService riskOutlookService;
 
     @Test
     void listsPrograms() throws Exception {
@@ -94,5 +98,57 @@ class ProgramControllerTest {
     void rejectsInvalidDateFilters() throws Exception {
         mockMvc.perform(get("/api/programs").param("from", "2026-13-01"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsRiskOutlook() throws Exception {
+        UUID measureId = UUID.fromString("77777777-7777-7777-7777-777777777777");
+        when(riskOutlookService.getOutlook(measureId, 30)).thenReturn(
+                new RiskOutlookService.RiskOutlookResult(
+                        2,
+                        List.of(
+                                new RiskOutlookService.UpcomingExpiration(
+                                        "EMP-001",
+                                        "Ava Khan",
+                                        "Plant A",
+                                        "Audiogram",
+                                        "2025-06-01",
+                                        365,
+                                        335,
+                                        0,
+                                        "2026-05-02"
+                                )
+                        ),
+                        List.of(
+                                new RiskOutlookService.RepeatNonComplier(
+                                        "EMP-900",
+                                        "Rami Patel",
+                                        "Plant B",
+                                        "Audiogram",
+                                        3
+                                )
+                        ),
+                        List.of(
+                                new RiskOutlookService.SiteComplianceRate("Plant A", 10, 7, 2, 70.0, 50.0)
+                        )
+                )
+        );
+
+        mockMvc.perform(get("/api/programs/{measureId}/risk-outlook", measureId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.upcomingNonCompliantCount").value(2))
+                .andExpect(jsonPath("$.upcomingExpirations[0].externalId").value("EMP-001"))
+                .andExpect(jsonPath("$.repeatNonCompliers[0].streakCount").value(3))
+                .andExpect(jsonPath("$.siteComplianceRates[0].site").value("Plant A"));
+    }
+
+    @Test
+    void riskOutlookReturnsNotFoundWhenMeasureIsMissing() throws Exception {
+        UUID measureId = UUID.fromString("88888888-8888-8888-8888-888888888888");
+        when(riskOutlookService.getOutlook(measureId, 30))
+                .thenThrow(new IllegalArgumentException("Measure not found"));
+
+        mockMvc.perform(get("/api/programs/{measureId}/risk-outlook", measureId))
+                .andExpect(status().isNotFound());
     }
 }

@@ -39,6 +39,7 @@ export function ReleaseApprovalTab({
   const [showActivateConfirm, setShowActivateConfirm] = useState(false);
   const [showDeprecateConfirm, setShowDeprecateConfirm] = useState(false);
   const [deprecateReason, setDeprecateReason] = useState("");
+  const [exportingMat, setExportingMat] = useState(false);
 
   const measureVersionId = versionHistory.find(v => v.version === measure.version)?.id ?? "";
 
@@ -89,6 +90,34 @@ export function ReleaseApprovalTab({
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Deprecation failed");
+    }
+  }
+
+  async function exportMatBundle() {
+    if (!measureVersionId) {
+      onError("No measure version selected for MAT export.");
+      return;
+    }
+    setExportingMat(true);
+    onError("");
+    try {
+      const blob = await api.downloadBlob(
+        `/api/measures/${measureId}/versions/${measureVersionId}/export/mat?format=xml`
+      );
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const safeName = (measure.name || "measure").replace(/[^A-Za-z0-9_-]+/g, "-");
+      anchor.href = url;
+      anchor.download = `${safeName}-${measure.version}-mat.xml`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+      emitToast("MAT export downloaded");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "MAT export failed");
+    } finally {
+      setExportingMat(false);
     }
   }
 
@@ -144,7 +173,7 @@ export function ReleaseApprovalTab({
         )}
 
         {measureVersionId ? (
-          <div className="mt-2 flex justify-start">
+          <div className="mt-2 flex flex-wrap items-center justify-start gap-2">
             <AuditPacketExportButton
               api={api}
               path={`/api/auditor/measure-versions/${measureVersionId}/packet`}
@@ -152,6 +181,16 @@ export function ReleaseApprovalTab({
               label="Export Measure Audit Packet"
               onError={(message) => onError(message)}
             />
+            {canApprove ? (
+              <button
+                type="button"
+                onClick={() => void exportMatBundle()}
+                disabled={exportingMat}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {exportingMat ? "Exporting MAT..." : "Export for MAT (FHIR XML)"}
+              </button>
+            ) : null}
           </div>
         ) : null}
 

@@ -80,6 +80,15 @@ class SecurityRoleIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @WithMockUser(username = "viewer@workwell.dev", roles = "VIEWER")
+    void viewerCannotExportMatBundle() throws Exception {
+        UUID measureId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        mockMvc.perform(get("/api/measures/{measureId}/versions/{versionId}/export/mat", measureId, versionId))
+                .andExpect(status().isForbidden());
+    }
+
     // --- AUTHOR ---
 
     @Test
@@ -119,6 +128,15 @@ class SecurityRoleIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @WithMockUser(username = "author@workwell.dev", roles = "AUTHOR")
+    void authorCannotExportMatBundle() throws Exception {
+        UUID measureId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        mockMvc.perform(get("/api/measures/{measureId}/versions/{versionId}/export/mat", measureId, versionId))
+                .andExpect(status().isForbidden());
+    }
+
     // --- APPROVER ---
 
     @Test
@@ -138,6 +156,15 @@ class SecurityRoleIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @WithMockUser(username = "approver@workwell.dev", roles = "APPROVER")
+    void approverCanReachMatExportEndpoint() throws Exception {
+        UUID measureId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        mockMvc.perform(get("/api/measures/{measureId}/versions/{versionId}/export/mat", measureId, versionId))
+                .andExpect(status().isNotFound());
+    }
+
     // --- ADMIN ---
 
     @Test
@@ -152,6 +179,15 @@ class SecurityRoleIntegrationTest extends AbstractIntegrationTest {
     void adminCanReadMeasures() throws Exception {
         mockMvc.perform(get("/api/measures"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(username = "admin@workwell.dev", roles = "ADMIN")
+    void adminCanReachMatExportEndpoint() throws Exception {
+        UUID measureId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        mockMvc.perform(get("/api/measures/{measureId}/versions/{versionId}/export/mat", measureId, versionId))
+                .andExpect(status().isNotFound());
     }
 
     // --- Internal eval endpoint ---

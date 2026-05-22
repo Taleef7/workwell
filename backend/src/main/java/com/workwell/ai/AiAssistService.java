@@ -8,11 +8,14 @@ import com.workwell.caseflow.CaseFlowService;
 import com.workwell.run.RunPersistenceService;
 import com.workwell.security.SecurityActor;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -198,6 +201,28 @@ public class AiAssistService {
             13. Do NOT make compliance decisions — only compute from structured FHIR data
             """;
 
+    private static final List<String> REQUIRED_FIXTURE_OUTCOMES = List.of(
+            "COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"
+    );
+    private static final String FIXTURE_SYSTEM_PROMPT = """
+            You are a CQL test engineer. Generate test fixtures for occupational health compliance measures.
+            Return ONLY a valid JSON array of fixture objects. No explanation, no markdown.
+
+            Each fixture: {
+              "name": "description",
+              "inputData": {
+                "examDate": "YYYY-MM-DD or null",
+                "programEnrolled": true/false,
+                "hasExemption": true/false,
+                "role": "string",
+                "site": "string"
+              },
+              "expectedOutcome": "COMPLIANT|DUE_SOON|OVERDUE|MISSING_DATA|EXCLUDED"
+            }
+
+            Generate exactly 5 fixtures covering all 5 outcome types.
+            """;
+
     private String stripCodeFences(String raw) {
         if (raw == null) return "";
         String trimmed = raw.trim();
@@ -245,6 +270,145 @@ public class AiAssistService {
                   else if "Days Since Last Exam" > 335 then 'DUE_SOON'
                   else 'COMPLIANT'
                 """.formatted(safeMeasureName);
+    }
+
+    public List<GeneratedTestFixture> generateTestFixtures(UUID measureId, String actor) {
+        if (measureId == null) {
+            throw new IllegalArgumentException("measureId is required");
+        }
+        Map<String, Object> measureRow = jdbcTemplate.query(
+                """
+                        SELECT m.name AS name, COALESCE(mv.cql_text, '') AS cql_text
+                        FROM measures m
+                        JOIN measure_versions mv ON mv.measure_id = m.id
+                        WHERE m.id = ?
+                        ORDER BY mv.created_at DESC
+                        LIMIT 1
+                        """,
+                rs -> rs.next()
+                        ? Map.of("name", rs.getString("name"), "cqlText", rs.getString("cql_text"))
+                        : null,
+                measureId
+        );
+        if (measureRow == null) {
+            throw new IllegalArgumentException("Measure not found: " + measureId);
+        }
+
+        String measureName = valueAsString(measureRow.get("name"), "Measure");
+        String cqlText = valueAsString(measureRow.get("cqlText"), "");
+        String prompt = "Measure name: " + measureName + "\n\n"
+                + "CQL library:\n" + cqlText + "\n\n"
+                + "Generate exactly 5 test fixtures covering each outcome type.";
+
+        List<GeneratedTestFixture> fixtures;
+        boolean fallbackUsed;
+        String provider;
+        try {
+            String raw = callWithModelFallback(FIXTURE_SYSTEM_PROMPT, prompt);
+            fixtures = parseGeneratedFixtures(raw);
+            fallbackUsed = false;
+            provider = modelName;
+        } catch (Exception ex) {
+            fixtures = buildFallbackFixtures();
+            fallbackUsed = true;
+            provider = "fallback-template";
+        }
+
+        insertAiAudit("AI_TEST_FIXTURES_GENERATED", actor, null, null, Map.of(
+                "measureId", measureId.toString(),
+                "measureName", measureName,
+                "count", fixtures.size(),
+                "model", provider,
+                "fallbackUsed", fallbackUsed
+        ));
+        return fixtures;
+    }
+
+    private List<GeneratedTestFixture> parseGeneratedFixtures(String raw) throws JsonProcessingException {
+        String json = stripCodeFences(raw);
+        List<Map<String, Object>> parsed = objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
+        List<GeneratedTestFixture> normalized = new ArrayList<>();
+        for (int i = 0; i < parsed.size(); i++) {
+            Map<String, Object> row = parsed.get(i);
+            String expectedOutcome = valueAsString(row.get("expectedOutcome"), "").trim().toUpperCase();
+            if (!REQUIRED_FIXTURE_OUTCOMES.contains(expectedOutcome)) {
+                continue;
+            }
+            String name = valueAsString(row.get("name"), "").trim();
+            if (name.isBlank()) {
+                name = "Generated fixture " + (i + 1);
+            }
+            normalized.add(new GeneratedTestFixture(
+                    name,
+                    safeMap(row.get("inputData")),
+                    expectedOutcome
+            ));
+        }
+
+        Set<String> seenOutcomes = new HashSet<>();
+        for (GeneratedTestFixture fixture : normalized) {
+            seenOutcomes.add(fixture.expectedOutcome());
+        }
+        if (!seenOutcomes.containsAll(REQUIRED_FIXTURE_OUTCOMES)) {
+            throw new IllegalStateException("Generated fixtures did not cover all required outcomes.");
+        }
+
+        List<GeneratedTestFixture> ordered = new ArrayList<>();
+        for (String requiredOutcome : REQUIRED_FIXTURE_OUTCOMES) {
+            GeneratedTestFixture match = normalized.stream()
+                    .filter(fixture -> requiredOutcome.equals(fixture.expectedOutcome()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Missing generated fixture for outcome: " + requiredOutcome));
+            ordered.add(match);
+        }
+        return ordered;
+    }
+
+    private List<GeneratedTestFixture> buildFallbackFixtures() {
+        LocalDate today = LocalDate.now();
+        List<GeneratedTestFixture> fallback = new ArrayList<>();
+        fallback.add(new GeneratedTestFixture(
+                "Employee with exam 30 days ago → COMPLIANT",
+                fixtureInput(today.minusDays(30).toString(), true, false, "Maintenance Tech", "Plant A"),
+                "COMPLIANT"
+        ));
+        fallback.add(new GeneratedTestFixture(
+                "Employee with exam 340 days ago → DUE_SOON",
+                fixtureInput(today.minusDays(340).toString(), true, false, "Nurse", "Clinic"),
+                "DUE_SOON"
+        ));
+        fallback.add(new GeneratedTestFixture(
+                "Employee with exam 400 days ago → OVERDUE",
+                fixtureInput(today.minusDays(400).toString(), true, false, "Welder", "Plant B"),
+                "OVERDUE"
+        ));
+        fallback.add(new GeneratedTestFixture(
+                "Employee with no exam on file → MISSING_DATA",
+                fixtureInput(null, true, false, "Office Staff", "Plant A"),
+                "MISSING_DATA"
+        ));
+        fallback.add(new GeneratedTestFixture(
+                "Employee with medical exemption → EXCLUDED",
+                fixtureInput(null, true, true, "Industrial Hygienist", "Clinic"),
+                "EXCLUDED"
+        ));
+        return fallback;
+    }
+
+    private Map<String, Object> fixtureInput(
+            String examDate,
+            boolean programEnrolled,
+            boolean hasExemption,
+            String role,
+            String site
+    ) {
+        Map<String, Object> inputData = new LinkedHashMap<>();
+        inputData.put("examDate", examDate);
+        inputData.put("programEnrolled", programEnrolled);
+        inputData.put("hasExemption", hasExemption);
+        inputData.put("role", role);
+        inputData.put("site", site);
+        return inputData;
     }
 
     public CaseExplanationResponse explainCase(UUID caseId, String actor) {
@@ -556,6 +720,13 @@ public class AiAssistService {
             String cql,
             String provider,
             boolean fallbackUsed
+    ) {
+    }
+
+    public record GeneratedTestFixture(
+            String name,
+            Map<String, Object> inputData,
+            String expectedOutcome
     ) {
     }
 
