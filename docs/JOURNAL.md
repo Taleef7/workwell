@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-05-22 — Sprint 7.1: AI Draft CQL + PR #52 review resolved
+
+### PR #52 closeout
+
+**Review comment resolved:** code-reviewer flagged that `AiAssistService.draftCql` ordered versions by `Active` status before recency, meaning if a measure had an older Active version and a newer Draft version the AI prompt used stale `spec_json` — contradicting what Studio shows in the editor.
+
+Fix: dropped the `CASE WHEN mv.status = 'Active' THEN 0 ELSE 1 END` priority from the ORDER BY; now orders purely by `mv.created_at DESC` so the newest version is always selected regardless of lifecycle status. One-line change, AI module tests confirmed green. Review thread resolved on GitHub.
+
+- Commit: `e4e8501` — fix(ai): select newest measure version for AI Draft CQL prompt
+- PR #52 ready to merge (no remaining open comments)
+
+---
+
 ## 2026-05-22 — Sprint 7.1: AI Draft CQL
 
 ### What changed
