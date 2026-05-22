@@ -73,7 +73,11 @@ public class ProgramController {
             @PathVariable UUID measureId,
             @RequestParam(name = "horizonDays", defaultValue = "30") int horizonDays
     ) {
-        return riskOutlookService.getOutlook(measureId, horizonDays);
+        try {
+            return riskOutlookService.getOutlook(measureId, horizonDays);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
     }
 
     private Instant parseFromDate(String from) {

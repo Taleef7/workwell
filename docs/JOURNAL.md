@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-05-22 — PR #53 review follow-up (security + error mapping + MAT export hygiene)
+
+### Review threads resolved
+
+1. **MAT export authorization boundary**
+   - `SecurityConfig` now explicitly gates `GET /api/measures/*/versions/*/export/mat` to `ROLE_APPROVER` or `ROLE_ADMIN` before the broad authenticated GET rule.
+   - Prevents author/case-manager/viewer roles from downloading MAT bundles directly by URL.
+
+2. **Risk outlook missing-measure response classification**
+   - `ProgramController.riskOutlook(...)` now maps `IllegalArgumentException` from `RiskOutlookService` to `404 Not Found` via `ResponseStatusException`.
+   - Keeps response semantics aligned with the rest of controller-layer not-found handling.
+
+3. **MAT export ValueSet version handling**
+   - `MeasureExportService` now preserves nullable `value_sets.version` from DB and only sets FHIR `ValueSet.version` when non-blank.
+   - Avoids serializing empty version primitives for value sets that intentionally omit version data.
+
+### Tests added/updated
+
+- `ProgramControllerTest`:
+  - Added `riskOutlookReturnsNotFoundWhenMeasureIsMissing`.
+- `SecurityRoleIntegrationTest`:
+  - Added MAT export role checks:
+    - VIEWER forbidden
+    - AUTHOR forbidden
+    - APPROVER allowed through security layer (request reaches controller; returns 404 for unknown IDs)
+    - ADMIN allowed through security layer (request reaches controller; returns 404 for unknown IDs)
+- `MeasureExportServiceTest`:
+  - Added `omitsValueSetVersionWhenStoredVersionIsBlank` to assert no empty FHIR version output for blank DB values.
+
+### Docs updated
+
+- `README.md` API highlights now annotate MAT export endpoint role requirements (`ROLE_APPROVER`/`ROLE_ADMIN`).
+
 ## 2026-05-22 — Sprint 7.2–7.5: AI Fixtures, Risk Outlook, MAT Export, Mobile UX
 
 ### What changed

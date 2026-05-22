@@ -86,7 +86,7 @@ pnpm dev
 - `GET /api/admin/terminology-mappings` — list local-to-standard terminology mappings with status and confidence
 - `POST /api/admin/terminology-mappings` — create a new terminology mapping (PROPOSED by default)
 - `GET /api/programs/{measureId}/risk-outlook?horizonDays=30` — upcoming due-soon pressure, repeat non-compliers, and site risk rates
-- `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml` — FHIR R4 MAT-compatible bundle export
+- `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml` — FHIR R4 MAT-compatible bundle export; requires `ROLE_APPROVER` or `ROLE_ADMIN`
 - `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
 - `GET /api/runs?limit=1`
 - `GET /api/cases?status=open`

@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.UUID;
 import org.hl7.fhir.r4.model.Attachment;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.CodeableConcept;
+import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.Library;
 import org.hl7.fhir.r4.model.Measure;
@@ -101,7 +103,7 @@ public class MeasureExportService {
                     vs.id,
                     vs.oid,
                     vs.name,
-                    COALESCE(vs.version, '') AS version,
+                    vs.version,
                     COALESCE(vs.canonical_url, '') AS canonical_url,
                     vs.codes_json::text AS codes_json_text
                 FROM measure_value_set_links mvsl
@@ -128,6 +130,12 @@ public class MeasureExportService {
         library.setTitle(row.measureName() + " CQL Library");
         library.setVersion(row.version());
         library.setStatus(resolvePublicationStatus(row.status()));
+        library.setType(new CodeableConcept().addCoding(
+                new Coding()
+                        .setSystem("http://terminology.hl7.org/CodeSystem/library-type")
+                        .setCode("logic-library")
+                        .setDisplay("Logic Library")
+        ));
 
         if (row.cqlText() != null && !row.cqlText().isBlank()) {
             Attachment attachment = new Attachment();
@@ -157,7 +165,10 @@ public class MeasureExportService {
         valueSet.setId(UUID.randomUUID().toString());
         valueSet.setName(safeIdentifier(row.name()));
         valueSet.setTitle(row.name());
-        valueSet.setVersion(row.version());
+        String valueSetVersion = row.version() == null ? "" : row.version().trim();
+        if (!valueSetVersion.isEmpty()) {
+            valueSet.setVersion(valueSetVersion);
+        }
         valueSet.setStatus(Enumerations.PublicationStatus.ACTIVE);
         valueSet.setUrl(resolveValueSetUrl(row));
 

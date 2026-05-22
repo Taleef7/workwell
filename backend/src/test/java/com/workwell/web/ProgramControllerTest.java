@@ -141,4 +141,14 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.repeatNonCompliers[0].streakCount").value(3))
                 .andExpect(jsonPath("$.siteComplianceRates[0].site").value("Plant A"));
     }
+
+    @Test
+    void riskOutlookReturnsNotFoundWhenMeasureIsMissing() throws Exception {
+        UUID measureId = UUID.fromString("88888888-8888-8888-8888-888888888888");
+        when(riskOutlookService.getOutlook(measureId, 30))
+                .thenThrow(new IllegalArgumentException("Measure not found"));
+
+        mockMvc.perform(get("/api/programs/{measureId}/risk-outlook", measureId))
+                .andExpect(status().isNotFound());
+    }
 }
