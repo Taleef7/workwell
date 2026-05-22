@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-05-22 — Repository polish pass (community health + standards + README modernization)
+
+### What changed
+
+- Reworked `README.md` for a production-grade repository front page:
+  - added CI/deploy/license/runtime badges
+  - tightened project positioning and status summary
+  - refreshed stack/runtime sections
+  - added explicit verification command block
+  - added community and governance links
+- Added repository community health and contribution standards:
+  - `CONTRIBUTING.md`
+  - `SECURITY.md`
+  - `CODE_OF_CONDUCT.md`
+  - `SUPPORT.md`
+  - `.github/pull_request_template.md`
+  - `.github/ISSUE_TEMPLATE/bug_report.md`
+  - `.github/ISSUE_TEMPLATE/feature_request.md`
+  - `.github/ISSUE_TEMPLATE/config.yml` (blank issues disabled; security redirect)
+  - `.github/CODEOWNERS`
+- Added project hygiene files:
+  - `CHANGELOG.md` (Keep a Changelog format)
+  - `.editorconfig`
+- Refreshed package metadata for discoverability and tooling:
+  - `frontend/package.json` updated with canonical package name, description, repository metadata, homepage, keywords
+  - `e2e/package.json` updated with description/repository/homepage
+
+### GitHub repository metadata
+
+- Updated About description.
+- Updated homepage URL to `https://twh.os.mieweb.org`.
+- Added curated topics: TWH, occupational health, compliance, CQL/FHIR, Spring Boot, Next.js, MCP, OpenAI, and related tags.
+
+### Verification
+
+- `frontend`: `npm run lint` passed with one existing warning in `test/mocks/next-font.ts` (no new lint errors introduced).
+
 ## 2026-05-22 — Sprint 7 closeout to `main`, tracker cleanup, and repo metadata refresh
 
 ### Repository state updates

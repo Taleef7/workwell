@@ -1,17 +1,29 @@
 # WorkWell Measure Studio
 
-WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker Health (TWH)** compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one demoable stack.
+[![CI](https://github.com/Taleef7/workwell/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Taleef7/workwell/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Taleef7/workwell/actions/workflows/deploy-twh-mieweb.yml/badge.svg?branch=main)](https://github.com/Taleef7/workwell/actions/workflows/deploy-twh-mieweb.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)](backend/build.gradle.kts)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
+[![Open Issues](https://img.shields.io/github/issues/Taleef7/workwell)](https://github.com/Taleef7/workwell/issues)
 
-## What it includes
+WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker Health (TWH)** compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one operational platform.
 
-- Measure catalog + Studio authoring for Spec, CQL, Value Sets, Tests, Traceability, and Activation Impact Preview
-- Lifecycle flow: `Draft -> Approved -> Active -> Deprecated`
-- Compile gate and test-fixture validation gate before activation
-- Manual runs for ALL_PROGRAMS, MEASURE, and CASE scopes across Audiogram, TB Surveillance, HAZWOPER Surveillance, Flu Vaccine, and all-program views
-- Case worklist, case detail, outreach, assign/escalate, rerun-to-verify, and timeline audit history
-- CSV exports for runs, outcomes, cases, and audit events
-- Read-only MCP tools for programmatic inspection
-- AI assist surfaces for drafting and explanations, with compliance always decided by CQL
+## At a glance
+
+- Lifecycle-managed measures: `Draft -> Approved -> Active -> Deprecated`
+- CQL compile + fixture validation gates before activation
+- Scoped run pipeline: `ALL_PROGRAMS`, `MEASURE`, `CASE`
+- Case operations: outreach, assign/escalate, rerun-to-verify, timeline audit
+- AI assist for CQL drafting and test fixture generation (never compliance decisions)
+- MAT-compatible FHIR R4 export for measure portability
+- Risk outlook analytics for upcoming exposure and repeat non-compliance patterns
+
+## Status
+
+- Sprint queue through **Sprint 7** is implemented in the repo.
+- Sprint 7 issues `#47`-`#51` are completed and closed.
+- Default branch: `main` only (stale sprint branches cleaned up).
 
 ## Production surfaces
 
@@ -20,25 +32,27 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 - Public preview frontend: `https://workwell-measure-studio.vercel.app`
 - Public preview backend API: `https://workwell-measure-studio-api.fly.dev`
 
-## Stack
+## Technology stack
 
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
 - Frontend: Next.js 16 App Router, TypeScript, Tailwind, shadcn/ui, Monaco
-- CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0
-- Infra: MIE Create-a-Container (primary), Neon, GitHub Actions, pnpm (with Vercel/Fly public preview surfaces)
-
-## Current status
-
-- Sprint queue through Sprint 7 is implemented in the repo as of **2026-05-22**.
-- Sprint 7.1–7.5 issues are closed (`#47`–`#51`), with Sprint 7.2–7.5 promoted to `main`.
+- CQL/FHIR: HAPI FHIR + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0
+- Infra: MIE Create-a-Container (primary), Neon, GitHub Actions
 
 ## Repository layout
 
-- `backend/` Spring Boot API, CQL evaluation, caseflow, exports, MCP, and security
-- `frontend/` Next.js dashboard, Studio, admin, login, and demo UX
-- `docs/` architecture, data model, deployment, demo runbook, and closeout notes
+- `backend/` API, CQL evaluation, caseflow, exports, security, MCP
+- `frontend/` dashboard, Studio, admin, login, UX surfaces
+- `docs/` architecture, data model, deploy, runbooks, sprint and journal history
+- `e2e/` Playwright tests
 
 ## Quick start
+
+### Prerequisites
+
+- Java 21
+- Node.js 20+
+- npm (or pnpm if installed locally)
 
 ### Backend
 
@@ -52,82 +66,75 @@ cd backend
 
 ```bash
 cd frontend
-pnpm install
-pnpm lint
-pnpm build
-pnpm dev
+npm install
+npm run lint
+npm run build
+npm run dev
+```
+
+## Verification commands
+
+```bash
+# backend
+cd backend
+./gradlew.bat test
+
+# frontend
+cd ../frontend
+npm run lint
+npm run test
+npm run build
 ```
 
 ## Key routes
 
-- `/` public landing page with GitHub link, walkthrough video, and sandbox CTA
-- `/sandbox` no-manual-login demo entry that routes into the dashboard
-- `/programs` dashboard overview
-- `/programs/[measureId]` measure trend/detail view
-- `/runs` run history and summaries
-- `/cases` worklist and filters
-- `/cases/[id]` case detail, timeline, outreach, and rerun actions
-- `/measures` measure catalog and create flow
-- `/studio/[id]` Studio authoring for a specific measure
-- `/admin` scheduler controls and integration health
-- `/login` demo login entry point
+- `/programs` compliance overview
+- `/programs/[measureId]` trend, drivers, risk outlook
+- `/runs` run history and detail
+- `/cases` case worklist and filters
+- `/cases/[id]` evidence, actions, timeline
+- `/measures` catalog
+- `/studio/[id]` measure authoring
+- `/admin` integration and scheduler controls
 
 ## API highlights
 
-- `GET /api/measures`
-- `GET /api/measures/{id}`
-- `PUT /api/measures/{id}/spec`
-- `POST /api/measures/{id}/cql/compile`
-- `PUT /api/measures/{id}/tests`
-- `POST /api/measures/{id}/tests/validate`
-- `POST /api/measures/{id}/ai/draft-cql` — generate an AI-assisted CQL draft (with fallback template)
-- `POST /api/measures/{id}/ai/generate-test-fixtures` — generate five AI-assisted outcome fixtures (with fallback set)
-- `GET /api/measures/{id}/data-readiness` — per-measure data readiness: required element mapping status, source freshness, missingness rate, blockers and warnings
-- `GET /api/admin/data-mappings` — list all canonical data element source mappings
-- `POST /api/admin/data-mappings/validate` — cross-reference integration health into mapping statuses (marks STALE on degraded source)
-- `GET /api/measures/{id}/traceability` — policy-to-evidence traceability matrix with gap detection
-- `POST /api/measures/{id}/impact-preview` — dry-run activation impact: outcome counts, case impact, no DB writes; writes `MEASURE_IMPACT_PREVIEWED` audit event
-- `POST /api/measures/{id}/value-sets/resolve-check` — governance resolve-check: resolution status, code counts, CQL unattached reference detection, blockers/warnings
-- `GET /api/value-sets/{id}/diff?to={toId}` — code-level diff between two value set versions with affected measure list
-- `GET /api/value-sets/{id}/detail` — full value set detail including governance metadata and code list
-- `GET /api/admin/terminology-mappings` — list local-to-standard terminology mappings with status and confidence
-- `POST /api/admin/terminology-mappings` — create a new terminology mapping (PROPOSED by default)
-- `GET /api/programs/{measureId}/risk-outlook?horizonDays=30` — upcoming due-soon pressure, repeat non-compliers, and site risk rates
-- `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml` — FHIR R4 MAT-compatible bundle export; requires `ROLE_APPROVER` or `ROLE_ADMIN`
-- `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
-- `GET /api/runs?limit=1`
+- `POST /api/measures/{id}/ai/draft-cql`
+- `POST /api/measures/{id}/ai/generate-test-fixtures`
+- `GET /api/programs/{measureId}/risk-outlook?horizonDays=30`
+- `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml`
+- `POST /api/runs/manual`
 - `GET /api/cases?status=open`
-- `POST /api/cases/{caseId}/evidence` and `GET /api/evidence/{id}/download` for case evidence, restricted to case manager/admin roles
-- `GET /api/admin/integrations`
 - `GET /api/exports/runs?format=csv`
-- `GET /api/exports/outcomes?format=csv&runId={id}`
-- `GET /api/exports/cases?format=csv`
-- `GET /api/auditor/cases/{caseId}/packet?format=json|html` — structured case audit packet: case summary, evidence, actions, outreach, appointments, AI assist logs, disclaimers; requires `ROLE_CASE_MANAGER` or `ROLE_ADMIN`
-- `GET /api/auditor/runs/{runId}/packet?format=json|html` — structured run audit packet: run metadata, outcomes summary, logs, audit events, disclaimers; requires `ROLE_CASE_MANAGER` or `ROLE_ADMIN`
-- `GET /api/auditor/measure-versions/{mvId}/packet?format=json|html` — structured measure version audit packet: spec, CQL+hash, compile result, value sets, governance, traceability, data readiness, approval history; requires `ROLE_APPROVER` or `ROLE_ADMIN`
+- `GET /api/auditor/cases/{caseId}/packet?format=json|html`
 
-## CSV exports
+For full API surface and behavioral notes, see docs linked below.
 
-Exact export contracts live in [`docs/EXPORTS.md`](docs/EXPORTS.md).
+## Documentation map
 
-## Docs to read next
+- [Architecture](docs/ARCHITECTURE.md)
+- [Data Model](docs/DATA_MODEL.md)
+- [Measures](docs/MEASURES.md)
+- [Deploy Guide](docs/DEPLOY.md)
+- [Exports](docs/EXPORTS.md)
+- [Sprint Index](docs/sprints/README.md)
+- [Journal](docs/JOURNAL.md)
+- [Changelog](CHANGELOG.md)
 
-- `docs/ARCHITECTURE.md`
-- `docs/DATA_MODEL.md`
-- `docs/MEASURES.md`
-- `docs/DEPLOY.md`
-- `docs/DEMO_SCRIPT.md`
-- `docs/DEMO_RUNBOOK.md`
-- `docs/JOURNAL.md`
+## Engineering and governance notes
 
-## Notes
+- AI assist is constrained by `docs/AI_GUARDRAILS.md`; compliance remains CQL-derived only.
+- Public API audit actor is always security-context derived.
+- Evidence download/upload operations are role-gated and audited.
+- Production startup enforces auth, JWT, and CORS safety checks.
 
-- `POST /api/eval` is internal compatibility-only and requires `X-WorkWell-Internal: true`.
-- Case rerun-to-verify re-evaluates the subject through the structured CQL path and only resolves the case when that evaluation returns a compliant or excluded outcome.
-- Evidence uploads and downloads are role-protected for `ROLE_CASE_MANAGER` and `ROLE_ADMIN`; downloads resolve the linked case first and write `EVIDENCE_DOWNLOADED` audit events with sanitized filenames and content types.
-- Production backend startup rejects unsafe settings: auth-off, weak or missing JWT secrets, wildcard CORS, localhost CORS in production-like profiles, and backend demo flags without an explicit public-demo override.
-- Production CORS uses exact origins from `WORKWELL_CORS_ALLOWED_ORIGINS`; `https://*.vercel.app` is not allowed.
-- Frontend demo prefill (`NEXT_PUBLIC_DEMO_MODE`) is local-only and the frontend build fails if it is enabled during a production build.
-- Public APIs derive audit identity from the authenticated security context; they no longer accept caller-supplied `actor` or `resolvedBy` inputs.
-- MCP routes remain protected through Spring Security role checks; there is no public MCP mode in production. See [`docs/MCP.md`](docs/MCP.md).
-- `docs/archive/SPIKE_PLAN.md` is historical sprint context.
+## Community and contribution
+
+- [Contributing Guide](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Support](SUPPORT.md)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
