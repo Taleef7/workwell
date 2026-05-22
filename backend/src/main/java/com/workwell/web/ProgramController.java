@@ -1,6 +1,7 @@
 package com.workwell.web;
 
 import com.workwell.program.ProgramService;
+import com.workwell.run.RiskOutlookService;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -17,9 +18,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class ProgramController {
     private final ProgramService programService;
+    private final RiskOutlookService riskOutlookService;
 
-    public ProgramController(ProgramService programService) {
+    public ProgramController(ProgramService programService, RiskOutlookService riskOutlookService) {
         this.programService = programService;
+        this.riskOutlookService = riskOutlookService;
     }
 
     @GetMapping("/api/programs")
@@ -63,6 +66,14 @@ public class ProgramController {
             @RequestParam(name = "to", required = false) String to
     ) {
         return programService.topDrivers(measureId, site, parseFromDate(from), parseToDate(to));
+    }
+
+    @GetMapping("/api/programs/{measureId}/risk-outlook")
+    public RiskOutlookService.RiskOutlookResult riskOutlook(
+            @PathVariable UUID measureId,
+            @RequestParam(name = "horizonDays", defaultValue = "30") int horizonDays
+    ) {
+        return riskOutlookService.getOutlook(measureId, horizonDays);
     }
 
     private Instant parseFromDate(String from) {

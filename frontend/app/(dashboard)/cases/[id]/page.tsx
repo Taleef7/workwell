@@ -404,7 +404,123 @@ export default function CaseDetailPage() {
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
 
       {caseDetail ? (
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <>
+        <div className="space-y-3 md:hidden">
+          <details open className="rounded-xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900">Case Summary</summary>
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-semibold text-slate-900">{caseDetail.employeeName}</p>
+              <p className="text-xs text-slate-500">{caseDetail.employeeId}</p>
+              <p className="text-xs text-slate-600">{caseDetail.measureName}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(caseDetail.status)}`}>
+                  {labelFor(CASE_STATUS_LABELS, caseDetail.status)}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(caseDetail.currentOutcomeStatus)}`}>
+                  {labelFor(OUTCOME_LABELS, caseDetail.currentOutcomeStatus)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600">Period: {caseDetail.evaluationPeriod}</p>
+              <p className="text-xs text-slate-700">{caseDetail.nextAction}</p>
+              <Link href={`/employees/${caseDetail.employeeId}`} className="text-xs font-semibold text-blue-700 hover:underline">
+                Open Employee Profile
+              </Link>
+            </div>
+          </details>
+
+          <details className="rounded-xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900">Actions</summary>
+            <div className="mt-3 space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Outreach Template</label>
+              <select
+                className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+              >
+                {templates.length === 0 ? <option value="">Default template</option> : null}
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>{template.name}</option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void previewOutreach()}
+                  disabled={previewing || caseStatus === "EXCLUDED"}
+                  className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  {previewing ? "Previewing..." : "Preview"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runAction("outreach")}
+                  disabled={acting !== null || caseStatus === "EXCLUDED"}
+                  className="rounded bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {acting === "outreach" ? "Sending..." : "Send Outreach"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runAction("rerun")}
+                  disabled={acting !== null}
+                  className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {acting === "rerun" ? "Verifying..." : "Rerun to Verify"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEscalationConfirmOpen(true)}
+                  disabled={escalating}
+                  className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 disabled:opacity-60"
+                >
+                  {escalating ? "Escalating..." : "Escalate"}
+                </button>
+              </div>
+              <div className="grid gap-2">
+                <input
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  value={assigneeInput}
+                  onChange={(e) => setAssigneeInput(e.target.value)}
+                  placeholder="Assignee email or handle"
+                />
+                <button
+                  type="button"
+                  onClick={() => void assignCase()}
+                  disabled={assigning}
+                  className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  {assigning ? "Assigning..." : "Assign"}
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <details className="rounded-xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900">Why Flagged Evidence</summary>
+            <div className="mt-3 space-y-2">
+              {(caseDetail.evidenceJson.expressionResults ?? []).map((row, index) => (
+                <div key={`${String(row.define ?? index)}-${index}`} className="rounded border border-slate-200 bg-slate-50 p-2">
+                  <p className="text-xs font-semibold text-slate-800">{String(row.define ?? "define")}</p>
+                  <p className="text-xs text-slate-700">{String(row.result)}</p>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <details className="rounded-xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-900">Timeline</summary>
+            <div className="mt-3 space-y-2">
+              {caseDetail.timeline.map((event) => (
+                <div key={`${event.eventType}-${event.occurredAt}`} className="rounded border border-slate-200 bg-slate-50 p-2">
+                  <p className="text-xs font-semibold text-slate-800">{formatEventType(event.eventType)}</p>
+                  <p className="text-[11px] text-slate-600">{new Date(event.occurredAt).toLocaleString()} • {event.actor}</p>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+
+        <div className="hidden gap-6 md:grid xl:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -843,6 +959,7 @@ export default function CaseDetailPage() {
             </div>
           </div>
         </div>
+      </>
       ) : null}
     </section>
   );

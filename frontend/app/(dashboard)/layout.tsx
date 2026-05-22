@@ -112,7 +112,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* ── Mobile sidebar backdrop ──────────────────────────────────── */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm md:hidden"
           aria-hidden="true"
         />
       )}
@@ -120,7 +120,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside
         ref={sidebarRef}
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-out lg:translate-x-0 lg:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-out md:translate-x-0 md:shadow-none ${
           sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         }`}
       >
@@ -140,7 +140,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           </Link>
           <button
             type="button"
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close navigation"
           >
@@ -206,13 +206,13 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ── Main area (header + content) ────────────────────────────── */}
-      <div className="flex min-h-dvh flex-col lg:pl-64">
+      <div className="flex min-h-dvh flex-col md:pl-64">
         {/* Header */}
         <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur">
           {/* Mobile hamburger */}
           <button
             type="button"
-            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 lg:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
+            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
             onClick={() => setSidebarOpen(true)}
             aria-label="Open navigation"
           >
@@ -222,7 +222,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           {/* Mobile logo */}
           <Link
             href="/programs"
-            className="flex items-center gap-2 rounded-lg lg:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
+            className="flex items-center gap-2 rounded-lg md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[9px] font-bold tracking-[0.18em] text-white">
               WW
@@ -293,7 +293,47 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Page content */}
-        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
+        <main className="min-w-0 flex-1 p-4 pb-20 md:p-6 md:pb-6">{children}</main>
+
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur md:hidden">
+          <div className="grid grid-cols-4 gap-1">
+            <Link
+              href="/programs"
+              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/programs") ? "text-slate-950" : "text-slate-500"}`}
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span>Programs</span>
+            </Link>
+            <Link
+              href="/cases"
+              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/cases") ? "text-slate-950" : "text-slate-500"}`}
+            >
+              <Shield className="h-4 w-4" />
+              <span>Cases</span>
+            </Link>
+            <Link
+              href="/runs"
+              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/runs") ? "text-slate-950" : "text-slate-500"}`}
+            >
+              <Activity className="h-4 w-4" />
+              <span>Runs</span>
+            </Link>
+            {isAdmin ? (
+              <Link
+                href="/admin"
+                className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/admin") ? "text-slate-950" : "text-slate-500"}`}
+              >
+                <Settings className="h-4 w-4" />
+                <span>Admin</span>
+              </Link>
+            ) : (
+              <span className="flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium text-slate-400">
+                <Settings className="h-4 w-4" />
+                <span>Admin</span>
+              </span>
+            )}
+          </div>
+        </nav>
       </div>
     </div>
   );

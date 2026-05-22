@@ -1,6 +1,7 @@
 package com.workwell.web;
 
 import com.workwell.admin.DataReadinessService;
+import com.workwell.fhir.MeasureExportService;
 import com.workwell.measure.MeasureImpactPreviewService;
 import com.workwell.measure.MeasureService;
 import com.workwell.measure.MeasureTraceabilityService;
@@ -13,7 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,19 +38,22 @@ public class MeasureController {
     private final MeasureImpactPreviewService impactPreviewService;
     private final DataReadinessService dataReadinessService;
     private final ValueSetGovernanceService valueSetGovernanceService;
+    private final MeasureExportService measureExportService;
 
     public MeasureController(
             MeasureService measureService,
             MeasureTraceabilityService traceabilityService,
             MeasureImpactPreviewService impactPreviewService,
             DataReadinessService dataReadinessService,
-            ValueSetGovernanceService valueSetGovernanceService
+            ValueSetGovernanceService valueSetGovernanceService,
+            MeasureExportService measureExportService
     ) {
         this.measureService = measureService;
         this.traceabilityService = traceabilityService;
         this.impactPreviewService = impactPreviewService;
         this.dataReadinessService = dataReadinessService;
         this.valueSetGovernanceService = valueSetGovernanceService;
+        this.measureExportService = measureExportService;
     }
 
     @Operation(summary = "List measures", description = "Catalog of measures with optional status and search filters.")
@@ -267,6 +274,28 @@ public class MeasureController {
             return dataReadinessService.computeReadiness(id);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/measures/{measureId}/versions/{versionId}/export/mat")
+    public ResponseEntity<byte[]> exportMatBundle(
+            @PathVariable UUID measureId,
+            @PathVariable UUID versionId,
+            @RequestParam(name = "format", defaultValue = "xml") String format
+    ) {
+        if (!"xml".equalsIgnoreCase(format)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported format. Use format=xml.");
+        }
+        try {
+            String xml = measureExportService.exportAsMatBundle(measureId, versionId);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"measure-" + versionId + "-mat.xml\"")
+                    .contentType(MediaType.parseMediaType("application/fhir+xml"))
+                    .body(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage());
         }
     }
 
