@@ -87,6 +87,15 @@ export default function StudioMeasurePage() {
 
   return (
     <section className="space-y-4">
+      <div className="md:hidden rounded-xl border border-slate-200 bg-white p-6 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Studio</p>
+        <h2 className="mt-2 text-lg font-semibold text-slate-900">Studio requires a larger screen</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Open this page on a desktop or laptop to author CQL, manage value sets, and run release checks.
+        </p>
+      </div>
+
+      <div className="hidden space-y-4 md:block">
       <div className="flex items-center justify-between">
         <div>
           <Link href="/measures" className="text-xs text-slate-500 hover:underline">Back to Measures</Link>
@@ -221,6 +230,7 @@ export default function StudioMeasurePage() {
       {measureId && tab === "traceability" ? (
         <TraceabilityTab measureId={measureId} api={api} />
       ) : null}
+      </div>
     </section>
   );
 }

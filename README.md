@@ -73,6 +73,8 @@ pnpm dev
 - `POST /api/measures/{id}/cql/compile`
 - `PUT /api/measures/{id}/tests`
 - `POST /api/measures/{id}/tests/validate`
+- `POST /api/measures/{id}/ai/draft-cql` — generate an AI-assisted CQL draft (with fallback template)
+- `POST /api/measures/{id}/ai/generate-test-fixtures` — generate five AI-assisted outcome fixtures (with fallback set)
 - `GET /api/measures/{id}/data-readiness` — per-measure data readiness: required element mapping status, source freshness, missingness rate, blockers and warnings
 - `GET /api/admin/data-mappings` — list all canonical data element source mappings
 - `POST /api/admin/data-mappings/validate` — cross-reference integration health into mapping statuses (marks STALE on degraded source)
@@ -83,6 +85,8 @@ pnpm dev
 - `GET /api/value-sets/{id}/detail` — full value set detail including governance metadata and code list
 - `GET /api/admin/terminology-mappings` — list local-to-standard terminology mappings with status and confidence
 - `POST /api/admin/terminology-mappings` — create a new terminology mapping (PROPOSED by default)
+- `GET /api/programs/{measureId}/risk-outlook?horizonDays=30` — upcoming due-soon pressure, repeat non-compliers, and site risk rates
+- `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml` — FHIR R4 MAT-compatible bundle export
 - `POST /api/runs/manual` (supports `ALL_PROGRAMS`, `MEASURE`, and `CASE` scopes)
 - `GET /api/runs?limit=1`
 - `GET /api/cases?status=open`
