@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-05-22 — Sprint 7.1: AI Draft CQL
+
+### What changed
+
+**Backend** — added `AiAssistService.draftCql(measureId, oshaText, actor)`:
+- Reads measure name + active `spec_json` for the given measure
+- Sends a CQL-specialist system prompt + user prompt containing measure name, spec JSON, and pasted OSHA text
+- Strips code fences from model output
+- Writes `AI_DRAFT_CQL_GENERATED` audit event with `measureId`, `model`/`provider`, `promptLength`, `outputLength`, `fallbackUsed`
+- Deterministic fallback CQL template returned when AI call fails — TODO-annotated skeleton with `Outcome Status` define covering all five buckets
+
+**Endpoint** — `POST /api/measures/{measureId}/ai/draft-cql` on `AiController`, accepts `{ oshaText }` body, returns `{ success, cql, provider, fallbackUsed }`.
+
+**Frontend** — `CqlTab` now has an "AI Draft CQL" button next to Compile. Opens a modal with an OSHA text textarea; on submit the returned CQL is pushed into the Monaco editor and a dismissible amber banner appears above the editor. Compile state is reset so the user must compile the AI draft before approval.
+
+### Why
+Sprint 7 §7.1 differentiator — competitors don't offer CQL authoring assist. CQL is still validated by the existing compile gate before activation, so the rule that AI cannot decide compliance is preserved.
+
+Issues filed: #47 (this), #48, #49, #50, #51 for the rest of Sprint 7.
+
 ## 2026-05-21 — 2026 eCQM catalog upgrade (49 measures), infra cleanup
 
 ### What changed
