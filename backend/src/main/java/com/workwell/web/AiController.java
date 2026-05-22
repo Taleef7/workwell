@@ -34,6 +34,19 @@ public class AiController {
         }
     }
 
+    @PostMapping("/api/measures/{measureId}/ai/draft-cql")
+    public AiAssistService.DraftCqlResponse draftCql(
+            @PathVariable UUID measureId,
+            @RequestBody(required = false) DraftCqlRequest request
+    ) {
+        try {
+            String oshaText = request == null ? "" : request.oshaText();
+            return aiAssistService.draftCql(measureId, oshaText, SecurityActor.currentActor());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        }
+    }
+
     @PostMapping({"/api/cases/{caseId}/explain", "/api/cases/{caseId}/ai/explain"})
     public AiAssistService.CaseExplanationResponse explainCase(
             @PathVariable UUID caseId
@@ -59,6 +72,11 @@ public class AiController {
     public record DraftSpecRequest(
             String measureName,
             @NotBlank String policyText
+    ) {
+    }
+
+    public record DraftCqlRequest(
+            String oshaText
     ) {
     }
 }
