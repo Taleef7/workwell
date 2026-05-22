@@ -38,3 +38,6 @@ docs/WorkWell Studio Summer 2026 Doc.pdf
 backend/src/test/resources/logback-test.xml
 .tmp_eval_payload.json
 .vercel
+
+# Local-only notes (tokens, personal config — never commit)
+docs/MCP_LOCAL.md
