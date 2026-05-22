@@ -236,12 +236,12 @@ async function handleDraftCql() {
 ```
 
 ### Acceptance criteria
-- [ ] `POST /api/measures/{id}/ai/draft-cql` returns valid CQL text (or fallback template)
-- [ ] Returned CQL includes `library`, `using FHIR`, `context Patient`, and `Outcome Status` define
-- [ ] AI draft CQL is inserted into Monaco editor with amber warning banner
-- [ ] Banner is visible after generation and can be dismissed by the user (via the ✕ button)
-- [ ] `AI_DRAFT_CQL_GENERATED` audit event is written with `fallbackUsed` field
-- [ ] Fallback template is returned when AI call fails — no error thrown to user
+- [x] `POST /api/measures/{id}/ai/draft-cql` returns valid CQL text (or fallback template)
+- [x] Returned CQL includes `library`, `using FHIR`, `context Patient`, and `Outcome Status` define
+- [x] AI draft CQL is inserted into Monaco editor with amber warning banner
+- [x] Banner is visible after generation and can be dismissed by the user (via the ✕ button)
+- [x] `AI_DRAFT_CQL_GENERATED` audit event is written with `fallbackUsed` field
+- [x] Fallback template is returned when AI call fails — no error thrown to user
 
 ---
 
@@ -367,11 +367,11 @@ async function handleGenerateFixtures() {
 ```
 
 ### Acceptance criteria
-- [ ] `POST /api/measures/{id}/ai/generate-test-fixtures` returns 5 fixture objects
-- [ ] All 5 outcome types (COMPLIANT, DUE_SOON, OVERDUE, MISSING_DATA, EXCLUDED) are represented
-- [ ] Fallback fixtures are returned when AI fails — no error to user
-- [ ] Generated fixtures appear as draft rows in the Tests tab
-- [ ] `AI_TEST_FIXTURES_GENERATED` audit event is written
+- [x] `POST /api/measures/{id}/ai/generate-test-fixtures` returns 5 fixture objects
+- [x] All 5 outcome types (COMPLIANT, DUE_SOON, OVERDUE, MISSING_DATA, EXCLUDED) are represented
+- [x] Fallback fixtures are returned when AI fails — no error to user
+- [x] Generated fixtures appear as draft rows in the Tests tab
+- [x] `AI_TEST_FIXTURES_GENERATED` audit event is written
 
 ---
 
@@ -580,10 +580,10 @@ public ResponseEntity<RiskOutlookService.RiskOutlookResult> getRiskOutlook(
 ```
 
 ### Acceptance criteria
-- [ ] `GET /api/programs/{measureId}/risk-outlook` returns upcoming expirations, repeat non-compliers, and site rates
-- [ ] Risk Outlook widget renders on the programs overview or measure detail page
-- [ ] Repeat non-complier employee names link to `/employees/[externalId]`
-- [ ] Site compliance rate table shows all sites sorted by compliance rate ascending (most at-risk first)
+- [x] `GET /api/programs/{measureId}/risk-outlook` returns upcoming expirations, repeat non-compliers, and site rates
+- [x] Risk Outlook widget renders on the programs overview or measure detail page
+- [x] Repeat non-complier employee names link to `/employees/[externalId]`
+- [x] Site compliance rate table shows all sites sorted by compliance rate ascending (most at-risk first)
 
 ---
 
@@ -755,11 +755,11 @@ public ResponseEntity<byte[]> exportMat(
 ```
 
 ### Acceptance criteria
-- [ ] `GET /api/measures/{id}/versions/{versionId}/export/mat` returns a `Content-Type: application/fhir+xml` response
-- [ ] The bundle contains Library, Measure, and ValueSet resources
-- [ ] Library.content[0].data contains the CQL text as raw bytes (HAPI FHIR serializes it as base64 — do NOT pre-encode)
-- [ ] The XML validates as a FHIR R4 Bundle (test with HAPI FHIR validator)
-- [ ] Export button appears in Studio for APPROVER and ADMIN roles
+- [x] `GET /api/measures/{id}/versions/{versionId}/export/mat` returns a `Content-Type: application/fhir+xml` response
+- [x] The bundle contains Library, Measure, and ValueSet resources
+- [x] Library.content[0].data contains the CQL text as raw bytes (HAPI FHIR serializes it as base64 — do NOT pre-encode)
+- [x] The XML validates as a FHIR R4 Bundle (test with HAPI FHIR validator)
+- [x] Export button appears in Studio for APPROVER and ADMIN roles
 
 ---
 
@@ -857,29 +857,29 @@ return (
 ```
 
 ### Acceptance criteria
-- [ ] On viewport < 768px, sidebar is hidden and bottom tab bar is visible
-- [ ] Cases list on mobile shows card layout instead of table
-- [ ] Studio page on mobile shows "requires larger screen" notice instead of broken layout
-- [ ] Case detail page is readable and usable on a 375px-wide screen (iPhone SE)
-- [ ] No horizontal scroll on any mobile page except Studio (which shows the notice)
+- [x] On viewport < 768px, sidebar is hidden and bottom tab bar is visible
+- [x] Cases list on mobile shows card layout instead of table
+- [x] Studio page on mobile shows "requires larger screen" notice instead of broken layout
+- [x] Case detail page is readable and usable on a 375px-wide screen (iPhone SE)
+- [x] No horizontal scroll on any mobile page except Studio (which shows the notice)
 
 ---
 
 ## Definition of Done — Sprint 7
 
-- [ ] `POST /api/measures/{id}/ai/draft-cql` generates a compilable CQL skeleton with `Outcome Status` define
-- [ ] AI Draft CQL button in Studio CQL tab works with OSHA text input modal
-- [ ] `AI_DRAFT_CQL_GENERATED` audit event written with `fallbackUsed` field
-- [ ] Fallback CQL template covers all cases when AI fails
-- [ ] `POST /api/measures/{id}/ai/generate-test-fixtures` returns 5 fixtures covering all outcome types
-- [ ] Risk Outlook widget renders on programs page with upstream expiry count and repeat non-compliers
-- [ ] `GET /api/measures/{id}/versions/{versionId}/export/mat` returns valid FHIR R4 XML bundle
-- [ ] MAT bundle contains Library with base64 CQL, Measure resource, and linked ValueSets
-- [ ] Cases list has a responsive mobile card layout
-- [ ] Studio shows "requires larger screen" on mobile
-- [ ] Bottom tab bar visible on mobile
-- [ ] `./gradlew test` and `pnpm build` pass
-- [ ] JOURNAL.md entry added
+- [x] `POST /api/measures/{id}/ai/draft-cql` generates a compilable CQL skeleton with `Outcome Status` define
+- [x] AI Draft CQL button in Studio CQL tab works with OSHA text input modal
+- [x] `AI_DRAFT_CQL_GENERATED` audit event written with `fallbackUsed` field
+- [x] Fallback CQL template covers all cases when AI fails
+- [x] `POST /api/measures/{id}/ai/generate-test-fixtures` returns 5 fixtures covering all outcome types
+- [x] Risk Outlook widget renders on programs page with upstream expiry count and repeat non-compliers
+- [x] `GET /api/measures/{id}/versions/{versionId}/export/mat` returns valid FHIR R4 XML bundle
+- [x] MAT bundle contains Library with base64 CQL, Measure resource, and linked ValueSets
+- [x] Cases list has a responsive mobile card layout
+- [x] Studio shows "requires larger screen" on mobile
+- [x] Bottom tab bar visible on mobile
+- [x] `./gradlew test` and `pnpm build` pass
+- [x] JOURNAL.md entry added
 
 ### Recommendations
 

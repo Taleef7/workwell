@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Stack:** Vercel (frontend) + Fly.io (backend) + Neon (Postgres) + Anthropic API.
+**Stack:** MIE Create-a-Container (frontend + backend) + Neon (Postgres) + OpenAI API.
 **Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
 **Cost target:** keep the live stack under about $25/month.
 
@@ -38,7 +38,7 @@ Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
 The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
 - All 4 OSHA surveillance measures with full CQL (Audiogram, HAZWOPER, TB, Flu)
 - 4 HEDIS wellness catalog measures (Cholesterol, BMI, Diabetes HbA1c, Hypertension)
-- All 47 CMS eCQM catalog entries (Draft, awaiting CQL authoring)
+- All 49 CMS eCQM catalog entries (Draft, awaiting CQL authoring)
 
 ### Manual re-deploy (force update existing containers)
 
@@ -46,14 +46,14 @@ Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI
 
 ---
 
-## Stack
+## Legacy/Public Preview Stack
 
 | Layer | Service | Tier | Cost |
 |-------|---------|------|------|
 | Frontend | Vercel | Hobby | $0 |
 | Backend | Fly.io | shared-cpu-1x, 512MB | ~$2/mo |
 | Postgres | Neon | Free | $0 (3GB cap) |
-| AI | Anthropic API | direct, $20 hard cap | ~$5–15 actual |
+| AI | OpenAI API | direct, budget-capped | variable |
 | Domain | Vercel subdomain | n/a | $0 |
 
 Fly 256MB free OOMs Spring Boot. Don't try.
@@ -66,7 +66,7 @@ Fallback if Fly cost is a problem: Render free tier (cold-start tradeoff, ~30s f
 - Fly CLI: `iwr https://fly.io/install.ps1 -useb | iex` (Windows) or `curl -L https://fly.io/install.sh | sh`
 - Vercel CLI: `pnpm i -g vercel`
 - Neon account + project created
-- Anthropic API key with $20/mo hard cap set in console billing
+- OpenAI API key with a hard monthly budget cap set in console billing
 
 ## One-time setup
 
@@ -86,7 +86,7 @@ cd backend
 fly launch --no-deploy
 fly secrets set DATABASE_URL=<neon-pooled>
 fly secrets set DATABASE_URL_DIRECT=<neon-direct>
-fly secrets set ANTHROPIC_API_KEY=<key>
+fly secrets set OPENAI_API_KEY=<key>
 fly secrets set SPRING_PROFILES_ACTIVE=prod
 fly secrets set WORKWELL_AUTH_ENABLED=true
 fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
@@ -123,9 +123,9 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
    - `NEXT_PUBLIC_DEMO_MODE` = `true` only for local/demo builds that should prefill the login form
 4. Stop after project connection and env configuration. First deploy from `main` happens after the stack is provisioned and verified.
 
-### Anthropic
+### OpenAI
 
-1. Get API key from console.anthropic.com
+1. Get API key from platform.openai.com
 2. Set $20/mo hard usage limit in billing
 3. Save as Fly secret only (never expose to frontend)
 
@@ -135,7 +135,7 @@ curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
 |-----|-------|---------|
 | `DATABASE_URL` | Fly | Pooled Neon connection for app runtime |
 | `DATABASE_URL_DIRECT` | Fly | Direct Neon connection for Flyway migrations |
-| `ANTHROPIC_API_KEY` | Fly | AI calls (Explain Why Flagged, Draft Spec) |
+| `OPENAI_API_KEY` | Fly | AI calls (drafting and explanation surfaces) |
 | `SPRING_PROFILES_ACTIVE` | Fly | Always `prod` in deployed env |
 | `WORKWELL_AUTH_ENABLED` | Fly | Enable stub auth; set `true` in deployed env |
 | `WORKWELL_AUTH_JWT_SECRET` | Fly | Required when auth is enabled; use a strong secret |
@@ -221,7 +221,7 @@ Daily check while the stack is live:
 
 - **Fly dashboard:** Usage tab, projected monthly
 - **Neon dashboard:** storage + compute consumed
-- **Anthropic console:** today's spend
+- **OpenAI usage dashboard:** today's spend
 
 If any approaches limit, fix that day. Don't wait.
 
@@ -242,7 +242,7 @@ If any approaches limit, fix that day. Don't wait.
 - Verify `NEXT_PUBLIC_API_BASE_URL` is set in Vercel env
 - Clear build cache if backend types changed: Vercel dashboard → Settings → Clear Cache
 
-**Anthropic 429**
+**OpenAI 429**
 - One retry with exponential backoff (1s, 2s)
 - Surface "AI temporarily unavailable" in UI
 - Fall back to rule-based explanation text

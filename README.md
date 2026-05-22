@@ -1,6 +1,6 @@
 # WorkWell Measure Studio
 
-WorkWell Measure Studio is a Spring Boot + Next.js monorepo for occupational-health compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one demoable stack.
+WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker Health (TWH)** compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one demoable stack.
 
 ## What it includes
 
@@ -15,15 +15,22 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for occupational-hea
 
 ## Production surfaces
 
-- Frontend: `https://workwell-measure-studio.vercel.app`
-- Backend API: `https://workwell-measure-studio-api.fly.dev`
+- Primary demo frontend: `https://twh.os.mieweb.org`
+- Primary demo backend API: `https://twh-api.os.mieweb.org`
+- Public preview frontend: `https://workwell-measure-studio.vercel.app`
+- Public preview backend API: `https://workwell-measure-studio-api.fly.dev`
 
 ## Stack
 
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
-- Frontend: Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui, Monaco
+- Frontend: Next.js 16 App Router, TypeScript, Tailwind, shadcn/ui, Monaco
 - CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0
-- Infra: Fly.io, Vercel, Neon, GitHub Actions, pnpm
+- Infra: MIE Create-a-Container (primary), Neon, GitHub Actions, pnpm (with Vercel/Fly public preview surfaces)
+
+## Current status
+
+- Sprint queue through Sprint 7 is implemented in the repo as of **2026-05-22**.
+- Sprint 7.1–7.5 issues are closed (`#47`–`#51`), with Sprint 7.2–7.5 promoted to `main`.
 
 ## Repository layout
 

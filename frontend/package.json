@@ -1,7 +1,22 @@
 {
-  "name": "frontend",
+  "name": "workwell-measure-studio-frontend",
   "version": "0.1.0",
   "private": true,
+  "description": "WorkWell Measure Studio frontend (Next.js App Router) for Total Worker Health compliance operations.",
+  "homepage": "https://github.com/Taleef7/workwell",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Taleef7/workwell.git",
+    "directory": "frontend"
+  },
+  "keywords": [
+    "workwell",
+    "nextjs",
+    "cql",
+    "fhir",
+    "occupational-health",
+    "total-worker-health"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
