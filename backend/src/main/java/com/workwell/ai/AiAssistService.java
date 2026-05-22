@@ -131,7 +131,7 @@ public class AiAssistService {
                         FROM measures m
                         JOIN measure_versions mv ON mv.measure_id = m.id
                         WHERE m.id = ?
-                        ORDER BY (CASE WHEN mv.status = 'Active' THEN 0 ELSE 1 END), mv.created_at DESC
+                        ORDER BY mv.created_at DESC
                         LIMIT 1
                         """,
                 rs -> rs.next()
