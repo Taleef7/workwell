@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-06-03 — CI test suite 3.8x faster (test sharding + per-test population-run fix)
+
+### What changed
+
+- Root cause of the ~44 min CI: the backend `./gradlew test` step dominated wall-clock (frontend ~50s, E2E manual). Per-class timing showed a few integration tests re-ran a full-population CQL evaluation (~70s) in `@BeforeEach`, once per test method.
+  - `EvidenceAccessIntegrationTest` ran it 14x (~1022s); converted to one shared run via `@BeforeAll` + `@TestInstance(PER_CLASS)` — its tests are read-only on the population and filter audit by their own upload id → ~71s.
+  - `CaseFlowRerunIntegrationTest` ran it 5x (~422s); each test targets a distinct outcome-type case with non-overlapping mutations, so one shared run suffices → ~146s.
+  - `ScopedRunIntegrationTest`, `CaseUpsertIntegrationTest`, `Major1PopulationIntegrationTest` left as-is — their reruns are the behavior under test (idempotency, scoped-run parity, empty-table historical seed) and need per-test isolation.
+- `.github/workflows/ci.yml`: backend job is now an 8-way matrix; only shard 0 writes the Gradle cache; added a per-class timing diagnostic step.
+- `backend/build.gradle.kts`: `Test.include(Spec<FileTreeElement>)` assigns each test class to a shard by stable path hash (`TEST_SHARD_TOTAL`/`TEST_SHARD_INDEX`); CI forks 4-wide with a 1.5g per-fork heap cap; `GRADLE_TEST_FORKS` override. Local runs (no shard env) unchanged.
+
+### Result / Verification
+
+- Wall-clock 44 min → 11m30s (~3.8x); CI green on `main`.
+- All 239 backend tests pass; per-shard counts sum to 239 (no tests dropped).
+- Remaining ceiling is `ScopedRunIntegrationTest` (~635s); a single class runs in one fork, so further gains require splitting it (deferred).
+- Shipped in PR #57.
+
+## 2026-06-03 — MIE Container Manager deploy fix (v1 API migration)
+
+### What changed
+
+The MIE Create-a-Container manager API changed under us; the `deploy-twh-mieweb` backend-container job failed three times.
+
+- `.github/scripts/deploy-mieweb-container.sh`:
+  - API base normalized to `<manager-origin>/api/v1` — the origin now serves the SPA web UI, `/api` serves Swagger, and the JSON REST API is at `/api/v1` (PR #55).
+  - Migrated to the v1 contract (PR #56): responses are wrapped in a `{"data": ...}` envelope (`.data[]`, `.data.externalDomains[]`); create body uses `template` (not `template_name`) with `services` as an array of flat objects; job polling reads `.data.status` (success value is `"success"`); create-response job id from `.data.jobId`; container URL from `.data[].httpEntries[0].externalUrl`.
+  - Shapes verified against the live manager API and the manager's own SPA client.
+
+### Verification
+
+- Post-merge `deploy-twh-mieweb` run green end-to-end (build + deploy backend + deploy frontend).
+- Live: `GET https://twh-api.os.mieweb.org/actuator/health` → `200 {"status":"UP"}`; frontend → `200`.
+
 ## 2026-06-03 — Sprint 8 scoped run parity (SITE/EMPLOYEE end-to-end + rerun support)
 
 ### What changed
