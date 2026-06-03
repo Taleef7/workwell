@@ -93,13 +93,13 @@ echo "$CONTAINER_ENV_VARS_JSON" | jq -e '
 
 echo "Confirming site ${SITE_ID} exists..."
 sites_json="$(request GET /sites)"
-echo "$sites_json" | jq -e --argjson site_id "$SITE_ID" '.sites[] | select(.id == $site_id)' >/dev/null
+echo "$sites_json" | jq -e --argjson site_id "$SITE_ID" '.data[] | select(.id == $site_id)' >/dev/null
 
 echo "Resolving external domain for site ${SITE_ID}..."
 template_context="$(request GET "/sites/${SITE_ID}/containers/new")"
 external_domain_id="$(
   echo "$template_context" |
-    jq -r '([.domains[] | select(.name == "os.mieweb.org") | .id] | first) // .domains[0].id // empty'
+    jq -r '([.data.externalDomains[] | select(.name == "os.mieweb.org") | .id] | first) // .data.externalDomains[0].id // empty'
 )"
 if [ -z "$external_domain_id" ] || [ "$external_domain_id" = "null" ]; then
   echo "::error::No external domain is available for site ${SITE_ID}." >&2
@@ -107,7 +107,7 @@ if [ -z "$external_domain_id" ] || [ "$external_domain_id" = "null" ]; then
 fi
 
 existing_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}")"
-existing_id="$(echo "$existing_json" | jq -r '.containers[0].id // empty')"
+existing_id="$(echo "$existing_json" | jq -r '.data[0].id // empty')"
 if [ -n "$existing_id" ]; then
   if [ "$REPLACE_EXISTING" != "true" ]; then
     echo "::error::Container '${CONTAINER_HOSTNAME}' already exists as ID ${existing_id}. Re-run workflow_dispatch with replace_existing=true or merge to main intentionally." >&2
@@ -126,24 +126,24 @@ jq -n \
   --argjson env_vars "$CONTAINER_ENV_VARS_JSON" \
   '{
     hostname: $hostname,
-    template_name: $image,
-    services: {
-      web: {
+    template: $image,
+    nvidiaRequested: false,
+    services: [
+      {
         type: "http",
         internalPort: $internal_port,
         externalHostname: $hostname,
         externalDomainId: $domain_id,
         authRequired: false
       }
-    },
-    environmentVars: $env_vars,
-    nvidiaRequested: false
+    ],
+    environmentVars: $env_vars
   }' > "$payload_file"
 
 cleanup_existing_for_retry() {
   local retry_existing_json retry_existing_id
   retry_existing_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}" || echo '{}')"
-  retry_existing_id="$(echo "$retry_existing_json" | jq -r '.containers[0].id // empty')"
+  retry_existing_id="$(echo "$retry_existing_json" | jq -r '.data[0].id // empty')"
   if [ -n "$retry_existing_id" ]; then
     echo "Cleaning up container '${CONTAINER_HOSTNAME}' (ID ${retry_existing_id}) before retry..."
     request DELETE "/sites/${SITE_ID}/containers/${retry_existing_id}" >/dev/null || true
@@ -154,9 +154,9 @@ cleanup_existing_for_retry() {
 create_and_wait() {
   local create_json job_id job_json job_status status_log
   create_json="$(request POST "/sites/${SITE_ID}/containers" "$payload_file")"
-  job_id="$(echo "$create_json" | jq -r '.jobId // empty')"
+  job_id="$(echo "$create_json" | jq -r '.data.jobId // .data.creationJobId // .data.id // .jobId // empty')"
   if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
-    echo "::error::Create response did not include jobId." >&2
+    echo "::error::Create response did not include a job id." >&2
     echo "$create_json" >&2
     return 1
   fi
@@ -164,7 +164,7 @@ create_and_wait() {
   echo "Waiting for job ${job_id}..."
   for attempt in $(seq 1 30); do
     job_json="$(request GET "/jobs/${job_id}")"
-    job_status="$(echo "$job_json" | jq -r '.status // "unknown"')"
+    job_status="$(echo "$job_json" | jq -r '.data.status // .status // "unknown"')"
     echo "Attempt ${attempt}/30: ${job_status}"
     case "$job_status" in
       success|completed)
@@ -217,8 +217,8 @@ if [ "$create_result" -ne 0 ]; then
 fi
 
 final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}")"
-container_status="$(echo "$final_json" | jq -r '.containers[0].status // "unknown"')"
-container_url="$(echo "$final_json" | jq -r '.containers[0].httpExternalUrl // empty')"
+container_status="$(echo "$final_json" | jq -r '.data[0].status // "unknown"')"
+container_url="$(echo "$final_json" | jq -r '.data[0].httpEntries[0].externalUrl // empty')"
 echo "Container status: ${container_status}"
 echo "Container URL: ${container_url:-not reported yet}"
 if [ "$container_status" != "running" ]; then
