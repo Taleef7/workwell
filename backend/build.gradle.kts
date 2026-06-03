@@ -63,10 +63,15 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
-	// CI gets two forks so long-running Spring/Testcontainers classes can overlap
-	// without turning the runner into a noisy stampede. Override via GRADLE_TEST_FORKS.
+	// CI forks 4-wide so heavy Spring/CQL/Testcontainers classes in a shard overlap
+	// (ubuntu-latest has 4 vCPUs). Override via GRADLE_TEST_FORKS.
 	maxParallelForks = System.getenv("GRADLE_TEST_FORKS")?.toIntOrNull()
-		?: if (System.getenv("CI") == "true") 2 else 1
+		?: if (System.getenv("CI") == "true") 4 else 1
+	// Cap per-fork heap so 4 JVMs + their Postgres containers fit the runner's RAM;
+	// prod runs the app on 768m, so 1.5g per test fork is ample.
+	if (System.getenv("CI") == "true") {
+		maxHeapSize = "1536m"
+	}
 
 	// Optional CI matrix sharding: split the test classes across parallel runner jobs
 	// by a stable path hash, so each class runs in exactly one shard and the union of
