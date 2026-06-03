@@ -47,6 +47,8 @@ export const ROLE_LABELS: Record<string, string> = {
 export const SCOPE_LABELS: Record<string, string> = {
   ALL_PROGRAMS: "All Programs",
   MEASURE: "Measure",
+  SITE: "Site",
+  EMPLOYEE: "Employee",
   CASE: "Case"
 };
 

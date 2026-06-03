@@ -6,6 +6,7 @@ import com.workwell.AbstractIntegrationTest;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import com.workwell.web.EvalController.ManualRunResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,12 +16,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 @SpringBootTest
 class ScopedRunIntegrationTest extends AbstractIntegrationTest {
+    private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED");
 
     @Autowired
     private AllProgramsRunService allProgramsRunService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private RunPersistenceService runPersistenceService;
 
     @BeforeEach
     void reset() {
@@ -51,16 +56,21 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
 
         UUID runId = UUID.fromString(response.runId());
         assertThat(response.scopeType()).isEqualTo("MEASURE");
-        assertThat(response.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(response.status()).isEqualTo("REQUESTED");
+        assertThat(response.scopeLabel()).contains("Audiogram");
         assertThat(response.activeMeasuresExecuted()).isEqualTo(1);
-        assertThat(response.totalEvaluated()).isGreaterThan(0);
+
+        RunPersistenceService.RunSummaryResponse summary = awaitTerminalRun(runId);
+        assertThat(summary.scopeType()).isEqualTo("measure");
+        assertThat(summary.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(summary.totalEvaluated()).isGreaterThan(0L);
 
         Map<String, Object> runRow = jdbcTemplate.queryForMap(
                 "SELECT scope_type, status, partial_failure_count, requested_scope_json FROM runs WHERE id = ?",
                 runId
         );
         assertThat(String.valueOf(runRow.get("scope_type"))).isEqualTo("measure");
-        assertThat(String.valueOf(runRow.get("status"))).isEqualTo(response.status());
+        assertThat(String.valueOf(runRow.get("status"))).isEqualTo(summary.status());
         assertThat(((Number) runRow.get("partial_failure_count")).intValue()).isGreaterThanOrEqualTo(0);
 
         List<String> measureNames = jdbcTemplate.query(
@@ -82,7 +92,7 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
                 Integer.class,
                 runId
         );
-        assertThat(outcomeCount).isEqualTo((int) response.totalEvaluated());
+        assertThat(outcomeCount).isEqualTo((int) summary.totalEvaluated());
 
         String auditActor = jdbcTemplate.queryForObject(
                 """
@@ -102,8 +112,7 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
                 (rs, rowNum) -> rs.getString("message"),
                 runId
         );
-        assertThat(logMessages).anySatisfy(message -> assertThat(message).contains("Run requested"));
-        assertThat(logMessages).anySatisfy(message -> assertThat(message).contains("Evaluation completed"));
+        assertThat(logMessages).anySatisfy(message -> assertThat(message).contains("Async all-programs run started"));
         assertThat(logMessages).anySatisfy(message -> assertThat(message).contains("Run completed"));
     }
 
@@ -193,38 +202,85 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void unsupportedScopesFailFast() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                allProgramsRunService.run(
-                        new ManualRunRequest(
-                                RunScopeType.SITE,
-                                null,
-                                null,
-                                "Plant A",
-                                null,
-                                null,
-                                LocalDate.now(),
-                                false
-                        ),
-                        "cm@workwell.dev"
-                )
-        ).isInstanceOf(IllegalArgumentException.class);
+    void siteScopeQueuesAndPersistsOnlyRequestedSite() {
+        ManualRunResponse response = allProgramsRunService.run(
+                new ManualRunRequest(
+                        RunScopeType.SITE,
+                        null,
+                        null,
+                        "Plant A",
+                        null,
+                        null,
+                        LocalDate.of(2026, 5, 9),
+                        false
+                ),
+                "cm@workwell.dev"
+        );
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                allProgramsRunService.run(
-                        new ManualRunRequest(
-                                RunScopeType.EMPLOYEE,
-                                null,
-                                null,
-                                null,
-                                "emp-001",
-                                null,
-                                LocalDate.now(),
-                                false
-                        ),
-                        "cm@workwell.dev"
-                )
-        ).isInstanceOf(IllegalArgumentException.class);
+        assertThat(response.scopeType()).isEqualTo("SITE");
+        assertThat(response.status()).isEqualTo("REQUESTED");
+
+        UUID runId = UUID.fromString(response.runId());
+        RunPersistenceService.RunSummaryResponse summary = awaitTerminalRun(runId);
+        assertThat(summary.scopeType()).isEqualTo("site");
+        assertThat(summary.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(summary.totalEvaluated()).isGreaterThan(0L);
+
+        List<String> outcomeSites = jdbcTemplate.query(
+                """
+                        SELECT DISTINCT e.site
+                        FROM outcomes o
+                        JOIN employees e ON e.id = o.employee_id
+                        WHERE o.run_id = ?
+                        ORDER BY e.site
+                        """,
+                (rs, rowNum) -> rs.getString("site"),
+                runId
+        );
+        assertThat(outcomeSites).containsExactly("Plant A");
+        assertThat(requestedSite(runId)).isEqualTo("Plant A");
+        assertThat(runStartedActor(runId)).isEqualTo("cm@workwell.dev");
+    }
+
+    @Test
+    void employeeScopeQueuesAndPersistsOnlyRequestedEmployee() {
+        ManualRunResponse response = allProgramsRunService.run(
+                new ManualRunRequest(
+                        RunScopeType.EMPLOYEE,
+                        null,
+                        null,
+                        null,
+                        "emp-041",
+                        null,
+                        LocalDate.of(2026, 5, 9),
+                        false
+                ),
+                "cm@workwell.dev"
+        );
+
+        assertThat(response.scopeType()).isEqualTo("EMPLOYEE");
+        assertThat(response.status()).isEqualTo("REQUESTED");
+
+        UUID runId = UUID.fromString(response.runId());
+        RunPersistenceService.RunSummaryResponse summary = awaitTerminalRun(runId);
+        assertThat(summary.scopeType()).isEqualTo("employee");
+        assertThat(summary.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(summary.totalEvaluated()).isGreaterThan(0L);
+
+        List<String> outcomeEmployees = jdbcTemplate.query(
+                """
+                        SELECT DISTINCT e.external_id
+                        FROM outcomes o
+                        JOIN employees e ON e.id = o.employee_id
+                        WHERE o.run_id = ?
+                        ORDER BY e.external_id
+                        """,
+                (rs, rowNum) -> rs.getString("external_id"),
+                runId
+        );
+        assertThat(outcomeEmployees).containsExactly("emp-041");
+        assertThat(requestedEmployeeExternalId(runId)).isEqualTo("emp-041");
+        assertThat(runStartedActor(runId)).isEqualTo("cm@workwell.dev");
     }
 
     @Test
@@ -273,6 +329,90 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
         assertThat(rerunResponse.totalEvaluated()).isEqualTo(1L);
     }
 
+    @Test
+    void siteScopeRerunUsesPersistedRequestedSite() {
+        ManualRunResponse initialResponse = allProgramsRunService.run(
+                new ManualRunRequest(
+                        RunScopeType.SITE,
+                        null,
+                        null,
+                        "Plant A",
+                        null,
+                        null,
+                        LocalDate.of(2026, 5, 9),
+                        false
+                ),
+                "cm@workwell.dev"
+        );
+        UUID initialRunId = UUID.fromString(initialResponse.runId());
+        awaitTerminalRun(initialRunId);
+
+        ManualRunResponse rerunResponse = allProgramsRunService.rerunSameScope(initialRunId, "cm@workwell.dev");
+        assertThat(rerunResponse.scopeType()).isEqualTo("SITE");
+        assertThat(rerunResponse.status()).isEqualTo("REQUESTED");
+
+        UUID rerunId = UUID.fromString(rerunResponse.runId());
+        RunPersistenceService.RunSummaryResponse rerunSummary = awaitTerminalRun(rerunId);
+        assertThat(rerunSummary.scopeType()).isEqualTo("site");
+        assertThat(rerunSummary.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(requestedSite(rerunId)).isEqualTo("Plant A");
+
+        List<String> outcomeSites = jdbcTemplate.query(
+                """
+                        SELECT DISTINCT e.site
+                        FROM outcomes o
+                        JOIN employees e ON e.id = o.employee_id
+                        WHERE o.run_id = ?
+                        ORDER BY e.site
+                        """,
+                (rs, rowNum) -> rs.getString("site"),
+                rerunId
+        );
+        assertThat(outcomeSites).containsExactly("Plant A");
+    }
+
+    @Test
+    void employeeScopeRerunUsesPersistedRequestedEmployee() {
+        ManualRunResponse initialResponse = allProgramsRunService.run(
+                new ManualRunRequest(
+                        RunScopeType.EMPLOYEE,
+                        null,
+                        null,
+                        null,
+                        "emp-041",
+                        null,
+                        LocalDate.of(2026, 5, 9),
+                        false
+                ),
+                "cm@workwell.dev"
+        );
+        UUID initialRunId = UUID.fromString(initialResponse.runId());
+        awaitTerminalRun(initialRunId);
+
+        ManualRunResponse rerunResponse = allProgramsRunService.rerunSameScope(initialRunId, "cm@workwell.dev");
+        assertThat(rerunResponse.scopeType()).isEqualTo("EMPLOYEE");
+        assertThat(rerunResponse.status()).isEqualTo("REQUESTED");
+
+        UUID rerunId = UUID.fromString(rerunResponse.runId());
+        RunPersistenceService.RunSummaryResponse rerunSummary = awaitTerminalRun(rerunId);
+        assertThat(rerunSummary.scopeType()).isEqualTo("employee");
+        assertThat(rerunSummary.status()).isIn("COMPLETED", "PARTIAL_FAILURE");
+        assertThat(requestedEmployeeExternalId(rerunId)).isEqualTo("emp-041");
+
+        List<String> outcomeEmployees = jdbcTemplate.query(
+                """
+                        SELECT DISTINCT e.external_id
+                        FROM outcomes o
+                        JOIN employees e ON e.id = o.employee_id
+                        WHERE o.run_id = ?
+                        ORDER BY e.external_id
+                        """,
+                (rs, rowNum) -> rs.getString("external_id"),
+                rerunId
+        );
+        assertThat(outcomeEmployees).containsExactly("emp-041");
+    }
+
     private int countCases(UUID employeeId, UUID measureVersionId, String evaluationPeriod) {
         Integer count = jdbcTemplate.queryForObject(
                 """
@@ -286,5 +426,53 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
                 evaluationPeriod
         );
         return count == null ? 0 : count;
+    }
+
+    private RunPersistenceService.RunSummaryResponse awaitTerminalRun(UUID runId) {
+        long deadlineMs = System.currentTimeMillis() + 10_000L;
+        while (System.currentTimeMillis() < deadlineMs) {
+            RunPersistenceService.RunSummaryResponse summary = runPersistenceService.loadRunById(runId)
+                    .orElseThrow(() -> new AssertionError("Run not found: " + runId));
+            if (TERMINAL_RUN_STATUSES.contains(summary.status())) {
+                return summary;
+            }
+            try {
+                Thread.sleep(100L);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for run " + runId + " to complete", ex);
+            }
+        }
+        throw new AssertionError("Run did not reach a terminal state within 10 seconds: " + runId);
+    }
+
+    private String runStartedActor(UUID runId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT actor
+                        FROM audit_events
+                        WHERE ref_run_id = ? AND event_type = 'RUN_STARTED'
+                        ORDER BY occurred_at ASC
+                        LIMIT 1
+                        """,
+                String.class,
+                runId
+        );
+    }
+
+    private String requestedSite(UUID runId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT requested_scope_json->>'site' FROM runs WHERE id = ?",
+                String.class,
+                runId
+        );
+    }
+
+    private String requestedEmployeeExternalId(UUID runId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT requested_scope_json->>'employeeExternalId' FROM runs WHERE id = ?",
+                String.class,
+                runId
+        );
     }
 }

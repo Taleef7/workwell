@@ -13,6 +13,7 @@ import com.workwell.measure.HazwoperSurveillanceDemoService;
 import com.workwell.measure.TBSurveillanceDemoService;
 import com.workwell.run.AllProgramsRunService;
 import com.workwell.run.RunPersistenceService;
+import com.workwell.web.EvalController.ManualRunResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -138,7 +139,18 @@ class EvalControllerTest {
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void runsAllProgramsScopeUsingActiveMeasureVersions() throws Exception {
         UUID runId = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev"))).thenReturn(new ManualRunResponse(
+                runId.toString(),
+                "ALL_PROGRAMS",
+                "All Programs",
+                "REQUESTED",
+                4,
+                0L,
+                0L,
+                0L,
+                "Run queued for execution",
+                List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
+        ));
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -151,7 +163,7 @@ class EvalControllerTest {
     @Test
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void rejectsMeasureScopeWithoutMeasureIdentifier() throws Exception {
-        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev")))
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev")))
                 .thenThrow(new IllegalArgumentException("measureId or measureVersionId is required for MEASURE scope"));
 
         mockMvc.perform(post("/api/runs/manual")
@@ -164,7 +176,18 @@ class EvalControllerTest {
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void acceptsSiteScopeForAsyncExecution() throws Exception {
         UUID runId = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev"))).thenReturn(new ManualRunResponse(
+                runId.toString(),
+                "SITE",
+                "Site: Plant A",
+                "REQUESTED",
+                4,
+                0L,
+                0L,
+                0L,
+                "Run queued for execution",
+                List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
+        ));
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -178,7 +201,18 @@ class EvalControllerTest {
     @WithMockUser(username = "cm@workwell.dev", roles = "CASE_MANAGER")
     void acceptsEmployeeScopeForAsyncExecution() throws Exception {
         UUID runId = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(allProgramsRunService.createRunRecord(any(), eq("cm@workwell.dev"))).thenReturn(runId);
+        when(allProgramsRunService.run(any(), eq("cm@workwell.dev"))).thenReturn(new ManualRunResponse(
+                runId.toString(),
+                "EMPLOYEE",
+                "Employee: emp-001",
+                "REQUESTED",
+                4,
+                0L,
+                0L,
+                0L,
+                "Run queued for execution",
+                List.of("Audiogram", "TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")
+        ));
 
         mockMvc.perform(post("/api/runs/manual")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -84,6 +84,8 @@ type ManualRunResponse = {
   measuresExecuted?: string[];
 };
 
+type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
+
 type MeasureOption = {
   id: string;
   name: string;
@@ -161,8 +163,10 @@ export default function RunsPage() {
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
-  const [runScopeType, setRunScopeType] = useState<"ALL_PROGRAMS" | "MEASURE" | "CASE">("ALL_PROGRAMS");
+  const [runScopeType, setRunScopeType] = useState<RunScopeType>("ALL_PROGRAMS");
   const [runMeasureId, setRunMeasureId] = useState("");
+  const [runSite, setRunSite] = useState("");
+  const [runEmployeeExternalId, setRunEmployeeExternalId] = useState("");
   const [runCaseId, setRunCaseId] = useState("");
   const [runEvaluationDate, setRunEvaluationDate] = useState("");
   const [loading, setLoading] = useState(false);
@@ -174,7 +178,9 @@ export default function RunsPage() {
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<Date | null>(null);
   const [runElapsedSec, setRunElapsedSec] = useState(0);
   const { siteId, from, to } = useGlobalFilters();
-  const rerunSupported = selectedRun ? ["ALL_PROGRAMS", "MEASURE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType)) : false;
+  const rerunSupported = selectedRun
+    ? ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType))
+    : false;
   const selectedRunIdRef = useRef<string | null>(selectedRunId);
 
   useEffect(() => {
@@ -361,6 +367,16 @@ export default function RunsPage() {
           throw new Error("Select a measure before running a measure-scoped job.");
         }
         payload.measureId = runMeasureId;
+      } else if (runScopeType === "SITE") {
+        if (!runSite.trim()) {
+          throw new Error("Enter a site before running a site-scoped job.");
+        }
+        payload.site = runSite.trim();
+      } else if (runScopeType === "EMPLOYEE") {
+        if (!runEmployeeExternalId.trim()) {
+          throw new Error("Enter an employee external ID before running an employee-scoped job.");
+        }
+        payload.employeeExternalId = runEmployeeExternalId.trim();
       } else if (runScopeType === "CASE") {
         if (!runCaseId.trim()) {
           throw new Error("Enter a case ID before running a case-scoped job.");
@@ -466,6 +482,8 @@ export default function RunsPage() {
           <option value="">All Scope Types</option>
           <option value="all_programs">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
           <option value="measure">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
+          <option value="site">{labelFor(SCOPE_LABELS, "SITE")}</option>
+          <option value="employee">{labelFor(SCOPE_LABELS, "EMPLOYEE")}</option>
           <option value="case">{labelFor(SCOPE_LABELS, "CASE")}</option>
         </select>
         <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
@@ -485,10 +503,12 @@ export default function RunsPage() {
             <select
               className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
               value={runScopeType}
-              onChange={(e) => setRunScopeType(e.target.value as "ALL_PROGRAMS" | "MEASURE" | "CASE")}
+              onChange={(e) => setRunScopeType(e.target.value as RunScopeType)}
             >
               <option value="ALL_PROGRAMS">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
               <option value="MEASURE">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
+              <option value="SITE">{labelFor(SCOPE_LABELS, "SITE")}</option>
+              <option value="EMPLOYEE">{labelFor(SCOPE_LABELS, "EMPLOYEE")}</option>
               <option value="CASE">{labelFor(SCOPE_LABELS, "CASE")}</option>
             </select>
           </div>
@@ -517,6 +537,30 @@ export default function RunsPage() {
               onChange={(e) => setRunEvaluationDate(e.target.value)}
             />
           </div>
+          {runScopeType === "SITE" ? (
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Site</label>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                value={runSite}
+                onChange={(e) => setRunSite(e.target.value)}
+                placeholder="Enter a site name, for example Plant A"
+              />
+            </div>
+          ) : null}
+          {runScopeType === "EMPLOYEE" ? (
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Employee External ID</label>
+              <input
+                type="text"
+                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                value={runEmployeeExternalId}
+                onChange={(e) => setRunEmployeeExternalId(e.target.value)}
+                placeholder="Enter an employee external ID, for example emp-041"
+              />
+            </div>
+          ) : null}
           {runScopeType === "CASE" ? (
             <div className="md:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Case ID</label>
@@ -549,12 +593,15 @@ export default function RunsPage() {
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-500">MEASURE runs require a measure selection. CASE runs require a case UUID.</p>
+        <p className="mt-2 text-xs text-slate-500">
+          MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require an employee external ID.
+          CASE runs require a case UUID.
+        </p>
       </div>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
-        <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, or case-scoped runs.</p>
+        <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, site-scoped, employee-scoped, or case-scoped runs.</p>
       ) : null}
       {loading ? (
         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">

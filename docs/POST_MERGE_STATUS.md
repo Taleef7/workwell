@@ -3,6 +3,8 @@
 ## Date
 2026-05-11
 
+> Historical snapshot note: the SITE/EMPLOYEE deferred-scope findings captured below were true on 2026-05-11. They were resolved in the 2026-06-03 scoped run parity follow-up, which added end-to-end SITE/EMPLOYEE manual runs and same-scope reruns.
+
 ## Current Git State
 - **Current branch:** `main`
 - **Remote branches:** `origin/main` only
@@ -103,7 +105,7 @@ Note: README and DEMO_QA_CHECKLIST incorrectly state password is `password` — 
 | Run detail | 200 | ✅ 200 |
 | Runs CSV export | 200 | ✅ 200 |
 | Outcomes CSV export | 200 | ✅ 200 |
-| Unsupported SITE scope | 400 | ✅ 400 |
+| SITE/EMPLOYEE scoped runs (2026-05-11 snapshot) | 400 when unsupported at the time | Resolved in 2026-06-03 scoped parity follow-up |
 
 ### Cases
 | Check | Expected | Result |
@@ -130,7 +132,7 @@ Note: README and DEMO_QA_CHECKLIST incorrectly state password is `password` — 
 MCP QA via client not performed (no MCP client connected). Role-based endpoint security confirmed via HTTP (`/sse` and `/mcp/message` both return 403 unauthenticated). `McpSecurityIntegrationTest` covers role/authorization logic and requires Docker.
 
 ## Known Deferred Items
-- `SITE` and `EMPLOYEE` scoped runs remain deferred (not implemented; 400 returned for unsupported scopes).
+- `SITE` and `EMPLOYEE` scoped runs were deferred in this 2026-05-11 snapshot; they are now implemented for manual runs and same-scope reruns as of 2026-06-03.
 - Real HRIS/FHIR integrations remain future work; current mappings are demo/seeded.
 - Demo terminology mappings are not official production terminology.
 - PDF audit packet export is deferred.

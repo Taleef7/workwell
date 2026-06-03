@@ -730,7 +730,10 @@ public class RunPersistenceService {
 
     public Optional<RerunScope> loadRerunScope(UUID runId) {
         String sql = """
-                SELECT scope_type, scope_id, site
+                SELECT scope_type,
+                       scope_id,
+                       COALESCE(NULLIF(site, ''), NULLIF(requested_scope_json->>'site', '')) AS site,
+                       NULLIF(requested_scope_json->>'employeeExternalId', '') AS employee_external_id
                 FROM runs
                 WHERE id = ?
                 """;
@@ -739,7 +742,8 @@ public class RunPersistenceService {
             return Optional.of(new RerunScope(
                     row.get("scope_type") == null ? "" : row.get("scope_type").toString(),
                     (UUID) row.get("scope_id"),
-                    row.get("site") == null ? "" : row.get("site").toString()
+                    row.get("site") == null ? "" : row.get("site").toString(),
+                    row.get("employee_external_id") == null ? "" : row.get("employee_external_id").toString()
             ));
         } catch (EmptyResultDataAccessException ex) {
             return Optional.empty();
@@ -1398,7 +1402,8 @@ public class RunPersistenceService {
     public record RerunScope(
             String scopeType,
             UUID scopeId,
-            String site
+            String site,
+            String employeeExternalId
     ) {
     }
 
