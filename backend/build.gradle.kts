@@ -1,3 +1,6 @@
+import org.gradle.api.file.FileTreeElement
+import org.gradle.api.specs.Spec
+
 plugins {
 	java
 	id("org.springframework.boot") version "3.3.5"
@@ -73,13 +76,15 @@ tasks.withType<Test> {
 	val shardTotal = System.getenv("TEST_SHARD_TOTAL")?.toIntOrNull()
 	val shardIndex = System.getenv("TEST_SHARD_INDEX")?.toIntOrNull()
 	if (shardTotal != null && shardTotal > 1 && shardIndex != null) {
-		setCandidateClassFiles(candidateClassFiles.filter { classFile ->
-			Math.floorMod(classFile.path.replace('\\', '/').hashCode(), shardTotal) == shardIndex
+		// FileTreeElement.path is always '/'-separated and relative to the test
+		// classes root, so the hash is stable across OSes. Directories must pass so
+		// the tree is traversed into; only .class candidates are assigned to a shard.
+		include(Spec<FileTreeElement> { element ->
+			element.isDirectory ||
+				Math.floorMod(element.path.hashCode(), shardTotal) == shardIndex
 		})
 		doFirst {
-			logger.lifecycle(
-				"Backend test shard $shardIndex/$shardTotal: ${candidateClassFiles.files.size} candidate class files"
-			)
+			logger.lifecycle("Backend test shard $shardIndex/$shardTotal active")
 		}
 	}
 
