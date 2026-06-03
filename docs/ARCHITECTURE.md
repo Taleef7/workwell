@@ -83,7 +83,7 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
    - `Outcome Status` define determines bucket (`COMPLIANT|DUE_SOON|OVERDUE|MISSING_DATA|EXCLUDED`).
    - Define-level `expressionResults` are captured into `outcomes.evidence_json`.
 4. Run summary counters, failure summary, and final status are persisted in `runs`.
-5. Supported scopes now include `ALL_PROGRAMS`, `MEASURE`, and `CASE`; unsupported scopes fail fast with a 400.
+5. Supported scopes now include `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, and `CASE`. `CASE` stays synchronous for rerun-to-verify; the other manual scopes run through the async run job model.
 
 ### 5.4 Outcomes -> Cases
 1. Non-compliant outcomes (`DUE_SOON|OVERDUE|MISSING_DATA`) upsert open cases.
