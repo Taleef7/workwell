@@ -7,13 +7,15 @@ import com.workwell.run.AllProgramsRunService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class CaseFlowRerunIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -25,7 +27,10 @@ class CaseFlowRerunIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @BeforeEach
+    // Each test targets a case of a distinct outcome type (COMPLIANT/EXCLUDED/DUE_SOON/
+    // OVERDUE/MISSING_DATA) and verifies rerun behavior on it; the targets don't overlap,
+    // so one shared population run is enough instead of a full run before each of 5 tests.
+    @BeforeAll
     void seedData() {
         jdbcTemplate.execute("TRUNCATE TABLE runs, outcomes, cases, case_actions, run_logs, audit_events, outreach_records, scheduled_appointments, waivers, evidence_attachments CASCADE");
         allProgramsRunService.runAllPrograms("All Programs", "admin@workwell.dev");
