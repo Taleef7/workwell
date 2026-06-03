@@ -18,7 +18,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -108,7 +107,7 @@ public class EvalController {
 
     @Operation(
             summary = "Trigger a manual run",
-            description = "Starts an evaluation run over the requested scope (ALL_PROGRAMS, MEASURE, or CASE). "
+            description = "Starts an evaluation run over the requested scope (ALL_PROGRAMS, MEASURE, SITE, EMPLOYEE, or CASE). "
                     + "Rate limited to 5 triggers per user per hour."
     )
     @PostMapping("/api/runs/manual")
@@ -118,17 +117,11 @@ public class EvalController {
         }
         String actor = SecurityActor.currentActor();
         try {
+            ManualRunResponse result = allProgramsRunService.run(request, actor);
             if (request.scopeType() == RunScopeType.CASE) {
-                ManualRunResponse result = allProgramsRunService.run(request, actor);
                 return ResponseEntity.ok(result);
             }
-            UUID runId = allProgramsRunService.createRunRecord(request, actor);
-            allProgramsRunService.executeRunAsync(runId, request, actor);
-            return ResponseEntity.accepted().body(Map.of(
-                    "runId", runId.toString(),
-                    "status", "REQUESTED",
-                    "message", "Run queued for execution. Poll GET /api/runs/" + runId + " for status."
-            ));
+            return ResponseEntity.accepted().body(result);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

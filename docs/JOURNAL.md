@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-06-03 — Sprint 8 scoped run parity (SITE/EMPLOYEE end-to-end + rerun support)
+
+### What changed
+
+- Backend manual-run parity:
+  - `AllProgramsRunService.run(...)` now keeps `CASE` synchronous and routes `ALL_PROGRAMS`, `MEASURE`, `SITE`, and `EMPLOYEE` through the async run-job path used by `/api/runs/manual`.
+  - `AllProgramsRunService.rerunSameScope(...)` now supports persisted `SITE` and `EMPLOYEE` runs by replaying `requested_scope_json.site` and `requested_scope_json.employeeExternalId`.
+  - Non-case reruns now reuse the same async contract as manual runs, so the operator-facing rerun flow is consistent across all supported non-case scopes.
+- Persisted rerun-scope hydration:
+  - `RunPersistenceService.loadRerunScope(...)` now restores `site` and `employeeExternalId` from `requested_scope_json`, with `site` falling back to the legacy `runs.site` column when present.
+- Runs UI parity:
+  - `/runs` manual scope selector now exposes `SITE` and `EMPLOYEE`.
+  - Added required free-text inputs for `site` and `employeeExternalId`.
+  - Scope filter dropdown and rerun eligibility now include `SITE` and `EMPLOYEE`.
+  - Scope labels now render `Site` and `Employee` consistently in tables and details.
+- Docs alignment:
+  - `README.md` and `docs/ARCHITECTURE.md` now describe the full supported scoped-run surface.
+  - `docs/POST_MERGE_STATUS.md` historical deferred-scope note is now explicitly marked as resolved.
+
+### Verification
+
+- `frontend`: `npm run lint` passed with one existing warning in `test/mocks/next-font.ts`.
+- `frontend`: `npm run build` passed.
+- `backend`: `.\gradlew.bat --no-daemon test --tests com.workwell.web.EvalControllerTest` passed.
+- `backend`: targeted `ScopedRunIntegrationTest` methods passed individually for:
+  - `measureScopePersistsOnlySelectedMeasureAndAuditActor`
+  - `siteScopeQueuesAndPersistsOnlyRequestedSite`
+  - `employeeScopeQueuesAndPersistsOnlyRequestedEmployee`
+  - `siteScopeRerunUsesPersistedRequestedSite`
+  - `employeeScopeRerunUsesPersistedRequestedEmployee`
+- `backend`: `ScopedRunFailureIntegrationTest.measureScopeFailurePersistsMissingDataAndPartialFailure` passed using `--no-daemon --no-configuration-cache` with a unique `java.io.tmpdir` to avoid a local Gradle temp-file race in this Windows + OneDrive environment.
+
 ## 2026-05-22 — Repository polish pass (community health + standards + README modernization)
 
 ### What changed

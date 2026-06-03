@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -32,6 +33,7 @@ public class AllProgramsRunService {
     private final CqlEvaluationService cqlEvaluationService;
     private final CaseFlowService caseFlowService;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<AllProgramsRunService> selfProvider;
 
     public AllProgramsRunService(
             RunPersistenceService runPersistenceService,
@@ -39,7 +41,8 @@ public class AllProgramsRunService {
             JdbcTemplate jdbcTemplate,
             CqlEvaluationService cqlEvaluationService,
             CaseFlowService caseFlowService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ObjectProvider<AllProgramsRunService> selfProvider
     ) {
         this.runPersistenceService = runPersistenceService;
         this.measureService = measureService;
@@ -47,6 +50,7 @@ public class AllProgramsRunService {
         this.cqlEvaluationService = cqlEvaluationService;
         this.caseFlowService = caseFlowService;
         this.objectMapper = objectMapper;
+        this.selfProvider = selfProvider;
     }
 
     public ManualRunResponse run(ManualRunRequest request, String triggerActor) {
@@ -56,11 +60,8 @@ public class AllProgramsRunService {
 
         RunScopeType scopeType = request.scopeType();
         return switch (scopeType) {
-            case ALL_PROGRAMS -> runAllPrograms("All Programs", triggerActor, effectiveEvaluationDate(request));
-            case MEASURE -> runMeasureScope(request, triggerActor);
             case CASE -> runCaseScope(request, triggerActor);
-            case SITE -> throw new IllegalArgumentException("Scope SITE is not implemented yet");
-            case EMPLOYEE -> throw new IllegalArgumentException("Scope EMPLOYEE is not implemented yet");
+            case ALL_PROGRAMS, MEASURE, SITE, EMPLOYEE -> queueAsyncScopeRun(request, triggerActor);
         };
     }
 
@@ -169,7 +170,55 @@ public class AllProgramsRunService {
         RunPersistenceService.RerunScope scope = runPersistenceService.loadRerunScope(sourceRunId)
                 .orElseThrow(() -> new IllegalArgumentException("Source run not found: " + sourceRunId));
         if ("all_programs".equalsIgnoreCase(scope.scopeType())) {
-            return runAllPrograms("All Programs", triggerActor, LocalDate.now());
+            return queueAsyncScopeRun(
+                    new ManualRunRequest(
+                            RunScopeType.ALL_PROGRAMS,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            false
+                    ),
+                    triggerActor
+            );
+        }
+        if ("site".equalsIgnoreCase(scope.scopeType())) {
+            if (scope.site() == null || scope.site().isBlank()) {
+                throw new IllegalArgumentException("Source site-scoped run is missing the site value");
+            }
+            return queueAsyncScopeRun(
+                    new ManualRunRequest(
+                            RunScopeType.SITE,
+                            null,
+                            null,
+                            scope.site(),
+                            null,
+                            null,
+                            null,
+                            false
+                    ),
+                    triggerActor
+            );
+        }
+        if ("employee".equalsIgnoreCase(scope.scopeType())) {
+            if (scope.employeeExternalId() == null || scope.employeeExternalId().isBlank()) {
+                throw new IllegalArgumentException("Source employee-scoped run is missing the employeeExternalId value");
+            }
+            return queueAsyncScopeRun(
+                    new ManualRunRequest(
+                            RunScopeType.EMPLOYEE,
+                            null,
+                            null,
+                            null,
+                            scope.employeeExternalId(),
+                            null,
+                            null,
+                            false
+                    ),
+                    triggerActor
+            );
         }
         if (!"measure".equalsIgnoreCase(scope.scopeType()) || scope.scopeId() == null) {
             if ("case".equalsIgnoreCase(scope.scopeType())) {
@@ -188,52 +237,18 @@ public class AllProgramsRunService {
             throw new IllegalArgumentException("Unsupported run scope type: " + scope.scopeType());
         }
 
-        Map<String, Object> row = jdbcTemplate.queryForMap(
-                """
-                        SELECT m.id AS measure_id,
-                               m.name AS measure_name,
-                               mv.version AS version,
-                               mv.cql_text AS cql_text
-                        FROM measure_versions mv
-                        JOIN measures m ON m.id = mv.measure_id
-                        WHERE mv.id = ?
-                        """,
-                scope.scopeId()
-        );
-        UUID rerunId = UUID.randomUUID();
-        LocalDate evaluationDate = LocalDate.now();
-        DemoRunPayload payload;
-        try {
-            payload = cqlEvaluationService.evaluate(
-                    rerunId.toString(),
-                    String.valueOf(row.get("measure_name")),
-                    String.valueOf(row.get("version")),
-                    String.valueOf(row.get("cql_text")),
-                    evaluationDate
-            );
-        } catch (Exception ex) {
-            payload = fallbackPayload(
-                    rerunId,
-                    String.valueOf(row.get("measure_name")),
-                    String.valueOf(row.get("version")),
-                    evaluationDate,
-                    ex
-            );
-        }
-        runPersistenceService.persistMeasureRun(
-                payload,
-                "measure",
-                null,
-                "manual",
-                triggerActor,
-                requestedScope("MEASURE", (UUID) row.get("measure_id"), scope.scopeId(), null, null, null, evaluationDate, false),
-                false
-        );
-        return buildResponse(
-                rerunId,
-                RunScopeType.MEASURE.name(),
-                payload.measureName() + " " + payload.measureVersion(),
-                List.of(payload.measureName())
+        return queueAsyncScopeRun(
+                new ManualRunRequest(
+                        RunScopeType.MEASURE,
+                        null,
+                        scope.scopeId(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        false
+                ),
+                triggerActor
         );
     }
 
@@ -329,6 +344,43 @@ public class AllProgramsRunService {
                 target.measureName() + " " + target.measureVersion(),
                 List.of(target.measureName())
         );
+    }
+
+    private ManualRunResponse queueAsyncScopeRun(ManualRunRequest request, String actor) {
+        String scopeLabel = buildScopeLabel(request);
+        List<String> measuresExecuted = measuresExecutedForRequest(request);
+        UUID runId = createRunRecord(request, actor);
+        // Route through the proxied bean so Spring applies @Async even for internal dispatches.
+        selfProvider.getObject().executeRunAsync(runId, request, actor);
+        return new ManualRunResponse(
+                runId.toString(),
+                request.scopeType().name(),
+                scopeLabel,
+                "REQUESTED",
+                measuresExecuted.size(),
+                0L,
+                0L,
+                0L,
+                "Run queued for execution",
+                measuresExecuted
+        );
+    }
+
+    private List<String> measuresExecutedForRequest(ManualRunRequest request) {
+        return switch (request.scopeType()) {
+            case MEASURE -> {
+                try {
+                    yield List.of(resolveMeasureTarget(request).measureName());
+                } catch (IllegalArgumentException ex) {
+                    yield List.of();
+                }
+            }
+            case CASE -> List.of();
+            case ALL_PROGRAMS, SITE, EMPLOYEE -> runPersistenceService.loadActiveMeasureScopes().stream()
+                    .map(DemoRunModels.ActiveMeasureScope::measureName)
+                    .distinct()
+                    .toList();
+        };
     }
 
     private ManualRunResponse runCaseScope(ManualRunRequest request, String actor) {
@@ -601,7 +653,14 @@ public class AllProgramsRunService {
     private String buildScopeLabel(ManualRunRequest request) {
         return switch (request.scopeType()) {
             case ALL_PROGRAMS -> "All Programs";
-            case MEASURE -> "Measure";
+            case MEASURE -> {
+                try {
+                    ResolvedMeasureTarget target = resolveMeasureTarget(request);
+                    yield target.measureName() + " " + target.measureVersion();
+                } catch (IllegalArgumentException ex) {
+                    yield "Measure";
+                }
+            }
             case SITE -> "Site: " + request.site();
             case EMPLOYEE -> "Employee: " + request.employeeExternalId();
             case CASE -> "Case";
