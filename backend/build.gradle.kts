@@ -61,8 +61,28 @@ dependencyManagement {
 tasks.withType<Test> {
 	useJUnitPlatform()
 	// CI gets two forks so long-running Spring/Testcontainers classes can overlap
-	// without turning the runner into a noisy stampede.
-	maxParallelForks = if (System.getenv("CI") == "true") 2 else 1
+	// without turning the runner into a noisy stampede. Override via GRADLE_TEST_FORKS.
+	maxParallelForks = System.getenv("GRADLE_TEST_FORKS")?.toIntOrNull()
+		?: if (System.getenv("CI") == "true") 2 else 1
+
+	// Optional CI matrix sharding: split the test classes across parallel runner jobs
+	// by a stable path hash, so each class runs in exactly one shard and the union of
+	// shards 0..TEST_SHARD_TOTAL-1 covers the whole suite. This is the lever that cuts
+	// the CQL-heavy backend suite from ~44 min on one runner to a few minutes across
+	// several. With no shard env set (local runs), the full suite runs as before.
+	val shardTotal = System.getenv("TEST_SHARD_TOTAL")?.toIntOrNull()
+	val shardIndex = System.getenv("TEST_SHARD_INDEX")?.toIntOrNull()
+	if (shardTotal != null && shardTotal > 1 && shardIndex != null) {
+		setCandidateClassFiles(candidateClassFiles.filter { classFile ->
+			Math.floorMod(classFile.path.replace('\\', '/').hashCode(), shardTotal) == shardIndex
+		})
+		doFirst {
+			logger.lifecycle(
+				"Backend test shard $shardIndex/$shardTotal: ${candidateClassFiles.files.size} candidate class files"
+			)
+		}
+	}
+
 	// Keep binary in-progress results outside the OneDrive tree so sync cannot
 	// race against Gradle's rename of these short-lived files (NoSuchFileException).
 	binaryResultsDirectory.set(
