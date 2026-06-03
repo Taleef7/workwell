@@ -19,8 +19,9 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,6 +38,7 @@ import org.springframework.test.web.servlet.MvcResult;
         "workwell.auth.jwt-secret=test-secret-for-evidence-security"
 })
 @AutoConfigureMockMvc
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EvidenceAccessIntegrationTest extends AbstractIntegrationTest {
 
     private static final Path evidenceRoot = createEvidenceRoot();
@@ -61,8 +63,12 @@ class EvidenceAccessIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @BeforeEach
-    void resetState() throws Exception {
+    // Evidence access/role tests are read-only against the seeded population: each test
+    // uploads its own attachment (unique id) and filters audit by that id, so a single
+    // population run shared across the class is sufficient. This drops the class from
+    // ~14 full-population runs (~17 min) to one (~90s).
+    @BeforeAll
+    void seedPopulationOnce() throws Exception {
         jdbcTemplate.execute("TRUNCATE TABLE runs, outcomes, cases, case_actions, run_logs, audit_events, evidence_attachments, outreach_records, scheduled_appointments, waivers CASCADE");
         deleteEvidenceFiles();
         Files.createDirectories(evidenceRoot);
