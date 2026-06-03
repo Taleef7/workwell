@@ -14,11 +14,14 @@ import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 @SpringBootTest
+@Execution(ExecutionMode.SAME_THREAD)
 class ScopedRunFailureIntegrationTest extends AbstractIntegrationTest {
     private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED");
 
@@ -97,6 +100,45 @@ class ScopedRunFailureIntegrationTest extends AbstractIntegrationTest {
                 runId
         );
         assertThat(persistedOutcome).isEqualTo("MISSING_DATA");
+    }
+
+    @Test
+    void measureScopeReturnsBeforeSlowEvaluationCompletes() {
+        measureService.listMeasures();
+
+        UUID measureId = jdbcTemplate.queryForObject(
+                "SELECT id FROM measures WHERE name = ?",
+                UUID.class,
+                "Audiogram"
+        );
+
+        when(cqlEvaluationService.evaluate(anyString(), anyString(), anyString(), anyString(), any(LocalDate.class)))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(1_500L);
+                    throw new RuntimeException("slow async failure");
+                });
+
+        long startedAt = System.nanoTime();
+        var response = allProgramsRunService.run(
+                new ManualRunRequest(
+                        RunScopeType.MEASURE,
+                        measureId,
+                        null,
+                        null,
+                        null,
+                        null,
+                        LocalDate.of(2026, 5, 9),
+                        false
+                ),
+                "cm@workwell.dev"
+        );
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        assertThat(response.status()).isEqualTo("REQUESTED");
+        assertThat(elapsedMs).isLessThan(1_200L);
+
+        RunPersistenceService.RunSummaryResponse summary = awaitTerminalRun(UUID.fromString(response.runId()));
+        assertThat(summary.status()).isEqualTo("PARTIAL_FAILURE");
     }
 
     private RunPersistenceService.RunSummaryResponse awaitTerminalRun(UUID runId) {
