@@ -1,3 +1,6 @@
+import org.gradle.api.file.FileTreeElement
+import org.gradle.api.specs.Spec
+
 plugins {
 	java
 	id("org.springframework.boot") version "3.3.5"
@@ -60,9 +63,36 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
-	// CI gets two forks so long-running Spring/Testcontainers classes can overlap
-	// without turning the runner into a noisy stampede.
-	maxParallelForks = if (System.getenv("CI") == "true") 2 else 1
+	// CI forks 4-wide so heavy Spring/CQL/Testcontainers classes in a shard overlap
+	// (ubuntu-latest has 4 vCPUs). Override via GRADLE_TEST_FORKS.
+	maxParallelForks = System.getenv("GRADLE_TEST_FORKS")?.toIntOrNull()
+		?: if (System.getenv("CI") == "true") 4 else 1
+	// Cap per-fork heap so 4 JVMs + their Postgres containers fit the runner's RAM;
+	// prod runs the app on 768m, so 1.5g per test fork is ample.
+	if (System.getenv("CI") == "true") {
+		maxHeapSize = "1536m"
+	}
+
+	// Optional CI matrix sharding: split the test classes across parallel runner jobs
+	// by a stable path hash, so each class runs in exactly one shard and the union of
+	// shards 0..TEST_SHARD_TOTAL-1 covers the whole suite. This is the lever that cuts
+	// the CQL-heavy backend suite from ~44 min on one runner to a few minutes across
+	// several. With no shard env set (local runs), the full suite runs as before.
+	val shardTotal = System.getenv("TEST_SHARD_TOTAL")?.toIntOrNull()
+	val shardIndex = System.getenv("TEST_SHARD_INDEX")?.toIntOrNull()
+	if (shardTotal != null && shardTotal > 1 && shardIndex != null) {
+		// FileTreeElement.path is always '/'-separated and relative to the test
+		// classes root, so the hash is stable across OSes. Directories must pass so
+		// the tree is traversed into; only .class candidates are assigned to a shard.
+		include(Spec<FileTreeElement> { element ->
+			element.isDirectory ||
+				Math.floorMod(element.path.hashCode(), shardTotal) == shardIndex
+		})
+		doFirst {
+			logger.lifecycle("Backend test shard $shardIndex/$shardTotal active")
+		}
+	}
+
 	// Keep binary in-progress results outside the OneDrive tree so sync cannot
 	// race against Gradle's rename of these short-lived files (NoSuchFileException).
 	binaryResultsDirectory.set(
