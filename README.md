@@ -13,7 +13,7 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 
 - Lifecycle-managed measures: `Draft -> Approved -> Active -> Deprecated`
 - CQL compile + fixture validation gates before activation
-- Scoped run pipeline: `ALL_PROGRAMS`, `MEASURE`, `CASE`
+- Scoped run pipeline: `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, `CASE`
 - Case operations: outreach, assign/escalate, rerun-to-verify, timeline audit
 - AI assist for CQL drafting and test fixture generation (never compliance decisions)
 - MAT-compatible FHIR R4 export for measure portability
@@ -104,6 +104,7 @@ npm run build
 - `GET /api/programs/{measureId}/risk-outlook?horizonDays=30`
 - `GET /api/measures/{measureId}/versions/{versionId}/export/mat?format=xml`
 - `POST /api/runs/manual`
+- `POST /api/runs/{id}/rerun`
 - `GET /api/cases?status=open`
 - `GET /api/exports/runs?format=csv`
 - `GET /api/auditor/cases/{caseId}/packet?format=json|html`
