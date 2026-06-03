@@ -21,13 +21,18 @@ for name in \
   require_env "$name"
 done
 
+# Normalize whatever form LAUNCHPAD_API_URL takes down to the manager origin, then target
+# the versioned JSON REST base. As of 2026-06 the MIE Container Manager serves:
+#   - the SPA web UI at the origin (e.g. GET /sites returns index.html)
+#   - the Swagger UI at /api
+#   - the JSON REST API at /api/v1
+# Strip any of these known suffixes if present, then re-append /api/v1 so the value is
+# resilient to the secret being stored as the bare origin, /api, /v1, or /api/v1.
 api_root="${MIEWEB_API_URL%/}"
-if [[ "$api_root" == */api ]]; then
-  # /api is the Swagger UI route; the JSON endpoints are served from the manager origin.
-  api_base="${api_root%/api}"
-else
-  api_base="$api_root"
-fi
+api_root="${api_root%/api/v1}"
+api_root="${api_root%/v1}"
+api_root="${api_root%/api}"
+api_base="${api_root}/api/v1"
 
 request() {
   local method="$1"
@@ -72,7 +77,7 @@ request() {
 
   if ! jq -e . "$response_file" >/dev/null 2>&1; then
     echo "::error::${method} ${path} returned a non-JSON response from ${api_base}${path}." >&2
-    echo "::error::Check LAUNCHPAD_API_URL. The Swagger UI lives at /api, but REST requests must target the manager origin." >&2
+    echo "::error::Check LAUNCHPAD_API_URL. The web UI serves HTML at the origin and Swagger at /api; the JSON REST API is at /api/v1." >&2
     echo "Response preview:" >&2
     head -c 500 "$response_file" >&2 || true
     echo >&2
