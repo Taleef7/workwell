@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**", "fix/**", "feat/**"]
+    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,14 +13,23 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend — Test
+    name: Backend — Test (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     permissions:
       checks: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     defaults:
       run:
         working-directory: backend
+    env:
+      # Split the CQL-heavy suite across parallel runners; keep this in sync with the
+      # length of matrix.shard above. See build.gradle.kts for the hash-based selection.
+      TEST_SHARD_TOTAL: "8"
+      TEST_SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -29,14 +38,25 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
         with:
-          cache-read-only: false
-      - name: Run backend tests
+          # Only one shard writes the shared Gradle cache to avoid concurrent-write
+          # contention; the rest read it.
+          cache-read-only: ${{ matrix.shard != 0 }}
+      - name: Run backend tests (shard ${{ matrix.shard }}/8)
         run: ./gradlew test --build-cache --no-daemon
+      - name: Per-class timings (shard balancing data)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in build/test-results/test/*.xml; do
+            cls=$(basename "$f" .xml); cls=${cls#TEST-}
+            t=$(sed -n 's/.*<testsuite[^>]*[[:space:]]time="\([0-9.]*\)".*/\1/p' "$f" | head -1)
+            echo "TIMING ${t:-0} ${cls}"
+          done | sort -t' ' -k2 -gr
       - name: Publish test results
         uses: dorny/test-reporter@v1
         if: always()
         with:
-          name: Backend Tests
+          name: Backend Tests (shard ${{ matrix.shard }})
           path: backend/build/test-results/test/*.xml
           reporter: java-junit
 
