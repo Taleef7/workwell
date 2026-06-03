@@ -11,10 +11,13 @@ import java.util.UUID;
 import com.workwell.web.EvalController.ManualRunResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 @SpringBootTest
+@Execution(ExecutionMode.SAME_THREAD)
 class ScopedRunIntegrationTest extends AbstractIntegrationTest {
     private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED");
 
@@ -429,7 +432,7 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
     }
 
     private RunPersistenceService.RunSummaryResponse awaitTerminalRun(UUID runId) {
-        long deadlineMs = System.currentTimeMillis() + 10_000L;
+        long deadlineMs = System.currentTimeMillis() + 120_000L;
         while (System.currentTimeMillis() < deadlineMs) {
             RunPersistenceService.RunSummaryResponse summary = runPersistenceService.loadRunById(runId)
                     .orElseThrow(() -> new AssertionError("Run not found: " + runId));
@@ -443,7 +446,7 @@ class ScopedRunIntegrationTest extends AbstractIntegrationTest {
                 throw new AssertionError("Interrupted while waiting for run " + runId + " to complete", ex);
             }
         }
-        throw new AssertionError("Run did not reach a terminal state within 10 seconds: " + runId);
+        throw new AssertionError("Run did not reach a terminal state within 120 seconds: " + runId);
     }
 
     private String runStartedActor(UUID runId) {

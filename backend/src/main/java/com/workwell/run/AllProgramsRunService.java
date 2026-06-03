@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -32,6 +33,7 @@ public class AllProgramsRunService {
     private final CqlEvaluationService cqlEvaluationService;
     private final CaseFlowService caseFlowService;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<AllProgramsRunService> selfProvider;
 
     public AllProgramsRunService(
             RunPersistenceService runPersistenceService,
@@ -39,7 +41,8 @@ public class AllProgramsRunService {
             JdbcTemplate jdbcTemplate,
             CqlEvaluationService cqlEvaluationService,
             CaseFlowService caseFlowService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ObjectProvider<AllProgramsRunService> selfProvider
     ) {
         this.runPersistenceService = runPersistenceService;
         this.measureService = measureService;
@@ -47,6 +50,7 @@ public class AllProgramsRunService {
         this.cqlEvaluationService = cqlEvaluationService;
         this.caseFlowService = caseFlowService;
         this.objectMapper = objectMapper;
+        this.selfProvider = selfProvider;
     }
 
     public ManualRunResponse run(ManualRunRequest request, String triggerActor) {
@@ -346,7 +350,8 @@ public class AllProgramsRunService {
         String scopeLabel = buildScopeLabel(request);
         List<String> measuresExecuted = measuresExecutedForRequest(request);
         UUID runId = createRunRecord(request, actor);
-        executeRunAsync(runId, request, actor);
+        // Route through the proxied bean so Spring applies @Async even for internal dispatches.
+        selfProvider.getObject().executeRunAsync(runId, request, actor);
         return new ManualRunResponse(
                 runId.toString(),
                 request.scopeType().name(),
