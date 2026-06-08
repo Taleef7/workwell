@@ -65,8 +65,8 @@ class ProgramControllerTest {
         UUID runIdA = UUID.fromString("44444444-4444-4444-4444-444444444444");
         UUID runIdB = UUID.fromString("55555555-5555-5555-5555-555555555555");
         when(programService.trend(measureId, null, null, null)).thenReturn(List.of(
-                new ProgramService.ProgramTrendPoint(runIdA, Instant.parse("2026-05-07T00:00:00Z"), 55.0, 100),
-                new ProgramService.ProgramTrendPoint(runIdB, Instant.parse("2026-04-07T00:00:00Z"), 50.0, 100)
+                new ProgramService.ProgramTrendPoint(runIdA, Instant.parse("2026-05-07T00:00:00Z"), 55.0, 100, 55, 10, 20, 10, 5),
+                new ProgramService.ProgramTrendPoint(runIdB, Instant.parse("2026-04-07T00:00:00Z"), 50.0, 100, 50, 12, 22, 11, 5)
         ));
 
         mockMvc.perform(get("/api/programs/{measureId}/trend", measureId))

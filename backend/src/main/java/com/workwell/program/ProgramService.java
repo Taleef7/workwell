@@ -133,6 +133,8 @@ public class ProgramService {
         // Union of outcome-level data (real runs with employee rows) and run-level aggregate
         // data (MEASURE-scoped seeded/historical runs that have no outcome rows). Deduplicates
         // by excluding run IDs already covered by the outcome-based branch.
+        // run_based uses 0 for per-bucket counts because the runs table only stores compliant +
+        // non_compliant aggregate totals, not the per-status breakdown.
         String sql = """
                 WITH active_measure_version AS (
                     SELECT mv.id
@@ -144,8 +146,12 @@ public class ProgramService {
                 outcome_based AS (
                     SELECT o.run_id,
                            r.started_at,
-                           COUNT(*)                                        AS total_evaluated,
-                           COUNT(*) FILTER (WHERE o.status = 'COMPLIANT') AS compliant
+                           COUNT(*)                                              AS total_evaluated,
+                           COUNT(*) FILTER (WHERE o.status = 'COMPLIANT')       AS compliant,
+                           COUNT(*) FILTER (WHERE o.status = 'DUE_SOON')        AS due_soon,
+                           COUNT(*) FILTER (WHERE o.status = 'OVERDUE')         AS overdue,
+                           COUNT(*) FILTER (WHERE o.status = 'MISSING_DATA')    AS missing_data,
+                           COUNT(*) FILTER (WHERE o.status = 'EXCLUDED')        AS excluded
                     FROM outcomes o
                     JOIN runs r ON r.id = o.run_id
                     JOIN employees e ON e.id = o.employee_id
@@ -162,7 +168,11 @@ public class ProgramService {
                     SELECT r.id    AS run_id,
                            r.started_at,
                            COALESCE(r.total_evaluated, 0) AS total_evaluated,
-                           COALESCE(r.compliant, 0)        AS compliant
+                           COALESCE(r.compliant, 0)        AS compliant,
+                           0                               AS due_soon,
+                           0                               AS overdue,
+                           0                               AS missing_data,
+                           0                               AS excluded
                     FROM runs r
                     JOIN active_measure_version amv ON amv.id = r.scope_id
                     WHERE CAST(? AS TEXT) IS NULL
@@ -173,10 +183,10 @@ public class ProgramService {
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                       AND r.id NOT IN (SELECT run_id FROM outcome_based)
                 )
-                SELECT run_id, started_at, total_evaluated, compliant
+                SELECT run_id, started_at, total_evaluated, compliant, due_soon, overdue, missing_data, excluded
                 FROM outcome_based
                 UNION ALL
-                SELECT run_id, started_at, total_evaluated, compliant
+                SELECT run_id, started_at, total_evaluated, compliant, due_soon, overdue, missing_data, excluded
                 FROM run_based
                 ORDER BY started_at DESC
                 LIMIT 10
@@ -185,12 +195,21 @@ public class ProgramService {
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             long totalEvaluated = rs.getLong("total_evaluated");
             long compliant = rs.getLong("compliant");
+            long dueSoon = rs.getLong("due_soon");
+            long overdue = rs.getLong("overdue");
+            long missingData = rs.getLong("missing_data");
+            long excluded = rs.getLong("excluded");
             double complianceRate = totalEvaluated == 0 ? 0d : Math.round((compliant * 1000.0 / totalEvaluated)) / 10.0;
             return new ProgramTrendPoint(
                     (UUID) rs.getObject("run_id"),
                     toInstant(rs.getObject("started_at")),
                     complianceRate,
-                    totalEvaluated
+                    totalEvaluated,
+                    compliant,
+                    dueSoon,
+                    overdue,
+                    missingData,
+                    excluded
             );
         }, measureId, site, site,
                 from == null ? null : Timestamp.from(from), from == null ? null : Timestamp.from(from),
@@ -350,7 +369,12 @@ public class ProgramService {
             UUID runId,
             Instant startedAt,
             double complianceRate,
-            long totalEvaluated
+            long totalEvaluated,
+            long compliant,
+            long dueSoon,
+            long overdue,
+            long missingData,
+            long excluded
     ) {
     }
 
