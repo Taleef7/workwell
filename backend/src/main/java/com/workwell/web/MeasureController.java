@@ -101,6 +101,11 @@ public class MeasureController {
         return measureService.listValueSets();
     }
 
+    @GetMapping("/api/measures/versions/{measureVersionId}/value-sets")
+    public List<MeasureService.ValueSetRef> listValueSetsByVersion(@PathVariable UUID measureVersionId) {
+        return measureService.listValueSetsByVersionId(measureVersionId);
+    }
+
     @GetMapping("/api/osha-references")
     public List<MeasureService.OshaReference> listOshaReferences() {
         return measureService.listOshaReferences();
