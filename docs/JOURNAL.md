@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-06-08 — Studio UX feedback: spec labels, async button states, live compile badge
+
+### What shipped (frontend-only; branch `feat/studio-ux-feedback`, PR open — not merged)
+
+- **Fix 1 — Spec field labels (`SpecTab.tsx`):** Added a persistent visible `<label>` (wired via `htmlFor`/`id`) above each of the 8 spec controls (Description, Eligibility Role/Site Filter, Program Enrollment Text, Exclusion Label, Exclusion Criteria Text, Compliance Window, Required Data Elements). Placeholders kept as hint text; field order, state, and save payload unchanged.
+- **Fix 2 — Async button in-flight states:** Adopted the `TestsTab` spinner + disabled-while-pending pattern for the remaining async buttons — Compile (`CqlTab`), AI Draft Spec + Save Draft (`SpecTab`), and Approve/Activate/Deprecate confirms (`ReleaseApprovalTab`). Each shows an inline spinner + verb ("Compiling…", "Drafting…", "Saving…", "Approving…", "Activating…", "Deprecating…") and is disabled while pending to guard against double-submit. (`CqlTab` "AI Draft CQL" only opens a dialog; its actual async "Generate CQL Draft" already had the pattern.)
+- **Fix 3 — Live compile status badge (`CqlTab.tsx` + `studio/[id]/page.tsx`):** Badge now renders a parent-held `liveCompileStatus` override derived from the compile response `status` (COMPILED | WARNINGS | ERROR), flipping immediately without a reload instead of showing the stale persisted prop. Override resets on measure navigation. WARNINGS stays amber (distinct from ERROR red).
+
+### Verification
+
+- `npm run lint` (0 errors; 1 pre-existing warning in `test/mocks/next-font.ts`), `npm run test` (53 passed, incl. 5 new), `npm run build` (TypeScript clean, all routes built).
+- New tests: `SpecTab.test.tsx` (a `<label>` per spec field + Saving/Drafting in-flight), `CqlTab.test.tsx` (badge NOT_COMPILED → WARNINGS without remount, amber-not-red + Compiling in-flight).
+- Frontend-only; no backend, schema, API-contract, or compliance-logic changes. PR left unmerged (Taleef deploys).
+
+---
+
 ## 2026-06-08 — Post-merge polish: 7 PRs merged (#60–#66)
 
 ### What shipped

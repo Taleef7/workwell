@@ -40,6 +40,9 @@ export function ReleaseApprovalTab({
   const [showDeprecateConfirm, setShowDeprecateConfirm] = useState(false);
   const [deprecateReason, setDeprecateReason] = useState("");
   const [exportingMat, setExportingMat] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [deprecating, setDeprecating] = useState(false);
 
   const measureVersionId = versionHistory.find(v => v.version === measure.version)?.id ?? "";
 
@@ -57,6 +60,7 @@ export function ReleaseApprovalTab({
 
   async function approve() {
     onError("");
+    setApproving(true);
     try {
       await api.post(`/api/measures/${measureId}/approve`);
       setShowApproveConfirm(false);
@@ -64,11 +68,14 @@ export function ReleaseApprovalTab({
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Approve failed");
+    } finally {
+      setApproving(false);
     }
   }
 
   async function activate() {
     onError("");
+    setActivating(true);
     try {
       await api.post(`/api/measures/${measureId}/status`, { targetStatus: "Active" });
       setShowActivateConfirm(false);
@@ -76,12 +83,15 @@ export function ReleaseApprovalTab({
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Activation failed");
+    } finally {
+      setActivating(false);
     }
   }
 
   async function deprecate() {
     onError("");
     if (!deprecateReason.trim()) { onError("Deprecation reason is required."); return; }
+    setDeprecating(true);
     try {
       await api.post(`/api/measures/${measureId}/deprecate`, { reason: deprecateReason.trim() });
       setShowDeprecateConfirm(false);
@@ -90,6 +100,8 @@ export function ReleaseApprovalTab({
       onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Deprecation failed");
+    } finally {
+      setDeprecating(false);
     }
   }
 
@@ -242,7 +254,23 @@ export function ReleaseApprovalTab({
             </ul>
             <div className="mt-4 flex justify-end gap-2">
               <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowApproveConfirm(false)}>Cancel</button>
-              <button className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white" onClick={approve}>Confirm</button>
+              <button
+                className="flex items-center gap-1 rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                onClick={approve}
+                disabled={approving}
+              >
+                {approving ? (
+                  <>
+                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Approving…
+                  </>
+                ) : (
+                  "Confirm"
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -255,7 +283,23 @@ export function ReleaseApprovalTab({
             <p className="mt-2 text-sm text-slate-700">Activating this version replaces any currently Active version.</p>
             <div className="mt-4 flex justify-end gap-2">
               <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowActivateConfirm(false)}>Cancel</button>
-              <button className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white" onClick={activate}>Confirm Activate</button>
+              <button
+                className="flex items-center gap-1 rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                onClick={activate}
+                disabled={activating}
+              >
+                {activating ? (
+                  <>
+                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Activating…
+                  </>
+                ) : (
+                  "Confirm Activate"
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -274,7 +318,23 @@ export function ReleaseApprovalTab({
             />
             <div className="mt-4 flex justify-end gap-2">
               <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowDeprecateConfirm(false)}>Cancel</button>
-              <button className="rounded bg-slate-700 px-3 py-2 text-xs font-semibold text-white" onClick={deprecate}>Confirm Deprecate</button>
+              <button
+                className="flex items-center gap-1 rounded bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                onClick={deprecate}
+                disabled={deprecating}
+              >
+                {deprecating ? (
+                  <>
+                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Deprecating…
+                  </>
+                ) : (
+                  "Confirm Deprecate"
+                )}
+              </button>
             </div>
           </div>
         </div>

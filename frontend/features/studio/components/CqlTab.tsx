@@ -35,6 +35,10 @@ type Props = {
   onError: (msg: string) => void;
   canClone: boolean;
   onCreateNewVersion: (summary: string) => Promise<boolean>;
+  /** Live compile status from the most recent compile response; overrides the persisted prop on the badge. */
+  liveCompileStatus?: string | null;
+  /** Reports the compile response status (COMPILED | WARNINGS | ERROR) up to the parent. */
+  onCompileStatusChange?: (status: string) => void;
 };
 
 export function CqlTab({
@@ -50,7 +54,9 @@ export function CqlTab({
   onCompiled,
   onError,
   canClone,
-  onCreateNewVersion
+  onCreateNewVersion,
+  liveCompileStatus,
+  onCompileStatusChange
 }: Props) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -60,7 +66,12 @@ export function CqlTab({
   const [showDraftCqlDialog, setShowDraftCqlDialog] = useState(false);
   const [oshaText, setOshaText] = useState("");
   const [drafting, setDrafting] = useState(false);
+  const [compiling, setCompiling] = useState(false);
   const [draftBanner, setDraftBanner] = useState<string | null>(null);
+
+  // Prefer the live status from the latest compile response so the badge flips immediately,
+  // falling back to the persisted measure status (e.g. on first load / after refetch).
+  const displayedCompileStatus = liveCompileStatus ?? measure.compileStatus ?? "UNKNOWN";
 
   async function handleDraftCql() {
     setDrafting(true);
@@ -162,6 +173,7 @@ export function CqlTab({
 
   async function compile() {
     onError("");
+    setCompiling(true);
     try {
       const payload = await api.post<object, { status: string; errors?: string[]; warnings?: string[] }>(
         `/api/measures/${measureId}/cql/compile`,
@@ -169,10 +181,13 @@ export function CqlTab({
       );
       onCompileWarnings(payload.warnings ?? []);
       onCompileErrors(payload.errors ?? []);
+      if (payload.status) onCompileStatusChange?.(payload.status);
       if ((payload.errors ?? []).length === 0) emitToast("CQL compiled successfully");
       onCompiled();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Compile failed");
+    } finally {
+      setCompiling(false);
     }
   }
 
@@ -212,8 +227,22 @@ export function CqlTab({
         />
       </div>
       <div className="flex items-center gap-2">
-        <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white" onClick={compile}>
-          Compile
+        <button
+          className="flex items-center gap-1 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          onClick={compile}
+          disabled={compiling}
+        >
+          {compiling ? (
+            <>
+              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Compiling…
+            </>
+          ) : (
+            "Compile"
+          )}
         </button>
         <button
           type="button"
@@ -222,8 +251,11 @@ export function CqlTab({
         >
           AI Draft CQL
         </button>
-        <span className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(measure.compileStatus ?? "")}`}>
-          {formatStatusLabel(measure.compileStatus ?? "UNKNOWN")}
+        <span
+          data-testid="compile-status-badge"
+          className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(displayedCompileStatus)}`}
+        >
+          {formatStatusLabel(displayedCompileStatus)}
         </span>
         {canClone && (
           <button
@@ -279,7 +311,7 @@ export function CqlTab({
           </div>
         </div>
       )}
-      {(measure.compileStatus ?? "").toUpperCase() === "WARNINGS" ? (
+      {displayedCompileStatus.toUpperCase() === "WARNINGS" ? (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
           Compile completed with warnings. Activation is allowed, but review warnings before moving to Active.
         </p>
