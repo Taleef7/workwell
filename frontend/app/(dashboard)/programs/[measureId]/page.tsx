@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import {
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid
+} from "recharts";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
@@ -30,6 +33,11 @@ type TrendPoint = {
   startedAt: string;
   complianceRate: number;
   totalEvaluated: number;
+  compliant: number;
+  dueSoon: number;
+  overdue: number;
+  missingData: number;
+  excluded: number;
 };
 
 type TopDrivers = {
@@ -161,8 +169,8 @@ export default function ProgramDetailPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Compliance trend (last 10)</p>
-              <Sparkline points={trend.map((t) => t.complianceRate)} />
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Compliance trend (last 10 runs)</p>
+              <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} />
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Outcome breakdown (latest run)</p>
@@ -420,24 +428,55 @@ export default function ProgramDetailPage() {
   );
 }
 
-function Sparkline({ points }: { points: number[] }) {
-  const width = 360;
-  const height = 80;
+function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
   if (!points.length) {
-    return <div className="h-[80px] rounded border border-dashed border-slate-300 bg-slate-50" />;
+    return (
+      <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
+        <span className="text-xs text-slate-400">No run history for this measure yet</span>
+      </div>
+    );
   }
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const step = points.length === 1 ? 0 : width / (points.length - 1);
-  const d = points.map((p, i) => {
-    const x = i * step;
-    const y = height - ((p - min) / range) * height;
-    return `${i === 0 ? "M" : "L"}${x},${y}`;
-  }).join(" ");
+
+  const data = points.map((p) => ({
+    label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    rate: p.complianceRate,
+    compliant: p.compliant,
+    dueSoon: p.dueSoon,
+    overdue: p.overdue,
+    missingData: p.missingData,
+    excluded: p.excluded,
+  }));
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[80px] w-full rounded border border-slate-200 bg-white">
-      <path d={d} fill="none" stroke="#0f172a" strokeWidth="2" />
-    </svg>
+    <ResponsiveContainer width="100%" height={160}>
+      <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <defs>
+          <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
+            <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+        <YAxis domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+        <Tooltip
+          formatter={(value, name) => {
+            if (name === "rate") return [`${Number(value).toFixed(1)}%`, "Compliance rate"];
+            return [value, String(name)];
+          }}
+          contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+          labelStyle={{ fontSize: 11, color: "#475569" }}
+        />
+        <Area
+          type="monotone"
+          dataKey="rate"
+          stroke="#059669"
+          strokeWidth={2}
+          fill="url(#complianceGrad)"
+          dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
+          activeDot={{ r: 5 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
   );
 }
