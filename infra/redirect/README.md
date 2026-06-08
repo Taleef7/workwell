@@ -26,11 +26,6 @@ Minimal nginx image that issues a `301 Moved Permanently` from
    Expected: `HTTP/1.1 301 Moved Permanently` with
    `Location: https://twh.os.mieweb.org/`.
 
-4. **Optional: deploy a workwell-api redirect.**
-   If `workwell-api.os.mieweb.org` also needs to redirect, duplicate the
-   `deploy-redirect` job in the workflow with `REDIRECT_HOSTNAME: workwell-api`
-   and the same image. The nginx config redirects all paths unconditionally.
-
 ## Image
 
 - Source: `infra/redirect/Dockerfile` + `infra/redirect/nginx.conf`
