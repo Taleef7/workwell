@@ -21,16 +21,16 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 
 ## Status
 
-- Sprint queue through **Sprint 7** is implemented in the repo.
-- Sprint 7 issues `#47`-`#51` are completed and closed.
+- All planned sprints (**0–7**) are implemented and merged to `main`; Sprint 7 issues `#47`–`#51` are closed.
+- Post-merge work continues on `main`: Sprint 8 scoped-run parity (`SITE`/`EMPLOYEE` manual runs + reruns), an 8-way CI test-sharding speedup (~3.8×), and the MIE Container Manager v1 API deploy migration.
 - Default branch: `main` only (stale sprint branches cleaned up).
 
 ## Production surfaces
 
-- Primary demo frontend: `https://twh.os.mieweb.org`
-- Primary demo backend API: `https://twh-api.os.mieweb.org`
-- Public preview frontend: `https://workwell-measure-studio.vercel.app`
-- Public preview backend API: `https://workwell-measure-studio-api.fly.dev`
+- Live frontend: `https://twh.os.mieweb.org`
+- Live backend API: `https://twh-api.os.mieweb.org`
+
+> The earlier Vercel + Fly.io public-preview stack (`workwell-measure-studio.vercel.app`, `workwell-measure-studio-api.fly.dev`) is **decommissioned**. MIE TWH is the sole live deployment.
 
 ## Technology stack
 

@@ -1,10 +1,14 @@
 # WorkWell Measure Studio — Complete Walkthrough & Functionality Guide
 
-**Version:** Sprint 6 (all sprints merged)
-**Last updated:** 2026-05-18
+**Version:** All sprints (0–7) merged
+**Last updated:** 2026-05-18 (URLs updated 2026-06-08 to the live MIE TWH stack)
 **Audience:** Anyone testing, evaluating, or demonstrating the platform — no technical background required
-**Production URL:** https://workwell-measure-studio.vercel.app
+**Production URL:** https://twh.os.mieweb.org
 **Issue tracker:** https://github.com/Taleef7/workwell-measure-studio/issues/23
+
+> **Stack note:** This walkthrough was authored against the now-decommissioned Vercel/Fly stack.
+> URLs point to the live MIE TWH stack (`twh.os.mieweb.org`); any embedded case/run/measure IDs
+> are illustrative and may differ on the current instance.
 
 ---
 
@@ -26,9 +30,9 @@ AI assists human reviewers with drafting and explanation, but **every compliance
 ### Production URLs
 | Surface | URL |
 |---------|-----|
-| Application | https://workwell-measure-studio.vercel.app |
-| Backend API | https://workwell-measure-studio-api.fly.dev |
-| Health check | https://workwell-measure-studio-api.fly.dev/actuator/health |
+| Application | https://twh.os.mieweb.org |
+| Backend API | https://twh-api.os.mieweb.org |
+| Health check | https://twh-api.os.mieweb.org/actuator/health |
 
 ### Demo Accounts
 All accounts use the same password: **`Workwell123!`**
@@ -58,7 +62,7 @@ The login screen is the entry point to the application. WorkWell uses demo accou
 
 ### Steps
 
-1. Open https://workwell-measure-studio.vercel.app in your browser.
+1. Open https://twh.os.mieweb.org in your browser.
 2. You will be redirected to the **Login** page at `/login`.
 3. Enter the following credentials to log in as an administrator (full access):
    - **Email:** `admin@workwell.dev`
@@ -230,7 +234,7 @@ The case detail page is the **single source of truth** for one employee's non-co
 ### Steps — opening a case
 
 1. From `/cases`, click **Omar Siddiq's** case row (search for `Omar` if needed). Or navigate directly to:
-   `https://workwell-measure-studio.vercel.app/cases/32fee6f4-6e69-4675-b44e-5f6392de7dbd`
+   `https://twh.os.mieweb.org/cases/32fee6f4-6e69-4675-b44e-5f6392de7dbd`
 2. The case detail page opens.
 
 ### Understanding the page layout
@@ -366,7 +370,7 @@ The Runs page shows every execution of every measure — a permanent history of 
 
 ### Exporting runs data
 
-10. Click **Export Runs CSV** (or go directly to `https://workwell-measure-studio-api.fly.dev/api/exports/runs?format=csv` — you'll need to authenticate first, so use the app's export button).
+10. Click **Export Runs CSV** (or go directly to `https://twh-api.os.mieweb.org/api/exports/runs?format=csv` — you'll need to authenticate first, so use the app's export button).
 11. The CSV downloads with columns: runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf.
 
 12. To export outcomes for a specific run:
@@ -730,7 +734,7 @@ WorkWell exposes a **Machine-Callable Protocol (MCP) server** that allows AI age
 ### Prerequisites
 - **Claude Desktop is installed.** Download from https://claude.ai/download (macOS and Windows supported).
 - **A valid WorkWell JWT.** Log in to the WorkWell UI as any user with at least `ROLE_CASE_MANAGER` and copy the access token. In the dashboard the access token is held only in memory — easiest path is to sign in via the WorkWell auth API (`POST /api/auth/login` with `{ "email": "...", "password": "..." }`) and capture the `accessToken` from the JSON response.
-- **The WorkWell backend is reachable.** For the deployed demo this is `https://workwell-measure-studio-api.fly.dev`. For local development this is typically `http://localhost:8080`.
+- **The WorkWell backend is reachable.** For the deployed demo this is `https://twh-api.os.mieweb.org`. For local development this is typically `http://localhost:8080`.
 
 ### Claude Desktop config file
 
@@ -744,7 +748,7 @@ Add (or merge into) an `mcpServers` block pointing at the SSE endpoint with the 
 {
   "mcpServers": {
     "workwell": {
-      "url": "https://workwell-measure-studio-api.fly.dev/sse",
+      "url": "https://twh-api.os.mieweb.org/sse",
       "transport": "sse",
       "headers": {
         "Authorization": "Bearer <PASTE_WORKWELL_JWT_HERE>"
@@ -821,12 +825,12 @@ WorkWell enforces role-based access control throughout the application. This sec
 2. Navigate to Studio for any measure.
 3. The **Approve** and **Activate** buttons should be disabled or absent.
 4. Confirm by opening browser developer tools → Network tab, then manually calling:
-   `POST https://workwell-measure-studio-api.fly.dev/api/measures/{id}/approve`
+   `POST https://twh-api.os.mieweb.org/api/measures/{id}/approve`
    with your session JWT. Expected response: `403 Forbidden`.
 
 **Test 2 — Anonymous access rejected:**
 5. Open an incognito window.
-6. Try to access: `https://workwell-measure-studio-api.fly.dev/api/measures`
+6. Try to access: `https://twh-api.os.mieweb.org/api/measures`
 7. Expected: `403 Forbidden` (no cookie, no JWT).
 
 **Test 3 — Case Manager cannot access Admin:**
@@ -837,7 +841,7 @@ WorkWell enforces role-based access control throughout the application. This sec
 **Test 4 — MCP requires authentication:**
 11. In your terminal (if you have curl):
     ```
-    curl https://workwell-measure-studio-api.fly.dev/sse
+    curl https://twh-api.os.mieweb.org/sse
     ```
 12. Expected: `403 Forbidden`.
 

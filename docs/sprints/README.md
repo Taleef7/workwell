@@ -4,7 +4,7 @@
 
 Generated: 2026-05-14 from the full expert audit of the live application, codebase, v0 prototype screenshots, vision document, and competitive landscape research.
 
-Current rollout status (2026-05-22): Sprint 0 through Sprint 7 are implemented; Sprint 7 issues #47-#51 are closed and merged to `main`.
+Current rollout status (2026-06-08): Sprint 0 through Sprint 7 are implemented and merged to `main` (Sprint 7 issues #47–#51 closed). Post-Sprint-7 follow-up on `main` includes Sprint 8 scoped-run parity (SITE/EMPLOYEE manual runs + same-scope reruns, 2026-06-03), an 8-way CI test-sharding speedup, and the MIE Container Manager v1 API deploy migration. This index is now historical reference — there is no active sprint queue.
 
 ---
 

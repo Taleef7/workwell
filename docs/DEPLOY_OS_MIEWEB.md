@@ -1,5 +1,13 @@
 # Deploying to MIE Open Source Proxmox
 
+> **Historical / superseded (2026-06-08).** This is the *initial* additive OS-MIEWeb rollout
+> playbook, written when the Vercel + Fly.io stack was still live and the MIE containers used the
+> earlier `workwell` / `workwell-api` naming. The deployment has since consolidated onto the single
+> **TWH** stack (`twh.os.mieweb.org` / `twh-api.os.mieweb.org`, workflow `deploy-twh-mieweb.yml`),
+> and the Vercel + Fly.io stack is **decommissioned** — so the Vercel/Fly fallback in the Rollback
+> section below no longer applies. See `docs/DEPLOY.md` for the current deployment reference.
+> Retained for historical context only.
+
 This runbook covers the additive OS MIEWeb deployment path for WorkWell Measure Studio. It does not replace the current Vercel frontend or Fly.io backend; those stay live during rollout and rollback.
 
 ## Target Architecture
