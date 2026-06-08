@@ -25,13 +25,17 @@ TOKEN=$(curl -fsS -X POST https://twh-api.os.mieweb.org/api/auth/login \
 curl -fsS https://twh-api.os.mieweb.org/api/measures \
   -H "Authorization: Bearer $TOKEN" | jq -r '.[] | "\(.name): \(.id)"'
 
-# 3) Latest run ID for a measure (paste a measure ID from step 2)
-MEASURE_ID=<audiogram-measure-id>
-curl -fsS "https://twh-api.os.mieweb.org/api/runs?measureId=$MEASURE_ID&limit=1" \
-  -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id'
+# 3) Latest Audiogram-scoped run ID. /api/runs has no measureId filter — it only
+#    supports status/scopeType/triggerType/site/from/to/limit — so post-filter the
+#    returned JSON by measure name. If no measure-scoped Audiogram run exists, drop
+#    the map(...) and take .[0].id: the latest ALL_PROGRAMS run also covers Audiogram.
+MEASURE_ID=<audiogram-measure-id>   # from step 2; reused by the case filter below
+curl -fsS "https://twh-api.os.mieweb.org/api/runs?limit=50" \
+  -H "Authorization: Bearer $TOKEN" | jq -r 'map(select(.measureName | test("Audiogram"))) | .[0].id'
 
-# 4) An open Audiogram case ID (for MCP explain_outcome)
-curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureName=Audiogram" \
+# 4) An open Audiogram case ID (for MCP explain_outcome). /api/cases filters by
+#    measureId (the logical measure UUID), not measureName — reuse $MEASURE_ID.
+curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" \
   -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id'
 ```
 
@@ -44,8 +48,8 @@ reseeds, the case UUID does not.
 ```bash
 curl -fsS https://twh-api.os.mieweb.org/actuator/health
 curl -fsS https://twh-api.os.mieweb.org/api/measures -H "Authorization: Bearer $TOKEN"
-curl -fsS "https://twh-api.os.mieweb.org/api/runs?measureId=$MEASURE_ID&limit=1" -H "Authorization: Bearer $TOKEN"
-curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureName=Audiogram" -H "Authorization: Bearer $TOKEN"
+curl -fsS "https://twh-api.os.mieweb.org/api/runs?limit=50" -H "Authorization: Bearer $TOKEN" | jq 'map(select(.measureName | test("Audiogram")))'
+curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" -H "Authorization: Bearer $TOKEN"
 ```
 
 Expected:
