@@ -10,14 +10,17 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Wellness Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:wellness-enrollment' and x.code = 'wellness-enrolled'))
 
 define "Has Medical Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:wellness-exemption' and x.code = 'wellness-exempt'))
 
 define "Most Recent BMI Screening Date":
   Last(
     [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:bmi-screening' and C.code = 'bmi-screen')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 

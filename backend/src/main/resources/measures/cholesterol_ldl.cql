@@ -10,14 +10,17 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Cholesterol Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:cholesterol-program' and x.code = 'cholesterol-enrolled'))
 
 define "Has Medical Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:cholesterol-exemption' and x.code = 'cholesterol-exempt'))
 
 define "Most Recent LDL Screening Date":
   Last(
     [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:ldl-labs' and C.code = 'ldl-lab')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 

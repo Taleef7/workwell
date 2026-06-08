@@ -11,14 +11,17 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Hearing Conservation Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:hearing-enrollment' and x.code = 'hearing-enrollment'))
 
 define "Has Active Waiver":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:audiogram-waiver' and x.code = 'audiogram-waiver'))
 
 define "Most Recent Audiogram Date":
   Last(
     [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:audiogram-procedures' and C.code = 'audiogram-procedure')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 

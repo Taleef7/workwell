@@ -10,18 +10,22 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "Clinical Facing Employee":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:clinical-roles' and x.code = 'clinical-role'))
 
 define "Has Valid Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:flu-exemption' and x.code = 'flu-exemption'))
 
 define "Flu Vaccine This Season":
   exists([Immunization] I
-    where (I.occurrence as FHIR.dateTime) during "Measurement Period")
+    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:flu-vaccines' and C.code = 'flu-vaccine')
+      and (I.occurrence as FHIR.dateTime) during "Measurement Period")
 
 define "Most Recent Flu Vaccine Date":
   Last(
     [Immunization] I
+      where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:flu-vaccines' and C.code = 'flu-vaccine')
       sort by (occurrence as FHIR.dateTime)
   ).occurrence as FHIR.dateTime
 
