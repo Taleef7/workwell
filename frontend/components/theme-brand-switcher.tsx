@@ -17,14 +17,16 @@ export function ThemeBrandSwitcher({ showBrand = true }: { showBrand?: boolean }
   return (
     <div className="flex items-center gap-2">
       {showBrand && (
-        <Select
-          aria-label="Brand theme"
-          value={brand}
-          onValueChange={(value) => setBrand(value as BrandId)}
-          options={brands.map((b) => ({ value: b.value, label: b.label }))}
-          size="sm"
-          className="w-40"
-        />
+        <div className="hidden sm:block">
+          <Select
+            aria-label="Brand theme"
+            value={brand}
+            onValueChange={(value) => setBrand(value as BrandId)}
+            options={brands.map((b) => ({ value: b.value, label: b.label }))}
+            size="sm"
+            className="w-40"
+          />
+        </div>
       )}
       <button
         type="button"
