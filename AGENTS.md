@@ -4,39 +4,39 @@ Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) work
 
 ## What this project is
 - Single-developer Spring Boot + Next.js monorepo
-- Goal: implement the gaps and improvements identified in `docs/sprints/` to showcase and overdeliver on the project's original vision
-- Build phase: sprint-based feature implementation — see `docs/sprints/README.md` for the ordered work queue
+- Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
+- Phase (as of 2026-06-08): all planned sprints (0–7) are merged to `main`; active work is post-merge closeout and polish. `docs/sprints/` is historical context now, not an active queue.
 
 ## Read before any task
-1. `docs/sprints/README.md` — sprint index and critical path. This is your active work queue.
-2. The specific sprint file for the issue you're working on (e.g., `docs/sprints/SPRINT_00_critical_demo_fixes.md`)
-3. `docs/JOURNAL.md` — latest state of the project
-4. `README.md` — public project overview and API surface
+1. `docs/JOURNAL.md` — latest state of the project (newest entry on top). This is the current source of truth.
+2. `CLAUDE.md` — current focus, hard rules, and build/verify commands
+3. `README.md` — public project overview and API surface
+4. `docs/sprints/README.md` — historical sprint index (all sprints merged; reference only)
 
 `docs/archive/SPIKE_PLAN.md` and `docs/archive/PROJECT_PLAN_v1.md` are historical only — do not act on them.
 
-## Sprint execution protocol
-- Work **one sprint at a time**, in the order defined in `docs/sprints/README.md`
-- Within a sprint, work **one issue at a time** from top to bottom
-- Every issue has an **Acceptance Criteria** checklist — every box must pass before the issue is done
-- Create a feature branch per issue: `fix/sprint-0-<slug>` or `feat/sprint-1-<slug>`
-- Open a PR for review after each issue — do not batch multiple issues into one PR unless they are tightly coupled (e.g., a migration + the service that uses it)
-- **Stop and ask** before starting the next sprint — Taleef reviews before proceeding
+## Feature work protocol
+- Planned sprint work (0–7) is complete; new work is post-merge polish or follow-up features
+- Work **one task at a time**; keep changes small and focused
+- Where a sprint file defined acceptance criteria, every box must still pass before that work is considered done
+- Create a feature branch per task: `fix/<slug>` or `feat/<slug>`
+- Open a PR for review per task — do not batch unrelated changes; tightly coupled changes (e.g., a migration + the service that uses it) may share a PR
+- **Stop and ask** before starting a new workstream — Taleef reviews before proceeding
 - Update `docs/JOURNAL.md` with a dated entry for everything that ships
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
 - CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (see CQF_FHIR_CR_REFERENCE.md)
-- Frontend: Next.js 14+ App Router, TypeScript, Tailwind, shadcn/ui, Monaco
-- AI: Spring AI (Anthropic), MCP via `io.modelcontextprotocol/java-sdk`
-- Infra: Docker Compose local; Fly.io + Vercel + Neon prod; GitHub Actions; pnpm
+- Frontend: Next.js 16 App Router + React 19, TypeScript, Tailwind, shadcn/ui, Monaco
+- AI: Spring AI (OpenAI starter, `spring-ai-openai-spring-boot-starter`), MCP via `io.modelcontextprotocol/java-sdk`
+- Infra: Docker Compose local; MIE Create-a-Container + Neon prod (Fly.io + Vercel preview decommissioned); GitHub Actions; pnpm
 
 ## Hard rules
 - Avoid new dependencies unless explicitly approved — if a sprint file calls for a dependency, it is pre-approved; anything else requires asking first
 - One Spring Boot app, modular packages — no microservices
 - Spring Application Events + DB audit log — no Kafka or external streaming
 - Auth: JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and specified in Sprint 4. User accounts remain hardcoded — no SSO, no real user directory.
-- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the mandatory default on the demo stack. Do not set `SENDGRID_API_KEY` in any demo environment config.
+- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the mandatory default on the demo stack. Do not set `WORKWELL_EMAIL_SENDGRID_API_KEY` in any demo environment config.
 - AI never decides compliance (docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
 - Every state change writes `audit_event` — no exceptions
 - No silent scope changes — if something in a sprint file doesn't match the codebase, stop and report before proceeding

@@ -4,11 +4,15 @@
 **Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
 **Cost target:** keep the live stack under about $25/month.
 
+> The MIE TWH stack below is the **sole live deployment**. The earlier Vercel + Fly.io
+> public-preview stack is **decommissioned** — its setup is retained only as
+> [Appendix A](#appendix-a--decommissioned-vercel--flyio-stack-historical-reference) for historical reference.
+
 ---
 
-## MIE Create-a-Container Deployment (Primary Demo Stack)
+## MIE Create-a-Container Deployment (sole live stack)
 
-The primary demo deployment runs on MIE's internal container platform (`os.mieweb.org`).
+The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 **One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
 
 | Service | Hostname | Image |
@@ -21,7 +25,12 @@ The primary demo deployment runs on MIE's internal container platform (`os.miewe
 Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
 1. Builds the backend image tagged with `latest` + `sha-<SHA>`
 2. Builds the frontend image with TWH branding baked in via build-args
-3. Deploys both containers to MIE via `deploy-mieweb-container.sh`
+3. Deploys both containers to MIE via `.github/scripts/deploy-mieweb-container.sh`
+
+The deploy script talks to the MIE Container Manager **v1 API** (`<manager-origin>/api/v1`):
+responses are wrapped in a `{"data": ...}` envelope, the create body uses `template` with
+`services` as an array of flat objects, and job polling reads `.data.status` (success value
+`"success"`). See the 2026-06-03 JOURNAL entries for the v1 migration details (PRs #55, #56).
 
 ### Required GitHub Secrets for MIE deploy
 
@@ -33,6 +42,26 @@ Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
 | `OPENAI_API_KEY` | AI services (Draft Spec, Explain Why Flagged) |
 | `WORKWELL_AUTH_JWT_SECRET_TWH` | JWT signing secret for TWH instance |
 
+The deploy workflow maps these `*_TWH` GitHub secrets onto the backend container's runtime
+environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
+`WORKWELL_AUTH_JWT_SECRET_TWH` → `WORKWELL_AUTH_JWT_SECRET`) used in the
+[environment variables reference](#environment-variables-reference) below.
+
+### Backend runtime configuration (set by the workflow / container)
+
+- `WORKWELL_INSTANCE=twh` — selects TWH seeding (see below)
+- `SPRING_PROFILES_ACTIVE=prod`
+- `WORKWELL_AUTH_ENABLED=true`, `WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>`
+- `WORKWELL_AUTH_COOKIE_SAME_SITE=None`, `WORKWELL_AUTH_COOKIE_SECURE=true`
+- `WORKWELL_EMAIL_PROVIDER=simulated` (must stay `simulated` on the demo stack)
+
+> **Refresh-cookie config:** the refresh-token cookie is set `SameSite=None; Secure`, and
+> production startup **fails fast** if `WORKWELL_AUTH_COOKIE_SAME_SITE` is not `None` or
+> `WORKWELL_AUTH_COOKIE_SECURE` is not `true`. With the frontend (`twh.os.mieweb.org`) and
+> API (`twh-api.os.mieweb.org`) on split origins, this is what lets the browser send the
+> cookie on the `POST /api/auth/refresh` fetch — otherwise silent token refresh fails and
+> users are logged out on every reload.
+
 ### Instance seeding
 
 The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
@@ -40,116 +69,39 @@ The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
 - 4 HEDIS wellness catalog measures (Cholesterol, BMI, Diabetes HbA1c, Hypertension)
 - All 49 CMS eCQM catalog entries (Draft, awaiting CQL authoring)
 
+Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
+
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
 
 ---
 
-## Legacy/Public Preview Stack
-
-| Layer | Service | Tier | Cost |
-|-------|---------|------|------|
-| Frontend | Vercel | Hobby | $0 |
-| Backend | Fly.io | shared-cpu-1x, 512MB | ~$2/mo |
-| Postgres | Neon | Free | $0 (3GB cap) |
-| AI | OpenAI API | direct, budget-capped | variable |
-| Domain | Vercel subdomain | n/a | $0 |
-
-Fly 256MB free OOMs Spring Boot. Don't try.
-
-Fallback if Fly cost is a problem: Render free tier (cold-start tradeoff, ~30s first hit per inactive period).
-
-## Prerequisites
-
-- GitHub account, repo `workwell-measure-studio`
-- Fly CLI: `iwr https://fly.io/install.ps1 -useb | iex` (Windows) or `curl -L https://fly.io/install.sh | sh`
-- Vercel CLI: `pnpm i -g vercel`
-- Neon account + project created
-- OpenAI API key with a hard monthly budget cap set in console billing
-
-## One-time setup
-
-### Neon
-
-1. Create project `workwell-measure-studio`, region us-east, **Postgres 16**
-2. Copy **pooled** connection string (for app)
-3. Copy **direct** connection string (for Flyway migrations)
-4. Save as repo secrets: `DATABASE_URL`, `DATABASE_URL_DIRECT`
-
-Do not use `neonctl projects create` unless it supports `pg_version=16`; the current CLI defaults to Postgres 17 and is not compliant with the locked stack.
-
-### Fly.io
-
-```bash
-cd backend
-fly launch --no-deploy
-fly secrets set DATABASE_URL=<neon-pooled>
-fly secrets set DATABASE_URL_DIRECT=<neon-direct>
-fly secrets set OPENAI_API_KEY=<key>
-fly secrets set SPRING_PROFILES_ACTIVE=prod
-fly secrets set WORKWELL_AUTH_ENABLED=true
-fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
-fly secrets set WORKWELL_AUTH_COOKIE_SAME_SITE=None
-fly secrets set WORKWELL_AUTH_COOKIE_SECURE=true
-```
-
-> The frontend (Vercel) and backend (Fly) are different registrable domains, so
-> every browser→API call is **cross-site**. The refresh-token cookie must be
-> `SameSite=None; Secure` or the browser never sends it on the cross-site
-> `POST /api/auth/refresh` fetch — silent token refresh fails and users are
-> logged out on every page reload. Production startup now **fails fast** if
-> `WORKWELL_AUTH_COOKIE_SAME_SITE` is not `None` or `WORKWELL_AUTH_COOKIE_SECURE`
-> is not `true`.
-
-Edit `fly.toml`: `memory = "512mb"`, region = closest to you (e.g., `ord`, `iad`), and keep `min_machines_running = 1` if you need a stable remote MCP connection.
-
-Stop after wiring the secrets and project settings. Deploy only after the stack is provisioned and verified.
-
-First deploy verification:
-
-```bash
-fly deploy
-curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
-```
-
-### Vercel
-
-1. Import GitHub repo, root directory `frontend/`
-2. Framework: Next.js (auto-detected)
-3. Env vars:
-   - `NEXT_PUBLIC_API_BASE_URL` = Fly app URL (e.g., `https://workwell-measure-studio-api.fly.dev`)
-   - `NEXT_PUBLIC_APP_NAME` = `WorkWell Measure Studio`
-   - `NEXT_PUBLIC_DEMO_MODE` = `true` only for local/demo builds that should prefill the login form
-4. Stop after project connection and env configuration. First deploy from `main` happens after the stack is provisioned and verified.
-
-### OpenAI
-
-1. Get API key from platform.openai.com
-2. Set $20/mo hard usage limit in billing
-3. Save as Fly secret only (never expose to frontend)
-
-## Env vars reference
+## Environment variables reference
 
 | Var | Where | Purpose |
 |-----|-------|---------|
-| `DATABASE_URL` | Fly | Pooled Neon connection for app runtime |
-| `DATABASE_URL_DIRECT` | Fly | Direct Neon connection for Flyway migrations |
-| `OPENAI_API_KEY` | Fly | AI calls (drafting and explanation surfaces) |
-| `SPRING_PROFILES_ACTIVE` | Fly | Always `prod` in deployed env |
-| `WORKWELL_AUTH_ENABLED` | Fly | Enable stub auth; set `true` in deployed env |
-| `WORKWELL_AUTH_JWT_SECRET` | Fly | Required when auth is enabled; use a strong secret |
-| `WORKWELL_AUTH_COOKIE_SAME_SITE` | Fly | Refresh-cookie SameSite. **Must be `None` in production** (cross-site Vercel↔Fly). Default `Lax` for local same-origin dev. |
-| `WORKWELL_AUTH_COOKIE_SECURE` | Fly | Refresh-cookie Secure flag. **Must be `true` in production** (required for SameSite=None). Default `false` for local HTTP dev. |
-| `NEXT_PUBLIC_API_BASE_URL` | Vercel | Backend URL for fetch calls |
-| `NEXT_PUBLIC_APP_NAME` | Vercel | App display name |
-| `NEXT_PUBLIC_DEMO_MODE` | Vercel | Prefill login form for local/demo builds only |
-| `WORKWELL_EMAIL_PROVIDER` | Fly | Outreach email provider. **Stays `simulated` on the demo stack (default + CLAUDE.md hard rule).** |
-| `WORKWELL_EMAIL_SENDGRID_API_KEY` | Fly | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
-| `WORKWELL_EMAIL_FROM_ADDRESS` | Fly | From address for outreach (default `noreply@workwell-demo.dev`). |
-| `WORKWELL_EMAIL_FROM_NAME` | Fly | From display name (default `WorkWell Measure Studio`). |
+| `DATABASE_URL` | Backend | Pooled Neon connection for app runtime |
+| `DATABASE_URL_DIRECT` | Backend | Direct Neon connection for Flyway migrations |
+| `OPENAI_API_KEY` | Backend | AI calls (drafting and explanation surfaces) |
+| `SPRING_PROFILES_ACTIVE` | Backend | Always `prod` in deployed env |
+| `WORKWELL_INSTANCE` | Backend | `twh` selects the TWH seed set |
+| `WORKWELL_AUTH_ENABLED` | Backend | Enable auth; set `true` in deployed env |
+| `WORKWELL_AUTH_JWT_SECRET` | Backend | Required when auth is enabled; use a strong secret |
+| `WORKWELL_AUTH_COOKIE_SAME_SITE` | Backend | Refresh-cookie SameSite. **Must be `None` in production** (split frontend/API origins). Default `Lax` for local same-origin dev. |
+| `WORKWELL_AUTH_COOKIE_SECURE` | Backend | Refresh-cookie Secure flag. **Must be `true` in production** (required for SameSite=None). Default `false` for local HTTP dev. |
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend | Backend URL for fetch calls (origin-only, no `/api` suffix, no trailing whitespace) |
+| `NEXT_PUBLIC_APP_NAME` | Frontend | App display name |
+| `NEXT_PUBLIC_DEMO_MODE` | Frontend | Prefill login form for local/demo builds only; `true` **fails the production frontend build** |
+| `WORKWELL_EMAIL_PROVIDER` | Backend | Outreach email provider. **Stays `simulated` on the demo stack (default + CLAUDE.md hard rule).** |
+| `WORKWELL_EMAIL_SENDGRID_API_KEY` | Backend | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
+| `WORKWELL_EMAIL_FROM_ADDRESS` | Backend | From address for outreach (default `noreply@workwell-demo.dev`). |
+| `WORKWELL_EMAIL_FROM_NAME` | Backend | From display name (default `WorkWell Measure Studio`). |
 
-`.env.example` at repo root mirrors this list (without values). At present, env vars must be verified manually before deploy; the existing CI workflow does not validate deployment secrets or Vercel env configuration.
+`Where = Backend` vars are container environment on the MIE backend container (mapped from the
+`*_TWH` GitHub secrets where applicable); `Where = Frontend` vars are build-args/env baked into
+the MIE frontend image. `.env.example` at repo root mirrors this list (without values). Env vars
+must be verified manually before deploy; the CI workflow does not validate deployment secrets.
 
 ### Email delivery (Sprint 6)
 
@@ -164,6 +116,21 @@ Do not set `WORKWELL_EMAIL_SENDGRID_API_KEY` on the demo stack.
 The non-prod `POST /api/admin/demo-reset` endpoint (admin-only, `@Profile("!prod")`) truncates
 volatile demo tables including `audit_events`; it returns 403 under the `prod` profile.
 
+## Neon (Postgres)
+
+1. Project `workwell-twh`, region us-east, **Postgres 16**
+2. **Pooled** connection string → `DATABASE_URL_TWH` GitHub secret (app runtime)
+3. **Direct** connection string → used for Flyway migrations (`DATABASE_URL_DIRECT`)
+
+Do not use `neonctl projects create` unless it supports `pg_version=16`; the CLI defaults to
+Postgres 17 and is not compliant with the locked stack.
+
+## OpenAI
+
+1. Get API key from platform.openai.com
+2. Set a hard monthly usage limit in billing
+3. Store as the `OPENAI_API_KEY` GitHub secret only (never expose to the frontend)
+
 ## CI/CD
 
 **Active deploy workflow:** `.github/workflows/deploy-twh-mieweb.yml`
@@ -171,15 +138,15 @@ volatile demo tables including `audit_events`; it returns 403 under the `prod` p
 - Builds backend + frontend Docker images, pushes to GHCR, deploys both containers to MIE
 
 **CI workflow:** `.github/workflows/ci.yml`
-- Runs backend build + tests
+- Runs backend build + tests (8-way test sharding; ~11m30s wall-clock)
 - Runs frontend lint
-- Does not deploy (deploy is separate workflow above)
+- Does not deploy (deploy is the separate workflow above)
 
 ## Health checks
 
-- Backend: `GET /actuator/health` → `{"status":"UP"}`
-- Frontend: `GET /` → 200 OK
-- DB: from Fly machine, `fly ssh console` → `psql $DATABASE_URL_DIRECT -c "SELECT 1"`
+- Backend: `GET https://twh-api.os.mieweb.org/actuator/health` → `{"status":"UP"}`
+- Frontend: `GET https://twh.os.mieweb.org/` → 200 OK
+- DB: `psql "$DATABASE_URL_DIRECT" -c "SELECT 1"` from any host with the Neon direct string
 
 Post-deploy smoke checklist (MVP complete surface):
 - `GET /actuator/health` -> `200`
@@ -194,53 +161,32 @@ Post-deploy smoke checklist (MVP complete surface):
 - `POST /api/cases/{id}/actions/outreach/delivery?deliveryStatus=SENT` -> `200`
 - `GET /api/cases/{id}` confirms `latestOutreachDeliveryStatus=SENT`
 
-Add Fly HTTP check every 30s on `/actuator/health`. Free, alerts on 3 failures.
-
 ## Rollback
 
-### Fly
-```bash
-fly releases list
-fly releases rollback <version>
-```
-Or redeploy a previous SHA:
-```bash
-git checkout <sha>
-fly deploy
-```
-
-### Vercel
-Dashboard → Deployments → previous → Promote to Production.
+### MIE containers
+- Revert the offending commit on `main` (re-triggers `deploy-twh-mieweb.yml`), or
+- Re-run the deploy workflow via `workflow_dispatch` at an earlier SHA with `replace_existing: true`.
+  Each backend image is also tagged `sha-<SHA>` in GHCR for pinning a known-good build.
 
 ### Neon
-Each schema migration creates a branch. Promote previous branch to main from Neon dashboard.
+Each schema migration creates a branch. Promote the previous branch to main from the Neon dashboard.
 
 ## Cost monitoring
 
 Daily check while the stack is live:
 
-- **Fly dashboard:** Usage tab, projected monthly
 - **Neon dashboard:** storage + compute consumed
 - **OpenAI usage dashboard:** today's spend
+- **MIE platform:** internal container hosting (no per-month cloud bill like the legacy Fly tier)
 
 If any approaches limit, fix that day. Don't wait.
 
 ## Troubleshooting
 
-**Fly deploy fails with OOM**
-- Verify `memory = "512mb"` in `fly.toml`
-- Reduce JVM heap: `JAVA_OPTS=-Xmx384m -Xss256k`
-- Check `fly logs` for OOMKilled
-
 **Neon connection limit hit**
-- Use pooled connection string (`DATABASE_URL`), not direct, in app
+- Use the pooled connection string (`DATABASE_URL`), not direct, in the app
 - HikariCP `maximum-pool-size: 10` in `application.yml`
-- Direct only for Flyway
-
-**Vercel build fails**
-- Check Node version: 20+
-- Verify `NEXT_PUBLIC_API_BASE_URL` is set in Vercel env
-- Clear build cache if backend types changed: Vercel dashboard → Settings → Clear Cache
+- Direct connection only for Flyway
 
 **OpenAI 429**
 - One retry with exponential backoff (1s, 2s)
@@ -250,33 +196,89 @@ If any approaches limit, fix that day. Don't wait.
 
 **Audit log missing entries after deploy**
 - Check Spring profile is `prod`, not `dev`
-- Verify migration ran: `fly ssh console`, then `psql $DATABASE_URL_DIRECT -c "\dt"`
-- Should see `audit_event` table
+- Verify migrations ran: `psql "$DATABASE_URL_DIRECT" -c "\dt"` — should list `audit_events`
 
 **Case detail or outreach delivery endpoint returns 500 after deploy**
 - Check for SQL operator compatibility in prepared statements.
-- PostgreSQL JSON existence should use `jsonb_exists(payload_json, 'key')` in JDBC query text rather than raw `?` operator when bind parameters are present.
+- PostgreSQL JSON existence should use `jsonb_exists(payload_json, 'key')` in JDBC query text rather than the raw `?` operator when bind parameters are present.
 
 **MCP server can't be reached**
-- MCP runs as separate process or endpoint (`/mcp`)
-- Check Fly machine has port exposed if using stdio over HTTP
-- Verify Claude Desktop config points to the deployed URL and sends an `Authorization` header with a valid WorkWell JWT
-- If the machine is scaling to zero, keep `min_machines_running = 1` so the SSE transport stays available for remote clients
+- MCP is exposed at `/sse` + `/mcp/**` on the backend
+- Verify the Claude Desktop config points to the deployed URL and sends an `Authorization` header with a valid WorkWell JWT
+- Role gates apply: `/sse` and `/mcp/**` return 403 unauthenticated
 
-## Domain (optional)
+**Backend deploy job fails at the MIE manager API**
+- Confirm the API base resolves to `<manager-origin>/api/v1` (the origin serves the SPA; `/api` serves Swagger)
+- Responses are `{"data": ...}` enveloped; the create body uses `template` + `services[]`; job polling reads `.data.status` (`"success"`)
 
-Vercel subdomain `workwell-measure-studio.vercel.app` is fine for the demo. If buying a real domain later:
-1. Buy on any registrar
-2. Vercel: Settings → Domains → add, follow DNS instructions
-3. Fly: `fly certs add api.<your-domain>`, follow DNS instructions
-4. Update `NEXT_PUBLIC_API_BASE_URL` to new backend domain
+---
 
-## Initial deployment notes
+## Appendix A — Decommissioned Vercel + Fly.io stack (historical reference)
 
-- Confirm the active Vercel project is `workwell-measure-studio`.
-- Confirm Vercel Root Directory is `frontend`.
-- For the S0 `/runs` probe, validate preflight before debugging POST:
-  - `OPTIONS https://workwell-measure-studio-api.fly.dev/api/eval`
-  - Expect `200` plus `Access-Control-Allow-Origin`.
-- If probe UI shows `404` while direct POST works, check CORS/security config and redeploy Fly backend.
-- Keep `NEXT_PUBLIC_API_BASE_URL` as origin-only (for example `https://workwell-measure-studio-api.fly.dev`), with no `/api` suffix and no trailing whitespace.
+> **Decommissioned — do not use.** None of the resources below are deployed any more.
+> MIE TWH (above) is the sole live stack. This section is retained only so the earlier
+> public-preview setup remains documented. Environment variable *names* are unchanged;
+> on the current stack they are set on the MIE containers, not as Fly secrets or Vercel env.
+
+Legacy stack layout:
+
+| Layer | Service | Tier | Cost |
+|-------|---------|------|------|
+| Frontend | Vercel | Hobby | $0 |
+| Backend | Fly.io | shared-cpu-1x, 512MB | ~$2/mo |
+| Postgres | Neon | Free | $0 (3GB cap) |
+| AI | OpenAI API | direct, budget-capped | variable |
+| Domain | Vercel subdomain | n/a | $0 |
+
+Notes from that era: Fly 256MB free OOMs Spring Boot (use 512MB). Fallback if Fly cost was a
+problem: Render free tier (cold-start tradeoff, ~30s first hit per inactive period).
+
+### Legacy prerequisites
+- Fly CLI: `iwr https://fly.io/install.ps1 -useb | iex` (Windows) or `curl -L https://fly.io/install.sh | sh`
+- Vercel CLI: `pnpm i -g vercel`
+
+### Legacy Fly.io setup
+
+```bash
+cd backend
+fly launch --no-deploy
+fly secrets set DATABASE_URL=<neon-pooled>
+fly secrets set DATABASE_URL_DIRECT=<neon-direct>
+fly secrets set OPENAI_API_KEY=<key>
+fly secrets set SPRING_PROFILES_ACTIVE=prod
+fly secrets set WORKWELL_AUTH_ENABLED=true
+fly secrets set WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>
+fly secrets set WORKWELL_AUTH_COOKIE_SAME_SITE=None
+fly secrets set WORKWELL_AUTH_COOKIE_SECURE=true
+```
+
+> On the legacy stack the frontend (Vercel) and backend (Fly) were different registrable
+> domains, so every browser→API call was **cross-site** and the refresh-token cookie had to be
+> `SameSite=None; Secure`. (The same production fail-fast check applies on MIE today.)
+
+`fly.toml`: `memory = "512mb"`, region closest to you (e.g., `ord`, `iad`), and
+`min_machines_running = 1` for a stable remote MCP connection.
+
+```bash
+fly deploy
+curl https://<app>.fly.dev/actuator/health  # expect {"status":"UP"}
+```
+
+### Legacy Vercel setup
+
+1. Import GitHub repo, root directory `frontend/`
+2. Framework: Next.js (auto-detected)
+3. Env vars: `NEXT_PUBLIC_API_BASE_URL` = Fly app URL; `NEXT_PUBLIC_APP_NAME`; `NEXT_PUBLIC_DEMO_MODE` (local/demo only)
+
+### Legacy rollback
+- **Fly:** `fly releases list` then `fly releases rollback <version>`, or `git checkout <sha> && fly deploy`
+- **Vercel:** Dashboard → Deployments → previous → Promote to Production
+
+### Legacy troubleshooting
+- **Fly OOM:** verify `memory = "512mb"`; reduce heap `JAVA_OPTS=-Xmx384m -Xss256k`; check `fly logs` for OOMKilled
+- **Vercel build fails:** Node 20+; verify `NEXT_PUBLIC_API_BASE_URL`; clear build cache if backend types changed
+- **DB from Fly machine:** `fly ssh console` then `psql $DATABASE_URL_DIRECT -c "SELECT 1"`
+
+### Legacy domain / probe notes
+- Vercel subdomain `workwell-measure-studio.vercel.app` was the demo frontend; Fly `workwell-measure-studio-api.fly.dev` the backend
+- S0 `/runs` probe: `OPTIONS https://workwell-measure-studio-api.fly.dev/api/eval` expecting `200` + `Access-Control-Allow-Origin`

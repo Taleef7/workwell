@@ -1,37 +1,51 @@
-# Last verified: 2026-05-07
+# Last updated: 2026-06-08 (capture-based; originally verified 2026-05-07 on the legacy stack)
 
 # Demo Runbook (Production)
 
+> **Stack note:** URLs point to the live MIE TWH stack. Run/case IDs are environment-specific and
+> change every run, so this runbook captures them at demo time via the API (see "Capture current
+> IDs") rather than hardcoding them.
+
 ## Production Surfaces
-- Frontend: `https://workwell-measure-studio.vercel.app`
-- Backend API: `https://workwell-measure-studio-api.fly.dev`
+- Frontend: `https://twh.os.mieweb.org`
+- Backend API: `https://twh-api.os.mieweb.org`
 
-## Pinned Production IDs
+## Capture current IDs (run at demo time)
 
-### Measures
-- Audiogram: `4ae5d865-3d64-4a17-905d-f1b315a037e2`
-- TB Surveillance: `8c9fda6f-b9bb-413a-be4d-8ce4faa72999`
-- HAZWOPER Surveillance: `eaa81302-b6f6-4aba-a143-bb72941f9c00`
-- Flu Vaccine: `9db33281-0933-4dd6-86e9-e4c6df2b9a94`
+Run and case IDs are environment-specific and change on every run, so capture them live rather
+than relying on pinned values. All `/api/**` calls require a bearer token.
 
-### Latest run IDs (per measure query, `limit=1`)
-- Audiogram latest run: `3866d69a-2519-4051-bad0-98da9ea696bf`
-- TB Surveillance latest run: `fba26713-92ff-49e3-84d0-fa8d137881f7`
-- HAZWOPER Surveillance latest run: `3866d69a-2519-4051-bad0-98da9ea696bf`
-- Flu Vaccine latest run: `3866d69a-2519-4051-bad0-98da9ea696bf`
+```bash
+# 1) Mint an access token (admin or case-manager account)
+TOKEN=$(curl -fsS -X POST https://twh-api.os.mieweb.org/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@workwell.dev","password":"Workwell123!"}' | jq -r .token)
 
-### Pinned Audiogram open case for MCP `explain_outcome`
-- Case ID: `32fee6f4-6e69-4675-b44e-5f6392de7dbd`
-- Employee: `emp-006` (Omar Siddiq)
-- Outcome status: `OVERDUE`
+# 2) Measure IDs (names are stable across reseeds; UUIDs differ per instance)
+curl -fsS https://twh-api.os.mieweb.org/api/measures \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.[] | "\(.name): \(.id)"'
+
+# 3) Latest run ID for a measure (paste a measure ID from step 2)
+MEASURE_ID=<audiogram-measure-id>
+curl -fsS "https://twh-api.os.mieweb.org/api/runs?measureId=$MEASURE_ID&limit=1" \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id'
+
+# 4) An open Audiogram case ID (for MCP explain_outcome)
+curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureName=Audiogram" \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id'
+```
+
+Stable seeded reference: employee `emp-006` (Omar Siddiq) carries an Audiogram `OVERDUE` outcome
+and is a reliable persona for a deterministic `explain_outcome` demo — external IDs survive
+reseeds, the case UUID does not.
 
 ## Pre-flight Smoke Check (curl)
 
 ```bash
-curl -fsS https://workwell-measure-studio-api.fly.dev/actuator/health
-curl -fsS https://workwell-measure-studio-api.fly.dev/api/measures
-curl -fsS "https://workwell-measure-studio-api.fly.dev/api/runs?measureId=4ae5d865-3d64-4a17-905d-f1b315a037e2&limit=1"
-curl -fsS "https://workwell-measure-studio-api.fly.dev/api/cases?status=open&measureName=Audiogram"
+curl -fsS https://twh-api.os.mieweb.org/actuator/health
+curl -fsS https://twh-api.os.mieweb.org/api/measures -H "Authorization: Bearer $TOKEN"
+curl -fsS "https://twh-api.os.mieweb.org/api/runs?measureId=$MEASURE_ID&limit=1" -H "Authorization: Bearer $TOKEN"
+curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureName=Audiogram" -H "Authorization: Bearer $TOKEN"
 ```
 
 Expected:
@@ -42,18 +56,18 @@ Expected:
 
 ## 30-Minute Pre-Demo Checklist
 - Verify backend is up (`/actuator/health` is UP).
-- Verify frontend opens at `https://workwell-measure-studio.vercel.app/programs`.
+- Verify frontend opens at `https://twh.os.mieweb.org/programs`.
 - Verify all 4 measures are Active in `GET /api/measures`.
 - Verify at least one open Audiogram case exists.
-- Verify MCP server is running and can execute:
-  - `list_measures`
-  - `get_run_summary`
-  - `explain_outcome` with case ID `32fee6f4-6e69-4675-b44e-5f6392de7dbd`
+- Capture a current run ID and open Audiogram case ID (see "Capture current IDs").
+- Verify MCP server is running and can execute `list_measures`, `get_run_summary`, `explain_outcome`.
 
 ## Reference MCP Calls for Live Demo
 
+Substitute the IDs captured above:
+
 ```text
 list_measures
-get_run_summary {"runId":"3866d69a-2519-4051-bad0-98da9ea696bf"}
-explain_outcome {"caseId":"32fee6f4-6e69-4675-b44e-5f6392de7dbd"}
+get_run_summary {"runId":"<run-id>"}
+explain_outcome {"caseId":"<open-case-id>"}
 ```

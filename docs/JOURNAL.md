@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-06-08 — Documentation sync: truth-up across the living docs
+
+### What changed
+
+Brought the living docs into agreement with the current codebase and the single MIE TWH
+deployment, removing facts that had drifted since the 2026-05-21 focus snapshot. No code changes.
+
+- **CLAUDE.md / AGENTS.md:** Frontend `Next.js 14+` → `Next.js 16 + React 19`; AI `Spring AI (Anthropic)` → `Spring AI (OpenAI starter, spring-ai-openai-spring-boot-starter)` (matches `application.yml` `gpt-5.4-nano` / `gpt-4o-mini`); infra `Fly.io + Vercel + Neon` → MIE Create-a-Container + Neon (Fly + Vercel preview decommissioned); SendGrid env var corrected to `WORKWELL_EMAIL_SENDGRID_API_KEY`. CLAUDE.md Current Focus re-dated 2026-06-08 (Sprint 7 closed, Sprint 8 scoped-run parity, CI 3.8× PR #57, MIE v1 deploy fix PRs #55/#56, catalog 60/49, run scopes) and gained a Build & verify section. AGENTS.md reframed from "sprint-based build phase" to post-merge polish; "active work queue" pointer updated.
+- **README.md:** Status now notes Sprint 8 parity, CI sharding, and the MIE v1 deploy migration; Production surfaces reduced to the live MIE TWH frontend/backend with an explicit note that the Vercel + Fly public-preview stack is decommissioned.
+- **docs/DEPLOY.md:** Rewritten so MIE Create-a-Container is the sole current deployment; all Fly.io/Vercel provisioning, rollback, and troubleshooting moved into a clearly-labeled decommissioned/historical appendix. Env-var names retained; the `Where` column relabeled Backend/Frontend; added the GitHub-secret → container-env mapping note and the v1 manager-API details.
+- **docs/sprints/README.md:** Rollout-status line updated to 2026-06-08; index marked historical (no active sprint queue).
+- **CHANGELOG.md:** `[Unreleased]` now records Sprint 8 parity, the CI sharding speedup, the MIE v1 deploy fix, and the deployment consolidation.
+- **.env.example:** Fly/Vercel framing replaced with MIE context; the stale `WORKWELL_CORS_ALLOWED_ORIGINS` value (`frontend-seven-eta-24.vercel.app`) corrected to `https://twh.os.mieweb.org`.
+- **Usage guides (DEMO_RUNBOOK, WALKTHROUGH_GUIDE, MCP):** dead `*.vercel.app` / `*.fly.dev` hostnames swapped to `twh.os.mieweb.org` / `twh-api.os.mieweb.org`, with stack-note banners flagging that embedded example IDs predate the MIE instance.
+
+### Ground truth verified
+
+- Measure catalog: 60 total (4 OSHA active CQL, 3 OSHA catalog, 4 HEDIS active CQL, 49 CMS eCQM Draft) — confirmed against `MeasureService` and MEASURES.md/DEPLOY.md.
+- AI provider: OpenAI via `spring-ai-openai-spring-boot-starter` (`build.gradle.kts`), models `gpt-5.4-nano` / `gpt-4o-mini` (`application.yml`).
+- Frontend: Next.js 16.2.4 / React 19.2.4 (`frontend/package.json`).
+- Deployment: only `deploy-twh-mieweb.yml` is active; Fly.io + Vercel preview decommissioned (confirmed with owner).
+
+### Left as historical (intentionally not rewritten)
+
+`docs/archive/**`, `docs/new instructions/**`, `docs/superpowers/**`, the per-sprint `SPRINT_0x_*` specs, the MIE migration-process docs (`DEPLOY_OS_MIEWEB.md`, `ECQM_TWH_DEPLOYMENT_PLAN.md`), QA reports (`LIVE_APP_QA_REPORT.md`), and `docs/POST_MERGE_STATUS.md` (a dated 2026-05-11 snapshot already annotated with later resolutions). Old JOURNAL entries that mention Anthropic/Fly are point-in-time records and were left intact.
+
 ## 2026-06-03 — CI test suite 3.8x faster (test sharding + per-test population-run fix)
 
 ### What changed
