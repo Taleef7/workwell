@@ -10,14 +10,17 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In Diabetes Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:diabetes-program' and x.code = 'diabetes-enrolled'))
 
 define "Has Medical Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:diabetes-exemption' and x.code = 'diabetes-exempt'))
 
 define "Most Recent HbA1c Date":
   Last(
     [Procedure] P
+      where exists(P.code.coding C where C.system = 'urn:workwell:vs:hba1c-labs' and C.code = 'hba1c-lab')
       sort by (performed as FHIR.dateTime)
   ).performed as FHIR.dateTime
 
