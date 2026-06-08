@@ -1,17 +1,14 @@
 # Journal
 
-## 2026-06-09 — Polish pass: ADR-003, workwell.os redirect, CQL code-filter tightening, trend view, code explorer
+## 2026-06-08 — docs(decisions): ADR-003 TWH single-instance consolidation
 
 ### What changed
 
-Post-external-review polish pass based on Doug's harmonization brief. Six independent PRs opened from feature branches; tasks executed in order below.
-
-- **ADR-003 (docs/adr-003-twh-consolidation):** Captured the 2026-05-21 TWH consolidation decision in DECISIONS.md as a numbered ADR. Quoted the JOURNAL rationale; documented that the ecqm seeding path and `*_ECQM` secrets are retained as restore-later capability.
-- *(Further entries added per PR as tasks complete.)*
+- **ADR-003:** Captured the 2026-05-21 TWH single-instance consolidation decision in `docs/DECISIONS.md` as a numbered ADR. Quoted the JOURNAL rationale verbatim; documented that the eCQM seeding path and `*_ECQM` secrets are retained as restore-later capability; noted the `workwell.os` redirect as a follow-up (see `infra/redirect/`).
 
 ### Verification
 
-- No code changes in this entry; docs-only PR.
+- Docs-only PR; no backend or frontend changes.
 
 ---
 
