@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -10,17 +9,29 @@ import {
   ClipboardList,
   FileClock,
   LogOut,
-  Menu,
   Settings,
   Shield,
-  SlidersHorizontal,
-  X,
 } from "lucide-react";
+import {
+  AppHeader,
+  AppHeaderSection,
+  Select,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMobileToggle,
+  SidebarNav,
+  SidebarNavItem,
+  SidebarProvider,
+  SidebarToggle,
+} from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
@@ -36,28 +47,23 @@ const nav = [
   { href: "/admin", label: "Admin", icon: Settings, adminOnly: true },
 ] as const;
 
+const DATE_PRESETS = [
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "90d", label: "Last 90 days" },
+  { value: "all", label: "All time" },
+] as const;
+
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { token, user, logout } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const isAdmin = user?.role === "ROLE_ADMIN";
   const roleLabel = user ? labelFor(ROLE_LABELS, user.role) : null;
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-
-  // Close sidebar on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (sidebarOpen && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
-        setSidebarOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!token) return;
@@ -71,7 +77,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       }
     }
     void loadSites();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [api, token]);
 
   useEffect(() => {
@@ -92,7 +100,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       }
     }
     void loadWorklistGapCount();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [api, siteId, from, to, token]);
 
   const sharedFilterQuery = useMemo(() => {
@@ -103,245 +113,145 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return params.toString();
   }, [siteId, from, to]);
 
+  const siteOptions = useMemo(
+    () => [{ value: "", label: "All Sites" }, ...sites.map((s) => ({ value: s, label: s }))],
+    [sites],
+  );
+
   if (!token) {
-    return <div className="min-h-dvh bg-slate-50" />;
+    return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
   }
 
+  const navItems = nav.filter((item) => !("adminOnly" in item && item.adminOnly && !isAdmin));
+
   return (
-    <div className="min-h-dvh bg-slate-50">
-      {/* ── Mobile sidebar backdrop ──────────────────────────────────── */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm md:hidden"
-          aria-hidden="true"
-        />
-      )}
-
-      {/* ── Sidebar ─────────────────────────────────────────────────── */}
-      <aside
-        ref={sidebarRef}
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-out md:translate-x-0 md:shadow-none ${
-          sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
-        }`}
-      >
-        {/* Sidebar header */}
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-4">
-          <Link
-            href="/programs"
-            className="flex items-center gap-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-[10px] font-bold tracking-[0.2em] text-white">
-              WW
-            </span>
-            <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
-              <span className="text-xs text-slate-500">{APP_SUBTITLE}</span>
-            </span>
-          </Link>
-          <button
-            type="button"
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close navigation"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Nav items */}
-        <nav className="flex-1 overflow-y-auto p-3">
-          <ul className="space-y-0.5">
-            {nav.map((item) => {
-              if ("adminOnly" in item && item.adminOnly && !isAdmin) return null;
-              const active = pathname?.startsWith(item.href);
-              const Icon = item.icon;
-              const hasGap = item.href === "/worklist" && worklistGapCount > 0;
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={sharedFilterQuery ? `${item.href}?${sharedFilterQuery}` : item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                      active
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-                    }`}
-                  >
-                    <Icon className={`h-4 w-4 shrink-0 ${active ? "text-white" : "text-slate-400"}`} />
-                    <span className="flex-1">{item.label}</span>
-                    {hasGap && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${active ? "bg-white/15 text-white" : "bg-rose-100 text-rose-700"}`}>
-                        {worklistGapCount}
-                      </span>
-                    )}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        {/* Sidebar footer: user + logout */}
-        {user && (
-          <div className="shrink-0 border-t border-slate-200 p-3">
-            <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
-                {user.email.charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-slate-900">{user.email}</p>
-                <p className="text-[10px] text-slate-500">{roleLabel}</p>
-              </div>
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                aria-label="Log out"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-      </aside>
-
-      {/* ── Main area (header + content) ────────────────────────────── */}
-      <div className="flex min-h-dvh flex-col md:pl-64">
-        {/* Header */}
-        <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur">
-          {/* Mobile hamburger */}
-          <button
-            type="button"
-            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open navigation"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-
-          {/* Mobile logo */}
-          <Link
-            href="/programs"
-            className="flex items-center gap-2 rounded-lg md:hidden focus:outline-none focus:ring-2 focus:ring-slate-400"
-          >
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[9px] font-bold tracking-[0.18em] text-white">
-              WW
-            </span>
-            <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
-          </Link>
-
-          {/* Search — grows to fill */}
-          <div className="flex-1">
-            <GlobalSearch />
-          </div>
-
-          {/* Filters — hidden on mobile, visible md+ */}
-          <div className="hidden items-center gap-2 md:flex">
-            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5">
-              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <select
-                className="bg-transparent text-xs text-slate-700 outline-none"
-                value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
-                aria-label="Filter by site"
-              >
-                <option value="">All Sites</option>
-                {sites.map((site) => (
-                  <option key={site} value={site}>{site}</option>
-                ))}
-              </select>
-            </div>
-            <select
-              className="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700 outline-none"
-              value={datePreset}
-              onChange={(e) => setDatePreset(e.target.value as "7d" | "30d" | "90d" | "all")}
-              aria-label="Date range"
+    <SidebarProvider>
+      <div className="flex h-dvh overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+        {/* ── Sidebar (handles its own mobile drawer + backdrop) ───────── */}
+        <Sidebar>
+          <SidebarHeader>
+            <button
+              type="button"
+              onClick={() => router.push("/programs")}
+              className="flex items-center gap-2.5 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="all">All time</option>
-            </select>
-          </div>
-        </header>
-
-        {/* Mobile filters bar */}
-        <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100 bg-white px-4 py-2 md:hidden">
-          <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-          <select
-            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 outline-none"
-            value={siteId}
-            onChange={(e) => setSiteId(e.target.value)}
-            aria-label="Filter by site"
-          >
-            <option value="">All Sites</option>
-            {sites.map((site) => (
-              <option key={site} value={site}>{site}</option>
-            ))}
-          </select>
-          <select
-            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 outline-none"
-            value={datePreset}
-            onChange={(e) => setDatePreset(e.target.value as "7d" | "30d" | "90d" | "all")}
-            aria-label="Date range"
-          >
-            <option value="7d">7 days</option>
-            <option value="30d">30 days</option>
-            <option value="90d">90 days</option>
-            <option value="all">All time</option>
-          </select>
-        </div>
-
-        {/* Page content */}
-        <main className="min-w-0 flex-1 p-4 pb-20 md:p-6 md:pb-6">{children}</main>
-
-        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur md:hidden">
-          <div className="grid grid-cols-4 gap-1">
-            <Link
-              href="/programs"
-              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/programs") ? "text-slate-950" : "text-slate-500"}`}
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>Programs</span>
-            </Link>
-            <Link
-              href="/cases"
-              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/cases") ? "text-slate-950" : "text-slate-500"}`}
-            >
-              <Shield className="h-4 w-4" />
-              <span>Cases</span>
-            </Link>
-            <Link
-              href="/runs"
-              className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/runs") ? "text-slate-950" : "text-slate-500"}`}
-            >
-              <Activity className="h-4 w-4" />
-              <span>Runs</span>
-            </Link>
-            {isAdmin ? (
-              <Link
-                href="/admin"
-                className={`flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium ${pathname?.startsWith("/admin") ? "text-slate-950" : "text-slate-500"}`}
-              >
-                <Settings className="h-4 w-4" />
-                <span>Admin</span>
-              </Link>
-            ) : (
-              <span className="flex flex-col items-center justify-center rounded-lg py-1 text-[11px] font-medium text-slate-400">
-                <Settings className="h-4 w-4" />
-                <span>Admin</span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-[10px] font-bold tracking-[0.2em] text-white">
+                WW
               </span>
-            )}
+              <span className="flex flex-col leading-tight">
+                <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{APP_BADGE}</span>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">{APP_SUBTITLE}</span>
+              </span>
+            </button>
+          </SidebarHeader>
+
+          <SidebarContent>
+            <SidebarNav>
+              {navItems.map((item) => {
+                const active = pathname?.startsWith(item.href) ?? false;
+                const Icon = item.icon;
+                const hasGap = item.href === "/worklist" && worklistGapCount > 0;
+                const target = sharedFilterQuery ? `${item.href}?${sharedFilterQuery}` : item.href;
+                return (
+                  <SidebarNavItem
+                    key={item.href}
+                    label={item.label}
+                    icon={<Icon className="h-5 w-5" />}
+                    isActive={active}
+                    badge={hasGap ? worklistGapCount : undefined}
+                    onClick={() => router.push(target)}
+                  />
+                );
+              })}
+            </SidebarNav>
+          </SidebarContent>
+
+          {user && (
+            <SidebarFooter>
+              <div className="flex items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2.5 dark:bg-neutral-800">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[10px] font-bold text-white">
+                  {user.email.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">{user.email}</p>
+                  <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{roleLabel}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                  aria-label="Log out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </SidebarFooter>
+          )}
+        </Sidebar>
+
+        {/* ── Main area (header + content) ─────────────────────────────── */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <AppHeader>
+            <AppHeaderSection align="left" className="min-w-0 flex-1 gap-2">
+              <SidebarToggle />
+              <SidebarMobileToggle />
+              <div className="min-w-0 flex-1">
+                <GlobalSearch />
+              </div>
+            </AppHeaderSection>
+            <AppHeaderSection align="right" className="gap-2">
+              <div className="hidden items-center gap-2 lg:flex">
+                <Select
+                  aria-label="Filter by site"
+                  value={siteId}
+                  onValueChange={setSiteId}
+                  options={siteOptions}
+                  size="sm"
+                  className="w-36"
+                />
+                <Select
+                  aria-label="Date range"
+                  value={datePreset}
+                  onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
+                  options={[...DATE_PRESETS]}
+                  size="sm"
+                  className="w-36"
+                />
+              </div>
+              <ThemeBrandSwitcher />
+            </AppHeaderSection>
+          </AppHeader>
+
+          {/* Mobile filters bar (header filters are lg-only) */}
+          <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 lg:hidden dark:border-neutral-800 dark:bg-neutral-900">
+            <Select
+              aria-label="Filter by site"
+              value={siteId}
+              onValueChange={setSiteId}
+              options={siteOptions}
+              size="sm"
+              className="flex-1"
+            />
+            <Select
+              aria-label="Date range"
+              value={datePreset}
+              onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
+              options={[...DATE_PRESETS]}
+              size="sm"
+              className="flex-1"
+            />
           </div>
-        </nav>
+
+          <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div className="min-h-dvh bg-slate-50" />}>
+    <Suspense fallback={<div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />}>
       <GlobalFilterProvider>
         <DashboardShell>{children}</DashboardShell>
       </GlobalFilterProvider>

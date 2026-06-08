@@ -70,7 +70,7 @@
 |--------|------------------------|-------------------|--------|
 | Toast | `components/global-toast.tsx` | @mieweb/ui `ToastProvider`/`ToastContainer`/`useToast` | ✅ Phase 1a — event bridge kept (`emitToast`); `ToastProvider` provides context only, so `ToastContainer` is rendered from `useToast()` in `GlobalToast`. New client boundary `client-providers.tsx`. |
 | Confirm dialog | `components/confirm-dialog.tsx` | @mieweb/ui `Button` + dark-aware tokens | ✅ Phase 1a — **kept** the tested a11y shell (`role=alertdialog`, focus-trap, scroll-lock, `[aria-hidden]` backdrop) which Modal (`role=dialog`) does not replicate; migrated buttons → `Button` + colors → neutral tokens. 9/9 tests still pass. |
-| Layout shell | `(dashboard)/layout.tsx` sidebar + header + mobile nav | @mieweb/ui `Sidebar` + `AppHeader` (+ brand/theme switcher) | ⏳ Phase 1b |
+| Layout shell | `(dashboard)/layout.tsx` sidebar + header + mobile nav | @mieweb/ui `Sidebar`(+`Provider`/`Header`/`Content`/`Nav`/`NavItem`/`Footer`/`Toggle`/`MobileToggle`) + `AppHeader`(+`Section`) + `Select` filters + `ThemeBrandSwitcher` | ✅ Phase 1b — full rewrite. Sidebar owns mobile drawer+backdrop (custom drawer machinery, outside-click, mobile bottom-nav all removed). Desktop collapse via `SidebarToggle`. Brand/theme switcher now live in header. |
 | Global search | `components/GlobalSearch.tsx` | @mieweb/ui `CommandPalette` (evaluate) | ⏳ Step 4g |
 | OSHA combobox | `components/osha-reference-combobox.tsx` | @mieweb/ui `Select` or Tier-2 keep | ⏳ Step 4c |
 | Skeleton loader | `components/skeleton-loader.tsx` | @mieweb/ui `Skeleton` | ✅ Phase 1a — `SkeletonCard`/`SkeletonRow` export names + signatures preserved; internals rebuilt on `Skeleton` (dark-aware). |
@@ -88,7 +88,7 @@
 - [ ] Step 4c: Form Elements — pending (~48 input / 21 select / 12 textarea)
 - [ ] Step 4d: Data Display — pending (Badge, Card, Tabs; NITRO grids vs Table)
 - [x] Step 4e: Feedback — Toast (`ToastProvider`+`ToastContainer`+`useToast`, event bridge preserved) and Skeleton (`SkeletonCard`/`SkeletonRow` rebuilt on `Skeleton`). Build + 53/53 tests green.
-- [ ] Step 4f: Navigation — pending (Sidebar, AppHeader — Phase 1b layout shell)
+- [x] Step 4f: Navigation — `(dashboard)/layout.tsx` rebuilt on @mieweb/ui `Sidebar` + `AppHeader` + `ThemeBrandSwitcher`. Header site/date filters now @mieweb/ui `Select` (partial Step 4c). Build + lint green.
 - [ ] Step 4g: Overlays — pending (Dropdown, Tooltip, CommandPalette)
 - [ ] Step 4h: Evaluate & Decide — pending (keep Monaco, recharts; osha combobox)
 - [ ] Step 5: Icon Migration — already lucide-react (expect ≈ no-op) — pending verify
@@ -119,6 +119,7 @@
 | `frontend/components/global-toast.tsx` | (Phase 1a) Reimplemented as bridge: `useToast()` + `ToastContainer` (top-right); listens to `workwell:toast` |
 | `frontend/components/confirm-dialog.tsx` | (Phase 1a) Buttons → `Button`; colors → neutral dark-aware tokens; a11y shell unchanged |
 | `frontend/components/skeleton-loader.tsx` | (Phase 1a) `"use client"`; internals rebuilt on `Skeleton` |
+| `frontend/app/(dashboard)/layout.tsx` | (Phase 1b) **Full rewrite** onto @mieweb/ui `Sidebar` + `AppHeader`; removed custom mobile drawer + bottom-nav; nav via `router.push`; fixed app-shell (`h-dvh overflow-hidden`, `main` scrolls); 4 raw `<select>` → `Select` |
 
 ## Files Created
 
@@ -134,6 +135,7 @@
 | `frontend/scripts/copy-brand-css.mjs` | Syncs brand CSS → `public/brands` (`pnpm sync:brands`) |
 | `frontend/public/brands/*.css` | 7 brand CSS files (bluehive, ccme, enterprise-health, mieweb, ozwell, waggleline, webchart) |
 | `frontend/components/client-providers.tsx` | (Phase 1a) Client boundary wrapping `ToastProvider` + `AuthProvider` + `GlobalToast` |
+| `frontend/components/theme-brand-switcher.tsx` | (Phase 1b) Header control: brand `Select` + light/dark toggle (`useBrand`/`useTheme`) |
 
 ## Files Deleted
 
@@ -180,3 +182,4 @@
 - **⚠ Server-component pitfall (Phase 1a):** the `@mieweb/ui` barrel evaluates `React.createContext` at module load (Toast/Sidebar/CommandPalette contexts). Importing it from a **Server Component** (root `app/layout.tsx`) breaks `next build` at page-data collection with `TypeError: _.createContext is not a function`. **Rule: only import `@mieweb/ui` from `"use client"` modules.** Fix was the `client-providers.tsx` boundary; `skeleton-loader.tsx` also marked `"use client"` defensively.
 - **Toast architecture (Phase 1a):** `ToastProvider` provides context only — it does **not** render a viewport. You must render `<ToastContainer toasts onDismiss position />` yourself from `useToast()`. The legacy `emitToast()` window-event contract is preserved via a bridge in `GlobalToast`, so no call sites changed (37 `emitToast` calls across 11 files).
 - **confirm-dialog kept, not Modal:** spec said `confirm-dialog → Modal`, but the component has a 9-test a11y contract (`role=alertdialog`, custom Tab focus-trap wrap, scroll-lock, `[aria-hidden]` backdrop) that @mieweb/ui `Modal` (`role=dialog`, own focus handling) would regress. Decision: keep the shell, migrate buttons→`Button` + tokens. Revisit wholesale-Modal only if a11y parity is verified.
+- **Layout shell behavior changes (Phase 1b) — needs a visual smoke:** (1) **mobile breakpoint moved md(768)→lg(1024)** — Sidebar = off-canvas drawer below 1024px (tablets now get the drawer); (2) **mobile bottom-nav removed** — replaced by the Sidebar drawer opened via the header hamburger (`SidebarMobileToggle`); (3) **nav uses `router.push`** not `<Link>` (SidebarNavItem `href` renders a full-reload `<a>`), so client nav is kept but **route prefetch is dropped** — revisit if nav feels slow; (4) **fixed app-shell** — outer `h-dvh overflow-hidden`, `main` is the scroll container (was window scroll); (5) **desktop sidebar collapse** added (`SidebarToggle`, persisted by @mieweb/ui to `localStorage` key `sidebar-collapsed`).
