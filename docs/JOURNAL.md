@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-08 — Post-merge polish: 7 PRs merged (#60–#66)
+
+### What shipped
+
+- **#60 — ADR-003 (docs):** Captured 2026-05-21 TWH consolidation decision in `docs/DECISIONS.md`; journal entry scoped to actual shipped work and dated correctly.
+- **#61 — workwell.os redirect (infra):** Minimal nginx:1.27-alpine container issuing `301` from `workwell.os.mieweb.org` → `twh.os.mieweb.org`. Workflow: `deploy-workwell-redirect-mieweb.yml` (manual dispatch). Removed misleading "reuse for API hostname" suggestion.
+- **#62 — CQL code-filter tightening:** Applied inline code-filter pattern (already in use by TB/HAZWOPER) to all 6 previously unfiltered measures (audiogram, flu, hypertension, diabetes_hba1c, obesity_bmi, cholesterol_ldl). No synthetic-data changes needed.
+- **#63 — CMS125v14 + CMS122v14 promoted to Active:** Breast Cancer Screening (820-day mammogram window) and Diabetes HbA1c Poor Control (numeric Observation-based). Both seeded as Active v1.0; `observationValue` field added to `ExamConfig` for lab-value CQL. Catalog now has 10 runnable measures.
+- **#64 — Compliance trend chart with per-bucket breakdown:** Extended `ProgramTrendPoint` with 5 bucket counts; added recharts `AreaChart` with per-bucket dashed Area series (% of total) + Legend replacing the hand-rolled sparkline.
+- **#65 — Case code evidence explorer:** New `GET /api/measures/versions/{id}/value-sets` endpoint; case detail now shows color-coded define chips (green bool, blue date, orange positive numeric, amber Outcome Status) and a Declared value sets panel.
+- **#66 — SQL analogy panel in CQL tab:** Collapsed-by-default panel deriving illustrative SQL from `spec_json` fields. Regex fix: compliance window parser now requires explicit "N days" pattern (not just any digit) to prevent misreading "Series of 3 doses over 6 months" as 3 days.
+
+### Verification
+
+- 7 branches merged to main and deleted remotely + locally.
+- `docs/MEASURES.md` catalog summary updated (10 runnable, 47 Draft, 60 total).
+- CLAUDE.md Current Focus updated to reflect 10 runnable measures and new features.
+
+---
+
 ## 2026-06-08 — docs(decisions): ADR-003 TWH single-instance consolidation
 
 ### What changed
