@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import GlobalToast from "@/components/global-toast";
-import { AuthProvider } from "@/components/auth-provider";
+import { ClientProviders } from "@/components/client-providers";
 import { AppThemeInitializer } from "@/components/app-theme-initializer";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -26,10 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-full">
         <AppThemeInitializer />
-        <AuthProvider>
-          {children}
-          <GlobalToast />
-        </AuthProvider>
+        <ClientProviders>{children}</ClientProviders>
       </body>
     </html>
   );

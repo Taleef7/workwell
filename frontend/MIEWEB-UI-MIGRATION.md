@@ -68,12 +68,12 @@
 
 | System | Original Implementation | New Implementation | Status |
 |--------|------------------------|-------------------|--------|
-| Toast | `components/global-toast.tsx` | @mieweb/ui `Toast` | ⏳ Step 4e |
-| Confirm dialog | `components/confirm-dialog.tsx` | @mieweb/ui `Modal` | ⏳ Step 4b |
-| Layout shell | `(dashboard)/layout.tsx` sidebar + header + mobile nav | @mieweb/ui `Sidebar` + `AppHeader` (+ brand/theme switcher) | ⏳ Step 4f / Phase 1 |
+| Toast | `components/global-toast.tsx` | @mieweb/ui `ToastProvider`/`ToastContainer`/`useToast` | ✅ Phase 1a — event bridge kept (`emitToast`); `ToastProvider` provides context only, so `ToastContainer` is rendered from `useToast()` in `GlobalToast`. New client boundary `client-providers.tsx`. |
+| Confirm dialog | `components/confirm-dialog.tsx` | @mieweb/ui `Button` + dark-aware tokens | ✅ Phase 1a — **kept** the tested a11y shell (`role=alertdialog`, focus-trap, scroll-lock, `[aria-hidden]` backdrop) which Modal (`role=dialog`) does not replicate; migrated buttons → `Button` + colors → neutral tokens. 9/9 tests still pass. |
+| Layout shell | `(dashboard)/layout.tsx` sidebar + header + mobile nav | @mieweb/ui `Sidebar` + `AppHeader` (+ brand/theme switcher) | ⏳ Phase 1b |
 | Global search | `components/GlobalSearch.tsx` | @mieweb/ui `CommandPalette` (evaluate) | ⏳ Step 4g |
 | OSHA combobox | `components/osha-reference-combobox.tsx` | @mieweb/ui `Select` or Tier-2 keep | ⏳ Step 4c |
-| Skeleton loader | `components/skeleton-loader.tsx` | @mieweb/ui `Skeleton` | ⏳ Step 4e |
+| Skeleton loader | `components/skeleton-loader.tsx` | @mieweb/ui `Skeleton` | ✅ Phase 1a — `SkeletonCard`/`SkeletonRow` export names + signatures preserved; internals rebuilt on `Skeleton` (dark-aware). |
 | Theme + brand | none (light-only) | `useTheme` + `useBrand` + `AppThemeInitializer` | ✅ Step 2/3 |
 
 ## Steps Completed
@@ -84,11 +84,11 @@
 - [x] Step 2: CSS Foundation — `globals.css` rewritten: Enterprise Health brand import (`layer(theme)`), `@source "../node_modules/@mieweb/ui/dist"`, `@custom-variant dark` (data-theme + .dark), full `@theme` token block w/ hex fallbacks (7 scales + semantic + chart), Geist fonts preserved. Added `lib/useTheme.ts` (`useSyncExternalStore`; sets `.dark` + `data-theme`). PostCSS already `@tailwindcss/postcss`. Build green. ⚠ Cosmetic: brand's Jost `@import` is ignored inside `layer(theme)` → app keeps Geist (font fidelity = follow-up).
 - [x] Step 3: Brand Switching — copied 7 brand CSS files to `public/brands/`; added `scripts/copy-brand-css.mjs` + `sync:brands` npm script; `lib/useBrand.ts` (`useSyncExternalStore`; injects `/brands/{brand}.css` `<link>`, sets `data-brand`, default `enterprise-health`); `components/app-theme-initializer.tsx` restores saved theme+brand on load; wired into root layout (`<html suppressHydrationWarning data-theme="light">`). Switcher **UI** deferred to Phase 1 (lives in AppHeader). Build + lint green.
 - [ ] Step 4a: Buttons — [count replaced, count raw HTML converted] — pending (~118 raw `<button>`)
-- [ ] Step 4b: Dialog/Modal — pending (`confirm-dialog`)
+- [x] Step 4b: Dialog/Modal — `confirm-dialog` migrated to @mieweb/ui `Button` + dark tokens; tested a11y shell kept (Modal's `role=dialog` ≠ the asserted `role=alertdialog`/focus-trap). 9/9 tests pass.
 - [ ] Step 4c: Form Elements — pending (~48 input / 21 select / 12 textarea)
 - [ ] Step 4d: Data Display — pending (Badge, Card, Tabs; NITRO grids vs Table)
-- [ ] Step 4e: Feedback — pending (Toast, Skeleton)
-- [ ] Step 4f: Navigation — pending (Sidebar, AppHeader — Phase 1 layout shell)
+- [x] Step 4e: Feedback — Toast (`ToastProvider`+`ToastContainer`+`useToast`, event bridge preserved) and Skeleton (`SkeletonCard`/`SkeletonRow` rebuilt on `Skeleton`). Build + 53/53 tests green.
+- [ ] Step 4f: Navigation — pending (Sidebar, AppHeader — Phase 1b layout shell)
 - [ ] Step 4g: Overlays — pending (Dropdown, Tooltip, CommandPalette)
 - [ ] Step 4h: Evaluate & Decide — pending (keep Monaco, recharts; osha combobox)
 - [ ] Step 5: Icon Migration — already lucide-react (expect ≈ no-op) — pending verify
@@ -114,6 +114,11 @@
 | `frontend/app/layout.tsx` | `<html suppressHydrationWarning data-theme="light">`; render `<AppThemeInitializer/>`; body class now token-driven (dropped hardcoded `bg-slate-50 text-slate-900`) |
 | `frontend/package.json` | Added `@mieweb/ui@^0.6.1` dependency + `sync:brands` script |
 | `frontend/pnpm-lock.yaml` | Lockfile entry for `@mieweb/ui` (+80/-3) |
+| `frontend/app/layout.tsx` | (Phase 1a) Providers moved into `ClientProviders` client boundary (was inline `AuthProvider`+`GlobalToast`); root layout no longer imports `@mieweb/ui` directly |
+| `frontend/lib/toast.ts` | (Phase 1a) `emitToast(message, variant?)` — optional `ToastVariant`, default `success` |
+| `frontend/components/global-toast.tsx` | (Phase 1a) Reimplemented as bridge: `useToast()` + `ToastContainer` (top-right); listens to `workwell:toast` |
+| `frontend/components/confirm-dialog.tsx` | (Phase 1a) Buttons → `Button`; colors → neutral dark-aware tokens; a11y shell unchanged |
+| `frontend/components/skeleton-loader.tsx` | (Phase 1a) `"use client"`; internals rebuilt on `Skeleton` |
 
 ## Files Created
 
@@ -128,6 +133,7 @@
 | `frontend/components/app-theme-initializer.tsx` | Restores saved theme+brand on every page load |
 | `frontend/scripts/copy-brand-css.mjs` | Syncs brand CSS → `public/brands` (`pnpm sync:brands`) |
 | `frontend/public/brands/*.css` | 7 brand CSS files (bluehive, ccme, enterprise-health, mieweb, ozwell, waggleline, webchart) |
+| `frontend/components/client-providers.tsx` | (Phase 1a) Client boundary wrapping `ToastProvider` + `AuthProvider` + `GlobalToast` |
 
 ## Files Deleted
 
@@ -171,3 +177,6 @@
 - **API shape changes:** Select compound children → `options` array (`onValueChange(value)`); Avatar → props-based (`src`,`name`); Dropdown → `trigger` prop + `DropdownItem icon=`.
 - **No new theme dep:** custom `useTheme`/`useBrand` via `useSyncExternalStore` (satisfies `react-hooks/set-state-in-effect`; no `next-themes`).
 - **Brand load:** default Enterprise Health comes from the static `globals.css` import; `AppThemeInitializer` re-applies saved brand on load (minor redundant fetch for default users — acceptable; no-FOUC inline script is a later option).
+- **⚠ Server-component pitfall (Phase 1a):** the `@mieweb/ui` barrel evaluates `React.createContext` at module load (Toast/Sidebar/CommandPalette contexts). Importing it from a **Server Component** (root `app/layout.tsx`) breaks `next build` at page-data collection with `TypeError: _.createContext is not a function`. **Rule: only import `@mieweb/ui` from `"use client"` modules.** Fix was the `client-providers.tsx` boundary; `skeleton-loader.tsx` also marked `"use client"` defensively.
+- **Toast architecture (Phase 1a):** `ToastProvider` provides context only — it does **not** render a viewport. You must render `<ToastContainer toasts onDismiss position />` yourself from `useToast()`. The legacy `emitToast()` window-event contract is preserved via a bridge in `GlobalToast`, so no call sites changed (37 `emitToast` calls across 11 files).
+- **confirm-dialog kept, not Modal:** spec said `confirm-dialog → Modal`, but the component has a 9-test a11y contract (`role=alertdialog`, custom Tab focus-trap wrap, scroll-lock, `[aria-hidden]` backdrop) that @mieweb/ui `Modal` (`role=dialog`, own focus handling) would regress. Decision: keep the shell, migrate buttons→`Button` + tokens. Revisit wholesale-Modal only if a11y parity is verified.
