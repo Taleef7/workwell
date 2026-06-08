@@ -21,6 +21,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "sync:brands": "node scripts/copy-brand-css.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -28,6 +29,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
+    "@mieweb/ui": "^0.6.1",
     "@monaco-editor/react": "^4.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
