@@ -127,6 +127,8 @@ public class MeasureService {
             ensureDiabetesHbA1cSeed();
             ensureObesityBmiSeed();
             ensureCholesterolLdlSeed();
+            ensureCms125Seed();
+            ensureCms122Seed();
             ensureCmsEcqmCatalogSeed();
         }
     }
@@ -1149,6 +1151,127 @@ public class MeasureService {
                     toJson(Map.of("status", "NOT_COMPILED", "errors", List.of("CQL not yet authored"))),
                     "CMS eCQM 2026 catalog seed — " + ecqm.cmsId());
         }
+    }
+
+    private void ensureCms125Seed() {
+        // CMS125 — Breast Cancer Screening (mammogram within 27 months / 820 days).
+        // We seed this as Active with full CQL BEFORE ensureCmsEcqmCatalogSeed() runs.
+        // Because that method skips existing v1.0 versions, the Active record persists.
+        // policy_ref must start with "CMS125v" so the catalog seed can match by prefix.
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE policy_ref LIKE 'CMS125v%'",
+                    UUID.class
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Breast Cancer Screening",
+                    "CMS125v14",
+                    "WorkWell Studio",
+                    "{ecqm,cms,cancer-screening,preventive}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("cms125.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Breast Cancer Screening (CMS125v14 / MIPS 112): women 50–74 who had a mammogram in the measurement period or 26 months prior.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Breast Cancer Screening Eligible"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Clinical Exclusion", "criteriaText", "Bilateral mastectomy or history of breast cancer — documented exclusion on file")));
+        spec.put("complianceWindow", "27 months (820 days)");
+        spec.put("requiredDataElements", List.of("Last mammogram date", "Eligible population flag", "Exclusion status"));
+        spec.put("testFixtures", List.of());
+        spec.put("cmsEcqmId", "CMS125v14");
+        spec.put("mipsQualityId", "112");
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("cms125.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "CMS125v14 Breast Cancer Screening — Active seed with full CQL (27-month mammogram window)",
+                "system"
+        );
+    }
+
+    private void ensureCms122Seed() {
+        // CMS122 — Diabetes: HbA1c Poor Control (> 9%).
+        // Numeric Observation-based measure. An HbA1c value > 9% → OVERDUE (poor control).
+        // policy_ref must start with "CMS122v" so the catalog seed can match by prefix.
+        UUID measureId;
+        try {
+            measureId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM measures WHERE policy_ref LIKE 'CMS122v%'",
+                    UUID.class
+            );
+        } catch (EmptyResultDataAccessException ex) {
+            measureId = UUID.randomUUID();
+            jdbcTemplate.update(
+                    "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
+                    measureId,
+                    "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)",
+                    "CMS122v14",
+                    "WorkWell Studio",
+                    "{ecqm,cms,diabetes}"
+            );
+        }
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    loadSeedCql("cms122.cql"),
+                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                    measureId, "v1.0"
+            );
+            return;
+        }
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("description", "Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1): patients 18–75 with diabetes whose most recent HbA1c result is > 9% (poor control). OVERDUE indicates intervention is needed.");
+        spec.put("eligibilityCriteria", Map.of(
+                "roleFilter", "All",
+                "siteFilter", "All Sites",
+                "programEnrollmentText", "Diabetes Diagnosis"
+        ));
+        spec.put("exclusions", List.of(Map.of("label", "Clinical Exclusion", "criteriaText", "Hospice care, advanced illness, or other clinical exclusion")));
+        spec.put("complianceWindow", "Annual — based on HbA1c value, not recency");
+        spec.put("requiredDataElements", List.of("Most recent HbA1c lab value", "Diabetes diagnosis", "Exclusion status"));
+        spec.put("testFixtures", List.of());
+        spec.put("cmsEcqmId", "CMS122v14");
+        spec.put("mipsQualityId", "1");
+
+        jdbcTemplate.update(
+                "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
+                UUID.randomUUID(), measureId, "v1.0", "Active",
+                toJson(spec), loadSeedCql("cms122.cql"), "COMPILED",
+                toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
+                "CMS122v14 Diabetes HbA1c Poor Control — Active seed with numeric Observation CQL",
+                "system"
+        );
     }
 
     private void ensureHypertensionSeed() {

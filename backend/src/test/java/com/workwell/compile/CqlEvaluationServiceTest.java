@@ -173,6 +173,82 @@ class CqlEvaluationServiceTest {
         }
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void cms125BreastCancerScreeningProducesAllFiveOutcomeBuckets() throws Exception {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        String cqlText = readClasspathText("measures/cms125.cql");
+
+        DemoRunPayload payload = service.evaluate(
+                "44444444-4444-4444-4444-444444444444",
+                "Breast Cancer Screening",
+                "v1.0",
+                cqlText,
+                LocalDate.now()
+        );
+
+        assertEquals(100, payload.outcomes().size(), "CMS125 should evaluate every seeded employee");
+
+        long compliant = payload.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+        long dueSoon = payload.outcomes().stream().filter(o -> "DUE_SOON".equals(o.outcome())).count();
+        long overdue = payload.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+        long missingData = payload.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+        long excluded = payload.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+
+        assertTrue(compliant > 0, "CMS125 should produce COMPLIANT outcomes");
+        assertTrue(dueSoon > 0, "CMS125 should produce DUE_SOON outcomes");
+        assertTrue(overdue > 0, "CMS125 should produce OVERDUE outcomes");
+        assertTrue(missingData > 0, "CMS125 should produce MISSING_DATA outcomes");
+        assertTrue(excluded > 0, "CMS125 should produce EXCLUDED outcomes");
+
+        DemoOutcome overdueOutcome = payload.outcomes().stream()
+                .filter(o -> "OVERDUE".equals(o.outcome()))
+                .findFirst()
+                .orElseThrow();
+        List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) overdueOutcome.evidenceJson().get("expressionResults");
+        assertNotNull(expressionResults);
+        assertTrue(expressionResults.stream().anyMatch(r -> "Outcome Status".equals(r.get("define"))),
+                "CMS125 evidence should contain Outcome Status define");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cms122DiabetesHbA1cProducesStructuredOutcomes() throws Exception {
+        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        String cqlText = readClasspathText("measures/cms122.cql");
+
+        DemoRunPayload payload = service.evaluate(
+                "55555555-5555-5555-5555-555555555555",
+                "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)",
+                "v1.0",
+                cqlText,
+                LocalDate.now()
+        );
+
+        assertEquals(100, payload.outcomes().size(), "CMS122 should evaluate every seeded employee");
+
+        long compliant = payload.outcomes().stream().filter(o -> "COMPLIANT".equals(o.outcome())).count();
+        long overdue = payload.outcomes().stream().filter(o -> "OVERDUE".equals(o.outcome())).count();
+        long missingData = payload.outcomes().stream().filter(o -> "MISSING_DATA".equals(o.outcome())).count();
+        long excluded = payload.outcomes().stream().filter(o -> "EXCLUDED".equals(o.outcome())).count();
+
+        assertTrue(compliant > 0, "CMS122 should produce COMPLIANT outcomes (good HbA1c control)");
+        assertTrue(overdue > 0, "CMS122 should produce OVERDUE outcomes (poor HbA1c control > 9%)");
+        assertTrue(missingData > 0, "CMS122 should produce MISSING_DATA outcomes (no HbA1c result)");
+        assertTrue(excluded > 0, "CMS122 should produce EXCLUDED outcomes");
+
+        DemoOutcome overdueOutcome = payload.outcomes().stream()
+                .filter(o -> "OVERDUE".equals(o.outcome()))
+                .findFirst()
+                .orElseThrow();
+        List<Map<String, Object>> expressionResults = (List<Map<String, Object>>) overdueOutcome.evidenceJson().get("expressionResults");
+        assertNotNull(expressionResults, "CMS122 OVERDUE evidence should contain expressionResults");
+        assertTrue(
+                expressionResults.stream().anyMatch(r -> "HbA1c Poor Control".equals(r.get("define")) && "true".equalsIgnoreCase(String.valueOf(r.get("result")))),
+                "CMS122 OVERDUE evidence should show HbA1c Poor Control=true, got: " + expressionResults
+        );
+    }
+
     private String resourceName(String measureName) {
         return switch (measureName) {
             case "TB Surveillance" -> "tb_surveillance";
