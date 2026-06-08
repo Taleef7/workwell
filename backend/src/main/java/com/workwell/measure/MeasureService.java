@@ -795,6 +795,36 @@ public class MeasureService {
         }
     }
 
+    public List<ValueSetRef> listValueSetsByVersionId(UUID measureVersionId) {
+        String sql = """
+                SELECT vs.id, vs.oid, vs.name, vs.version, vs.last_resolved_at,
+                       COALESCE(jsonb_array_length(vs.codes_json), 0) AS code_count
+                FROM measure_value_set_links l
+                JOIN value_sets vs ON vs.id = l.value_set_id
+                WHERE l.measure_version_id = ?
+                ORDER BY vs.name ASC, vs.oid ASC
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            String oid = rs.getString("oid");
+            int codeCount = rs.getInt("code_count");
+            boolean demoResolved = oid != null && oid.startsWith("urn:workwell:vs:");
+            String resolvabilityStatus = demoResolved || codeCount > 0 ? "RESOLVED" : "UNRESOLVED";
+            String resolvabilityLabel = demoResolved ? "Resolved (demo)" : (codeCount > 0 ? "Resolved" : "Unresolved");
+            String resolvabilityNote = demoResolved || codeCount > 0 ? "" : "Codes not yet loaded.";
+            return new ValueSetRef(
+                    (UUID) rs.getObject("id"),
+                    oid,
+                    rs.getString("name"),
+                    rs.getString("version"),
+                    toInstant(rs.getObject("last_resolved_at")),
+                    resolvabilityStatus,
+                    resolvabilityLabel,
+                    resolvabilityNote,
+                    codeCount
+            );
+        }, measureVersionId);
+    }
+
     private List<ValueSetRef> listAttachedValueSets(UUID measureId) {
         UUID measureVersionId = latestMeasureVersionId(measureId);
         String sql = """
