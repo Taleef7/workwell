@@ -437,18 +437,21 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
     );
   }
 
-  const data = points.map((p) => ({
-    label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    rate: p.complianceRate,
-    compliant: p.compliant,
-    dueSoon: p.dueSoon,
-    overdue: p.overdue,
-    missingData: p.missingData,
-    excluded: p.excluded,
-  }));
+  const data = points.map((p) => {
+    const total = p.totalEvaluated || 1;
+    return {
+      label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      rate: p.complianceRate,
+      compliant: Math.round((p.compliant / total) * 100),
+      dueSoon: Math.round((p.dueSoon / total) * 100),
+      overdue: Math.round((p.overdue / total) * 100),
+      missingData: Math.round((p.missingData / total) * 100),
+      excluded: Math.round((p.excluded / total) * 100),
+    };
+  });
 
   return (
-    <ResponsiveContainer width="100%" height={160}>
+    <ResponsiveContainer width="100%" height={180}>
       <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
         <defs>
           <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
@@ -459,23 +462,27 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
         <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
         <YAxis domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
         <Tooltip
-          formatter={(value, name) => {
-            if (name === "rate") return [`${Number(value).toFixed(1)}%`, "Compliance rate"];
-            return [value, String(name)];
-          }}
+          formatter={(value, name) => [`${Number(value).toFixed(1)}%`, String(name)]}
           contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
           labelStyle={{ fontSize: 11, color: "#475569" }}
         />
         <Area
           type="monotone"
           dataKey="rate"
+          name="Compliance rate"
           stroke="#059669"
           strokeWidth={2}
           fill="url(#complianceGrad)"
           dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
           activeDot={{ r: 5 }}
         />
+        <Area type="monotone" dataKey="compliant"   name="Compliant"     stroke="#059669" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
+        <Area type="monotone" dataKey="dueSoon"     name="Due Soon"      stroke="#f59e0b" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
+        <Area type="monotone" dataKey="overdue"     name="Overdue"       stroke="#ef4444" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
+        <Area type="monotone" dataKey="missingData" name="Missing Data"  stroke="#94a3b8" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
+        <Area type="monotone" dataKey="excluded"    name="Excluded"      stroke="#64748b" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
