@@ -8,6 +8,7 @@ import { formatStatusLabel } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail } from "../types";
 import { compileStatusClass, formatIssue, parseCompileIssue } from "../utils";
+import { SqlPreviewPanel } from "./SqlPreviewPanel";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -299,6 +300,8 @@ export function CqlTab({
           </ul>
         </div>
       ) : null}
+
+      <SqlPreviewPanel measure={measure} />
 
       {showDraftCqlDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
