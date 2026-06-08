@@ -34,6 +34,7 @@ export default function StudioMeasurePage() {
   const [cqlText, setCqlText] = useState(measure?.cqlText ?? "");
   const [compileErrors, setCompileErrors] = useState<string[]>([]);
   const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
+  const [liveCompileStatus, setLiveCompileStatus] = useState<string | null>(null);
   const [changeSummary, setChangeSummary] = useState("");
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export default function StudioMeasurePage() {
   }, [measure]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setCompileErrors([]); setCompileWarnings([]); }, 0);
+    const timer = window.setTimeout(() => { setCompileErrors([]); setCompileWarnings([]); setLiveCompileStatus(null); }, 0);
     return () => window.clearTimeout(timer);
   }, [measureId]);
 
@@ -187,6 +188,8 @@ export default function StudioMeasurePage() {
           onError={(msg) => setError(msg || null)}
           canClone={canClone}
           onCreateNewVersion={createNewVersion}
+          liveCompileStatus={liveCompileStatus}
+          onCompileStatusChange={setLiveCompileStatus}
         />
       ) : null}
 
