@@ -566,6 +566,29 @@ public class CqlEvaluationService {
                     "urn:workwell:vs:ldl-labs",
                     false
             );
+            case "Breast Cancer Screening" -> new MeasureSeedSpec(
+                    "cms125",
+                    "cms125-eligible",
+                    "urn:workwell:vs:cms125-eligible",
+                    "cms125-excluded",
+                    "urn:workwell:vs:cms125-excluded",
+                    "mammogram",
+                    "urn:workwell:vs:cms125-mammogram",
+                    false,
+                    820
+            );
+            case "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)" -> new MeasureSeedSpec(
+                    "cms122",
+                    "cms122-diabetes",
+                    "urn:workwell:vs:cms122-diabetes",
+                    "cms122-excluded",
+                    "urn:workwell:vs:cms122-excluded",
+                    "hba1c-obs",
+                    "urn:workwell:vs:cms122-hba1c",
+                    false,
+                    365,
+                    true
+            );
             default -> null;
         };
     }
@@ -576,6 +599,29 @@ public class CqlEvaluationService {
             SeededOutcome targetOutcome
     ) {
         int window = spec.complianceWindowDays();
+        boolean hasWaiver = targetOutcome == SeededOutcome.EXCLUDED;
+
+        // Observation-based measures (e.g. CMS122 HbA1c) derive compliance from a
+        // numeric value, not a recency window. Use observationValue; daysSinceLastExam
+        // is set to a recent value so the observation has a timestamp.
+        if (spec.observationBased()) {
+            Float observationValue = switch (targetOutcome) {
+                case COMPLIANT -> 7.5f;
+                case OVERDUE -> 10.5f;
+                case MISSING_DATA, DUE_SOON -> null;
+                case EXCLUDED -> 7.5f;
+            };
+            Integer daysAgo = observationValue != null ? 30 : null;
+            SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
+                    daysAgo, hasWaiver, true,
+                    spec.enrollmentCode(), spec.enrollmentVs(),
+                    spec.waiverCode(), spec.waiverVs(),
+                    spec.examCode(), spec.examVs(), false,
+                    observationValue
+            );
+            return new SeededInput(employee, config, targetOutcome.name());
+        }
+
         Integer daysSinceLastExam = switch (targetOutcome) {
             case COMPLIANT -> window / 3;
             case DUE_SOON -> window - 10;
@@ -583,7 +629,6 @@ public class CqlEvaluationService {
             case MISSING_DATA -> null;
             case EXCLUDED -> window + 150;
         };
-        boolean hasWaiver = targetOutcome == SeededOutcome.EXCLUDED;
         SyntheticFhirBundleBuilder.ExamConfig config = new SyntheticFhirBundleBuilder.ExamConfig(
                 daysSinceLastExam,
                 hasWaiver,
@@ -629,13 +674,21 @@ public class CqlEvaluationService {
             String examCode,
             String examVs,
             boolean useImmunization,
-            int complianceWindowDays
+            int complianceWindowDays,
+            boolean observationBased
     ) {
         MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
                         String waiverCode, String waiverVs, String examCode, String examVs,
                         boolean useImmunization) {
             this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
-                    examCode, examVs, useImmunization, 365);
+                    examCode, examVs, useImmunization, 365, false);
+        }
+
+        MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
+                        String waiverCode, String waiverVs, String examCode, String examVs,
+                        boolean useImmunization, int complianceWindowDays) {
+            this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
+                    examCode, examVs, useImmunization, complianceWindowDays, false);
         }
     }
 }

@@ -10,8 +10,10 @@ import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.HumanName;
 import org.hl7.fhir.r4.model.Immunization;
+import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Procedure;
+import org.hl7.fhir.r4.model.Quantity;
 import org.hl7.fhir.r4.model.Reference;
 
 public class SyntheticFhirBundleBuilder {
@@ -49,7 +51,31 @@ public class SyntheticFhirBundleBuilder {
             ));
         }
 
-        if (config.daysSinceLastExam() != null) {
+        if (config.observationValue() != null) {
+            Observation observation = new Observation();
+            observation.setId(employee.externalId() + "-observation");
+            observation.setStatus(Observation.ObservationStatus.FINAL);
+            observation.setSubject(new Reference("Patient/" + employee.externalId()));
+            observation.getCode().addCoding()
+                    .setSystem(config.examValueSet())
+                    .setCode(config.examCode())
+                    .setDisplay(config.examCode());
+            if (config.daysSinceLastExam() != null) {
+                String effectiveDateTime = evaluationDate
+                        .minusDays(config.daysSinceLastExam())
+                        .atStartOfDay()
+                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+                observation.setEffective(new org.hl7.fhir.r4.model.DateTimeType(effectiveDateTime));
+            }
+            observation.setValue(new Quantity()
+                    .setValue(java.math.BigDecimal.valueOf(config.observationValue()))
+                    .setUnit("%")
+                    .setSystem("http://unitsofmeasure.org")
+                    .setCode("%"));
+            bundle.addEntry().setResource(observation);
+        }
+
+        if (config.daysSinceLastExam() != null && config.observationValue() == null) {
             String performedDateTime = evaluationDate
                     .minusDays(config.daysSinceLastExam())
                     .atStartOfDay()
@@ -106,7 +132,17 @@ public class SyntheticFhirBundleBuilder {
             String waiverValueSet,
             String examCode,
             String examValueSet,
-            boolean useImmunization
+            boolean useImmunization,
+            Float observationValue
     ) {
+        public ExamConfig(Integer daysSinceLastExam, boolean hasWaiver, boolean programEnrolled,
+                          String programEnrollmentCode, String programEnrollmentValueSet,
+                          String waiverCode, String waiverValueSet,
+                          String examCode, String examValueSet, boolean useImmunization) {
+            this(daysSinceLastExam, hasWaiver, programEnrolled,
+                    programEnrollmentCode, programEnrollmentValueSet,
+                    waiverCode, waiverValueSet, examCode, examValueSet,
+                    useImmunization, null);
+        }
     }
 }

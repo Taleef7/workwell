@@ -9,7 +9,8 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | OSHA occupational safety — fully evaluated | 4 | Active | Full CQL, runnable |
 | OSHA occupational safety — catalog only | 3 | Draft / Approved / Deprecated | Partial or no CQL |
 | HEDIS wellness — fully evaluated | 4 | Active | Full CQL, runnable |
-| CMS eCQM catalog (2026 performance period) | 49 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
+| CMS eCQM catalog (2026 performance period) | 47 | Draft | Catalog entry only — CQL authoring pending |
 | **Total** | **60** | | |
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
@@ -145,9 +146,41 @@ All four wellness measures use the same outcome pattern:
 
 ---
 
+## Category 3b — CMS eCQM (Full CQL)
+
+Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evaluation:
+
+### 3b.1 Breast Cancer Screening (CMS125v14 / MIPS 112)
+- Policy reference: CMS125v14
+- CQL file: `backend/src/main/resources/measures/cms125.cql`
+- Tags: `ecqm`, `cms`, `cancer-screening`, `preventive`
+- Compliance window: 27 months (820 days — mammogram within the measurement period or 26 months prior)
+
+Outcome mapping:
+- `EXCLUDED` when bilateral mastectomy or documented clinical exclusion
+- `MISSING_DATA` when enrolled, not excluded, no mammogram date found
+- `OVERDUE` when enrolled, not excluded, days since last mammogram > 820
+- `DUE_SOON` when enrolled, not excluded, days in (790..820]
+- `COMPLIANT` when enrolled, not excluded, days <= 790
+
+### 3b.2 Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1)
+- Policy reference: CMS122v14
+- CQL file: `backend/src/main/resources/measures/cms122.cql`
+- Tags: `ecqm`, `cms`, `diabetes`
+- Value-based (numeric): outcome is driven by HbA1c lab value, not recency
+
+Outcome mapping:
+- `EXCLUDED` when documented clinical exclusion
+- `MISSING_DATA` when diabetes diagnosis, not excluded, no recent HbA1c result
+- `OVERDUE` when diabetes diagnosis, not excluded, HbA1c value > 9% (poor control — intervention needed)
+- `COMPLIANT` when diabetes diagnosis, not excluded, HbA1c value ≤ 9% (adequate control)
+- `DUE_SOON` — not applicable (hard-coded false; control status drives outcome, not recency)
+
+---
+
 ## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 
-49 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for these measures is future work.
+47 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries (CMS125v14 and CMS122v14 are now Active with full CQL — see Category 3b). The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references.
 
