@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-08 — docs(decisions): ADR-003 TWH single-instance consolidation
+
+### What changed
+
+- **ADR-003:** Captured the 2026-05-21 TWH single-instance consolidation decision in `docs/DECISIONS.md` as a numbered ADR. Quoted the JOURNAL rationale verbatim; documented that the eCQM seeding path and `*_ECQM` secrets are retained as restore-later capability; noted the `workwell.os` redirect as a follow-up (see `infra/redirect/`).
+
+### Verification
+
+- Docs-only PR; no backend or frontend changes.
+
+---
+
 ## 2026-06-08 — Documentation sync: truth-up across the living docs
 
 ### What changed
