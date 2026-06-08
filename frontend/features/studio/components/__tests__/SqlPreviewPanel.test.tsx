@@ -80,4 +80,14 @@ describe("SqlPreviewPanel", () => {
     const block = screen.getByTestId("sql-preview-block");
     expect(block.textContent).toContain("see policy");
   });
+
+  it("uses raw-string fallback for multi-number non-day windows like 'Series of 3 doses over 6 months'", () => {
+    const doseWindow: MeasureDetail = { ...sampleMeasure, complianceWindow: "Series of 3 doses over 6 months" };
+    render(<SqlPreviewPanel measure={doseWindow} />);
+    fireEvent.click(screen.getByRole("button", { name: /SQL Analogy/i }));
+    const block = screen.getByTestId("sql-preview-block");
+    // Should pass the window through as a comment, not parse '3' as a day count
+    expect(block.textContent).toContain("Series of 3 doses over 6 months");
+    expect(block.textContent).not.toContain("INTERVAL '3 days'");
+  });
 });

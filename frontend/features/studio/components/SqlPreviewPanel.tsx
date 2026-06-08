@@ -16,8 +16,9 @@ function buildSql(measure: MeasureDetail): string {
     requiredDataElements,
   } = measure;
 
-  // Parse numeric days from compliance window string, e.g. "365 days", "820 days biannual"
-  const windowMatch = complianceWindow?.match(/(\d+)/);
+  // Only parse as days when the string explicitly says "N days" / "N day".
+  // Strings like "Series of 3 doses over 6 months" must not be treated as a day count.
+  const windowMatch = complianceWindow?.match(/(\d+)\s*days?\b/i);
   const windowDays = windowMatch ? parseInt(windowMatch[1], 10) : null;
   const dueSoonDays = windowDays ? windowDays - 30 : null;
 
