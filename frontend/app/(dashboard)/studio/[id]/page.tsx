@@ -88,10 +88,10 @@ export default function StudioMeasurePage() {
 
   return (
     <section className="space-y-4">
-      <div className="md:hidden rounded-xl border border-slate-200 bg-white p-6 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Studio</p>
-        <h2 className="mt-2 text-lg font-semibold text-slate-900">Studio requires a larger screen</h2>
-        <p className="mt-2 text-sm text-slate-600">
+      <div className="md:hidden rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Studio</p>
+        <h2 className="mt-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">Studio requires a larger screen</h2>
+        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
           Open this page on a desktop or laptop to author CQL, manage value sets, and run release checks.
         </p>
       </div>
@@ -99,10 +99,10 @@ export default function StudioMeasurePage() {
       <div className="hidden space-y-4 md:block">
       <div className="flex items-center justify-between">
         <div>
-          <Link href="/measures" className="text-xs text-slate-500 hover:underline">Back to Measures</Link>
+          <Link href="/measures" className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">Back to Measures</Link>
           <h2 className="text-2xl font-semibold">{measure?.name ?? "Measure Studio"}</h2>
           {measure ? (
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(measure.status)}`}>{labelFor(MEASURE_STATUS_LABELS, measure.status)}</span>
             </p>
           ) : null}
@@ -121,12 +121,12 @@ export default function StudioMeasurePage() {
           {canClone ? (
             <>
             <input
-              className="rounded border border-slate-300 px-2 py-1 text-xs"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs"
               placeholder="Change summary (required)"
               value={changeSummary}
               onChange={(e) => setChangeSummary(e.target.value)}
             />
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800" onClick={() => void createNewVersion()}>
+            <button className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200" onClick={() => void createNewVersion()}>
               New Version
             </button>
             </>
@@ -136,7 +136,7 @@ export default function StudioMeasurePage() {
 
       <div className="flex gap-2">
         {tabs.map((t) => (
-          <button key={t} className={`rounded-md px-3 py-2 text-sm ${tab === t ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => setTab(t)}>
+          <button key={t} className={`rounded-md px-3 py-2 text-sm ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`} onClick={() => setTab(t)}>
             {tabLabels[t]}
           </button>
         ))}
@@ -144,14 +144,14 @@ export default function StudioMeasurePage() {
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {!measureId ? <p className="text-sm text-red-700">Invalid measure route ID.</p> : null}
-      {loading ? <p className="text-sm text-slate-600">Loading...</p> : null}
+      {loading ? <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading...</p> : null}
 
       {normalizeEnumValue(measure?.status ?? "") === "APPROVED" && activationReadiness ? (
-        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm">
-          <p className="font-semibold text-slate-800">Activation Readiness</p>
-          <p className="text-slate-700">Compile: {formatStatusLabel(activationReadiness.compileStatus)}</p>
-          <p className="text-slate-700">Fixtures: {activationReadiness.testFixtureCount}</p>
-          <p className="text-slate-700">Value Sets: {activationReadiness.valueSetCount}</p>
+        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 text-sm">
+          <p className="font-semibold text-neutral-800 dark:text-neutral-200">Activation Readiness</p>
+          <p className="text-neutral-700 dark:text-neutral-300">Compile: {formatStatusLabel(activationReadiness.compileStatus)}</p>
+          <p className="text-neutral-700 dark:text-neutral-300">Fixtures: {activationReadiness.testFixtureCount}</p>
+          <p className="text-neutral-700 dark:text-neutral-300">Value Sets: {activationReadiness.valueSetCount}</p>
           {!activationReadiness.ready && activationReadiness.activationBlockers.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-red-700">
               {activationReadiness.activationBlockers.map((item) => <li key={item}>{item}</li>)}

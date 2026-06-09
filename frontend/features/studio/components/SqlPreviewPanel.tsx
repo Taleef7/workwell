@@ -87,20 +87,20 @@ export function SqlPreviewPanel({ measure }: Props) {
   const sql = buildSql(measure);
 
   return (
-    <div className="rounded border border-slate-200 bg-white">
+    <div className="rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
         aria-expanded={open}
       >
         <span className="select-none text-[10px]">{open ? "▼" : "▶"}</span>
         SQL Analogy
-        <span className="ml-1 text-[10px] font-normal text-slate-400">(derived from Spec — illustrative only)</span>
+        <span className="ml-1 text-[10px] font-normal text-neutral-400">(derived from Spec — illustrative only)</span>
       </button>
 
       {open && (
-        <div className="border-t border-slate-200">
+        <div className="border-t border-neutral-200 dark:border-neutral-800">
           <div className="flex items-start gap-2 rounded-none border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
             <span className="mt-0.5 shrink-0 font-semibold uppercase tracking-wider text-amber-700">Illustrative only</span>
             <span>Not executed. CQL is the compliance source of truth. Column names and table structure are analogical.</span>
