@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Badge, Button, Input, Select } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import {
   CASE_STATUS_LABELS,
@@ -49,6 +50,12 @@ type MeasureOption = {
 };
 
 type CaseStatusFilter = "open" | "closed" | "excluded" | "all";
+
+const PRIORITY_BADGE_VARIANT: Record<string, "danger" | "warning" | "secondary"> = {
+  HIGH: "danger",
+  MEDIUM: "warning",
+  LOW: "secondary"
+};
 
 function normalizeCaseStatusFilter(value: string | null): CaseStatusFilter {
   switch (value?.toLowerCase()) {
@@ -185,6 +192,38 @@ export default function CasesPage() {
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
 
+  const measureOptions = useMemo(
+    () => [{ value: "", label: "All Active Measures" }, ...measures.map((m) => ({ value: m.id, label: m.name }))],
+    [measures]
+  );
+  const priorityOptions = useMemo(
+    () => [
+      { value: "", label: "All Priorities" },
+      { value: "HIGH", label: labelFor(PRIORITY_LABELS, "HIGH") },
+      { value: "MEDIUM", label: labelFor(PRIORITY_LABELS, "MEDIUM") },
+      { value: "LOW", label: labelFor(PRIORITY_LABELS, "LOW") }
+    ],
+    []
+  );
+  const assigneeOptions = useMemo(
+    () => [
+      { value: "", label: "All Assignees" },
+      { value: "unassigned", label: "Unassigned" },
+      ...[...new Set(cases.map((item) => item.assignee).filter((item): item is string => Boolean(item)))].map((a) => ({
+        value: a,
+        label: a
+      }))
+    ],
+    [cases]
+  );
+  const siteOptions = useMemo(
+    () => [
+      { value: "", label: "All Sites" },
+      ...[...new Set(cases.map((item) => item.site).filter(Boolean))].map((s) => ({ value: s, label: s }))
+    ],
+    [cases]
+  );
+
   const setStatusAndUrl = useCallback((nextStatus: CaseStatusFilter) => {
     const params = new URLSearchParams(searchParams.toString());
     if (nextStatus === "open") {
@@ -307,212 +346,165 @@ export default function CasesPage() {
 
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-8 text-white shadow-lg">
-        <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Caseflow</p>
+      <div className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-8 text-white shadow-lg">
+        <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold">Why Flagged cases</h2>
-        <p className="mt-3 max-w-2xl text-slate-300">
+        <p className="mt-3 max-w-2xl text-neutral-300">
           Your daily worklist of employees flagged by the latest measure runs. Each card links to the structured
           evidence that explains why the case is open, including waiver context when an exclusion applies.
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold">Open and recent cases</h3>
-          <p className="text-sm text-slate-500">Filter, search, and bulk-act on flagged cases.</p>
+          <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Open and recent cases</h3>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Filter, search, and bulk-act on flagged cases.</p>
         </div>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
           {cases.length} case{cases.length !== 1 ? "s" : ""} loaded
         </p>
-        <button
-          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900"
-          onClick={() =>
-            void exportCsv(
-              `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}`,
-              "cases.csv"
-            )
-          }
-        >
-          Export cases CSV
-        </button>
-        <button
-          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
-          onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
-        >
-          Export audit CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              void exportCsv(
+                `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}`,
+                "cases.csv"
+              )
+            }
+          >
+            Export cases CSV
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
+          >
+            Export audit CSV
+          </Button>
+        </div>
       </div>
 
-      <div className="flex gap-0 border-b border-slate-200 mb-4">
-        <button
-          type="button"
-          onClick={() => {
-            const params = new URLSearchParams(searchParams.toString());
-            params.set('view', 'all');
-            router.push(`/cases?${params.toString()}`);
-          }}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            view !== 'mine'
-              ? 'border-slate-900 text-slate-900'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          All Cases
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const params = new URLSearchParams(searchParams.toString());
-            params.set('view', 'mine');
-            router.push(`/cases?${params.toString()}`);
-          }}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            view === 'mine'
-              ? 'border-slate-900 text-slate-900'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          My Cases
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <span>Status</span>
-          {(["open", "closed", "all"] as const).map((status) => (
+      <div className="mb-4 flex gap-0 border-b border-neutral-200 dark:border-neutral-800">
+        {(["all", "mine"] as const).map((tab) => {
+          const active = tab === "mine" ? view === "mine" : view !== "mine";
+          return (
             <button
+              key={tab}
+              type="button"
+              onClick={() => {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set("view", tab);
+                router.push(`/cases?${params.toString()}`);
+              }}
+              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                active
+                  ? "border-primary-600 text-primary-700 dark:text-primary-400"
+                  : "border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
+              }`}
+            >
+              {tab === "mine" ? "My Cases" : "All Cases"}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+          <span>Status</span>
+          {(["open", "closed", "all", "excluded"] as const).map((status) => (
+            <Button
               key={status}
               type="button"
+              size="sm"
+              variant={statusFilter === status ? "primary" : "outline"}
+              className="rounded-full"
               onClick={() => setStatusAndUrl(status)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === status ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
             >
-              {status === "open" ? "Open" : status === "closed" ? "Closed" : "All"}
-            </button>
+              {status === "open" ? "Open" : status === "closed" ? "Closed" : status === "all" ? "All" : "Excluded"}
+            </Button>
           ))}
-          <button
-            type="button"
-            onClick={() => setStatusAndUrl("excluded")}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === "excluded" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
-          >
-            Excluded
-          </button>
         </div>
-        <label className="text-sm text-slate-600">
-          Measure{" "}
-          <select
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            value={measureFilter}
-            onChange={(e) => setMeasureFilter(e.target.value)}
-          >
-            <option value="">All Active Measures</option>
-            {measures.map((measure) => (
-              <option key={measure.id} value={measure.id}>
-                {measure.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          Priority{" "}
-          <select
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-          >
-            <option value="">All Priorities</option>
-            <option value="HIGH">{labelFor(PRIORITY_LABELS, "HIGH")}</option>
-            <option value="MEDIUM">{labelFor(PRIORITY_LABELS, "MEDIUM")}</option>
-            <option value="LOW">{labelFor(PRIORITY_LABELS, "LOW")}</option>
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          Assignee{" "}
-          <select
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            value={assigneeFilter}
-            onChange={(e) => setAssigneeFilter(e.target.value)}
-          >
-            <option value="">All Assignees</option>
-            <option value="unassigned">Unassigned</option>
-            {[...new Set(cases.map((item) => item.assignee).filter((item): item is string => Boolean(item)))].map((assignee) => (
-              <option key={assignee} value={assignee}>
-                {assignee}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          Site{" "}
-          <select
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            value={siteFilter}
-            onChange={(e) => setSiteFilter(e.target.value)}
-          >
-            <option value="">All Sites</option>
-            {[...new Set(cases.map((item) => item.site).filter(Boolean))].map((site) => (
-              <option key={site} value={site}>
-                {site}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          Search
-          <input
-            className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm"
-            placeholder="Employee name or ID"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </label>
+        <Select
+          label="Measure"
+          size="sm"
+          className="w-48"
+          value={measureFilter}
+          onValueChange={setMeasureFilter}
+          options={measureOptions}
+        />
+        <Select
+          label="Priority"
+          size="sm"
+          className="w-40"
+          value={priorityFilter}
+          onValueChange={setPriorityFilter}
+          options={priorityOptions}
+        />
+        <Select
+          label="Assignee"
+          size="sm"
+          className="w-44"
+          value={assigneeFilter}
+          onValueChange={setAssigneeFilter}
+          options={assigneeOptions}
+        />
+        <Select
+          label="Site"
+          size="sm"
+          className="w-40"
+          value={siteFilter}
+          onValueChange={setSiteFilter}
+          options={siteOptions}
+        />
+        <Input
+          label="Search"
+          size="sm"
+          className="w-56"
+          placeholder="Employee name or ID"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
       </div>
 
       {selectedCaseIds.length > 0 ? (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="font-semibold text-blue-900">{selectedCaseIds.length} selected</span>
-            <input
-              className="rounded border border-blue-300 bg-white px-2 py-1"
+            <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
+            <Input
+              label="Assignee for selected"
+              hideLabel
+              size="sm"
+              className="w-48"
               placeholder="Assignee for selected"
               value={bulkAssignee}
               onChange={(e) => setBulkAssignee(e.target.value)}
             />
-            <button
-              className="rounded-md border border-blue-300 bg-white px-3 py-1 font-semibold text-blue-900 disabled:opacity-60"
-              disabled={bulkActing !== null}
-              onClick={() => void bulkAssign()}
-            >
+            <Button size="sm" variant="primary" disabled={bulkActing !== null} onClick={() => void bulkAssign()}>
               {bulkActing === "assign" ? "Assigning..." : "Assign to..."}
-            </button>
-            <button
-              className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1 font-semibold text-rose-900 disabled:opacity-60"
-              disabled={bulkActing !== null}
-              onClick={() => void bulkEscalate()}
-            >
+            </Button>
+            <Button size="sm" variant="danger" disabled={bulkActing !== null} onClick={() => void bulkEscalate()}>
               {bulkActing === "escalate" ? "Escalating..." : "Escalate selected"}
-            </button>
-            <button
-              className="rounded-md border border-slate-300 bg-white px-3 py-1 font-semibold text-slate-900 disabled:opacity-60"
-              disabled={bulkActing !== null}
-              onClick={() => void bulkExportSelected()}
-            >
+            </Button>
+            <Button size="sm" variant="outline" disabled={bulkActing !== null} onClick={() => void bulkExportSelected()}>
               {bulkActing === "export" ? "Exporting..." : "Export selected"}
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
 
       {loading ? (
-        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
           <table className="min-w-full text-sm">
             <tbody>{Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} cols={8} />)}</tbody>
           </table>
         </div>
       ) : null}
-      {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
+      {error ? <p className="text-sm text-red-700 dark:text-red-400">Error: {error}</p> : null}
 
       {!loading && !error && filteredCases.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600">
+        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
           {urlSearch.trim()
             ? `No results match your search "${urlSearch.trim()}".`
             : statusFilter === "excluded"
@@ -526,10 +518,10 @@ export default function CasesPage() {
       ) : null}
 
       {filteredCases.length > 0 ? (
-        <div className="hidden items-center gap-2 text-sm text-slate-600 md:flex">
+        <label className="hidden items-center gap-2 text-sm text-neutral-600 md:flex dark:text-neutral-400">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
-        </div>
+        </label>
       ) : null}
 
       <div className="space-y-2 md:hidden">
@@ -539,17 +531,17 @@ export default function CasesPage() {
             <Link
               key={item.caseId}
               href={`/cases/${item.caseId}`}
-              className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3"
+              className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">{item.employeeName}</p>
-                <p className="truncate text-xs text-slate-500">{item.measureName}</p>
+                <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{item.employeeName}</p>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{item.measureName}</p>
               </div>
               <div className="ml-3 flex items-center gap-2">
                 <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
                   {outcomeLabel}
                 </span>
-                <ChevronRight className="h-4 w-4 text-slate-400" />
+                <ChevronRight className="h-4 w-4 text-neutral-400" />
               </div>
             </Link>
           );
@@ -563,9 +555,9 @@ export default function CasesPage() {
           const priorityLabel = labelFor(PRIORITY_LABELS, item.priority);
           const outcomeLabel = labelFor(OUTCOME_LABELS, item.currentOutcomeStatus);
           return (
-            <div key={item.caseId} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs text-slate-600">
+                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
                   <input
                     type="checkbox"
                     checked={selectedCaseIds.includes(item.caseId)}
@@ -575,28 +567,28 @@ export default function CasesPage() {
                 </label>
                 <div className="flex flex-wrap justify-end gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{caseStatusLabel}</span>
-                  <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{priorityLabel}</span>
+                  <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>{priorityLabel}</Badge>
                 </div>
               </div>
 
               <div className="mt-2">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.measureName}</p>
-                <h4 className="mt-1 text-lg font-semibold text-slate-900">
-                  <Link href={`/employees/${item.employeeId}`} className="hover:underline hover:text-blue-700">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{item.measureName}</p>
+                <h4 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                  <Link href={`/employees/${item.employeeId}`} className="hover:text-primary-700 hover:underline dark:hover:text-primary-400">
                     {item.employeeName}
                   </Link>
                 </h4>
-                <p className="mt-1 text-sm text-slate-500">{item.employeeId}</p>
-                <p className="mt-1 text-xs text-slate-500">{item.site}</p>
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{item.employeeId}</p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{item.site}</p>
               </div>
 
-              <dl className="mt-4 space-y-2 text-sm text-slate-700">
+              <dl className="mt-4 space-y-2 text-sm text-neutral-700 dark:text-neutral-300">
                 <div className="flex items-center justify-between gap-3">
-                  <dt className="text-slate-500">Status</dt>
+                  <dt className="text-neutral-500 dark:text-neutral-400">Status</dt>
                   <dd className="font-medium">{caseStatusLabel}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <dt className="text-slate-500">Why flagged</dt>
+                  <dt className="text-neutral-500 dark:text-neutral-400">Why flagged</dt>
                   <dd>
                     <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
                       {outcomeLabel}
@@ -604,28 +596,28 @@ export default function CasesPage() {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <dt className="text-slate-500">Period</dt>
+                  <dt className="text-neutral-500 dark:text-neutral-400">Period</dt>
                   <dd className="font-medium">{item.evaluationPeriod}</dd>
                 </div>
                 {item.slaRemainingDays != null ? (
                   <div className="flex items-center justify-between gap-3">
-                    <dt className="text-slate-500">SLA</dt>
+                    <dt className="text-neutral-500 dark:text-neutral-400">SLA</dt>
                     <SlaChip slaRemainingDays={item.slaRemainingDays} slaBreached={item.slaBreached} />
                   </div>
                 ) : null}
                 {caseStatus === "EXCLUDED" ? (
                   <>
                     <div className="flex items-start justify-between gap-3">
-                      <dt className="text-slate-500">Exclusion reason</dt>
-                      <dd className="max-w-[220px] text-right text-xs text-slate-700">
+                      <dt className="text-neutral-500 dark:text-neutral-400">Exclusion reason</dt>
+                      <dd className="max-w-[220px] text-right text-xs text-neutral-700 dark:text-neutral-300">
                         {item.exclusionReason ?? "Excluded by active waiver or exemption."}
                       </dd>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <dt className="text-slate-500">Waiver</dt>
-                      <dd className="text-right text-xs font-medium text-slate-700">
+                      <dt className="text-neutral-500 dark:text-neutral-400">Waiver</dt>
+                      <dd className="text-right text-xs font-medium text-neutral-700 dark:text-neutral-300">
                         {item.waiverExpiresAt ? (
-                          <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800" : "bg-indigo-100 text-indigo-800"}`}>
+                          <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300" : "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"}`}>
                             {item.waiverExpired ? "Expired" : "Expires"} {new Date(item.waiverExpiresAt).toLocaleDateString()}
                           </span>
                         ) : (
@@ -637,8 +629,8 @@ export default function CasesPage() {
                 ) : null}
               </dl>
 
-              <p className="mt-4 text-sm text-slate-600">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
-              <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-slate-900 hover:underline">
+              <p className="mt-4 text-sm text-neutral-600 dark:text-neutral-400">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
+              <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-neutral-900 hover:underline dark:text-neutral-100">
                 View structured evidence →
               </Link>
             </div>
@@ -648,13 +640,9 @@ export default function CasesPage() {
 
       {hasMore ? (
         <div className="flex justify-center">
-          <button
-            className="rounded-md border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-            onClick={() => void loadMoreCases()}
-            disabled={loadingMore}
-          >
+          <Button variant="outline" disabled={loadingMore} onClick={() => void loadMoreCases()}>
             {loadingMore ? "Loading…" : "Load more cases"}
-          </button>
+          </Button>
         </div>
       ) : null}
     </section>

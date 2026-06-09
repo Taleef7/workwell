@@ -83,10 +83,10 @@
 - [x] Step 1: Install @mieweb/ui — v0.6.1, **482** named exports (pnpm 10 via corepack). Peers intact (`monaco-editor`, `@testing-library/dom` in `.pnpm`); `datavis-ace` deferred to NITRO pilot. `dist/` ships prebuilt (build script ignored — not needed for consumers). Baseline `next build` green.
 - [x] Step 2: CSS Foundation — `globals.css` rewritten: Enterprise Health brand import (`layer(theme)`), `@source "../node_modules/@mieweb/ui/dist"`, `@custom-variant dark` (data-theme + .dark), full `@theme` token block w/ hex fallbacks (7 scales + semantic + chart), Geist fonts preserved. Added `lib/useTheme.ts` (`useSyncExternalStore`; sets `.dark` + `data-theme`). PostCSS already `@tailwindcss/postcss`. Build green. ⚠ Cosmetic: brand's Jost `@import` is ignored inside `layer(theme)` → app keeps Geist (font fidelity = follow-up).
 - [x] Step 3: Brand Switching — copied 7 brand CSS files to `public/brands/`; added `scripts/copy-brand-css.mjs` + `sync:brands` npm script; `lib/useBrand.ts` (`useSyncExternalStore`; injects `/brands/{brand}.css` `<link>`, sets `data-brand`, default `enterprise-health`); `components/app-theme-initializer.tsx` restores saved theme+brand on load; wired into root layout (`<html suppressHydrationWarning data-theme="light">`). Switcher **UI** deferred to Phase 1 (lives in AppHeader). Build + lint green.
-- [ ] Step 4a: Buttons — [count replaced, count raw HTML converted] — pending (~118 raw `<button>`)
+- [~] Step 4a: Buttons — in progress. `/cases` migrated (exports, status pills, bulk actions, load-more → `Button`); confirm-dialog (Phase 1a) done. Remaining pages pending.
 - [x] Step 4b: Dialog/Modal — `confirm-dialog` migrated to @mieweb/ui `Button` + dark tokens; tested a11y shell kept (Modal's `role=dialog` ≠ the asserted `role=alertdialog`/focus-trap). 9/9 tests pass.
-- [ ] Step 4c: Form Elements — pending (~48 input / 21 select / 12 textarea)
-- [ ] Step 4d: Data Display — pending (Badge, Card, Tabs; NITRO grids vs Table)
+- [~] Step 4c: Form Elements — in progress. `/cases` filters → `Select` (measure/priority/assignee/site) + `Input` (search, bulk assignee); layout header filters (Phase 1b) → `Select`. Remaining pages pending.
+- [~] Step 4d: Data Display — in progress. `/cases` priority → `Badge` (HIGH=danger/MED=warning/LOW=secondary); nuanced status+outcome pills kept as **dark-aware token spans** (`lib/status.ts` helpers now carry `dark:` variants — Badge's 6 variants can't express the 5 outcome + 5 case-status colors). Cards/hero retokenized + dark. NITRO grids BLOCKED (see Known Gaps).
 - [x] Step 4e: Feedback — Toast (`ToastProvider`+`ToastContainer`+`useToast`, event bridge preserved) and Skeleton (`SkeletonCard`/`SkeletonRow` rebuilt on `Skeleton`). Build + 53/53 tests green.
 - [x] Step 4f: Navigation — `(dashboard)/layout.tsx` rebuilt on @mieweb/ui `Sidebar` + `AppHeader` + `ThemeBrandSwitcher`. Header site/date filters now @mieweb/ui `Select` (partial Step 4c). Build + lint green.
 - [ ] Step 4g: Overlays — pending (Dropdown, Tooltip, CommandPalette)
@@ -120,6 +120,10 @@
 | `frontend/components/confirm-dialog.tsx` | (Phase 1a) Buttons → `Button`; colors → neutral dark-aware tokens; a11y shell unchanged |
 | `frontend/components/skeleton-loader.tsx` | (Phase 1a) `"use client"`; internals rebuilt on `Skeleton` |
 | `frontend/app/(dashboard)/layout.tsx` | (Phase 1b) **Full rewrite** onto @mieweb/ui `Sidebar` + `AppHeader`; removed custom mobile drawer + bottom-nav; nav via `router.push`; fixed app-shell (`h-dvh overflow-hidden`, `main` scrolls); 4 raw `<select>` → `Select` |
+| `frontend/lib/status.ts` | (Phase 2) `measureStatusClass`/`outcomeStatusClass`/`caseStatusClass` now dark-aware (`dark:` variants); `slate`→`neutral` for the neutral cases (themes status pills app-wide) |
+| `frontend/components/SlaChip.tsx` | (Phase 2) dark-aware text colors; `slate`→`neutral` |
+| `frontend/__tests__/components/SlaChip.test.tsx` | (Phase 2) updated `text-slate-500`→`text-neutral-500` assertion |
+| `frontend/app/(dashboard)/cases/page.tsx` | (Phase 2 pilot) Buttons/Selects/Input/Badge + dark tokens across hero, header, tabs, filter bar, bulk bar, cards, load-more. All state/handlers preserved. Grid-free (card layout). |
 
 ## Files Created
 
@@ -167,6 +171,7 @@
 | Monaco (CQL editor) | No equivalent — specialized | `features/studio/components/CqlTab.tsx` |
 | recharts | @mieweb/ui ships chart color vars only, not chart components | `app/(dashboard)/programs/page.tsx`, `programs/[measureId]/page.tsx` |
 | Brand font (Jost) | EH brand's `@import` of Jost is dropped inside `layer(theme)` — app keeps Geist | `app/globals.css` (font-fidelity follow-up) |
+| **DataVis NITRO grid** | **BLOCKED — not npm-consumable.** `@mieweb/ui/datavis` imports raw source `datavis/src/...` from `mieweb/datavis`, which is `"private": true` (never published to npm), source-only (no built dist), depends on a *different* nested `@mieweb/ui@0.3.0-dev.85` + `datavis-ace` + `@dnd-kit` + `i18next`, and its `local` source has no row-data prop (built for `http` — it fetches a URL itself, bypassing our authed API client). `datavis-ace@4.0.0-PRE.2` IS on npm; the `datavis` engine is not. **Unblock:** ask Doug/MIE to publish `@mieweb/datavis` (built dist) to npm/GHCR, then `@mieweb/ui/datavis` drops in. **Interim:** tabular pages stay semantic tables retokenized to @mieweb/ui (swap-ready); `/cases` is card-based so needs no grid. Grid-engine decision (real NITRO once published vs `@mieweb/ui/ag-grid` [public peers] vs basic `Table`) deferred to the first genuinely tabular page. | `app/(dashboard)/runs`, `cases/[id]`, admin tables (future) |
 
 ## Notes
 

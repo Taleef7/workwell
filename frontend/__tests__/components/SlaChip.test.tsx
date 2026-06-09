@@ -48,9 +48,9 @@ describe("SlaChip", () => {
     expect(screen.getByTestId("sla-chip")).toHaveClass("text-red-600");
   });
 
-  it("applies slate class when slaRemainingDays is ≥8", () => {
+  it("applies neutral class when slaRemainingDays is ≥8", () => {
     render(<SlaChip slaRemainingDays={10} />);
-    expect(screen.getByTestId("sla-chip")).toHaveClass("text-slate-500");
+    expect(screen.getByTestId("sla-chip")).toHaveClass("text-neutral-500");
   });
 
   it("renders a span element (valid inside both dl and td)", () => {

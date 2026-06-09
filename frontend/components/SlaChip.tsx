@@ -12,12 +12,12 @@ export function SlaChip({ slaRemainingDays, slaBreached }: Props) {
   const effectivelyBreached = slaBreached || slaRemainingDays < 0;
 
   const colorClass = effectivelyBreached
-    ? "font-semibold text-red-700"
+    ? "font-semibold text-red-700 dark:text-red-400"
     : slaRemainingDays <= 2
-      ? "font-medium text-red-600"
+      ? "font-medium text-red-600 dark:text-red-400"
       : slaRemainingDays <= 7
-        ? "text-yellow-600"
-        : "text-slate-500";
+        ? "text-yellow-600 dark:text-yellow-400"
+        : "text-neutral-500 dark:text-neutral-400";
 
   return (
     <span className={colorClass} data-testid="sla-chip">
