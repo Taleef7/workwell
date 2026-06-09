@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Select } from "@mieweb/ui";
 import type { ApiClient } from "@/lib/api/client";
 
 type PacketFormat = "json" | "html";
@@ -47,27 +48,28 @@ export function AuditPacketExportButton({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <label className="sr-only" htmlFor={`${filenamePrefix}-format`}>
-        Audit packet format
-      </label>
-      <select
+      <Select
         id={`${filenamePrefix}-format`}
-        className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800"
+        aria-label="Audit packet format"
+        size="sm"
+        className="w-24"
         value={format}
-        onChange={(event) => setFormat(event.target.value as PacketFormat)}
+        onValueChange={(value) => setFormat(value as PacketFormat)}
         disabled={disabled || exporting}
-      >
-        <option value="json">JSON</option>
-        <option value="html">HTML</option>
-      </select>
-      <button
+        options={[
+          { value: "json", label: "JSON" },
+          { value: "html", label: "HTML" },
+        ]}
+      />
+      <Button
         type="button"
-        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        variant="outline"
+        size="sm"
         onClick={() => void exportPacket()}
         disabled={disabled || exporting}
       >
         {exporting ? "Exporting..." : label}
-      </button>
+      </Button>
     </div>
   );
 }

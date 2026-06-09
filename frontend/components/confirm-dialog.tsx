@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
+import { Button } from "@mieweb/ui";
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -88,7 +89,7 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       <div
-        className="absolute inset-0 bg-slate-900/40"
+        className="absolute inset-0 bg-neutral-900/50"
         aria-hidden="true"
         onClick={() => onCancelRef.current()}
       />
@@ -98,30 +99,21 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descId}
-        className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        className="relative w-full max-w-md rounded-lg border border-neutral-200 bg-white p-6 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <h2 id={titleId} className="text-lg font-semibold text-slate-900">
+        <h2 id={titleId} className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
           {title}
         </h2>
-        <p id={descId} className="mt-2 text-sm text-slate-600">
+        <p id={descId} className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
           {description}
         </p>
         <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
-          >
+          <Button type="button" variant="outline" onClick={onCancel}>
             {cancelLabel}
-          </button>
-          <button
-            ref={confirmRef}
-            type="button"
-            onClick={onConfirm}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer transition-colors"
-          >
+          </Button>
+          <Button ref={confirmRef} type="button" variant="primary" onClick={onConfirm}>
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

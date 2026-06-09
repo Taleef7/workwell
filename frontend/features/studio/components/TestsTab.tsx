@@ -107,19 +107,19 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
   }
 
   return (
-    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+    <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">Fixture Validation</h3>
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Fixture Validation</h3>
         <div className="flex gap-2">
-          <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={add}>Add Fixture</button>
+          <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={add}>Add Fixture</button>
           <button
-            className="rounded border border-purple-300 bg-white px-2 py-1 text-xs font-medium text-purple-700 disabled:opacity-60"
+            className="rounded border border-purple-300 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-purple-700 disabled:opacity-60"
             onClick={generateFixtures}
             disabled={isGenerating}
           >
             {isGenerating ? "Generating..." : "Generate Fixtures"}
           </button>
-          <button className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white" onClick={save}>Save Tests</button>
+          <button className="rounded bg-neutral-900 px-2 py-1 text-xs font-medium text-white" onClick={save}>Save Tests</button>
           <button
             className="flex items-center gap-1 rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-60"
             onClick={validate}
@@ -146,7 +146,7 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">AI-generated fixtures</p>
             <button
               type="button"
-              className="rounded border border-amber-400 bg-white px-2 py-1 text-xs font-semibold text-amber-900"
+              className="rounded border border-amber-400 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-semibold text-amber-900"
               onClick={addAllGeneratedFixtures}
             >
               Add All to Drafts
@@ -157,21 +157,21 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
           </p>
           <div className="mt-3 grid gap-2">
             {generatedFixtures.map((fixture, index) => (
-              <div key={`${fixture.name}-${index}`} className="rounded border border-amber-200 bg-white p-2">
+              <div key={`${fixture.name}-${index}`} className="rounded border border-amber-200 bg-white dark:bg-neutral-900 p-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold text-slate-900">{fixture.name}</p>
-                    <p className="text-xs text-slate-600">Expected: {labelFor(OUTCOME_LABELS, fixture.expectedOutcome)}</p>
+                    <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">{fixture.name}</p>
+                    <p className="text-xs text-neutral-600 dark:text-neutral-400">Expected: {labelFor(OUTCOME_LABELS, fixture.expectedOutcome)}</p>
                   </div>
                   <button
                     type="button"
-                    className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                    className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300"
                     onClick={() => addGeneratedFixture(fixture, index)}
                   >
                     Add to Draft
                   </button>
                 </div>
-                <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700">
+                <pre className="mt-2 overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800/50 p-2 text-[11px] text-neutral-700 dark:text-neutral-300">
                   {JSON.stringify(fixture.inputData, null, 2)}
                 </pre>
               </div>
@@ -180,23 +180,23 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
         </div>
       ) : null}
 
-      {fixtures.length === 0 ? <p className="text-sm text-slate-600">No fixtures yet. Add at least one before activation.</p> : null}
+      {fixtures.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No fixtures yet. Add at least one before activation.</p> : null}
       {fixtures.map((fixture, index) => (
-        <div key={`${fixture.fixtureName}-${index}`} className="grid gap-2 rounded border border-slate-200 p-3">
+        <div key={`${fixture.fixtureName}-${index}`} className="grid gap-2 rounded border border-neutral-200 dark:border-neutral-800 p-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-slate-700">Fixture {index + 1}</p>
-            <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={() => remove(index)}>Remove</button>
+            <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Fixture {index + 1}</p>
+            <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={() => remove(index)}>Remove</button>
           </div>
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
-          <select className="rounded border border-slate-300 px-3 py-2 text-sm" value={fixture.expectedOutcome} onChange={(e) => update(index, "expectedOutcome", e.target.value)}>
+          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
+          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
+          <select className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" value={fixture.expectedOutcome} onChange={(e) => update(index, "expectedOutcome", e.target.value)}>
             <option value="COMPLIANT">{labelFor(OUTCOME_LABELS, "COMPLIANT")}</option>
             <option value="DUE_SOON">{labelFor(OUTCOME_LABELS, "DUE_SOON")}</option>
             <option value="OVERDUE">{labelFor(OUTCOME_LABELS, "OVERDUE")}</option>
             <option value="MISSING_DATA">{labelFor(OUTCOME_LABELS, "MISSING_DATA")}</option>
             <option value="EXCLUDED">{labelFor(OUTCOME_LABELS, "EXCLUDED")}</option>
           </select>
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Notes" value={fixture.notes} onChange={(e) => update(index, "notes", e.target.value)} />
+          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Notes" value={fixture.notes} onChange={(e) => update(index, "notes", e.target.value)} />
         </div>
       ))}
       {testFailures.length > 0 ? (

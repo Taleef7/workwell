@@ -498,12 +498,12 @@ export default function AdminPage() {
   if (!isAdmin) {
     return (
       <section className="flex min-h-[60vh] items-center justify-center px-4">
-        <div className="max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
-            <ShieldAlert className="h-7 w-7 text-slate-700" />
+        <div className="max-w-md rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800">
+            <ShieldAlert className="h-7 w-7 text-neutral-700 dark:text-neutral-300" />
           </div>
-          <h2 className="mt-4 text-2xl font-semibold text-slate-900">Admin access required</h2>
-          <p className="mt-3 text-sm leading-6 text-slate-600">
+          <h2 className="mt-4 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Admin access required</h2>
+          <p className="mt-3 text-sm leading-6 text-neutral-600 dark:text-neutral-400">
             Your current role does not have access to this section. If you expected to see admin tools, please sign in with an
             administrator account.
           </p>
@@ -514,10 +514,10 @@ export default function AdminPage() {
 
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-8 text-white shadow-lg">
-        <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Admin</p>
+      <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-8 text-white shadow-lg">
+        <p className="text-sm uppercase tracking-[0.3em] text-neutral-300 dark:text-neutral-600">Admin</p>
         <h2 className="mt-2 text-3xl font-semibold">Operations, waivers, and audit access</h2>
-        <p className="mt-3 max-w-2xl text-slate-300">
+        <p className="mt-3 max-w-2xl text-neutral-300 dark:text-neutral-600">
           Keep the demo coherent: integration health, scheduler control, waiver tracking, and access-event review all live
           from the same admin surface.
         </p>
@@ -526,14 +526,14 @@ export default function AdminPage() {
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">scheduler</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{scheduler?.enabled ? "enabled" : "disabled"}</p>
-          <p className="mt-2 text-xs text-slate-500">Cron: {scheduler?.cron ?? "-"}</p>
-          <p className="mt-1 text-xs text-slate-500">
+        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">scheduler</p>
+          <p className="mt-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{scheduler?.enabled ? "enabled" : "disabled"}</p>
+          <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Cron: {scheduler?.cron ?? "-"}</p>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             Next fire: {scheduler?.nextFireAt ? new Date(scheduler.nextFireAt).toLocaleString() : "-"}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             Last scheduled run: {scheduler?.lastRunAt ? new Date(scheduler.lastRunAt).toLocaleString() : "Never"} ({formatStatusLabel(scheduler?.lastRunStatus ?? "never")})
           </p>
           <div className="mt-4 flex flex-col gap-2">
@@ -554,7 +554,7 @@ export default function AdminPage() {
                   type="button"
                   onClick={() => setShowDisableSchedulerConfirm(true)}
                   disabled={updatingScheduler || scheduler?.enabled === false}
-                  className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  className="rounded-md bg-neutral-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 >
                   Disable
                 </button>
@@ -577,7 +577,7 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => setShowDisableSchedulerConfirm(false)}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                   >
                     Cancel
                   </button>
@@ -587,24 +587,24 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">integration health</p>
+        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">integration health</p>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {integrations.map((item) => (
-              <div key={item.integration} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.displayName}</p>
+              <div key={item.integration} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{item.displayName}</p>
                 <p className="mt-2">
                   <span className={statusBadgeClass(item.status)}>{formatStatusLabel(item.status)}</span>
                 </p>
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                   Last sync: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "Never"}
                 </p>
-                <p className="mt-2 text-sm text-slate-600">{item.detail}</p>
+                <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{item.detail}</p>
                 <button
                   type="button"
                   onClick={() => void triggerSync(item.integration)}
                   disabled={syncing === item.integration}
-                  className="mt-4 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  className="mt-4 rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 >
                   {syncing === item.integration ? "Syncing..." : "Manual Sync"}
                 </button>
@@ -614,12 +614,12 @@ export default function AdminPage() {
         </article>
       </div>
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">data readiness</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Source mappings</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">data readiness</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Source mappings</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Required data elements for each measure must be mapped to a source system before a measure can safely activate.
               Run Validate Mappings to sync source health into mapping statuses.
             </p>
@@ -634,9 +634,9 @@ export default function AdminPage() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-4 py-2 font-medium">Canonical Element</th>
                 <th className="px-4 py-2 font-medium">Source</th>
@@ -649,27 +649,27 @@ export default function AdminPage() {
             <tbody>
               {dataMappings.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-4 text-sm text-slate-500">No mappings loaded.</td>
+                  <td colSpan={6} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No mappings loaded.</td>
                 </tr>
               ) : null}
               {dataMappings.map((m) => (
-                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr key={m.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-700">{m.canonicalElement}</code>
+                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.canonicalElement}</code>
                   </td>
-                  <td className="px-4 py-2 text-slate-600">{m.sourceDisplayName}</td>
+                  <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{m.sourceDisplayName}</td>
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-500">{m.sourceField}</code>
+                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.sourceField}</code>
                   </td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(m.mappingStatus)}`}>
                       {formatStatusLabel(m.mappingStatus)}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
+                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">
                     {m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—"}
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.notes ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -677,12 +677,12 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">terminology governance</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Local code mappings</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">terminology governance</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Local code mappings</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Local and internal codes mapped to standard terminology (LOINC, CPT, CVX, SNOMED). Demo mappings are
               labeled as such and do not claim official accuracy.
             </p>
@@ -696,14 +696,14 @@ export default function AdminPage() {
                 }
                 setShowAddMapping((open) => !open);
               }}
-              className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+              className="rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white hover:bg-neutral-800"
             >
               {showAddMapping ? "Close" : "Add Mapping"}
             </button>
             <button
               type="button"
               onClick={() => void loadTerminologyMappings()}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
             >
               Refresh
             </button>
@@ -711,80 +711,80 @@ export default function AdminPage() {
         </div>
 
         {showAddMapping ? (
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h4 className="text-sm font-semibold text-slate-900">Add terminology mapping</h4>
-            <p className="mt-1 text-xs text-slate-500">
+          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
+            <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Add terminology mapping</h4>
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               Creates a new local-to-standard mapping. New mappings default to <code className="text-[11px]">PROPOSED</code> and
               require review before promotion.
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Local Code *
                 <input
                   type="text"
                   value={mappingForm.localCode}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, localCode: e.target.value }))}
                   placeholder="e.g. LOCAL-AUD-001"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Local Display
                 <input
                   type="text"
                   value={mappingForm.localDisplay}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, localDisplay: e.target.value }))}
                   placeholder="Optional human-readable label"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Local System *
                 <input
                   type="text"
                   value={mappingForm.localSystem}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, localSystem: e.target.value }))}
                   placeholder="e.g. urn:workwell:demo"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Standard Code *
                 <input
                   type="text"
                   value={mappingForm.standardCode}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, standardCode: e.target.value }))}
                   placeholder="e.g. 92557"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Standard Display
                 <input
                   type="text"
                   value={mappingForm.standardDisplay}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, standardDisplay: e.target.value }))}
                   placeholder="Optional human-readable label"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Standard System *
                 <input
                   type="text"
                   value={mappingForm.standardSystem}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, standardSystem: e.target.value }))}
                   placeholder="e.g. http://www.ama-assn.org/go/cpt"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Status
-                <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                <div className="mt-1 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-600 dark:text-neutral-400">
                   PROPOSED — new mappings always start as PROPOSED and require review before promotion
                 </div>
               </label>
-              <label className="text-xs font-medium text-slate-700">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Confidence (0.0 – 1.0)
                 <input
                   type="number"
@@ -794,17 +794,17 @@ export default function AdminPage() {
                   value={mappingForm.mappingConfidence}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, mappingConfidence: e.target.value }))}
                   placeholder="e.g. 0.95"
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-xs font-medium text-slate-700 md:col-span-2">
+              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300 md:col-span-2">
                 Notes
                 <textarea
                   value={mappingForm.notes}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, notes: e.target.value }))}
                   placeholder="Optional context for reviewers"
                   rows={2}
-                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
             </div>
@@ -825,7 +825,7 @@ export default function AdminPage() {
                   setShowAddMapping(false);
                 }}
                 disabled={savingMapping}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -833,9 +833,9 @@ export default function AdminPage() {
           </div>
         ) : null}
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-4 py-2 font-medium">Local Code</th>
                 <th className="px-4 py-2 font-medium">Local System</th>
@@ -850,35 +850,35 @@ export default function AdminPage() {
             <tbody>
               {terminologyMappings.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-4 text-sm text-slate-500">No terminology mappings loaded.</td>
+                  <td colSpan={8} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No terminology mappings loaded.</td>
                 </tr>
               ) : null}
               {terminologyMappings.map((m) => (
-                <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr key={m.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-700">{m.localCode}</code>
-                    {m.localDisplay ? <p className="text-[11px] text-slate-500">{m.localDisplay}</p> : null}
+                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.localCode}</code>
+                    {m.localDisplay ? <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.localDisplay}</p> : null}
                   </td>
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-500">{m.localSystem}</code>
+                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.localSystem}</code>
                   </td>
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-700">{m.standardCode}</code>
-                    {m.standardDisplay ? <p className="text-[11px] text-slate-500">{m.standardDisplay}</p> : null}
+                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.standardCode}</code>
+                    {m.standardDisplay ? <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.standardDisplay}</p> : null}
                   </td>
                   <td className="px-4 py-2">
-                    <code className="text-[11px] text-slate-500">{m.standardSystem}</code>
+                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.standardSystem}</code>
                   </td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(m.mappingStatus)}`}>
                       {formatStatusLabel(m.mappingStatus)}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-600">
+                  <td className="px-4 py-2 text-xs text-neutral-600 dark:text-neutral-400">
                     {m.mappingConfidence != null ? `${Math.round(m.mappingConfidence * 100)}%` : "—"}
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{m.reviewedBy ?? "—"}</td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{m.notes ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.reviewedBy ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.notes ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -886,12 +886,12 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">waivers</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Excluded case support</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">waivers</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Excluded case support</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Global site filter applies automatically. Use the filters below to inspect active and expired waivers, or
               grant one manually for a specific employee and measure.
             </p>
@@ -899,17 +899,17 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => void loadWaivers()}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             Refresh waivers
           </button>
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-neutral-600 dark:text-neutral-400">
             Measure
             <select
-              className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               value={waiverMeasureFilter}
               onChange={(e) => setWaiverMeasureFilter(e.target.value)}
             >
@@ -921,10 +921,10 @@ export default function AdminPage() {
               ))}
             </select>
           </label>
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-neutral-600 dark:text-neutral-400">
             Active
             <select
-              className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               value={waiverActiveFilter}
               onChange={(e) => setWaiverActiveFilter(e.target.value)}
             >
@@ -933,20 +933,20 @@ export default function AdminPage() {
               <option value="false">Inactive only</option>
             </select>
           </label>
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-neutral-600 dark:text-neutral-400">
             Expires after
             <input
               type="date"
-              className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               value={waiverExpiresAfter}
               onChange={(e) => setWaiverExpiresAfter(e.target.value)}
             />
           </label>
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-neutral-600 dark:text-neutral-400">
             Expires before
             <input
               type="date"
-              className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               value={waiverExpiresBefore}
               onChange={(e) => setWaiverExpiresBefore(e.target.value)}
             />
@@ -954,33 +954,33 @@ export default function AdminPage() {
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-900">Waivers</p>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Waivers</p>
               <button
                 type="button"
                 onClick={() => void loadWaivers()}
                 disabled={loadingWaivers}
-                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
               >
                 {loadingWaivers ? "Loading..." : "Reload"}
               </button>
             </div>
             <div className="mt-3 space-y-3">
-              {waivers.length === 0 ? <p className="text-sm text-slate-600">No waivers found for the current filters.</p> : null}
+              {waivers.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No waivers found for the current filters.</p> : null}
               {waivers.map((waiver) => (
-                <div key={waiver.waiverId} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+                <div key={waiver.waiverId} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold text-slate-900">
-                        {waiver.employeeName} <span className="text-xs text-slate-500">({waiver.employeeExternalId})</span>
+                      <p className="font-semibold text-neutral-900 dark:text-neutral-100">
+                        {waiver.employeeName} <span className="text-xs text-neutral-500 dark:text-neutral-400">({waiver.employeeExternalId})</span>
                       </p>
-                      <p className="text-xs text-slate-600">
+                      <p className="text-xs text-neutral-600 dark:text-neutral-400">
                         {waiver.measureName} • v{waiver.measureVersion} • {waiver.site || "Unknown site"}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${waiver.active ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${waiver.active ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}>
                         {waiver.active ? "Active" : "Inactive"}
                       </span>
                       {waiver.expired ? (
@@ -988,8 +988,8 @@ export default function AdminPage() {
                       ) : null}
                     </div>
                   </div>
-                  <p className="mt-2 text-slate-700">{waiver.exclusionReason}</p>
-                  <div className="mt-2 grid gap-1 text-xs text-slate-500">
+                  <p className="mt-2 text-neutral-700 dark:text-neutral-300">{waiver.exclusionReason}</p>
+                  <div className="mt-2 grid gap-1 text-xs text-neutral-500 dark:text-neutral-400">
                     <p>Granted by {waiver.grantedBy} at {new Date(waiver.grantedAt).toLocaleString()}</p>
                     <p>Expires {waiver.expiresAt ? new Date(waiver.expiresAt).toLocaleString() : "never"}</p>
                     {waiver.notes ? <p>Notes: {waiver.notes}</p> : null}
@@ -999,25 +999,25 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-900">Grant waiver</p>
-            <p className="mt-1 text-xs text-slate-500">
+          <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Grant waiver</p>
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               Use an employee external ID from the seeded dataset. The latest active version for the selected measure will be used.
             </p>
             <div className="mt-4 grid gap-3">
-              <label className="text-sm text-slate-600">
+              <label className="text-sm text-neutral-600 dark:text-neutral-400">
                 Employee external ID
                 <input
-                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                   placeholder="patient-003"
                   value={waiverEmployeeExternalId}
                   onChange={(e) => setWaiverEmployeeExternalId(e.target.value)}
                 />
               </label>
-              <label className="text-sm text-slate-600">
+              <label className="text-sm text-neutral-600 dark:text-neutral-400">
                 Measure
                 <select
-                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                   value={waiverMeasureId}
                   onChange={(e) => setWaiverMeasureId(e.target.value)}
                 >
@@ -1029,34 +1029,34 @@ export default function AdminPage() {
                   ))}
                 </select>
               </label>
-              <label className="text-sm text-slate-600">
+              <label className="text-sm text-neutral-600 dark:text-neutral-400">
                 Exclusion reason
                 <textarea
-                  className="mt-2 min-h-24 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-2 min-h-24 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                   placeholder="Active medical waiver on file."
                   value={waiverExclusionReason}
                   onChange={(e) => setWaiverExclusionReason(e.target.value)}
                 />
               </label>
-              <label className="text-sm text-slate-600">
+              <label className="text-sm text-neutral-600 dark:text-neutral-400">
                 Expires at
                 <input
                   type="datetime-local"
-                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                   value={waiverExpiresAt}
                   onChange={(e) => setWaiverExpiresAt(e.target.value)}
                 />
               </label>
-              <label className="text-sm text-slate-600">
+              <label className="text-sm text-neutral-600 dark:text-neutral-400">
                 Notes
                 <textarea
-                  className="mt-2 min-h-20 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  className="mt-2 min-h-20 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                   placeholder="Optional notes for the waiver record."
                   value={waiverNotes}
                   onChange={(e) => setWaiverNotes(e.target.value)}
                 />
               </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
                 <input type="checkbox" checked={waiverActive} onChange={(e) => setWaiverActive(e.target.checked)} />
                 Active waiver
               </label>
@@ -1064,7 +1064,7 @@ export default function AdminPage() {
                 type="button"
                 onClick={() => void grantWaiver()}
                 disabled={grantingWaiver}
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {grantingWaiver ? "Granting..." : "Grant waiver"}
               </button>
@@ -1073,24 +1073,24 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">notification templates</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Outreach message templates</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">notification templates</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Outreach message templates</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Edit the subject and body of outreach templates inline. Preview substitutes sample values for
               {" "}
-              <code className="text-[11px] text-slate-500">{"{employee_name}"}</code>,{" "}
-              <code className="text-[11px] text-slate-500">{"{measure_name}"}</code>,{" "}
-              <code className="text-[11px] text-slate-500">{"{due_date}"}</code>,{" "}
-              <code className="text-[11px] text-slate-500">{"{assignee_name}"}</code>.
+              <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{"{employee_name}"}</code>,{" "}
+              <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{"{measure_name}"}</code>,{" "}
+              <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{"{due_date}"}</code>,{" "}
+              <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{"{assignee_name}"}</code>.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void loadTemplates()}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             Refresh templates
           </button>
@@ -1098,14 +1098,14 @@ export default function AdminPage() {
 
         <div className="mt-4 space-y-3">
           {templates.length === 0 ? (
-            <p className="text-sm text-slate-600">No templates loaded.</p>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">No templates loaded.</p>
           ) : null}
           {templates.map((template) => (
-            <div key={template.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div key={template.id} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">{template.name}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{template.name}</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
                     {template.type} · Subject: {template.subject}
                   </p>
                 </div>
@@ -1113,14 +1113,14 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => startEditTemplate(template)}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => void previewTemplate(template.id)}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     Preview
                   </button>
@@ -1129,13 +1129,13 @@ export default function AdminPage() {
               {editingTemplateId === template.id ? (
                 <div className="mt-3 space-y-2">
                   <input
-                    className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                    className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                     value={templateForm.subject}
                     onChange={(e) => setTemplateForm((f) => ({ ...f, subject: e.target.value }))}
                     placeholder="Subject"
                   />
                   <textarea
-                    className="h-32 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                    className="h-32 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
                     value={templateForm.bodyText}
                     onChange={(e) => setTemplateForm((f) => ({ ...f, bodyText: e.target.value }))}
                     placeholder="Body text"
@@ -1145,14 +1145,14 @@ export default function AdminPage() {
                       type="button"
                       onClick={() => void saveTemplate(template)}
                       disabled={savingTemplate}
-                      className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      className="rounded-md bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     >
                       {savingTemplate ? "Saving..." : "Save"}
                     </button>
                     <button
                       type="button"
                       onClick={() => setEditingTemplateId(null)}
-                      className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
                       Cancel
                     </button>
@@ -1160,10 +1160,10 @@ export default function AdminPage() {
                 </div>
               ) : null}
               {templatePreview && templatePreview.id === template.id ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-800">{templatePreview.subject}</p>
-                  <pre className="mt-2 whitespace-pre-wrap text-[12px] leading-5 text-slate-700">{templatePreview.bodyText}</pre>
+                <div className="mt-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Preview</p>
+                  <p className="mt-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">{templatePreview.subject}</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-[12px] leading-5 text-neutral-700 dark:text-neutral-300">{templatePreview.bodyText}</pre>
                 </div>
               ) : null}
             </div>
@@ -1171,28 +1171,28 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">outreach delivery log</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Recent outreach emails</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">outreach delivery log</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Recent outreach emails</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Every outreach send is recorded here. On the demo stack the provider is{" "}
-              <code className="text-[11px] text-slate-500">simulated</code> — no real email is delivered.
+              <code className="text-[11px] text-neutral-500 dark:text-neutral-400">simulated</code> — no real email is delivered.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void loadDeliveryLog()}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             Refresh log
           </button>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-4 py-2 font-medium">Recipient</th>
                 <th className="px-4 py-2 font-medium">Measure</th>
@@ -1205,16 +1205,16 @@ export default function AdminPage() {
             <tbody>
               {deliveryLog.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-4 text-sm text-slate-500">No outreach emails sent yet.</td>
+                  <td colSpan={6} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No outreach emails sent yet.</td>
                 </tr>
               ) : null}
               {deliveryLog.map((entry) => (
-                <tr key={entry.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2 text-slate-700">{entry.toAddress}</td>
-                  <td className="px-4 py-2 text-slate-600">{entry.measureName ?? "—"}</td>
-                  <td className="max-w-xs truncate px-4 py-2 text-xs text-slate-600">{entry.subject}</td>
+                <tr key={entry.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+                  <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{entry.toAddress}</td>
+                  <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{entry.measureName ?? "—"}</td>
+                  <td className="max-w-xs truncate px-4 py-2 text-xs text-neutral-600 dark:text-neutral-400">{entry.subject}</td>
                   <td className="px-4 py-2">
-                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                    <span className="rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-[10px] font-semibold text-neutral-700 dark:text-neutral-300">
                       {entry.provider}
                     </span>
                   </td>
@@ -1223,7 +1223,7 @@ export default function AdminPage() {
                       {entry.status}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
+                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">
                     {entry.sentAt ? new Date(entry.sentAt).toLocaleString() : "—"}
                   </td>
                 </tr>
@@ -1234,10 +1234,10 @@ export default function AdminPage() {
       </article>
 
       {demoResetVisible ? (
-      <article className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-red-200 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
         <h3 className="mt-1 text-2xl font-semibold text-red-700">Reset demo data</h3>
-        <p className="mt-1 text-sm text-slate-600">
+        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
           Clears all runs, cases, outcomes, outreach, and audit events. Employees, measures, and value sets are
           preserved. Only available outside production.
         </p>
@@ -1268,7 +1268,7 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={() => setShowResetConfirm(false)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
               >
                 Cancel
               </button>
@@ -1278,12 +1278,12 @@ export default function AdminPage() {
       </article>
       ) : null}
 
-      <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">audit log</p>
-            <h3 className="mt-1 text-2xl font-semibold text-slate-900">Access events and mutations</h3>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">audit log</p>
+            <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Access events and mutations</h3>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               CASE_VIEWED events are separated from mutations so access review stays distinct from action history.
             </p>
           </div>
@@ -1297,7 +1297,7 @@ export default function AdminPage() {
                 key={value}
                 type="button"
                 onClick={() => setAuditScope(value)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium ${auditScope === value ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
+                className={`rounded-full border px-3 py-1 text-xs font-medium ${auditScope === value ? "border-neutral-900 dark:border-neutral-100 bg-neutral-900 text-white" : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 {label}
               </button>
@@ -1306,41 +1306,41 @@ export default function AdminPage() {
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-3">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
             {auditScope === "access" ? "Showing case views." : auditScope === "mutations" ? "Showing write events." : "Showing all audit events."}
           </p>
           <button
             type="button"
             onClick={() => void loadAuditEvents()}
             disabled={loadingAudit}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
+            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
           >
             {loadingAudit ? "Loading..." : "Refresh audit"}
           </button>
         </div>
 
         <div className="mt-4 space-y-3">
-          {auditEvents.length === 0 ? <p className="text-sm text-slate-600">No audit events found.</p> : null}
+          {auditEvents.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No audit events found.</p> : null}
           {auditEvents.map((event) => (
-            <div key={`${event.eventType}-${event.occurredAt}-${event.caseId ?? "none"}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
+            <div key={`${event.eventType}-${event.occurredAt}-${event.caseId ?? "none"}`} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4 text-sm">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="font-semibold text-slate-900">{event.eventType}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="font-semibold text-neutral-900 dark:text-neutral-100">{event.eventType}</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
                     {event.scope === "access" ? "Access event" : "Mutation"} • {event.actor ?? "system"} • {new Date(event.occurredAt).toLocaleString()}
                   </p>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${event.scope === "access" ? "bg-indigo-100 text-indigo-800" : "bg-slate-100 text-slate-700"}`}>
+                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${event.scope === "access" ? "bg-indigo-100 text-indigo-800" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}>
                   {event.scope}
                 </span>
               </div>
-              <div className="mt-2 grid gap-1 text-xs text-slate-600">
+              <div className="mt-2 grid gap-1 text-xs text-neutral-600 dark:text-neutral-400">
                 <p>Case: {event.caseId ?? "-"}</p>
                 <p>Run: {event.runId ?? "-"}</p>
                 <p>Measure: {event.measureName ?? "-"}</p>
                 <p>Employee: {event.employeeExternalId ?? "-"}</p>
               </div>
-              {event.detail ? <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 text-[11px] leading-5 text-slate-700">{event.detail}</pre> : null}
+              {event.detail ? <pre className="mt-3 overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 text-[11px] leading-5 text-neutral-700 dark:text-neutral-300">{event.detail}</pre> : null}
             </div>
           ))}
         </div>
@@ -1355,7 +1355,7 @@ function terminologyStatusBadgeClass(status: string) {
   if (s === "REVIEWED") return "bg-blue-100 text-blue-800";
   if (s === "PROPOSED") return "bg-amber-100 text-amber-800";
   if (s === "REJECTED") return "bg-red-100 text-red-800";
-  return "bg-slate-100 text-slate-700";
+  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function mappingStatusBadgeClass(status: string) {
@@ -1363,7 +1363,7 @@ function mappingStatusBadgeClass(status: string) {
   if (s === "MAPPED") return "bg-emerald-100 text-emerald-800";
   if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800";
   if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800";
-  return "bg-slate-100 text-slate-700";
+  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function deliveryStatusBadgeClass(status: string) {
@@ -1371,7 +1371,7 @@ function deliveryStatusBadgeClass(status: string) {
   if (s === "SENT") return "bg-emerald-100 text-emerald-800";
   if (s === "SIMULATED") return "bg-sky-100 text-sky-800";
   if (s === "FAILED") return "bg-red-100 text-red-800";
-  return "bg-slate-100 text-slate-700";
+  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function statusBadgeClass(status: string) {
@@ -1389,5 +1389,5 @@ function statusBadgeClass(status: string) {
     return "rounded-full border border-red-300 bg-red-100 px-3 py-1 text-sm font-semibold text-red-900";
   }
   // unknown / anything else
-  return "rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700";
+  return "rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-3 py-1 text-sm font-semibold text-neutral-700 dark:text-neutral-300";
 }

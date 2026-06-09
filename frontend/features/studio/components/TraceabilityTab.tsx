@@ -49,7 +49,7 @@ export function TraceabilityTab({ measureId, api }: Props) {
     URL.revokeObjectURL(url);
   }
 
-  if (loading) return <p className="text-sm text-slate-600">Loading traceability data...</p>;
+  if (loading) return <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading traceability data...</p>;
   if (error) return <p className="text-sm text-red-700">Error: {error}</p>;
   if (!data) return null;
 
@@ -58,13 +58,13 @@ export function TraceabilityTab({ measureId, api }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex items-center justify-between rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
         <div>
-          <p className="text-sm font-semibold text-slate-900">{data.measureName} — {data.version}</p>
-          <p className="text-xs text-slate-500">{data.rows.length} traceability links · {data.gaps.length} gap{data.gaps.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{data.measureName} — {data.version}</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">{data.rows.length} traceability links · {data.gaps.length} gap{data.gaps.length !== 1 ? "s" : ""}</p>
         </div>
         <button
-          className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           onClick={exportJson}
         >
           Export JSON
@@ -94,13 +94,13 @@ export function TraceabilityTab({ measureId, api }: Props) {
       ) : null}
 
       {data.rows.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+        <p className="rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-6 text-sm text-neutral-600 dark:text-neutral-400">
           No traceability rows generated. Add a policy reference, spec fields, and CQL.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-3 py-2 font-medium">Policy Requirement</th>
                 <th className="px-3 py-2 font-medium">Spec Field</th>
@@ -113,63 +113,63 @@ export function TraceabilityTab({ measureId, api }: Props) {
             </thead>
             <tbody>
               {data.rows.map((row, i) => (
-                <tr key={i} className="border-t border-slate-100 align-top hover:bg-slate-50">
+                <tr key={i} className="border-t border-neutral-100 dark:border-neutral-800 align-top hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                   <td className="px-3 py-2">
-                    {row.policyCitation ? <p className="text-[10px] text-slate-400">{row.policyCitation}</p> : null}
-                    <p className="font-medium text-slate-800">{row.policyRequirement}</p>
+                    {row.policyCitation ? <p className="text-[10px] text-neutral-400">{row.policyCitation}</p> : null}
+                    <p className="font-medium text-neutral-800 dark:text-neutral-200">{row.policyRequirement}</p>
                   </td>
                   <td className="px-3 py-2">
-                    <code className="rounded bg-slate-100 px-1 text-[11px] text-slate-700">{row.specField}</code>
-                    {row.specValue ? <p className="mt-0.5 text-[11px] text-slate-500 line-clamp-2">{row.specValue}</p> : null}
+                    <code className="rounded bg-neutral-100 dark:bg-neutral-800 px-1 text-[11px] text-neutral-700 dark:text-neutral-300">{row.specField}</code>
+                    {row.specValue ? <p className="mt-0.5 text-[11px] text-neutral-500 dark:text-neutral-400 line-clamp-2">{row.specValue}</p> : null}
                   </td>
                   <td className="px-3 py-2">
                     {row.cqlDefine ? (
                       <>
-                        <p className="font-mono text-[11px] text-slate-800">&quot;{row.cqlDefine}&quot;</p>
+                        <p className="font-mono text-[11px] text-neutral-800 dark:text-neutral-200">&quot;{row.cqlDefine}&quot;</p>
                         {row.cqlSnippet ? (
-                          <pre className="mt-1 max-w-xs overflow-hidden text-ellipsis whitespace-pre-wrap text-[10px] text-slate-400 line-clamp-3">{row.cqlSnippet}</pre>
+                          <pre className="mt-1 max-w-xs overflow-hidden text-ellipsis whitespace-pre-wrap text-[10px] text-neutral-400 line-clamp-3">{row.cqlSnippet}</pre>
                         ) : null}
                       </>
-                    ) : <span className="text-slate-400">—</span>}
+                    ) : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     {row.valueSets.length > 0 ? (
                       <ul className="space-y-0.5">
                         {row.valueSets.map((vs, j) => (
-                          <li key={j} className="text-[11px] text-slate-700">{vs.name}</li>
+                          <li key={j} className="text-[11px] text-neutral-700 dark:text-neutral-300">{vs.name}</li>
                         ))}
                       </ul>
-                    ) : <span className="text-slate-400">—</span>}
+                    ) : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     {row.requiredDataElements.length > 0 ? (
                       <ul className="space-y-0.5">
                         {row.requiredDataElements.map((el, j) => (
-                          <li key={j}><code className="text-[10px] text-slate-600">{el}</code></li>
+                          <li key={j}><code className="text-[10px] text-neutral-600 dark:text-neutral-400">{el}</code></li>
                         ))}
                       </ul>
-                    ) : <span className="text-slate-400">—</span>}
+                    ) : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     {row.testFixtures.length > 0 ? (
                       <ul className="space-y-0.5">
                         {row.testFixtures.map((f, j) => (
                           <li key={j} className="text-[11px]">
-                            <span className="text-slate-500">{f.fixtureName || "—"}</span>
-                            {f.expectedOutcome ? <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">{formatStatusLabel(f.expectedOutcome)}</span> : null}
+                            <span className="text-neutral-500 dark:text-neutral-400">{f.fixtureName || "—"}</span>
+                            {f.expectedOutcome ? <span className="ml-1 rounded bg-neutral-100 dark:bg-neutral-800 px-1 text-[10px] text-neutral-600 dark:text-neutral-400">{formatStatusLabel(f.expectedOutcome)}</span> : null}
                           </li>
                         ))}
                       </ul>
-                    ) : <span className="text-slate-400">—</span>}
+                    ) : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     {row.runtimeEvidenceKeys.length > 0 ? (
                       <ul className="space-y-0.5">
                         {row.runtimeEvidenceKeys.map((key, j) => (
-                          <li key={j}><code className="text-[10px] text-slate-600">{key}</code></li>
+                          <li key={j}><code className="text-[10px] text-neutral-600 dark:text-neutral-400">{key}</code></li>
                         ))}
                       </ul>
-                    ) : <span className="text-slate-400">—</span>}
+                    ) : <span className="text-neutral-400">—</span>}
                   </td>
                 </tr>
               ))}
@@ -187,7 +187,7 @@ function GapRow({ gap }: { gap: TraceabilityGap }) {
       <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${gapBadgeClass(gap.severity)}`}>
         {formatStatusLabel(gap.severity)}
       </span>
-      <span className="text-sm text-slate-700">{gap.message}</span>
+      <span className="text-sm text-neutral-700 dark:text-neutral-300">{gap.message}</span>
     </li>
   );
 }

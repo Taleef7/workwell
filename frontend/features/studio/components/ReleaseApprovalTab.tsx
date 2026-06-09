@@ -135,8 +135,8 @@ export function ReleaseApprovalTab({
 
   return (
     <>
-      <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-900">Readiness Checklist</h3>
+      <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Readiness Checklist</h3>
         <div className="grid gap-2 text-sm">
           <p>Compile Status: <span className={compileReady ? "text-emerald-700" : "text-red-700"}>{compileReady ? "✅" : "❌"} {formatStatusLabel(activationReadiness?.compileStatus ?? "UNKNOWN")}</span></p>
           <p>Test Fixtures: <span className={testsReady ? "text-emerald-700" : "text-red-700"}>{testsReady ? "✅" : "❌"} {activationReadiness?.testFixtureCount ?? 0} fixtures</span></p>
@@ -154,13 +154,13 @@ export function ReleaseApprovalTab({
         <DataReadinessPanel measureId={measureId} api={api} />
         <ValueSetGovernancePanel measureId={measureId} api={api} />
 
-        <h3 className="mt-2 text-sm font-semibold text-slate-900">Version History</h3>
+        <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Version History</h3>
         {versionHistory.length === 0 ? (
-          <p className="text-sm text-slate-600">No versions found.</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No versions found.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-slate-500">
+              <thead className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 <tr>
                   <th className="px-2 py-1">Version</th>
                   <th className="px-2 py-1">Status</th>
@@ -171,7 +171,7 @@ export function ReleaseApprovalTab({
               </thead>
               <tbody>
                 {versionHistory.map((entry) => (
-                  <tr key={entry.id} className="border-t border-slate-200">
+                  <tr key={entry.id} className="border-t border-neutral-200 dark:border-neutral-800">
                     <td className="px-2 py-1">{entry.version}</td>
                     <td className="px-2 py-1"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${measureStatusClass(entry.status)}`}>{formatStatusLabel(entry.status)}</span></td>
                     <td className="px-2 py-1">{entry.author}</td>
@@ -198,7 +198,7 @@ export function ReleaseApprovalTab({
                 type="button"
                 onClick={() => void exportMatBundle()}
                 disabled={exportingMat}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+                className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
               >
                 {exportingMat ? "Exporting MAT..." : "Export for MAT (FHIR XML)"}
               </button>
@@ -235,7 +235,7 @@ export function ReleaseApprovalTab({
 
         {normalizeEnumValue(measure.status) === "ACTIVE" && canAdminDeprecate ? (
           <div className="mt-2">
-            <button className="rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => setShowDeprecateConfirm(true)}>
+            <button className="rounded-md bg-neutral-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => setShowDeprecateConfirm(true)}>
               Deprecate
             </button>
           </div>
@@ -243,17 +243,17 @@ export function ReleaseApprovalTab({
       </div>
 
       {showApproveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white p-4">
-            <h3 className="text-base font-semibold text-slate-900">Approve for Release</h3>
-            <p className="mt-2 text-sm text-slate-700">Confirm approval with checklist summary below:</p>
-            <ul className="mt-2 list-disc pl-5 text-sm text-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Approve for Release</h3>
+            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Confirm approval with checklist summary below:</p>
+            <ul className="mt-2 list-disc pl-5 text-sm text-neutral-700 dark:text-neutral-300">
               <li>Compile: {formatStatusLabel(activationReadiness?.compileStatus ?? "UNKNOWN")}</li>
               <li>Fixtures Valid: {testsReady ? "Yes" : "No"}</li>
               <li>Value Sets Attached: {hasValueSets ? "Yes" : "No"}</li>
             </ul>
             <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowApproveConfirm(false)}>Cancel</button>
+              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowApproveConfirm(false)}>Cancel</button>
               <button
                 className="flex items-center gap-1 rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 onClick={approve}
@@ -277,12 +277,12 @@ export function ReleaseApprovalTab({
       ) : null}
 
       {showActivateConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white p-4">
-            <h3 className="text-base font-semibold text-slate-900">Activate Measure</h3>
-            <p className="mt-2 text-sm text-slate-700">Activating this version replaces any currently Active version.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Activate Measure</h3>
+            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Activating this version replaces any currently Active version.</p>
             <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowActivateConfirm(false)}>Cancel</button>
+              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowActivateConfirm(false)}>Cancel</button>
               <button
                 className="flex items-center gap-1 rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 onClick={activate}
@@ -306,20 +306,20 @@ export function ReleaseApprovalTab({
       ) : null}
 
       {showDeprecateConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white p-4">
-            <h3 className="text-base font-semibold text-slate-900">Deprecate Measure</h3>
-            <p className="mt-2 text-sm text-slate-700">Deprecation reason is required.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
+          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Deprecate Measure</h3>
+            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Deprecation reason is required.</p>
             <textarea
-              className="mt-2 min-h-24 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 min-h-24 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               placeholder="Enter deprecation reason..."
               value={deprecateReason}
               onChange={(e) => setDeprecateReason(e.target.value)}
             />
             <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => setShowDeprecateConfirm(false)}>Cancel</button>
+              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowDeprecateConfirm(false)}>Cancel</button>
               <button
-                className="flex items-center gap-1 rounded bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                className="flex items-center gap-1 rounded bg-neutral-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 onClick={deprecate}
                 disabled={deprecating}
               >

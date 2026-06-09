@@ -62,13 +62,13 @@ export function OshaReferenceCombobox({
 
   return (
     <div className="relative">
-      <label className="mb-1 block text-xs font-medium uppercase tracking-[0.15em] text-slate-500">
+      <label className="mb-1 block text-xs font-medium uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
         {label}
       </label>
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
-          className="w-full rounded border border-slate-300 bg-white py-2 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+          className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 py-2 pl-10 pr-10 text-sm text-neutral-900 dark:text-neutral-100 outline-none transition focus:border-primary-500"
           placeholder={placeholder}
           value={value}
           onChange={(event) => {
@@ -85,7 +85,7 @@ export function OshaReferenceCombobox({
           <button
             type="button"
             aria-label="Clear policy reference"
-            className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-neutral-400 transition hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               onValueChange("");
@@ -96,10 +96,10 @@ export function OshaReferenceCombobox({
             <X className="h-4 w-4" />
           </button>
         ) : null}
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
       </div>
 
-      <div className="mt-1 flex items-start justify-between gap-3 text-[11px] text-slate-500">
+      <div className="mt-1 flex items-start justify-between gap-3 text-[11px] text-neutral-500 dark:text-neutral-400">
         <p>
           {selectedReference
             ? `Linked to ${formatOshaReferenceLabel(selectedReference)}`
@@ -108,25 +108,25 @@ export function OshaReferenceCombobox({
       </div>
 
       {open ? (
-        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg">
           {filteredReferences.length > 0 ? (
             filteredReferences.map((reference) => (
               <button
                 key={reference.id}
                 type="button"
-                className="flex w-full flex-col gap-1 border-b border-slate-100 px-3 py-2 text-left transition last:border-b-0 hover:bg-slate-50"
+                className="flex w-full flex-col gap-1 border-b border-neutral-100 dark:border-neutral-800 px-3 py-2 text-left transition last:border-b-0 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                 onMouseDown={(event) => {
                   event.preventDefault();
                   selectReference(reference);
                 }}
               >
-                <span className="text-sm font-medium text-slate-900">{reference.cfrCitation}</span>
-                <span className="text-xs text-slate-600">{reference.title}</span>
-                <span className="text-[11px] uppercase tracking-[0.12em] text-slate-400">{reference.programArea}</span>
+                <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{reference.cfrCitation}</span>
+                <span className="text-xs text-neutral-600 dark:text-neutral-400">{reference.title}</span>
+                <span className="text-[11px] uppercase tracking-[0.12em] text-neutral-400">{reference.programArea}</span>
               </button>
             ))
           ) : (
-            <div className="px-3 py-3 text-sm text-slate-500">
+            <div className="px-3 py-3 text-sm text-neutral-500 dark:text-neutral-400">
               No OSHA references match. Keep typing for a custom policy reference.
             </div>
           )}

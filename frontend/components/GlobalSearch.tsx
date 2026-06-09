@@ -13,11 +13,11 @@ interface SearchResult {
 }
 
 const OUTCOME_BADGE: Record<string, string> = {
-  OVERDUE: 'bg-red-100 text-red-700',
-  DUE_SOON: 'bg-yellow-100 text-yellow-700',
-  COMPLIANT: 'bg-green-100 text-green-700',
-  MISSING_DATA: 'bg-slate-100 text-slate-500',
-  EXCLUDED: 'bg-slate-50 text-slate-400',
+  OVERDUE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  DUE_SOON: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+  COMPLIANT: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  MISSING_DATA: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400',
+  EXCLUDED: 'bg-neutral-50 dark:bg-neutral-800/50 text-neutral-400',
 };
 
 export function GlobalSearch() {
@@ -75,7 +75,7 @@ export function GlobalSearch() {
     <div ref={containerRef} className="relative hidden sm:block">
       <div className="relative">
         <svg
-          className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400"
+          className="absolute left-2.5 top-2 h-3.5 w-3.5 text-neutral-400"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -92,12 +92,12 @@ export function GlobalSearch() {
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder="Search employees…"
-          className="h-8 w-56 rounded border border-slate-300 bg-white pl-7 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+          className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
         />
       </div>
 
       {open && (results.length > 0 || (query.length >= 2 && !loading)) && (
-        <div className="absolute top-full mt-1 w-72 rounded-lg border border-slate-200 bg-white shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full mt-1 w-72 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
           {results.length > 0 ? (
             <ul className="max-h-64 overflow-y-auto py-1">
               {results.map((r) => (
@@ -105,17 +105,17 @@ export function GlobalSearch() {
                   <button
                     type="button"
                     onClick={() => navigate(r.externalId)}
-                    className="w-full px-3 py-2 text-left hover:bg-slate-50 flex items-center justify-between gap-2"
+                    className="w-full px-3 py-2 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/50 flex items-center justify-between gap-2"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate">{r.name}</p>
-                      <p className="text-xs text-slate-400 truncate">
+                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{r.name}</p>
+                      <p className="text-xs text-neutral-400 truncate">
                         {r.role} · {r.site}
                       </p>
                     </div>
                     {r.latestOutcome && (
                       <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${OUTCOME_BADGE[r.latestOutcome] ?? 'bg-slate-100 text-slate-500'}`}
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${OUTCOME_BADGE[r.latestOutcome] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'}`}
                       >
                         {r.latestOutcome.replace(/_/g, ' ')}
                       </span>
@@ -125,7 +125,7 @@ export function GlobalSearch() {
               ))}
             </ul>
           ) : (
-            <div className="px-3 py-4 text-center text-xs text-slate-400">No employees found</div>
+            <div className="px-3 py-4 text-center text-xs text-neutral-400">No employees found</div>
           )}
         </div>
       )}

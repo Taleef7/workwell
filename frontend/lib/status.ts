@@ -92,28 +92,28 @@ export function labelFor(map: Record<string, string>, value: string | null | und
 
 export function measureStatusClass(status: string): string {
   const normalized = normalizeEnumValue(status);
-  if (normalized === "DRAFT") return "bg-slate-100 text-slate-700";
-  if (normalized === "APPROVED") return "bg-blue-100 text-blue-700";
-  if (normalized === "ACTIVE") return "bg-emerald-100 text-emerald-700";
-  return "bg-slate-300 text-slate-800";
+  if (normalized === "DRAFT") return "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
+  if (normalized === "APPROVED") return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
+  if (normalized === "ACTIVE") return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+  return "bg-neutral-300 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-200";
 }
 
 export function outcomeStatusClass(status: string): string {
   const normalized = normalizeEnumValue(status);
-  if (normalized === "COMPLIANT") return "bg-emerald-100 text-emerald-800";
-  if (normalized === "DUE_SOON") return "bg-amber-100 text-amber-800";
-  if (normalized === "OVERDUE") return "bg-rose-100 text-rose-800";
-  if (normalized === "MISSING_DATA") return "bg-violet-100 text-violet-800";
-  if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-800";
-  return "bg-slate-100 text-slate-700";
+  if (normalized === "COMPLIANT") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (normalized === "DUE_SOON") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (normalized === "OVERDUE") return "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300";
+  if (normalized === "MISSING_DATA") return "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300";
+  if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
+  return "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
 }
 
 export function caseStatusClass(status: string): string {
   const normalized = normalizeEnumValue(status);
-  if (normalized === "OPEN") return "bg-amber-100 text-amber-900";
-  if (normalized === "IN_PROGRESS") return "bg-blue-100 text-blue-900";
-  if (normalized === "RESOLVED") return "bg-emerald-100 text-emerald-900";
-  if (normalized === "CLOSED") return "bg-slate-100 text-slate-700";
-  if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-900";
-  return "bg-slate-100 text-slate-700";
+  if (normalized === "OPEN") return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200";
+  if (normalized === "IN_PROGRESS") return "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-200";
+  if (normalized === "RESOLVED") return "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200";
+  if (normalized === "CLOSED") return "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
+  if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-900 dark:bg-indigo-900/30 dark:text-indigo-200";
+  return "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
 }

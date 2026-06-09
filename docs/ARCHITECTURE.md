@@ -3,7 +3,7 @@
 ## 1) System Overview
 WorkWell Measure Studio is a **Total Worker Health (TWH)** compliance platform — a two-tier web application that unifies OSHA occupational safety compliance and CMS/HEDIS clinical quality measures in a single system. TWH is the NIOSH framework recognising that worker health is shaped by both workplace hazards and general health promotion.
 
-- Frontend: Next.js App Router dashboard on MIE Create-a-Container.
+- Frontend: Next.js App Router dashboard on MIE Create-a-Container, built on MIE's `@mieweb/ui` component library (Tailwind 4) with dark mode + Enterprise Health brand and a runtime brand switcher (semantic-token theming via `useTheme`/`useBrand`; see ADR-004). `@mieweb/ui` is imported only from client components (`components/client-providers.tsx` boundary).
 - Backend: Spring Boot API on MIE Create-a-Container.
 - Data: PostgreSQL 16 (Neon) with Flyway migrations.
 - Optional assistive surfaces: OpenAI-backed Spring AI calls for drafting/explanations (never compliance decisions).

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
@@ -169,20 +170,16 @@ export default function ProgramsPage() {
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold">Programs Overview</h2>
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
         <div className="flex items-center gap-3">
           {activeRunId ? (
-            <span className="text-sm text-slate-500 animate-pulse">
+            <span className="animate-pulse text-sm text-neutral-500 dark:text-neutral-400">
               {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
             </span>
           ) : (
-            <button
-              type="button"
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer transition-colors"
-              onClick={() => setShowRunConfirm(true)}
-            >
+            <Button variant="primary" onClick={() => setShowRunConfirm(true)}>
               Run All Measures Now
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -195,12 +192,12 @@ export default function ProgramsPage() {
       </div>
 
       {error ? (
-        <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           Failed to load program data: {error}
         </p>
       ) : null}
       {runError ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
           Run failed: {runError}
         </p>
       ) : null}
@@ -210,7 +207,7 @@ export default function ProgramsPage() {
         </div>
       ) : null}
       {!loading && programs.length === 0 ? (
-        <div className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+        <div className="rounded-md border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
           No active measures. Create and release a measure to begin.
         </div>
       ) : null}
@@ -220,13 +217,13 @@ export default function ProgramsPage() {
           const trend = trendByMeasure[program.measureId] ?? [];
           const drivers = driversByMeasure[program.measureId] ?? { bySite: [], byRole: [], byOutcomeReason: [] };
           return (
-            <div key={program.measureId} className="rounded-md border border-slate-200 bg-white p-4">
+            <div key={program.measureId} className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{program.measureName}</h3>
-                  <p className="text-xs text-slate-600">{program.policyRef} • {program.version}</p>
+                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{program.measureName}</h3>
+                  <p className="text-xs text-neutral-600 dark:text-neutral-400">{program.policyRef} • {program.version}</p>
                 </div>
-                <p className="text-2xl font-semibold text-slate-900">{program.complianceRate.toFixed(1)}%</p>
+                <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -238,33 +235,33 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-4">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Trend</p>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
                 <TrendChart data={trend} />
               </div>
 
-              <div className="mt-4 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+              <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
                 <div>
-                  <p className="font-semibold text-slate-800">Top Sites</p>
+                  <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Sites</p>
                   {drivers.bySite.length === 0 ? (
-                    <p className="text-slate-400">—</p>
+                    <p className="text-neutral-400">—</p>
                   ) : (
                     drivers.bySite.map((s) => (
                       <p key={s.site} className="flex justify-between">
                         <span>{s.site}</span>
-                        <span className="text-slate-500">{s.overdueCount} overdue</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">{s.overdueCount} overdue</span>
                       </p>
                     ))
                   )}
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-800">Top Roles</p>
+                  <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Roles</p>
                   {drivers.byRole.length === 0 ? (
-                    <p className="text-slate-400">—</p>
+                    <p className="text-neutral-400">—</p>
                   ) : (
                     drivers.byRole.map((r) => (
                       <p key={r.role} className="flex justify-between">
                         <span>{labelFor(ROLE_LABELS, r.role)}</span>
-                        <span className="text-slate-500">{r.overdueCount} overdue</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">{r.overdueCount} overdue</span>
                       </p>
                     ))
                   )}
@@ -272,21 +269,21 @@ export default function ProgramsPage() {
               </div>
 
               {drivers.byOutcomeReason && drivers.byOutcomeReason.length > 0 && (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">By Reason</p>
+                <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">By Reason</p>
                   <div className="space-y-1">
                     {drivers.byOutcomeReason.map((r) => (
                       <div key={r.reason} className="flex items-center justify-between text-xs">
                         <span className={`rounded px-1.5 py-0.5 font-medium ${
                           r.reason === "OVERDUE"
-                            ? "bg-rose-100 text-rose-700"
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
                             : r.reason === "DUE_SOON"
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-slate-100 text-slate-600"
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                            : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
                         }`}>
                           {labelFor(OUTCOME_LABELS, r.reason)}
                         </span>
-                        <span className="text-slate-500">{r.count} cases ({r.pct}%)</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">{r.count} cases ({r.pct}%)</span>
                       </div>
                     ))}
                   </div>
@@ -294,10 +291,10 @@ export default function ProgramsPage() {
               )}
 
               <div className="mt-4 flex items-center justify-between">
-                <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-blue-700 hover:underline">
+                <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
                   Open Worklist ({program.openCaseCount})
                 </Link>
-                <Link href={`/programs/${program.measureId}`} className="text-sm font-medium text-slate-700 hover:underline">
+                <Link href={`/programs/${program.measureId}`} className="text-sm font-medium text-neutral-700 hover:underline dark:text-neutral-300">
                   View Program Detail
                 </Link>
               </div>
@@ -324,23 +321,23 @@ export default function ProgramsPage() {
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3">
-      <p className="text-xs uppercase tracking-[0.15em] text-slate-500">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-slate-900">{value}</p>
+    <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+      <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
     </div>
   );
 }
 
 function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" }) {
   const style = tone === "green"
-    ? "bg-emerald-100 text-emerald-700"
+    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
     : tone === "amber"
-    ? "bg-amber-100 text-amber-800"
+    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
     : tone === "red"
-    ? "bg-rose-100 text-rose-700"
+    ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
     : tone === "violet"
-    ? "bg-violet-100 text-violet-800"
-    : "bg-slate-100 text-slate-700";
+    ? "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
+    : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
   return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
 }
 
@@ -351,8 +348,8 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
 
   if (sorted.length < 2) {
     return (
-      <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
-        <span className="text-xs text-slate-400">Not enough run history for trend</span>
+      <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50">
+        <span className="text-xs text-neutral-400">Not enough run history for trend</span>
       </div>
     );
   }
@@ -368,20 +365,20 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
   const deltaPositive = parseFloat(delta) >= 0;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 text-primary-600 dark:text-primary-400">
       <div className="flex items-center gap-1">
-        <span className={`text-xs font-medium ${deltaPositive ? "text-emerald-600" : "text-rose-600"}`}>
+        <span className={`text-xs font-medium ${deltaPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
           {deltaPositive ? "↑" : "↓"} {Math.abs(parseFloat(delta))}% from last run
         </span>
       </div>
       <ResponsiveContainer width="100%" height={80}>
         <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
           <YAxis
             tickFormatter={(v: number) => `${v}%`}
             domain={["auto", 100]}
-            tick={{ fontSize: 10 }}
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
             axisLine={false}
             tickLine={false}
             width={36}
@@ -393,9 +390,9 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
           <Line
             type="monotone"
             dataKey="rate"
-            stroke="#2563eb"
+            stroke="currentColor"
             strokeWidth={2}
-            dot={{ r: 3, fill: "#2563eb" }}
+            dot={{ r: 3, fill: "currentColor" }}
             activeDot={{ r: 4 }}
           />
         </LineChart>
