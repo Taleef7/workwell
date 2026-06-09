@@ -74,7 +74,7 @@
 | Global search | `components/GlobalSearch.tsx` | @mieweb/ui `CommandPalette` (evaluate) | ⏳ Step 4g |
 | OSHA combobox | `components/osha-reference-combobox.tsx` | @mieweb/ui `Select` or Tier-2 keep | ⏳ Step 4c |
 | Skeleton loader | `components/skeleton-loader.tsx` | @mieweb/ui `Skeleton` | ✅ Phase 1a — `SkeletonCard`/`SkeletonRow` export names + signatures preserved; internals rebuilt on `Skeleton` (dark-aware). |
-| Theme + brand | none (light-only) | `useTheme` + `useBrand` + `AppThemeInitializer` | ✅ Step 2/3 |
+| Theme + brand | none (light-only) | `useTheme` + `useBrand` + `ThemeScript` (pre-hydration, no-FOUC) | ✅ Step 2/3 |
 
 ## Steps Completed
 
@@ -82,7 +82,7 @@
 
 - [x] Step 1: Install @mieweb/ui — v0.6.1, **482** named exports (pnpm 10 via corepack). Peers intact (`monaco-editor`, `@testing-library/dom` in `.pnpm`); `datavis-ace` deferred to NITRO pilot. `dist/` ships prebuilt (build script ignored — not needed for consumers). Baseline `next build` green.
 - [x] Step 2: CSS Foundation — `globals.css` rewritten: Enterprise Health brand import (`layer(theme)`), `@source "../node_modules/@mieweb/ui/dist"`, `@custom-variant dark` (data-theme + .dark), full `@theme` token block w/ hex fallbacks (7 scales + semantic + chart), Geist fonts preserved. Added `lib/useTheme.ts` (`useSyncExternalStore`; sets `.dark` + `data-theme`). PostCSS already `@tailwindcss/postcss`. Build green. ⚠ Cosmetic: brand's Jost `@import` is ignored inside `layer(theme)` → app keeps Geist (font fidelity = follow-up).
-- [x] Step 3: Brand Switching — copied 7 brand CSS files to `public/brands/`; added `scripts/copy-brand-css.mjs` + `sync:brands` npm script; `lib/useBrand.ts` (`useSyncExternalStore`; injects `/brands/{brand}.css` `<link>`, sets `data-brand`, default `enterprise-health`); `components/app-theme-initializer.tsx` restores saved theme+brand on load; wired into root layout (`<html suppressHydrationWarning data-theme="light">`). Switcher **UI** deferred to Phase 1 (lives in AppHeader). Build + lint green.
+- [x] Step 3: Brand Switching — copied 7 brand CSS files to `public/brands/`; added `scripts/copy-brand-css.mjs` + `sync:brands` npm script; `lib/useBrand.ts` (`useSyncExternalStore`; injects `/brands/{brand}.css` `<link>`, sets `data-brand`, default `enterprise-health`); persisted theme+brand applied via the pre-hydration `components/theme-script.tsx` (no-FOUC; replaced the original `app-theme-initializer.tsx` per PR #68 review); wired into root layout (`<html suppressHydrationWarning data-theme="light">`). Switcher **UI** deferred to Phase 1 (lives in AppHeader). Build + lint green.
 - [~] Step 4a: Buttons — primary surfaces on `Button` (cases, programs, program-detail, measures, audit-packet-export, confirm-dialog, layout). Dense native `<button>`s on the 3 big table pages (runs/admin/cases-detail) + studio tabs are **retokenized in place** (dark/brand-correct) but not yet swapped to `Button` — documented follow-up.
 - [x] Step 4b: Dialog/Modal — `confirm-dialog` migrated to @mieweb/ui `Button` + dark tokens; tested a11y shell kept (Modal's `role=dialog` ≠ the asserted `role=alertdialog`/focus-trap). 9/9 tests pass.
 - [~] Step 4c: Form Elements — `Select`/`Input` on cases, measures, layout filters, audit-packet-export. Native form controls on the 3 big table pages + studio tabs retokenized in place (component swap = follow-up).
@@ -116,7 +116,7 @@
 | File | Change Summary |
 |------|---------------|
 | `frontend/app/globals.css` | Replaced 2-var stub with full @mieweb/ui CSS foundation (brand import, `@source`, `@custom-variant dark`, `@theme` token block + fallbacks) |
-| `frontend/app/layout.tsx` | `<html suppressHydrationWarning data-theme="light">`; render `<AppThemeInitializer/>`; body class now token-driven (dropped hardcoded `bg-slate-50 text-slate-900`) |
+| `frontend/app/layout.tsx` | `<html suppressHydrationWarning data-theme="light">`; render `<ThemeScript/>` (pre-hydration, first child of `<body>`) + `<ClientProviders/>`; body class now token-driven (dropped hardcoded `bg-slate-50 text-slate-900`) |
 | `frontend/package.json` | Added `@mieweb/ui@^0.6.1` dependency + `sync:brands` script |
 | `frontend/pnpm-lock.yaml` | Lockfile entry for `@mieweb/ui` (+80/-3) |
 | `frontend/app/layout.tsx` | (Phase 1a) Providers moved into `ClientProviders` client boundary (was inline `AuthProvider`+`GlobalToast`); root layout no longer imports `@mieweb/ui` directly |
@@ -140,7 +140,7 @@
 | `docs/mieweb-ui-migration/tailwind4-integration.md` | Vendor Tailwind 4 / CSS-var reference copy |
 | `frontend/lib/useTheme.ts` | Dark/light hook (sets `.dark` + `data-theme`) |
 | `frontend/lib/useBrand.ts` | Runtime brand switcher hook (default Enterprise Health) |
-| `frontend/components/app-theme-initializer.tsx` | Restores saved theme+brand on every page load |
+| `frontend/components/theme-script.tsx` | Pre-hydration inline script — applies persisted theme+brand to `<html>` before first paint (no-FOUC). Replaced the post-paint `app-theme-initializer.tsx` (removed) per PR #68 review. |
 | `frontend/scripts/copy-brand-css.mjs` | Syncs brand CSS → `public/brands` (`pnpm sync:brands`) |
 | `frontend/public/brands/*.css` | 7 brand CSS files (bluehive, ccme, enterprise-health, mieweb, ozwell, waggleline, webchart) |
 | `frontend/components/client-providers.tsx` | (Phase 1a) Client boundary wrapping `ToastProvider` + `AuthProvider` + `GlobalToast` |
@@ -188,7 +188,8 @@
 - **Variant renames to watch (component-specific):** Button `default`→`primary`, `destructive`→`danger`; Badge keeps `default`, uses `danger`. No `asChild` on Button.
 - **API shape changes:** Select compound children → `options` array (`onValueChange(value)`); Avatar → props-based (`src`,`name`); Dropdown → `trigger` prop + `DropdownItem icon=`.
 - **No new theme dep:** custom `useTheme`/`useBrand` via `useSyncExternalStore` (satisfies `react-hooks/set-state-in-effect`; no `next-themes`).
-- **Brand load:** default Enterprise Health comes from the static `globals.css` import; `AppThemeInitializer` re-applies saved brand on load (minor redundant fetch for default users — acceptable; no-FOUC inline script is a later option).
+- **Brand load:** default Enterprise Health comes from the static `globals.css` import; the **pre-hydration `ThemeScript`** applies the persisted theme + (non-default) brand to `<html>` before first paint, so returning dark-mode / non-default-brand users get no flash. (Was `AppThemeInitializer`'s `useEffect`, which ran after first paint → light flash; fixed per PR #68 review.)
+- **PR #68 review fixes (2026-06-09):** (1) FOUC — replaced the post-paint theme `useEffect` with the pre-hydration `ThemeScript` (above); removed `app-theme-initializer.tsx`. (2) Invalid Tailwind class `dark:bg-neutral-800/50/40` in `runs/page.tsx` (a `bg-slate-50/40` that the bulk sed mangled into a double-opacity token) → `bg-neutral-50/40 dark:bg-neutral-800/40`. Swept all files for the double-slash pattern; this was the only occurrence.
 - **⚠ Server-component pitfall (Phase 1a):** the `@mieweb/ui` barrel evaluates `React.createContext` at module load (Toast/Sidebar/CommandPalette contexts). Importing it from a **Server Component** (root `app/layout.tsx`) breaks `next build` at page-data collection with `TypeError: _.createContext is not a function`. **Rule: only import `@mieweb/ui` from `"use client"` modules.** Fix was the `client-providers.tsx` boundary; `skeleton-loader.tsx` also marked `"use client"` defensively.
 - **Toast architecture (Phase 1a):** `ToastProvider` provides context only — it does **not** render a viewport. You must render `<ToastContainer toasts onDismiss position />` yourself from `useToast()`. The legacy `emitToast()` window-event contract is preserved via a bridge in `GlobalToast`, so no call sites changed (37 `emitToast` calls across 11 files).
 - **confirm-dialog kept, not Modal:** spec said `confirm-dialog → Modal`, but the component has a 9-test a11y contract (`role=alertdialog`, custom Tab focus-trap wrap, scroll-lock, `[aria-hidden]` backdrop) that @mieweb/ui `Modal` (`role=dialog`, own focus handling) would regress. Decision: keep the shell, migrate buttons→`Button` + tokens. Revisit wholesale-Modal only if a11y parity is verified.
