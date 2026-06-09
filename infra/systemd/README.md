@@ -16,7 +16,7 @@ host-reboot recovery (see [`docs/DEPLOY.md` → "Service startup & reboot policy
 |---|---|
 | A single container crashing → restart it | `restart: unless-stopped` in [`infra/docker-compose.yml`](../docker-compose.yml) |
 | Host reboots → bring the whole stack back up | this systemd unit (`systemctl enable`) **+** `systemctl enable docker` |
-| Live `os.mieweb.org` deployment | MIE Create-a-Container platform (verify its reboot policy with MIE ops) |
+| Live `os.mieweb.org` deployment | MIE Create-a-Container platform (Proxmox `onboot`, platform-managed — see `docs/DEPLOY.md`) |
 
 ## Quick start
 
@@ -24,8 +24,11 @@ host-reboot recovery (see [`docs/DEPLOY.md` → "Service startup & reboot policy
 # 1. Docker must itself start on boot
 sudo systemctl enable docker
 
-# 2. Place the repo's infra/ where the unit expects it (WorkingDirectory)
-sudo mkdir -p /opt/workwell && sudo cp -r infra /opt/workwell/
+# 2. Put the FULL repo at /opt/workwell. The compose file builds the backend and
+#    frontend from the repo root (build context `..`), so the whole tree must be
+#    present — copying only infra/ would make the image builds fail.
+sudo git clone https://github.com/Taleef7/workwell.git /opt/workwell
+#    (or copy an existing checkout: sudo mkdir -p /opt/workwell && sudo cp -r . /opt/workwell)
 
 # 3. Install + enable the unit
 sudo cp infra/systemd/workwell.service /etc/systemd/system/workwell.service

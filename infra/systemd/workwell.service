@@ -15,8 +15,8 @@
 #
 # Install:
 #   sudo systemctl enable docker                                  # Docker must start on boot
-#   sudo mkdir -p /opt/workwell && sudo cp -r infra /opt/workwell/
-#   sudo cp infra/systemd/workwell.service /etc/systemd/system/workwell.service
+#   sudo git clone https://github.com/Taleef7/workwell.git /opt/workwell   # FULL repo: compose builds backend/frontend from the repo root
+#   sudo cp /opt/workwell/infra/systemd/workwell.service /etc/systemd/system/workwell.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now workwell                          # start now + on every boot
 #   systemctl status workwell                                     # verify
@@ -36,7 +36,10 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/workwell/infra
-ExecStartPre=/usr/bin/docker compose pull --quiet
+# Refresh only image-based services (postgres, hapi-fhir); `--ignore-buildable` skips the
+# backend/frontend build services. Leading `-` makes a pull failure non-fatal so boot still
+# proceeds to `up` (which builds the app images on first start).
+ExecStartPre=-/usr/bin/docker compose pull --quiet --ignore-buildable
 ExecStart=/usr/bin/docker compose up -d --remove-orphans
 ExecStop=/usr/bin/docker compose down
 # If `docker compose up` itself fails (e.g. transient registry error), retry the start.
