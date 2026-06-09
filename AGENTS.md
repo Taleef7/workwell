@@ -27,7 +27,7 @@ Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) work
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
 - CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (see CQF_FHIR_CR_REFERENCE.md)
-- Frontend: Next.js 16 App Router + React 19, TypeScript, Tailwind, shadcn/ui, Monaco
+- Frontend: Next.js 16 App Router + React 19, TypeScript, Tailwind 4, `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher; see ADR-004), Monaco. Import `@mieweb/ui` only from `"use client"` modules.
 - AI: Spring AI (OpenAI starter, `spring-ai-openai-spring-boot-starter`), MCP via `io.modelcontextprotocol/java-sdk`
 - Infra: Docker Compose local; MIE Create-a-Container + Neon prod (Fly.io + Vercel preview decommissioned); GitHub Actions; pnpm
 

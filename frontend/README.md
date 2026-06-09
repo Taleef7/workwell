@@ -31,6 +31,14 @@ pnpm dev
 - Do not ship `NEXT_PUBLIC_DEMO_MODE=true` in production.
 - The frontend build will stop if demo mode is left on during a production build.
 
+## UI & theming
+
+- Built on MIE's [`@mieweb/ui`](https://ui.mieweb.org) component library (Tailwind 4).
+- **Dark mode** (`lib/useTheme.ts`) + **Enterprise Health brand** default with a **runtime brand switcher** (`lib/useBrand.ts`) in the header; both restored on load by `components/app-theme-initializer.tsx`.
+- Brand stylesheets live in `public/brands/*.css`; re-sync them from the package with `pnpm sync:brands` after upgrading `@mieweb/ui`.
+- Import `@mieweb/ui` only from `"use client"` modules — its barrel runs `React.createContext` at load and breaks Server Component builds (see `components/client-providers.tsx`).
+- Full migration details + known gaps (e.g. DataVis NITRO grid is deferred): `MIEWEB-UI-MIGRATION.md`.
+
 ## Notes
 
 - The app uses the Next.js App Router.
