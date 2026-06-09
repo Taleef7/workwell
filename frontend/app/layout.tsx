@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ClientProviders } from "@/components/client-providers";
-import { AppThemeInitializer } from "@/components/app-theme-initializer";
+import { ThemeScript } from "@/components/theme-script";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <body className="min-h-full">
-        <AppThemeInitializer />
+        <ThemeScript />
         <ClientProviders>{children}</ClientProviders>
       </body>
     </html>

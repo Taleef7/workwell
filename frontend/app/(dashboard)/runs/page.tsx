@@ -789,7 +789,7 @@ export default function RunsPage() {
                       className={
                         caseHref
                           ? "cursor-pointer border-t border-neutral-200 dark:border-neutral-800 hover:bg-blue-50"
-                          : "cursor-default border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50/40 text-neutral-500 dark:text-neutral-400"
+                          : "cursor-default border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-800/40 text-neutral-500 dark:text-neutral-400"
                       }
                       onClick={caseHref ? () => router.push(caseHref) : undefined}
                       role={caseHref ? "link" : undefined}
