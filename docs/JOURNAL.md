@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-06-09 — Measures/programs/runs latency: seed-on-every-read removed (branch `fix/measures-latency`)
+
+### Root cause (Doug's "loading measures takes upwards of 10 seconds")
+`MeasureService.listMeasures()` called `ensureInstanceSeeds()` **on every read**. For the `twh` instance that re-ran the full demo-seed cascade against remote Neon each request: ~10 individual measure seeds (each a `SELECT id` + `SELECT COUNT` + an **`UPDATE`** that re-loads the `.cql` file from the classpath, even when the row already exists) plus `ensureCmsEcqmCatalogSeed()` looping all **49** CMS records (`SELECT … LIKE` + `UPDATE measures` + `SELECT COUNT` each). Net ≈ **180 sequential SQL round-trips + ~10 classpath file reads per page load**, almost all redundant writes → ~5–9 s. Not network, not a missing index, not the list query (which is a fast `JOIN LATERAL`).
+
+Same single cause explained all three slow screens: `/measures` (direct), `/programs` (`ProgramService.listPrograms` → `measureService.listMeasures()`), and `/runs` (page fetches `/api/measures` for the measure-filter dropdown, `runs/page.tsx:193`). The `/api/runs` and `/api/programs` queries themselves are fine.
+
+### Fix (`backend/.../measure/MeasureService.java`, one file)
+- **Per-process guard:** `volatile boolean instanceSeedsApplied` + double-checked locking around `ensureInstanceSeeds()` — seeds run **once per process**, so catalog reads become pure `SELECT`s (single-digit ms).
+- **Startup warm:** `@EventListener(ApplicationReadyEvent.class) warmInstanceSeeds()` runs the seed once after context startup, so the **first** request after a deploy is fast too.
+- Refresh-on-deploy intent preserved: every deploy is a fresh container/process, so the idempotent "upgrade-on-boot" seeding (refresh CQL text, bump CMS catalog to current performance year) still runs once per deploy. `DemoResetService` verified to **preserve** measures/measure_versions, so nothing depended on reseed-on-read. No schema/migration/API-contract/compliance change.
+
+### Extended slowness sweep (Doug also asked: "find other parts … taking too long")
+Swept every hot read path; the seed-on-read pattern was the **only** systemic slowdown (and it transitively covered measures, programs, runs, cases, admin, and studio since they all load `/api/measures` or route through `listPrograms`/`getMeasure`). Everything else is already efficient and needs no change:
+- `/api/runs` list — single bounded query with `LIMIT`.
+- `/api/programs/{id}/trend` + `/top-drivers` — bounded single queries; the `/programs` page already parallelizes its per-measure fan-out via `Promise.all` (two waves of ~10).
+- `/api/cases` list (also hit by the dashboard shell on every navigation, `layout.tsx:95`) — single bounded query (correlated `outreach_record_count` subquery + waiver `LATERAL` + `LIMIT`); no N+1.
+- `/api/admin/integrations` — `listHealth()` reads persisted `integration_health` state; live FHIR/MCP/AI probes run only in the `@Scheduled` 15-min refresh and manual sync (POST), never on the GET.
+- Frontend API client (`lib/api/client.ts`) — silent token refresh fires only on a 401 (single retry), so there's no per-request auth tax.
+
+Deliberately **not** adding speculative DB indexes: demo-scale data (~60 measures, ~50 employees, handful of runs) makes them moot, and schema migrations are Taleef-owned per the hard rule.
+
+### Verification
+- `compileJava` clean. Targeted seed/read integration tests green under Testcontainers: `com.workwell.measure.*` (incl. `ValueSetGovernanceIntegrationTest`, `MeasureTraceabilityIntegrationTest`, `MeasureImpactPreviewIntegrationTest`), `DataReadinessIntegrationTest`, `ScopedRunFailureIntegrationTest` — **BUILD SUCCESSFUL**. Full suite runs on CI for the PR.
+
+---
+
 ## 2026-06-09 — Frontend migration to `@mieweb/ui` (dark mode + Enterprise Health brand)
 
 ### What shipped (frontend-only; branch `feat/mieweb-ui-migration`, PR #68 — not merged)
