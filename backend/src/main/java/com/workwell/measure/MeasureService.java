@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,6 +33,17 @@ public class MeasureService {
 
     @Value("${workwell.instance:workwell}")
     private String workwellInstance;
+
+    /**
+     * Instance demo seeds are idempotent "upgrade-on-boot" logic (refresh CQL text, bump the CMS
+     * eCQM catalog to the current performance year). They only need to run once per process — each
+     * deploy is a fresh container/process, so a process-lifetime guard preserves the
+     * refresh-on-deploy intent while removing ~180 redundant SQL round-trips from every catalog
+     * read (previously {@code ensureInstanceSeeds()} ran on every {@code listMeasures()} call,
+     * which also dominated {@code /api/programs} and the {@code /runs} measure-filter load).
+     */
+    private volatile boolean instanceSeedsApplied = false;
+    private final Object instanceSeedLock = new Object();
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -115,21 +128,41 @@ public class MeasureService {
         new CmsEcqmRecord("Excessive Radiation Dose or Inadequate Image Quality for Diagnostic Computed Tomography (CT) in Adults (Clinician Level)", "CMS1056v3", "494", "{ecqm,cms,radiology,patient-safety}")
     );
 
+    /**
+     * Warms the demo seeds once at startup so the first catalog read after a deploy is fast
+     * rather than paying the full seed cost on a user request. Runs after the context is ready
+     * (Flyway has migrated, all beans constructed). Safe to no-op on instances with nothing to
+     * seed; idempotent if a read already triggered it.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void warmInstanceSeeds() {
+        ensureInstanceSeeds();
+    }
+
     private void ensureInstanceSeeds() {
-        if ("workwell".equals(workwellInstance) || "twh".equals(workwellInstance)) {
-            ensureAudiogramSeed();
-            ensureTbSeed();
-            ensureHazwoperSeed();
-            ensureFluSeed();
+        if (instanceSeedsApplied) {
+            return;
         }
-        if ("ecqm".equals(workwellInstance) || "twh".equals(workwellInstance)) {
-            ensureHypertensionSeed();
-            ensureDiabetesHbA1cSeed();
-            ensureObesityBmiSeed();
-            ensureCholesterolLdlSeed();
-            ensureCms125Seed();
-            ensureCms122Seed();
-            ensureCmsEcqmCatalogSeed();
+        synchronized (instanceSeedLock) {
+            if (instanceSeedsApplied) {
+                return;
+            }
+            if ("workwell".equals(workwellInstance) || "twh".equals(workwellInstance)) {
+                ensureAudiogramSeed();
+                ensureTbSeed();
+                ensureHazwoperSeed();
+                ensureFluSeed();
+            }
+            if ("ecqm".equals(workwellInstance) || "twh".equals(workwellInstance)) {
+                ensureHypertensionSeed();
+                ensureDiabetesHbA1cSeed();
+                ensureObesityBmiSeed();
+                ensureCholesterolLdlSeed();
+                ensureCms125Seed();
+                ensureCms122Seed();
+                ensureCmsEcqmCatalogSeed();
+            }
+            instanceSeedsApplied = true;
         }
     }
 
