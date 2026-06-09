@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-09 — Frontend migration to `@mieweb/ui` (dark mode + Enterprise Health brand)
+
+### What shipped (frontend-only; branch `feat/mieweb-ui-migration`, PR #68 — not merged)
+
+Migrated the frontend onto MIE's `@mieweb/ui` (v0.6.1) per Doug's 2026-06-08 direction. Full **dark mode** + **Enterprise Health brand** default + **runtime brand switcher** + semantic-token migration (was light-only, hardcoded `slate-*`). See ADR-004 and `frontend/MIEWEB-UI-MIGRATION.md`.
+
+- **Foundation:** Tailwind 4 CSS foundation (brand import, `@source`, `@custom-variant dark`, `@theme` tokens w/ fallbacks); `useTheme` + `useBrand` + `AppThemeInitializer`; 7 brand stylesheets in `public/brands/`.
+- **Global systems → @mieweb/ui:** toast (`ToastProvider`/`ToastContainer`/`useToast`, legacy `emitToast` event bridge preserved), skeletons (`Skeleton`), confirm-dialog (kept tested a11y shell, buttons→`Button` + tokens — 9/9 tests pass). New `components/client-providers.tsx` boundary (the `@mieweb/ui` barrel runs `createContext` at load → must not enter the RSC graph).
+- **Layout shell:** `Sidebar` + `AppHeader` (built-in mobile drawer, desktop collapse) + header brand/theme switcher; header filters → `Select`. Removed custom mobile drawer + bottom-nav. App-shell now `h-dvh` with internal `main` scroll.
+- **Pages (all dark + brand aware):** component-migrated `/cases`, `/programs` (+detail), `/measures`, `/employees/[externalId]`, `/worklist`, landing, plus shared components (GlobalSearch, audit-packet-export, OSHA combobox, ComplianceSummaryBar). `/runs`, `/admin`, `/cases/[id]`, studio tabs/panels: tokens+dark done, native form controls retokenized in place (component-swap follow-up). `lib/status.ts` helpers made dark-aware app-wide. `/login` (brand-primary submit) + `/sandbox` left as intentional bespoke pre-auth pages. Monaco + the dark code/SQL preview blocks kept dark; recharts rethemed.
+
+### Verification
+- `next build` clean, `eslint` (0 errors; 1 pre-existing `test/mocks` warning), `vitest` **53/53** pass (SlaChip assertion updated slate→neutral).
+- Playwright light+dark: shell, brand switch (Enterprise Health→BlueHive), mobile drawer; `/cases` incl. card grid with badges (stubbed data); `/measures`; `/admin` dark shell.
+
+### Known gap
+- **DataVis NITRO blocked** — `@mieweb/datavis` is `private`/source-only (not on npm). Tables kept swap-ready. Ask to Doug logged (publish `@mieweb/datavis` built to npm). Frontend-only; no backend/schema/API/compliance changes.
+
+---
+
 ## 2026-06-08 — Studio UX feedback: spec labels, async button states, live compile badge
 
 ### What shipped (frontend-only; branch `feat/studio-ux-feedback`, PR open — not merged)

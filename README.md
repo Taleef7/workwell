@@ -18,12 +18,14 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 - AI assist for CQL drafting and test fixture generation (never compliance decisions)
 - MAT-compatible FHIR R4 export for measure portability
 - Risk outlook analytics for upcoming exposure and repeat non-compliance patterns
+- Built on MIE's `@mieweb/ui` component library: dark mode + Enterprise Health brand with a runtime brand switcher
 
 ## Status
 
 - All planned sprints (**0–7**) are implemented and merged to `main`; Sprint 7 issues `#47`–`#51` are closed.
 - Post-merge work continues on `main`: Sprint 8 scoped-run parity (`SITE`/`EMPLOYEE` manual runs + reruns), an 8-way CI test-sharding speedup (~3.8×), and the MIE Container Manager v1 API deploy migration.
-- Default branch: `main` only (stale sprint branches cleaned up).
+- In flight: frontend migration to `@mieweb/ui` (dark mode + Enterprise Health brand) on `feat/mieweb-ui-migration` → PR #68 (awaiting review/merge).
+- Default branch: `main` (stale sprint branches cleaned up).
 
 ## Production surfaces
 
@@ -35,7 +37,7 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 ## Technology stack
 
 - Backend: Java 21, Spring Boot 3.x, Gradle Kotlin DSL, PostgreSQL 16, Flyway
-- Frontend: Next.js 16 App Router, TypeScript, Tailwind, shadcn/ui, Monaco
+- Frontend: Next.js 16 App Router, TypeScript, Tailwind 4, `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher), Monaco
 - CQL/FHIR: HAPI FHIR + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0
 - Infra: MIE Create-a-Container (primary), Neon, GitHub Actions
 
