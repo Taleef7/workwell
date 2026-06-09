@@ -82,17 +82,26 @@ Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI
 There are two runtime contexts, and the answer differs:
 
 **1. Live stack (`os.mieweb.org`) — MIE Create-a-Container.**
-The `twh` and `twh-api` containers run on **MIE's Container Manager**, so the platform — not a
-unit on a host we control — is responsible for restarting them after a host reboot. The deploy
-create-payload (`.github/scripts/deploy-mieweb-container.sh`) does **not** currently set a restart
-policy, so reboot recovery relies on the platform default. The backend image advertises itself to
-the platform via the `org.mieweb.opensource-server.*` Docker label (see `backend/Dockerfile`),
-which suggests the platform may also honor a restart/auto-start label.
+The `twh` and `twh-api` containers run on **MIE's Container Manager**, which is a **Proxmox
+abstraction** (the manager talks to each node's Proxmox API via a stored token; nodes are named
+`opensource-phxdc-pve*`). Restart-on-reboot therefore lives at the Proxmox **`onboot`** layer.
 
-> **Action — verify with MIE ops (not determinable from this repo):** (a) do containers
-> auto-restart after an `os.mieweb.org` host reboot, and (b) is there a restart-policy field/label
-> the Create-a-Container API accepts so we can make it explicit? If yes, add it to the create
-> payload in `deploy-mieweb-container.sh`. (Same escalation path as the nginx SSE/504 item.)
+What was verified directly against the manager API (`GET /api/v1/sites/1/containers/{id}` and
+`/sites/1/nodes`, 2026-06-09):
+- The container object exposes **no** restart/`onboot`/uptime field (only `status`, `hostname`,
+  `nodeName`, `services`, `environmentVars`, etc.), and neither does the node object. So a restart
+  policy is **not user-configurable or user-readable** through this API — there is nothing to add
+  to the create payload in `deploy-mieweb-container.sh`, and nothing to inspect.
+- **Clean restart recovery is already proven** by normal operation: every push to `main` runs
+  `deploy-twh-mieweb.yml`, which **deletes and recreates** both containers, and the deploy script
+  fails unless the final container `status` is `running`. So the containers reliably return to
+  `running` after being recreated.
+
+> **Only open item (one-line question for the Container Manager maintainer, not an ops ticket):**
+> are provisioned containers created with Proxmox **`onboot=1`** (auto-start when the node reboots)?
+> This is the single thing not verifiable from our side — a manual container restart does **not**
+> test it (restart ≠ node reboot), and rebooting a shared Proxmox node is not an option. Everything
+> else about reboot recovery is settled above.
 
 **2. Self-hosted / VM / local — Docker Compose + systemd.**
 For any host we *do* control, reboot recovery is fully handled and is the reference Doug asked for:
