@@ -13,7 +13,7 @@ import { SqlPreviewPanel } from "./SqlPreviewPanel";
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex min-h-[400px] items-center justify-center rounded-md border border-slate-200 bg-slate-950 text-sm text-slate-200">
+    <div className="flex min-h-[400px] items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-slate-950 text-sm text-slate-200">
       Loading editor...
     </div>
   )
@@ -192,7 +192,7 @@ export function CqlTab({
   }
 
   return (
-    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+    <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       {draftBanner ? (
         <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <span className="mt-0.5 font-semibold uppercase tracking-wider text-amber-700">AI draft</span>
@@ -207,7 +207,7 @@ export function CqlTab({
           </button>
         </div>
       ) : null}
-      <div className="overflow-hidden rounded border border-slate-300" style={{ minHeight: 400, height: "calc(100vh - 24rem)", maxHeight: "calc(100vh - 12rem)" }}>
+      <div className="overflow-hidden rounded border border-neutral-300 dark:border-neutral-700" style={{ minHeight: 400, height: "calc(100vh - 24rem)", maxHeight: "calc(100vh - 12rem)" }}>
         <MonacoEditor
           height="100%"
           language="sql"
@@ -228,7 +228,7 @@ export function CqlTab({
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="flex items-center gap-1 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          className="flex items-center gap-1 rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
           onClick={compile}
           disabled={compiling}
         >
@@ -247,7 +247,7 @@ export function CqlTab({
         <button
           type="button"
           onClick={() => setShowDraftCqlDialog(true)}
-          className="rounded-md border border-purple-300 bg-white px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+          className="rounded-md border border-purple-300 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50"
         >
           AI Draft CQL
         </button>
@@ -261,7 +261,7 @@ export function CqlTab({
           <button
             type="button"
             onClick={() => setShowNewVersionDialog(true)}
-            className="ml-auto rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            className="ml-auto rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             New Version
           </button>
@@ -269,19 +269,19 @@ export function CqlTab({
       </div>
 
       {showNewVersionDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-slate-900">Create New Measure Version</h3>
-            <p className="mt-2 text-sm text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Create New Measure Version</h3>
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
               This will clone the current CQL logic into a new draft version.
             </p>
             <div className="mt-4">
-              <label htmlFor="change-summary-input" className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <label htmlFor="change-summary-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
                 Change Summary
               </label>
               <textarea
                 id="change-summary-input"
-                className="mt-1 w-full rounded-2xl border border-slate-300 p-3 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                className="mt-1 w-full rounded-2xl border border-neutral-300 dark:border-neutral-700 p-3 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 placeholder="Describe what changed in this version..."
                 rows={3}
                 value={newVersionSummary}
@@ -295,7 +295,7 @@ export function CqlTab({
                   setShowNewVersionDialog(false);
                   setNewVersionSummary("");
                 }}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
               >
                 Cancel
               </button>
@@ -303,7 +303,7 @@ export function CqlTab({
                 type="button"
                 onClick={handleSubmitNewVersion}
                 disabled={creatingVersion || !newVersionSummary.trim()}
-                className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                className="rounded-md bg-neutral-900 px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-60"
               >
                 {creatingVersion ? "Creating..." : "Create Version"}
               </button>
@@ -336,24 +336,24 @@ export function CqlTab({
       <SqlPreviewPanel measure={measure} />
 
       {showDraftCqlDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-slate-900">AI Draft CQL</h3>
-            <p className="mt-2 text-sm text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">AI Draft CQL</h3>
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
               Paste relevant OSHA/policy text below. The AI will use your saved Spec and this text to generate
               a starting CQL library. You must compile and review before activating.
             </p>
             <textarea
               value={oshaText}
               onChange={(e) => setOshaText(e.target.value)}
-              className="mt-3 h-48 w-full rounded-2xl border border-slate-300 p-3 font-mono text-xs focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              className="mt-3 h-48 w-full rounded-2xl border border-neutral-300 dark:border-neutral-700 p-3 font-mono text-xs focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
               placeholder="Paste OSHA regulatory text or policy requirements here…"
             />
             <div className="mt-6 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowDraftCqlDialog(false)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
               >
                 Cancel
               </button>

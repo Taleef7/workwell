@@ -15,7 +15,7 @@ function resolutionStatusClass(status: string) {
   if (s === "RESOLVED") return "bg-emerald-100 text-emerald-800";
   if (s === "STALE") return "bg-amber-100 text-amber-800";
   if (s === "UNRESOLVED" || s === "EMPTY" || s === "ERROR") return "bg-red-100 text-red-800";
-  return "bg-slate-100 text-slate-700";
+  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 export function ValueSetGovernancePanel({ measureId, api }: Props) {
@@ -46,14 +46,14 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
   }, [runCheck]);
 
   return (
-    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+    <div className="mt-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Value Set Governance</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Value Set Governance</p>
         <button
           type="button"
           onClick={runCheck}
           disabled={loading}
-          className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
         >
           {loading ? "Checking…" : "Re-check"}
         </button>
@@ -67,7 +67,7 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${data.allResolved ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
               {data.allResolved ? "All Resolved" : "Blockers Found"}
             </span>
-            <span className="text-xs text-slate-600">{data.valueSets.length} value set(s) checked</span>
+            <span className="text-xs text-neutral-600 dark:text-neutral-400">{data.valueSets.length} value set(s) checked</span>
           </div>
 
           {data.blockers.length > 0 ? (
@@ -95,7 +95,7 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
           {data.valueSets.length > 0 ? (
             <div className="mt-3 overflow-x-auto">
               <table className="min-w-full text-left text-xs">
-                <thead className="text-[10px] uppercase tracking-wide text-slate-500">
+                <thead className="text-[10px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                   <tr>
                     <th className="px-2 py-1">Name</th>
                     <th className="px-2 py-1">Version</th>
@@ -105,28 +105,28 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
                 </thead>
                 <tbody>
                   {data.valueSets.map((vs) => (
-                    <tr key={vs.id} className="border-t border-slate-200">
-                      <td className="px-2 py-1 font-medium text-slate-800">{vs.name}</td>
-                      <td className="px-2 py-1 text-slate-600">{vs.version ?? "—"}</td>
+                    <tr key={vs.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                      <td className="px-2 py-1 font-medium text-neutral-800 dark:text-neutral-200">{vs.name}</td>
+                      <td className="px-2 py-1 text-neutral-600 dark:text-neutral-400">{vs.version ?? "—"}</td>
                       <td className="px-2 py-1">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${resolutionStatusClass(vs.resolutionStatus)}`}>
                           {formatStatusLabel(vs.resolutionStatus)}
                         </span>
                       </td>
-                      <td className="px-2 py-1 text-slate-600">{vs.codeCount}</td>
+                      <td className="px-2 py-1 text-neutral-600 dark:text-neutral-400">{vs.codeCount}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="mt-2 text-xs text-slate-500">No value sets attached to this measure version.</p>
+            <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No value sets attached to this measure version.</p>
           )}
         </>
       ) : !loading ? (
-        <p className="mt-2 text-xs text-slate-500">Run a check to see value set governance status.</p>
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Run a check to see value set governance status.</p>
       ) : (
-        <p className="mt-2 text-xs text-slate-500">Checking…</p>
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Checking…</p>
       )}
     </div>
   );

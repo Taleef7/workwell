@@ -64,47 +64,47 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
   const available = allValueSets.filter((vs) => !attachedIds.has(vs.id));
 
   return (
-    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-900">Value Set Governance</h3>
+    <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Value Set Governance</h3>
       <ValueSetGovernancePanel measureId={measureId} api={api} />
 
-      <h3 className="mt-2 text-sm font-semibold text-slate-900">Attached Value Sets</h3>
+      <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Attached Value Sets</h3>
       {attached.length ? (
         <ul className="space-y-2">
           {attached.map((vs) => (
-            <li key={vs.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
+            <li key={vs.id} className="flex items-center justify-between rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
               <div>
-                <p className="font-medium text-slate-800">{vs.name}</p>
-                <p className="text-xs text-slate-600">{vs.oid} • {vs.version}</p>
+                <p className="font-medium text-neutral-800 dark:text-neutral-200">{vs.name}</p>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
                   {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
                 {normalizeEnumValue(vs.resolvabilityStatus) === "UNRESOLVED" ? <p className="mt-1 text-xs text-amber-700">{vs.resolvabilityNote}</p> : null}
               </div>
-              <button className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700" onClick={() => detach(vs.id)}>Remove</button>
+              <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={() => detach(vs.id)}>Remove</button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-slate-600">No value sets attached yet.</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">No value sets attached yet.</p>
       )}
 
-      <h3 className="mt-2 text-sm font-semibold text-slate-900">Create Value Set</h3>
-      <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
-      <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Version" value={version} onChange={(e) => setVersion(e.target.value)} />
+      <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Create Value Set</h3>
+      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
+      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Version" value={version} onChange={(e) => setVersion(e.target.value)} />
       <div>
-        <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white" onClick={createValueSet}>Create Value Set</button>
+        <button className="rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white" onClick={createValueSet}>Create Value Set</button>
       </div>
 
-      <h3 className="mt-2 text-sm font-semibold text-slate-900">Attach Existing Value Set</h3>
+      <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Attach Existing Value Set</h3>
       {available.length ? (
         <ul className="space-y-2">
           {available.map((vs) => (
-            <li key={vs.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
+            <li key={vs.id} className="flex items-center justify-between rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
               <div>
-                <p className="font-medium text-slate-800">{vs.name}</p>
-                <p className="text-xs text-slate-600">{vs.oid} • {vs.version}</p>
+                <p className="font-medium text-neutral-800 dark:text-neutral-200">{vs.name}</p>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
                   {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
@@ -114,7 +114,7 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-slate-600">No value sets available yet.</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">No value sets available yet.</p>
       )}
     </div>
   );
