@@ -75,6 +75,52 @@ Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
 
+### Service startup & reboot policy
+
+> "What happens if the server reboots — does WorkWell come back up on its own?"
+
+There are two runtime contexts, and the answer differs:
+
+**1. Live stack (`os.mieweb.org`) — MIE Create-a-Container.**
+The `twh` and `twh-api` containers run on **MIE's Container Manager**, which is a **Proxmox
+abstraction** (the manager talks to each node's Proxmox API via a stored token; nodes are named
+`opensource-phxdc-pve*`). Restart-on-reboot therefore lives at the Proxmox **`onboot`** layer.
+
+What was verified directly against the manager API (`GET /api/v1/sites/1/containers/{id}` and
+`/sites/1/nodes`, 2026-06-09):
+- The container object exposes **no** restart/`onboot`/uptime field (only `status`, `hostname`,
+  `nodeName`, `services`, `environmentVars`, etc.), and neither does the node object. So a restart
+  policy is **not user-configurable or user-readable** through this API — there is nothing to add
+  to the create payload in `deploy-mieweb-container.sh`, and nothing to inspect.
+- **Clean restart recovery is already proven** by normal operation: every push to `main` runs
+  `deploy-twh-mieweb.yml`, which **deletes and recreates** both containers, and the deploy script
+  fails unless the final container `status` is `running`. So the containers reliably return to
+  `running` after being recreated.
+
+> **Only open item (one-line question for the Container Manager maintainer, not an ops ticket):**
+> are provisioned containers created with Proxmox **`onboot=1`** (auto-start when the node reboots)?
+> This is the single thing not verifiable from our side — a manual container restart does **not**
+> test it (restart ≠ node reboot), and rebooting a shared Proxmox node is not an option. Everything
+> else about reboot recovery is settled above.
+
+**2. Self-hosted / VM / local — Docker Compose + systemd.**
+For any host we *do* control, reboot recovery is fully handled and is the reference Doug asked for:
+
+- **Per-container crash recovery:** every service in `infra/docker-compose.yml` is now
+  `restart: unless-stopped`, so Docker restarts a crashed container automatically (and restarts
+  the stack when the Docker daemon starts).
+- **Boot-time startup:** an example systemd unit, `infra/systemd/workwell.service`, starts the
+  whole compose stack on boot. Install + verification steps are in `infra/systemd/README.md`.
+
+```bash
+sudo systemctl enable docker                       # Docker starts on boot
+sudo systemctl enable --now workwell               # stack starts now + on every boot
+systemctl status workwell                          # verify
+```
+
+With both in place, a `sudo reboot` brings the entire stack back automatically (`docker compose ps`
+shows all services `Up`).
+
 ---
 
 ## Environment variables reference

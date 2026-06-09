@@ -1,0 +1,52 @@
+# WorkWell Measure Studio — example systemd unit
+#
+# Runs the full WorkWell stack (Postgres + backend + frontend [+ HAPI FHIR])
+# from infra/docker-compose.yml as a host-managed service that:
+#   - starts automatically on every boot (so a server reboot brings the app back), and
+#   - is supervised by systemd (start/stop/status via systemctl).
+#
+# Per-container crash recovery is handled by the `restart: unless-stopped` policy in
+# infra/docker-compose.yml; this unit handles boot-time startup of the whole stack.
+#
+# This is the reference unit for a self-hosted / VM deployment. The live os.mieweb.org
+# stack runs on MIE's Create-a-Container platform instead (see docs/DEPLOY.md →
+# "Service startup & reboot policy"); there the platform — not this unit — owns
+# host-reboot recovery.
+#
+# Install:
+#   sudo systemctl enable docker                                  # Docker must start on boot
+#   sudo git clone https://github.com/Taleef7/workwell.git /opt/workwell   # FULL repo: compose builds backend/frontend from the repo root
+#   sudo cp /opt/workwell/infra/systemd/workwell.service /etc/systemd/system/workwell.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now workwell                          # start now + on every boot
+#   systemctl status workwell                                     # verify
+#
+# Verify reboot recovery:
+#   sudo reboot      # after it comes back: `systemctl status workwell` should be active,
+#                    # and `docker compose ps` should show all services Up.
+
+[Unit]
+Description=WorkWell Measure Studio (Docker Compose stack)
+Documentation=https://github.com/Taleef7/workwell
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/workwell/infra
+# Refresh only image-based services (postgres, hapi-fhir); `--ignore-buildable` skips the
+# backend/frontend build services. Leading `-` makes a pull failure non-fatal so boot still
+# proceeds to `up` (which builds the app images on first start).
+ExecStartPre=-/usr/bin/docker compose pull --quiet --ignore-buildable
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+# If `docker compose up` itself fails (e.g. transient registry error), retry the start.
+# Steady-state container restarts are owned by the compose `restart:` policy.
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
