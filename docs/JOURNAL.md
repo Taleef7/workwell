@@ -11,6 +11,8 @@ Changes (no schema/API change):
 - `infra/systemd/workwell.service` + `infra/systemd/README.md`: the example systemd unit Doug asked for — boots the compose stack on host startup (`systemctl enable`), with install + reboot-verification steps. Reference for self-hosted/VM hosts; the live MIE platform owns its own reboot recovery.
 - `docs/DEPLOY.md`: new **"Service startup & reboot policy"** section explaining both contexts, with an explicit **verify-with-MIE-ops** action — does the Create-a-Container platform auto-restart containers on host reboot, and is there a restart-policy field/label to set on the create payload? (the backend image already carries an `org.mieweb.opensource-server.*` label, hinting label-driven config.)
 
+Follow-up (same day): verified the live-platform reboot question directly against the MIE Container Manager API (read-only, with Taleef's key). The manager is a **Proxmox** abstraction (`opensource-phxdc-pve*` nodes); the container + node objects expose **no** restart/`onboot`/uptime field, so a restart policy is neither user-settable nor user-readable via the API — the "add a restart field to the create payload" idea is a confirmed dead end. Clean restart recovery is already proven by every `main` deploy (delete+recreate → must end `running`). The only residual unknown is whether containers are provisioned with Proxmox `onboot=1`, which is a one-line question for the Container Manager maintainer (a manual restart can't test it; rebooting a shared node isn't an option). DEPLOY.md updated with this evidence-backed wording.
+
 Left unmerged for review (no commit/push without OK).
 
 ---
