@@ -7,6 +7,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   AreaChart, Area, XAxis, YAxis, CartesianGrid
 } from "recharts";
+import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
@@ -151,32 +152,32 @@ export default function ProgramDetailPage() {
 
   return (
     <section className="space-y-4">
-      <Link href="/programs" className="text-sm text-slate-500 hover:underline">← Back to Programs</Link>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      <Link href="/programs" className="text-sm text-neutral-500 dark:text-neutral-400 hover:underline">← Back to Programs</Link>
+      {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
       {program ? (
         <>
-          <div className="rounded-md border border-slate-200 bg-white p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">{program.policyRef}</p>
-            <h2 className="text-2xl font-semibold text-slate-900">{program.measureName}</h2>
-            <p className="text-sm text-slate-600">Version {program.version}</p>
+          <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{program.policyRef}</p>
+            <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{program.measureName}</h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}</p>
             <div className="mt-3 flex items-end gap-3">
-              <p className="text-4xl font-semibold text-slate-900">{program.complianceRate.toFixed(1)}%</p>
-              <p className={`text-sm font-medium ${delta >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+              <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>
+              <p className={`text-sm font-medium ${delta >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}>
                 {delta >= 0 ? "↑" : "↓"} {Math.abs(delta).toFixed(1)} from previous
               </p>
             </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Compliance trend (last 10 runs)</p>
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Compliance trend (last 10 runs)</p>
               <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} />
             </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Outcome breakdown (latest run)</p>
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Outcome breakdown (latest run)</p>
               {outcomeBreakdown.length === 0 ? (
-                <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
-                  <span className="text-xs text-slate-400">No outcomes for the latest run</span>
+                <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
+                  <span className="text-xs text-neutral-400">No outcomes for the latest run</span>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
@@ -209,24 +210,24 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Risk outlook (next 30 days)</p>
+          <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 30 days)</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <div className="rounded border border-orange-200 bg-orange-50 p-3">
-                <p className="text-xs text-orange-800">Upcoming due soon</p>
-                <p className="text-2xl font-semibold text-orange-900">
+              <div className="rounded border border-orange-200 bg-orange-50 p-3 dark:border-orange-900 dark:bg-orange-950/40">
+                <p className="text-xs text-orange-800 dark:text-orange-300">Upcoming due soon</p>
+                <p className="text-2xl font-semibold text-orange-900 dark:text-orange-200">
                   {riskOutlook?.upcomingNonCompliantCount ?? 0}
                 </p>
               </div>
-              <div className="rounded border border-rose-200 bg-rose-50 p-3">
-                <p className="text-xs text-rose-800">Repeat non-compliers</p>
-                <p className="text-2xl font-semibold text-rose-900">
+              <div className="rounded border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/40">
+                <p className="text-xs text-rose-800 dark:text-rose-300">Repeat non-compliers</p>
+                <p className="text-2xl font-semibold text-rose-900 dark:text-rose-200">
                   {riskOutlook?.repeatNonCompliers.length ?? 0}
                 </p>
               </div>
-              <div className="rounded border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs text-amber-800">Highest-risk site</p>
-                <p className="text-lg font-semibold text-amber-900">
+              <div className="rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+                <p className="text-xs text-amber-800 dark:text-amber-300">Highest-risk site</p>
+                <p className="text-lg font-semibold text-amber-900 dark:text-amber-200">
                   {riskOutlook?.siteComplianceRates?.[0]?.site ?? "—"}
                 </p>
               </div>
@@ -234,10 +235,10 @@ export default function ProgramDetailPage() {
 
             {riskOutlook?.repeatNonCompliers && riskOutlook.repeatNonCompliers.length > 0 ? (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Repeat non-compliers</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">Repeat non-compliers</p>
                 <div className="mt-2 overflow-x-auto">
                   <table className="min-w-full text-xs">
-                    <thead className="text-left text-slate-600">
+                    <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
                         <th className="py-1 pr-3">Employee</th>
                         <th className="py-1 pr-3">Site</th>
@@ -246,14 +247,14 @@ export default function ProgramDetailPage() {
                     </thead>
                     <tbody>
                       {riskOutlook.repeatNonCompliers.map((item) => (
-                        <tr key={`${item.externalId}-${item.streakCount}`} className="border-t border-slate-200">
+                        <tr key={`${item.externalId}-${item.streakCount}`} className="border-t border-neutral-200 dark:border-neutral-800">
                           <td className="py-1 pr-3">
-                            <Link href={`/employees/${item.externalId}`} className="font-medium text-blue-700 hover:underline">
+                            <Link href={`/employees/${item.externalId}`} className="font-medium text-primary-700 dark:text-primary-400 hover:underline">
                               {item.name}
                             </Link>
                           </td>
                           <td className="py-1 pr-3">{item.site}</td>
-                          <td className="py-1 pr-3 text-rose-700">{item.streakCount}x</td>
+                          <td className="py-1 pr-3 text-rose-700 dark:text-rose-400">{item.streakCount}x</td>
                         </tr>
                       ))}
                     </tbody>
@@ -261,15 +262,15 @@ export default function ProgramDetailPage() {
                 </div>
               </div>
             ) : (
-              <p className="mt-4 text-xs text-slate-500">No repeat non-compliers detected at the moment.</p>
+              <p className="mt-4 text-xs text-neutral-500 dark:text-neutral-400">No repeat non-compliers detected at the moment.</p>
             )}
 
             {riskOutlook?.siteComplianceRates && riskOutlook.siteComplianceRates.length > 0 ? (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Site risk heatmap</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">Site risk heatmap</p>
                 <div className="mt-2 overflow-x-auto">
                   <table className="min-w-full text-xs">
-                    <thead className="text-left text-slate-600">
+                    <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
                         <th className="py-1 pr-3">Site</th>
                         <th className="py-1 pr-3">Current rate</th>
@@ -279,7 +280,7 @@ export default function ProgramDetailPage() {
                     </thead>
                     <tbody>
                       {riskOutlook.siteComplianceRates.map((site) => (
-                        <tr key={site.site} className="border-t border-slate-200">
+                        <tr key={site.site} className="border-t border-neutral-200 dark:border-neutral-800">
                           <td className="py-1 pr-3">{site.site}</td>
                           <td className="py-1 pr-3">{site.currentComplianceRate.toFixed(1)}%</td>
                           <td className="py-1 pr-3">{site.predictedComplianceRate.toFixed(1)}%</td>
@@ -294,27 +295,27 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">Top sites</p>
-              {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-slate-500">-</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top sites</p>
+              {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
             </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">Top roles</p>
-              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-slate-500">-</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top roles</p>
+              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
             </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">Reason mix</p>
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reason mix</p>
               {drivers.byOutcomeReason.length === 0 ? (
-                <p className="mt-2 text-xs text-slate-500">-</p>
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p>
               ) : (
                 <div className="mt-2 space-y-2">
                   {drivers.byOutcomeReason.map((r) => (
                     <div key={r.reason}>
                       <div className="flex justify-between text-xs">
                         <span>{labelFor(OUTCOME_LABELS, r.reason)}</span>
-                        <span className="text-slate-500">{r.count} ({r.pct.toFixed(1)}%)</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">{r.count} ({r.pct.toFixed(1)}%)</span>
                       </div>
-                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                         <div
                           className="h-full rounded-full"
                           style={{
@@ -330,19 +331,19 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 bg-white p-4">
+          <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-900">Run history</p>
-              <Link href="/runs" className="text-xs font-medium text-blue-700 hover:underline">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run history</p>
+              <Link href="/runs" className="text-xs font-medium text-primary-700 dark:text-primary-400 hover:underline">
                 View all runs →
               </Link>
             </div>
             {runHistory.length === 0 ? (
-              <p className="mt-2 text-xs text-slate-500">No runs recorded for this measure yet.</p>
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No runs recorded for this measure yet.</p>
             ) : (
               <div className="mt-2 overflow-x-auto">
                 <table className="min-w-full text-xs">
-                  <thead className="text-left text-slate-600">
+                  <thead className="text-left text-neutral-600 dark:text-neutral-400">
                     <tr>
                       <th className="py-1 pr-3">Run</th>
                       <th className="py-1 pr-3">Started</th>
@@ -352,17 +353,17 @@ export default function ProgramDetailPage() {
                   </thead>
                   <tbody>
                     {runHistory.map((run) => (
-                      <tr key={run.runId} className="border-t border-slate-200 hover:bg-slate-50">
+                      <tr key={run.runId} className="border-t border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                         <td className="py-1 pr-3">
                           <Link
                             href={`/runs?runId=${encodeURIComponent(run.runId)}`}
-                            className="font-medium text-blue-700 hover:underline"
+                            className="font-medium text-primary-700 dark:text-primary-400 hover:underline"
                             title={run.runId}
                           >
                             {run.runId.slice(0, 8)}...
                           </Link>
                         </td>
-                        <td className="py-1 pr-3 text-slate-600">{formatTimestamp(run.startedAt)}</td>
+                        <td className="py-1 pr-3 text-neutral-600 dark:text-neutral-400">{formatTimestamp(run.startedAt)}</td>
                         <td className="py-1 pr-3">{run.complianceRate.toFixed(1)}%</td>
                         <td className="py-1 pr-3">{run.totalEvaluated}</td>
                       </tr>
@@ -373,10 +374,10 @@ export default function ProgramDetailPage() {
             )}
           </div>
 
-          <div className="rounded-md border border-slate-200 bg-white p-4">
-            <p className="text-sm font-semibold text-slate-900">Measures in this Program</p>
+          <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Measures in this Program</p>
             <table className="mt-2 min-w-full text-xs">
-              <thead className="text-left text-slate-600">
+              <thead className="text-left text-neutral-600 dark:text-neutral-400">
                 <tr>
                   <th className="py-1">Version</th>
                   <th className="py-1">Compliant</th>
@@ -387,7 +388,7 @@ export default function ProgramDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-t border-slate-200">
+                <tr className="border-t border-neutral-200 dark:border-neutral-800">
                   <td className="py-1">{program.version}</td>
                   <td className="py-1">{program.compliant}</td>
                   <td className="py-1">{program.dueSoon}</td>
@@ -400,11 +401,12 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
+            <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Open Worklist (Filtered)
             </Link>
-            <button
-              className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => {
                 void (async () => {
                   try {
@@ -418,11 +420,11 @@ export default function ProgramDetailPage() {
               }}
             >
               Run This Measure
-            </button>
+            </Button>
           </div>
         </>
       ) : (
-        <p className="text-sm text-slate-600">Loading program detail...</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading program detail...</p>
       )}
     </section>
   );
@@ -431,8 +433,8 @@ export default function ProgramDetailPage() {
 function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
   if (!points.length) {
     return (
-      <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50">
-        <span className="text-xs text-slate-400">No run history for this measure yet</span>
+      <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
+        <span className="text-xs text-neutral-400">No run history for this measure yet</span>
       </div>
     );
   }
@@ -459,7 +461,7 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
             <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+        <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} />
         <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
         <YAxis domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
         <Legend iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
