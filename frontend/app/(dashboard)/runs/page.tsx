@@ -434,13 +434,13 @@ export default function RunsPage() {
         <h2 className="text-2xl font-semibold">Run History</h2>
         <div className="flex items-center gap-2">
           <button
-            className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200"
             onClick={() => void downloadCsv("/api/exports/runs?format=csv", "runs-export.csv")}
           >
             Export runs CSV
           </button>
           <button
-            className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200"
             onClick={() =>
               void downloadCsv(
                 `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}`,
@@ -451,7 +451,7 @@ export default function RunsPage() {
             Export outcomes CSV
           </button>
           <button
-            className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200 disabled:opacity-60"
             onClick={() => void rerunSameScope()}
             disabled={!selectedRunId || !rerunSupported || isRunTriggering}
           >
@@ -470,15 +470,15 @@ export default function RunsPage() {
         </div>
       </div>
 
-      <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
-        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+      <div className="grid gap-2 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 md:grid-cols-4">
+        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="">All Statuses</option>
           <option value="completed">{labelFor(RUN_STATUS_LABELS, "COMPLETED")}</option>
           <option value="running">{labelFor(RUN_STATUS_LABELS, "RUNNING")}</option>
           <option value="failed">{labelFor(RUN_STATUS_LABELS, "FAILED")}</option>
           <option value="partial">{labelFor(RUN_STATUS_LABELS, "PARTIAL")}</option>
         </select>
-        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
+        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
           <option value="">All Scope Types</option>
           <option value="all_programs">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
           <option value="measure">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
@@ -486,22 +486,22 @@ export default function RunsPage() {
           <option value="employee">{labelFor(SCOPE_LABELS, "EMPLOYEE")}</option>
           <option value="case">{labelFor(SCOPE_LABELS, "CASE")}</option>
         </select>
-        <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
+        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
           <option value="">All Trigger Types</option>
           <option value="manual">{labelFor(TRIGGER_LABELS, "MANUAL")}</option>
           <option value="scheduler">{labelFor(TRIGGER_LABELS, "SCHEDULER")}</option>
         </select>
-        <button className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700" onClick={() => void loadRuns()}>
+        <button className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm text-neutral-700 dark:text-neutral-300" onClick={() => void loadRuns()}>
           Refresh
         </button>
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
         <div className="grid gap-3 md:grid-cols-4">
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Scope</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Scope</label>
             <select
-              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
               value={runScopeType}
               onChange={(e) => setRunScopeType(e.target.value as RunScopeType)}
             >
@@ -513,9 +513,9 @@ export default function RunsPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Measure</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Measure</label>
             <select
-              className="w-full rounded border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-100"
+              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm disabled:bg-neutral-100 dark:bg-neutral-800"
               value={runMeasureId}
               onChange={(e) => setRunMeasureId(e.target.value)}
               disabled={runScopeType !== "MEASURE"}
@@ -529,20 +529,20 @@ export default function RunsPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Evaluation Date</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Evaluation Date</label>
             <input
               type="date"
-              className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
               value={runEvaluationDate}
               onChange={(e) => setRunEvaluationDate(e.target.value)}
             />
           </div>
           {runScopeType === "SITE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Site</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Site</label>
               <input
                 type="text"
-                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
                 value={runSite}
                 onChange={(e) => setRunSite(e.target.value)}
                 placeholder="Enter a site name, for example Plant A"
@@ -551,10 +551,10 @@ export default function RunsPage() {
           ) : null}
           {runScopeType === "EMPLOYEE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Employee External ID</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Employee External ID</label>
               <input
                 type="text"
-                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
                 value={runEmployeeExternalId}
                 onChange={(e) => setRunEmployeeExternalId(e.target.value)}
                 placeholder="Enter an employee external ID, for example emp-041"
@@ -563,10 +563,10 @@ export default function RunsPage() {
           ) : null}
           {runScopeType === "CASE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Case ID</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Case ID</label>
               <input
                 type="text"
-                className="w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
                 value={runCaseId}
                 onChange={(e) => setRunCaseId(e.target.value)}
                 placeholder="Paste a case UUID"
@@ -575,7 +575,7 @@ export default function RunsPage() {
           ) : null}
           <div className="flex items-end">
             <button
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
               onClick={() => void runManualScope()}
               disabled={isRunTriggering}
             >
@@ -593,7 +593,7 @@ export default function RunsPage() {
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
           MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require an employee external ID.
           CASE runs require a case UUID.
         </p>
@@ -604,16 +604,16 @@ export default function RunsPage() {
         <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, site-scoped, employee-scoped, or case-scoped runs.</p>
       ) : null}
       {loading ? (
-        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full text-sm">
             <tbody>{Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} cols={7} />)}</tbody>
           </table>
         </div>
       ) : null}
-      {!loading && runs.length === 0 ? <p className="text-sm text-slate-600">No runs yet. Use the run controls above to start one.</p> : null}
+      {!loading && runs.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No runs yet. Use the run controls above to start one.</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-slate-200 bg-white">
+        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full table-fixed text-sm">
             <colgroup>
               <col className="w-[40%]" />
@@ -622,7 +622,7 @@ export default function RunsPage() {
               <col className="w-[10%]" />
               <col className="w-[20%]" />
             </colgroup>
-            <thead className="bg-slate-50 text-left text-slate-600">
+            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
               <tr>
                 <th className="px-3 py-2">Run</th>
                 <th className="px-3 py-2">Status</th>
@@ -635,12 +635,12 @@ export default function RunsPage() {
               {runs.map((run) => (
                 <tr
                   key={run.runId}
-                  className={`cursor-pointer border-t border-slate-200 ${selectedRunId === run.runId ? "bg-slate-100" : "hover:bg-slate-50"}`}
+                  className={`cursor-pointer border-t border-neutral-200 dark:border-neutral-800 ${selectedRunId === run.runId ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"}`}
                   onClick={() => setSelectedRunId(run.runId)}
                 >
                   <td className="px-3 py-2 align-top">
-                    <p className="font-medium text-slate-800">{run.measureName}</p>
-                    <p className="text-xs text-slate-500" title={run.runId}>
+                    <p className="font-medium text-neutral-800 dark:text-neutral-200">{run.measureName}</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400" title={run.runId}>
                       {run.runId.slice(0, 8)}...
                     </p>
                   </td>
@@ -649,13 +649,13 @@ export default function RunsPage() {
                   <td className="px-3 py-2 align-top">
                     {run.runId === activeRunId ? (
                       <span className="tabular-nums">
-                        {runElapsedSec}s <span className="animate-pulse text-slate-400">●</span>
+                        {runElapsedSec}s <span className="animate-pulse text-neutral-400">●</span>
                       </span>
                     ) : (
                       formatRunDuration(run.durationMs, run.status)
                     )}
                   </td>
-                  <td className="px-3 py-2 align-top text-slate-600" title={formatAbsoluteTimestamp(run.startedAt)}>
+                  <td className="px-3 py-2 align-top text-neutral-600 dark:text-neutral-400" title={formatAbsoluteTimestamp(run.startedAt)}>
                     {formatRelativeTimestamp(run.startedAt)}
                   </td>
                 </tr>
@@ -663,9 +663,9 @@ export default function RunsPage() {
             </tbody>
           </table>
           {runs.length >= limit ? (
-            <div className="border-t border-slate-200 px-3 py-3">
+            <div className="border-t border-neutral-200 dark:border-neutral-800 px-3 py-3">
               <button
-                className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
                 onClick={() => setLimit((current) => current + RUN_PAGE_SIZE)}
                 disabled={loading}
               >
@@ -675,13 +675,13 @@ export default function RunsPage() {
           ) : null}
         </div>
 
-        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
-          <h3 className="text-sm font-semibold text-slate-900">Run Detail</h3>
+        <div className="space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Detail</h3>
           {runInsight && !runInsight.fallback && runInsight.insights.length > 0 && !insightDismissed ? (
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">AI-generated operational insight - verify before acting</p>
-                <button className="text-xs text-blue-700 underline" onClick={() => setInsightDismissed(true)}>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">AI-generated operational insight - verify before acting</p>
+                <button className="text-xs text-primary-700 dark:text-primary-400 underline" onClick={() => setInsightDismissed(true)}>
                   Dismiss
                 </button>
               </div>
@@ -694,34 +694,34 @@ export default function RunsPage() {
           ) : null}
           {selectedRun ? (
             <>
-              <p className="text-sm text-slate-700">
+              <p className="text-sm text-neutral-700 dark:text-neutral-300">
                 {selectedRun.measureName} ({labelFor(SCOPE_LABELS, selectedRun.scopeType)}) - {labelFor(RUN_STATUS_LABELS, selectedRun.status)}
               </p>
-              <p className="text-xs text-slate-600">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
-              <p className="text-xs text-slate-600">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
-              <p className="text-xs text-slate-600">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Duration:{" "}
                 {selectedRunId === activeRunId ? (
                   <span className="tabular-nums">
-                    {runElapsedSec}s <span className="animate-pulse text-slate-400">●</span>
+                    {runElapsedSec}s <span className="animate-pulse text-neutral-400">●</span>
                   </span>
                 ) : (
                   formatRunDuration(selectedRun.durationMs, selectedRun.status)
                 )}
               </p>
-              <p className="text-xs text-slate-600">Evaluated: {selectedRun.totalEvaluated}</p>
-              <p className="text-xs text-slate-600">Cases: {selectedRun.totalCases}</p>
-              <p className="text-xs text-slate-600">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Evaluated: {selectedRun.totalEvaluated}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases: {selectedRun.totalCases}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Data Freshness: {selectedRun.dataFreshnessMinutes >= 0 ? `${selectedRun.dataFreshnessMinutes} min old` : "unknown"}
               </p>
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Data Fresh As Of: {selectedRun.dataFreshAsOf ? new Date(selectedRun.dataFreshAsOf).toLocaleString() : "-"}
               </p>
               <div>
-                <p className="text-xs font-semibold text-slate-700">Outcome Counts</p>
-                <ul className="text-xs text-slate-600">
+                <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Outcome Counts</p>
+                <ul className="text-xs text-neutral-600 dark:text-neutral-400">
                   {selectedRun.outcomeCounts.map((item) => (
                     <li key={item.status}>
                       {labelFor(OUTCOME_LABELS, item.status)}: {item.count}
@@ -740,36 +740,36 @@ export default function RunsPage() {
               </div>
             </>
           ) : (
-            <p className="text-sm text-slate-600">Select a run to view details.</p>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">Select a run to view details.</p>
           )}
         </div>
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-3">
-        <h3 className="text-sm font-semibold text-slate-900">Run Logs</h3>
+      <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Logs</h3>
         {runLogs.length === 0 ? (
-          <p className="text-sm text-slate-600">No logs for this run.</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No logs for this run.</p>
         ) : (
           <ul className="space-y-1 text-xs">
             {runLogs.map((entry, idx) => (
-              <li key={`${entry.timestamp}-${idx}`} className="rounded border border-slate-200 px-2 py-1">
-                <span className="font-semibold text-slate-700">{formatStatusLabel(entry.level)}</span>{" "}
-                <span className="text-slate-500">{new Date(entry.timestamp).toLocaleString()}</span>{" "}
-                <span className="text-slate-700">{entry.message}</span>
+              <li key={`${entry.timestamp}-${idx}`} className="rounded border border-neutral-200 dark:border-neutral-800 px-2 py-1">
+                <span className="font-semibold text-neutral-700 dark:text-neutral-300">{formatStatusLabel(entry.level)}</span>{" "}
+                <span className="text-neutral-500 dark:text-neutral-400">{new Date(entry.timestamp).toLocaleString()}</span>{" "}
+                <span className="text-neutral-700 dark:text-neutral-300">{entry.message}</span>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-3">
-        <h3 className="text-sm font-semibold text-slate-900">Outcomes</h3>
+      <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Outcomes</h3>
         {runOutcomes.length === 0 ? (
-          <p className="text-sm text-slate-600">No outcomes for this run.</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No outcomes for this run.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
-              <thead className="bg-slate-50 text-left text-slate-600">
+              <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
                 <tr>
                   <th className="px-2 py-2">Employee</th>
                   <th className="px-2 py-2">Role</th>
@@ -788,8 +788,8 @@ export default function RunsPage() {
                       key={`${row.employeeExternalId}-${row.caseId ?? "none"}`}
                       className={
                         caseHref
-                          ? "cursor-pointer border-t border-slate-200 hover:bg-blue-50"
-                          : "cursor-default border-t border-slate-200 bg-slate-50/40 text-slate-500"
+                          ? "cursor-pointer border-t border-neutral-200 dark:border-neutral-800 hover:bg-blue-50"
+                          : "cursor-default border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-800/40 text-neutral-500 dark:text-neutral-400"
                       }
                       onClick={caseHref ? () => router.push(caseHref) : undefined}
                       role={caseHref ? "link" : undefined}
@@ -813,12 +813,12 @@ export default function RunsPage() {
                       <td className="px-2 py-2">
                         <a
                           href={`/employees/${row.employeeExternalId}`}
-                          className="font-medium text-slate-800 hover:underline hover:text-blue-700"
+                          className="font-medium text-neutral-800 dark:text-neutral-200 hover:underline hover:text-primary-700 dark:text-primary-400"
                           onClick={(event) => event.stopPropagation()}
                         >
                           {row.employeeName}
                         </a>
-                        <p className="text-slate-500">{row.employeeExternalId}</p>
+                        <p className="text-neutral-500 dark:text-neutral-400">{row.employeeExternalId}</p>
                       </td>
                       <td className="px-2 py-2">{labelFor(ROLE_LABELS, row.role)}</td>
                       <td className="px-2 py-2">{row.site}</td>
@@ -832,7 +832,7 @@ export default function RunsPage() {
                       <td className="px-2 py-2">
                         {caseHref ? (
                           <a
-                            className="text-blue-700 underline"
+                            className="text-primary-700 dark:text-primary-400 underline"
                             href={caseHref}
                             onClick={(event) => event.stopPropagation()}
                           >

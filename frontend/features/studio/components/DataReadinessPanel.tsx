@@ -23,7 +23,7 @@ function mappingBadgeClass(status: string) {
   if (normalized === "MAPPED") return "bg-emerald-50 text-emerald-800";
   if (normalized === "STALE" || normalized === "PARTIAL") return "bg-amber-50 text-amber-800";
   if (normalized === "UNMAPPED" || normalized === "ERROR") return "bg-red-50 text-red-800";
-  return "bg-slate-100 text-slate-600";
+  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400";
 }
 
 function freshnessBadgeClass(status: string) {
@@ -31,7 +31,7 @@ function freshnessBadgeClass(status: string) {
   if (normalized === "FRESH") return "text-emerald-700";
   if (normalized === "STALE") return "text-amber-700";
   if (normalized === "VERY_STALE") return "text-red-700";
-  return "text-slate-500";
+  return "text-neutral-500 dark:text-neutral-400";
 }
 
 export function DataReadinessPanel({ measureId, api }: Props) {
@@ -58,11 +58,11 @@ export function DataReadinessPanel({ measureId, api }: Props) {
   }, [load]);
 
   return (
-    <div className="mt-4 space-y-3 rounded-md border border-slate-200 bg-white p-4">
+    <div className="mt-4 space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-900">Data Readiness</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Data Readiness</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             Source mapping, freshness, and missingness for required data elements.
           </p>
         </div>
@@ -73,7 +73,7 @@ export function DataReadinessPanel({ measureId, api }: Props) {
             </span>
           ) : null}
           <button
-            className="rounded border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-50"
             onClick={() => void load()}
             disabled={loading}
           >
@@ -109,9 +109,9 @@ export function DataReadinessPanel({ measureId, api }: Props) {
           ) : null}
 
           {data.requiredElements.length > 0 ? (
-            <div className="overflow-x-auto rounded-md border border-slate-200">
+            <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800">
               <table className="min-w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500">
+                <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
                   <tr>
                     <th className="px-3 py-2 font-medium">Required Element</th>
                     <th className="px-3 py-2 font-medium">Source</th>
@@ -122,12 +122,12 @@ export function DataReadinessPanel({ measureId, api }: Props) {
                 </thead>
                 <tbody>
                   {data.requiredElements.map((el, i) => (
-                    <tr key={i} className="border-t border-slate-100 align-top">
+                    <tr key={i} className="border-t border-neutral-100 dark:border-neutral-800 align-top">
                       <td className="px-3 py-2">
-                        <p className="font-medium text-slate-800">{el.label}</p>
-                        <p className="text-[10px] text-slate-400">{el.canonicalElement}</p>
+                        <p className="font-medium text-neutral-800 dark:text-neutral-200">{el.label}</p>
+                        <p className="text-[10px] text-neutral-400">{el.canonicalElement}</p>
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{el.sourceId ?? "—"}</td>
+                      <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{el.sourceId ?? "—"}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${mappingBadgeClass(el.mappingStatus)}`}>
                           {formatStatusLabel(el.mappingStatus)}
@@ -140,10 +140,10 @@ export function DataReadinessPanel({ measureId, api }: Props) {
                         {el.missingnessRate > 0 ? (
                           <span className="text-amber-700">{(el.missingnessRate * 100).toFixed(0)}%</span>
                         ) : (
-                          <span className="text-slate-400">0%</span>
+                          <span className="text-neutral-400">0%</span>
                         )}
                         {el.sampleMissingEmployees.length > 0 ? (
-                          <p className="mt-0.5 text-[10px] text-slate-400">
+                          <p className="mt-0.5 text-[10px] text-neutral-400">
                             e.g. {el.sampleMissingEmployees.join(", ")}
                           </p>
                         ) : null}
@@ -154,12 +154,12 @@ export function DataReadinessPanel({ measureId, api }: Props) {
               </table>
             </div>
           ) : (
-            <p className="text-xs text-slate-500">No required elements defined in spec.</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">No required elements defined in spec.</p>
           )}
 
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             Manage source mappings in{" "}
-            <Link href="/admin" className="text-blue-700 underline hover:text-blue-900">
+            <Link href="/admin" className="text-primary-700 dark:text-primary-400 underline hover:text-blue-900">
               Admin → Data Mappings
             </Link>
             .

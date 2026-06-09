@@ -13,7 +13,7 @@
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: Java 21 + Spring Boot 3.x + Gradle Kotlin DSL + PostgreSQL 16 + Flyway
 - CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (see CQF_FHIR_CR_REFERENCE.md)
-- Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind + shadcn/ui + Monaco
+- Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher; see ADR-004) + Monaco
 - AI: Spring AI (OpenAI starter, `spring-ai-openai-spring-boot-starter`); MCP via `io.modelcontextprotocol/java-sdk`
 - Infra: Docker Compose locally; MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI; pnpm
 
@@ -101,6 +101,6 @@ Current posture:
 - **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`. The earlier Fly.io + Vercel public-preview stack is decommissioned; MIE TWH is the sole live stack.
 - **Measure catalog:** 60 total — 4 OSHA active (CQL), 3 OSHA catalog, 4 HEDIS wellness active (CQL), 2 CMS eCQM active (CMS125v14 breast cancer, CMS122v14 diabetes HbA1c), 47 CMS eCQM Draft entries; **10 runnable measures total**
 - **Supported run scopes:** `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, `CASE`
-- `main` is fully up to date; no open feature branches
+- **In flight:** `@mieweb/ui` frontend migration (dark mode + Enterprise Health brand + runtime brand switcher) on `feat/mieweb-ui-migration` → **PR #68** (open, awaiting review/merge). Full visual migration across all pages; see ADR-004, `docs/JOURNAL.md` (2026-06-09), and `frontend/MIEWEB-UI-MIGRATION.md`. NITRO data-grid deferred (`@mieweb/datavis` not npm-publishable yet — ask to Doug pending).
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only

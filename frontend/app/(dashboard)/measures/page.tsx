@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, labelFor, measureStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
 
@@ -86,31 +87,31 @@ export default function MeasuresPage() {
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold">Measures</h2>
-        <button
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-          onClick={() => setShowCreate((value) => !value)}
-        >
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Measures</h2>
+        <Button variant="primary" onClick={() => setShowCreate((value) => !value)}>
           Create Measure
-        </button>
+        </Button>
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex flex-wrap gap-2">
           {statusFilters.map((status) => (
-            <button
+            <Button
               key={status}
               type="button"
+              size="sm"
+              variant={statusFilter === status ? "primary" : "outline"}
+              className="rounded-full"
               onClick={() => setStatusFilter(status)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${statusFilter === status ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}
             >
               {status}
-            </button>
+            </Button>
           ))}
         </div>
         <div className="mt-3">
-          <input
-            className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          <Input
+            label="Search measures"
+            hideLabel
             placeholder="Search by measure name or tag"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -119,29 +120,29 @@ export default function MeasuresPage() {
       </div>
 
       {showCreate ? (
-        <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Policy Ref" value={policyRef} onChange={(e) => setPolicyRef(e.target.value)} />
-          <input className="rounded border border-slate-300 px-3 py-2 text-sm" placeholder="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} />
+        <div className="grid gap-3 rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+          <Input label="Name" hideLabel placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input label="Policy Ref" hideLabel placeholder="Policy Ref" value={policyRef} onChange={(e) => setPolicyRef(e.target.value)} />
+          <Input label="Owner" hideLabel placeholder="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} />
           <div>
-            <button className="rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" onClick={createMeasure} disabled={creating}>
+            <Button variant="primary" size="sm" onClick={createMeasure} disabled={creating}>
               {creating ? "Creating..." : "Create"}
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
 
-      {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
-      {loading ? <p className="text-sm text-slate-600">Loading measures...</p> : null}
+      {error ? <p className="text-sm text-red-700 dark:text-red-400">Error: {error}</p> : null}
+      {loading ? <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading measures...</p> : null}
       {!loading && items.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+        <p className="rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-6 text-sm text-neutral-600 dark:text-neutral-400">
           No measures match this filter.
         </p>
       ) : null}
 
-      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
             <tr>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Policy Ref</th>
@@ -157,13 +158,13 @@ export default function MeasuresPage() {
             {items.map((item) => (
               <tr
                 key={item.id}
-                className="cursor-pointer border-t border-slate-200 hover:bg-slate-50"
+                className="cursor-pointer border-t border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                 onClick={() => router.push(`/studio/${item.id}`)}
               >
                 <td className="px-3 py-2">{item.name}</td>
                 <td className="px-3 py-2">
                   {item.policyRef && /^CMS\d+/.test(item.policyRef) ? (
-                    <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                    <span className="inline-flex items-center rounded bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
                       {item.policyRef}
                     </span>
                   ) : (
@@ -174,7 +175,7 @@ export default function MeasuresPage() {
                 <td className="px-3 py-2">
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(item.status)}`}>{labelFor(MEASURE_STATUS_LABELS, item.status)}</span>
                 </td>
-                <td className="px-3 py-2 text-xs text-slate-600">
+                <td className="px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">
                   {new Date(item.statusUpdatedAt).toLocaleString()} by {item.statusUpdatedBy || "-"}
                 </td>
                 <td className="px-3 py-2">{item.owner}</td>
@@ -183,13 +184,13 @@ export default function MeasuresPage() {
                   {item.tags && item.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {item.tags.map((tag) => (
-                        <span key={tag} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                        <span key={tag} className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">
                           {tag}
                         </span>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span className="text-neutral-400">—</span>
                   )}
                 </td>
               </tr>

@@ -28,20 +28,20 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-dvh flex-col bg-slate-50 text-slate-950">
+    <main className="flex min-h-dvh flex-col bg-neutral-50 text-neutral-950 dark:bg-neutral-950 dark:text-neutral-100">
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 pb-12 pt-6 sm:px-8">
         {/* ── Header ─────────────────────────────────────────────────── */}
         <header className="flex items-center justify-between gap-4">
           <Link
             href="/"
-            className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+            className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-[10px] font-bold tracking-[0.2em] text-white">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-[10px] font-bold tracking-[0.2em] text-white">
               WW
             </span>
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-slate-950">{APP_BADGE}</span>
-              <span className="text-xs text-slate-500">{APP_SUBTITLE}</span>
+              <span className="text-sm font-semibold text-neutral-950 dark:text-neutral-100">{APP_BADGE}</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">{APP_SUBTITLE}</span>
             </span>
           </Link>
 
@@ -51,7 +51,7 @@ export default function HomePage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Watch product walkthrough video"
-              className="text-slate-600 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
             >
               Walkthrough
             </a>
@@ -60,7 +60,7 @@ export default function HomePage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label="View source on GitHub"
-              className="text-slate-600 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
             >
               GitHub
             </a>
@@ -69,31 +69,31 @@ export default function HomePage() {
 
         {/* ── Hero ───────────────────────────────────────────────────── */}
         <section className="flex flex-1 flex-col justify-center py-12">
-          <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">
+          <p className="text-xs font-semibold uppercase tracking-[0.26em] text-neutral-500 dark:text-neutral-400">
             Public sandbox · No login required
           </p>
 
           <h1
-            className={`${fraunces.className} mt-5 max-w-3xl text-4xl leading-[1.05] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl`}
+            className={`${fraunces.className} mt-5 max-w-3xl text-4xl leading-[1.05] tracking-tight text-neutral-950 dark:text-neutral-100 sm:text-5xl lg:text-6xl`}
           >
             {APP_TAGLINE}
           </h1>
 
-          <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
+          <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-600 dark:text-neutral-400 sm:text-lg">
             {APP_DESCRIPTION}
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
             <Link
               href="/sandbox"
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >
               Open sandbox
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
               href="/login"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 dark:text-neutral-300 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
             >
               Sign in
               <ArrowRight className="h-3.5 w-3.5" />
@@ -104,16 +104,16 @@ export default function HomePage() {
             href={videoUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-5 w-fit text-sm text-slate-500 underline-offset-4 transition-colors hover:text-slate-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+            className="mt-5 w-fit text-sm text-neutral-500 dark:text-neutral-400 underline-offset-4 transition-colors hover:text-neutral-700 dark:hover:text-neutral-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
           >
             Watch the 5-min walkthrough →
           </a>
 
-          <div className="mt-10 border-t border-slate-200 pt-6">
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
+          <div className="mt-10 border-t border-neutral-200 dark:border-neutral-800 pt-6">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500 dark:text-neutral-400">
               {capabilities.map((item, index) => (
                 <span key={item} className="flex items-center gap-x-3">
-                  {index > 0 && <span aria-hidden="true" className="text-slate-300">·</span>}
+                  {index > 0 && <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-600">·</span>}
                   <span>{item}</span>
                 </span>
               ))}
@@ -122,7 +122,7 @@ export default function HomePage() {
         </section>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <footer className="border-t border-slate-200 pt-6 text-xs text-slate-500">
+        <footer className="border-t border-neutral-200 dark:border-neutral-800 pt-6 text-xs text-neutral-500 dark:text-neutral-400">
           © {APP_NAME} — {APP_TAGLINE}
         </footer>
       </div>
