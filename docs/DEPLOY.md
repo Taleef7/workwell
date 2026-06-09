@@ -75,6 +75,43 @@ Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
 
+### Service startup & reboot policy
+
+> "What happens if the server reboots — does WorkWell come back up on its own?"
+
+There are two runtime contexts, and the answer differs:
+
+**1. Live stack (`os.mieweb.org`) — MIE Create-a-Container.**
+The `twh` and `twh-api` containers run on **MIE's Container Manager**, so the platform — not a
+unit on a host we control — is responsible for restarting them after a host reboot. The deploy
+create-payload (`.github/scripts/deploy-mieweb-container.sh`) does **not** currently set a restart
+policy, so reboot recovery relies on the platform default. The backend image advertises itself to
+the platform via the `org.mieweb.opensource-server.*` Docker label (see `backend/Dockerfile`),
+which suggests the platform may also honor a restart/auto-start label.
+
+> **Action — verify with MIE ops (not determinable from this repo):** (a) do containers
+> auto-restart after an `os.mieweb.org` host reboot, and (b) is there a restart-policy field/label
+> the Create-a-Container API accepts so we can make it explicit? If yes, add it to the create
+> payload in `deploy-mieweb-container.sh`. (Same escalation path as the nginx SSE/504 item.)
+
+**2. Self-hosted / VM / local — Docker Compose + systemd.**
+For any host we *do* control, reboot recovery is fully handled and is the reference Doug asked for:
+
+- **Per-container crash recovery:** every service in `infra/docker-compose.yml` is now
+  `restart: unless-stopped`, so Docker restarts a crashed container automatically (and restarts
+  the stack when the Docker daemon starts).
+- **Boot-time startup:** an example systemd unit, `infra/systemd/workwell.service`, starts the
+  whole compose stack on boot. Install + verification steps are in `infra/systemd/README.md`.
+
+```bash
+sudo systemctl enable docker                       # Docker starts on boot
+sudo systemctl enable --now workwell               # stack starts now + on every boot
+systemctl status workwell                          # verify
+```
+
+With both in place, a `sudo reboot` brings the entire stack back automatically (`docker compose ps`
+shows all services `Up`).
+
 ---
 
 ## Environment variables reference

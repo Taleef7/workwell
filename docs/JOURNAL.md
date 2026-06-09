@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-09 — Service startup & reboot policy (Doug's June-8 systemd/reboot points) — branch `infra/systemd-reboot-policy`
+
+Resolved the remaining concrete points from Doug's 2026-06-08 meeting (latency ✅ PR #69, `@mieweb/ui` ✅ PR #68 already done; the "decompose into modules" roadmap is captured in the local `docs/PLAN.md` and deferred): **"systemd services startup / example systemd file for my project"** and **"what if the server reboots? what restart policy?"**
+
+Findings: the live `os.mieweb.org` stack runs on **MIE's Container Manager** and the deploy create-payload sets **no restart policy**, so host-reboot recovery is the platform's default; `infra/docker-compose.yml` had **no `restart:` policy** either, so the self-hosted/local stack would not auto-recover.
+
+Changes (no schema/API change):
+- `infra/docker-compose.yml`: added `restart: unless-stopped` to all 4 services (postgres, hapi-fhir, backend, frontend) — container crash + daemon-restart recovery. Validated with `docker compose config` (exit 0).
+- `infra/systemd/workwell.service` + `infra/systemd/README.md`: the example systemd unit Doug asked for — boots the compose stack on host startup (`systemctl enable`), with install + reboot-verification steps. Reference for self-hosted/VM hosts; the live MIE platform owns its own reboot recovery.
+- `docs/DEPLOY.md`: new **"Service startup & reboot policy"** section explaining both contexts, with an explicit **verify-with-MIE-ops** action — does the Create-a-Container platform auto-restart containers on host reboot, and is there a restart-policy field/label to set on the create payload? (the backend image already carries an `org.mieweb.opensource-server.*` label, hinting label-driven config.)
+
+Left unmerged for review (no commit/push without OK).
+
+---
+
 ## 2026-06-09 — Measures/programs/runs latency: seed-on-every-read removed (branch `fix/measures-latency`)
 
 ### Root cause (Doug's "loading measures takes upwards of 10 seconds")
