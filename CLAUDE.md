@@ -84,9 +84,9 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-06-08)
+## Current Focus (as of 2026-06-10)
 
-**All sprints through Sprint 7 are merged and closed; Sprint 8 scoped-run parity has landed. The stack is in post-merge polish / showcase mode.**
+**All sprints through Sprint 7 are merged and closed; Sprint 8 scoped-run parity, the `@mieweb/ui` migration, and post-merge polish have all landed. The project has moved from polish into the strategic roadmap (epics tracked as GitHub issues #71–#78): decompose the engine into reusable ports/adapters so real EHR/FHIR data can plug in later, harden standalone first, then integrate. Wave 1 has started — E1 is merged; E2 is next.**
 
 History (all on `main`):
 - Sprints 0–6 → PRs #16–#22; eCQM + TWH instance support → PR #46
@@ -95,12 +95,14 @@ History (all on `main`):
 - CI test suite 3.8x faster via 8-way test sharding (44m → 11m30s) → PR #57
 - MIE Container Manager deploy migrated to the v1 API envelope → PRs #55, #56
 - Post-merge polish pass → PRs #60–#66: ADR-003, workwell.os redirect, CQL code-filter tightening, CMS125+CMS122 promoted to Active, compliance trend per-bucket chart, case code evidence explorer, SQL analogy panel
+- `@mieweb/ui` frontend migration → PR #68; measures/programs/runs latency fix → PR #69; systemd + reboot-policy docs → PR #70
+- **Roadmap Wave 1 — E1: reusable measure engine ports/adapters → PR #95** (epic #71 + sub-issues #79–#84, closed). `CqlEvaluationService` now runs behind `PatientDataProvider`/`EmployeeDirectory`/`MeasureDefinitionProvider`/`EvaluationConfigProvider`; synthetic adapters are the default (ADR-005). Roadmap epics tracked as issues #71–#78.
 
 Current posture:
 - **Live URL:** `https://twh.os.mieweb.org` — login: `admin@workwell.dev` / `Workwell123!`
 - **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`. The earlier Fly.io + Vercel public-preview stack is decommissioned; MIE TWH is the sole live stack.
 - **Measure catalog:** 60 total — 4 OSHA active (CQL), 3 OSHA catalog, 4 HEDIS wellness active (CQL), 2 CMS eCQM active (CMS125v14 breast cancer, CMS122v14 diabetes HbA1c), 47 CMS eCQM Draft entries; **10 runnable measures total**
 - **Supported run scopes:** `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, `CASE`
-- **In flight:** `@mieweb/ui` frontend migration (dark mode + Enterprise Health brand + runtime brand switcher) on `feat/mieweb-ui-migration` → **PR #68** (open, awaiting review/merge). Full visual migration across all pages; see ADR-004, `docs/JOURNAL.md` (2026-06-09), and `frontend/MIEWEB-UI-MIGRATION.md`. NITRO data-grid deferred (`@mieweb/datavis` not npm-publishable yet — ask to Doug pending).
+- **Next up:** E2 — declarative YAML measures + headless evaluator (#72), building on the E1 ports. The roadmap epics are tracked as GitHub issues #71–#78; `docs/JOURNAL.md` carries the running narrative. (A fuller strategy roadmap and the open strategic questions for Doug are kept as local-only working files on the maintainer's machine, not committed to the repo.) NITRO data-grid still deferred (`@mieweb/datavis` not npm-publishable yet — ask to Doug pending).
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only
