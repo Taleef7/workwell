@@ -1,0 +1,12 @@
+id: obesity_bmi
+name: BMI Screening & Counseling
+version: 1.0.0
+title: BMI Screening & Counseling
+policyRef: HEDIS WCC / Cigna Healthcare Wellness
+tags: [wellness, bmi, obesity]
+cql: obesity_bmi.cql
+bindings:
+  rateKey: obesity_bmi
+  enrollment: { code: wellness-enrolled, valueSet: "urn:workwell:vs:wellness-enrollment" }
+  waiver:     { code: wellness-exempt, valueSet: "urn:workwell:vs:wellness-exemption" }
+  event:      { code: bmi-screen, valueSet: "urn:workwell:vs:bmi-screening", type: procedure }
