@@ -120,11 +120,49 @@ public class CqlEvaluationService {
             LocalDate evaluationDate,
             SeededInput input
     ) {
+        Bundle bundle = patientDataProvider.bundleFor(input.employee(), input.config(), evaluationDate);
+        return evaluateBundleInternal(measureName, measureVersion, cqlText, evaluationDate, bundle,
+                input.employee().externalId());
+    }
+
+    /**
+     * Headless evaluation of an arbitrary FHIR bundle — the "patient + YAML → compliant?" surface
+     * (E2 / #88). Returns the normalized outcome bucket plus the define-level expression results.
+     */
+    public com.workwell.engine.model.BundleOutcome evaluateBundle(
+            String measureName,
+            String measureVersion,
+            String cqlText,
+            LocalDate evaluationDate,
+            Bundle bundle,
+            String subjectId
+    ) {
+        EvaluationResult eval = evaluateBundleInternal(
+                measureName, measureVersion, cqlText, evaluationDate, bundle, subjectId);
+        Map<String, ?> expressionResults = eval.expressionResults == null ? Map.of() : eval.expressionResults;
+        String outcomeStatus = normalizeOutcomeStatus(expressionResults.get("Outcome Status"));
+        List<Map<String, Object>> rows = expressionResults.entrySet().stream()
+                .map(entry -> {
+                    Map<String, Object> row = new LinkedHashMap<String, Object>();
+                    row.put("define", entry.getKey());
+                    row.put("result", normalizeExpressionValue(entry.getValue()));
+                    return row;
+                })
+                .toList();
+        return new com.workwell.engine.model.BundleOutcome(subjectId, outcomeStatus, rows);
+    }
+
+    private EvaluationResult evaluateBundleInternal(
+            String measureName,
+            String measureVersion,
+            String cqlText,
+            LocalDate evaluationDate,
+            Bundle bundle,
+            String subjectExternalId
+    ) {
         FhirContext context = FhirContext.forR4Cached();
         context.setValidationSupport(new DefaultProfileValidationSupport(context));
         MeasureEvaluationOptions options = MeasureEvaluationOptions.defaultOptions();
-
-        Bundle bundle = patientDataProvider.bundleFor(input.employee(), input.config(), evaluationDate);
 
         IRepository repository = new InMemoryFhirRepository(context);
         List<IBaseResource> allResources = new ArrayList<>();
@@ -148,7 +186,7 @@ public class CqlEvaluationService {
         } else {
             start = evaluationDate.atStartOfDay(ZoneOffset.UTC);
         }
-        String subjectId = "Patient/" + input.employee().externalId();
+        String subjectId = "Patient/" + subjectExternalId;
 
         // Pass the in-memory Measure directly; CQF canonical re-resolution is brittle for these synthetic demo measures.
         var composite = processor.evaluateMeasureWithCqlEngine(
@@ -163,11 +201,11 @@ public class CqlEvaluationService {
         Map<String, EvaluationResult> bySubject = composite.getResultsPerMeasure().values().stream().findFirst().orElse(Map.of());
         EvaluationResult eval = bySubject.get(subjectId);
         if (eval == null) {
-            eval = bySubject.get(input.employee().externalId());
+            eval = bySubject.get(subjectExternalId);
         }
         if (eval == null) {
             eval = bySubject.entrySet().stream()
-                    .filter(e -> e.getKey() != null && e.getKey().endsWith(input.employee().externalId()))
+                    .filter(e -> e.getKey() != null && e.getKey().endsWith(subjectExternalId))
                     .map(Map.Entry::getValue)
                     .findFirst()
                     .orElse(null);

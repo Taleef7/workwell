@@ -54,7 +54,7 @@ class EngineGoldenParityTest {
         return new CqlEvaluationService(
                 new com.workwell.engine.synthetic.SyntheticPatientDataProvider(),
                 new com.workwell.engine.synthetic.SyntheticEmployeeDirectory(),
-                new com.workwell.engine.synthetic.SyntheticMeasureDefinitionProvider(),
+                new com.workwell.engine.yaml.YamlMeasureDefinitionProvider(),
                 new com.workwell.engine.synthetic.PropertiesEvaluationConfigProvider(
                         new EvaluationPopulationProperties()));
     }
@@ -86,7 +86,9 @@ class EngineGoldenParityTest {
                 Files.createDirectories(golden.getParent());
                 Files.writeString(golden, actual, StandardCharsets.UTF_8);
             } else {
-                String expected = Files.readString(golden, StandardCharsets.UTF_8);
+                // Normalize line endings: git autocrlf may materialize the fixtures with CRLF on
+                // Windows; the invariant is the employee->status mapping, not the EOL bytes.
+                String expected = Files.readString(golden, StandardCharsets.UTF_8).replace("\r\n", "\n");
                 assertEquals(expected, actual, "Outcome mapping drift for " + m.getKey());
             }
         }

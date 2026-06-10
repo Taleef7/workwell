@@ -1,0 +1,12 @@
+id: hypertension
+name: Hypertension BP Screening
+version: 1.0.0
+title: Hypertension BP Screening
+policyRef: HEDIS BPC / JPMC Wellness Rewards
+tags: [wellness, hypertension, cardiovascular]
+cql: hypertension.cql
+bindings:
+  rateKey: hypertension
+  enrollment: { code: wellness-enrolled, valueSet: "urn:workwell:vs:wellness-enrollment" }
+  waiver:     { code: wellness-exempt, valueSet: "urn:workwell:vs:wellness-exemption" }
+  event:      { code: bp-screen, valueSet: "urn:workwell:vs:bp-screening", type: procedure }

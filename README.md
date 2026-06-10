@@ -74,6 +74,26 @@ npm run build
 npm run dev
 ```
 
+## Headless evaluation (patient + YAML → compliant?)
+
+Measure bindings are declarative YAML files (`backend/src/main/resources/measures/*.yaml`, one per
+runnable measure, sibling to its CQL). The engine can answer compliance for an arbitrary FHIR R4
+patient bundle with no server and no database:
+
+```bash
+cd backend
+./gradlew.bat evaluateMeasure --args="path/to/patient-bundle.json src/main/resources/measures/audiogram.yaml"
+```
+
+```json
+{
+  "subjectId" : "demo-patient-1",
+  "measure" : "Audiogram",
+  "outcome" : "COMPLIANT",
+  "evidence" : { "expressionResults" : [ { "define" : "Days Since Last Audiogram", "result" : 100 }, "..." ] }
+}
+```
+
 ## Verification commands
 
 ```bash

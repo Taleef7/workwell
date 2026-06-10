@@ -61,6 +61,13 @@ dependencyManagement {
 	}
 }
 
+tasks.register<JavaExec>("evaluateMeasure") {
+	group = "application"
+	description = "Headless: evaluate a patient FHIR bundle JSON against a measure YAML (no Spring, no DB)"
+	classpath = sourceSets["main"].runtimeClasspath
+	mainClass.set("com.workwell.engine.cli.HeadlessEvaluatorCli")
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
 	// CI forks 4-wide so heavy Spring/CQL/Testcontainers classes in a shard overlap

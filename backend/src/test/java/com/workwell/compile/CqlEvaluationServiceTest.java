@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.workwell.engine.synthetic.PropertiesEvaluationConfigProvider;
 import com.workwell.engine.synthetic.SyntheticEmployeeDirectory;
-import com.workwell.engine.synthetic.SyntheticMeasureDefinitionProvider;
+import com.workwell.engine.yaml.YamlMeasureDefinitionProvider;
 import com.workwell.engine.synthetic.SyntheticPatientDataProvider;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
@@ -26,7 +26,7 @@ class CqlEvaluationServiceTest {
         return new CqlEvaluationService(
                 new SyntheticPatientDataProvider(),
                 new SyntheticEmployeeDirectory(),
-                new SyntheticMeasureDefinitionProvider(),
+                new YamlMeasureDefinitionProvider(),
                 new PropertiesEvaluationConfigProvider(new EvaluationPopulationProperties()));
     }
 
@@ -126,7 +126,7 @@ class CqlEvaluationServiceTest {
         CqlEvaluationService service = new CqlEvaluationService(
                 new SyntheticPatientDataProvider(),
                 new SyntheticEmployeeDirectory(),
-                new SyntheticMeasureDefinitionProvider(),
+                new YamlMeasureDefinitionProvider(),
                 new PropertiesEvaluationConfigProvider(new EvaluationPopulationProperties())) {
             @Override
             protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
