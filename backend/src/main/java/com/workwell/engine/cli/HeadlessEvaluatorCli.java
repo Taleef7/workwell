@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.hl7.fhir.r4.model.Bundle;
@@ -50,9 +51,22 @@ public final class HeadlessEvaluatorCli {
             Path bundlePath = Path.of(args[0]);
             Path yamlPath = Path.of(args[1]);
             LocalDate evaluationDate = LocalDate.now();
-            for (int i = 2; i < args.length - 1; i++) {
+            for (int i = 2; i < args.length; i++) {
                 if ("--date".equals(args[i])) {
-                    evaluationDate = LocalDate.parse(args[i + 1]);
+                    if (i + 1 >= args.length) {
+                        err.println("error: --date requires a YYYY-MM-DD value");
+                        return 1;
+                    }
+                    String dateArg = args[++i];
+                    try {
+                        evaluationDate = LocalDate.parse(dateArg);
+                    } catch (DateTimeParseException ex) {
+                        err.println("error: invalid --date value '" + dateArg + "' (expected YYYY-MM-DD)");
+                        return 1;
+                    }
+                } else {
+                    err.println("error: unrecognized argument '" + args[i] + "'");
+                    return 1;
                 }
             }
             if (!Files.isRegularFile(bundlePath) || !Files.isRegularFile(yamlPath)) {

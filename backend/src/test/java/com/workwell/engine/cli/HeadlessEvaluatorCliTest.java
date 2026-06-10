@@ -72,6 +72,45 @@ class HeadlessEvaluatorCliTest {
         assertEquals(1, exit);
     }
 
+    @Test
+    void danglingDateFlagReturnsExitCode1() {
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        int exit = HeadlessEvaluatorCli.run(
+                new String[]{
+                    tempDir.resolve("patient.json").toString(),
+                    tempDir.resolve("measure.yaml").toString(),
+                    "--date"},
+                System.out, new PrintStream(stderr, true, StandardCharsets.UTF_8));
+        assertEquals(1, exit);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("--date requires"));
+    }
+
+    @Test
+    void invalidDateValueReturnsExitCode1() {
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        int exit = HeadlessEvaluatorCli.run(
+                new String[]{
+                    tempDir.resolve("patient.json").toString(),
+                    tempDir.resolve("measure.yaml").toString(),
+                    "--date", "not-a-date"},
+                System.out, new PrintStream(stderr, true, StandardCharsets.UTF_8));
+        assertEquals(1, exit);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("invalid --date value"));
+    }
+
+    @Test
+    void unrecognizedArgumentReturnsExitCode1() {
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        int exit = HeadlessEvaluatorCli.run(
+                new String[]{
+                    tempDir.resolve("patient.json").toString(),
+                    tempDir.resolve("measure.yaml").toString(),
+                    "--bogus"},
+                System.out, new PrintStream(stderr, true, StandardCharsets.UTF_8));
+        assertEquals(1, exit);
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("unrecognized argument"));
+    }
+
     private Path copyClasspath(String resource, Path target) throws Exception {
         String text = FileCopyUtils.copyToString(new java.io.InputStreamReader(
                 new ClassPathResource(resource).getInputStream(), StandardCharsets.UTF_8));
