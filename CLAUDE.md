@@ -86,7 +86,7 @@
 
 ## Current Focus (as of 2026-06-10)
 
-**All sprints through Sprint 7 are merged and closed; Sprint 8 scoped-run parity, the `@mieweb/ui` migration, and post-merge polish have all landed. The project has moved from polish into the strategic roadmap (`docs/PLAN.md`): decompose the engine into reusable ports/adapters so real EHR/FHIR data can plug in later, harden standalone first, then integrate. Wave 1 has started — E1 is merged; E2 is next.**
+**All sprints through Sprint 7 are merged and closed; Sprint 8 scoped-run parity, the `@mieweb/ui` migration, and post-merge polish have all landed. The project has moved from polish into the strategic roadmap (epics tracked as GitHub issues #71–#78): decompose the engine into reusable ports/adapters so real EHR/FHIR data can plug in later, harden standalone first, then integrate. Wave 1 has started — E1 is merged; E2 is next.**
 
 History (all on `main`):
 - Sprints 0–6 → PRs #16–#22; eCQM + TWH instance support → PR #46
@@ -103,6 +103,6 @@ Current posture:
 - **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`. The earlier Fly.io + Vercel public-preview stack is decommissioned; MIE TWH is the sole live stack.
 - **Measure catalog:** 60 total — 4 OSHA active (CQL), 3 OSHA catalog, 4 HEDIS wellness active (CQL), 2 CMS eCQM active (CMS125v14 breast cancer, CMS122v14 diabetes HbA1c), 47 CMS eCQM Draft entries; **10 runnable measures total**
 - **Supported run scopes:** `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, `CASE`
-- **Next up:** E2 — declarative YAML measures + headless evaluator (#72), building on the E1 ports. See `docs/PLAN.md` for the full roadmap (Waves 1–3) and `questions_for_doug.md` for open strategic forks. NITRO data-grid still deferred (`@mieweb/datavis` not npm-publishable yet — ask to Doug pending).
+- **Next up:** E2 — declarative YAML measures + headless evaluator (#72), building on the E1 ports. The roadmap epics are tracked as GitHub issues #71–#78; `docs/JOURNAL.md` carries the running narrative. (A fuller strategy roadmap and the open strategic questions for Doug are kept as local-only working files on the maintainer's machine, not committed to the repo.) NITRO data-grid still deferred (`@mieweb/datavis` not npm-publishable yet — ask to Doug pending).
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only
