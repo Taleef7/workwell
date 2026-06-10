@@ -1,0 +1,12 @@
+id: flu_vaccine
+name: Flu Vaccine
+version: 1.0.0
+title: Flu Vaccine This Season
+policyRef: CDC seasonal influenza guidance
+tags: [vaccine, seasonal, immunization]
+cql: flu_vaccine.cql
+bindings:
+  rateKey: flu_vaccine
+  enrollment: { code: clinical-role, valueSet: "urn:workwell:vs:clinical-roles" }
+  waiver:     { code: flu-exemption, valueSet: "urn:workwell:vs:flu-exemption" }
+  event:      { code: flu-vaccine, valueSet: "urn:workwell:vs:flu-vaccines", type: immunization }

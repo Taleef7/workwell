@@ -1,0 +1,12 @@
+id: cholesterol_ldl
+name: Cholesterol LDL Screening
+version: 1.0.0
+title: Cholesterol LDL Screening
+policyRef: HEDIS CBP / JPMC Wellness Rewards
+tags: [wellness, cholesterol, cardiovascular]
+cql: cholesterol_ldl.cql
+bindings:
+  rateKey: cholesterol_ldl
+  enrollment: { code: cholesterol-enrolled, valueSet: "urn:workwell:vs:cholesterol-program" }
+  waiver:     { code: cholesterol-exempt, valueSet: "urn:workwell:vs:cholesterol-exemption" }
+  event:      { code: ldl-lab, valueSet: "urn:workwell:vs:ldl-labs", type: procedure }
