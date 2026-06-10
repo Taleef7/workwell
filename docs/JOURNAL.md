@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-06-10 — E2: declarative YAML measures + headless evaluator — branch `feat/e2-yaml-measures`
+
+Wave 1 epic #72 (sub-issues #85–#88), straight on top of E1's ports. Doug's most concrete ask — *"programming layer, no UI: given this patient and this YAML file, are they compliant?"* — is now a one-command reality.
+
+What shipped:
+- **YAML schema v1 + parser (#85):** one `measures/<id>.yaml` per runnable measure (metadata + `cql:` ref + `bindings:`; `event.type: procedure|immunization|observation` replaces the two raw booleans). `YamlMeasureParser` is pure SnakeYAML map-loading (no new dependency — Boot ships it), fails fast naming file + field, rejects unknown keys.
+- **All 10 measures as YAML (#87)** with bindings copied verbatim from the old switch.
+- **`YamlMeasureDefinitionProvider` (#86)** scans `classpath*:measures/*.yaml` at construction (Spring-core resolver as plain library code — no ApplicationContext) and is the default bean. **`SyntheticMeasureDefinitionProvider` deleted** — YAML is the single source of bindings (ADR-006). Golden parity (100 employees × 10 measures) gated the swap; the only "drift" found was git-autocrlf line endings in the fixtures, fixed by normalizing EOLs in the harness (the invariant is the employee→status mapping).
+- **Public `evaluateBundle(...)`** extracted from the engine core: evaluates an *arbitrary* FHIR `Bundle` → `BundleOutcome` (normalized bucket + define-level expression results). Synthetic path delegates unchanged.
+- **Headless CLI (#88):** `HeadlessEvaluatorCli` (plain `main`, no Spring/DB) + Gradle `evaluateMeasure` task. Verified live with a hand-written FHIR bundle: `./gradlew.bat evaluateMeasure --args="patient.json .../audiogram.yaml"` → `"outcome": "COMPLIANT"` with `Days Since Last Audiogram: 100` in the evidence.
+
+Decisions (ADR-006): YAML replaces the switch (no `yaml|java` fallback — dual sources were the #82 smell); CLI over REST endpoint (deferred, trivial atop `evaluateBundle`); minimal schema — population logic/buckets stay in the CQL, which is the single source of logic. Headless evidence is `expressionResults` + outcome only (synthetic `why_flagged` derives from `ExamConfig`, which real bundles don't have).
+
+Verification: parser/provider/CLI TDD suites green; golden parity + no-Spring guard + `CqlEvaluationServiceTest` green; live CLI demo run. No schema/API/compliance change; demo unchanged. PR for review (no auto-merge).
+
+---
+
 ## 2026-06-10 — E1: reusable measure engine ports/adapters — MERGED (PR #95)
 
 Started the strategic roadmap's Wave 1 (epic #71, sub-issues #79–#84): invert `CqlEvaluationService` onto ports so the synthetic demo becomes the default *adapter* rather than hard-wired internals — the seam real EHR/FHIR data and declarative YAML measures (E2) plug into without a rewrite. Created GitHub issues for all roadmap epics (E1–E9; #71–#78) with linked sub-issues; spec + plan committed under `docs/superpowers/`.
