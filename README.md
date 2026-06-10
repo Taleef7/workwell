@@ -23,9 +23,9 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 ## Status
 
 - All planned sprints (**0–7**) are implemented and merged to `main`; Sprint 7 issues `#47`–`#51` are closed.
-- Post-merge work continues on `main`: Sprint 8 scoped-run parity (`SITE`/`EMPLOYEE` manual runs + reruns), an 8-way CI test-sharding speedup (~3.8×), and the MIE Container Manager v1 API deploy migration.
-- In flight: frontend migration to `@mieweb/ui` (dark mode + Enterprise Health brand) on `feat/mieweb-ui-migration` → PR #68 (awaiting review/merge).
-- Default branch: `main` (stale sprint branches cleaned up).
+- Sprint 8 scoped-run parity, the 8-way CI test-sharding speedup (~3.8×), the MIE Container Manager v1 API deploy migration, and the `@mieweb/ui` frontend migration (PR #68) are all merged.
+- **Strategic roadmap underway** (tracked as GitHub issues `#71`–`#78`): the engine is being decomposed into reusable ports/adapters so real EHR/FHIR data can plug in later. **E1 — reusable measure engine ports/adapters (PR #95, epic #71) is merged.** Next: **E2 — declarative YAML measures (#72)**.
+- Default branch: `main` (feature branches deleted after merge).
 
 ## Production surfaces
 
