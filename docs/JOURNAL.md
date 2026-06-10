@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-06-10 — E1: reusable measure engine ports/adapters — branch `feat/e1-measure-engine-ports`
+
+Started the strategic roadmap's Wave 1 (epic #71, sub-issues #79–#84): invert `CqlEvaluationService` onto ports so the synthetic demo becomes the default *adapter* rather than hard-wired internals — the seam real EHR/FHIR data and declarative YAML measures (E2) plug into without a rewrite. Created GitHub issues for all roadmap epics (E1–E9; #71–#78) with linked sub-issues; spec + plan committed under `docs/superpowers/`.
+
+What shipped on the branch:
+- **Golden-file baseline first** (`EngineGoldenParityTest`): captured the deterministic (employee → outcome-status) mapping for all 100 employees × 10 measures into committed fixtures — the regression gate. (CQL uses `Now()`, so the bucket, not absolute dates, is the stable invariant.)
+- **Four ports** in `com.workwell.engine.port` (`PatientDataProvider`, `EmployeeDirectory`, `MeasureDefinitionProvider`, `EvaluationConfigProvider`) + `MeasureDefinition` model. `OutreachChannel` deferred to E5 (YAGNI).
+- **Synthetic default adapters** in `engine.synthetic` (wrap the existing bundle builder, employee catalog, the moved binding switch, and the population properties). `CqlEvaluationService` now takes the 4 ports; `evaluate`/`evaluateSubject` signatures unchanged so all callers are untouched.
+- **`EngineNoSpringContextTest`** proves the core evaluates with plain `new` and no `ApplicationContext` (the "Spring-free core" acceptance), kept in the same Gradle module (no `:engine` subproject — ADR-005).
+- Deleted the now-dead `measureSeedSpecFor` switch + `MeasureSeedSpec` record from `CqlEvaluationService`.
+- Docs: ARCHITECTURE `engine` module boundary + ADR-005.
+
+Decisions (with Taleef): same module + guard test (not a separate Gradle module); 4 ports now. **#82 nuance:** the duplicated *bindings* lived only in `CqlEvaluationService` and are now solely in `SyntheticMeasureDefinitionProvider`; `MeasureService` seeding holds only catalog/UI metadata + CQL filenames (separate concern), so no `MeasureCatalog` indirection was added (YAGNI; E2's YAML supersedes it).
+
+Verification: engine tests + `CqlEvaluationServiceTest` green (golden parity holds, no-Spring guard passes); full backend suite running before PR. Demo behavior unchanged (synthetic = default adapter). No schema/API/compliance change. PR left for review (no auto-merge).
+
+---
+
 ## 2026-06-09 — Service startup & reboot policy (Doug's June-8 systemd/reboot points) — branch `infra/systemd-reboot-policy`
 
 Resolved the remaining concrete points from Doug's 2026-06-08 meeting (latency ✅ PR #69, `@mieweb/ui` ✅ PR #68 already done; the "decompose into modules" roadmap is captured in the local `docs/PLAN.md` and deferred): **"systemd services startup / example systemd file for my project"** and **"what if the server reboots? what restart policy?"**
