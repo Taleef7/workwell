@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-06-10 — E1: reusable measure engine ports/adapters — branch `feat/e1-measure-engine-ports`
+## 2026-06-10 — E1: reusable measure engine ports/adapters — MERGED (PR #95)
 
 Started the strategic roadmap's Wave 1 (epic #71, sub-issues #79–#84): invert `CqlEvaluationService` onto ports so the synthetic demo becomes the default *adapter* rather than hard-wired internals — the seam real EHR/FHIR data and declarative YAML measures (E2) plug into without a rewrite. Created GitHub issues for all roadmap epics (E1–E9; #71–#78) with linked sub-issues; spec + plan committed under `docs/superpowers/`.
 
@@ -14,7 +14,9 @@ What shipped on the branch:
 
 Decisions (with Taleef): same module + guard test (not a separate Gradle module); 4 ports now. **#82 nuance:** the duplicated *bindings* lived only in `CqlEvaluationService` and are now solely in `SyntheticMeasureDefinitionProvider`; `MeasureService` seeding holds only catalog/UI metadata + CQL filenames (separate concern), so no `MeasureCatalog` indirection was added (YAGNI; E2's YAML supersedes it).
 
-Verification: engine tests + `CqlEvaluationServiceTest` green (golden parity holds, no-Spring guard passes); full backend suite running before PR. Demo behavior unchanged (synthetic = default adapter). No schema/API/compliance change. PR left for review (no auto-merge).
+Verification: engine tests + `CqlEvaluationServiceTest` green (golden parity holds, no-Spring guard passes). Demo behavior unchanged (synthetic = default adapter). No schema/API/compliance change.
+
+**Merged** via **PR #95**; epic #71 + sub-issues #79–#84 all closed, `feat/e1-measure-engine-ports` deleted (local + remote). One CI follow-up rode along: the `dorny/test-reporter` "Publish test results" step was intermittently failing whole shard jobs with `HttpError: Requires authentication` (transient GitHub check-run API 401 under 8 parallel shards) even though every `Run backend tests` step passed — set `fail-on-error: false` so the reporter is non-blocking and check status reflects the real test result. **Next: E2 — declarative YAML measures (#72)**, which plugs into the new `MeasureDefinitionProvider` port.
 
 ---
 
