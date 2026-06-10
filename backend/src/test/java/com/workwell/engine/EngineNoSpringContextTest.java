@@ -6,7 +6,7 @@ import com.workwell.compile.CqlEvaluationService;
 import com.workwell.compile.EvaluationPopulationProperties;
 import com.workwell.engine.synthetic.PropertiesEvaluationConfigProvider;
 import com.workwell.engine.synthetic.SyntheticEmployeeDirectory;
-import com.workwell.engine.synthetic.SyntheticMeasureDefinitionProvider;
+import com.workwell.engine.yaml.YamlMeasureDefinitionProvider;
 import com.workwell.engine.synthetic.SyntheticPatientDataProvider;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +26,7 @@ class EngineNoSpringContextTest {
         CqlEvaluationService service = new CqlEvaluationService(
                 new SyntheticPatientDataProvider(),
                 new SyntheticEmployeeDirectory(),
-                new SyntheticMeasureDefinitionProvider(),
+                new YamlMeasureDefinitionProvider(),
                 new PropertiesEvaluationConfigProvider(new EvaluationPopulationProperties()));
 
         String cql = FileCopyUtils.copyToString(new java.io.InputStreamReader(
