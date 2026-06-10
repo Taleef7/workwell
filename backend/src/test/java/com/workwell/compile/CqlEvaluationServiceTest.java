@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.workwell.engine.synthetic.PropertiesEvaluationConfigProvider;
+import com.workwell.engine.synthetic.SyntheticEmployeeDirectory;
+import com.workwell.engine.synthetic.SyntheticMeasureDefinitionProvider;
+import com.workwell.engine.synthetic.SyntheticPatientDataProvider;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import java.nio.charset.StandardCharsets;
@@ -18,14 +22,18 @@ import org.springframework.util.FileCopyUtils;
 
 class CqlEvaluationServiceTest {
 
-    private static EvaluationPopulationProperties defaultPopulationProperties() {
-        return new EvaluationPopulationProperties();
+    private static CqlEvaluationService newService() {
+        return new CqlEvaluationService(
+                new SyntheticPatientDataProvider(),
+                new SyntheticEmployeeDirectory(),
+                new SyntheticMeasureDefinitionProvider(),
+                new PropertiesEvaluationConfigProvider(new EvaluationPopulationProperties()));
     }
 
     @SuppressWarnings("unchecked")
     @Test
     void cqlEvaluationProducesRealExpressionResults() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        CqlEvaluationService service = newService();
         String cqlText = readClasspathText("measures/audiogram.cql");
 
         DemoRunPayload payload = service.evaluate(
@@ -53,7 +61,7 @@ class CqlEvaluationServiceTest {
 
     @Test
     void singleSubjectEvaluationMatchesBatchOutcome() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        CqlEvaluationService service = newService();
         String cqlText = readClasspathText("measures/audiogram.cql");
         LocalDate evaluationDate = LocalDate.now();
 
@@ -115,7 +123,11 @@ class CqlEvaluationServiceTest {
 
     @Test
     void perEmployeeFailureIsolationKeepsRunGoing() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties()) {
+        CqlEvaluationService service = new CqlEvaluationService(
+                new SyntheticPatientDataProvider(),
+                new SyntheticEmployeeDirectory(),
+                new SyntheticMeasureDefinitionProvider(),
+                new PropertiesEvaluationConfigProvider(new EvaluationPopulationProperties())) {
             @Override
             protected boolean shouldFailEmployeeForTesting(String employeeExternalId) {
                 return "emp-002".equals(employeeExternalId);
@@ -153,7 +165,7 @@ class CqlEvaluationServiceTest {
 
     @Test
     void tbHazwoperAndFluEvaluationsProduceStructuredOutcomes() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        CqlEvaluationService service = newService();
 
         for (String measureName : List.of("TB Surveillance", "HAZWOPER Surveillance", "Flu Vaccine")) {
             String cqlText = readClasspathText("measures/" + resourceName(measureName) + ".cql");
@@ -176,7 +188,7 @@ class CqlEvaluationServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void cms125BreastCancerScreeningProducesAllFiveOutcomeBuckets() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        CqlEvaluationService service = newService();
         String cqlText = readClasspathText("measures/cms125.cql");
 
         DemoRunPayload payload = service.evaluate(
@@ -214,7 +226,7 @@ class CqlEvaluationServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void cms122DiabetesHbA1cProducesStructuredOutcomes() throws Exception {
-        CqlEvaluationService service = new CqlEvaluationService(defaultPopulationProperties());
+        CqlEvaluationService service = newService();
         String cqlText = readClasspathText("measures/cms122.cql");
 
         DemoRunPayload payload = service.evaluate(

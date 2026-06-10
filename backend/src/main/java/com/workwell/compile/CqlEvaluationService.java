@@ -3,6 +3,11 @@ package com.workwell.compile;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.repository.IRepository;
+import com.workwell.engine.model.MeasureDefinition;
+import com.workwell.engine.port.EmployeeDirectory;
+import com.workwell.engine.port.EvaluationConfigProvider;
+import com.workwell.engine.port.MeasureDefinitionProvider;
+import com.workwell.engine.port.PatientDataProvider;
 import com.workwell.measure.SyntheticEmployeeCatalog;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
@@ -45,11 +50,19 @@ public class CqlEvaluationService {
     private static final int EXCLUDED_COUNT = 3;
     private static final int MISSING_DATA_COUNT = 2;
 
-    private final SyntheticFhirBundleBuilder syntheticFhirBundleBuilder = new SyntheticFhirBundleBuilder();
-    private final EvaluationPopulationProperties evaluationPopulationProperties;
+    private final PatientDataProvider patientDataProvider;
+    private final EmployeeDirectory employeeDirectory;
+    private final MeasureDefinitionProvider measureDefinitionProvider;
+    private final EvaluationConfigProvider evaluationConfigProvider;
 
-    public CqlEvaluationService(EvaluationPopulationProperties evaluationPopulationProperties) {
-        this.evaluationPopulationProperties = evaluationPopulationProperties;
+    public CqlEvaluationService(PatientDataProvider patientDataProvider,
+                                EmployeeDirectory employeeDirectory,
+                                MeasureDefinitionProvider measureDefinitionProvider,
+                                EvaluationConfigProvider evaluationConfigProvider) {
+        this.patientDataProvider = patientDataProvider;
+        this.employeeDirectory = employeeDirectory;
+        this.measureDefinitionProvider = measureDefinitionProvider;
+        this.evaluationConfigProvider = evaluationConfigProvider;
     }
 
     public DemoRunPayload evaluate(String runId, String measureName, String measureVersion, String cqlText, LocalDate evaluationDate) {
@@ -111,7 +124,7 @@ public class CqlEvaluationService {
         context.setValidationSupport(new DefaultProfileValidationSupport(context));
         MeasureEvaluationOptions options = MeasureEvaluationOptions.defaultOptions();
 
-        Bundle bundle = syntheticFhirBundleBuilder.buildBundle(input.employee(), input.config(), evaluationDate);
+        Bundle bundle = patientDataProvider.bundleFor(input.employee(), input.config(), evaluationDate);
 
         IRepository repository = new InMemoryFhirRepository(context);
         List<IBaseResource> allResources = new ArrayList<>();
@@ -404,7 +417,7 @@ public class CqlEvaluationService {
     }
 
     private List<SeededInput> seededInputsFor(String measureName) {
-        MeasureSeedSpec spec = measureSeedSpecFor(measureName);
+        MeasureDefinition spec = measureDefinitionProvider.forMeasure(measureName);
         if (spec == null) {
             return List.of();
         }
@@ -438,13 +451,13 @@ public class CqlEvaluationService {
     }
 
     private SeededInput seededInputFor(String measureName, String subjectId) {
-        MeasureSeedSpec spec = measureSeedSpecFor(measureName);
+        MeasureDefinition spec = measureDefinitionProvider.forMeasure(measureName);
         if (spec == null) {
             throw new IllegalArgumentException("Unsupported measure: " + measureName);
         }
 
         List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployees = orderedEmployeesFor(spec);
-        SyntheticEmployeeCatalog.EmployeeProfile employee = SyntheticEmployeeCatalog.byId(subjectId);
+        SyntheticEmployeeCatalog.EmployeeProfile employee = employeeDirectory.byId(subjectId);
         int employeeIndex = orderedEmployees.indexOf(employee);
         if (employeeIndex < 0) {
             throw new IllegalArgumentException("Unknown employee id: " + subjectId);
@@ -473,129 +486,19 @@ public class CqlEvaluationService {
         return input(employee, spec, seededOutcome);
     }
 
-    private List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployeesFor(MeasureSeedSpec spec) {
-        return SyntheticEmployeeCatalog.allEmployees().stream()
+    private List<SyntheticEmployeeCatalog.EmployeeProfile> orderedEmployeesFor(MeasureDefinition spec) {
+        return employeeDirectory.allEmployees().stream()
                 .sorted(Comparator.comparingInt(employee -> Math.floorMod((spec.rateKey() + "|" + employee.externalId()).hashCode(), Integer.MAX_VALUE)))
                 .toList();
     }
 
     private double complianceRate(String rateKey) {
-        return evaluationPopulationProperties.getComplianceRates().getOrDefault(rateKey, 0.80d);
-    }
-
-    private MeasureSeedSpec measureSeedSpecFor(String measureName) {
-        return switch (measureName) {
-            case "Audiogram" -> new MeasureSeedSpec(
-                    "audiogram",
-                    "hearing-enrollment",
-                    "urn:workwell:vs:hearing-enrollment",
-                    "audiogram-waiver",
-                    "urn:workwell:vs:audiogram-waiver",
-                    "audiogram-procedure",
-                    "urn:workwell:vs:audiogram-procedures",
-                    false
-            );
-            case "TB Surveillance" -> new MeasureSeedSpec(
-                    "tb_surveillance",
-                    "tb-program",
-                    "urn:workwell:vs:tb-eligible-roles",
-                    "tb-exemption",
-                    "urn:workwell:vs:tb-exemption",
-                    "tb-screen",
-                    "urn:workwell:vs:tb-screening",
-                    false
-            );
-            case "HAZWOPER Surveillance" -> new MeasureSeedSpec(
-                    "hazwoper",
-                    "hazwoper-program",
-                    "urn:workwell:vs:hazwoper-enrollment",
-                    "hazwoper-exemption",
-                    "urn:workwell:vs:hazwoper-exemption",
-                    "hazwoper-exam",
-                    "urn:workwell:vs:hazwoper-exams",
-                    false
-            );
-            case FLU_VACCINE_MEASURE_NAME -> new MeasureSeedSpec(
-                    "flu_vaccine",
-                    "clinical-role",
-                    "urn:workwell:vs:clinical-roles",
-                    "flu-exemption",
-                    "urn:workwell:vs:flu-exemption",
-                    "flu-vaccine",
-                    "urn:workwell:vs:flu-vaccines",
-                    true
-            );
-            case "Hypertension BP Screening" -> new MeasureSeedSpec(
-                    "hypertension",
-                    "wellness-enrolled",
-                    "urn:workwell:vs:wellness-enrollment",
-                    "wellness-exempt",
-                    "urn:workwell:vs:wellness-exemption",
-                    "bp-screen",
-                    "urn:workwell:vs:bp-screening",
-                    false
-            );
-            case "Diabetes HbA1c Monitoring" -> new MeasureSeedSpec(
-                    "diabetes_hba1c",
-                    "diabetes-enrolled",
-                    "urn:workwell:vs:diabetes-program",
-                    "diabetes-exempt",
-                    "urn:workwell:vs:diabetes-exemption",
-                    "hba1c-lab",
-                    "urn:workwell:vs:hba1c-labs",
-                    false,
-                    180
-            );
-            case "BMI Screening & Counseling" -> new MeasureSeedSpec(
-                    "obesity_bmi",
-                    "wellness-enrolled",
-                    "urn:workwell:vs:wellness-enrollment",
-                    "wellness-exempt",
-                    "urn:workwell:vs:wellness-exemption",
-                    "bmi-screen",
-                    "urn:workwell:vs:bmi-screening",
-                    false
-            );
-            case "Cholesterol LDL Screening" -> new MeasureSeedSpec(
-                    "cholesterol_ldl",
-                    "cholesterol-enrolled",
-                    "urn:workwell:vs:cholesterol-program",
-                    "cholesterol-exempt",
-                    "urn:workwell:vs:cholesterol-exemption",
-                    "ldl-lab",
-                    "urn:workwell:vs:ldl-labs",
-                    false
-            );
-            case "Breast Cancer Screening" -> new MeasureSeedSpec(
-                    "cms125",
-                    "cms125-eligible",
-                    "urn:workwell:vs:cms125-eligible",
-                    "cms125-excluded",
-                    "urn:workwell:vs:cms125-excluded",
-                    "mammogram",
-                    "urn:workwell:vs:cms125-mammogram",
-                    false,
-                    820
-            );
-            case "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)" -> new MeasureSeedSpec(
-                    "cms122",
-                    "cms122-diabetes",
-                    "urn:workwell:vs:cms122-diabetes",
-                    "cms122-excluded",
-                    "urn:workwell:vs:cms122-excluded",
-                    "hba1c-obs",
-                    "urn:workwell:vs:cms122-hba1c",
-                    false,
-                    365,
-                    true
-            );
-            default -> null;
-        };
+        return evaluationConfigProvider.complianceRate(rateKey);
     }
 
     private SeededInput input(
             SyntheticEmployeeCatalog.EmployeeProfile employee,
-            MeasureSeedSpec spec,
+            MeasureDefinition spec,
             SeededOutcome targetOutcome
     ) {
         int window = spec.complianceWindowDays();
@@ -663,32 +566,5 @@ public class CqlEvaluationService {
         OVERDUE,
         MISSING_DATA,
         EXCLUDED
-    }
-
-    private record MeasureSeedSpec(
-            String rateKey,
-            String enrollmentCode,
-            String enrollmentVs,
-            String waiverCode,
-            String waiverVs,
-            String examCode,
-            String examVs,
-            boolean useImmunization,
-            int complianceWindowDays,
-            boolean observationBased
-    ) {
-        MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
-                        String waiverCode, String waiverVs, String examCode, String examVs,
-                        boolean useImmunization) {
-            this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
-                    examCode, examVs, useImmunization, 365, false);
-        }
-
-        MeasureSeedSpec(String rateKey, String enrollmentCode, String enrollmentVs,
-                        String waiverCode, String waiverVs, String examCode, String examVs,
-                        boolean useImmunization, int complianceWindowDays) {
-            this(rateKey, enrollmentCode, enrollmentVs, waiverCode, waiverVs,
-                    examCode, examVs, useImmunization, complianceWindowDays, false);
-        }
     }
 }

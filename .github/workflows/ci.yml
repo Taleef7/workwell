@@ -59,6 +59,11 @@ jobs:
           name: Backend Tests (shard ${{ matrix.shard }})
           path: backend/build/test-results/test/*.xml
           reporter: java-junit
+          # The reporter only publishes annotations; a transient GitHub check-run
+          # API 401 ("HttpError: Requires authentication") must not fail the job
+          # when the tests themselves passed. The gradle "Run backend tests" step
+          # remains the real gate.
+          fail-on-error: false
 
   frontend:
     name: Frontend — Lint, Test, Build
