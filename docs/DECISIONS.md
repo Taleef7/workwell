@@ -1,5 +1,41 @@
 # Architecture Decision Records
 
+## ADR-006: Declarative YAML measure definitions + headless evaluator CLI
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+- **Epic:** #72 (sub-issues #85–#88); spec `docs/superpowers/specs/2026-06-10-e2-yaml-measures-design.md`
+- **Context:** After E1 (ADR-005), measure bindings still lived in a hardcoded Java switch
+  (`SyntheticMeasureDefinitionProvider`), and there was no way to evaluate an arbitrary patient
+  outside the web app. Doug's most concrete ask is a "programming layer, no UI: given this patient
+  and this YAML file, are they compliant?".
+- **Decision:**
+  - **YAML is the single source of measure bindings.** One `measures/<id>.yaml` per runnable measure
+    (sibling to its `.cql`), schema v1: metadata (`id`, `name` = exact catalog name, `version`,
+    `title`, `policyRef`, `tags`) + `cql:` file ref + `bindings:` (enrollment/waiver/event code +
+    value set, `event.type: procedure|immunization|observation` replacing the two raw booleans,
+    `complianceWindowDays` defaulting to 365). `YamlMeasureDefinitionProvider` loads
+    `classpath*:measures/*.yaml` at construction (Spring-core resource resolver as plain library
+    code — no ApplicationContext; the no-Spring guard still constructs it with `new`) and is the
+    default bean. The hardcoded switch is **deleted**; no `yaml|java` fallback flag (dual sources
+    were the #82 smell). Golden parity (100 employees × 10 measures) gates the swap.
+  - **Population logic and bucket thresholds stay in the CQL** (`Outcome Status` define) — CQL is
+    the single source of logic; YAML is the binding/metadata envelope. Aspirational eCQM packaging
+    fields were deliberately not added (extension path documented in the spec for E3).
+  - **Headless surface:** public `CqlEvaluationService.evaluateBundle(...)` evaluates an arbitrary
+    FHIR `Bundle` and returns `BundleOutcome` (normalized bucket + define-level expression results);
+    the synthetic path delegates to the same core. `HeadlessEvaluatorCli` (plain `main`, no Spring,
+    no DB) + the Gradle `evaluateMeasure` task expose it:
+    `./gradlew.bat evaluateMeasure --args="patient.json measures/audiogram.yaml"`. A REST endpoint
+    was deferred (trivial later atop `evaluateBundle`).
+  - **No new dependencies:** SnakeYAML (Boot), HAPI JSON parser, Jackson — all already shipped.
+- **Consequences:**
+  - Authoring a new runnable measure = a `.cql` + a `.yaml` file; no Java changes for bindings.
+  - Headless evidence is `expressionResults` + outcome only — the synthetic `why_flagged` block
+    derives from `ExamConfig`, which doesn't exist for real bundles (intentional, documented).
+  - E3 (#73) plugs MeasureReport/value-set expansion into the same seam; a future real
+    `PatientDataProvider` feeds `evaluateBundle` directly.
+
 ## ADR-005: Measure engine ports/adapters (same module, synthetic default adapter)
 
 - **Date:** 2026-06-10
