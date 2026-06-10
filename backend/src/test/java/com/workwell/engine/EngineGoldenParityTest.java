@@ -51,7 +51,12 @@ class EngineGoldenParityTest {
     private static final boolean WRITE_MODE = false;
 
     private CqlEvaluationService newService() {
-        return new CqlEvaluationService(new EvaluationPopulationProperties());
+        return new CqlEvaluationService(
+                new com.workwell.engine.synthetic.SyntheticPatientDataProvider(),
+                new com.workwell.engine.synthetic.SyntheticEmployeeDirectory(),
+                new com.workwell.engine.synthetic.SyntheticMeasureDefinitionProvider(),
+                new com.workwell.engine.synthetic.PropertiesEvaluationConfigProvider(
+                        new EvaluationPopulationProperties()));
     }
 
     private String fixtureName(String cql) {
