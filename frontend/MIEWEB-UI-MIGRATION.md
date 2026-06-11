@@ -83,14 +83,14 @@
 - [x] Step 1: Install @mieweb/ui — v0.6.1, **482** named exports (pnpm 10 via corepack). Peers intact (`monaco-editor`, `@testing-library/dom` in `.pnpm`); `datavis-ace` deferred to NITRO pilot. `dist/` ships prebuilt (build script ignored — not needed for consumers). Baseline `next build` green.
 - [x] Step 2: CSS Foundation — `globals.css` rewritten: Enterprise Health brand import (`layer(theme)`), `@source "../node_modules/@mieweb/ui/dist"`, `@custom-variant dark` (data-theme + .dark), full `@theme` token block w/ hex fallbacks (7 scales + semantic + chart), Geist fonts preserved. Added `lib/useTheme.ts` (`useSyncExternalStore`; sets `.dark` + `data-theme`). PostCSS already `@tailwindcss/postcss`. Build green. ⚠ Cosmetic: brand's Jost `@import` is ignored inside `layer(theme)` → app keeps Geist (font fidelity = follow-up).
 - [x] Step 3: Brand Switching — copied 7 brand CSS files to `public/brands/`; added `scripts/copy-brand-css.mjs` + `sync:brands` npm script; `lib/useBrand.ts` (`useSyncExternalStore`; injects `/brands/{brand}.css` `<link>`, sets `data-brand`, default `enterprise-health`); persisted theme+brand applied via the pre-hydration `components/theme-script.tsx` (no-FOUC; replaced the original `app-theme-initializer.tsx` per PR #68 review); wired into root layout (`<html suppressHydrationWarning data-theme="light">`). Switcher **UI** deferred to Phase 1 (lives in AppHeader). Build + lint green.
-- [~] Step 4a: Buttons — primary surfaces on `Button` (cases, programs, program-detail, measures, audit-packet-export, confirm-dialog, layout). Dense native `<button>`s on the 3 big table pages (runs/admin/cases-detail) + studio tabs are **retokenized in place** (dark/brand-correct) but not yet swapped to `Button` — documented follow-up.
+- [x] Step 4a: Buttons — primary surfaces on `Button` (cases, programs, program-detail, measures, audit-packet-export, confirm-dialog, layout). **Control-swap follow-up landed (2026-06-11, issue #99, branch `feat/mieweb-ui-controls`):** the dense native `<button>`s on the 3 big table pages (`runs`/`admin`/`cases/[id]`) + all 9 studio tabs are now `Button` (with `isLoading`/`loadingText` where they had pending text). Intentional exceptions kept native: `confirm-dialog` a11y shell, `SqlPreviewPanel` disclosure toggle, the admin audit-scope **segmented pill** control, `cases/page.tsx` bulk-select checkboxes, native file `<input type="file">`, and the bespoke pre-auth `/login`+`/sandbox` surfaces.
 - [x] Step 4b: Dialog/Modal — `confirm-dialog` migrated to @mieweb/ui `Button` + dark tokens; tested a11y shell kept (Modal's `role=dialog` ≠ the asserted `role=alertdialog`/focus-trap). 9/9 tests pass.
-- [~] Step 4c: Form Elements — `Select`/`Input` on cases, measures, layout filters, audit-packet-export. Native form controls on the 3 big table pages + studio tabs retokenized in place (component swap = follow-up).
+- [x] Step 4c: Form Elements — `Select`/`Input` on cases, measures, layout filters, audit-packet-export. **Control-swap follow-up landed (2026-06-11, issue #99):** native `<input>`/`<select>`/`<textarea>` on `runs`/`admin`/`cases/[id]` + all studio tabs now `Input`/`Select`/`Textarea` (`Select` uses the `options` array + `onValueChange`; `Input`/`Textarea` carry `label`+`hideLabel` to preserve `getByLabelText` test contracts). Native kept only for the file `<input type="file">` (no @mieweb/ui equivalent) and `cases/page.tsx` bulk-select checkboxes.
 - [~] Step 4d: Data Display — `Badge` for priority on cases; nuanced status+outcome pills are **dark-aware token spans** (`lib/status.ts` helpers carry `dark:` variants — Badge's 6 variants can't express the 5 outcome + 5 case-status colors). All cards/heroes/tables retokenized + dark **app-wide**. NITRO grids BLOCKED (see Known Gaps); tables are swap-ready semantic tables.
 
 ### Phase 3 — page coverage (visual dark+brand migration)
 **Fully migrated (components + tokens + dark), Playwright-verified where noted:** layout shell, `/cases` (✓light/dark+cards), `/programs`, `/programs/[measureId]`, `/worklist`, `/measures` (✓table), `/employees/[externalId]`, landing, GlobalSearch, audit-packet-export-button, osha-combobox, ComplianceSummaryBar, confirm-dialog/toast/skeleton.
-**Tokens+dark done, native controls retokenized (component-swap follow-up):** `/runs`, `/admin` (✓dark shell), `/cases/[id]`, `/studio/[id]` + all studio tabs/panels (Monaco + dark code/SQL blocks kept dark).
+**Fully migrated incl. control swap (2026-06-11, issue #99):** `/runs`, `/admin`, `/cases/[id]`, `/studio/[id]` + all studio tabs/panels — native controls now `Button`/`Input`/`Select`/`Textarea`/`Modal` (Monaco + dark code/SQL blocks kept dark; see Step 4a/4c exceptions).
 **Intentional exceptions (bespoke pre-auth, not themed):** `/login` (brand-primary submit only), `/sandbox` (always-dark splash).
 - [x] Step 4e: Feedback — Toast (`ToastProvider`+`ToastContainer`+`useToast`, event bridge preserved) and Skeleton (`SkeletonCard`/`SkeletonRow` rebuilt on `Skeleton`). Build + 53/53 tests green.
 - [x] Step 4f: Navigation — `(dashboard)/layout.tsx` rebuilt on @mieweb/ui `Sidebar` + `AppHeader` + `ThemeBrandSwitcher`. Header site/date filters now @mieweb/ui `Select` (partial Step 4c). Build + lint green.
@@ -158,14 +158,22 @@
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Raw `<button>` elements | 118 | _TBD_ |
-| Raw `<input>` elements | 48 | _TBD_ |
-| Raw `<select>` elements | 21 | _TBD_ |
-| Raw `<textarea>` elements | 12 | _TBD_ |
-| Raw `<table>` elements (blocks) | ~10 | _TBD_ |
+| Raw `<button>` elements | 118 | 14 (all intentional exceptions — see below) |
+| Raw `<input>` elements | 48 | 7 (file input + bulk-select checkboxes + pre-auth/login + bespoke comboboxes) |
+| Raw `<select>` elements | 21 | 0 |
+| Raw `<textarea>` elements | 12 | 0 |
+| Raw `<table>` elements (blocks) | ~10 | ~10 (semantic small/static tables; data grids on NITRO) |
 | shadcn/local wrapper files | 0 (none) | 0 |
-| `@mieweb/ui` import lines | 0 | _TBD_ |
-| Total dependencies (prod+dev) | 27 (11+16) | 28 (12+16) so far |
+| `@mieweb/ui` import lines | 0 | 24 |
+| Total dependencies (prod+dev) | 27 (11+16) | 28 (12+16) |
+
+**Remaining raw `<button>`/`<input>` are all intentional (2026-06-11, issue #99):**
+- Segmented tab/pill controls: `cases/page.tsx` (all/mine), `studio/[id]/page.tsx` (tab nav), `admin/page.tsx` (audit-scope) — these are toggle groups, not standalone buttons.
+- Bulk-select checkboxes: `cases/page.tsx` (`<input type="checkbox">`).
+- Native file picker: `cases/[id]/page.tsx` (`<input type="file">` — no @mieweb/ui equivalent).
+- Bespoke a11y/disclosure shells: `confirm-dialog.tsx`, `SqlPreviewPanel.tsx`, `CqlTab.tsx` (✕ dismiss).
+- Pre-auth surfaces: `login/page.tsx`.
+- Custom overlays kept (Step 4g pending): `GlobalSearch.tsx`, `osha-reference-combobox.tsx`, `theme-brand-switcher.tsx`, `layout.tsx`.
 
 ## Known Gaps
 

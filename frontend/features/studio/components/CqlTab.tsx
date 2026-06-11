@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { Monaco, OnChange, OnMount } from "@monaco-editor/react";
+import { Button, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { formatStatusLabel } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
@@ -203,6 +204,7 @@ export function CqlTab({
             className="text-amber-700 hover:text-amber-900"
             aria-label="Dismiss AI draft banner"
           >
+            {/* bespoke inline ✕ dismiss affordance — not a standard Button surface */}
             ✕
           </button>
         </div>
@@ -227,30 +229,24 @@ export function CqlTab({
         />
       </div>
       <div className="flex items-center gap-2">
-        <button
-          className="flex items-center gap-1 rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={compile}
           disabled={compiling}
+          isLoading={compiling}
+          loadingText="Compiling…"
         >
-          {compiling ? (
-            <>
-              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Compiling…
-            </>
-          ) : (
-            "Compile"
-          )}
-        </button>
-        <button
+          Compile
+        </Button>
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => setShowDraftCqlDialog(true)}
-          className="rounded-md border border-purple-300 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50"
         >
           AI Draft CQL
-        </button>
+        </Button>
         <span
           data-testid="compile-status-badge"
           className={`rounded-full px-2 py-1 text-xs font-medium ${compileStatusClass(displayedCompileStatus)}`}
@@ -258,59 +254,62 @@ export function CqlTab({
           {formatStatusLabel(displayedCompileStatus)}
         </span>
         {canClone && (
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            className="ml-auto"
             onClick={() => setShowNewVersionDialog(true)}
-            className="ml-auto rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             New Version
-          </button>
+          </Button>
         )}
       </div>
 
-      {showNewVersionDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Create New Measure Version</h3>
-            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-              This will clone the current CQL logic into a new draft version.
-            </p>
-            <div className="mt-4">
-              <label htmlFor="change-summary-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                Change Summary
-              </label>
-              <textarea
-                id="change-summary-input"
-                className="mt-1 w-full rounded-2xl border border-neutral-300 dark:border-neutral-700 p-3 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                placeholder="Describe what changed in this version..."
-                rows={3}
-                value={newVersionSummary}
-                onChange={(e) => setNewVersionSummary(e.target.value)}
-              />
-            </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowNewVersionDialog(false);
-                  setNewVersionSummary("");
-                }}
-                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmitNewVersion}
-                disabled={creatingVersion || !newVersionSummary.trim()}
-                className="rounded-md bg-neutral-900 px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-60"
-              >
-                {creatingVersion ? "Creating..." : "Create Version"}
-              </button>
-            </div>
+      <Modal open={showNewVersionDialog} onOpenChange={(open) => { if (!open) { setShowNewVersionDialog(false); setNewVersionSummary(""); } }} size="md">
+        <ModalHeader>
+          <ModalTitle>Create New Measure Version</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            This will clone the current CQL logic into a new draft version.
+          </p>
+          <div className="mt-4">
+            <Textarea
+              id="change-summary-input"
+              label="Change Summary"
+              placeholder="Describe what changed in this version..."
+              rows={3}
+              value={newVersionSummary}
+              onChange={(e) => setNewVersionSummary(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setShowNewVersionDialog(false);
+              setNewVersionSummary("");
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={handleSubmitNewVersion}
+            disabled={creatingVersion || !newVersionSummary.trim()}
+            isLoading={creatingVersion}
+            loadingText="Creating..."
+          >
+            Create Version
+          </Button>
+        </ModalFooter>
+      </Modal>
       {displayedCompileStatus.toUpperCase() === "WARNINGS" ? (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
           Compile completed with warnings. Activation is allowed, but review warnings before moving to Active.
@@ -335,40 +334,41 @@ export function CqlTab({
 
       <SqlPreviewPanel measure={measure} />
 
-      {showDraftCqlDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">AI Draft CQL</h3>
-            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-              Paste relevant OSHA/policy text below. The AI will use your saved Spec and this text to generate
-              a starting CQL library. You must compile and review before activating.
-            </p>
-            <textarea
-              value={oshaText}
-              onChange={(e) => setOshaText(e.target.value)}
-              className="mt-3 h-48 w-full rounded-2xl border border-neutral-300 dark:border-neutral-700 p-3 font-mono text-xs focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-              placeholder="Paste OSHA regulatory text or policy requirements here…"
-            />
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowDraftCqlDialog(false)}
-                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDraftCql}
-                disabled={drafting}
-                className="rounded-md bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
-              >
-                {drafting ? "Generating…" : "Generate CQL Draft"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal open={showDraftCqlDialog} onOpenChange={(open) => { if (!open) setShowDraftCqlDialog(false); }} size="xl">
+        <ModalHeader>
+          <ModalTitle>AI Draft CQL</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            Paste relevant OSHA/policy text below. The AI will use your saved Spec and this text to generate
+            a starting CQL library. You must compile and review before activating.
+          </p>
+          <Textarea
+            label="OSHA / policy text"
+            hideLabel
+            value={oshaText}
+            onChange={(e) => setOshaText(e.target.value)}
+            className="mt-3 h-48 font-mono text-xs"
+            placeholder="Paste OSHA regulatory text or policy requirements here…"
+          />
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setShowDraftCqlDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={handleDraftCql}
+            disabled={drafting}
+            isLoading={drafting}
+            loadingText="Generating…"
+          >
+            Generate CQL Draft
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

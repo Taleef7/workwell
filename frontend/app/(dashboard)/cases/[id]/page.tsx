@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Select, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, formatStatusLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
@@ -144,6 +145,23 @@ export default function CaseDetailPage() {
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [escalationConfirmOpen, setEscalationConfirmOpen] = useState(false);
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+
+  // Option lists for @mieweb/ui Select controls.
+  const templateOptions = useMemo(
+    () =>
+      templates.length === 0
+        ? [{ value: "", label: "Default template" }]
+        : templates.map((template) => ({ value: template.id, label: template.name })),
+    [templates],
+  );
+  const appointmentTypeOptions = useMemo(
+    () =>
+      ["Audiogram", "TB Test", "Annual Physical", "Flu Vaccine", "Other"].map((t) => ({
+        value: t,
+        label: t,
+      })),
+    [],
+  );
 
   const loadCase = useCallback(async () => {
     try {
@@ -448,66 +466,77 @@ export default function CaseDetailPage() {
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Actions</summary>
             <div className="mt-3 space-y-3">
-              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">Outreach Template</label>
-              <select
-                className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
+              <Select
+                label="Outreach Template"
                 value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
-              >
-                {templates.length === 0 ? <option value="">Default template</option> : null}
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>{template.name}</option>
-                ))}
-              </select>
+                onValueChange={setSelectedTemplateId}
+                options={templateOptions}
+              />
               <div className="grid grid-cols-2 gap-2">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => void previewOutreach()}
                   disabled={previewing || caseStatus === "EXCLUDED"}
-                  className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
+                  isLoading={previewing}
+                  loadingText="Previewing..."
                 >
-                  {previewing ? "Previewing..." : "Preview"}
-                </button>
-                <button
+                  Preview
+                </Button>
+                <Button
                   type="button"
+                  variant="primary"
+                  size="sm"
                   onClick={() => void runAction("outreach")}
                   disabled={acting !== null || caseStatus === "EXCLUDED"}
-                  className="rounded bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  isLoading={acting === "outreach"}
+                  loadingText="Sending..."
                 >
-                  {acting === "outreach" ? "Sending..." : "Send Outreach"}
-                </button>
-                <button
+                  Send Outreach
+                </Button>
+                <Button
                   type="button"
+                  variant="primary"
+                  size="sm"
                   onClick={() => void runAction("rerun")}
                   disabled={acting !== null}
-                  className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  isLoading={acting === "rerun"}
+                  loadingText="Verifying..."
                 >
-                  {acting === "rerun" ? "Verifying..." : "Rerun to Verify"}
-                </button>
-                <button
+                  Rerun to Verify
+                </Button>
+                <Button
                   type="button"
+                  variant="danger"
+                  size="sm"
                   onClick={() => setEscalationConfirmOpen(true)}
                   disabled={escalating}
-                  className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 disabled:opacity-60"
+                  isLoading={escalating}
+                  loadingText="Escalating..."
                 >
-                  {escalating ? "Escalating..." : "Escalate"}
-                </button>
+                  Escalate
+                </Button>
               </div>
               <div className="grid gap-2">
-                <input
-                  className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+                <Input
+                  label="Assignee"
+                  hideLabel
                   value={assigneeInput}
                   onChange={(e) => setAssigneeInput(e.target.value)}
                   placeholder="Assignee email or handle"
                 />
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => void assignCase()}
                   disabled={assigning}
-                  className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
+                  isLoading={assigning}
+                  loadingText="Assigning..."
                 >
-                  {assigning ? "Assigning..." : "Assign"}
-                </button>
+                  Assign
+                </Button>
               </div>
             </div>
           </details>
@@ -600,139 +629,170 @@ export default function CaseDetailPage() {
                   </div>
                 ) : null}
                 <div className="mt-4 grid gap-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Outreach template</label>
-                  <select
-                    className="rounded-lg border border-amber-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100"
+                  <Select
+                    label="Outreach template"
                     value={selectedTemplateId}
-                    onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  >
-                    {templates.length === 0 ? <option value="">Default template</option> : null}
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setSelectedTemplateId}
+                    options={templateOptions}
+                  />
                 </div>
                 <div className="mt-4 grid gap-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Assignee</label>
-                  <div className="flex gap-2">
-                    <input
-                      className="w-full rounded-lg border border-amber-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100"
+                  <div className="flex items-end gap-2">
+                    <Input
+                      label="Assignee"
+                      hideLabel
+                      className="w-full"
                       value={assigneeInput}
                       onChange={(e) => setAssigneeInput(e.target.value)}
                       placeholder="e.g. supervisor-a"
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       onClick={() => void assignCase()}
                       disabled={assigning}
-                      className="rounded-xl border border-amber-400 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      isLoading={assigning}
+                      loadingText="Assigning..."
                     >
-                      {assigning ? "Assigning..." : "Assign"}
-                    </button>
+                      Assign
+                    </Button>
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => void previewOutreach()}
                     disabled={previewing || caseStatus === "EXCLUDED"}
-                    className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    isLoading={previewing}
+                    loadingText="Previewing..."
                   >
-                    {previewing ? "Previewing..." : "Preview outreach"}
-                  </button>
-                  <button
+                    Preview outreach
+                  </Button>
+                  <Button
                     type="button"
+                    variant="primary"
                     onClick={() => void runAction("outreach")}
                     disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null}
-                    className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                    isLoading={acting === "outreach"}
+                    loadingText="Sending outreach..."
                   >
-                    {acting === "outreach" ? "Sending outreach..." : "Send outreach"}
-                  </button>
-                  <button
+                    Send outreach
+                  </Button>
+                  <Button
                     type="button"
+                    variant="danger"
                     onClick={() => setEscalationConfirmOpen(true)}
                     disabled={escalating}
-                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-900 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:bg-rose-100 disabled:text-rose-400"
+                    isLoading={escalating}
+                    loadingText="Escalating..."
                   >
-                    {escalating ? "Escalating..." : "Escalate"}
-                  </button>
-                  <button
+                    Escalate
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => void runAction("rerun")}
                     disabled={acting !== null || caseStatus === "CLOSED"}
-                    className="rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100 transition hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-100 dark:bg-neutral-800 disabled:text-neutral-400"
+                    isLoading={acting === "rerun"}
+                    loadingText="Verifying..."
                   >
-                    {acting === "rerun" ? "Verifying..." : "Rerun to verify"}
-                  </button>
-                  <button
+                    Rerun to verify
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setResolveModalOpen(true)}
                     disabled={caseStatus === "CLOSED" || caseStatus === "RESOLVED"}
-                    className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Mark Resolved
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setAppointmentModalOpen(true)}
-                    className="rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-900 transition hover:bg-indigo-100"
                   >
                     Schedule Appointment
-                  </button>
+                  </Button>
                 </div>
-                {appointmentModalOpen ? (
-                  <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
-                    <label className="text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Appointment type</label>
-                    <select className="mt-2 w-full rounded border border-indigo-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm" value={appointmentType} onChange={(e) => setAppointmentType(e.target.value)}>
-                      <option>Audiogram</option>
-                      <option>TB Test</option>
-                      <option>Annual Physical</option>
-                      <option>Flu Vaccine</option>
-                      <option>Other</option>
-                    </select>
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Date and time</label>
-                    <input type="datetime-local" className="mt-2 w-full rounded border border-indigo-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm" value={appointmentDateTime} onChange={(e) => setAppointmentDateTime(e.target.value)} />
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Location</label>
-                    <input className="mt-2 w-full rounded border border-indigo-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm" value={appointmentLocation} onChange={(e) => setAppointmentLocation(e.target.value)} />
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.15em] text-indigo-800">Notes</label>
-                    <textarea className="mt-2 min-h-20 w-full rounded border border-indigo-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm" value={appointmentNotes} onChange={(e) => setAppointmentNotes(e.target.value)} />
-                    <div className="mt-3 flex gap-2">
-                      <button type="button" onClick={() => void scheduleAppointment()} disabled={scheduling} className="rounded-lg bg-indigo-700 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60">
-                        {scheduling ? "Scheduling..." : "Save Appointment"}
-                      </button>
-                      <button type="button" onClick={() => setAppointmentModalOpen(false)} className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                        Cancel
-                      </button>
+                <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
+                  <ModalHeader>
+                    <ModalTitle>Schedule Appointment</ModalTitle>
+                  </ModalHeader>
+                  <ModalBody>
+                    <div className="space-y-3">
+                      <Select
+                        label="Appointment type"
+                        value={appointmentType}
+                        onValueChange={setAppointmentType}
+                        options={appointmentTypeOptions}
+                      />
+                      <Input
+                        type="datetime-local"
+                        label="Date and time"
+                        value={appointmentDateTime}
+                        onChange={(e) => setAppointmentDateTime(e.target.value)}
+                      />
+                      <Input
+                        label="Location"
+                        value={appointmentLocation}
+                        onChange={(e) => setAppointmentLocation(e.target.value)}
+                      />
+                      <Textarea
+                        label="Notes"
+                        className="min-h-20"
+                        value={appointmentNotes}
+                        onChange={(e) => setAppointmentNotes(e.target.value)}
+                      />
                     </div>
-                  </div>
-                ) : null}
+                  </ModalBody>
+                  <ModalFooter>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setAppointmentModalOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void scheduleAppointment()}
+                      disabled={scheduling}
+                      isLoading={scheduling}
+                      loadingText="Scheduling..."
+                    >
+                      Save Appointment
+                    </Button>
+                  </ModalFooter>
+                </Modal>
                 {resolveModalOpen ? (
                   <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                    <label className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-800">Closure note (required)</label>
-                    <textarea
-                      className="mt-2 min-h-24 w-full rounded border border-emerald-300 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100"
+                    <Textarea
+                      label="Closure note (required)"
+                      className="min-h-24"
                       value={resolveNote}
                       onChange={(e) => setResolveNote(e.target.value)}
                       placeholder="Describe why this case was manually resolved."
                     />
                     <div className="mt-3 flex gap-2">
-                      <button
+                      <Button
                         type="button"
+                        variant="primary"
+                        size="sm"
                         onClick={() => void markResolved()}
                         disabled={resolving || !resolveNote.trim()}
-                        className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                        isLoading={resolving}
+                        loadingText="Resolving..."
                       >
-                        {resolving ? "Resolving..." : "Confirm Resolve"}
-                      </button>
-                      <button
+                        Confirm Resolve
+                      </Button>
+                      <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setResolveModalOpen(false)}
-                        className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : null}
@@ -748,30 +808,15 @@ export default function CaseDetailPage() {
                   <p className="mt-3 text-xs text-amber-800">Preview the outreach message before sending.</p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void updateDeliveryStatus("QUEUED")}
-                    disabled={acting !== null}
-                    className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
-                  >
+                  <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("QUEUED")} disabled={acting !== null}>
                     Mark queued
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void updateDeliveryStatus("SENT")}
-                    disabled={acting !== null}
-                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 disabled:opacity-60"
-                  >
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("SENT")} disabled={acting !== null}>
                     Mark sent
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void updateDeliveryStatus("FAILED")}
-                    disabled={acting !== null}
-                    className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-800 disabled:opacity-60"
-                  >
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("FAILED")} disabled={acting !== null}>
                     Mark failed
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -860,13 +905,14 @@ export default function CaseDetailPage() {
                   {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
                 </pre>
                 <div className="mt-4">
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowRawEvidence((current) => !current)}
-                    className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-900 dark:text-neutral-100"
                   >
                     {showRawEvidence ? "Hide Raw Evidence" : "View Raw Evidence"}
-                  </button>
+                  </Button>
                 </div>
                 {showRawEvidence ? (
                   <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 text-xs leading-5 text-neutral-700 dark:text-neutral-300">
@@ -874,14 +920,16 @@ export default function CaseDetailPage() {
                   </pre>
                 ) : null}
                 <div className="mt-4">
-                  <button
+                  <Button
                     type="button"
+                    variant="primary"
                     onClick={() => void explainWhyFlagged()}
                     disabled={explaining}
-                    className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    isLoading={explaining}
+                    loadingText="Explaining..."
                   >
-                    {explaining ? "Explaining..." : "Explain Why Flagged"}
-                  </button>
+                    Explain Why Flagged
+                  </Button>
                   {explaining ? <div className="mt-3 h-16 animate-pulse rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800" /> : null}
                   {aiExplanation ? (
                     <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
@@ -934,20 +982,24 @@ export default function CaseDetailPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
                 <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
-                <input
-                  className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+                <Input
+                  label="Evidence description"
+                  hideLabel
                   placeholder="Description"
                   value={evidenceDescription}
                   onChange={(e) => setEvidenceDescription(e.target.value)}
                 />
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => void uploadEvidence()}
                   disabled={uploadingEvidence || !evidenceFile}
-                  className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
+                  isLoading={uploadingEvidence}
+                  loadingText="Uploading..."
                 >
-                  {uploadingEvidence ? "Uploading..." : "Upload Evidence"}
-                </button>
+                  Upload Evidence
+                </Button>
               </div>
               <div className="mt-4 space-y-2">
                 {evidence.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No evidence uploaded.</p> : null}
@@ -957,9 +1009,11 @@ export default function CaseDetailPage() {
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">{Math.round(entry.fileSizeBytes / 1024)} KB • {entry.mimeType}</p>
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">Uploaded by {entry.uploadedBy} at {new Date(entry.uploadedAt).toLocaleString()}</p>
                     {entry.description ? <p className="text-xs text-neutral-700 dark:text-neutral-300">{entry.description}</p> : null}
-                    <button
+                    <Button
                       type="button"
-                      className="mt-2 text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline"
+                      variant="link"
+                      size="sm"
+                      className="mt-2"
                       onClick={() => {
                         void api.downloadBlob(`/api/evidence/${entry.id}/download`).then((blob) => {
                           const url = window.URL.createObjectURL(blob);
@@ -976,7 +1030,7 @@ export default function CaseDetailPage() {
                       }}
                     >
                       Download
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>

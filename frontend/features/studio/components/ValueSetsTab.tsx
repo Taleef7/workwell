@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Input } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
@@ -81,7 +82,7 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
                 </p>
                 {normalizeEnumValue(vs.resolvabilityStatus) === "UNRESOLVED" ? <p className="mt-1 text-xs text-amber-700">{vs.resolvabilityNote}</p> : null}
               </div>
-              <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={() => detach(vs.id)}>Remove</button>
+              <Button variant="secondary" size="sm" onClick={() => detach(vs.id)}>Remove</Button>
             </li>
           ))}
         </ul>
@@ -90,11 +91,11 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
       )}
 
       <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Create Value Set</h3>
-      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
-      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Version" value={version} onChange={(e) => setVersion(e.target.value)} />
+      <Input label="OID" hideLabel placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
+      <Input label="Name" hideLabel placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      <Input label="Version" hideLabel placeholder="Version" value={version} onChange={(e) => setVersion(e.target.value)} />
       <div>
-        <button className="rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white" onClick={createValueSet}>Create Value Set</button>
+        <Button variant="primary" size="sm" onClick={createValueSet}>Create Value Set</Button>
       </div>
 
       <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Attach Existing Value Set</h3>
@@ -109,7 +110,7 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
                   {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
               </div>
-              <button className="rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white" onClick={() => attach(vs.id)}>Attach</button>
+              <Button variant="primary" size="sm" onClick={() => attach(vs.id)}>Attach</Button>
             </li>
           ))}
         </ul>

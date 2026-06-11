@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Button, Input, Select } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn, TableRow } from "datavis/src/components/table/types";
@@ -517,19 +518,70 @@ export default function RunsPage() {
     [router],
   );
 
+  // Option lists for the @mieweb/ui Select filters + run-control dropdowns.
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All Statuses" },
+      { value: "completed", label: labelFor(RUN_STATUS_LABELS, "COMPLETED") },
+      { value: "running", label: labelFor(RUN_STATUS_LABELS, "RUNNING") },
+      { value: "failed", label: labelFor(RUN_STATUS_LABELS, "FAILED") },
+      { value: "partial", label: labelFor(RUN_STATUS_LABELS, "PARTIAL") },
+    ],
+    [],
+  );
+  const scopeFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All Scope Types" },
+      { value: "all_programs", label: labelFor(SCOPE_LABELS, "ALL_PROGRAMS") },
+      { value: "measure", label: labelFor(SCOPE_LABELS, "MEASURE") },
+      { value: "site", label: labelFor(SCOPE_LABELS, "SITE") },
+      { value: "employee", label: labelFor(SCOPE_LABELS, "EMPLOYEE") },
+      { value: "case", label: labelFor(SCOPE_LABELS, "CASE") },
+    ],
+    [],
+  );
+  const triggerFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All Trigger Types" },
+      { value: "manual", label: labelFor(TRIGGER_LABELS, "MANUAL") },
+      { value: "scheduler", label: labelFor(TRIGGER_LABELS, "SCHEDULER") },
+    ],
+    [],
+  );
+  const runScopeOptions = useMemo(
+    () =>
+      (["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"] as const).map((scope) => ({
+        value: scope,
+        label: labelFor(SCOPE_LABELS, scope),
+      })),
+    [],
+  );
+  const runMeasureOptions = useMemo(
+    () => [
+      { value: "", label: "Select a measure" },
+      ...measures.map((measure) => ({
+        value: measure.id,
+        label: `${measure.name} v${measure.version} (${labelFor(MEASURE_STATUS_LABELS, measure.status)})`,
+      })),
+    ],
+    [measures],
+  );
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Run History</h2>
         <div className="flex items-center gap-2">
-          <button
-            className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void downloadCsv("/api/exports/runs?format=csv", "runs-export.csv")}
           >
             Export runs CSV
-          </button>
-          <button
-            className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200"
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() =>
               void downloadCsv(
                 `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}`,
@@ -538,100 +590,81 @@ export default function RunsPage() {
             }
           >
             Export outcomes CSV
-          </button>
-          <button
-            className="flex items-center gap-2 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200 disabled:opacity-60"
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => void rerunSameScope()}
             disabled={!selectedRunId || !rerunSupported || isRunTriggering}
+            isLoading={isRunTriggering}
+            loadingText="Running…"
           >
-            {isRunTriggering ? (
-              <>
-                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Running…
-              </>
-            ) : (
-              "Rerun Selected Scope"
-            )}
-          </button>
+            Rerun Selected Scope
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-2 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 md:grid-cols-4">
-        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="">All Statuses</option>
-          <option value="completed">{labelFor(RUN_STATUS_LABELS, "COMPLETED")}</option>
-          <option value="running">{labelFor(RUN_STATUS_LABELS, "RUNNING")}</option>
-          <option value="failed">{labelFor(RUN_STATUS_LABELS, "FAILED")}</option>
-          <option value="partial">{labelFor(RUN_STATUS_LABELS, "PARTIAL")}</option>
-        </select>
-        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
-          <option value="">All Scope Types</option>
-          <option value="all_programs">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
-          <option value="measure">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
-          <option value="site">{labelFor(SCOPE_LABELS, "SITE")}</option>
-          <option value="employee">{labelFor(SCOPE_LABELS, "EMPLOYEE")}</option>
-          <option value="case">{labelFor(SCOPE_LABELS, "CASE")}</option>
-        </select>
-        <select className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm" value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)}>
-          <option value="">All Trigger Types</option>
-          <option value="manual">{labelFor(TRIGGER_LABELS, "MANUAL")}</option>
-          <option value="scheduler">{labelFor(TRIGGER_LABELS, "SCHEDULER")}</option>
-        </select>
-        <button className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm text-neutral-700 dark:text-neutral-300" onClick={() => void loadRuns()}>
+      <div className="grid items-end gap-2 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 md:grid-cols-4">
+        <Select
+          label="Status"
+          hideLabel
+          size="sm"
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          options={statusFilterOptions}
+          aria-label="Filter by status"
+        />
+        <Select
+          label="Scope type"
+          hideLabel
+          size="sm"
+          value={scopeFilter}
+          onValueChange={setScopeFilter}
+          options={scopeFilterOptions}
+          aria-label="Filter by scope type"
+        />
+        <Select
+          label="Trigger type"
+          hideLabel
+          size="sm"
+          value={triggerFilter}
+          onValueChange={setTriggerFilter}
+          options={triggerFilterOptions}
+          aria-label="Filter by trigger type"
+        />
+        <Button variant="outline" size="sm" onClick={() => void loadRuns()}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-        <div className="grid gap-3 md:grid-cols-4">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Scope</label>
-            <select
-              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
-              value={runScopeType}
-              onChange={(e) => setRunScopeType(e.target.value as RunScopeType)}
-            >
-              <option value="ALL_PROGRAMS">{labelFor(SCOPE_LABELS, "ALL_PROGRAMS")}</option>
-              <option value="MEASURE">{labelFor(SCOPE_LABELS, "MEASURE")}</option>
-              <option value="SITE">{labelFor(SCOPE_LABELS, "SITE")}</option>
-              <option value="EMPLOYEE">{labelFor(SCOPE_LABELS, "EMPLOYEE")}</option>
-              <option value="CASE">{labelFor(SCOPE_LABELS, "CASE")}</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Measure</label>
-            <select
-              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm disabled:bg-neutral-100 dark:bg-neutral-800"
-              value={runMeasureId}
-              onChange={(e) => setRunMeasureId(e.target.value)}
-              disabled={runScopeType !== "MEASURE"}
-            >
-              <option value="">Select a measure</option>
-              {measures.map((measure) => (
-                <option key={measure.id} value={measure.id}>
-                  {measure.name} v{measure.version} ({labelFor(MEASURE_STATUS_LABELS, measure.status)})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Evaluation Date</label>
-            <input
-              type="date"
-              className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
-              value={runEvaluationDate}
-              onChange={(e) => setRunEvaluationDate(e.target.value)}
-            />
-          </div>
+        <div className="grid items-end gap-3 md:grid-cols-4">
+          <Select
+            label="Scope"
+            size="sm"
+            value={runScopeType}
+            onValueChange={(value) => setRunScopeType(value as RunScopeType)}
+            options={runScopeOptions}
+          />
+          <Select
+            label="Measure"
+            size="sm"
+            value={runMeasureId}
+            onValueChange={setRunMeasureId}
+            options={runMeasureOptions}
+            disabled={runScopeType !== "MEASURE"}
+          />
+          <Input
+            type="date"
+            label="Evaluation Date"
+            size="sm"
+            value={runEvaluationDate}
+            onChange={(e) => setRunEvaluationDate(e.target.value)}
+          />
           {runScopeType === "SITE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Site</label>
-              <input
-                type="text"
-                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
+              <Input
+                label="Site"
+                size="sm"
                 value={runSite}
                 onChange={(e) => setRunSite(e.target.value)}
                 placeholder="Enter a site name, for example Plant A"
@@ -640,10 +673,9 @@ export default function RunsPage() {
           ) : null}
           {runScopeType === "EMPLOYEE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Employee External ID</label>
-              <input
-                type="text"
-                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
+              <Input
+                label="Employee External ID"
+                size="sm"
                 value={runEmployeeExternalId}
                 onChange={(e) => setRunEmployeeExternalId(e.target.value)}
                 placeholder="Enter an employee external ID, for example emp-041"
@@ -652,35 +684,25 @@ export default function RunsPage() {
           ) : null}
           {runScopeType === "CASE" ? (
             <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Case ID</label>
-              <input
-                type="text"
-                className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-2 text-sm"
+              <Input
+                label="Case ID"
+                size="sm"
                 value={runCaseId}
                 onChange={(e) => setRunCaseId(e.target.value)}
                 placeholder="Paste a case UUID"
               />
             </div>
           ) : null}
-          <div className="flex items-end">
-            <button
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-              onClick={() => void runManualScope()}
-              disabled={isRunTriggering}
-            >
-              {isRunTriggering ? (
-                <>
-                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Running…
-                </>
-              ) : (
-                "Run Now"
-              )}
-            </button>
-          </div>
+          <Button
+            variant="primary"
+            fullWidth
+            onClick={() => void runManualScope()}
+            disabled={isRunTriggering}
+            isLoading={isRunTriggering}
+            loadingText="Running…"
+          >
+            Run Now
+          </Button>
         </div>
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
           MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require an employee external ID.
@@ -753,13 +775,15 @@ export default function RunsPage() {
           </table>
           {runs.length >= limit ? (
             <div className="border-t border-neutral-200 dark:border-neutral-800 px-3 py-3">
-              <button
-                className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
                 onClick={() => setLimit((current) => current + RUN_PAGE_SIZE)}
                 disabled={loading}
               >
                 Load more runs
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
@@ -770,9 +794,9 @@ export default function RunsPage() {
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">AI-generated operational insight - verify before acting</p>
-                <button className="text-xs text-primary-700 dark:text-primary-400 underline" onClick={() => setInsightDismissed(true)}>
+                <Button variant="link" size="sm" onClick={() => setInsightDismissed(true)}>
                   Dismiss
-                </button>
+                </Button>
               </div>
               <ul className="list-disc space-y-1 pl-4 text-xs text-blue-900">
                 {runInsight.insights.map((item, idx) => (
