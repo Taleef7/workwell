@@ -17,6 +17,13 @@ Compliance: raw `<button>` 118→14, `<input>` 48→7, `<select>` 21→0, `<text
 
 Verification: `tsc --noEmit` clean, `pnpm lint` clean (1 pre-existing test-mock warning), `pnpm test` 53/53, `pnpm build` green. No backend/schema/API/compliance change. PR left for review (no auto-merge; Taleef deploys). Updated `frontend/MIEWEB-UI-MIGRATION.md` (Steps 4a/4c marked done, compliance table filled).
 
+**Full-stack E2E + live browser verification (2026-06-11, follow-up).** Brought up the real stack locally (Docker Postgres + HAPI via `infra/docker-compose.yml`, Spring Boot `bootRun` with `WORKWELL_DEMO_ENABLED=true`, Next.js `dev` at `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080`) and exercised the swapped surfaces in a real Chromium browser:
+- **Playwright golden-path suite: 4/4 pass** against localhost. Two pre-existing selector fragilities (not caused by this branch) were fixed in `e2e/tests/golden-path.spec.ts`: `getByLabel(/password/i)` was ambiguous (also matched the login "Show password" toggle's `aria-label`) → now `#email`/`#password`; logout regex `/logout|sign out/i` didn't match the layout's `aria-label="Log out"` (rewritten in PR #68) → now `/log ?out|sign out/i`.
+- **`/runs`** — `@mieweb/ui` `Select` (Status/Scope/Trigger/site/date) open with correct `listbox`/`option` roles; option select works; `Button`s render with brand styling.
+- **`/admin`** — scheduler/integration/validate `Button`s render; terminology "Add Mapping" opens the swapped form (7 `Input` + 1 `Textarea`, `label`-derived accessible names; value binding + Cancel verified). NITRO grids (data-readiness 14 rows, terminology 6 rows) render with `<code>`/badge cells intact. (Note: a NITRO grid's virtualized cells visually overlap the terminology add-form — a pre-existing z-index quirk from the PR #100 grids, not a control-swap regression; the form is fully functional underneath.)
+- **`/studio/[id]` CQL tab** — Compile/AI-Draft `Button`s + audit-format `Select`; "AI Draft CQL" opens the promoted `@mieweb/ui` `Modal` (dialog role, `Textarea` with label, Cancel/Generate footer buttons); Escape closes it.
+- **`/cases/[id]`** — outreach-template `Select`, assignee `Input`+Assign, all action `Button`s (Preview/Send/Escalate/Rerun/Resolve/Schedule + Mark queued/sent/failed); "Schedule Appointment" opens the promoted `Modal` (Appointment-type `Select`, datetime `Input`, location `Input`, Cancel/Save footer); Escape closes it.
+
 ---
 
 ## 2026-06-11 — DataVis NITRO grid unblocked (frontend) — branch `feat/datavis-nitro-unblock`
