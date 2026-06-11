@@ -9,6 +9,11 @@ if (isProductionBuild && demoModeEnabled) {
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // The NITRO data grid (@mieweb/ui/datavis) imports raw TS/TSX from the vendored
+  // `datavis` package (frontend/vendor/datavis). Next must transpile it like first-party
+  // source, and must also transpile @mieweb/ui so its internal extensionless `datavis/src/*`
+  // deep imports go through the project resolver (which appends .ts/.tsx).
+  transpilePackages: ["datavis", "@mieweb/ui"],
   async redirects() {
     return [
       {

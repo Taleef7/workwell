@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
+import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
+import type { RowData, TableColumn } from "datavis/src/components/table/types";
 
 type IntegrationHealth = {
   integration: string;
@@ -495,6 +497,122 @@ export default function AdminPage() {
     }
   }
 
+  // ── NITRO grids for the three admin governance/audit tables ──
+  // (declared before the isAdmin early-return so hooks run unconditionally)
+  const dataMappingColumns: NitroGridColumn[] = [
+    { field: "canonicalElement", header: "Canonical Element" },
+    { field: "source", header: "Source" },
+    { field: "sourceField", header: "Source Field" },
+    { field: "status", header: "Status" },
+    { field: "lastValidated", header: "Last Validated" },
+    { field: "notes", header: "Notes" },
+    { field: "rawStatus", header: "Raw Status", visible: false },
+  ];
+  const dataMappingRows = useMemo(
+    () =>
+      dataMappings.map((m) => ({
+        canonicalElement: m.canonicalElement,
+        source: m.sourceDisplayName,
+        sourceField: m.sourceField,
+        status: formatStatusLabel(m.mappingStatus),
+        rawStatus: m.mappingStatus,
+        lastValidated: m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—",
+        notes: m.notes ?? "—",
+      })),
+    [dataMappings],
+  );
+  const formatDataMappingCell = useCallback((value: unknown, row: RowData, column: TableColumn) => {
+    if (column.field === "canonicalElement" || column.field === "sourceField") {
+      return <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{String(value ?? "")}</code>;
+    }
+    if (column.field === "status") {
+      return (
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(String(row.rawStatus ?? ""))}`}>
+          {String(value ?? "")}
+        </span>
+      );
+    }
+    return value as React.ReactNode;
+  }, []);
+
+  const terminologyColumns: NitroGridColumn[] = [
+    { field: "localCode", header: "Local Code" },
+    { field: "localSystem", header: "Local System" },
+    { field: "standardCode", header: "Standard Code" },
+    { field: "standardSystem", header: "Standard System" },
+    { field: "status", header: "Status" },
+    { field: "confidence", header: "Confidence" },
+    { field: "reviewedBy", header: "Reviewed By" },
+    { field: "notes", header: "Notes" },
+    { field: "rawStatus", header: "Raw Status", visible: false },
+  ];
+  const terminologyRows = useMemo(
+    () =>
+      terminologyMappings.map((m) => ({
+        localCode: m.localDisplay ? `${m.localCode} (${m.localDisplay})` : m.localCode,
+        localSystem: m.localSystem,
+        standardCode: m.standardDisplay ? `${m.standardCode} (${m.standardDisplay})` : m.standardCode,
+        standardSystem: m.standardSystem,
+        status: formatStatusLabel(m.mappingStatus),
+        rawStatus: m.mappingStatus,
+        confidence: m.mappingConfidence != null ? `${Math.round(m.mappingConfidence * 100)}%` : "—",
+        reviewedBy: m.reviewedBy ?? "—",
+        notes: m.notes ?? "—",
+      })),
+    [terminologyMappings],
+  );
+  const formatTerminologyCell = useCallback((value: unknown, row: RowData, column: TableColumn) => {
+    if (column.field === "localCode" || column.field === "localSystem" || column.field === "standardCode" || column.field === "standardSystem") {
+      return <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{String(value ?? "")}</code>;
+    }
+    if (column.field === "status") {
+      return (
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(String(row.rawStatus ?? ""))}`}>
+          {String(value ?? "")}
+        </span>
+      );
+    }
+    return value as React.ReactNode;
+  }, []);
+
+  const deliveryColumns: NitroGridColumn[] = [
+    { field: "recipient", header: "Recipient" },
+    { field: "measure", header: "Measure" },
+    { field: "subject", header: "Subject" },
+    { field: "provider", header: "Provider" },
+    { field: "status", header: "Status" },
+    { field: "sent", header: "Sent" },
+  ];
+  const deliveryRows = useMemo(
+    () =>
+      deliveryLog.map((entry) => ({
+        recipient: entry.toAddress,
+        measure: entry.measureName ?? "—",
+        subject: entry.subject,
+        provider: entry.provider,
+        status: entry.status,
+        sent: entry.sentAt ? new Date(entry.sentAt).toLocaleString() : "—",
+      })),
+    [deliveryLog],
+  );
+  const formatDeliveryCell = useCallback((value: unknown, _row: RowData, column: TableColumn) => {
+    if (column.field === "provider") {
+      return (
+        <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+          {String(value ?? "")}
+        </span>
+      );
+    }
+    if (column.field === "status") {
+      return (
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${deliveryStatusBadgeClass(String(value ?? ""))}`}>
+          {String(value ?? "")}
+        </span>
+      );
+    }
+    return value as React.ReactNode;
+  }, []);
+
   if (!isAdmin) {
     return (
       <section className="flex min-h-[60vh] items-center justify-center px-4">
@@ -634,47 +752,19 @@ export default function AdminPage() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-              <tr>
-                <th className="px-4 py-2 font-medium">Canonical Element</th>
-                <th className="px-4 py-2 font-medium">Source</th>
-                <th className="px-4 py-2 font-medium">Source Field</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Last Validated</th>
-                <th className="px-4 py-2 font-medium">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dataMappings.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No mappings loaded.</td>
-                </tr>
-              ) : null}
-              {dataMappings.map((m) => (
-                <tr key={m.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.canonicalElement}</code>
-                  </td>
-                  <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{m.sourceDisplayName}</td>
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.sourceField}</code>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${mappingStatusBadgeClass(m.mappingStatus)}`}>
-                      {formatStatusLabel(m.mappingStatus)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">
-                    {m.lastValidatedAt ? new Date(m.lastValidatedAt).toLocaleString() : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.notes ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {dataMappings.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No mappings loaded.</p>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+            <NitroGrid
+              rows={dataMappingRows}
+              columns={dataMappingColumns}
+              sourceName="Data Element Mappings"
+              formatCell={formatDataMappingCell}
+              style={{ height: "26rem" }}
+            />
+          </div>
+        )}
       </article>
 
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
@@ -833,57 +923,19 @@ export default function AdminPage() {
           </div>
         ) : null}
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-              <tr>
-                <th className="px-4 py-2 font-medium">Local Code</th>
-                <th className="px-4 py-2 font-medium">Local System</th>
-                <th className="px-4 py-2 font-medium">Standard Code</th>
-                <th className="px-4 py-2 font-medium">Standard System</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Confidence</th>
-                <th className="px-4 py-2 font-medium">Reviewed By</th>
-                <th className="px-4 py-2 font-medium">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {terminologyMappings.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No terminology mappings loaded.</td>
-                </tr>
-              ) : null}
-              {terminologyMappings.map((m) => (
-                <tr key={m.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.localCode}</code>
-                    {m.localDisplay ? <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.localDisplay}</p> : null}
-                  </td>
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.localSystem}</code>
-                  </td>
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-700 dark:text-neutral-300">{m.standardCode}</code>
-                    {m.standardDisplay ? <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.standardDisplay}</p> : null}
-                  </td>
-                  <td className="px-4 py-2">
-                    <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{m.standardSystem}</code>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${terminologyStatusBadgeClass(m.mappingStatus)}`}>
-                      {formatStatusLabel(m.mappingStatus)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-neutral-600 dark:text-neutral-400">
-                    {m.mappingConfidence != null ? `${Math.round(m.mappingConfidence * 100)}%` : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.reviewedBy ?? "—"}</td>
-                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{m.notes ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {terminologyMappings.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No terminology mappings loaded.</p>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+            <NitroGrid
+              rows={terminologyRows}
+              columns={terminologyColumns}
+              sourceName="Terminology Mappings"
+              formatCell={formatTerminologyCell}
+              style={{ height: "26rem" }}
+            />
+          </div>
+        )}
       </article>
 
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
@@ -1190,47 +1242,19 @@ export default function AdminPage() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-              <tr>
-                <th className="px-4 py-2 font-medium">Recipient</th>
-                <th className="px-4 py-2 font-medium">Measure</th>
-                <th className="px-4 py-2 font-medium">Subject</th>
-                <th className="px-4 py-2 font-medium">Provider</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Sent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deliveryLog.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No outreach emails sent yet.</td>
-                </tr>
-              ) : null}
-              {deliveryLog.map((entry) => (
-                <tr key={entry.id} className="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
-                  <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{entry.toAddress}</td>
-                  <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{entry.measureName ?? "—"}</td>
-                  <td className="max-w-xs truncate px-4 py-2 text-xs text-neutral-600 dark:text-neutral-400">{entry.subject}</td>
-                  <td className="px-4 py-2">
-                    <span className="rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-[10px] font-semibold text-neutral-700 dark:text-neutral-300">
-                      {entry.provider}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${deliveryStatusBadgeClass(entry.status)}`}>
-                      {entry.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">
-                    {entry.sentAt ? new Date(entry.sentAt).toLocaleString() : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {deliveryLog.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No outreach emails sent yet.</p>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+            <NitroGrid
+              rows={deliveryRows}
+              columns={deliveryColumns}
+              sourceName="Outreach Delivery Log"
+              formatCell={formatDeliveryCell}
+              style={{ height: "26rem" }}
+            />
+          </div>
+        )}
       </article>
 
       {demoResetVisible ? (

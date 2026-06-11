@@ -37,7 +37,8 @@ pnpm dev
 - **Dark mode** (`lib/useTheme.ts`) + **Enterprise Health brand** default with a **runtime brand switcher** (`lib/useBrand.ts`) in the header. Persisted theme/brand are applied **before first paint** by a pre-hydration inline script (`components/theme-script.tsx`) to avoid a flash; the hooks handle subsequent runtime changes.
 - Brand stylesheets live in `public/brands/*.css`; re-sync them from the package with `pnpm sync:brands` after upgrading `@mieweb/ui`.
 - Import `@mieweb/ui` only from `"use client"` modules — its barrel runs `React.createContext` at load and breaks Server Component builds (see `components/client-providers.tsx`).
-- Full migration details + known gaps (e.g. DataVis NITRO grid is deferred): `MIEWEB-UI-MIGRATION.md`.
+- **DataVis NITRO data grid** drives the large operational/audit tables (`/measures`, `/runs` Outcomes, `/admin`). It is consumed via `@mieweb/ui/datavis` + a vendored `datavis` source (`vendor/datavis`, aliased `file:`) — see `vendor/datavis/VENDORING.md` and ADR-007. Use it through the client-only `features/datavis/NitroGrid` wrapper (never import `@mieweb/ui/datavis` directly); rich cells via `formatCell`. Small in-card tables stay semantic.
+- Full migration details + remaining `@mieweb/ui` control-swap gaps (issue #99): `MIEWEB-UI-MIGRATION.md`.
 
 ## Notes
 

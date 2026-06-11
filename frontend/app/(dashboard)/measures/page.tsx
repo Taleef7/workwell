@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, labelFor, measureStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
+import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
+import type { RowData, TableColumn, TableRow } from "datavis/src/components/table/types";
 
 type Measure = {
   id: string;
@@ -84,6 +86,91 @@ export default function MeasuresPage() {
     void loadMeasures();
   }, [loadMeasures]);
 
+  // NITRO grid column config + flattened rows (id carried for row-click navigation).
+  const gridColumns = useMemo<NitroGridColumn[]>(
+    () => [
+      { field: "name", header: "Name" },
+      { field: "policyRef", header: "Policy Ref" },
+      { field: "version", header: "Version" },
+      { field: "status", header: "Status" },
+      { field: "statusUpdated", header: "Status Updated" },
+      { field: "owner", header: "Owner" },
+      { field: "lastUpdated", header: "Last Updated" },
+      { field: "tags", header: "Tags" },
+      { field: "id", header: "ID", visible: false },
+      { field: "rawStatus", header: "Raw Status", visible: false },
+    ],
+    [],
+  );
+
+  const gridRows = useMemo(
+    () =>
+      items.map((item) => ({
+        name: item.name,
+        policyRef: item.policyRef,
+        version: item.version,
+        status: labelFor(MEASURE_STATUS_LABELS, item.status),
+        rawStatus: item.status,
+        statusUpdated: `${new Date(item.statusUpdatedAt).toLocaleString()} by ${item.statusUpdatedBy || "-"}`,
+        owner: item.owner,
+        lastUpdated: new Date(item.lastUpdated).toLocaleString(),
+        tags: item.tags && item.tags.length > 0 ? item.tags.join(", ") : "—",
+        id: item.id,
+      })),
+    [items],
+  );
+
+  // Restore the rich cell rendering the hand-rolled table had: CMS policy-ref badge,
+  // status pill, and tag chips. NITRO's formatCell returns a ReactNode per cell.
+  const formatCell = useCallback(
+    (value: unknown, row: RowData, column: TableColumn) => {
+      if (column.field === "policyRef") {
+        const ref = String(value ?? "");
+        if (ref && /^CMS\d+/.test(ref)) {
+          return (
+            <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 font-mono text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900">
+              {ref}
+            </span>
+          );
+        }
+        return ref;
+      }
+      if (column.field === "status") {
+        const raw = String(row.rawStatus ?? value ?? "");
+        return (
+          <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(raw)}`}>
+            {String(value ?? "")}
+          </span>
+        );
+      }
+      if (column.field === "tags") {
+        const text = String(value ?? "");
+        if (text === "—") return <span className="text-neutral-400">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {text.split(", ").map((tag) => (
+              <span key={tag} className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+                {tag}
+              </span>
+            ))}
+          </div>
+        );
+      }
+      return value as React.ReactNode;
+    },
+    [],
+  );
+
+  const handleRowClick = useCallback(
+    (row: TableRow) => {
+      const id = row.data?.id;
+      if (typeof id === "string" && id) {
+        router.push(`/studio/${id}`);
+      }
+    },
+    [router],
+  );
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -140,64 +227,18 @@ export default function MeasuresPage() {
         </p>
       ) : null}
 
-      <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-        <table className="min-w-full text-sm">
-          <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
-            <tr>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Policy Ref</th>
-              <th className="px-3 py-2">Version</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Status Updated</th>
-              <th className="px-3 py-2">Owner</th>
-              <th className="px-3 py-2">Last Updated</th>
-              <th className="px-3 py-2">Tags</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr
-                key={item.id}
-                className="cursor-pointer border-t border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                onClick={() => router.push(`/studio/${item.id}`)}
-              >
-                <td className="px-3 py-2">{item.name}</td>
-                <td className="px-3 py-2">
-                  {item.policyRef && /^CMS\d+/.test(item.policyRef) ? (
-                    <span className="inline-flex items-center rounded bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
-                      {item.policyRef}
-                    </span>
-                  ) : (
-                    item.policyRef
-                  )}
-                </td>
-                <td className="px-3 py-2">{item.version}</td>
-                <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(item.status)}`}>{labelFor(MEASURE_STATUS_LABELS, item.status)}</span>
-                </td>
-                <td className="px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  {new Date(item.statusUpdatedAt).toLocaleString()} by {item.statusUpdatedBy || "-"}
-                </td>
-                <td className="px-3 py-2">{item.owner}</td>
-                <td className="px-3 py-2">{new Date(item.lastUpdated).toLocaleString()}</td>
-                <td className="px-3 py-2">
-                  {item.tags && item.tags.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {item.tags.map((tag) => (
-                        <span key={tag} className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-neutral-400">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {items.length > 0 ? (
+        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+          <NitroGrid
+            rows={gridRows}
+            columns={gridColumns}
+            sourceName="Measures"
+            formatCell={formatCell}
+            onRowClick={handleRowClick}
+            style={{ height: "32rem" }}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
