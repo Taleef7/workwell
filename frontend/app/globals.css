@@ -7,6 +7,9 @@
 /* 3. Scan @mieweb/ui compiled output so Tailwind 4 generates its utility classes */
 @source "../node_modules/@mieweb/ui/dist";
 
+/* 3b. Scan the vendored datavis (NITRO grid) source so Tailwind generates its utility classes */
+@source "../vendor/datavis/src";
+
 /* 4. Dark mode variant (matches data-theme=dark and the .dark class) */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *, .dark, .dark *));
 
@@ -143,4 +146,11 @@ body {
   margin: 0;
   font-family: var(--font-geist-sans), sans-serif;
   @apply bg-neutral-50 text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100;
+}
+/* DataVis NITRO grid — custom classes from vendor/datavis/src/index.css (not Tailwind-generated) */
+.wcdv-pin-separator {
+  box-shadow: 2px 0 4px -1px rgba(0, 0, 0, 0.1);
+}
+.wcdv-thead-shadow {
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
 }
