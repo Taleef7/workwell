@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-06-11 — DataVis NITRO grid unblocked (frontend) — branch `feat/datavis-nitro-unblock`
+
+Reopened the "NITRO blocked, waiting on Doug to publish `@mieweb/datavis`" gap from the `@mieweb/ui` migration (PR #68) and **unblocked it ourselves**. The prior diagnosis was incomplete: the published `@mieweb/ui@0.6.1` *does* ship the NITRO bundle (`dist/datavis.js` + `./datavis`), but it imports from a **bare `datavis` specifier** (raw `datavis/src/...` `.ts/.tsx`) plus `datavis-ace`. `datavis-ace@=4.0.0-PRE.2` is on public npm; the `datavis` UI source isn't on npm **but the `mieweb/datavis` repo is public** — and `@mieweb/ui`'s own build marks `/^datavis\//` external, expecting the consumer to provide it exactly as the upstream monorepo does via a `file:` link.
+
+What shipped (frontend-only):
+- **Vendored `datavis` source** into `frontend/vendor/datavis` (pinned to upstream commit `52c27cc`, the one matching `@mieweb/ui@0.6.1`'s 2026-05-14 publish). Copied `src/` only — excluded the standalone demo entry, `demo/`, `testing/`, stories, and tests. Added a `package.json` aliasing it as `"datavis": "file:./vendor/datavis"` (react/react-dom/@mieweb/ui/datavis-ace as **peers** = singletons) + `VENDORING.md` (provenance + upgrade recipe).
+- **Deps:** `datavis-ace@=4.0.0-PRE.2` (its `json-formatter-js` resolves as an HTTPS tarball, not git — no git needed in the alpine image), `@dnd-kit/{core,sortable,utilities}`, `i18next`, `react-i18next`.
+- **Wiring:** `transpilePackages: ["datavis", "@mieweb/ui"]` (Next must transpile both — `@mieweb/ui`'s internal extensionless deep imports only resolve through the project resolver); Tailwind `@source "../vendor/datavis/src"` + the `.wcdv-*` custom classes ported from upstream `index.css`.
+- **Integration seam:** `features/datavis/NitroGrid.tsx` + `NitroGridClient.tsx`. The grid is **client-only with `ssr:false`** (the engine touches `window` at module load). Local in-memory rows use the upstream `createMockView` pattern — a `ComputedView` over a `window`-installed local source fed through `DataVisNitroContext` — so there's **no `http` fetch**; our authed API client still owns data loading. Pages import the wrapper, never `@mieweb/ui/datavis` directly.
+- **Proof:** swapped `/measures` from a hand-rolled `<table>` to `<NitroGrid>` (row-click → studio preserved). Browser-verified the real NITRO grid renders (sortable/filterable headers, CSV/copy/refresh toolbar, Count aggregate footer, dark + brand styling).
+- **Docker/CI:** both `frontend/Dockerfile` (live deploy) and `infra/frontend.Dockerfile` (local compose) now `COPY vendor` before `pnpm install` (the `file:` dep must exist at install). `.dockerignore` doesn't exclude `vendor/`.
+
+**Full NITRO rollout (same branch):** after the measures proof-of-concept, audited all 13 app `<table>` blocks and swapped the **4 strong-fit operational/audit tables** to `<NitroGrid>`, keeping rich cells via NITRO's `formatCell` (returns `ReactNode`):
+- `/measures` — restored the cells the first pass had flattened: CMS policy-ref mono badge, status pill, tag chips (browser-verified).
+- `/runs` Outcomes table — employee link (+external ID), outcome pill, case link; row-click → case nav preserved.
+- `/admin` ×3 — data-element mappings, terminology mappings, outreach delivery log; `<code>` cells + status/provider badge pills preserved. (Hooks declared above the `isAdmin` early-return to satisfy rules-of-hooks.)
+- **Deliberately NOT swapped** (NITRO chrome too heavy / wrong fit): the small in-card tables on `/programs/[measureId]` (≤10-row risk/heatmap) and studio version-history/governance panels; `/cases` is a card grid; `/employees/[externalId]` is a small profile table; the `/runs` master list stays a master→detail selector.
+
+Verification: `pnpm lint` (0 errors), `pnpm build` (compiled + TS clean), `pnpm test` (53/53). Vendored source excluded from our eslint (`vendor/**`). No backend/schema/API/compliance change. Long-term fix still preferred — MIE publishes a built `@mieweb/datavis` to npm so `vendor/` can be deleted (carried in `questions_for_doug.md`). PR left for review (no auto-merge; Taleef deploys).
+
+**Follow-up (separate branch B):** complete the `@mieweb/ui` component-swap of remaining raw HTML form/control elements on `/admin` (largest gap), `/runs`, `/cases/[id]` (+ its bespoke appointment modal), and the studio tabs — all currently retokenized-in-place from PR #68 but not yet component-migrated. Intentional non-`@mieweb/ui` surfaces stay as-is: `/login` + `/sandbox` (bespoke pre-auth), Monaco (no equivalent), recharts (UI ships only chart color vars), `confirm-dialog`'s tested a11y shell.
+
+---
+
 ## 2026-06-10 — E2: declarative YAML measures + headless evaluator — branch `feat/e2-yaml-measures`
 
 Wave 1 epic #72 (sub-issues #85–#88), straight on top of E1's ports. Doug's most concrete ask — *"programming layer, no UI: given this patient and this YAML file, are they compliant?"* — is now a one-command reality.

@@ -8,6 +8,7 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 ## [Unreleased]
 
 ### Added
+- DataVis **NITRO** data grid unblocked and rolled out: consumed via `@mieweb/ui/datavis` + a vendored `datavis` source (`frontend/vendor/datavis`, aliased `file:`) and `datavis-ace@=4.0.0-PRE.2`. Live on `/measures`, `/runs` (Outcomes), and `/admin` (data mappings, terminology mappings, delivery log) through the client-only `features/datavis/NitroGrid` wrapper; rich cells preserved via `formatCell`. See ADR-007 + `frontend/vendor/datavis/VENDORING.md`. (Remaining `@mieweb/ui` form-control swap split out as issue #99.)
 - Scoped-run parity (Sprint 8): `SITE` and `EMPLOYEE` manual runs and same-scope reruns now route through the async run-job path, matching `ALL_PROGRAMS`/`MEASURE`; the `/runs` UI exposes the new scopes.
 
 ### Changed

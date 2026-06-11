@@ -1,0 +1,22 @@
+{
+  "name": "datavis",
+  "version": "0.1.0-workwell-vendored",
+  "private": true,
+  "type": "module",
+  "description": "Vendored @mieweb/datavis source (NITRO data grid) consumed by @mieweb/ui/datavis. Pinned to upstream commit 52c27ccc4f2ae0413eabb2845e02b238ee1f7b85 (~@mieweb/ui 0.6.1). Intentionally has no exports field so the bundler resolves the bare `datavis/src/...` deep imports (.ts/.tsx) the same way the upstream monorepo does. See vendor/datavis/VENDORING.md.",
+  "main": "./src/index.ts",
+  "peerDependencies": {
+    "@mieweb/ui": ">=0.6.0",
+    "datavis-ace": "=4.0.0-PRE.2",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "i18next": "^26.0.3",
+    "lucide-react": "^1.14.0",
+    "react-i18next": "^17.0.2"
+  }
+}
