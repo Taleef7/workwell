@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { formatStatusLabel, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
@@ -194,151 +195,137 @@ export function ReleaseApprovalTab({
               onError={(message) => onError(message)}
             />
             {canApprove ? (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => void exportMatBundle()}
                 disabled={exportingMat}
-                className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
+                isLoading={exportingMat}
+                loadingText="Exporting MAT..."
               >
-                {exportingMat ? "Exporting MAT..." : "Export for MAT (FHIR XML)"}
-              </button>
+                Export for MAT (FHIR XML)
+              </Button>
             ) : null}
           </div>
         ) : null}
 
         {normalizeEnumValue(measure.status) === "DRAFT" && canApprove ? (
           <div className="mt-2">
-            <button
-              className="rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={!approveEnabled}
               title={!approveEnabled ? approveDisabledReason : "Approve for release"}
               onClick={() => setShowApproveConfirm(true)}
             >
               Approve for Release
-            </button>
+            </Button>
           </div>
         ) : null}
 
         {normalizeEnumValue(measure.status) === "APPROVED" && canApprove ? (
           <div className="mt-2 space-y-3">
             <ImpactPreviewPanel measureId={measureId} api={api} />
-            <button
-              className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={!canActivate}
               title={!canActivate ? "Resolve blockers before activating." : "Activate measure"}
               onClick={() => setShowActivateConfirm(true)}
             >
               Activate Measure
-            </button>
+            </Button>
           </div>
         ) : null}
 
         {normalizeEnumValue(measure.status) === "ACTIVE" && canAdminDeprecate ? (
           <div className="mt-2">
-            <button className="rounded-md bg-neutral-700 px-3 py-2 text-xs font-semibold text-white" onClick={() => setShowDeprecateConfirm(true)}>
+            <Button variant="secondary" size="sm" onClick={() => setShowDeprecateConfirm(true)}>
               Deprecate
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
 
-      {showApproveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Approve for Release</h3>
-            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Confirm approval with checklist summary below:</p>
-            <ul className="mt-2 list-disc pl-5 text-sm text-neutral-700 dark:text-neutral-300">
-              <li>Compile: {formatStatusLabel(activationReadiness?.compileStatus ?? "UNKNOWN")}</li>
-              <li>Fixtures Valid: {testsReady ? "Yes" : "No"}</li>
-              <li>Value Sets Attached: {hasValueSets ? "Yes" : "No"}</li>
-            </ul>
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowApproveConfirm(false)}>Cancel</button>
-              <button
-                className="flex items-center gap-1 rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                onClick={approve}
-                disabled={approving}
-              >
-                {approving ? (
-                  <>
-                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Approving…
-                  </>
-                ) : (
-                  "Confirm"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal open={showApproveConfirm} onOpenChange={(open) => { if (!open) setShowApproveConfirm(false); }} size="lg">
+        <ModalHeader>
+          <ModalTitle>Approve for Release</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">Confirm approval with checklist summary below:</p>
+          <ul className="mt-2 list-disc pl-5 text-sm text-neutral-700 dark:text-neutral-300">
+            <li>Compile: {formatStatusLabel(activationReadiness?.compileStatus ?? "UNKNOWN")}</li>
+            <li>Fixtures Valid: {testsReady ? "Yes" : "No"}</li>
+            <li>Value Sets Attached: {hasValueSets ? "Yes" : "No"}</li>
+          </ul>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" size="sm" onClick={() => setShowApproveConfirm(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={approve}
+            disabled={approving}
+            isLoading={approving}
+            loadingText="Approving…"
+          >
+            Confirm
+          </Button>
+        </ModalFooter>
+      </Modal>
 
-      {showActivateConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Activate Measure</h3>
-            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Activating this version replaces any currently Active version.</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowActivateConfirm(false)}>Cancel</button>
-              <button
-                className="flex items-center gap-1 rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                onClick={activate}
-                disabled={activating}
-              >
-                {activating ? (
-                  <>
-                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Activating…
-                  </>
-                ) : (
-                  "Confirm Activate"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal open={showActivateConfirm} onOpenChange={(open) => { if (!open) setShowActivateConfirm(false); }} size="lg">
+        <ModalHeader>
+          <ModalTitle>Activate Measure</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">Activating this version replaces any currently Active version.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" size="sm" onClick={() => setShowActivateConfirm(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={activate}
+            disabled={activating}
+            isLoading={activating}
+            loadingText="Activating…"
+          >
+            Confirm Activate
+          </Button>
+        </ModalFooter>
+      </Modal>
 
-      {showDeprecateConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50">
-          <div className="w-full max-w-lg rounded-lg bg-white dark:bg-neutral-900 p-4">
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Deprecate Measure</h3>
-            <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">Deprecation reason is required.</p>
-            <textarea
-              className="mt-2 min-h-24 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              placeholder="Enter deprecation reason..."
-              value={deprecateReason}
-              onChange={(e) => setDeprecateReason(e.target.value)}
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-xs font-semibold" onClick={() => setShowDeprecateConfirm(false)}>Cancel</button>
-              <button
-                className="flex items-center gap-1 rounded bg-neutral-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                onClick={deprecate}
-                disabled={deprecating}
-              >
-                {deprecating ? (
-                  <>
-                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Deprecating…
-                  </>
-                ) : (
-                  "Confirm Deprecate"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal open={showDeprecateConfirm} onOpenChange={(open) => { if (!open) setShowDeprecateConfirm(false); }} size="lg">
+        <ModalHeader>
+          <ModalTitle>Deprecate Measure</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">Deprecation reason is required.</p>
+          <Textarea
+            label="Deprecation reason"
+            hideLabel
+            className="mt-2 min-h-24"
+            placeholder="Enter deprecation reason..."
+            value={deprecateReason}
+            onChange={(e) => setDeprecateReason(e.target.value)}
+          />
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" size="sm" onClick={() => setShowDeprecateConfirm(false)}>Cancel</Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={deprecate}
+            disabled={deprecating}
+            isLoading={deprecating}
+            loadingText="Deprecating…"
+          >
+            Confirm Deprecate
+          </Button>
+        </ModalFooter>
+      </Modal>
     </>
   );
 }

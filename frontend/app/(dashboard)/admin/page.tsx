@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ShieldAlert } from "lucide-react";
+import { Button, Checkbox, Input, Select, Textarea } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
@@ -575,6 +576,29 @@ export default function AdminPage() {
     return value as React.ReactNode;
   }, []);
 
+  const waiverMeasureFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All measures" },
+      ...measures.map((measure) => ({ value: measure.id, label: measure.name })),
+    ],
+    [measures],
+  );
+  const waiverActiveFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All" },
+      { value: "true", label: "Active only" },
+      { value: "false", label: "Inactive only" },
+    ],
+    [],
+  );
+  const waiverGrantMeasureOptions = useMemo(
+    () => [
+      { value: "", label: "Select measure" },
+      ...measures.map((measure) => ({ value: measure.id, label: measure.name })),
+    ],
+    [measures],
+  );
+
   const deliveryColumns: NitroGridColumn[] = [
     { field: "recipient", header: "Recipient" },
     { field: "measure", header: "Measure" },
@@ -656,49 +680,53 @@ export default function AdminPage() {
           </p>
           <div className="mt-4 flex flex-col gap-2">
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                size="sm"
                 onClick={() => {
                   setShowDisableSchedulerConfirm(false);
                   void toggleScheduler(true);
                 }}
                 disabled={updatingScheduler || scheduler?.enabled === true}
-                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
               >
                 Enable
-              </button>
+              </Button>
               {!showDisableSchedulerConfirm && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setShowDisableSchedulerConfirm(true)}
                   disabled={updatingScheduler || scheduler?.enabled === false}
-                  className="rounded-md bg-neutral-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 >
                   Disable
-                </button>
+                </Button>
               )}
             </div>
             {showDisableSchedulerConfirm && (
               <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                 <p className="text-xs text-amber-800 font-medium">Are you sure you want to disable the scheduler?</p>
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     type="button"
+                    variant="primary"
+                    size="sm"
                     onClick={() => {
                       setShowDisableSchedulerConfirm(false);
                       void toggleScheduler(false);
                     }}
-                    className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800"
                   >
                     Confirm Disable
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setShowDisableSchedulerConfirm(false)}
-                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -718,14 +746,18 @@ export default function AdminPage() {
                   Last sync: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "Never"}
                 </p>
                 <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{item.detail}</p>
-                <button
+                <Button
                   type="button"
+                  variant="primary"
+                  size="sm"
+                  className="mt-4"
                   onClick={() => void triggerSync(item.integration)}
                   disabled={syncing === item.integration}
-                  className="mt-4 rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  isLoading={syncing === item.integration}
+                  loadingText="Syncing..."
                 >
-                  {syncing === item.integration ? "Syncing..." : "Manual Sync"}
-                </button>
+                  Manual Sync
+                </Button>
               </div>
             ))}
           </div>
@@ -742,14 +774,17 @@ export default function AdminPage() {
               Run Validate Mappings to sync source health into mapping statuses.
             </p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void validateMappings()}
             disabled={validatingMappings}
-            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60"
+            isLoading={validatingMappings}
+            loadingText="Validating…"
           >
-            {validatingMappings ? "Validating…" : "Validate Mappings"}
-          </button>
+            Validate Mappings
+          </Button>
         </div>
 
         {dataMappings.length === 0 ? (
@@ -778,25 +813,27 @@ export default function AdminPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="sm"
               onClick={() => {
                 if (showAddMapping) {
                   resetMappingForm();
                 }
                 setShowAddMapping((open) => !open);
               }}
-              className="rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white hover:bg-neutral-800"
             >
               {showAddMapping ? "Close" : "Add Mapping"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => void loadTerminologyMappings()}
-              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
             >
               Refresh
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -808,117 +845,99 @@ export default function AdminPage() {
               require review before promotion.
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Local Code *
-                <input
-                  type="text"
-                  value={mappingForm.localCode}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localCode: e.target.value }))}
-                  placeholder="e.g. LOCAL-AUD-001"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Local Display
-                <input
-                  type="text"
-                  value={mappingForm.localDisplay}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localDisplay: e.target.value }))}
-                  placeholder="Optional human-readable label"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Local System *
-                <input
-                  type="text"
-                  value={mappingForm.localSystem}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, localSystem: e.target.value }))}
-                  placeholder="e.g. urn:workwell:demo"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Standard Code *
-                <input
-                  type="text"
-                  value={mappingForm.standardCode}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardCode: e.target.value }))}
-                  placeholder="e.g. 92557"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Standard Display
-                <input
-                  type="text"
-                  value={mappingForm.standardDisplay}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardDisplay: e.target.value }))}
-                  placeholder="Optional human-readable label"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Standard System *
-                <input
-                  type="text"
-                  value={mappingForm.standardSystem}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, standardSystem: e.target.value }))}
-                  placeholder="e.g. http://www.ama-assn.org/go/cpt"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
+              <Input
+                label="Local Code *"
+                type="text"
+                value={mappingForm.localCode}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, localCode: e.target.value }))}
+                placeholder="e.g. LOCAL-AUD-001"
+              />
+              <Input
+                label="Local Display"
+                type="text"
+                value={mappingForm.localDisplay}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, localDisplay: e.target.value }))}
+                placeholder="Optional human-readable label"
+              />
+              <Input
+                label="Local System *"
+                type="text"
+                value={mappingForm.localSystem}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, localSystem: e.target.value }))}
+                placeholder="e.g. urn:workwell:demo"
+              />
+              <Input
+                label="Standard Code *"
+                type="text"
+                value={mappingForm.standardCode}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, standardCode: e.target.value }))}
+                placeholder="e.g. 92557"
+              />
+              <Input
+                label="Standard Display"
+                type="text"
+                value={mappingForm.standardDisplay}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, standardDisplay: e.target.value }))}
+                placeholder="Optional human-readable label"
+              />
+              <Input
+                label="Standard System *"
+                type="text"
+                value={mappingForm.standardSystem}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, standardSystem: e.target.value }))}
+                placeholder="e.g. http://www.ama-assn.org/go/cpt"
+              />
               <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                 Status
                 <div className="mt-1 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-600 dark:text-neutral-400">
                   PROPOSED — new mappings always start as PROPOSED and require review before promotion
                 </div>
               </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Confidence (0.0 – 1.0)
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  value={mappingForm.mappingConfidence}
-                  onChange={(e) => setMappingForm((prev) => ({ ...prev, mappingConfidence: e.target.value }))}
-                  placeholder="e.g. 0.95"
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300 md:col-span-2">
-                Notes
-                <textarea
+              <Input
+                label="Confidence (0.0 – 1.0)"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                value={mappingForm.mappingConfidence}
+                onChange={(e) => setMappingForm((prev) => ({ ...prev, mappingConfidence: e.target.value }))}
+                placeholder="e.g. 0.95"
+              />
+              <div className="md:col-span-2">
+                <Textarea
+                  label="Notes"
                   value={mappingForm.notes}
                   onChange={(e) => setMappingForm((prev) => ({ ...prev, notes: e.target.value }))}
                   placeholder="Optional context for reviewers"
                   rows={2}
-                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
-              </label>
+              </div>
             </div>
             {mappingError ? <p className="mt-3 text-sm text-red-700">{mappingError}</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => void submitMapping()}
                 disabled={savingMapping}
-                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+                isLoading={savingMapping}
+                loadingText="Saving…"
+                variant="primary"
+                size="sm"
               >
-                {savingMapping ? "Saving…" : "Save mapping"}
-              </button>
-              <button
+                Save mapping
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   resetMappingForm();
                   setShowAddMapping(false);
                 }}
                 disabled={savingMapping}
-                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -948,75 +967,58 @@ export default function AdminPage() {
               grant one manually for a specific employee and measure.
             </p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void loadWaivers()}
-            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             Refresh waivers
-          </button>
+          </Button>
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <label className="text-sm text-neutral-600 dark:text-neutral-400">
-            Measure
-            <select
-              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              value={waiverMeasureFilter}
-              onChange={(e) => setWaiverMeasureFilter(e.target.value)}
-            >
-              <option value="">All measures</option>
-              {measures.map((measure) => (
-                <option key={measure.id} value={measure.id}>
-                  {measure.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-neutral-600 dark:text-neutral-400">
-            Active
-            <select
-              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              value={waiverActiveFilter}
-              onChange={(e) => setWaiverActiveFilter(e.target.value)}
-            >
-              <option value="">All</option>
-              <option value="true">Active only</option>
-              <option value="false">Inactive only</option>
-            </select>
-          </label>
-          <label className="text-sm text-neutral-600 dark:text-neutral-400">
-            Expires after
-            <input
-              type="date"
-              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              value={waiverExpiresAfter}
-              onChange={(e) => setWaiverExpiresAfter(e.target.value)}
-            />
-          </label>
-          <label className="text-sm text-neutral-600 dark:text-neutral-400">
-            Expires before
-            <input
-              type="date"
-              className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              value={waiverExpiresBefore}
-              onChange={(e) => setWaiverExpiresBefore(e.target.value)}
-            />
-          </label>
+          <Select
+            label="Measure"
+            value={waiverMeasureFilter}
+            onValueChange={setWaiverMeasureFilter}
+            options={waiverMeasureFilterOptions}
+          />
+          <Select
+            label="Active"
+            value={waiverActiveFilter}
+            onValueChange={setWaiverActiveFilter}
+            options={waiverActiveFilterOptions}
+          />
+          <Input
+            type="date"
+            label="Expires after"
+            value={waiverExpiresAfter}
+            onChange={(e) => setWaiverExpiresAfter(e.target.value)}
+          />
+          <Input
+            type="date"
+            label="Expires before"
+            value={waiverExpiresBefore}
+            onChange={(e) => setWaiverExpiresBefore(e.target.value)}
+          />
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Waivers</p>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => void loadWaivers()}
                 disabled={loadingWaivers}
-                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
+                isLoading={loadingWaivers}
+                loadingText="Loading..."
               >
-                {loadingWaivers ? "Loading..." : "Reload"}
-              </button>
+                Reload
+              </Button>
             </div>
             <div className="mt-3 space-y-3">
               {waivers.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No waivers found for the current filters.</p> : null}
@@ -1057,69 +1059,53 @@ export default function AdminPage() {
               Use an employee external ID from the seeded dataset. The latest active version for the selected measure will be used.
             </p>
             <div className="mt-4 grid gap-3">
-              <label className="text-sm text-neutral-600 dark:text-neutral-400">
-                Employee external ID
-                <input
-                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                  placeholder="patient-003"
-                  value={waiverEmployeeExternalId}
-                  onChange={(e) => setWaiverEmployeeExternalId(e.target.value)}
-                />
-              </label>
-              <label className="text-sm text-neutral-600 dark:text-neutral-400">
-                Measure
-                <select
-                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                  value={waiverMeasureId}
-                  onChange={(e) => setWaiverMeasureId(e.target.value)}
-                >
-                  <option value="">Select a measure</option>
-                  {measures.map((measure) => (
-                    <option key={measure.id} value={measure.id}>
-                      {measure.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-sm text-neutral-600 dark:text-neutral-400">
-                Exclusion reason
-                <textarea
-                  className="mt-2 min-h-24 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                  placeholder="Active medical waiver on file."
-                  value={waiverExclusionReason}
-                  onChange={(e) => setWaiverExclusionReason(e.target.value)}
-                />
-              </label>
-              <label className="text-sm text-neutral-600 dark:text-neutral-400">
-                Expires at
-                <input
-                  type="datetime-local"
-                  className="mt-2 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                  value={waiverExpiresAt}
-                  onChange={(e) => setWaiverExpiresAt(e.target.value)}
-                />
-              </label>
-              <label className="text-sm text-neutral-600 dark:text-neutral-400">
-                Notes
-                <textarea
-                  className="mt-2 min-h-20 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                  placeholder="Optional notes for the waiver record."
-                  value={waiverNotes}
-                  onChange={(e) => setWaiverNotes(e.target.value)}
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
-                <input type="checkbox" checked={waiverActive} onChange={(e) => setWaiverActive(e.target.checked)} />
-                Active waiver
-              </label>
-              <button
+              <Input
+                label="Employee external ID"
+                placeholder="patient-003"
+                value={waiverEmployeeExternalId}
+                onChange={(e) => setWaiverEmployeeExternalId(e.target.value)}
+              />
+              <Select
+                label="Measure"
+                value={waiverMeasureId}
+                onValueChange={setWaiverMeasureId}
+                options={waiverGrantMeasureOptions}
+              />
+              <Textarea
+                label="Exclusion reason"
+                className="min-h-24"
+                placeholder="Active medical waiver on file."
+                value={waiverExclusionReason}
+                onChange={(e) => setWaiverExclusionReason(e.target.value)}
+              />
+              <Input
+                type="datetime-local"
+                label="Expires at"
+                value={waiverExpiresAt}
+                onChange={(e) => setWaiverExpiresAt(e.target.value)}
+              />
+              <Textarea
+                label="Notes"
+                className="min-h-20"
+                placeholder="Optional notes for the waiver record."
+                value={waiverNotes}
+                onChange={(e) => setWaiverNotes(e.target.value)}
+              />
+              <Checkbox
+                label="Active waiver"
+                checked={waiverActive}
+                onChange={(e) => setWaiverActive(e.target.checked)}
+              />
+              <Button
                 type="button"
+                variant="primary"
                 onClick={() => void grantWaiver()}
                 disabled={grantingWaiver}
-                className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                isLoading={grantingWaiver}
+                loadingText="Granting..."
               >
-                {grantingWaiver ? "Granting..." : "Grant waiver"}
-              </button>
+                Grant waiver
+              </Button>
             </div>
           </div>
         </div>
@@ -1139,13 +1125,14 @@ export default function AdminPage() {
               <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{"{assignee_name}"}</code>.
             </p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void loadTemplates()}
-            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
           >
             Refresh templates
-          </button>
+          </Button>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -1162,52 +1149,51 @@ export default function AdminPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startEditTemplate(template)}
-                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  >
+                  <Button type="button" variant="outline" size="sm" onClick={() => startEditTemplate(template)}>
                     Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void previewTemplate(template.id)}
-                    className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  >
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void previewTemplate(template.id)}>
                     Preview
-                  </button>
+                  </Button>
                 </div>
               </div>
               {editingTemplateId === template.id ? (
                 <div className="mt-3 space-y-2">
-                  <input
-                    className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+                  <Input
+                    label="Subject"
+                    hideLabel
                     value={templateForm.subject}
                     onChange={(e) => setTemplateForm((f) => ({ ...f, subject: e.target.value }))}
                     placeholder="Subject"
                   />
-                  <textarea
-                    className="h-32 w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
+                  <Textarea
+                    label="Body text"
+                    hideLabel
+                    className="h-32 font-mono"
                     value={templateForm.bodyText}
                     onChange={(e) => setTemplateForm((f) => ({ ...f, bodyText: e.target.value }))}
                     placeholder="Body text"
                   />
                   <div className="flex gap-2">
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
+                      size="sm"
                       onClick={() => void saveTemplate(template)}
                       disabled={savingTemplate}
-                      className="rounded-md bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      isLoading={savingTemplate}
+                      loadingText="Saving..."
                     >
-                      {savingTemplate ? "Saving..." : "Save"}
-                    </button>
-                    <button
+                      Save
+                    </Button>
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setEditingTemplateId(null)}
-                      className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : null}
@@ -1233,13 +1219,9 @@ export default function AdminPage() {
               <code className="text-[11px] text-neutral-500 dark:text-neutral-400">simulated</code> — no real email is delivered.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void loadDeliveryLog()}
-            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={() => void loadDeliveryLog()}>
             Refresh log
-          </button>
+          </Button>
         </div>
 
         {deliveryLog.length === 0 ? (
@@ -1268,34 +1250,36 @@ export default function AdminPage() {
         {resetMessage ? <p className="mt-3 text-sm font-medium text-emerald-700">{resetMessage}</p> : null}
         <div className="mt-4">
           {!showResetConfirm ? (
-            <button
+            <Button
               type="button"
+              variant="danger"
               onClick={() => {
                 setResetMessage(null);
                 setShowResetConfirm(true);
               }}
-              className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
             >
               Reset Demo Data
-            </button>
+            </Button>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm font-medium text-red-700">Are you sure? This cannot be undone.</span>
-              <button
+              <Button
                 type="button"
+                variant="danger"
                 onClick={() => void handleDemoReset()}
                 disabled={resetting}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                isLoading={resetting}
+                loadingText="Resetting..."
               >
-                {resetting ? "Resetting..." : "Confirm Reset"}
-              </button>
-              <button
+                Confirm Reset
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setShowResetConfirm(false)}
-                className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1333,14 +1317,17 @@ export default function AdminPage() {
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
             {auditScope === "access" ? "Showing case views." : auditScope === "mutations" ? "Showing write events." : "Showing all audit events."}
           </p>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void loadAuditEvents()}
             disabled={loadingAudit}
-            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-60"
+            isLoading={loadingAudit}
+            loadingText="Loading..."
           >
-            {loadingAudit ? "Loading..." : "Refresh audit"}
-          </button>
+            Refresh audit
+          </Button>
         </div>
 
         <div className="mt-4 space-y-3">

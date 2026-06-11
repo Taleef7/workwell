@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@mieweb/ui";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { ResolveCheckResponse } from "../types";
@@ -49,14 +50,17 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
     <div className="mt-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Value Set Governance</p>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={runCheck}
           disabled={loading}
-          className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-60"
+          isLoading={loading}
+          loadingText="Checking…"
         >
-          {loading ? "Checking…" : "Re-check"}
-        </button>
+          Re-check
+        </Button>
       </div>
 
       {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}

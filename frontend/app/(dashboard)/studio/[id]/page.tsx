@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect } from "react";
+import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
@@ -120,15 +121,16 @@ export default function StudioMeasurePage() {
           ) : null}
           {canClone ? (
             <>
-            <input
-              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs"
+            <Input
+              label="Change summary"
+              hideLabel
               placeholder="Change summary (required)"
               value={changeSummary}
               onChange={(e) => setChangeSummary(e.target.value)}
             />
-            <button className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-800 dark:text-neutral-200" onClick={() => void createNewVersion()}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void createNewVersion()}>
               New Version
-            </button>
+            </Button>
             </>
           ) : null}
         </div>

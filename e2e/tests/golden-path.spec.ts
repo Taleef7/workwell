@@ -5,8 +5,8 @@ const DEMO_PASSWORD = "Workwell123!";
 
 async function loginAs(page: Page, email: string, password: string) {
   await page.goto("/login");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/password/i).fill(password);
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page).toHaveURL(/\/programs/);
 }
@@ -55,8 +55,8 @@ test.describe("Golden demo path", () => {
   test("full demo flow: login → programs → cases → studio → logout", async ({ page }) => {
     // 1. Login
     await page.goto("/login");
-    await page.getByLabel(/email/i).fill(DEMO_EMAIL);
-    await page.getByLabel(/password/i).fill(DEMO_PASSWORD);
+    await page.locator("#email").fill(DEMO_EMAIL);
+    await page.locator("#password").fill(DEMO_PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
     await expect(page).toHaveURL(/\/programs/);
 
@@ -72,8 +72,9 @@ test.describe("Golden demo path", () => {
     await expect(page.locator("h1, h2, table").first()).toBeVisible();
 
     // 5. Logout — required step, not optional
-    await expect(page.getByRole("button", { name: /logout|sign out/i })).toBeVisible({ timeout: 5_000 });
-    await page.getByRole("button", { name: /logout|sign out/i }).click();
+    const logoutButton = page.getByRole("button", { name: /log ?out|sign out/i });
+    await expect(logoutButton).toBeVisible({ timeout: 5_000 });
+    await logoutButton.click();
     await expect(page).toHaveURL(/\/login/);
   });
 });
