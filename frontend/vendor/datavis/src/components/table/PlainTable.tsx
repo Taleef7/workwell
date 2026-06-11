@@ -573,6 +573,9 @@ export function PlainTable({
       },
       [onRowClick],
     ),
+    // Scope keyboard scroll-into-view to this grid so multiple grids on one page
+    // (each numbering rows from 0) don't scroll each other's matching row.
+    tableRef,
   );
 
   // ── Row click handler ─────────────────────────
