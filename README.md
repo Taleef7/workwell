@@ -18,7 +18,7 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 - AI assist for CQL drafting and test fixture generation (never compliance decisions)
 - MAT-compatible FHIR R4 export for measure portability
 - Risk outlook analytics for upcoming exposure and repeat non-compliance patterns
-- Built on MIE's `@mieweb/ui` component library: dark mode + Enterprise Health brand with a runtime brand switcher
+- Built on MIE's `@mieweb/ui` component library: dark mode + Enterprise Health brand with a runtime brand switcher, plus the DataVis NITRO data grid on the large operational/audit tables
 
 ## Status
 

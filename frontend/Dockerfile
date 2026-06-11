@@ -3,6 +3,9 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Vendored `datavis` (NITRO grid) is a file: dependency — its package.json must be
+# present before install so pnpm can link it. Copy the whole vendored source.
+COPY vendor ./vendor
 RUN pnpm install --frozen-lockfile
 
 FROM node:20-alpine AS build

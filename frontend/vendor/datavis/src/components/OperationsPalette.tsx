@@ -1,0 +1,105 @@
+/**
+ * OperationsPalette — Inline toolbar of action buttons for row-level operations.
+ *
+ * Replaces `src/operations_palette.js`. Groups operations by category.
+ */
+
+import React, { useMemo, useCallback } from 'react';
+import { Button } from '@mieweb/ui/components/Button';
+import { Tooltip } from '@mieweb/ui/components/Tooltip';
+import { useTranslation } from 'react-i18next';
+
+export interface Operation {
+  /** Unique index (assigned automatically if not provided) */
+  idx?: number;
+  /** Display label */
+  label?: string;
+  /** Optional icon element */
+  icon?: React.ReactNode;
+  /** Category for grouping */
+  category?: string;
+  /** Callback invoked when the operation is triggered */
+  callback: (ctx: OperationContext) => void;
+}
+
+export interface OperationContext {
+  /** Currently selected rows */
+  rows: unknown[];
+  /** The button element (for positioning popovers, etc.) */
+  buttonRef?: React.RefObject<HTMLButtonElement>;
+}
+
+export interface OperationsPaletteProps {
+  /** Available operations */
+  operations: Operation[];
+  /** Currently selected rows — passed to operation callbacks */
+  selectedRows?: unknown[];
+}
+
+export function OperationsPalette({
+  operations,
+  selectedRows = [],
+}: OperationsPaletteProps) {
+  const { t } = useTranslation();
+  // Group operations by category
+  const groups = useMemo(() => {
+    const map = new Map<string, Operation[]>();
+    for (const op of operations) {
+      const cat = op.category ?? '';
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(op);
+    }
+    return map;
+  }, [operations]);
+
+  const handleClick = useCallback(
+    (op: Operation) => {
+      op.callback({ rows: selectedRows });
+    },
+    [selectedRows],
+  );
+
+  if (operations.length === 0) return null;
+
+  return (
+    <div
+      className="wcdv-operations-palette border-b border-gray-100 dark:border-neutral-700 px-3 py-1.5 bg-white dark:bg-neutral-900"
+      role="toolbar"
+      aria-label={t('GRID_CONTROL.OPERATIONS.TITLE') || 'Operations'}
+    >
+      <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap">
+        <span className="text-xs font-medium text-gray-500 dark:text-neutral-400 mr-1">
+          {t('GRID_CONTROL.OPERATIONS.TITLE') || 'Operations'}
+        </span>
+
+        {[...groups.entries()].map(([category, ops], gi) => (
+          <React.Fragment key={category || gi}>
+            {/* Category separator (except first) */}
+            {gi > 0 && (
+              <div className="w-px h-5 bg-gray-200 dark:bg-neutral-700 mx-0.5" role="separator" />
+            )}
+
+            {ops.map((op, i) => {
+              const label = op.label ?? '';
+              const tooltipText = label || `Operation ${i + 1}`;
+
+              return (
+                <Tooltip key={i} content={tooltipText}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleClick(op)}
+                    aria-label={tooltipText}
+                  >
+                    {op.icon ? <span className="mr-0.5 inline-flex items-center">{op.icon}</span> : null}
+                    {label && <span>{label}</span>}
+                  </Button>
+                </Tooltip>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
