@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { Button } from "@mieweb/ui";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { TraceabilityResponse, TraceabilityGap } from "../types";
@@ -63,12 +64,9 @@ export function TraceabilityTab({ measureId, api }: Props) {
           <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{data.measureName} — {data.version}</p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{data.rows.length} traceability links · {data.gaps.length} gap{data.gaps.length !== 1 ? "s" : ""}</p>
         </div>
-        <button
-          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-          onClick={exportJson}
-        >
+        <Button variant="outline" size="sm" onClick={exportJson}>
           Export JSON
-        </button>
+        </Button>
       </div>
 
       {errors.length > 0 ? (

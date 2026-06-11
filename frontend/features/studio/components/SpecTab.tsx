@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Input, Textarea } from "@mieweb/ui";
 import { OshaReferenceCombobox } from "@/components/osha-reference-combobox";
 import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
@@ -98,30 +99,25 @@ export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onEr
       {aiDraftBanner ? (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">{aiDraftBanner}</p>
       ) : null}
-      <textarea
-        className="min-h-20 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+      <Textarea
+        label="Policy text for AI draft"
+        hideLabel
+        className="min-h-20"
         placeholder="Paste policy text for AI draft..."
         value={policyText}
         onChange={(e) => setPolicyText(e.target.value)}
       />
       <div>
-        <button
-          className="flex items-center gap-1 rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={draftWithAi}
           disabled={draftingSpec}
+          isLoading={draftingSpec}
+          loadingText="Drafting…"
         >
-          {draftingSpec ? (
-            <>
-              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Drafting…
-            </>
-          ) : (
-            "AI Draft Spec"
-          )}
-        </button>
+          AI Draft Spec
+        </Button>
       </div>
       <OshaReferenceCombobox
         value={policyRef}
@@ -130,56 +126,75 @@ export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onEr
         onValueChange={setPolicyRef}
         onReferenceSelect={(reference) => setOshaReferenceId(reference?.id ?? null)}
       />
-      <div className="grid gap-1">
-        <label htmlFor="spec-description" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Description</label>
-        <textarea id="spec-description" className="min-h-20 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-role-filter" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Eligibility Role Filter</label>
-        <input id="spec-role-filter" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., Safety Technician" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-site-filter" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Eligibility Site Filter</label>
-        <input id="spec-site-filter" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., Plant A" value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-program-enrollment" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Program Enrollment Text</label>
-        <input id="spec-program-enrollment" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., In Hearing Conservation Program" value={programEnrollmentText} onChange={(e) => setProgramEnrollmentText(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-exclusion-label" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Exclusion Label</label>
-        <input id="spec-exclusion-label" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., Active Waiver" value={exclusionLabel} onChange={(e) => setExclusionLabel(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-exclusion-criteria" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Exclusion Criteria Text</label>
-        <input id="spec-exclusion-criteria" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., Has Active Waiver" value={exclusionCriteria} onChange={(e) => setExclusionCriteria(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-compliance-window" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Compliance Window</label>
-        <input id="spec-compliance-window" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="e.g., Annual" value={complianceWindow} onChange={(e) => setComplianceWindow(e.target.value)} />
-      </div>
-      <div className="grid gap-1">
-        <label htmlFor="spec-required-data-elements" className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Required Data Elements</label>
-        <textarea id="spec-required-data-elements" className="min-h-24 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="One per line" value={requiredDataElementsText} onChange={(e) => setRequiredDataElementsText(e.target.value)} />
-      </div>
+      <Textarea
+        id="spec-description"
+        label="Description"
+        className="min-h-20"
+        placeholder="Description"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <Input
+        id="spec-role-filter"
+        label="Eligibility Role Filter"
+        placeholder="e.g., Safety Technician"
+        value={roleFilter}
+        onChange={(e) => setRoleFilter(e.target.value)}
+      />
+      <Input
+        id="spec-site-filter"
+        label="Eligibility Site Filter"
+        placeholder="e.g., Plant A"
+        value={siteFilter}
+        onChange={(e) => setSiteFilter(e.target.value)}
+      />
+      <Input
+        id="spec-program-enrollment"
+        label="Program Enrollment Text"
+        placeholder="e.g., In Hearing Conservation Program"
+        value={programEnrollmentText}
+        onChange={(e) => setProgramEnrollmentText(e.target.value)}
+      />
+      <Input
+        id="spec-exclusion-label"
+        label="Exclusion Label"
+        placeholder="e.g., Active Waiver"
+        value={exclusionLabel}
+        onChange={(e) => setExclusionLabel(e.target.value)}
+      />
+      <Input
+        id="spec-exclusion-criteria"
+        label="Exclusion Criteria Text"
+        placeholder="e.g., Has Active Waiver"
+        value={exclusionCriteria}
+        onChange={(e) => setExclusionCriteria(e.target.value)}
+      />
+      <Input
+        id="spec-compliance-window"
+        label="Compliance Window"
+        placeholder="e.g., Annual"
+        value={complianceWindow}
+        onChange={(e) => setComplianceWindow(e.target.value)}
+      />
+      <Textarea
+        id="spec-required-data-elements"
+        label="Required Data Elements"
+        className="min-h-24"
+        placeholder="One per line"
+        value={requiredDataElementsText}
+        onChange={(e) => setRequiredDataElementsText(e.target.value)}
+      />
       <div>
-        <button
-          className="flex items-center gap-1 rounded-md bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={save}
           disabled={savingSpec}
+          isLoading={savingSpec}
+          loadingText="Saving…"
         >
-          {savingSpec ? (
-            <>
-              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Saving…
-            </>
-          ) : (
-            "Save Draft"
-          )}
-        </button>
+          Save Draft
+        </Button>
       </div>
     </div>
   );

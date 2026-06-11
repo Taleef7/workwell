@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-06-11 — `@mieweb/ui` control-swap completed (frontend) — branch `feat/mieweb-ui-controls`
+
+Closed out the deferred `@mieweb/ui` component migration (issue #99 — the "Follow-up (separate branch B)" noted in the NITRO entry below). PR #68 had retokenized the dense form/control surfaces in place (dark/brand-correct) but left them as raw `<button>/<input>/<select>/<textarea>`. This branch swaps them to real `@mieweb/ui` components on the four remaining surfaces.
+
+Swapped to `@mieweb/ui`:
+- **`/runs`** — header export/rerun, 3 filter `Select`s + Refresh, the run-control form (Scope/Measure `Select`, Evaluation Date `Input`, conditional Site/Employee/Case `Input`s, Run Now), Load-more, Dismiss. (NITRO Outcomes grid already from PR #100.)
+- **All 9 studio tabs** — `SpecTab`/`CqlTab`/`TestsTab`/`ValueSetsTab`/`ReleaseApprovalTab`/`TraceabilityTab`/`DataReadinessPanel`/`ValueSetGovernancePanel`/`ImpactPreviewPanel` — buttons → `Button` (with `isLoading`/`loadingText` where they showed pending text, preserving `findByRole("button",{name:/Saving|Compiling/})` test contracts); inputs/textareas → `Input`/`Textarea` with `label`+`hideLabel` (preserves `getByLabelText`); `CqlTab` New-Version + AI-Draft dialogs and `ReleaseApprovalTab`'s 3 confirm dialogs → `Modal`.
+- **`/cases/[id]`** — both mobile + desktop action blocks, appointment inline panel → `Modal`, resolve/delivery-status controls, evidence description `Input` + Upload/Download buttons, raw-evidence toggle, Explain-Why-Flagged button.
+- **`/admin`** (largest gap) — scheduler enable/disable/confirm/cancel, integration manual-sync + validate-mappings + add-mapping/refresh, the terminology add-mapping form (6 `Input` + `Textarea`), save/cancel, waiver filters (`Select`/date `Input`) + reload + grant-waiver form (`Input`/`Select`/`Textarea`/`Checkbox`) + grant button, notification-template editor (`Input`/`Textarea` + edit/preview/save/cancel), delivery-log refresh, demo-reset trio (`danger`), audit refresh.
+- **`/studio/[id]`** header — change-summary `Input` + New-Version `Button`.
+
+Intentional native exceptions (documented in `frontend/MIEWEB-UI-MIGRATION.md` compliance table): segmented tab/pill toggle groups (`cases` all/mine, `studio/[id]` tab nav, `admin` audit-scope), bulk-select checkboxes (`cases`), the native file picker (`cases/[id]`), the bespoke a11y/disclosure shells (`confirm-dialog`, `SqlPreviewPanel`, `CqlTab` ✕ dismiss), pre-auth `/login`+`/sandbox`, Monaco, recharts, and the Step-4g overlays still pending (`GlobalSearch`, osha combobox, theme-brand-switcher, layout shell).
+
+Compliance: raw `<button>` 118→14, `<input>` 48→7, `<select>` 21→0, `<textarea>` 12→0 — all 21 remaining are the intentional exceptions above. `@mieweb/ui` import lines 0→24.
+
+Verification: `tsc --noEmit` clean, `pnpm lint` clean (1 pre-existing test-mock warning), `pnpm test` 53/53, `pnpm build` green. No backend/schema/API/compliance change. PR left for review (no auto-merge; Taleef deploys). Updated `frontend/MIEWEB-UI-MIGRATION.md` (Steps 4a/4c marked done, compliance table filled).
+
+**Full-stack E2E + live browser verification (2026-06-11, follow-up).** Brought up the real stack locally (Docker Postgres + HAPI via `infra/docker-compose.yml`, Spring Boot `bootRun` with `WORKWELL_DEMO_ENABLED=true`, Next.js `dev` at `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080`) and exercised the swapped surfaces in a real Chromium browser:
+- **Playwright golden-path suite: 4/4 pass** against localhost. Two pre-existing selector fragilities (not caused by this branch) were fixed in `e2e/tests/golden-path.spec.ts`: `getByLabel(/password/i)` was ambiguous (also matched the login "Show password" toggle's `aria-label`) → now `#email`/`#password`; logout regex `/logout|sign out/i` didn't match the layout's `aria-label="Log out"` (rewritten in PR #68) → now `/log ?out|sign out/i`.
+- **`/runs`** — `@mieweb/ui` `Select` (Status/Scope/Trigger/site/date) open with correct `listbox`/`option` roles; option select works; `Button`s render with brand styling.
+- **`/admin`** — scheduler/integration/validate `Button`s render; terminology "Add Mapping" opens the swapped form (7 `Input` + 1 `Textarea`, `label`-derived accessible names; value binding + Cancel verified). NITRO grids (data-readiness 14 rows, terminology 6 rows) render with `<code>`/badge cells intact. (Note: a NITRO grid's virtualized cells visually overlap the terminology add-form — a pre-existing z-index quirk from the PR #100 grids, not a control-swap regression; the form is fully functional underneath.)
+- **`/studio/[id]` CQL tab** — Compile/AI-Draft `Button`s + audit-format `Select`; "AI Draft CQL" opens the promoted `@mieweb/ui` `Modal` (dialog role, `Textarea` with label, Cancel/Generate footer buttons); Escape closes it.
+- **`/cases/[id]`** — outreach-template `Select`, assignee `Input`+Assign, all action `Button`s (Preview/Send/Escalate/Rerun/Resolve/Schedule + Mark queued/sent/failed); "Schedule Appointment" opens the promoted `Modal` (Appointment-type `Select`, datetime `Input`, location `Input`, Cancel/Save footer); Escape closes it.
+
+---
+
 ## 2026-06-11 — DataVis NITRO grid unblocked (frontend) — branch `feat/datavis-nitro-unblock`
 
 Reopened the "NITRO blocked, waiting on Doug to publish `@mieweb/datavis`" gap from the `@mieweb/ui` migration (PR #68) and **unblocked it ourselves**. The prior diagnosis was incomplete: the published `@mieweb/ui@0.6.1` *does* ship the NITRO bundle (`dist/datavis.js` + `./datavis`), but it imports from a **bare `datavis` specifier** (raw `datavis/src/...` `.ts/.tsx`) plus `datavis-ace`. `datavis-ace@=4.0.0-PRE.2` is on public npm; the `datavis` UI source isn't on npm **but the `mieweb/datavis` repo is public** — and `@mieweb/ui`'s own build marks `/^datavis\//` external, expecting the consumer to provide it exactly as the upstream monorepo does via a `file:` link.

@@ -1,10 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Input, Select } from "@mieweb/ui";
 import { OUTCOME_LABELS, labelFor } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
 import type { TestFixture } from "../types";
+
+const EXPECTED_OUTCOME_OPTIONS = [
+  { value: "COMPLIANT", label: labelFor(OUTCOME_LABELS, "COMPLIANT") },
+  { value: "DUE_SOON", label: labelFor(OUTCOME_LABELS, "DUE_SOON") },
+  { value: "OVERDUE", label: labelFor(OUTCOME_LABELS, "OVERDUE") },
+  { value: "MISSING_DATA", label: labelFor(OUTCOME_LABELS, "MISSING_DATA") },
+  { value: "EXCLUDED", label: labelFor(OUTCOME_LABELS, "EXCLUDED") },
+];
 
 type GeneratedFixture = {
   name: string;
@@ -111,32 +120,28 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Fixture Validation</h3>
         <div className="flex gap-2">
-          <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={add}>Add Fixture</button>
-          <button
-            className="rounded border border-purple-300 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-purple-700 disabled:opacity-60"
+          <Button variant="secondary" size="sm" onClick={add}>Add Fixture</Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={generateFixtures}
             disabled={isGenerating}
+            isLoading={isGenerating}
+            loadingText="Generating..."
           >
-            {isGenerating ? "Generating..." : "Generate Fixtures"}
-          </button>
-          <button className="rounded bg-neutral-900 px-2 py-1 text-xs font-medium text-white" onClick={save}>Save Tests</button>
-          <button
-            className="flex items-center gap-1 rounded bg-blue-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-60"
+            Generate Fixtures
+          </Button>
+          <Button variant="primary" size="sm" onClick={save}>Save Tests</Button>
+          <Button
+            variant="primary"
+            size="sm"
             onClick={validate}
             disabled={isValidating}
+            isLoading={isValidating}
+            loadingText="Validating…"
           >
-            {isValidating ? (
-              <>
-                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Validating…
-              </>
-            ) : (
-              "Validate"
-            )}
-          </button>
+            Validate
+          </Button>
         </div>
       </div>
 
@@ -144,13 +149,9 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
         <div className="rounded border border-amber-300 bg-amber-50 p-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">AI-generated fixtures</p>
-            <button
-              type="button"
-              className="rounded border border-amber-400 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-semibold text-amber-900"
-              onClick={addAllGeneratedFixtures}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={addAllGeneratedFixtures}>
               Add All to Drafts
-            </button>
+            </Button>
           </div>
           <p className="mt-1 text-xs text-amber-900">
             AI-generated fixtures — verify expected outcomes match your CQL logic before running.
@@ -163,13 +164,14 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
                     <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">{fixture.name}</p>
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">Expected: {labelFor(OUTCOME_LABELS, fixture.expectedOutcome)}</p>
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300"
+                    variant="outline"
+                    size="sm"
                     onClick={() => addGeneratedFixture(fixture, index)}
                   >
                     Add to Draft
-                  </button>
+                  </Button>
                 </div>
                 <pre className="mt-2 overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800/50 p-2 text-[11px] text-neutral-700 dark:text-neutral-300">
                   {JSON.stringify(fixture.inputData, null, 2)}
@@ -185,18 +187,19 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
         <div key={`${fixture.fixtureName}-${index}`} className="grid gap-2 rounded border border-neutral-200 dark:border-neutral-800 p-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Fixture {index + 1}</p>
-            <button className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs font-medium text-neutral-700 dark:text-neutral-300" onClick={() => remove(index)}>Remove</button>
+            <Button variant="secondary" size="sm" onClick={() => remove(index)}>Remove</Button>
           </div>
-          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
-          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
-          <select className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" value={fixture.expectedOutcome} onChange={(e) => update(index, "expectedOutcome", e.target.value)}>
-            <option value="COMPLIANT">{labelFor(OUTCOME_LABELS, "COMPLIANT")}</option>
-            <option value="DUE_SOON">{labelFor(OUTCOME_LABELS, "DUE_SOON")}</option>
-            <option value="OVERDUE">{labelFor(OUTCOME_LABELS, "OVERDUE")}</option>
-            <option value="MISSING_DATA">{labelFor(OUTCOME_LABELS, "MISSING_DATA")}</option>
-            <option value="EXCLUDED">{labelFor(OUTCOME_LABELS, "EXCLUDED")}</option>
-          </select>
-          <input className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" placeholder="Notes" value={fixture.notes} onChange={(e) => update(index, "notes", e.target.value)} />
+          <Input label="Fixture Name" hideLabel placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
+          <Input label="Employee External ID" hideLabel placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
+          <Select
+            label="Expected outcome"
+            hideLabel
+            aria-label="Expected outcome"
+            value={fixture.expectedOutcome}
+            onValueChange={(value) => update(index, "expectedOutcome", value)}
+            options={EXPECTED_OUTCOME_OPTIONS}
+          />
+          <Input label="Notes" hideLabel placeholder="Notes" value={fixture.notes} onChange={(e) => update(index, "notes", e.target.value)} />
         </div>
       ))}
       {testFailures.length > 0 ? (
