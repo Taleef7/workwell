@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@mieweb/ui";
 import { formatStatusLabel } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { ImpactPreviewResponse } from "../types";
@@ -52,13 +53,16 @@ export function ImpactPreviewPanel({ measureId, api }: Props) {
           <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Activation Impact Preview</p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">Dry run — no outcomes, cases, or runs will be written.</p>
         </div>
-        <button
-          className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+        <Button
+          variant="outline"
+          size="sm"
           onClick={runPreview}
           disabled={loading}
+          isLoading={loading}
+          loadingText="Running…"
         >
-          {loading ? "Running…" : "Preview Activation Impact"}
-        </button>
+          Preview Activation Impact
+        </Button>
       </div>
 
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}

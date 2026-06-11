@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { Button } from "@mieweb/ui";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
 import type { DataReadinessResponse } from "../types";
@@ -72,13 +73,16 @@ export function DataReadinessPanel({ measureId, api }: Props) {
               {formatStatusLabel(data.overallStatus)}
             </span>
           ) : null}
-          <button
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-50"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void load()}
             disabled={loading}
+            isLoading={loading}
+            loadingText="Loading…"
           >
-            {loading ? "Loading…" : "Refresh"}
-          </button>
+            Refresh
+          </Button>
         </div>
       </div>
 
