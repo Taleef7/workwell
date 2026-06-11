@@ -43,6 +43,22 @@ repo is public. We mirror the monorepo by vendoring the source and aliasing it a
 5. `Dockerfile` / `infra/frontend.Dockerfile` → copy `vendor/` before `pnpm install` (the `file:`
    dep must exist at install time).
 
+## Local patches (reapply on re-vendor)
+
+These are local accessibility fixes applied on top of the pinned commit. They are latent
+upstream bugs that our multi-grid + interactive-cell usage surfaces; reapply (or, better, upstream
+them) when re-vendoring. Both live in `src/components/table/useKeyboardNav.ts` (+ its call site in
+`PlainTable.tsx`):
+
+1. **Ignore key events from interactive cell content.** `handleKeyDown` returns early when the
+   event originates from an `a/button/input/select/textarea/[contenteditable]` descendant, so
+   Enter/Space on a focused in-cell link (e.g. the employee/case links on `/runs` Outcomes) follows
+   the link instead of activating the row.
+2. **Scope scroll-into-view to the focused grid.** `useKeyboardNav` takes an optional
+   `containerRef`; `scrollActiveRowIntoView` queries within it instead of `document`, so pages with
+   multiple grids (e.g. `/admin` ×3, each numbering rows from 0) scroll the right grid's row.
+   `PlainTable.tsx` passes its `tableRef`.
+
 ## Upgrading
 
 When bumping `@mieweb/ui`, re-vendor `datavis` from the commit matching the new release:
@@ -50,7 +66,8 @@ When bumping `@mieweb/ui`, re-vendor `datavis` from the commit matching the new 
 1. Find the `@mieweb/ui` publish date: `npm view @mieweb/ui@<version> time`.
 2. Pick the `datavis` commit at/just before that date.
 3. Replace `src/` here with that commit's `src/` (keep the same exclusions), update the pinned
-   commit above, and re-run `pnpm install`, lint, build, and the NITRO render check.
+   commit above, **reapply the Local patches above** (unless upstream has fixed them), and re-run
+   `pnpm install`, lint, build, and the NITRO render check.
 
 > The deep import paths inside `@mieweb/ui/dist/datavis.js` (e.g. `datavis/src/components/DataGrid`)
 > must still exist in the re-vendored source — that is the contract to verify on every upgrade.
