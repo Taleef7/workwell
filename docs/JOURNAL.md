@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-06-11 — Note: vendored DataVis a11y fixes are upstream-PR candidates (`mieweb/datavis`)
+
+Capturing this so it isn't lost: the two accessibility fixes we carry as **local patches** on the vendored NITRO grid (`frontend/vendor/datavis/src/components/table/useKeyboardNav.ts` + its call site in `PlainTable.tsx`, recorded in `vendor/datavis/VENDORING.md` "Local patches") are **genuine latent upstream bugs**, not WorkWell-specific workarounds. They reproduce in upstream's own Storybook with no WorkWell context, so they're clean candidates for a real PR to `mieweb/datavis`:
+
+1. **Row keyboard handler hijacks Enter/Space from interactive cell content.** When a cell contains a link/button/input, Enter/Space while it's focused activates the *row* instead of the control. Fix: `handleKeyDown` early-returns when the event originates from an `a/button/input/select/textarea/[contenteditable]` descendant.
+2. **`scrollActiveRowIntoView` uses a document-wide `[data-row-num]` query**, so with multiple grids on one page (each numbering rows from 0) keyboard nav scrolls the *wrong* grid. Fix: thread an optional `containerRef` and scope the query to it; `PlainTable` passes its `tableRef`.
+
+Scope of a clean PR = only those two files; nothing WorkWell-specific would spill in (the patches are already isolated in the vendored copy). **Not opening a PR yet** — etiquette: give Doug/MIE a heads-up first (file an issue with a minimal repro and offer the PR) so it reads as collaboration, not as routing around the maintainers, especially since we also vendor their private `@mieweb/datavis`. The separate "publish a built `@mieweb/datavis` to npm" ask is a distribution/strategy decision (already tracked in `questions_for_doug.md`), **not** a bug fix — it cannot be resolved by a code PR and should stay a conversation with Doug. Re-flag both on the next re-vendor (the local patches must be reapplied unless upstream has merged them).
+
+---
+
 ## 2026-06-11 — `@mieweb/ui` control-swap completed (frontend) — branch `feat/mieweb-ui-controls`
 
 Closed out the deferred `@mieweb/ui` component migration (issue #99 — the "Follow-up (separate branch B)" noted in the NITRO entry below). PR #68 had retokenized the dense form/control surfaces in place (dark/brand-correct) but left them as raw `<button>/<input>/<select>/<textarea>`. This branch swaps them to real `@mieweb/ui` components on the four remaining surfaces.
