@@ -1,0 +1,3 @@
+[submodule "external/mieweb-cloud"]
+	path = external/mieweb-cloud
+	url = https://github.com/mieweb/cloud.git
