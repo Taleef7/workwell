@@ -1,5 +1,72 @@
 # Architecture Decision Records
 
+## ADR-008: De-Java the backend — re-platform onto TypeScript / `@mieweb/cloud` (strangler-fig)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (direction); execution gated on a Phase-1 parity spike
+- **Stakeholder:** Doug Horner (`horner`) — issue [#96](https://github.com/Taleef7/workwell/issues/96)
+- **Plan:** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`
+- **Context:** Doug's #96 changes the repo direction: the backend must **not require Java/Spring Boot,
+  a JVM, Spring DI, Spring Data, or Spring MVC** to run, test, or deploy. `@mieweb/cloud` (a v0.0.0
+  Cloudflare-shaped portability layer) becomes the pluggable backend; application code calls explicit
+  repository contracts (e.g. `runStore.createRun(input)`, `runStore.claimNextQueuedRun(workerId)`) and
+  each runtime adapter (Cloudflare native / local Node / SQLite / D1 / Postgres / S3-MinIO / Valkey)
+  implements them. Principle: **"SQLite/D1 define the portable floor; Postgres provides the
+  performance ceiling."** A lightweight query builder (Drizzle or Kysely) handles schema/migrations/
+  CRUD, **not** the portability layer. This supersedes the ADR-001 "single Spring Boot deployable"
+  decision for the backend runtime (ADR-001 remains the historical record of why the monolith was
+  right for the MVP timeline). The frontend (ADR-004/007) is unaffected.
+- **Decision:**
+  - **Strangler-fig re-platform**, not a big-bang rewrite. Port the backend to TypeScript
+    module-by-module **behind the unchanged frontend API contract** (`frontend/lib/api/client.ts` URL
+    + request/response shapes are the seam); nothing is deleted until its TS replacement passes parity.
+  - **CQL engine = Path C (confirmed by Taleef 2026-06-12).** Keep CQL and eCQM standards-compliance;
+    run the Java `cql-to-elm` translator **offline at authoring/build time only** (committing ELM JSON +
+    FHIRHelpers + ModelInfo + expanded value sets) and **execute ELM in Node** via
+    `cql-execution`/`fqm-execution`. Java thus leaves the **runtime/deploy-required** path entirely,
+    surviving only as a build tool. Rejected: Path B (FHIRPath, zero Java but abandons CQL/MAT — gives up
+    the differentiator). Fallback if Path C fails parity: keep the Java engine as an isolated evaluation
+    microservice (Java stays required to deploy — last resort).
+  - **Live CQL authoring is preserved (no functionality compromise).** The Studio CQL compile gate
+    stays; the CQL→ELM translator is the one piece that may remain Java "where absolutely necessary" —
+    as a build-time CLI/CI step **or** an optional authoring-only translation sidecar the app calls only
+    when an author edits CQL, never on the run/test/deploy-required path. A WASM/J2CL `cql-to-elm`
+    transpile is evaluated in the Phase-1 spike as the route to zero-Java authoring.
+  - **Reusable-module mandate (Vision Doc, Doug 2026-06-08):** each layer ships as a reusable MIE
+    package (frontend on `@mieweb/ui`, backend on `@mieweb/cloud`), and the headless
+    `evaluate(patient, measure.yaml)` evaluator (ADR-006) survives as a first-class reusable TS artifact.
+  - **Engine as an explicit swappable compute binding (not the app framework).** The worker calls an
+    `EvaluateMeasure` binding like an AI/vector provider; the portability layer is JVM-free regardless.
+    Path C (Node-ELM execution) is the **preferred** binding implementation; a **JVM evaluator sidecar**
+    is the fallback implementation (decided by the Phase-1 parity spike). A target with no CQL binding
+    **raises `UnsupportedBindingError`, never guesses a status** — same invariant as "AI never decides
+    compliance." Full storage decomposition into `RunStore`/`CaseStore`/`OutcomeStore`/`MeasureStore`/
+    `AuditStore` contracts, the answers to Doug's 9 questions, and the repo-grounded Spring footprint are
+    detailed in the companion memo `docs/MIEWEB_CLOUD_REFACTOR_MEMO.md`. The eventual zero-JVM endgame
+    (no sidecar) ties to roadmap epic **E9/#78 (CQL→SQL / transpile)**, tracked separately.
+  - **Not a FHIR server.** Postgres stays the system of record; FHIR R4 bundles remain transient,
+    synthesized in-memory only to feed the engine. We adopt TS FHIR *typing* (`@types/fhir`), not a TS
+    FHIR server. `node-on-fhir/honeycomb` (Meteor + MongoDB + AGPL-3.0, no CQL) is **not adopted**;
+    Medplum (monolithic platform) is overkill.
+  - **Deploy target:** Node container on MIE Create-a-Container (not Cloudflare Workers yet) — same
+    `deploy-twh-mieweb.yml` v1 Container Manager flow with the JVM image swapped for a Node image.
+  - **`@mieweb/cloud` added as a git submodule** and co-developed: `@mieweb/cloud-postgres` does not
+    exist yet and is built as part of Phase 2.
+  - **Parity is the gate.** A Phase-1 vertical-slice spike must show one measure's TS output equals the
+    Java engine's `Outcome Status` + key `expressionResults` for the shared employee fixtures before the
+    expensive phases proceed (GO/NO-GO).
+- **Consequences:**
+  - Tracked as epic sub-issues under #96 (Phases 0–5) on the "WorkWell #96 — De-Java Re-platform" board.
+  - The `evidence_json` contract (ADR-002), the `audit_event`-on-every-state-change invariant, case
+    idempotency, and "AI never decides compliance" all carry forward unchanged into the TS backend.
+  - **JSONB-floor tension:** the schema's Postgres JSON ops must either be reworked to the SQLite/D1
+    floor or surfaced as honest `UnsupportedBindingError` on constrained adapters — resolved per-target.
+  - Schema migrations remain **Taleef-owned**; no agent writes `V0xx`/new migrations without explicit
+    instruction. The 21 existing migrations define the data model the Drizzle/Kysely schema mirrors.
+  - End state: Java/Spring/Gradle removed from the backend; `CLAUDE.md`/`README.md` stack lines change
+    from "Java 21 + Spring Boot" to the TS/`@mieweb/cloud` stack when Phase 5 lands (a future ADR amends
+    the "immutable stack" line at that point).
+
 ## ADR-007: Vendor `@mieweb/datavis` (NITRO grid) source to unblock the data grid
 
 - **Date:** 2026-06-11
