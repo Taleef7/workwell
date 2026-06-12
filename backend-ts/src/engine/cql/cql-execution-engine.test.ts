@@ -1,0 +1,36 @@
+/**
+ * Contract test for the production CqlExecutionEngine (#106): evaluate every
+ * runnable measure × scenario in Node (no JVM) and assert the outcome bucket.
+ * Bundles are the same synthetic fixtures proven byte-equal to the Java engine.
+ *   node --import tsx --test src/engine/cql/cql-execution-engine.test.ts
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { CqlExecutionEngine } from "./cql-execution-engine.ts";
+import { MEASURES } from "./measure-registry.ts";
+
+const synthRoot = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
+const EVAL = "2026-06-12";
+const EXPECTED: Record<string, string> = {
+  present_recent: "COMPLIANT",
+  present_old: "OVERDUE",
+  missing: "MISSING_DATA",
+  excluded: "EXCLUDED",
+};
+
+const engine = new CqlExecutionEngine();
+
+for (const measureId of Object.keys(MEASURES)) {
+  test(`evaluates ${measureId} across all scenarios (no JVM)`, async () => {
+    for (const [scenario, expected] of Object.entries(EXPECTED)) {
+      const bundle = JSON.parse(readFileSync(path.join(synthRoot, measureId, `${scenario}.json`), "utf8"));
+      const outcome = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: EVAL });
+      assert.equal(outcome.outcome, expected, `${measureId}/${scenario}`);
+      assert.equal(outcome.measure, MEASURES[measureId]!.name);
+      assert.ok(outcome.evidence.expressionResults.some((r) => r.define === "Outcome Status"));
+    }
+  });
+}
