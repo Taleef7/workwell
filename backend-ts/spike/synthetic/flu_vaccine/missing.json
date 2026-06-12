@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "flu_vaccine-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "flu_vaccine-missing-enr",
+        "subject": {
+          "reference": "Patient/flu_vaccine-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:clinical-roles",
+              "code": "clinical-role"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

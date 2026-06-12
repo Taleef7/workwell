@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "obesity_bmi-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "obesity_bmi-excluded-enr",
+        "subject": {
+          "reference": "Patient/obesity_bmi-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:wellness-enrollment",
+              "code": "wellness-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "obesity_bmi-excluded-wvr",
+        "subject": {
+          "reference": "Patient/obesity_bmi-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:wellness-exemption",
+              "code": "wellness-exempt"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "obesity_bmi-excluded-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/obesity_bmi-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:bmi-screening",
+              "code": "bmi-screen"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "tb_surveillance-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "tb_surveillance-missing-enr",
+        "subject": {
+          "reference": "Patient/tb_surveillance-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-eligible-roles",
+              "code": "tb-program"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

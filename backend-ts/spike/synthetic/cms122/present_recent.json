@@ -1,0 +1,54 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cms122-present_recent"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms122-present_recent-enr",
+        "subject": {
+          "reference": "Patient/cms122-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms122-diabetes",
+              "code": "cms122-diabetes"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "id": "cms122-present_recent-evt",
+        "status": "final",
+        "subject": {
+          "reference": "Patient/cms122-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms122-hba1c",
+              "code": "hba1c-obs"
+            }
+          ]
+        },
+        "effectiveDateTime": "2026-04-23T00:00:00.000Z",
+        "valueQuantity": {
+          "value": 7.5,
+          "unit": "%",
+          "system": "http://unitsofmeasure.org",
+          "code": "%"
+        }
+      }
+    }
+  ]
+}

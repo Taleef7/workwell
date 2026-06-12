@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "tb_surveillance-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "tb_surveillance-excluded-enr",
+        "subject": {
+          "reference": "Patient/tb_surveillance-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-eligible-roles",
+              "code": "tb-program"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "tb_surveillance-excluded-wvr",
+        "subject": {
+          "reference": "Patient/tb_surveillance-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-exemption",
+              "code": "tb-exemption"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "tb_surveillance-excluded-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/tb_surveillance-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-screening",
+              "code": "tb-screen"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

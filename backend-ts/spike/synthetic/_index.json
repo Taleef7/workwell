@@ -1,0 +1,105 @@
+{
+  "evalDate": "2026-06-12",
+  "measures": [
+    {
+      "id": "audiogram",
+      "lib": "AnnualAudiogramCompleted-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "hazwoper",
+      "lib": "HazwoperSurveillance-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "tb_surveillance",
+      "lib": "TbSurveillance-1.3.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "flu_vaccine",
+      "lib": "FluVaccineSeasonal-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "hypertension",
+      "lib": "HypertensionBPScreeningCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "diabetes_hba1c",
+      "lib": "DiabetesHbA1cMonitoringCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "obesity_bmi",
+      "lib": "ObesityBMIScreeningCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "cholesterol_ldl",
+      "lib": "CholesterolLDLScreeningCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "cms125",
+      "lib": "BreastCancerScreeningCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "cms122",
+      "lib": "DiabetesHbA1cPoorControlCQL-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    }
+  ]
+}
