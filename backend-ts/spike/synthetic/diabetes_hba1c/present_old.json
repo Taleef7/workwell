@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "diabetes_hba1c-present_old"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "diabetes_hba1c-present_old-enr",
+        "subject": {
+          "reference": "Patient/diabetes_hba1c-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:diabetes-program",
+              "code": "diabetes-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "diabetes_hba1c-present_old-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/diabetes_hba1c-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hba1c-labs",
+              "code": "hba1c-lab"
+            }
+          ]
+        },
+        "performedDateTime": "2023-12-25T00:00:00.000Z"
+      }
+    }
+  ]
+}

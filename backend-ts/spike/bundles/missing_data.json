@@ -1,0 +1,15 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "spike-missing", "gender": "female", "birthDate": "1990-11-30" } },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "enr-missing",
+        "subject": { "reference": "Patient/spike-missing" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:hearing-enrollment", "code": "hearing-enrollment" } ] }
+      }
+    }
+  ]
+}

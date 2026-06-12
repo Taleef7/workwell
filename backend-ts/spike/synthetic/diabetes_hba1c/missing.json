@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "diabetes_hba1c-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "diabetes_hba1c-missing-enr",
+        "subject": {
+          "reference": "Patient/diabetes_hba1c-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:diabetes-program",
+              "code": "diabetes-enrolled"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

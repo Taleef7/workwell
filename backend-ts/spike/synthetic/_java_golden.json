@@ -1,0 +1,1658 @@
+{
+  "audiogram" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Audiogram",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Active Waiver",
+        "result" : true
+      }, {
+        "define" : "In Hearing Conservation Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Audiogram Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Audiogram",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Active Waiver",
+        "result" : false
+      }, {
+        "define" : "In Hearing Conservation Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent Audiogram Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Audiogram",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Active Waiver",
+        "result" : false
+      }, {
+        "define" : "In Hearing Conservation Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Audiogram Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last Audiogram",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Active Waiver",
+        "result" : false
+      }, {
+        "define" : "In Hearing Conservation Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Audiogram Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "cholesterol_ldl" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last LDL Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In Cholesterol Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent LDL Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last LDL Screening",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Cholesterol Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent LDL Screening Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last LDL Screening",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Cholesterol Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent LDL Screening Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last LDL Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Cholesterol Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent LDL Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "cms122" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Diabetes Diagnosis",
+        "result" : true
+      }, {
+        "define" : "Has Exclusion",
+        "result" : true
+      }, {
+        "define" : "Has Recent HbA1c Result",
+        "result" : true
+      }, {
+        "define" : "HbA1c Poor Control",
+        "result" : false
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Observation",
+        "result" : "org.hl7.fhir.r4.model.Observation@24309836"
+      }, {
+        "define" : "Most Recent HbA1c Value",
+        "result" : "org.hl7.fhir.r4.model.Quantity@64acc538"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Diabetes Diagnosis",
+        "result" : true
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "Has Recent HbA1c Result",
+        "result" : false
+      }, {
+        "define" : "HbA1c Poor Control",
+        "result" : null
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent HbA1c Observation",
+        "result" : null
+      }, {
+        "define" : "Most Recent HbA1c Value",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Diabetes Diagnosis",
+        "result" : true
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "Has Recent HbA1c Result",
+        "result" : true
+      }, {
+        "define" : "HbA1c Poor Control",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Observation",
+        "result" : "org.hl7.fhir.r4.model.Observation@57ae95ca"
+      }, {
+        "define" : "Most Recent HbA1c Value",
+        "result" : "org.hl7.fhir.r4.model.Quantity@58d45584"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Diabetes Diagnosis",
+        "result" : true
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "Has Recent HbA1c Result",
+        "result" : true
+      }, {
+        "define" : "HbA1c Poor Control",
+        "result" : false
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Observation",
+        "result" : "org.hl7.fhir.r4.model.Observation@6b238c47"
+      }, {
+        "define" : "Most Recent HbA1c Value",
+        "result" : "org.hl7.fhir.r4.model.Quantity@2bd813b4"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "cms125" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Mammogram",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Exclusion",
+        "result" : true
+      }, {
+        "define" : "In Screening Population",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Mammogram Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Mammogram",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "In Screening Population",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent Mammogram Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Mammogram",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "In Screening Population",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Mammogram Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last Mammogram",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Exclusion",
+        "result" : false
+      }, {
+        "define" : "In Screening Population",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Mammogram Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "diabetes_hba1c" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last HbA1c",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In Diabetes Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last HbA1c",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Diabetes Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent HbA1c Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last HbA1c",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Diabetes Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last HbA1c",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Diabetes Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent HbA1c Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "flu_vaccine" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Clinical Facing Employee",
+        "result" : true
+      }, {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Flu Vaccine",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Flu Vaccine This Season",
+        "result" : true
+      }, {
+        "define" : "Has Valid Exemption",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Flu Vaccine Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Clinical Facing Employee",
+        "result" : true
+      }, {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Flu Vaccine",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Flu Vaccine This Season",
+        "result" : false
+      }, {
+        "define" : "Has Valid Exemption",
+        "result" : false
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent Flu Vaccine Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Clinical Facing Employee",
+        "result" : true
+      }, {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Flu Vaccine",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Flu Vaccine This Season",
+        "result" : false
+      }, {
+        "define" : "Has Valid Exemption",
+        "result" : false
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Flu Vaccine Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Clinical Facing Employee",
+        "result" : true
+      }, {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last Flu Vaccine",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Flu Vaccine This Season",
+        "result" : true
+      }, {
+        "define" : "Has Valid Exemption",
+        "result" : false
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Flu Vaccine Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "hazwoper" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Exam",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In HAZWOPER Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Surveillance Exam Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Exam",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In HAZWOPER Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent Surveillance Exam Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last Exam",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In HAZWOPER Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Surveillance Exam Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last Exam",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In HAZWOPER Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent Surveillance Exam Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "hypertension" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BP Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BP Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BP Screening",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent BP Screening Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BP Screening",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BP Screening Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last BP Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BP Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "obesity_bmi" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BMI Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BMI Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BMI Screening",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent BMI Screening Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last BMI Screening",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BMI Screening Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last BMI Screening",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In Wellness Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent BMI Screening Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  },
+  "tb_surveillance" : {
+    "excluded" : {
+      "outcome" : "EXCLUDED",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last TB Screen",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : true
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : true
+      }, {
+        "define" : "In TB Screening Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent TB Screen Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "EXCLUDED"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "missing" : {
+      "outcome" : "MISSING_DATA",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last TB Screen",
+        "result" : 46183
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In TB Screening Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : true
+      }, {
+        "define" : "Most Recent TB Screen Date",
+        "result" : null
+      }, {
+        "define" : "Outcome Status",
+        "result" : "MISSING_DATA"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_old" : {
+      "outcome" : "OVERDUE",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : false
+      }, {
+        "define" : "Days Since Last TB Screen",
+        "result" : 900
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In TB Screening Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent TB Screen Date",
+        "result" : "DateTimeType[2023-12-25T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "OVERDUE"
+      }, {
+        "define" : "Overdue",
+        "result" : true
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    },
+    "present_recent" : {
+      "outcome" : "COMPLIANT",
+      "expressionResults" : [ {
+        "define" : "Compliant",
+        "result" : true
+      }, {
+        "define" : "Days Since Last TB Screen",
+        "result" : 50
+      }, {
+        "define" : "Due Soon",
+        "result" : false
+      }, {
+        "define" : "Excluded",
+        "result" : false
+      }, {
+        "define" : "Has Medical Exemption",
+        "result" : false
+      }, {
+        "define" : "In TB Screening Program",
+        "result" : true
+      }, {
+        "define" : "Initial Population",
+        "result" : true
+      }, {
+        "define" : "Missing Data",
+        "result" : false
+      }, {
+        "define" : "Most Recent TB Screen Date",
+        "result" : "DateTimeType[2026-04-23T00:00:00.000Z]"
+      }, {
+        "define" : "Outcome Status",
+        "result" : "COMPLIANT"
+      }, {
+        "define" : "Overdue",
+        "result" : false
+      }, {
+        "define" : "Patient",
+        "result" : null
+      } ]
+    }
+  }
+}

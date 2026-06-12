@@ -1,0 +1,58 @@
+{
+  "subjectId": "spike-missing",
+  "measure": "Audiogram",
+  "evaluationDate": "2026-06-12",
+  "outcome": "MISSING_DATA",
+  "evidence": {
+    "expressionResults": [
+      {
+        "define": "Compliant",
+        "result": false
+      },
+      {
+        "define": "Days Since Last Audiogram",
+        "result": 46183
+      },
+      {
+        "define": "Due Soon",
+        "result": false
+      },
+      {
+        "define": "Excluded",
+        "result": false
+      },
+      {
+        "define": "Has Active Waiver",
+        "result": false
+      },
+      {
+        "define": "In Hearing Conservation Program",
+        "result": true
+      },
+      {
+        "define": "Initial Population",
+        "result": true
+      },
+      {
+        "define": "Missing Data",
+        "result": true
+      },
+      {
+        "define": "Most Recent Audiogram Date",
+        "result": null
+      },
+      {
+        "define": "Outcome Status",
+        "result": "MISSING_DATA"
+      },
+      {
+        "define": "Overdue",
+        "result": true
+      },
+      {
+        "define": "Patient",
+        "result": null
+      }
+    ]
+  }
+}

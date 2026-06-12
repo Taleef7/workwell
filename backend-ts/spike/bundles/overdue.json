@@ -1,0 +1,25 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "spike-overdue", "gender": "male", "birthDate": "1972-02-20" } },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "enr-overdue",
+        "subject": { "reference": "Patient/spike-overdue" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:hearing-enrollment", "code": "hearing-enrollment" } ] }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "audiogram-overdue",
+        "status": "completed",
+        "subject": { "reference": "Patient/spike-overdue" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:audiogram-procedures", "code": "audiogram-procedure" } ] },
+        "performedDateTime": "2025-05-08T00:00:00.000Z"
+      }
+    }
+  ]
+}
