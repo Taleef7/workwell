@@ -23,7 +23,9 @@ There are **two layers** in this repo, and #96 should treat them differently:
 
 So the achievable end state is **not** "no JVM anywhere." It is:
 
-> **No JVM in the portability layer.** The CQL engine becomes an explicit **compute binding** — a service the worker calls (like an AI provider or vector backend), not the application framework. Cloudflare-shaped contract on top; JVM evaluator behind one named binding; "no TS-native CQL engine yet" surfaced honestly as `UnsupportedBindingError` until/unless a transpile path (E9 / #78) is decided.
+> **No JVM in the portability layer.** The CQL engine becomes an explicit **compute binding** — a service the worker calls (like an AI provider or vector backend), not the application framework. Cloudflare-shaped contract on top; a target with no binding surfaces `UnsupportedBindingError` rather than guessing.
+
+> **Update 2026-06-12 — Path C chosen (ADR-008).** The **preferred implementation** of that binding is **Node ELM execution** (`cql-execution`/`fqm-execution`): Java runs **only at build/authoring time** to translate CQL→ELM (committed ELM JSON), and a **JVM evaluator sidecar is the *fallback* implementation**, used only if Node-ELM fails golden parity (decided by the Phase-1 spike, #103). So the JVM is **not** the expected steady-state *runtime* — it is build-time translation plus a parity safety net. Where this memo (written 2026-06-10) calls the JVM evaluator "the only Java that survives in the steady state," read it as the **fallback/legacy** path; the preferred steady state is Node ELM. The full zero-JVM endgame (no sidecar, no build-time Java) ties to **E9/#78**.
 
 The good news, already true in the repo today: **E1/E2 already cut this seam.** The evaluation core is Spring-free except for cosmetic annotations, and we already ship a no-Spring, no-DB headless entrypoint that proves it.
 
@@ -60,7 +62,7 @@ Single Gradle module `backend/`. Entry points, by weight:
 - **CSV export, AI prompt assembly, outreach templating, audit packet assembly** are mostly pure transforms over data — portable to TS with low risk once they read from a `*Store` contract instead of JPA repositories.
 
 ### 3. Which parts need temporary compatibility shims
-- **The CQL engine** is a *permanent* binding, not a temporary shim: expose `CqlEvaluationService.evaluateBundle(...)` over a thin transport (stdio for local/CLI, HTTP for server, or a sidecar worker). This is the only Java that survives in the steady state.
+- **The CQL engine** is an explicit, *swappable* compute binding, not a temporary shim. Per ADR-008 (Path C), its **preferred** implementation is Node ELM execution (Java only at build-time CQL→ELM translation); the **fallback** implementation exposes `CqlEvaluationService.evaluateBundle(...)` over a thin transport (stdio for local/CLI, HTTP/sidecar for server) and is used only if Node-ELM fails golden parity. So the only Java that may persist at *runtime* is this fallback evaluator (legacy path); build-time CQL→ELM translation is the piece that stays Java under Path C. Either way it is a binding, never the framework.
 - **MCP server** (`mcp-spring-webmvc`) — shim until re-implemented on the TS MCP SDK.
 - **JPA → contract** — the `*Store` interfaces (below) are the shim boundary; the JPA implementations stay as the `@mieweb/cloud-postgres`-equivalent until the TS adapters reach parity, then retire.
 
@@ -97,10 +99,10 @@ Explicit `UnsupportedBindingError` from `@mieweb/cloud-types` (Doug's design). N
 
 1. **Lock the engine as a binding (smallest, highest leverage).** Promote E2's headless evaluator into a stable `EvaluateMeasure` service contract (stdio + HTTP). Strip the 6 cosmetic annotations from `engine.*`/`CqlEvaluationService`. No behavior change; golden-parity gated. → This alone satisfies "the JVM is a binding, not the framework."
 2. **Define `@mieweb/cloud-types` storage contracts** (`RunStore`, `CaseStore`, `OutcomeStore`, `MeasureStore`, `AuditStore`) + `UnsupportedBindingError`, modeled on the 4 existing `engine.port` interfaces.
-3. **Stand up `@mieweb/cloud-local`** (SQLite + filesystem + in-proc queue) and a contract test app. Wire it to call the engine binding from step 1. Prove one measure end-to-end with no JVM in the app path (JVM only behind the evaluate binding).
+3. **Stand up `@mieweb/cloud-local`** (SQLite + filesystem + in-proc queue) and a contract test app. Wire it to call the engine binding from step 1. Prove one measure end-to-end with no JVM in the app path. Under Path C the evaluate binding itself is **Node ELM** (no runtime JVM); the JVM evaluator sits behind the binding only as the parity **fallback**. This is exactly the Phase-1 spike (#103).
 4. **`@mieweb/cloud-postgres`** implementing the same contracts against current Neon schema (migration ownership stays with Taleef).
 5. **Port application surfaces** (runs, cases, exports, outreach, audit) onto the contracts incrementally; retire the Spring module as each surface reaches parity. Keep Spring app runnable as the reference until the TS path passes the full contract + golden suites.
-6. **Decide E9/#78 (CQL→SQL) separately.** Only that epic can remove the JVM binding entirely; until then it stays, surfaced honestly.
+6. **Decide E9/#78 (CQL→SQL / full transpile) separately.** Under Path C the JVM already leaves the *runtime* (Node-ELM execution); what remains is **build-time** CQL→ELM translation, plus the optional JVM evaluator *fallback* if Node-ELM misses parity. E9/#78 is what removes that last build-time Java entirely; until then it stays, surfaced honestly.
 
 **Net:** Cloudflare stays native and zero-overhead; every other backend is pluggable; Java/Spring is **not required** to use/test/deploy the portability layer; the one unavoidable JVM dependency (CQL evaluation) is an explicit, swappable compute binding rather than a hidden framework.
 
