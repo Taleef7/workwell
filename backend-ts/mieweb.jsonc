@@ -22,9 +22,11 @@
     },
 
     // ---- mieweb (os.mieweb.org): libSQL + S3/MinIO + Valkey ----------------
-    // Matches external/mieweb-cloud/packages/cloud-os/docker-compose.yml.
+    // Matches external/mieweb-cloud/packages/cloud-os/docker-compose.yml, where
+    // libSQL owns host port 8080 (MinIO 9000, Valkey 6379). The app MUST listen
+    // elsewhere here or it collides with libSQL — use 8082 (cf. test-app's 8802).
     "mieweb": {
-      "port": 8080,
+      "port": 8082,
       "bindings": {
         "DB": { "driver": "libsql", "url": "http://localhost:8080" },
         "BUCKET": {
