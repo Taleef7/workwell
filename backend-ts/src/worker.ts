@@ -19,6 +19,7 @@ import type {
   CloudExecutionContext,
 } from "@mieweb/cloud";
 import { handleRuns } from "./routes/runs.ts";
+import { handleMeasures } from "./routes/measures.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -60,6 +61,10 @@ export default {
     if (pathname === "/api/version") {
       return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
     }
+
+    // Measures — live CQL/eCQM evaluation in Node (no JVM), #106.
+    const measuresResponse = await handleMeasures(req);
+    if (measuresResponse) return measuresResponse;
 
     // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
     const runsResponse = await handleRuns(req, env);
