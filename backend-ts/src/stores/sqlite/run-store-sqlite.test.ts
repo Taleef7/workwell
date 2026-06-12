@@ -84,3 +84,15 @@ test("claimNextQueuedRun atomically flips QUEUED → RUNNING, FIFO, then null", 
   // No QUEUED rows left → null (already-claimed runs are not re-claimed).
   assert.equal(await s.claimNextQueuedRun("worker-C"), null);
 });
+
+test("markRunning moves a QUEUED run out of the claim path (idempotent)", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-mark-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const s = new SqliteRunStore(db);
+
+  const run = await s.createRun(sampleInput());
+  const running = await s.markRunning(run.id);
+  assert.equal(running?.status, "RUNNING");
+  assert.equal(await s.claimNextQueuedRun("worker-X"), null, "a RUNNING run is not claimable");
+  assert.equal((await s.markRunning(run.id))?.status, "RUNNING", "idempotent");
+});
