@@ -1,0 +1,33 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "spike-excluded", "gender": "male", "birthDate": "1968-07-15" } },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "enr-excluded",
+        "subject": { "reference": "Patient/spike-excluded" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:hearing-enrollment", "code": "hearing-enrollment" } ] }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "waiver-excluded",
+        "subject": { "reference": "Patient/spike-excluded" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:audiogram-waiver", "code": "audiogram-waiver" } ] }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "audiogram-excluded",
+        "status": "completed",
+        "subject": { "reference": "Patient/spike-excluded" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:audiogram-procedures", "code": "audiogram-procedure" } ] },
+        "performedDateTime": "2025-01-10T00:00:00.000Z"
+      }
+    }
+  ]
+}

@@ -68,6 +68,13 @@ tasks.register<JavaExec>("evaluateMeasure") {
 	mainClass.set("com.workwell.engine.cli.HeadlessEvaluatorCli")
 }
 
+tasks.register<JavaExec>("generateElm") {
+	group = "application"
+	description = "Build-time CQL -> ELM JSON translator (Path C, #96); emits measure ELM + FHIRHelpers ELM"
+	classpath = sourceSets["main"].runtimeClasspath
+	mainClass.set("com.workwell.engine.cli.ElmCompilerCli")
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
 	// CI forks 4-wide so heavy Spring/CQL/Testcontainers classes in a shard overlap

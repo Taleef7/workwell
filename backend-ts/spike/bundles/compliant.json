@@ -1,0 +1,41 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "spike-compliant",
+        "name": [{ "family": "Compliant", "given": ["Ada"] }],
+        "gender": "female",
+        "birthDate": "1985-04-12"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "enr-compliant",
+        "subject": { "reference": "Patient/spike-compliant" },
+        "code": {
+          "coding": [
+            { "system": "urn:workwell:vs:hearing-enrollment", "code": "hearing-enrollment", "display": "In Hearing Conservation Program" }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "audiogram-compliant",
+        "status": "completed",
+        "subject": { "reference": "Patient/spike-compliant" },
+        "code": {
+          "coding": [
+            { "system": "urn:workwell:vs:audiogram-procedures", "code": "audiogram-procedure", "display": "Annual Audiogram" }
+          ]
+        },
+        "performedDateTime": "2026-03-04T00:00:00.000Z"
+      }
+    }
+  ]
+}

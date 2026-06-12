@@ -1,0 +1,58 @@
+{
+  "subjectId": "spike-compliant",
+  "measure": "Audiogram",
+  "evaluationDate": "2026-06-12",
+  "outcome": "COMPLIANT",
+  "evidence": {
+    "expressionResults": [
+      {
+        "define": "Compliant",
+        "result": true
+      },
+      {
+        "define": "Days Since Last Audiogram",
+        "result": 100
+      },
+      {
+        "define": "Due Soon",
+        "result": false
+      },
+      {
+        "define": "Excluded",
+        "result": false
+      },
+      {
+        "define": "Has Active Waiver",
+        "result": false
+      },
+      {
+        "define": "In Hearing Conservation Program",
+        "result": true
+      },
+      {
+        "define": "Initial Population",
+        "result": true
+      },
+      {
+        "define": "Missing Data",
+        "result": false
+      },
+      {
+        "define": "Most Recent Audiogram Date",
+        "result": "DateTimeType[2026-03-04T00:00:00.000Z]"
+      },
+      {
+        "define": "Outcome Status",
+        "result": "COMPLIANT"
+      },
+      {
+        "define": "Overdue",
+        "result": false
+      },
+      {
+        "define": "Patient",
+        "result": null
+      }
+    ]
+  }
+}

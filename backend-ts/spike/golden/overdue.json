@@ -1,0 +1,58 @@
+{
+  "subjectId": "spike-overdue",
+  "measure": "Audiogram",
+  "evaluationDate": "2026-06-12",
+  "outcome": "OVERDUE",
+  "evidence": {
+    "expressionResults": [
+      {
+        "define": "Compliant",
+        "result": false
+      },
+      {
+        "define": "Days Since Last Audiogram",
+        "result": 400
+      },
+      {
+        "define": "Due Soon",
+        "result": false
+      },
+      {
+        "define": "Excluded",
+        "result": false
+      },
+      {
+        "define": "Has Active Waiver",
+        "result": false
+      },
+      {
+        "define": "In Hearing Conservation Program",
+        "result": true
+      },
+      {
+        "define": "Initial Population",
+        "result": true
+      },
+      {
+        "define": "Missing Data",
+        "result": false
+      },
+      {
+        "define": "Most Recent Audiogram Date",
+        "result": "DateTimeType[2025-05-08T00:00:00.000Z]"
+      },
+      {
+        "define": "Outcome Status",
+        "result": "OVERDUE"
+      },
+      {
+        "define": "Overdue",
+        "result": true
+      },
+      {
+        "define": "Patient",
+        "result": null
+      }
+    ]
+  }
+}
