@@ -1,0 +1,58 @@
+{
+  "subjectId": "spike-due-soon",
+  "measure": "Audiogram",
+  "evaluationDate": "2026-06-12",
+  "outcome": "DUE_SOON",
+  "evidence": {
+    "expressionResults": [
+      {
+        "define": "Compliant",
+        "result": false
+      },
+      {
+        "define": "Days Since Last Audiogram",
+        "result": 350
+      },
+      {
+        "define": "Due Soon",
+        "result": true
+      },
+      {
+        "define": "Excluded",
+        "result": false
+      },
+      {
+        "define": "Has Active Waiver",
+        "result": false
+      },
+      {
+        "define": "In Hearing Conservation Program",
+        "result": true
+      },
+      {
+        "define": "Initial Population",
+        "result": true
+      },
+      {
+        "define": "Missing Data",
+        "result": false
+      },
+      {
+        "define": "Most Recent Audiogram Date",
+        "result": "DateTimeType[2025-06-27T00:00:00.000Z]"
+      },
+      {
+        "define": "Outcome Status",
+        "result": "DUE_SOON"
+      },
+      {
+        "define": "Overdue",
+        "result": false
+      },
+      {
+        "define": "Patient",
+        "result": null
+      }
+    ]
+  }
+}

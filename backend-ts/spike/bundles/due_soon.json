@@ -1,0 +1,25 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "spike-due-soon", "gender": "male", "birthDate": "1979-09-01" } },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "enr-due-soon",
+        "subject": { "reference": "Patient/spike-due-soon" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:hearing-enrollment", "code": "hearing-enrollment" } ] }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "audiogram-due-soon",
+        "status": "completed",
+        "subject": { "reference": "Patient/spike-due-soon" },
+        "code": { "coding": [ { "system": "urn:workwell:vs:audiogram-procedures", "code": "audiogram-procedure" } ] },
+        "performedDateTime": "2025-06-27T00:00:00.000Z"
+      }
+    }
+  ]
+}
