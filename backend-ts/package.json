@@ -9,20 +9,28 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "dev": "mieweb --target local dev",
-    "start:local": "mieweb --target local dev",
+    "dev": "tsx node_modules/@mieweb/cli/src/index.mjs --target local dev",
+    "start:local": "tsx node_modules/@mieweb/cli/src/index.mjs --target local dev",
+    "migrate:local": "node node_modules/@mieweb/cli/src/index.mjs --target local d1 migrations apply",
     "test": "node --test"
   },
   "dependencies": {
     "@mieweb/cloud": "workspace:*",
     "@mieweb/cloud-local": "workspace:*",
     "@mieweb/cloud-types": "workspace:*",
-    "@mieweb/cli": "workspace:*"
+    "@mieweb/cli": "workspace:*",
+    "better-sqlite3": "^12.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"],
+    "overrides": {
+      "better-sqlite3": "^12.0.0"
+    }
   }
 }
