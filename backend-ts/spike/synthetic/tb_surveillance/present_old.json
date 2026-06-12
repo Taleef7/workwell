@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "tb_surveillance-present_old"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "tb_surveillance-present_old-enr",
+        "subject": {
+          "reference": "Patient/tb_surveillance-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-eligible-roles",
+              "code": "tb-program"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "tb_surveillance-present_old-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/tb_surveillance-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tb-screening",
+              "code": "tb-screen"
+            }
+          ]
+        },
+        "performedDateTime": "2023-12-25T00:00:00.000Z"
+      }
+    }
+  ]
+}

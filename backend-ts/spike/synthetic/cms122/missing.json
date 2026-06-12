@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cms122-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms122-missing-enr",
+        "subject": {
+          "reference": "Patient/cms122-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms122-diabetes",
+              "code": "cms122-diabetes"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

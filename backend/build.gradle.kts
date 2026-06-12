@@ -75,6 +75,13 @@ tasks.register<JavaExec>("generateElm") {
 	mainClass.set("com.workwell.engine.cli.ElmCompilerCli")
 }
 
+tasks.register<JavaExec>("batchEvaluate") {
+	group = "application"
+	description = "Batch Java goldens for the multi-measure parity check (#106): synthetic/<id>/<scenario>.json -> _java_golden.json"
+	classpath = sourceSets["main"].runtimeClasspath
+	mainClass.set("com.workwell.engine.cli.BatchEvaluateCli")
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
 	// CI forks 4-wide so heavy Spring/CQL/Testcontainers classes in a shard overlap

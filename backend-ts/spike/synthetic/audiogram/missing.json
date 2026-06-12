@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "audiogram-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "audiogram-missing-enr",
+        "subject": {
+          "reference": "Patient/audiogram-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hearing-enrollment",
+              "code": "hearing-enrollment"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

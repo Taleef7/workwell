@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "flu_vaccine-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "flu_vaccine-excluded-enr",
+        "subject": {
+          "reference": "Patient/flu_vaccine-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:clinical-roles",
+              "code": "clinical-role"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "flu_vaccine-excluded-wvr",
+        "subject": {
+          "reference": "Patient/flu_vaccine-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:flu-exemption",
+              "code": "flu-exemption"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "flu_vaccine-excluded-evt",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/flu_vaccine-excluded"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:flu-vaccines",
+              "code": "flu-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

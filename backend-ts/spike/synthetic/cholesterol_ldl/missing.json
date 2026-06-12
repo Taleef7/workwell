@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cholesterol_ldl-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cholesterol_ldl-missing-enr",
+        "subject": {
+          "reference": "Patient/cholesterol_ldl-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cholesterol-program",
+              "code": "cholesterol-enrolled"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

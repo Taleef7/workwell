@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hazwoper-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hazwoper-excluded-enr",
+        "subject": {
+          "reference": "Patient/hazwoper-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hazwoper-enrollment",
+              "code": "hazwoper-program"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hazwoper-excluded-wvr",
+        "subject": {
+          "reference": "Patient/hazwoper-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hazwoper-exemption",
+              "code": "hazwoper-exemption"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "hazwoper-excluded-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/hazwoper-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hazwoper-exams",
+              "code": "hazwoper-exam"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

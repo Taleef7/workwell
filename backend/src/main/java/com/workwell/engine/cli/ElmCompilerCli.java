@@ -4,6 +4,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.stream.Stream;
 import org.cqframework.cql.cql2elm.CqlCompilerException;
 import org.cqframework.cql.cql2elm.CqlTranslator;
 import org.cqframework.cql.cql2elm.LibraryManager;
@@ -28,16 +30,26 @@ public final class ElmCompilerCli {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("usage: ElmCompilerCli <input.cql> <output-dir>");
+            System.err.println("usage: ElmCompilerCli <input.cql | measures-dir> <output-dir>");
             System.exit(1);
             return;
         }
-        Path cqlPath = Path.of(args[0]);
+        Path input = Path.of(args[0]);
         Path outDir = Path.of(args[1]);
         Files.createDirectories(outDir);
 
-        // 1) the measure library itself
-        translateAndWrite(Files.readString(cqlPath, StandardCharsets.UTF_8), outDir, null);
+        // 1) the measure libraries — a single .cql, or every .cql in a directory
+        List<Path> cqlFiles;
+        if (Files.isDirectory(input)) {
+            try (Stream<Path> s = Files.list(input)) {
+                cqlFiles = s.filter(p -> p.toString().endsWith(".cql")).sorted().toList();
+            }
+        } else {
+            cqlFiles = List.of(input);
+        }
+        for (Path cqlPath : cqlFiles) {
+            translateAndWrite(Files.readString(cqlPath, StandardCharsets.UTF_8), outDir, null);
+        }
 
         // 2) FHIRHelpers 4.0.1 (included by every WorkWell measure) — cql-execution needs its ELM too
         FhirLibrarySourceProvider provider = new FhirLibrarySourceProvider();

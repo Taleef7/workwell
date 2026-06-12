@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cms125-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms125-missing-enr",
+        "subject": {
+          "reference": "Patient/cms125-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-eligible",
+              "code": "cms125-eligible"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

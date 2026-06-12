@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hazwoper-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hazwoper-missing-enr",
+        "subject": {
+          "reference": "Patient/hazwoper-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hazwoper-enrollment",
+              "code": "hazwoper-program"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cms125-present_old"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms125-present_old-enr",
+        "subject": {
+          "reference": "Patient/cms125-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-eligible",
+              "code": "cms125-eligible"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "cms125-present_old-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/cms125-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-mammogram",
+              "code": "mammogram"
+            }
+          ]
+        },
+        "performedDateTime": "2023-12-25T00:00:00.000Z"
+      }
+    }
+  ]
+}
