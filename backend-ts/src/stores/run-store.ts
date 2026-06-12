@@ -51,4 +51,6 @@ export interface RunStore {
   appendLog(runId: string, level: string, message: string): Promise<void>;
   /** Atomically claim the next QUEUED run for a worker (locking is adapter-specific). */
   claimNextQueuedRun(workerId: string): Promise<RunRecord | null>;
+  /** Move a QUEUED run to RUNNING (no-op if already past QUEUED) so it leaves the claim path. */
+  markRunning(runId: string): Promise<RunRecord | null>;
 }

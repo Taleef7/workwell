@@ -35,4 +35,16 @@ CREATE TABLE IF NOT EXISTS run_logs (
 );
 
 CREATE INDEX IF NOT EXISTS run_logs_run_id_idx ON run_logs (run_id);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+  id            TEXT PRIMARY KEY,
+  run_id        TEXT NOT NULL REFERENCES runs(id),
+  subject_id    TEXT NOT NULL,
+  measure_id    TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  evaluated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
 `;
