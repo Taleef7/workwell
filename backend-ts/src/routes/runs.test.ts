@@ -58,6 +58,10 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   const rows = (await listed!.json()) as Array<{ status: string }>;
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.status, "COMPLIANT");
+
+  // An evaluated run must not be re-handed to a worker (it left the QUEUED claim path).
+  const claim = await post("/api/runs/claim");
+  assert.equal(claim?.status, 204, "evaluated run is not re-claimed");
 });
 
 test("evaluate against an unknown run → 404", async () => {

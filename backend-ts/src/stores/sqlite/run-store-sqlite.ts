@@ -95,4 +95,17 @@ export class SqliteRunStore implements RunStore {
       .first<RunRow>();
     return row ? toRecord(row) : null;
   }
+
+  /**
+   * Transition a QUEUED run to RUNNING so it leaves the claim path (a run being
+   * processed must not be re-handed to a worker). Only QUEUED rows move; any later
+   * status is left untouched (idempotent). Returns the current row, or null if absent.
+   */
+  async markRunning(runId: string): Promise<RunRecord | null> {
+    await this.db
+      .prepare(`UPDATE runs SET status = 'RUNNING' WHERE id = ? AND status = 'QUEUED'`)
+      .bind(runId)
+      .run();
+    return this.getRun(runId);
+  }
 }
