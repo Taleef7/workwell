@@ -1,0 +1,14 @@
+# backend-ts is its own self-contained pnpm workspace so it can consume the
+# @mieweb/cloud packages from the `mieweb/cloud` git submodule WITHOUT turning
+# the WorkWell repo root into a workspace (frontend/ + backend/ stay untouched).
+#
+# The submodule packages use `workspace:*` for their own internal deps, so they
+# must be resolved as workspace members here (a plain `file:` link would break
+# those internal `workspace:*` references). Including them as members below lets
+# pnpm resolve the whole @mieweb/cloud graph from source.
+#
+# Phase 2 (#104) graduates the reusable parts (cloud-postgres, measure-engine)
+# into top-level `packages/*` here.
+packages:
+  - "."
+  - "../external/mieweb-cloud/packages/*"
