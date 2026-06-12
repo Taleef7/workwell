@@ -3,7 +3,7 @@
 ## ADR-008: De-Java the backend — re-platform onto TypeScript / `@mieweb/cloud` (strangler-fig)
 
 - **Date:** 2026-06-12
-- **Status:** Accepted (direction); execution gated on a Phase-1 parity spike
+- **Status:** Accepted — Phase-1 parity spike cleared (**GO**); zero-Java end state validated (see 2026-06-12 update below)
 - **Stakeholder:** Doug Horner (`horner`) — issue [#96](https://github.com/Taleef7/workwell/issues/96)
 - **Plan:** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`
 - **Context:** Doug's #96 changes the repo direction: the backend must **not require Java/Spring Boot,
@@ -28,10 +28,30 @@
     the differentiator). Fallback if Path C fails parity: keep the Java engine as an isolated evaluation
     microservice (Java stays required to deploy — last resort).
   - **Live CQL authoring is preserved (no functionality compromise).** The Studio CQL compile gate
-    stays; the CQL→ELM translator is the one piece that may remain Java "where absolutely necessary" —
-    as a build-time CLI/CI step **or** an optional authoring-only translation sidecar the app calls only
-    when an author edits CQL, never on the run/test/deploy-required path. A WASM/J2CL `cql-to-elm`
-    transpile is evaluated in the Phase-1 spike as the route to zero-Java authoring.
+    stays; CQL→ELM translation runs in Node (see the 2026-06-12 update) — never requiring a JVM.
+
+- **Update 2026-06-12 — Phase-1 spike GO + zero-Java end state (Taleef, per Doug's #96):**
+  The Phase-1 vertical-slice spike (#103) cleared the gate on evidence:
+  - The TS worker runs on the `@mieweb/cloud` local Node host; `RunStore` works over `CloudDatabase`
+    (SQLite floor) with an atomic queue-claim; live `POST /api/runs` · `GET /api/runs/:id` · `claim`.
+  - **CQL Path C golden parity across all 10 runnable measures × 4 scenarios — 40/40 exact** (452
+    define comparisons) vs the Java engine, incl. the eCQMs (CMS122 value-based, CMS125 820-day),
+    season-based flu (`Measurement Period`), and count-based hazwoper/tb. The feared ValueSet-expansion
+    risk is **absent** — all 10 measures use inline code filters (no `in "ValueSet"`), so no terminology
+    service is needed.
+  - **Zero Java is achievable with no functional compromise, so we take it (Doug's stated end state).**
+    `@cqframework/cql` (v4.0.0-beta.1, Apache-2.0) — the cqframework reference translator compiled to
+    **pure Node via Kotlin Multiplatform, no JVM** — translates all 10 measures' CQL→ELM (errors=0), and
+    that Node-translated ELM evaluates **40/40 exact** against the Java golden. So CQL→ELM, the last Java
+    touchpoint, **also runs in Node**: Java/Spring Boot leaves the project **entirely** — runtime, build,
+    and authoring. The earlier "JVM evaluator sidecar / build-time Java" fallbacks are demoted to
+    contingency only (used solely if `@cqframework/cql` regresses before cutover).
+  - **Guardrails:** the `@cqframework/cql` beta version is **pinned**; the full-catalog golden-parity
+    harness (`backend-ts/spike/compare-all.mjs`) is the **regression gate** on every bump/measure change;
+    the Java `ElmCompilerCli` is retained transitionally as a cross-check, removed with the rest of Java
+    when the TS engine binding lands (#106). Three standard version-stable resources (System + FHIR-R4
+    model-info XML, FHIRHelpers CQL) are committed config, not a Java dependency.
+  - Evidence + reproduce: `backend-ts/spike/README.md` (PR #112).
   - **Reusable-module mandate (Vision Doc, Doug 2026-06-08):** each layer ships as a reusable MIE
     package (frontend on `@mieweb/ui`, backend on `@mieweb/cloud`), and the headless
     `evaluate(patient, measure.yaml)` evaluator (ADR-006) survives as a first-class reusable TS artifact.
