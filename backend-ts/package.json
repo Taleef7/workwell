@@ -12,7 +12,7 @@
     "dev": "tsx node_modules/@mieweb/cli/src/index.mjs --target local dev",
     "start:local": "tsx node_modules/@mieweb/cli/src/index.mjs --target local dev",
     "migrate:local": "node node_modules/@mieweb/cli/src/index.mjs --target local d1 migrations apply",
-    "test": "node --test"
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@mieweb/cli": "workspace:*",
