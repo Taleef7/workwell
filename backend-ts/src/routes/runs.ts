@@ -74,13 +74,17 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   // Evaluate a subject through the JVM-free CQL engine and persist the outcome.
   const evalId = pathname.match(/^\/api\/runs\/([^/]+)\/evaluate$/)?.[1];
   if (evalId && req.method === "POST") {
-    if (!(await (await store(env)).getRun(evalId))) return json({ error: "not_found", id: evalId }, 404);
+    const runStore = await store(env);
+    if (!(await runStore.getRun(evalId))) return json({ error: "not_found", id: evalId }, 404);
     const body = (await req.json().catch(() => null)) as
       | { measureId?: string; patientBundle?: unknown; evaluationDate?: string }
       | null;
     if (!body?.measureId || !body.patientBundle) {
       return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle }" }, 400);
     }
+    // A run being processed must leave the QUEUED claim path so it isn't re-handed
+    // to a worker (QUEUED → RUNNING; idempotent for already-running runs).
+    await runStore.markRunning(evalId);
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,
