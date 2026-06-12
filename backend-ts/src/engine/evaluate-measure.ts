@@ -40,10 +40,12 @@ export interface MeasureOutcome {
 }
 
 export interface EvaluateMeasureInput {
+  /** Measure id (registry key, e.g. "audiogram"). */
+  measureId: string;
   /** FHIR R4 patient bundle (transient eval input — WorkWell is not a FHIR server). */
   patientBundle: unknown;
-  /** Declarative measure binding (measures/<id>.yaml — ADR-006). */
-  measureYaml: string;
+  /** Evaluation date `YYYY-MM-DD`; pins Now()/Today() + the Measurement Period. Defaults to today. */
+  evaluationDate?: string;
 }
 
 /**
@@ -57,7 +59,7 @@ export interface EvaluateMeasureBinding {
   evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome>;
 }
 
-/** Default binding until Phase 3 wires a real one: refuse, never guess. */
+/** Fallback binding when no engine is configured: refuse, never guess. */
 export class UnconfiguredEngine implements EvaluateMeasureBinding {
   constructor(private readonly target: CloudTarget = "local") {}
 
@@ -65,7 +67,7 @@ export class UnconfiguredEngine implements EvaluateMeasureBinding {
     throw new UnsupportedBindingError(
       "EvaluateMeasure",
       this.target,
-      "no CQL engine binding configured (Node-ELM or JVM sidecar lands in Phase 3 / #106)",
+      "no CQL engine binding configured",
     );
   }
 }
