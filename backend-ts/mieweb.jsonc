@@ -1,0 +1,63 @@
+{
+  // Off-Cloudflare driver hints. wrangler.jsonc stays the source of truth for
+  // WHICH bindings exist; this sidecar says which adapter backs each one per
+  // target. Select a target with `mieweb --target <t> dev`.
+  //
+  // "SQLite/D1 define the portable floor; Postgres provides the performance
+  // ceiling." (ADR-008 / issue #96)
+  "$schema": "../external/mieweb-cloud/packages/cli/mieweb-config.schema.json",
+  "wrangler": "./wrangler.jsonc",
+  "target": "local",
+  "targets": {
+    // ---- local: in-process Node adapters, zero external services -----------
+    // The portable floor. This is what the Phase-1 spike runs against first.
+    "local": {
+      "port": 8080,
+      "bindings": {
+        "DB": { "driver": "sqlite", "path": ".data/local/workwell.sqlite" },
+        "BUCKET": { "driver": "fs", "path": ".data/local/evidence" },
+        "CACHE": { "driver": "memory" },
+        "JOBS": { "driver": "inproc", "queue": "workwell-run-jobs" }
+      }
+    },
+
+    // ---- mieweb (os.mieweb.org): libSQL + S3/MinIO + Valkey ----------------
+    // Matches external/mieweb-cloud/packages/cloud-os/docker-compose.yml.
+    "mieweb": {
+      "port": 8080,
+      "bindings": {
+        "DB": { "driver": "libsql", "url": "http://localhost:8080" },
+        "BUCKET": {
+          "driver": "s3",
+          "endpoint": "http://localhost:9000",
+          "bucket": "workwell-evidence",
+          "accessKeyId": "minioadmin",
+          "secretAccessKey": "minioadmin",
+          "forcePathStyle": true,
+          "createIfMissing": true
+        },
+        "CACHE": { "driver": "valkey", "host": "127.0.0.1", "port": 6379, "namespace": "workwell" },
+        "JOBS": {
+          "driver": "valkey-queue",
+          "queue": "workwell-run-jobs",
+          "host": "127.0.0.1",
+          "port": 6379,
+          "namespace": "workwell"
+        }
+      }
+    }
+
+    // ---- postgres: the performance ceiling --------------------------------
+    // Added in Phase 2 (#104) once @mieweb/cloud-postgres exists. It implements
+    // the SAME CloudDatabase contract; app code does not change. Sketch:
+    // "postgres": {
+    //   "port": 8080,
+    //   "bindings": {
+    //     "DB": { "driver": "postgres", "url": "<neon-pooled>" },
+    //     "BUCKET": { "driver": "s3", ... },
+    //     "CACHE": { "driver": "valkey", ... },
+    //     "JOBS": { "driver": "postgres-queue", "table": "run_jobs" }   // FOR UPDATE SKIP LOCKED
+    //   }
+    // }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  // Cloudflare is the reference implementation (ADR-008). This is an ordinary
+  // worker config and the source of truth for WHICH bindings exist; the
+  // off-Cloudflare driver hints live in the mieweb.jsonc sidecar.
+  //
+  // WorkWell bindings (mapped to the current Java/Neon stack):
+  //   DB     D1     → app system of record (employees, runs, outcomes, cases, audit…)
+  //   BUCKET R2     → evidence file uploads/downloads (role-gated, audited)
+  //   CACHE  KV     → measure-catalog warm cache / ephemeral lookups
+  //   JOBS   Queue  → async run-job pipeline (claimNextQueuedRun worker)
+  //
+  // Postgres is the performance ceiling and is added as a driver/target in the
+  // mieweb.jsonc sidecar once @mieweb/cloud-postgres exists (Phase 2 / #104).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "workwell-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "workwell", "database_id": "local-workwell" }
+  ],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "local-workwell-cache" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "workwell-evidence" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "workwell-run-jobs" }],
+    "consumers": [{ "queue": "workwell-run-jobs", "max_batch_size": 10 }]
+  }
+}
