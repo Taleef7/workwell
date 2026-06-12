@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hypertension-present_recent"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hypertension-present_recent-enr",
+        "subject": {
+          "reference": "Patient/hypertension-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:wellness-enrollment",
+              "code": "wellness-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "hypertension-present_recent-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/hypertension-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:bp-screening",
+              "code": "bp-screen"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

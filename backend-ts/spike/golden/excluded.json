@@ -1,0 +1,58 @@
+{
+  "subjectId": "spike-excluded",
+  "measure": "Audiogram",
+  "evaluationDate": "2026-06-12",
+  "outcome": "EXCLUDED",
+  "evidence": {
+    "expressionResults": [
+      {
+        "define": "Compliant",
+        "result": false
+      },
+      {
+        "define": "Days Since Last Audiogram",
+        "result": 518
+      },
+      {
+        "define": "Due Soon",
+        "result": false
+      },
+      {
+        "define": "Excluded",
+        "result": true
+      },
+      {
+        "define": "Has Active Waiver",
+        "result": true
+      },
+      {
+        "define": "In Hearing Conservation Program",
+        "result": true
+      },
+      {
+        "define": "Initial Population",
+        "result": true
+      },
+      {
+        "define": "Missing Data",
+        "result": false
+      },
+      {
+        "define": "Most Recent Audiogram Date",
+        "result": "DateTimeType[2025-01-10T00:00:00.000Z]"
+      },
+      {
+        "define": "Outcome Status",
+        "result": "EXCLUDED"
+      },
+      {
+        "define": "Overdue",
+        "result": false
+      },
+      {
+        "define": "Patient",
+        "result": null
+      }
+    ]
+  }
+}

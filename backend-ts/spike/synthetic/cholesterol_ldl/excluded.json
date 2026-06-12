@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cholesterol_ldl-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cholesterol_ldl-excluded-enr",
+        "subject": {
+          "reference": "Patient/cholesterol_ldl-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cholesterol-program",
+              "code": "cholesterol-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cholesterol_ldl-excluded-wvr",
+        "subject": {
+          "reference": "Patient/cholesterol_ldl-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cholesterol-exemption",
+              "code": "cholesterol-exempt"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "cholesterol_ldl-excluded-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/cholesterol_ldl-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:ldl-labs",
+              "code": "ldl-lab"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

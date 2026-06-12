@@ -31,6 +31,15 @@ to TypeScript module-by-module behind the *unchanged* frontend API contract, dem
 runtime dependency to a build-time authoring tool (compile CQL→ELM offline, execute ELM in Node), and
 co-develop the missing `@mieweb/cloud-postgres` adapter as we go.
 
+> **Update 2026-06-12 — Phase-1 spike GO; going fully zero-Java (Doug's #96 end state).** The spike
+> proved CQL Path C parity across **all 10 measures × 4 scenarios — 40/40 exact** vs the Java engine,
+> and proved that **`@cqframework/cql`** (Kotlin-Multiplatform, pure Node, no JVM) translates all 10
+> measures' CQL→ELM with that same 40/40 parity. So even the build-time translator runs in Node:
+> **Java/Spring Boot leaves the project entirely — runtime, build, and authoring** — with no functional
+> compromise. The `@cqframework/cql` beta is pinned and gated by the full-catalog parity harness
+> (`backend-ts/spike/compare-all.mjs`); the Java translator is kept only as a transitional cross-check.
+> See ADR-008 (2026-06-12 update) and `backend-ts/spike/README.md`.
+
 Why this satisfies every constraint:
 - **Don't give up work done** → strangler is incremental; nothing is deleted until its TS replacement
   passes parity. The frontend (already TS, decoupled via `frontend/lib/api/client.ts`) is untouched.

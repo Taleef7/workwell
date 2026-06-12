@@ -1,0 +1,65 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "cms125-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms125-excluded-enr",
+        "subject": {
+          "reference": "Patient/cms125-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-eligible",
+              "code": "cms125-eligible"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cms125-excluded-wvr",
+        "subject": {
+          "reference": "Patient/cms125-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-excluded",
+              "code": "cms125-excluded"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "cms125-excluded-evt",
+        "status": "completed",
+        "subject": {
+          "reference": "Patient/cms125-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:cms125-mammogram",
+              "code": "mammogram"
+            }
+          ]
+        },
+        "performedDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}
