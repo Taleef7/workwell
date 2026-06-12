@@ -10,7 +10,7 @@
  * Tables are fully schema-qualified (`workwell_spike.*`) because the canonical
  * `public` schema has same-named tables; we must never touch those.
  */
-import type { PgPool } from "./pg-database.ts";
+import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { CreateRunInput, RunRecord, RunStore, RunStatus } from "../run-store.ts";
 
@@ -64,6 +64,9 @@ export class PgRunStore implements RunStore {
   }
 
   async getRun(id: string): Promise<RunRecord | null> {
+    // Native UUID column: a malformed id finds no row on the floor, so don't let
+    // Postgres throw `invalid input syntax for type uuid` — match the contract.
+    if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<RunRow>(
       `SELECT id, status, scope_type, scope_id, started_at, completed_at
          FROM ${T} WHERE id = $1`,
@@ -122,6 +125,7 @@ export class PgRunStore implements RunStore {
    * only QUEUED rows move; any later status is untouched). Returns the current row.
    */
   async markRunning(runId: string): Promise<RunRecord | null> {
+    if (!isUuid(runId)) return null;
     await this.pool.query(
       `UPDATE ${T} SET status = 'RUNNING' WHERE id = $1 AND status = 'QUEUED'`,
       [runId],

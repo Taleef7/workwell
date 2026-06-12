@@ -3,7 +3,7 @@
  * Same contract as the SQLite floor; `evidence` lives in a native JSONB column
  * (TEXT JSON on the floor). Schema-qualified to avoid the canonical `public.outcomes`.
  */
-import type { PgPool } from "./pg-database.ts";
+import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { OutcomeRecord, OutcomeStore, RecordOutcomeInput } from "../outcome-store.ts";
 
@@ -53,6 +53,9 @@ export class PgOutcomeStore implements OutcomeStore {
   }
 
   async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
+    // Native UUID column: a malformed run id yields no rows on the floor, so don't
+    // let Postgres throw `invalid input syntax for type uuid` — match the contract.
+    if (!isUuid(runId)) return [];
     const { rows } = await this.pool.query<OutcomeRow>(
       `SELECT id, run_id, subject_id, measure_id, status, evidence_json, evaluated_at
          FROM ${T} WHERE run_id = $1 ORDER BY evaluated_at ASC`,
