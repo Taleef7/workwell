@@ -18,6 +18,7 @@ import type {
   CloudQueue,
   CloudExecutionContext,
 } from "@mieweb/cloud";
+import { handleRuns } from "./routes/runs.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -45,20 +46,24 @@ const json = (data: unknown, status = 200): Response =>
 export default {
   async fetch(
     req: Request,
-    _env: Env,
+    env: Env,
     _ctx: CloudExecutionContext,
   ): Promise<Response> {
     const { pathname } = new URL(req.url);
 
     // Health — parity with the Java backend's GET /actuator/health.
     if (pathname === "/actuator/health" || pathname === "/health") {
-      return json({ status: "UP", stack: "workwell-ts", phase: "0-skeleton" });
+      return json({ status: "UP", stack: "workwell-ts", phase: "1-spike" });
     }
 
     // Version — parity with GET /api/version (unauthenticated discovery).
     if (pathname === "/api/version") {
-      return json({ api: "v1", stack: "typescript", build: "phase0-skeleton" });
+      return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
     }
+
+    // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
+    const runsResponse = await handleRuns(req, env);
+    if (runsResponse) return runsResponse;
 
     // Everything else is not ported yet. Be honest (no faked behavior), the
     // same principle as UnsupportedBindingError / "AI never decides compliance".
