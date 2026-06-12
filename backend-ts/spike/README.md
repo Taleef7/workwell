@@ -48,6 +48,35 @@ cd backend && ./gradlew.bat generateElm \
 cd ../backend-ts && node spike/compare.mjs        # exit 0 iff all match
 ```
 
+## Can the *last* Java dependency be removed too? — **Yes (proven)**
+
+Path C (above) keeps Java only as the **build-time** CQL→ELM translator (`ElmCompilerCli`).
+The remaining question: can even that go, for a **100% Java-free** toolchain?
+
+**Answer: yes.** The cqframework reference translator now ships an official **pure-Node**
+build — [`@cqframework/cql`](https://www.npmjs.com/package/@cqframework/cql) (v4.0.0-beta.1,
+Apache-2.0) — a **Kotlin-Multiplatform** compile of the *same* translator source to JavaScript
+(no JVM). `spike/cqf-translate.mjs` translates `audiogram.cql` → ELM in Node, and that ELM
+evaluates **identically to the Java engine**:
+
+```
+node spike/cqf-translate.mjs                  # CQL → ELM in pure Node (no JVM), errors=0
+node spike/compare.mjs spike/elm-js           # evaluate that ELM vs the Java golden
+✅ GOLDEN PARITY: all scenarios match Java exactly
+```
+
+It needs three **standard, version-stable** resources supplied once (committed config, not a
+Java dependency): `system-modelinfo.xml`, `fhir-modelinfo-4.0.1.xml`, `FHIRHelpers-4.0.1.cql`.
+These are extracted from the cqframework `model`/`quick` artifacts (see below); the translator
+is the same codebase as the JVM one (Kotlin → JVM **and** JS), so correctness lineage is shared.
+
+**Recommendation:** keep the proven Java translator as the build step **for now** (ADR-008 Path
+C, stable); track `@cqframework/cql` and swap `ElmCompilerCli` → a Node translator once the
+package is past beta and validated across all 10 measures. At that point **Java/JVM leaves the
+project entirely** — runtime, build, and authoring. (Reproduce the resource extraction:
+`unzip -j <gradle-cache>/.../quick-3.29.0.jar org/hl7/fhir/fhir-modelinfo-4.0.1.xml org/hl7/fhir/FHIRHelpers-4.0.1.cql`
+and `.../model-3.29.0.jar org/hl7/elm/r1/system-modelinfo.xml` into `spike/cqf-resources/`.)
+
 ## Layout
 
 ```

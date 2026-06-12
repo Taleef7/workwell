@@ -3,3 +3,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .wrangler/
+# Spike: heavy/extractable CQL resources + generated ELM (see spike/README.md to regenerate)
+spike/cqf-resources/
+spike/elm-js/

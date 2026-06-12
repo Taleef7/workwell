@@ -11,6 +11,9 @@ importers:
 
   .:
     dependencies:
+      '@cqframework/cql':
+        specifier: 4.0.0-beta.1
+        version: 4.0.0-beta.1
       '@mieweb/cli':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cli
@@ -223,6 +226,9 @@ packages:
 
   '@cloudflare/workers-types@4.20260612.1':
     resolution: {integrity: sha512-PMQI7XP/wrMhxyjseUHoHj6XFqkHaf4utWQ/hhefVY8oMK2LJ730oeQ7H/nZSVMexZe39DzsdOx7sf1PqMr7+Q==}
+
+  '@cqframework/cql@4.0.0-beta.1':
+    resolution: {integrity: sha512-eXjVLLGyvnrOULnTS3KuFOdyMWogTl9dYLVgFVeDDZsRIbwGB0XMxVauYrnXqK4OEONz+R41W/yYuwFfCQDX/A==}
 
   '@esbuild/aix-ppc64@0.28.1':
     resolution: {integrity: sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ==}
@@ -754,6 +760,10 @@ packages:
     resolution: {integrity: sha512-6R3J5M4AcbtLUdZmRv2SygeVaM7IhrLXu9BmnOGmmACak8fiUtOsYNWUS4uK7upbmHIBbLBeFeI//477BKLBzA==}
     engines: {node: '>=11.0.0'}
 
+  saxes@6.0.0:
+    resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==}
+    engines: {node: '>=v12.22.7'}
+
   semver@7.8.4:
     resolution: {integrity: sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==}
     engines: {node: '>=10'}
@@ -874,6 +884,9 @@ packages:
   xmlbuilder@11.0.1:
     resolution: {integrity: sha512-fDlsI/kFEx7gLvbecc0/ohLG50fugQp8ryHzMTuW9vSa1GJ0XYWKnhsUx7oie3G98+r56aTQIUB4kht42R3JvA==}
     engines: {node: '>=4.0'}
+
+  xmlchars@2.2.0:
+    resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
   xmldoc@0.4.0:
     resolution: {integrity: sha512-rJ/+/UzYCSlFNuAzGuRyYgkH2G5agdX1UQn4+5siYw9pkNC3Hu/grYNDx/dqYLreeSjnY5oKg74CMBKxJHSg6Q==}
@@ -1138,6 +1151,10 @@ snapshots:
     optional: true
 
   '@cloudflare/workers-types@4.20260612.1': {}
+
+  '@cqframework/cql@4.0.0-beta.1':
+    dependencies:
+      saxes: 6.0.0
 
   '@esbuild/aix-ppc64@0.28.1':
     optional: true
@@ -1671,6 +1688,10 @@ snapshots:
 
   sax@1.6.0: {}
 
+  saxes@6.0.0:
+    dependencies:
+      xmlchars: 2.2.0
+
   semver@7.8.4: {}
 
   simple-concat@1.0.1: {}
@@ -1781,6 +1802,8 @@ snapshots:
       xmlbuilder: 11.0.1
 
   xmlbuilder@11.0.1: {}
+
+  xmlchars@2.2.0: {}
 
   xmldoc@0.4.0:
     dependencies:

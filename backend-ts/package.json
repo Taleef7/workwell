@@ -15,6 +15,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@cqframework/cql": "4.0.0-beta.1",
     "@mieweb/cli": "workspace:*",
     "@mieweb/cloud": "workspace:*",
     "@mieweb/cloud-local": "workspace:*",
