@@ -12,7 +12,8 @@ import cql from "cql-execution";
 import cqlfhir from "cql-exec-fhir";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const elmDir = path.join(here, "elm");
+// Optional arg: ELM dir override (e.g. spike/elm-js for the pure-Node @cqframework/cql build).
+const elmDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(here, "elm");
 const synthRoot = path.join(here, "synthetic");
 
 const index = JSON.parse(readFileSync(path.join(synthRoot, "_index.json"), "utf8"));

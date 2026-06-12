@@ -65,15 +65,26 @@ node spike/compare.mjs spike/elm-js           # evaluate that ELM vs the Java go
 ✅ GOLDEN PARITY: all scenarios match Java exactly
 ```
 
+**Validated across ALL 10 measures, not just Audiogram:**
+
+```
+node spike/cqf-translate.mjs ../backend/src/main/resources/measures spike/elm-js   # 10 measures, errors=0
+node spike/compare-all.mjs spike/elm-js                                            # Node-translated ELM vs Java golden
+✅ 40/40 scenarios match Java exactly (452 define comparisons, 10 measures × 4 scenarios)
+```
+
 It needs three **standard, version-stable** resources supplied once (committed config, not a
 Java dependency): `system-modelinfo.xml`, `fhir-modelinfo-4.0.1.xml`, `FHIRHelpers-4.0.1.cql`.
 These are extracted from the cqframework `model`/`quick` artifacts (see below); the translator
 is the same codebase as the JVM one (Kotlin → JVM **and** JS), so correctness lineage is shared.
 
-**Recommendation:** keep the proven Java translator as the build step **for now** (ADR-008 Path
-C, stable); track `@cqframework/cql` and swap `ElmCompilerCli` → a Node translator once the
-package is past beta and validated across all 10 measures. At that point **Java/JVM leaves the
-project entirely** — runtime, build, and authoring. (Reproduce the resource extraction:
+**Decision (per Doug's #96 — zero Java/Spring Boot, no functional compromise):** adopt
+`@cqframework/cql` as the CQL→ELM translator so **Java/JVM leaves the project entirely** —
+runtime, build, **and** authoring. The full-catalog golden-parity harness (`compare-all.mjs`) is
+the **regression gate**: it must stay green on any `@cqframework/cql` bump or measure change.
+The beta version is **pinned**, and the Java `ElmCompilerCli` is retained transitionally as a
+cross-check/fallback until the TS engine binding lands (#106), then removed with the rest of Java.
+(Reproduce the resource extraction:
 `unzip -j <gradle-cache>/.../quick-3.29.0.jar org/hl7/fhir/fhir-modelinfo-4.0.1.xml org/hl7/fhir/FHIRHelpers-4.0.1.cql`
 and `.../model-3.29.0.jar org/hl7/elm/r1/system-modelinfo.xml` into `spike/cqf-resources/`.)
 

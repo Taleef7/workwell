@@ -8,7 +8,7 @@
  *
  *   node spike/cqf-translate.mjs <measure.cql> <out-dir>
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -62,11 +62,18 @@ function translate(cqlText, label) {
   return json;
 }
 
-const measureJson = translate(readFileSync(cqlPath, "utf8"), path.basename(cqlPath));
-const libId = JSON.parse(measureJson).library.identifier;
-writeFileSync(path.join(outDir, `${libId.id}-${libId.version}.elm.json`), measureJson);
+// Accept a single .cql or a directory of measures.
+const cqlFiles = statSync(cqlPath).isDirectory()
+  ? readdirSync(cqlPath).filter((f) => f.endsWith(".cql")).sort().map((f) => path.join(cqlPath, f))
+  : [cqlPath];
+
+for (const f of cqlFiles) {
+  const measureJson = translate(readFileSync(f, "utf8"), path.basename(f));
+  const libId = JSON.parse(measureJson).library.identifier;
+  writeFileSync(path.join(outDir, `${libId.id}-${libId.version}.elm.json`), measureJson);
+}
 
 const fhirHelpersJson = translate(fhirHelpersCql, "FHIRHelpers-4.0.1");
 writeFileSync(path.join(outDir, "FHIRHelpers-4.0.1.elm.json"), fhirHelpersJson);
 
-console.log(`ELM (pure Node, no JVM) written to ${outDir}`);
+console.log(`ELM (pure Node, no JVM) for ${cqlFiles.length} measure(s) written to ${outDir}`);
