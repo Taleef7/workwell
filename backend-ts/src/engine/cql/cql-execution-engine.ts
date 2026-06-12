@@ -6,10 +6,11 @@
  * cql-execution + cql-exec-fhir. Proven byte-equal to the Java engine across all
  * 10 measures × 4 scenarios (backend-ts/spike). This is the headless
  * "given a patient and a measure, are they compliant?" engine, with no JVM.
+ *
+ * ELM is bundled via static imports (elm/index.ts) — NO node:fs at import or
+ * runtime — so the worker is portable across every @mieweb/cloud target
+ * (Cloudflare Workers included), not just the Node container.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 // eslint-disable-next-line import/no-unresolved
 import cql from "cql-execution";
 import cqlfhir from "cql-exec-fhir";
@@ -21,6 +22,7 @@ import type {
   OutcomeStatus,
 } from "../evaluate-measure.ts";
 import { MEASURES } from "./measure-registry.ts";
+import { ELM_LIBRARIES } from "./elm/index.ts";
 
 const OUTCOMES: ReadonlySet<string> = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
@@ -45,20 +47,15 @@ const renderDefine = (v: unknown): unknown => {
 };
 
 export class CqlExecutionEngine implements EvaluateMeasureBinding {
-  private readonly elmDir: string;
   private readonly fhirHelpers: unknown;
-  private readonly libraryCache = new Map<string, unknown>();
 
-  constructor(elmDir?: string) {
-    this.elmDir = elmDir ?? fileURLToPath(new URL("./elm", import.meta.url));
+  constructor() {
     this.fhirHelpers = this.loadElm("FHIRHelpers-4.0.1");
   }
 
   private loadElm(library: string): unknown {
-    const cached = this.libraryCache.get(library);
-    if (cached) return cached;
-    const elm = JSON.parse(readFileSync(path.join(this.elmDir, `${library}.elm.json`), "utf8"));
-    this.libraryCache.set(library, elm);
+    const elm = ELM_LIBRARIES[library];
+    if (!elm) throw new Error(`ELM not bundled for library '${library}' (re-run pnpm compile-measures)`);
     return elm;
   }
 
