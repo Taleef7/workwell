@@ -41,6 +41,14 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(await store.getRun(crypto.randomUUID()), null);
   });
 
+  test(`[${label}] getRun/markRunning return null for a malformed (non-UUID) id`, async () => {
+    // The Postgres ceiling has native UUID id columns; a malformed id (e.g. `foo`
+    // from GET /api/runs/foo) must NOT throw — it must match the floor's "no row".
+    const store = await freshStore();
+    assert.equal(await store.getRun("not-a-uuid"), null);
+    assert.equal(await store.markRunning("not-a-uuid"), null);
+  });
+
   test(`[${label}] appendLog writes without error`, async () => {
     const store = await freshStore();
     const run = await store.createRun(sampleRun());
@@ -123,5 +131,10 @@ export function outcomeStoreContract(
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun());
     assert.deepEqual(await outcomeStore.listOutcomes(run.id), []);
+  });
+
+  test(`[${label}] listOutcomes returns [] for a malformed (non-UUID) run id`, async () => {
+    const { outcomeStore } = await fresh();
+    assert.deepEqual(await outcomeStore.listOutcomes("not-a-uuid"), []);
   });
 }

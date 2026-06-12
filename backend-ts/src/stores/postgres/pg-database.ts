@@ -10,6 +10,17 @@ import { SPIKE_SCHEMA } from "./schema-pg.ts";
 
 export type PgPool = pg.Pool;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True when `id` is a syntactically valid UUID. The ceiling's `id` columns are
+ * native `UUID`, so a malformed value (e.g. `foo` from `GET /api/runs/foo`) makes
+ * Postgres raise `invalid input syntax for type uuid`. The SQLite floor stores ids
+ * as TEXT and simply finds no row, so adapters guard with this to return the
+ * contract's `null`/`[]` instead of throwing — keeping floor/ceiling behaviour identical.
+ */
+export const isUuid = (id: string): boolean => UUID_RE.test(id);
+
 /**
  * Create a pool whose connections resolve unqualified names against the isolated
  * spike schema first (`search_path`). The adapters fully-qualify every table
