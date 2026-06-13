@@ -113,6 +113,8 @@ test("toRunOutcomeRows resolves employees, derives waiver/days, and sorts by nam
     }),
     // emp-005 = "Nadia Anwar"; EXCLUDED via active waiver
     oc("emp-005", "EXCLUDED", { expressionResults: [{ define: "Has Active Waiver", result: true }] }),
+    // emp-007 = "Sana Imtiaz"; a CMS eCQM run uses "Has Exclusion" (not "…Waiver")
+    oc("emp-007", "EXCLUDED", { expressionResults: [{ define: "Has Exclusion", result: true }] }),
     // unknown subject → degrade gracefully (name = id, role/site = em dash)
     oc("ghost-999", "MISSING_DATA", { expressionResults: [] }),
   ]);
@@ -129,6 +131,8 @@ test("toRunOutcomeRows resolves employees, derives waiver/days, and sorts by nam
   assert.equal(omar.caseId, null);
 
   assert.equal(rows.find((r) => r.employeeExternalId === "emp-005")!.waiverStatus, "active");
+  // CMS eCQM exclusion define is recognized too (parity with Java why_flagged)
+  assert.equal(rows.find((r) => r.employeeExternalId === "emp-007")!.waiverStatus, "active");
 
   const ghost = rows.find((r) => r.employeeExternalId === "ghost-999")!;
   assert.equal(ghost.role, "—");
