@@ -15,6 +15,7 @@
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 
 export interface RunListItem {
   runId: string;
@@ -43,6 +44,18 @@ export interface RunLogEntry {
   timestamp: string;
   level: string;
   message: string;
+}
+
+/** Per-employee outcome row for the run detail grid (Java RunOutcomeRow). */
+export interface RunOutcomeRow {
+  employeeName: string;
+  employeeExternalId: string;
+  role: string;
+  site: string;
+  outcomeStatus: string;
+  daysSinceExam: string | null;
+  waiverStatus: string | null;
+  caseId: string | null;
 }
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
@@ -107,6 +120,54 @@ export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[]): RunSumm
 
 export function toRunLogEntries(logs: RunLogRow[]): RunLogEntry[] {
   return logs.map((l) => ({ timestamp: l.ts, level: l.level, message: l.message }));
+}
+
+// ---- per-employee outcome rows (#107) ---------------------------------------
+interface ExprResult {
+  define: string;
+  result: unknown;
+}
+function expressionResults(evidence: unknown): ExprResult[] {
+  const er = (evidence as { expressionResults?: unknown } | null)?.expressionResults;
+  return Array.isArray(er) ? (er as ExprResult[]) : [];
+}
+
+/**
+ * `days_since_exam` / `waiver_status` are derived from the CQL define results, matching
+ * the Java why_flagged semantics: waiver_status is "active"/"none" off the measure's
+ * waiver/exemption/exclusion define (CqlEvaluationService), and days-since is the recency
+ * define's value. The exemption flag is named one of (consistent across runnable measures):
+ * "Has Active Waiver" (OSHA audiogram), "Has Medical Exemption" (HAZWOPER/TB/HEDIS),
+ * "Has Valid Exemption" (flu), "Has Exclusion" (CMS eCQM 125/122).
+ */
+const EXEMPTION_DEFINE = /waiver|exemption|exclusion/i;
+
+function daysSinceExam(evidence: unknown): string | null {
+  const e = expressionResults(evidence).find((r) => /^days since/i.test(r.define));
+  return e && e.result != null ? String(e.result) : null;
+}
+function waiverStatus(evidence: unknown): string | null {
+  const e = expressionResults(evidence).find((r) => EXEMPTION_DEFINE.test(r.define));
+  return e && typeof e.result === "boolean" ? (e.result ? "active" : "none") : null;
+}
+
+export function toRunOutcomeRow(outcome: OutcomeRecord): RunOutcomeRow {
+  const emp = employeeById(outcome.subjectId); // null → degrade gracefully, never throw
+  return {
+    employeeName: emp?.name ?? outcome.subjectId,
+    employeeExternalId: outcome.subjectId,
+    role: emp?.role ?? "—",
+    site: emp?.site ?? "—",
+    outcomeStatus: outcome.status,
+    daysSinceExam: daysSinceExam(outcome.evidence),
+    waiverStatus: waiverStatus(outcome.evidence),
+    caseId: null, // cases module not ported yet (later #107 slice)
+  };
+}
+
+/** Outcome rows for a run, sorted by employee name (matches the Java ORDER BY e.name). */
+export function toRunOutcomeRows(outcomes: OutcomeRecord[]): RunOutcomeRow[] {
+  return outcomes.map(toRunOutcomeRow).sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 }
 
 /** `/api/runs` list filters (the params the Runs page sends). All optional/AND-ed. */

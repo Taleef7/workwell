@@ -55,9 +55,11 @@ test("create run → evaluate subject via engine → persist + list outcome", as
 
   const listed = await get(`/api/runs/${run.id}/outcomes`);
   assert.equal(listed?.status, 200);
-  const rows = (await listed!.json()) as Array<{ status: string }>;
+  const rows = (await listed!.json()) as Array<{ outcomeStatus: string; employeeExternalId: string; caseId: string | null }>;
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.status, "COMPLIANT");
+  assert.equal(rows[0]!.outcomeStatus, "COMPLIANT"); // RunOutcomeRow shape
+  assert.ok(rows[0]!.employeeExternalId, "row carries the employee external id");
+  assert.equal(rows[0]!.caseId, null);
 
   // An evaluated run must not be re-handed to a worker (it left the QUEUED claim path).
   const claim = await post("/api/runs/claim");
