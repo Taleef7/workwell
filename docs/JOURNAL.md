@@ -1,5 +1,15 @@
 # Journal
 
+## 2026-06-13 — Issue #96: ELM Explorer (CQL source ↔ AST) — strangler read endpoint + demo surface
+
+Branch `feat/issue-96-elm-explorer` (off `main`, kept off the still-open #115 Postgres PR). A demo/visualization slice that doubles as real strangler progress, prompted by Doug's meeting questions ("is CQL the canonical source of truth? is it like ANTLR/Yacc? AST vs parse tree?"). The point it makes tangibly: **CQL is the human source of truth; the `cql-to-elm` translator (ANTLR4, run at build time — no JVM at runtime) compiles it to ELM, the AST the Node `cql-execution` engine actually tree-walks; the `Outcome Status` define is the sole compliance result.**
+
+- **Backend (TS, pure strangler — no Java added):** `GET /api/measures/:id/elm` in `backend-ts/src/routes/measures.ts` returns the same compiled ELM the engine executes — `statements.def` (the AST) plus the CQL source narrative (`EnableAnnotations`) and `locator`s (`EnableLocators`). Already mounted via `handleMeasures` in `worker.ts`. Read-only; never decides compliance. Route test (`measures.test.ts`) covers list/elm/404. **backend-ts 21/21 green, typecheck clean.**
+- **Frontend:** new `/studio/elm` page + `features/studio/components/ElmExplorer.tsx` — side-by-side **CQL source ↔ collapsible AST tree**, linked by `localId` (click either pane to highlight the matching node; ★ marks the canonical `Outcome Status` define). Dependency-free (no-new-deps rule). Talks to the TS backend over the existing fetch client (`api.get`) — when the frontend is pointed at the Node backend this *is* the plan's "frontend talks to the TS endpoints unchanged" validation. **lint clean, `npm run build` green (`/studio/elm` registered).**
+- Self-contained: keyed on the engine's measure slug (not the Java studio's DB UUID), so it doesn't touch the existing Studio tabs or the Java backend. Cleanly separable from the #96 critical-path phases (Postgres adapter #104/#115, endpoint strangler #107).
+
+---
+
 ## 2026-06-12 — Issue #96 de-Java re-platform: direction accepted, ADR-008 + plan + board + sub-issues
 
 Doug's #96 ("don't depend on Java/Spring Boot; make `@mieweb/cloud` the pluggable backend") is now a committed direction with full tracking. Decided the **shape** after the feasibility homework: **strangler-fig re-platform onto TypeScript / `@mieweb/cloud`, CQL Path C** — keep the CQL/eCQM engine but run the Java `cql-to-elm` translator **offline at build time** (commit ELM JSON) and execute ELM in Node via `cql-execution`/`fqm-execution`, so the JVM leaves the run/test/deploy path entirely. Key reframing that kills the FHIR-server question: **WorkWell is not a FHIR server** (Postgres is the system of record; FHIR R4 bundles are transient eval input), so no TS FHIR server is adopted — `node-on-fhir/honeycomb` (Meteor + Mongo + AGPL, no CQL) is **rejected**; we only need TS FHIR *typing* + an eval engine. Deploy target = Node container on MIE.
