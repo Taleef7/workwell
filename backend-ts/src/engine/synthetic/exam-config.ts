@@ -22,6 +22,14 @@ export interface ExamConfig {
   observationValue: number | null;
 }
 
+/**
+ * `target` is a distribution BUCKET, not a guaranteed result. The canonical outcome is
+ * always the CQL engine's `Outcome Status` (AI/seed never decides compliance). For
+ * season-based (flu) and value-based (CMS122) measures, some buckets intentionally
+ * converge to a different canonical outcome (e.g. flu DUE_SOON → COMPLIANT, since any
+ * in-period shot is compliant; CMS122 DUE_SOON → MISSING_DATA) — exactly as the Java
+ * seeded distribution does. Those convergences are pinned in fhir-bundle-builder.test.ts.
+ */
 export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome): ExamConfig {
   const hasWaiver = target === "EXCLUDED";
 

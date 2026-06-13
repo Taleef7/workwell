@@ -12,6 +12,9 @@ Branch `feat/issue-96-synthetic-generation`. Foundational half of the manual-run
 
 **backend-ts 97 tests — 96 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Next (2/2): the run orchestration — scope resolution (ALL_PROGRAMS/MEASURE/SITE/EMPLOYEE/CASE) over the employee directory + compliance-rate distribution, persist the run + outcomes, and the `POST /api/runs/manual` + `/rerun` endpoints (`ManualRunResponse`). Then the cases, measures, and programs modules.
 
+Review follow-up (Codex on PR #120), resolved before merge:
+- **P2 — flu DUE_SOON convergence.** The golden test *skipped* flu DUE_SOON because an in-period shot evaluates COMPLIANT, which could let the future distribution silently shift intended due-soon flu rows to compliant. Investigated the Java distribution (`seededInputsFor`): it assigns DUE_SOON/OVERDUE buckets to **all** measures including flu, and **persists the canonical CQL result, not the seeded target** (the seed never decides compliance). So the convergence is Java's actual behavior, not a regression. Made it explicit instead of silent: the golden test now pins all 17 (measure × bucket) cases including the convergences (flu DUE_SOON → COMPLIANT, cms122 DUE_SOON → MISSING_DATA), and `deriveExamConfig` documents that the target is a distribution bucket while the canonical outcome is the CQL result. backend-ts 110 tests — 109 pass / 1 skip / 0 fail.
+
 ---
 
 ## 2026-06-13 — Issue #96 Phase 4 (#107): runs module — `/outcomes` → RunOutcomeRow + employee directory
