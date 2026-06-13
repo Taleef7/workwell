@@ -61,6 +61,8 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
       ["INFO:run started", "WARN:evaluated 1 employee"],
     );
     assert.ok(logs[0]!.ts, "log carries a timestamp");
+    // the limit bounds the payload (oldest-first window)
+    assert.equal((await store.listLogs(run.id, 1)).length, 1);
   });
 
   test(`[${label}] listRuns returns runs newest-first, capped at limit`, async () => {

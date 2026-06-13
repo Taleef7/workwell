@@ -84,6 +84,22 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   assert.deepEqual(summary.outcomeCounts, [{ status: "COMPLIANT", count: 1 }]);
 });
 
+test("GET /api/runs honors status/scopeType/site filters", async () => {
+  const a = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t", requestedScope: { site: "PLANT_A" } });
+  const aRun = (await a!.json()) as { id: string };
+  const b = await post("/api/runs", { scopeType: "ALL_PROGRAMS", triggeredBy: "t", requestedScope: {} });
+  const bRun = (await b!.json()) as { id: string };
+
+  const ids = async (qs: string) => ((await get(`/api/runs?${qs}`).then((r) => r!.json())) as Array<{ runId: string }>).map((x) => x.runId);
+
+  assert.deepEqual(await ids("scopeType=ALL_PROGRAMS"), [bRun.id]);
+  assert.deepEqual(await ids("site=PLANT_A"), [aRun.id]);
+  assert.equal((await ids("site=PLANT_Z")).length, 0, "an unmatched site filters all out (not ignored)");
+  // both are QUEUED (not evaluated), so a QUEUED status filter returns both
+  assert.equal((await ids("status=QUEUED")).filter((id) => id === aRun.id || id === bRun.id).length, 2);
+  assert.equal((await ids("status=FAILED")).length, 0);
+});
+
 test("GET /api/runs/:id/logs returns the run's log timeline; unknown run detail → 404", async () => {
   const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
   const run = (await created!.json()) as { id: string };

@@ -108,3 +108,27 @@ export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[]): RunSumm
 export function toRunLogEntries(logs: RunLogRow[]): RunLogEntry[] {
   return logs.map((l) => ({ timestamp: l.ts, level: l.level, message: l.message }));
 }
+
+/** `/api/runs` list filters (the params the Runs page sends). All optional/AND-ed. */
+export interface RunFilters {
+  status?: string;
+  scopeType?: string;
+  triggerType?: string;
+  site?: string;
+  from?: string; // inclusive lower bound on the run's start day (YYYY-MM-DD…)
+  to?: string; // inclusive upper bound
+}
+
+/** Day portion of an ISO/date string, for day-granular from/to comparison. */
+const day = (s: string): string => s.slice(0, 10);
+
+export function matchesRunFilters(run: RunRecord, f: RunFilters): boolean {
+  if (f.status && run.status !== f.status) return false;
+  if (f.scopeType && run.scopeType !== f.scopeType) return false;
+  // triggerType is "MANUAL" for every floor run until the scheduler pipeline lands.
+  if (f.triggerType && f.triggerType !== "MANUAL") return false;
+  if (f.site && run.site !== f.site) return false;
+  if (f.from && day(run.startedAt) < day(f.from)) return false;
+  if (f.to && day(run.startedAt) > day(f.to)) return false;
+  return true;
+}
