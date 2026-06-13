@@ -27,21 +27,24 @@ interface RunRow {
 const iso = (v: Date | string | null): string | null =>
   v == null ? null : v instanceof Date ? v.toISOString() : v;
 
-/** A run's site lives in the requested scope (set by the scoped-run pipeline). */
-const siteOf = (requestedScope: unknown): string | null => {
-  const site = (requestedScope as { site?: unknown } | null)?.site;
-  return typeof site === "string" && site ? site : null;
-};
+/** JSONB is already parsed by pg; normalize null/non-object to {}. */
+const asScope = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+const siteOf = (scope: Record<string, unknown>): string | null =>
+  typeof scope.site === "string" && scope.site ? scope.site : null;
 
-const toRecord = (r: RunRow): RunRecord => ({
-  id: r.id,
-  status: r.status as RunStatus,
-  scopeType: r.scope_type as CreateRunInput["scopeType"],
-  scopeId: r.scope_id,
-  site: siteOf(r.requested_scope_json),
-  startedAt: iso(r.started_at)!,
-  completedAt: iso(r.completed_at),
-});
+const toRecord = (r: RunRow): RunRecord => {
+  const requestedScope = asScope(r.requested_scope_json);
+  return {
+    id: r.id,
+    status: r.status as RunStatus,
+    scopeType: r.scope_type as CreateRunInput["scopeType"],
+    scopeId: r.scope_id,
+    site: siteOf(requestedScope),
+    requestedScope,
+    startedAt: iso(r.started_at)!,
+    completedAt: iso(r.completed_at),
+  };
+};
 
 const T = `${SPIKE_SCHEMA}.runs`;
 const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, started_at, completed_at";
@@ -157,6 +160,16 @@ export class PgRunStore implements RunStore {
       `UPDATE ${T} SET status = 'RUNNING' WHERE id = $1 AND status = 'QUEUED'`,
       [runId],
     );
+    return this.getRun(runId);
+  }
+
+  async finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null> {
+    if (!isUuid(runId)) return null;
+    await this.pool.query(`UPDATE ${T} SET status = $2, completed_at = $3 WHERE id = $1`, [
+      runId,
+      status,
+      new Date().toISOString(),
+    ]);
     return this.getRun(runId);
   }
 }
