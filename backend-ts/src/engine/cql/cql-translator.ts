@@ -7,12 +7,12 @@
  * exactly what the de-Java re-platform (ADR-008, Path C) is about. Read/compute only;
  * it never persists anything and never decides compliance.
  *
- * Resources (src/engine/cql/resources): System + FHIR R4 model-info XML and the
- * FHIRHelpers CQL — version-stable standard config, loaded once and cached.
+ * Resources (System + FHIR R4 model-info XML and the FHIRHelpers CQL — version-stable
+ * standard config) are bundled as a static JSON import (cql-resources.json, generated
+ * by scripts/compile-measures.mjs), NOT read from disk at runtime. This mirrors
+ * elm/index.ts and keeps the module portable across every @mieweb/cloud target,
+ * including Cloudflare Workers where node:fs is unavailable by default.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   ModelManager,
   LibraryManager,
@@ -22,32 +22,24 @@ import {
   stringAsSource,
   // @ts-expect-error — @cqframework/cql ships its own bundled types via subpath
 } from "@cqframework/cql/cql-to-elm";
+import resources from "./resources/cql-resources.json" with { type: "json" };
 
-const resDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "resources");
-
-let cachedResources: { systemXml: string; fhirXml: string; fhirHelpers: string } | null = null;
-function resources() {
-  if (!cachedResources) {
-    cachedResources = {
-      systemXml: readFileSync(path.join(resDir, "system-modelinfo.xml"), "utf8"),
-      fhirXml: readFileSync(path.join(resDir, "fhir-modelinfo-4.0.1.xml"), "utf8"),
-      fhirHelpers: readFileSync(path.join(resDir, "FHIRHelpers-4.0.1.cql"), "utf8"),
-    };
-  }
-  return cachedResources;
-}
+const { systemModelInfoXml, fhirModelInfoXml, fhirHelpersCql } = resources as {
+  systemModelInfoXml: string;
+  fhirModelInfoXml: string;
+  fhirHelpersCql: string;
+};
 
 function manager(): unknown {
-  const { systemXml, fhirXml, fhirHelpers } = resources();
   const mm = new ModelManager();
   mm.modelInfoLoader.registerModelInfoProvider(
     createModelInfoProvider((name: string) =>
-      name === "System" ? stringAsSource(systemXml) : name === "FHIR" ? stringAsSource(fhirXml) : null,
+      name === "System" ? stringAsSource(systemModelInfoXml) : name === "FHIR" ? stringAsSource(fhirModelInfoXml) : null,
     ),
   );
   const lm = new LibraryManager(mm);
   lm.librarySourceLoader.registerProvider(
-    createLibrarySourceProvider((name: string) => (name === "FHIRHelpers" ? stringAsSource(fhirHelpers) : null)),
+    createLibrarySourceProvider((name: string) => (name === "FHIRHelpers" ? stringAsSource(fhirHelpersCql) : null)),
   );
   return lm;
 }

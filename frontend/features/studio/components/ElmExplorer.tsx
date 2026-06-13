@@ -162,9 +162,12 @@ export function ElmExplorer({
   const current =
     defines.find((d) => d.name === activeDefine) ?? defines.find((d) => d.name === CANONICAL_DEFINE) ?? defines[0];
 
-  // Debounced live recompile.
+  // Debounced live recompile. Depends ONLY on the edited CQL (never on `status`,
+  // which this effect sets — depending on it would reschedule a compile after every
+  // completion and turn one edit into an endless POST /compile loop). The seed is
+  // already compiled server-side, so skip until the source actually changes.
   useEffect(() => {
-    if (cql === initialCql && status === "ok") return; // initial load already compiled server-side
+    if (cql === initialCql) return;
     const handle = window.setTimeout(async () => {
       const mySeq = ++seq.current;
       setStatus("compiling");
@@ -181,7 +184,7 @@ export function ElmExplorer({
       }
     }, 550);
     return () => window.clearTimeout(handle);
-  }, [cql, onCompile, initialCql, status]);
+  }, [cql, onCompile, initialCql]);
 
   const jumpTo = useCallback(
     (locator?: string, line?: number, char?: number) => {
