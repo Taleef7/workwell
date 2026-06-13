@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 2 (#105): TS auth — JWT + PBKDF2 + login/refresh/logout + role gates + fail-fast
+
+Branch `feat/issue-96-auth-ts` → **PR #117**. Full port of the Java auth/security layer to the TS backend (board #105). Housekeeping first: closed #103 (Phase-1 spike, delivered via #114) and #104 (Postgres adapter, #115) — board auto-set both to Done; restored the 2026-06-12 "direction accepted" JOURNAL entry #115 had overwritten.
+
+All JVM-free, **zero new deps** (Node `crypto` + WebCrypto — portable to the Cloudflare Worker target):
+- **`auth/jwt.ts`** — port of `JwtService`: HS256, base64url no-pad, access `{sub,role,iat,exp}` (900s) / refresh `{sub,refresh:true,iat,exp}` (28800s), refresh-can't-authenticate, constant-time verify, expired/tampered/wrong-secret rejected. 9 tests.
+- **`auth/password.ts`** — PBKDF2-HMAC-SHA256 via WebCrypto (210k iters, `pbkdf2$iter$salt$hash`), constant-time. Chosen over a bcrypt dependency (no-new-deps rule); demo accounts are hardcoded so re-hashing the same password is fine (Java/Neon bcrypt rows untouched). 4 tests.
+- **`auth/demo-users.ts`** — the four hardcoded roles from the Java `demo_users` seed (V003): author/approver/cm/admin@workwell.dev, shared `Workwell123!`, case-insensitive lookup. 3 tests.
+- **`routes/auth.ts`** — `POST /api/auth/login|refresh|logout` port of `AuthController`: access token in the JSON body + HttpOnly `refresh_token` cookie scoped to `/api/auth`, SameSite/Secure (None ⇒ Secure forced), rotation on refresh. 8 tests.
+- **`auth/authorize.ts`** — port of `JwtAuthFilter` + the `SecurityConfig` role matrix: Bearer-token principal extraction + ordered, first-match-wins rules (admin→ADMIN, evidence/runs/cases→CASE_MANAGER, approve/activate→APPROVER, spec/cql/tests→AUTHOR, etc.), 401 vs 403 semantics, public allowlist. The two TS-only ELM-Explorer endpoints (GET `…/elm`, POST `/compile`) are gated to AUTHENTICATED. 9 tests.
+- **`config/cors.ts`** — port of `SecurityConfig.corsConfigurationSource`: exact allowed origins, credentials enabled, methods GET/POST/PUT/PATCH/DELETE/OPTIONS, ACAO echoes the specific origin (never `*`), Allow-Headers echoes the requested headers. `preflightResponse` answers `OPTIONS`; `withCors` decorates every response. 4 tests.
+- **`config/startup-safety.ts`** — auth/cookie/**CORS** subset of `StartupSafetyValidator`: production fail-fast on auth-disabled, weak/short JWT secret, a non-`None`/non-Secure refresh cookie, or empty/wildcard/localhost CORS origins; the SameSite=None-requires-Secure and unknown-SameSite checks apply in every environment. 8 tests.
+- **`worker.ts`** — answers the CORS preflight before auth, decorates every response with `withCors`, then wires the fail-fast guard (unsafe config ⇒ 503), the authorization gate (skipped when auth disabled, mirroring `authEnabled=false`→permitAll), and the auth routes. Worker integration tests prove the gate + CORS end-to-end (public health; preflight 204; cross-site login carries ACAO; 401 without a token; login→token→authorized read; role-gated 403). 5 tests.
+
+**backend-ts 81 tests — 80 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.**
+
+Review follow-ups (Codex on PR #117), both fixed before merge:
+- **P2 — run-collection gate.** The glob→regex helper required a trailing slash, so `/api/runs/**` matched `/api/runs/claim` but not `POST /api/runs`, letting it fall through to the generic authenticated rule. Reworked `rx` to Spring AntPathMatcher semantics (`/**` matches the base path too); added a regression test.
+- **P1 — auth preflight/CORS.** The split frontend/backend is cross-origin, so login is preceded by `OPTIONS /api/auth/login`; with no CORS the browser blocked it. Implemented the CORS layer above (this also un-defers the CORS fail-fast checks that were previously punted to Phase 4).
+
+Audit-event emission on auth actions is still deferred to when the audit module is ported (no audit store on the TS side yet). Next: Phase 4 API strangler (#107).
+
+---
+
 ## 2026-06-13 — Issue #96: ELM Explorer — **live, JVM-free CQL → AST** authoring surface
 
 Branch `feat/issue-96-elm-explorer` (off `main`, kept off the still-open #115 Postgres PR). A demo/visualization slice that doubles as real strangler progress, prompted by Doug's meeting questions ("is CQL the canonical source of truth? is it like ANTLR/Yacc? AST vs parse tree?"). The point it makes tangibly: **CQL is the human source of truth; the `cql-to-elm` translator (ANTLR4) compiles it to ELM, the AST the Node `cql-execution` engine tree-walks; the `Outcome Status` define is the sole compliance result.** Hardened from a static viewer into a **real-time editor**: edit CQL, watch the AST rebuild live — and the translator now runs JVM-free at *runtime*, not just at build time.
@@ -23,6 +47,25 @@ What shipped (`backend-ts/src/stores/`, TS-only, no JVM):
 Schema-ownership guardrail (CLAUDE.md): the canonical Neon/Flyway tables are Taleef-owned and **untouched**. The compose `public` schema already has same-named `runs`/`outcomes`/`run_logs` tables, so the spike adapters live in an **isolated `workwell_spike` schema** and fully schema-qualify every table — they can't reach `public`. This mirrors how the SQLite floor DDL is already isolated spike scaffolding.
 
 Verification (Docker Postgres up via `infra/docker-compose.yml`): `tsc --noEmit` clean; `pnpm test` **29/29** — the 8 `[postgres]` cases ran live against `postgres:16` and the 8 `[sqlite]` cases against `@mieweb/cloud-local`, identical behaviour. CI without Postgres stays green: the Postgres harness probes reachability first and registers a single *skipped* test when nothing answers (verified by pointing `WORKWELL_TEST_PG_URL` at a dead port → 1 skipped, 0 failed). The live runs `/api/runs` route still uses the SQLite floor; selecting the Postgres binding per deploy target is a later concern (Phase 5 / worker binding config), deliberately not in this PR.
+
+---
+
+## 2026-06-12 — Issue #96 de-Java re-platform: direction accepted, ADR-008 + plan + board + sub-issues
+
+> Restored 2026-06-13: this entry was inadvertently overwritten on `main` when the Phase-2 Postgres entry above replaced (rather than prepended) the top of the journal; re-added verbatim to keep the record intact.
+
+Doug's #96 ("don't depend on Java/Spring Boot; make `@mieweb/cloud` the pluggable backend") is now a committed direction with full tracking. Decided the **shape** after the feasibility homework: **strangler-fig re-platform onto TypeScript / `@mieweb/cloud`, CQL Path C** — keep the CQL/eCQM engine but run the Java `cql-to-elm` translator **offline at build time** (commit ELM JSON) and execute ELM in Node via `cql-execution`/`fqm-execution`, so the JVM leaves the run/test/deploy path entirely. Key reframing that kills the FHIR-server question: **WorkWell is not a FHIR server** (Postgres is the system of record; FHIR R4 bundles are transient eval input), so no TS FHIR server is adopted — `node-on-fhir/honeycomb` (Meteor + Mongo + AGPL, no CQL) is **rejected**; we only need TS FHIR *typing* + an eval engine. Deploy target = Node container on MIE.
+
+Why strangler + Path C: satisfies all of Taleef's constraints — don't give up work done (frontend untouched; ports/adapters from E1 carry over; nothing deleted until its TS replacement passes parity), follow Doug's end-state (no JVM), low friction (Path C is the only option that keeps the eCQM differentiator *and* removes Java from deploy), and contributes upstream (build the missing `@mieweb/cloud-postgres`).
+
+Artifacts landed (docs only; no code/schema/API change):
+- **ADR-008** at top of `docs/DECISIONS.md` (supersedes ADR-001 for the backend runtime; ADR-001 kept as historical record).
+- **Execution plan** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md` (keep/transition/retire table, Phases 0–5, risks, verification).
+- **Labels:** `replatform-96`, `mieweb-cloud`, `cql-engine`, `spike`, `typescript`.
+- **Project board** "WorkWell 96 - De-Java Re-platform" (users/Taleef7/projects/6, linked to repo) with custom **Phase** (0–5) + **Workstream** (Platform/Engine/API/Infra/Docs) + Status fields, README, all 9 issues added with field values set.
+- **Sub-issues of #96 (Phases 0–5):** #102 (P0 scaffolding), #103 (P1 spike — **GO/NO-GO gate**), #104 (P2 storage adapters), #105 (P2 auth/audit), #106 (P3 engine parity), #107 + #108 (P4 API strangler), #109 (P5 deploy cutover + JVM retirement). Summary comment posted on #96 with two open questions flagged to @horner (confirm Path C; storage-floor stance to be settled on Phase-1 evidence).
+
+**Phase 1 (#103) is the cheap gate before the expensive months**: prove one measure hits golden parity in Node against the Java engine first. `@mieweb/cloud` to be added as a submodule and co-developed (v0.0.0; `@mieweb/cloud-postgres` doesn't exist yet). Schema migrations remain Taleef-owned. Nothing built yet — next action is Phase 0 scaffolding once Doug confirms the framing.
 
 ---
 
