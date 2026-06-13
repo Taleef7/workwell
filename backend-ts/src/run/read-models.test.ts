@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toRunListItem, toRunSummary, toRunLogEntries, matchesRunFilters } from "./read-models.ts";
+import { toRunListItem, toRunSummary, toRunLogEntries, matchesRunFilters, toRunOutcomeRows } from "./read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 
@@ -90,6 +90,50 @@ test("matchesRunFilters AND-s status/scopeType/triggerType/site and day-bounded 
   // combined AND
   assert.equal(matchesRunFilters(r, { status: "FAILED", site: "PLANT_A", scopeType: "SITE" }), true);
   assert.equal(matchesRunFilters(r, { status: "FAILED", site: "PLANT_B" }), false);
+});
+
+test("toRunOutcomeRows resolves employees, derives waiver/days, and sorts by name", () => {
+  const oc = (subjectId: string, status: string, evidence: unknown): OutcomeRecord => ({
+    id: crypto.randomUUID(),
+    runId: "run-1",
+    subjectId,
+    measureId: "audiogram",
+    status,
+    evidence,
+    evaluatedAt: "2026-06-13T10:00:00.000Z",
+  });
+  const rows = toRunOutcomeRows([
+    // emp-006 = "Omar Siddiq" (Welder, Plant A) in the ported catalog; OVERDUE, no waiver
+    oc("emp-006", "OVERDUE", {
+      expressionResults: [
+        { define: "Has Active Waiver", result: false },
+        { define: "Days Since Last Audiogram", result: 420 },
+        { define: "Outcome Status", result: "OVERDUE" },
+      ],
+    }),
+    // emp-005 = "Nadia Anwar"; EXCLUDED via active waiver
+    oc("emp-005", "EXCLUDED", { expressionResults: [{ define: "Has Active Waiver", result: true }] }),
+    // unknown subject → degrade gracefully (name = id, role/site = em dash)
+    oc("ghost-999", "MISSING_DATA", { expressionResults: [] }),
+  ]);
+
+  // sorted by employeeName ASC (resolved names ordered: Nadia before Omar)
+  const names = rows.map((r) => r.employeeName);
+  assert.ok(names.indexOf("Nadia Anwar") < names.indexOf("Omar Siddiq"), "sorted by employee name");
+  assert.ok(names.includes("ghost-999"), "unknown subject still listed (by its id)");
+  const omar = rows.find((r) => r.employeeExternalId === "emp-006")!;
+  assert.equal(omar.role, "Welder");
+  assert.equal(omar.site, "Plant A");
+  assert.equal(omar.waiverStatus, "none");
+  assert.equal(omar.daysSinceExam, "420");
+  assert.equal(omar.caseId, null);
+
+  assert.equal(rows.find((r) => r.employeeExternalId === "emp-005")!.waiverStatus, "active");
+
+  const ghost = rows.find((r) => r.employeeExternalId === "ghost-999")!;
+  assert.equal(ghost.role, "—");
+  assert.equal(ghost.daysSinceExam, null);
+  assert.equal(ghost.waiverStatus, null);
 });
 
 test("toRunLogEntries maps the store row (ts) to the frontend shape (timestamp)", () => {
