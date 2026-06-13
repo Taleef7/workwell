@@ -1,8 +1,14 @@
 /**
- * Generation ↔ evaluation golden test (#107): for each runnable measure + target outcome,
+ * Generation ↔ evaluation golden test (#107): for each runnable measure + seeded target,
  * derive the exam config → build the synthetic FHIR bundle → evaluate through the JVM-free
- * CQL engine, and assert the engine re-derives the intended outcome. This proves the ported
- * synthetic generator drives the engine exactly like the Java SyntheticFhirBundleBuilder.
+ * CQL engine, and assert the ACTUAL engine outcome. Proves the ported synthetic generator
+ * drives the engine exactly like the Java SyntheticFhirBundleBuilder.
+ *
+ * The seeded target is a *distribution bucket*, not a guarantee — the canonical outcome is
+ * always the CQL result (AI/seed never decides compliance). For season-based (flu) and
+ * value-based (cms122) measures, some buckets intentionally converge to a different outcome,
+ * exactly as the Java seeded distribution does (it assigns the same buckets and persists the
+ * CQL result). Those convergences are pinned below so they can never drift silently.
  *   node --import tsx --test src/engine/synthetic/fhir-bundle-builder.test.ts
  */
 import { test } from "node:test";
@@ -17,37 +23,37 @@ const engine = new CqlExecutionEngine();
 const EVAL_DATE = "2026-06-13";
 const emp = employeeById("emp-006")!; // Omar Siddiq, Welder, Plant A
 
-async function expectOutcome(measureId: string, target: TargetOutcome) {
-  const config = deriveExamConfig(MEASURE_BINDINGS[measureId]!, target);
-  const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
-  const result = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: EVAL_DATE });
-  assert.equal(result.outcome, target, `${measureId} target ${target} → got ${result.outcome}`);
-  assert.equal(result.subjectId, "emp-006");
+// [measureId, seeded target bucket, expected canonical CQL outcome]
+const CASES: Array<[string, TargetOutcome, string]> = [
+  // recency / Procedure (window 365): target == actual for every bucket
+  ["audiogram", "COMPLIANT", "COMPLIANT"],
+  ["audiogram", "DUE_SOON", "DUE_SOON"],
+  ["audiogram", "OVERDUE", "OVERDUE"],
+  ["audiogram", "MISSING_DATA", "MISSING_DATA"],
+  ["audiogram", "EXCLUDED", "EXCLUDED"],
+  // recency with a non-365 window (180)
+  ["diabetes_hba1c", "COMPLIANT", "COMPLIANT"],
+  ["diabetes_hba1c", "OVERDUE", "OVERDUE"],
+  // Immunization, season-based: the DUE_SOON bucket is an in-period shot → COMPLIANT
+  ["flu_vaccine", "COMPLIANT", "COMPLIANT"],
+  ["flu_vaccine", "DUE_SOON", "COMPLIANT"], // convergence (matches Java seeded distribution)
+  ["flu_vaccine", "OVERDUE", "OVERDUE"],
+  ["flu_vaccine", "MISSING_DATA", "MISSING_DATA"],
+  ["flu_vaccine", "EXCLUDED", "EXCLUDED"],
+  // Observation, value-based (HbA1c > 9%): the DUE_SOON bucket has no value → MISSING_DATA
+  ["cms122", "COMPLIANT", "COMPLIANT"],
+  ["cms122", "DUE_SOON", "MISSING_DATA"], // convergence (value-based has no due-soon)
+  ["cms122", "OVERDUE", "OVERDUE"],
+  ["cms122", "MISSING_DATA", "MISSING_DATA"],
+  ["cms122", "EXCLUDED", "EXCLUDED"],
+];
+
+for (const [measureId, target, expected] of CASES) {
+  test(`${measureId}: seeded ${target} → engine ${expected}`, async () => {
+    const config = deriveExamConfig(MEASURE_BINDINGS[measureId]!, target);
+    const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
+    const result = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: EVAL_DATE });
+    assert.equal(result.outcome, expected, `${measureId} seeded ${target} → got ${result.outcome}, expected ${expected}`);
+    assert.equal(result.subjectId, "emp-006");
+  });
 }
-
-// recency / Procedure (window 365)
-test("audiogram (Procedure) generates each target outcome", async () => {
-  for (const t of ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"] as TargetOutcome[]) {
-    await expectOutcome("audiogram", t);
-  }
-});
-
-// recency with a non-365 window (180)
-test("diabetes_hba1c (Procedure, 180-day window) generates compliant + overdue", async () => {
-  await expectOutcome("diabetes_hba1c", "COMPLIANT");
-  await expectOutcome("diabetes_hba1c", "OVERDUE");
-});
-
-// Immunization + season-based measure (no OVERDUE/DUE_SOON path)
-test("flu_vaccine (Immunization) generates compliant / missing / excluded", async () => {
-  for (const t of ["COMPLIANT", "MISSING_DATA", "EXCLUDED"] as TargetOutcome[]) {
-    await expectOutcome("flu_vaccine", t);
-  }
-});
-
-// Observation / value-based (HbA1c > 9% poor control)
-test("cms122 (Observation, value-based) generates compliant / overdue / missing / excluded", async () => {
-  for (const t of ["COMPLIANT", "OVERDUE", "MISSING_DATA", "EXCLUDED"] as TargetOutcome[]) {
-    await expectOutcome("cms122", t);
-  }
-});
