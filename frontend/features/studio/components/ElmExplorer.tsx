@@ -155,6 +155,7 @@ export function ElmExplorer({
   const [selectedLocalId, setSelectedLocalId] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const seq = useRef(0);
+  const seededCompile = useRef(false);
 
   const defines = useMemo(() => elm.library?.statements?.def ?? [], [elm]);
   // Derive the shown define (no state-sync effect): explicit selection, else the
@@ -162,14 +163,22 @@ export function ElmExplorer({
   const current =
     defines.find((d) => d.name === activeDefine) ?? defines.find((d) => d.name === CANONICAL_DEFINE) ?? defines[0];
 
-  // Debounced live recompile. Depends ONLY on the edited CQL (never on `status`,
-  // which this effect sets — depending on it would reschedule a compile after every
-  // completion and turn one edit into an endless POST /compile loop). The seed is
-  // already compiled server-side, so skip until the source actually changes.
+  // Debounced live recompile. Two invariants:
+  //  1. Depend ONLY on the edited CQL — never on `status`, which this effect sets;
+  //     depending on it would reschedule a compile after every completion and turn
+  //     one edit into an endless POST /compile loop.
+  //  2. Bump `seq` SYNCHRONOUSLY on every CQL change (not inside the timeout), so any
+  //     already-in-flight compile is invalidated the moment the source changes —
+  //     including when the user reverts to the seed before an earlier response lands.
+  //     Otherwise a stale response could overwrite the editor's current AST/diagnostics.
+  // The very first run is the server-seeded compile, so it's skipped (no recompile).
   useEffect(() => {
-    if (cql === initialCql) return;
+    const mySeq = ++seq.current;
+    if (!seededCompile.current) {
+      seededCompile.current = true;
+      return; // seed (initialElm) already compiled server-side
+    }
     const handle = window.setTimeout(async () => {
-      const mySeq = ++seq.current;
       setStatus("compiling");
       try {
         const result = await onCompile(cql);
@@ -184,7 +193,7 @@ export function ElmExplorer({
       }
     }, 550);
     return () => window.clearTimeout(handle);
-  }, [cql, onCompile, initialCql]);
+  }, [cql, onCompile]);
 
   const jumpTo = useCallback(
     (locator?: string, line?: number, char?: number) => {
