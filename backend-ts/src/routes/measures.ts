@@ -17,6 +17,10 @@ import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
+import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
+
+/** Cap on live-compile input so the playground can't be used to DoS the translator. */
+const MAX_CQL_BYTES = 64 * 1024;
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
@@ -32,13 +36,25 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
     return json(Object.values(MEASURES).map((m) => ({ id: m.id, name: m.name })));
   }
 
+  // Live CQL → ELM compile (no JVM) — powers the ELM-explorer playground.
+  if (pathname === "/api/measures/compile" && req.method === "POST") {
+    const body = (await req.json().catch(() => null)) as { cql?: unknown } | null;
+    const cql = body?.cql;
+    if (typeof cql !== "string") return json({ error: "invalid_cql" }, 400);
+    if (cql.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+    const result = compileCql(cql);
+    return json(result);
+  }
+
   const elmId = pathname.match(/^\/api\/measures\/([^/]+)\/elm$/)?.[1];
   if (elmId && req.method === "GET") {
     const meta = MEASURES[elmId];
     if (!meta) return json({ error: "unknown_measure", measureId: elmId }, 404);
     const elm = ELM_LIBRARIES[meta.library];
     if (!elm) return json({ error: "elm_not_found", measureId: elmId, library: meta.library }, 404);
-    return json({ measureId: meta.id, name: meta.name, library: meta.library, elm });
+    // `cql` is the original source rebuilt from the ELM annotation narrative, so the
+    // explorer can seed its editor with real, recompilable measure CQL.
+    return json({ measureId: meta.id, name: meta.name, library: meta.library, cql: reconstructCql(elm), elm });
   }
 
   const measureId = pathname.match(/^\/api\/measures\/([^/]+)\/evaluate$/)?.[1];

@@ -1,26 +1,20 @@
 "use client";
 
 /**
- * ELM Explorer (issue #96 demo) — source ↔ AST side-by-side for a compiled measure.
+ * ELM Explorer (issue #96) — live CQL → AST, no JVM.
  *
- * The CQL `cql-to-elm` translator (ANTLR4, run at build time, no JVM at runtime)
- * emits the ELM: the Expression Logical Model, i.e. the AST that the Node engine
- * (`cql-execution`) tree-walks to compute compliance. This panel renders that AST
- * next to the CQL source it came from, linked by `localId`:
- *   - left:  CQL source, reconstructed from the ELM annotation narrative (each
- *            span carries the `localId` of the node it produced — EnableAnnotations)
- *   - right: the AST, a collapsible tree keyed on each node's `type`
- * Click either side to highlight the matching node on the other. Read-only — this
- * never decides compliance; it just makes "CQL → AST → evaluate" tangible.
+ * CQL is the human-authored source of truth; the `cql-to-elm` translator (ANTLR4,
+ * pure Node via @cqframework/cql — no JVM) compiles it to ELM, the Expression
+ * Logical Model = the AST that the Node engine (`cql-execution`) tree-walks to
+ * compute compliance. This panel lets you EDIT CQL and watch the AST rebuild in
+ * real time (debounced recompile against POST /api/measures/compile), surfaces
+ * translator diagnostics, and lets you click an AST node to jump to the exact CQL
+ * span it came from (via the node's `locator`). Read-only w.r.t. compliance — the
+ * canonical `Outcome Status` define remains the sole source of truth.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// ---- minimal ELM shapes (the translator output is otherwise `unknown`) --------
-interface Narrative {
-  r?: string;
-  s?: Narrative[];
-  value?: string[];
-}
+// ---- shapes ------------------------------------------------------------------
 interface ElmNode {
   type?: string;
   localId?: string;
@@ -30,7 +24,6 @@ interface ElmNode {
 interface ElmDefine extends ElmNode {
   name: string;
   expression?: ElmNode;
-  annotation?: { s?: Narrative }[];
 }
 export interface ElmLibrary {
   library?: {
@@ -38,44 +31,43 @@ export interface ElmLibrary {
     statements?: { def?: ElmDefine[] };
   };
 }
-
-/** The canonical compliance define — worth calling out in the demo. */
-const CANONICAL_DEFINE = "Outcome Status";
-
-// ---- left pane: CQL source rebuilt from the annotation narrative --------------
-function NarrativeText({
-  node,
-  selected,
-  onSelect,
-}: {
-  node: Narrative;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  const children = node.s
-    ? node.s.map((child, i) => <NarrativeText key={i} node={child} selected={selected} onSelect={onSelect} />)
-    : node.value?.join("") ?? "";
-
-  if (!node.r) return <>{children}</>;
-  const isSel = node.r === selected;
-  return (
-    <span
-      data-r={node.r}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect(isSel ? null : node.r ?? null);
-      }}
-      className={`cursor-pointer rounded-sm ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-amber-200/40 dark:hover:bg-amber-500/20"}`}
-    >
-      {children}
-    </span>
-  );
+export interface CqlDiagnostic {
+  severity: string;
+  message: string;
+  startLine?: number;
+  startChar?: number;
+  endLine?: number;
+  endChar?: number;
+}
+export interface CompileResult {
+  ok: boolean;
+  elm: ElmLibrary | null;
+  diagnostics: CqlDiagnostic[];
 }
 
-// ---- right pane: the AST, collapsible, keyed on node.type ---------------------
-const CHILD_KEYS_SKIP = new Set(["localId", "locator", "annotation", "type"]);
+const CANONICAL_DEFINE = "Outcome Status";
 
-/** A short inline summary of a node's scalar fields (value, name, path, …). */
+// ---- locator → textarea offset (CQL locators are 1-based "L:C-L:C") -----------
+function offsetFromLineChar(text: string, line: number, char: number): number {
+  const lines = text.split("\n");
+  let off = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++) off += lines[i]!.length + 1;
+  return off + (char - 1);
+}
+function locatorRange(text: string, locator?: string): { start: number; end: number } | null {
+  const m = locator?.match(/^(\d+):(\d+)-(\d+):(\d+)$/);
+  if (!m) return null;
+  return {
+    start: offsetFromLineChar(text, +m[1]!, +m[2]!),
+    end: offsetFromLineChar(text, +m[3]!, +m[4]!) + 1,
+  };
+}
+
+// ---- AST tree, collapsible, keyed on node.type --------------------------------
+const CHILD_KEYS_SKIP = new Set(["localId", "locator", "annotation", "type"]);
+function isElmNode(v: unknown): v is ElmNode {
+  return !!v && typeof v === "object" && "type" in (v as object);
+}
 function nodeSummary(node: ElmNode): string {
   const bits: string[] = [];
   for (const key of ["name", "path", "value", "valueType", "precision", "operator"]) {
@@ -83,10 +75,6 @@ function nodeSummary(node: ElmNode): string {
     if (typeof v === "string" || typeof v === "number") bits.push(`${key}=${v}`);
   }
   return bits.join("  ");
-}
-
-function isElmNode(v: unknown): v is ElmNode {
-  return !!v && typeof v === "object" && "type" in (v as object);
 }
 
 function AstNode({
@@ -100,9 +88,9 @@ function AstNode({
   label: string;
   depth: number;
   selected: string | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (node: ElmNode) => void;
 }) {
-  const [open, setOpen] = useState(depth < 2);
+  const [open, setOpen] = useState(depth < 3);
   const childEntries: { key: string; node: ElmNode }[] = [];
   for (const [key, val] of Object.entries(node)) {
     if (CHILD_KEYS_SKIP.has(key)) continue;
@@ -116,9 +104,9 @@ function AstNode({
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
       <div
-        onClick={() => onSelect(isSel ? null : node.localId ?? null)}
+        onClick={() => onSelect(node)}
         className={`flex cursor-pointer items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
-        title={node.locator ? `locator ${node.locator}` : undefined}
+        title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
       >
         {hasChildren ? (
           <button
@@ -149,64 +137,165 @@ function AstNode({
   );
 }
 
-export function ElmExplorer({ elm }: { elm: ElmLibrary }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const defines = useMemo(() => elm.library?.statements?.def ?? [], [elm]);
-  const [activeDefine, setActiveDefine] = useState<string>(() => defines[0]?.name ?? "");
-  const current = defines.find((d) => d.name === activeDefine) ?? defines[0];
+// ---- main --------------------------------------------------------------------
+export function ElmExplorer({
+  initialCql,
+  initialElm,
+  onCompile,
+}: {
+  initialCql: string;
+  initialElm: ElmLibrary;
+  onCompile: (cql: string) => Promise<CompileResult>;
+}) {
+  const [cql, setCql] = useState(initialCql);
+  const [elm, setElm] = useState<ElmLibrary>(initialElm);
+  const [diagnostics, setDiagnostics] = useState<CqlDiagnostic[]>([]);
+  const [status, setStatus] = useState<"idle" | "compiling" | "ok" | "error">("ok");
+  const [activeDefine, setActiveDefine] = useState<string>("");
+  const [selectedLocalId, setSelectedLocalId] = useState<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const seq = useRef(0);
 
-  if (defines.length === 0) {
-    return <p className="text-sm text-neutral-600 dark:text-neutral-400">No ELM statements found.</p>;
-  }
+  const defines = useMemo(() => elm.library?.statements?.def ?? [], [elm]);
+  // Derive the shown define (no state-sync effect): explicit selection, else the
+  // canonical Outcome Status define, else the first — robust as the live ELM changes.
+  const current =
+    defines.find((d) => d.name === activeDefine) ?? defines.find((d) => d.name === CANONICAL_DEFINE) ?? defines[0];
+
+  // Debounced live recompile.
+  useEffect(() => {
+    if (cql === initialCql && status === "ok") return; // initial load already compiled server-side
+    const handle = window.setTimeout(async () => {
+      const mySeq = ++seq.current;
+      setStatus("compiling");
+      try {
+        const result = await onCompile(cql);
+        if (mySeq !== seq.current) return; // a newer edit superseded this
+        setDiagnostics(result.diagnostics ?? []);
+        if (result.elm?.library) setElm(result.elm);
+        setStatus(result.ok ? "ok" : "error");
+      } catch {
+        if (mySeq !== seq.current) return;
+        setStatus("error");
+        setDiagnostics([{ severity: "error", message: "Compile request failed" }]);
+      }
+    }, 550);
+    return () => window.clearTimeout(handle);
+  }, [cql, onCompile, initialCql, status]);
+
+  const jumpTo = useCallback(
+    (locator?: string, line?: number, char?: number) => {
+      const ta = taRef.current;
+      if (!ta) return;
+      const range = locator ? locatorRange(cql, locator) : line ? { start: offsetFromLineChar(cql, line, char ?? 1), end: offsetFromLineChar(cql, line, char ?? 1) + 1 } : null;
+      if (!range) return;
+      ta.focus();
+      ta.setSelectionRange(range.start, Math.max(range.end, range.start + 1));
+    },
+    [cql],
+  );
+
+  const errorCount = diagnostics.filter((d) => d.severity.toLowerCase() === "error").length;
+  const warnCount = diagnostics.filter((d) => d.severity.toLowerCase() === "warning").length;
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-1">
-        {defines.map((d) => (
-          <button
-            key={d.name}
-            onClick={() => {
-              setActiveDefine(d.name);
-              setSelected(null);
-            }}
-            className={`rounded-md px-2 py-1 text-xs ${
-              d.name === activeDefine
-                ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
-            }`}
-          >
-            {d.name}
-            {d.name === CANONICAL_DEFINE ? " ★" : ""}
-          </button>
-        ))}
+      {/* status bar */}
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <span
+          className={`rounded-full px-2 py-0.5 font-medium ${
+            status === "compiling"
+              ? "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
+              : status === "error"
+                ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+          }`}
+        >
+          {status === "compiling" ? "compiling…" : status === "error" ? `✗ ${errorCount} error${errorCount === 1 ? "" : "s"}` : "✓ compiled"}
+        </span>
+        <span className="text-neutral-500">CQL → ELM in Node · no JVM</span>
+        {warnCount > 0 ? <span className="text-amber-600 dark:text-amber-400">{warnCount} warning{warnCount === 1 ? "" : "s"}</span> : null}
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {/* editor */}
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">CQL source</p>
-          <pre className="overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-800 dark:text-neutral-200">
-            {current?.annotation?.[0]?.s ? (
-              <NarrativeText node={current.annotation[0].s} selected={selected} onSelect={setSelected} />
-            ) : (
-              "(no source annotation)"
-            )}
-          </pre>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">CQL source — edit to recompile</p>
+          <textarea
+            ref={taRef}
+            value={cql}
+            onChange={(e) => setCql(e.target.value)}
+            spellCheck={false}
+            rows={22}
+            className="w-full resize-y rounded border border-neutral-200 bg-neutral-50 p-2 font-mono text-xs leading-relaxed text-neutral-800 outline-none focus:border-sky-400 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-200"
+          />
         </div>
 
+        {/* AST */}
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            ELM (AST){current?.expression?.type ? <span className="ml-2 font-normal normal-case text-neutral-400">root: {current.expression.type}</span> : null}
-          </p>
+          <div className="mb-2 flex flex-wrap items-center gap-1">
+            {defines.map((d) => (
+              <button
+                key={d.name}
+                onClick={() => {
+                  setActiveDefine(d.name);
+                  setSelectedLocalId(null);
+                }}
+                className={`rounded px-2 py-0.5 text-xs ${
+                  d.name === (current?.name ?? "")
+                    ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                    : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                }`}
+              >
+                {d.name}
+                {d.name === CANONICAL_DEFINE ? " ★" : ""}
+              </button>
+            ))}
+          </div>
           {current?.expression ? (
-            <AstNode node={current.expression} label="expression" depth={0} selected={selected} onSelect={setSelected} />
+            <div className="max-h-[28rem] overflow-auto">
+              <AstNode
+                node={current.expression}
+                label="expression"
+                depth={0}
+                selected={selectedLocalId}
+                onSelect={(node) => {
+                  setSelectedLocalId(node.localId ?? null);
+                  jumpTo(node.locator);
+                }}
+              />
+            </div>
           ) : (
-            <p className="text-xs text-neutral-500">(no expression)</p>
+            <p className="text-xs text-neutral-500">{defines.length ? "(no expression for this define)" : "(no compiled statements)"}</p>
           )}
         </div>
       </div>
+
+      {/* diagnostics */}
+      {diagnostics.length > 0 ? (
+        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Diagnostics</p>
+          <ul className="space-y-1 text-xs">
+            {diagnostics.map((d, i) => (
+              <li key={i}>
+                <button
+                  onClick={() => jumpTo(undefined, d.startLine, d.startChar)}
+                  className={`text-left hover:underline ${d.severity.toLowerCase() === "error" ? "text-red-700 dark:text-red-300" : "text-amber-600 dark:text-amber-400"}`}
+                >
+                  <span className="font-mono">
+                    [{d.severity}]{d.startLine ? ` ${d.startLine}:${d.startChar ?? 1}` : ""}
+                  </span>{" "}
+                  {d.message}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        Click a span on the left or a node on the right to highlight the matching node (linked by <code>localId</code>). ★ marks the
-        canonical <code>{CANONICAL_DEFINE}</code> define — the sole source of compliance truth.
+        Click an AST node to highlight the CQL span it came from (via <code>locator</code>). ★ marks the canonical{" "}
+        <code>{CANONICAL_DEFINE}</code> define — the sole source of compliance truth (AI never decides compliance).
       </p>
     </div>
   );
