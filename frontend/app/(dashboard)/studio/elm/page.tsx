@@ -8,10 +8,10 @@
  * frontend is pointed at the Node backend this is the strangler's own
  * "frontend talks to the TS endpoints unchanged" validation.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/api/hooks";
-import { ElmExplorer, type ElmLibrary } from "@/features/studio/components/ElmExplorer";
+import { ElmExplorer, type CompileResult, type ElmLibrary } from "@/features/studio/components/ElmExplorer";
 
 interface MeasureRow {
   id: string;
@@ -21,6 +21,7 @@ interface ElmResponse {
   measureId: string;
   name: string;
   library: string;
+  cql: string;
   elm: ElmLibrary;
 }
 
@@ -31,6 +32,11 @@ export default function ElmExplorerPage() {
   const [data, setData] = useState<ElmResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const compile = useCallback(
+    (cqlText: string) => api.post<{ cql: string }, CompileResult>("/api/measures/compile", { cql: cqlText }),
+    [api],
+  );
 
   useEffect(() => {
     void (async () => {
@@ -70,8 +76,9 @@ export default function ElmExplorerPage() {
         <h2 className="text-2xl font-semibold">ELM Explorer</h2>
         <p className="mt-1 max-w-3xl text-sm text-neutral-600 dark:text-neutral-400">
           CQL is the human-authored source of truth; the translator compiles it to <strong>ELM</strong> — the
-          Expression Logical Model, the AST that the Node engine executes to compute compliance. This view shows
-          that AST next to the CQL it came from, with no JVM in the runtime path.
+          Expression Logical Model, the AST that the Node engine executes to compute compliance. Edit the CQL on the
+          left and watch the AST rebuild in real time — the <code>cql-to-elm</code> translator runs in Node, with no
+          JVM in the path. Click any AST node to highlight the CQL span it came from.
         </p>
       </div>
 
@@ -96,7 +103,9 @@ export default function ElmExplorerPage() {
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {loading ? <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading ELM…</p> : null}
-      {data && !loading ? <ElmExplorer elm={data.elm} /> : null}
+      {data && !loading ? (
+        <ElmExplorer key={data.measureId} initialCql={data.cql} initialElm={data.elm} onCompile={compile} />
+      ) : null}
     </section>
   );
 }
