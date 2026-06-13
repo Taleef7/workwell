@@ -135,16 +135,19 @@ function expressionResults(evidence: unknown): ExprResult[] {
 /**
  * `days_since_exam` / `waiver_status` are derived from the CQL define results, matching
  * the Java why_flagged semantics: waiver_status is "active"/"none" off the measure's
- * waiver/exemption define (CqlEvaluationService), and days-since is the recency define's
- * value. Define naming is consistent across the runnable measures ("Days Since Last …",
- * "Has Active Waiver" / "Has Medical Exemption" / "Has Valid Exemption").
+ * waiver/exemption/exclusion define (CqlEvaluationService), and days-since is the recency
+ * define's value. The exemption flag is named one of (consistent across runnable measures):
+ * "Has Active Waiver" (OSHA audiogram), "Has Medical Exemption" (HAZWOPER/TB/HEDIS),
+ * "Has Valid Exemption" (flu), "Has Exclusion" (CMS eCQM 125/122).
  */
+const EXEMPTION_DEFINE = /waiver|exemption|exclusion/i;
+
 function daysSinceExam(evidence: unknown): string | null {
   const e = expressionResults(evidence).find((r) => /^days since/i.test(r.define));
   return e && e.result != null ? String(e.result) : null;
 }
 function waiverStatus(evidence: unknown): string | null {
-  const e = expressionResults(evidence).find((r) => /waiver|exemption/i.test(r.define));
+  const e = expressionResults(evidence).find((r) => EXEMPTION_DEFINE.test(r.define));
   return e && typeof e.result === "boolean" ? (e.result ? "active" : "none") : null;
 }
 

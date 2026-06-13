@@ -10,6 +10,9 @@ Branch `feat/issue-96-runs-outcomes`. Second runs slice: `GET /api/runs/:id/outc
 
 **backend-ts 93 tests — 92 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Next runs slice: the manual-run / rerun **write** pipeline (scope resolution + evaluation over the employee directory). Then the cases, measures, and programs modules.
 
+Review follow-up (Codex on PR #119), fixed before merge:
+- **P2 — CMS exclusion parity.** The waiver-status derivation regex matched only `waiver`/`exemption`, but CMS125/CMS122 name their exemption flag `Has Exclusion`, so CMS `EXCLUDED` rows returned `waiverStatus: null` instead of `"active"`. Widened the exemption-define matcher to `/waiver|exemption|exclusion/i` (the four runnable-measure names) and locked it with a CMS `Has Exclusion` test case.
+
 ---
 
 ## 2026-06-13 — Issue #96 Phase 4 (#107): API strangler — runs module, read-model slice
