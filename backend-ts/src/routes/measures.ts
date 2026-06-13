@@ -2,15 +2,21 @@
  * Measures route (#106) — the live, JVM-free compliance engine behind the worker.
  *
  *   GET  /api/measures                    list runnable measures
+ *   GET  /api/measures/:id/elm            compiled ELM (the AST) for the measure
  *   POST /api/measures/:id/evaluate       body = FHIR R4 bundle, ?date=YYYY-MM-DD
  *                                         → { subjectId, measure, outcome, evidence }
  *
  * This is Doug's "given a patient and a measure, are they compliant?" as a live TS
  * endpoint — CQL/eCQM evaluation in Node, no JVM (ELM compiled by @cqframework/cql).
+ *
+ * The /elm read endpoint serves the same compiled ELM the engine executes — the AST,
+ * with CQL source narrative (EnableAnnotations) + locators (EnableLocators) — so the
+ * Studio ELM-explorer can show source↔AST without a JVM. Read-only, no compliance.
  */
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
@@ -24,6 +30,15 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
 
   if (pathname === "/api/measures" && req.method === "GET") {
     return json(Object.values(MEASURES).map((m) => ({ id: m.id, name: m.name })));
+  }
+
+  const elmId = pathname.match(/^\/api\/measures\/([^/]+)\/elm$/)?.[1];
+  if (elmId && req.method === "GET") {
+    const meta = MEASURES[elmId];
+    if (!meta) return json({ error: "unknown_measure", measureId: elmId }, 404);
+    const elm = ELM_LIBRARIES[meta.library];
+    if (!elm) return json({ error: "elm_not_found", measureId: elmId, library: meta.library }, 404);
+    return json({ measureId: meta.id, name: meta.name, library: meta.library, elm });
   }
 
   const measureId = pathname.match(/^\/api\/measures\/([^/]+)\/evaluate$/)?.[1];
