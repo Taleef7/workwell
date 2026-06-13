@@ -43,6 +43,8 @@ export interface RunRecord {
   scopeId: string | null;
   /** Site the run targeted, if any (from the requested scope) — drives the `site` list filter. */
   site: string | null;
+  /** The original requested scope (measureId / employeeExternalId / site / …) — used to rerun. */
+  requestedScope: Record<string, unknown>;
   startedAt: string;
   completedAt: string | null;
 }
@@ -65,4 +67,6 @@ export interface RunStore {
   claimNextQueuedRun(workerId: string): Promise<RunRecord | null>;
   /** Move a QUEUED run to RUNNING (no-op if already past QUEUED) so it leaves the claim path. */
   markRunning(runId: string): Promise<RunRecord | null>;
+  /** Set a terminal status (COMPLETED/PARTIAL_FAILURE/FAILED) + completed_at. */
+  finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null>;
 }

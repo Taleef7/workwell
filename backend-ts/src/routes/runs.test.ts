@@ -86,6 +86,13 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   assert.deepEqual(summary.outcomeCounts, [{ status: "COMPLIANT", count: 1 }]);
 });
 
+test("POST /api/runs/manual maps scope errors (ALL_PROGRAMS → 501, missing measure → 400)", async () => {
+  const unsupported = await post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
+  assert.equal(unsupported?.status, 501);
+  const invalid = await post("/api/runs/manual", { scopeType: "MEASURE" });
+  assert.equal(invalid?.status, 400);
+});
+
 test("GET /api/runs honors status/scopeType/site filters", async () => {
   const a = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t", requestedScope: { site: "PLANT_A" } });
   const aRun = (await a!.json()) as { id: string };

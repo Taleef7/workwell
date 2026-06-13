@@ -22,6 +22,13 @@ import type { CreateRunInput } from "../stores/run-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import {
+  executeManualRun,
+  executeRerun,
+  UnsupportedScopeError,
+  InvalidRunRequestError,
+  type ManualRunRequest,
+} from "../run/run-pipeline.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -90,6 +97,33 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   if (logsId && req.method === "GET") {
     const logLimit = clampInt(url.searchParams.get("limit"), 200, 1, 1000);
     return json(toRunLogEntries(await (await store(env)).listLogs(logsId, logLimit)));
+  }
+
+  // ---- write pipeline (#107 runs module) ----------------------------------
+  // Manual scoped run (MEASURE / EMPLOYEE): evaluate + persist + summarize.
+  if (pathname === "/api/runs/manual" && req.method === "POST") {
+    const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
+    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), engine };
+    try {
+      return json(await executeManualRun(deps, body), 201);
+    } catch (err) {
+      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
+      if (err instanceof InvalidRunRequestError) return json({ error: "invalid_request", message: err.message }, 400);
+      return json({ error: "run_failed", message: String((err as Error)?.message ?? err) }, 500);
+    }
+  }
+
+  // Rerun an existing run's scope as a new run.
+  const rerunId = pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/)?.[1];
+  if (rerunId && req.method === "POST") {
+    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), engine };
+    try {
+      return json(await executeRerun(deps, rerunId), 201);
+    } catch (err) {
+      if (err instanceof InvalidRunRequestError) return json({ error: "not_found", message: err.message }, 404);
+      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
+      return json({ error: "run_failed", message: String((err as Error)?.message ?? err) }, 500);
+    }
   }
 
   if (pathname === "/api/runs" && req.method === "POST") {
