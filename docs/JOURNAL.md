@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 4 (#107): runs module — `/outcomes` → RunOutcomeRow + employee directory
+
+Branch `feat/issue-96-runs-outcomes`. Second runs slice: `GET /api/runs/:id/outcomes` now returns the frontend's `RunOutcomeRow` shape (was raw `OutcomeRecord[]`), so the run detail grid renders against the TS backend unchanged.
+
+- **`engine/synthetic/employee-catalog.ts`** — TS port of the Java `SyntheticEmployeeCatalog` (the `engine.synthetic` EmployeeDirectory): the 100 synthetic employees (externalId/name/role/site), generated from the Java source. `employeeById` returns null for unknown ids (callers degrade gracefully — no throw, unlike the Java `orElseThrow`).
+- **`run/read-models.ts`** — `toRunOutcomeRow`/`toRunOutcomeRows`: resolve each outcome's subject to name/role/site via the catalog, sort by employee name (Java `ORDER BY e.name`). `waiver_status` = "active"/"none" off the measure's waiver/exemption define, matching `CqlEvaluationService` why_flagged; `days_since_exam` from the recency define's value; `caseId` null (cases module not ported). Derivations use the consistent define naming across the runnable measures.
+- **`routes/runs.ts`** — `/outcomes` returns `RunOutcomeRow[]`.
+
+**backend-ts 93 tests — 92 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Next runs slice: the manual-run / rerun **write** pipeline (scope resolution + evaluation over the employee directory). Then the cases, measures, and programs modules.
+
+Review follow-up (Codex on PR #119), fixed before merge:
+- **P2 — CMS exclusion parity.** The waiver-status derivation regex matched only `waiver`/`exemption`, but CMS125/CMS122 name their exemption flag `Has Exclusion`, so CMS `EXCLUDED` rows returned `waiverStatus: null` instead of `"active"`. Widened the exemption-define matcher to `/waiver|exemption|exclusion/i` (the four runnable-measure names) and locked it with a CMS `Has Exclusion` test case.
+
+---
+
 ## 2026-06-13 — Issue #96 Phase 4 (#107): API strangler — runs module, read-model slice
 
 Branch `feat/issue-96-runs-read-models` (board #107 → In Progress; #105 merged via PR #117, board Done). First slice of the runs module: the GET read endpoints behind the **unchanged** frontend contract (`RunListItem` / `RunSummary` / `RunLogEntry` from `app/(dashboard)/runs/page.tsx`).
