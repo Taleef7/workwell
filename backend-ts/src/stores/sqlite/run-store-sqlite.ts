@@ -8,7 +8,7 @@
  * the contract for the spike.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CreateRunInput, RunRecord, RunStore, RunStatus } from "../run-store.ts";
+import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -68,11 +68,30 @@ export class SqliteRunStore implements RunStore {
     return row ? toRecord(row) : null;
   }
 
+  async listRuns(limit = 100): Promise<RunRecord[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT id, status, scope_type, scope_id, started_at, completed_at
+           FROM runs ORDER BY started_at DESC, id DESC LIMIT ?`,
+      )
+      .bind(limit)
+      .all<RunRow>();
+    return (results ?? []).map(toRecord);
+  }
+
   async appendLog(runId: string, level: string, message: string): Promise<void> {
     await this.db
       .prepare(`INSERT INTO run_logs (run_id, ts, level, message) VALUES (?, ?, ?, ?)`)
       .bind(runId, new Date().toISOString(), level, message)
       .run();
+  }
+
+  async listLogs(runId: string): Promise<RunLogRow[]> {
+    const { results } = await this.db
+      .prepare(`SELECT ts, level, message FROM run_logs WHERE run_id = ? ORDER BY id ASC`)
+      .bind(runId)
+      .all<RunLogRow>();
+    return results ?? [];
   }
 
   /**

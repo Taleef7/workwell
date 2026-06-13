@@ -62,6 +62,38 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   // An evaluated run must not be re-handed to a worker (it left the QUEUED claim path).
   const claim = await post("/api/runs/claim");
   assert.equal(claim?.status, 204, "evaluated run is not re-claimed");
+
+  // ---- read models (#107) -------------------------------------------------
+  // List: the run appears with the RunListItem shape + computed counts.
+  const list = await get("/api/runs");
+  assert.equal(list?.status, 200);
+  const rows2 = (await list!.json()) as Array<{ runId: string; measureName: string; totalEvaluated: number; compliantCount: number }>;
+  const mine = rows2.find((r) => r.runId === run.id)!;
+  assert.ok(mine, "created run is in the list");
+  assert.equal(mine.measureName, "Audiogram");
+  assert.equal(mine.totalEvaluated, 1);
+  assert.equal(mine.compliantCount, 1);
+
+  // Detail: RunSummary with passRate + outcomeCounts.
+  const detail = await get(`/api/runs/${run.id}`);
+  assert.equal(detail?.status, 200);
+  const summary = (await detail!.json()) as { measureVersion: string; passRate: number; outcomeCounts: Array<{ status: string; count: number }>; totalCases: number };
+  assert.equal(summary.measureVersion, "1.0.0");
+  assert.equal(summary.passRate, 100); // the one subject is COMPLIANT
+  assert.equal(summary.totalCases, 0);
+  assert.deepEqual(summary.outcomeCounts, [{ status: "COMPLIANT", count: 1 }]);
+});
+
+test("GET /api/runs/:id/logs returns the run's log timeline; unknown run detail → 404", async () => {
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+
+  const logs = await get(`/api/runs/${run.id}/logs`);
+  assert.equal(logs?.status, 200);
+  assert.ok(Array.isArray(await logs!.json()));
+
+  const missing = await get(`/api/runs/${crypto.randomUUID()}`);
+  assert.equal(missing?.status, 404);
 });
 
 test("evaluate against an unknown run → 404", async () => {
