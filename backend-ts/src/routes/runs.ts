@@ -21,7 +21,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
-import { toRunListItem, toRunSummary, toRunLogEntries, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -145,9 +145,10 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
     }
   }
 
+  // Per-employee outcome rows for the run detail grid (RunOutcomeRow).
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
-    return json(await (await outcomes(env)).listOutcomes(outcomesId));
+    return json(toRunOutcomeRows(await (await outcomes(env)).listOutcomes(outcomesId)));
   }
 
   // Run detail/summary — the RunSummary contract (superset of RunListItem).
