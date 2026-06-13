@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 2 (#105): TS auth — JWT + PBKDF2 + login/refresh/logout (in progress)
+
+Branch `feat/issue-96-auth-ts`. Started the auth port (board #105 → In Progress). Housekeeping first: closed #103 (Phase-1 spike, delivered via #114) and #104 (Postgres adapter, #115) — board auto-set both to Done; restored the 2026-06-12 "direction accepted" JOURNAL entry #115 had overwritten.
+
+Auth slices landed so far (all JVM-free, **zero new deps** — Node `crypto` + WebCrypto, portable to the Cloudflare Worker target):
+- **`auth/jwt.ts`** — faithful port of `com.workwell.security.JwtService`: HS256, base64url no-pad, access `{sub,role,iat,exp}` (900s) / refresh `{sub,refresh:true,iat,exp}` (28800s), refresh-can't-authenticate, constant-time verify, expired/tampered/wrong-secret rejected. 9 tests.
+- **`auth/password.ts`** — PBKDF2-HMAC-SHA256 via WebCrypto (210k iters, `pbkdf2$iter$salt$hash`), constant-time verify. Chosen over a bcrypt dependency to honor the no-new-deps rule; demo accounts are hardcoded, so re-hashing the same password is fine (the Java/Neon bcrypt rows are untouched). 4 tests.
+- **`auth/demo-users.ts`** — the four hardcoded demo roles from the Java `demo_users` seed (V003): author/approver/cm/admin@workwell.dev, shared password `Workwell123!`, case-insensitive lookup. 3 tests.
+- **`routes/auth.ts`** — `POST /api/auth/login|refresh|logout` port of `AuthController`: access token in the JSON body + HttpOnly `refresh_token` cookie scoped to `/api/auth`, SameSite/Secure (None ⇒ Secure forced), rotation on refresh. Mounted in `worker.ts` (memoized; 503 if `WORKWELL_AUTH_JWT_SECRET` unset). 8 route tests.
+
+**backend-ts 54 tests — 53 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Remaining #105 slices: auth middleware enforcing the role-gate route table (port of `JwtAuthFilter` + `SecurityConfig`), and the production fail-fast invariants (auth-enabled, strong secret, SameSite=None/Secure in prod). PR opens once those land.
+
+---
+
 ## 2026-06-13 — Issue #96: ELM Explorer — **live, JVM-free CQL → AST** authoring surface
 
 Branch `feat/issue-96-elm-explorer` (off `main`, kept off the still-open #115 Postgres PR). A demo/visualization slice that doubles as real strangler progress, prompted by Doug's meeting questions ("is CQL the canonical source of truth? is it like ANTLR/Yacc? AST vs parse tree?"). The point it makes tangibly: **CQL is the human source of truth; the `cql-to-elm` translator (ANTLR4) compiles it to ELM, the AST the Node `cql-execution` engine tree-walks; the `Outcome Status` define is the sole compliance result.** Hardened from a static viewer into a **real-time editor**: edit CQL, watch the AST rebuild live — and the translator now runs JVM-free at *runtime*, not just at build time.

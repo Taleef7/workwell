@@ -20,6 +20,7 @@ import type {
 } from "@mieweb/cloud";
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
+import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -35,7 +36,24 @@ export interface Env {
 
   // ---- plain runtime config (not @mieweb/cloud bindings) ------------------
   WORKWELL_AUTH_JWT_SECRET?: string;
+  WORKWELL_AUTH_COOKIE_SAME_SITE?: string;
+  WORKWELL_AUTH_COOKIE_SECURE?: string;
   OPENAI_API_KEY?: string;
+}
+
+// Memoized auth handler, keyed by secret (config is cheap but createJwt is per-call).
+let authHandlerSecret: string | undefined;
+let authHandler: AuthHandler | undefined;
+function getAuthHandler(env: Env): AuthHandler | null {
+  if (!env.WORKWELL_AUTH_JWT_SECRET) return null; // not configured — see fail-fast slice
+  if (authHandler && authHandlerSecret === env.WORKWELL_AUTH_JWT_SECRET) return authHandler;
+  authHandlerSecret = env.WORKWELL_AUTH_JWT_SECRET;
+  authHandler = createAuthHandler({
+    secret: env.WORKWELL_AUTH_JWT_SECRET,
+    cookieSameSite: env.WORKWELL_AUTH_COOKIE_SAME_SITE,
+    cookieSecure: env.WORKWELL_AUTH_COOKIE_SECURE === "true",
+  });
+  return authHandler;
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -60,6 +78,15 @@ export default {
     // Version — parity with GET /api/version (unauthenticated discovery).
     if (pathname === "/api/version") {
       return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
+    }
+
+    // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
+    const auth = getAuthHandler(env);
+    if (auth) {
+      const authResponse = await auth(req);
+      if (authResponse) return authResponse;
+    } else if (pathname.startsWith("/api/auth/")) {
+      return json({ error: "auth_not_configured", hint: "WORKWELL_AUTH_JWT_SECRET is unset" }, 503);
     }
 
     // Measures — live CQL/eCQM evaluation in Node (no JVM), #106.
