@@ -21,6 +21,9 @@ import type {
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
+import { createJwt, type JwtService } from "./auth/jwt.ts";
+import { authorize, extractPrincipal } from "./auth/authorize.ts";
+import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -36,24 +39,56 @@ export interface Env {
 
   // ---- plain runtime config (not @mieweb/cloud bindings) ------------------
   WORKWELL_AUTH_JWT_SECRET?: string;
+  WORKWELL_AUTH_ENABLED?: string;
   WORKWELL_AUTH_COOKIE_SAME_SITE?: string;
   WORKWELL_AUTH_COOKIE_SECURE?: string;
+  WORKWELL_ENVIRONMENT?: string;
+  SPRING_PROFILES_ACTIVE?: string;
+  NODE_ENV?: string;
   OPENAI_API_KEY?: string;
 }
 
-// Memoized auth handler, keyed by secret (config is cheap but createJwt is per-call).
-let authHandlerSecret: string | undefined;
+// Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
+let cachedSecret: string | undefined;
 let authHandler: AuthHandler | undefined;
+let verifier: JwtService | undefined;
 function getAuthHandler(env: Env): AuthHandler | null {
-  if (!env.WORKWELL_AUTH_JWT_SECRET) return null; // not configured — see fail-fast slice
-  if (authHandler && authHandlerSecret === env.WORKWELL_AUTH_JWT_SECRET) return authHandler;
-  authHandlerSecret = env.WORKWELL_AUTH_JWT_SECRET;
+  if (!env.WORKWELL_AUTH_JWT_SECRET) return null; // not configured — see fail-fast below
+  rebuildAuthIfNeeded(env);
+  return authHandler ?? null;
+}
+function getVerifier(env: Env): JwtService | null {
+  if (!env.WORKWELL_AUTH_JWT_SECRET) return null;
+  rebuildAuthIfNeeded(env);
+  return verifier ?? null;
+}
+function rebuildAuthIfNeeded(env: Env): void {
+  if (authHandler && cachedSecret === env.WORKWELL_AUTH_JWT_SECRET) return;
+  cachedSecret = env.WORKWELL_AUTH_JWT_SECRET;
   authHandler = createAuthHandler({
-    secret: env.WORKWELL_AUTH_JWT_SECRET,
+    secret: env.WORKWELL_AUTH_JWT_SECRET!,
     cookieSameSite: env.WORKWELL_AUTH_COOKIE_SAME_SITE,
     cookieSecure: env.WORKWELL_AUTH_COOKIE_SECURE === "true",
   });
-  return authHandler;
+  verifier = createJwt({ secret: env.WORKWELL_AUTH_JWT_SECRET! });
+}
+
+// Fail-fast: validate auth/cookie config once. If unsafe, every request 503s with
+// the reason (the Worker analogue of a crash-on-boot ApplicationRunner).
+let startupError: string | null | undefined;
+function startupGuard(env: Env): string | null {
+  if (startupError !== undefined) return startupError;
+  try {
+    assertSafeStartup(env as StartupEnv);
+    startupError = null;
+  } catch (err) {
+    startupError = String((err as Error)?.message ?? err);
+  }
+  return startupError;
+}
+
+function authEnabled(env: Env): boolean {
+  return !!env.WORKWELL_AUTH_JWT_SECRET && (env.WORKWELL_AUTH_ENABLED ?? "true").toLowerCase() !== "false";
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -70,6 +105,10 @@ export default {
   ): Promise<Response> {
     const { pathname } = new URL(req.url);
 
+    // Fail-fast: refuse to serve under an unsafe auth/cookie configuration.
+    const unsafe = startupGuard(env);
+    if (unsafe) return json({ error: "unsafe_configuration", message: unsafe }, 503);
+
     // Health — parity with the Java backend's GET /actuator/health.
     if (pathname === "/actuator/health" || pathname === "/health") {
       return json({ status: "UP", stack: "workwell-ts", phase: "1-spike" });
@@ -78,6 +117,16 @@ export default {
     // Version — parity with GET /api/version (unauthenticated discovery).
     if (pathname === "/api/version") {
       return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
+    }
+
+    // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
+    // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
+    if (authEnabled(env)) {
+      const principal = extractPrincipal(req, getVerifier(env)!);
+      const decision = authorize(req.method, pathname, principal);
+      if (!decision.ok) {
+        return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);
+      }
     }
 
     // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).

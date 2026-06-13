@@ -1,16 +1,19 @@
 # Journal
 
-## 2026-06-13 — Issue #96 Phase 2 (#105): TS auth — JWT + PBKDF2 + login/refresh/logout (in progress)
+## 2026-06-13 — Issue #96 Phase 2 (#105): TS auth — JWT + PBKDF2 + login/refresh/logout + role gates + fail-fast
 
-Branch `feat/issue-96-auth-ts`. Started the auth port (board #105 → In Progress). Housekeeping first: closed #103 (Phase-1 spike, delivered via #114) and #104 (Postgres adapter, #115) — board auto-set both to Done; restored the 2026-06-12 "direction accepted" JOURNAL entry #115 had overwritten.
+Branch `feat/issue-96-auth-ts` → **PR #117**. Full port of the Java auth/security layer to the TS backend (board #105). Housekeeping first: closed #103 (Phase-1 spike, delivered via #114) and #104 (Postgres adapter, #115) — board auto-set both to Done; restored the 2026-06-12 "direction accepted" JOURNAL entry #115 had overwritten.
 
-Auth slices landed so far (all JVM-free, **zero new deps** — Node `crypto` + WebCrypto, portable to the Cloudflare Worker target):
-- **`auth/jwt.ts`** — faithful port of `com.workwell.security.JwtService`: HS256, base64url no-pad, access `{sub,role,iat,exp}` (900s) / refresh `{sub,refresh:true,iat,exp}` (28800s), refresh-can't-authenticate, constant-time verify, expired/tampered/wrong-secret rejected. 9 tests.
-- **`auth/password.ts`** — PBKDF2-HMAC-SHA256 via WebCrypto (210k iters, `pbkdf2$iter$salt$hash`), constant-time verify. Chosen over a bcrypt dependency to honor the no-new-deps rule; demo accounts are hardcoded, so re-hashing the same password is fine (the Java/Neon bcrypt rows are untouched). 4 tests.
-- **`auth/demo-users.ts`** — the four hardcoded demo roles from the Java `demo_users` seed (V003): author/approver/cm/admin@workwell.dev, shared password `Workwell123!`, case-insensitive lookup. 3 tests.
-- **`routes/auth.ts`** — `POST /api/auth/login|refresh|logout` port of `AuthController`: access token in the JSON body + HttpOnly `refresh_token` cookie scoped to `/api/auth`, SameSite/Secure (None ⇒ Secure forced), rotation on refresh. Mounted in `worker.ts` (memoized; 503 if `WORKWELL_AUTH_JWT_SECRET` unset). 8 route tests.
+All JVM-free, **zero new deps** (Node `crypto` + WebCrypto — portable to the Cloudflare Worker target):
+- **`auth/jwt.ts`** — port of `JwtService`: HS256, base64url no-pad, access `{sub,role,iat,exp}` (900s) / refresh `{sub,refresh:true,iat,exp}` (28800s), refresh-can't-authenticate, constant-time verify, expired/tampered/wrong-secret rejected. 9 tests.
+- **`auth/password.ts`** — PBKDF2-HMAC-SHA256 via WebCrypto (210k iters, `pbkdf2$iter$salt$hash`), constant-time. Chosen over a bcrypt dependency (no-new-deps rule); demo accounts are hardcoded so re-hashing the same password is fine (Java/Neon bcrypt rows untouched). 4 tests.
+- **`auth/demo-users.ts`** — the four hardcoded roles from the Java `demo_users` seed (V003): author/approver/cm/admin@workwell.dev, shared `Workwell123!`, case-insensitive lookup. 3 tests.
+- **`routes/auth.ts`** — `POST /api/auth/login|refresh|logout` port of `AuthController`: access token in the JSON body + HttpOnly `refresh_token` cookie scoped to `/api/auth`, SameSite/Secure (None ⇒ Secure forced), rotation on refresh. 8 tests.
+- **`auth/authorize.ts`** — port of `JwtAuthFilter` + the `SecurityConfig` role matrix: Bearer-token principal extraction + ordered, first-match-wins rules (admin→ADMIN, evidence/runs/cases→CASE_MANAGER, approve/activate→APPROVER, spec/cql/tests→AUTHOR, etc.), 401 vs 403 semantics, public allowlist. The two TS-only ELM-Explorer endpoints (GET `…/elm`, POST `/compile`) are gated to AUTHENTICATED. 9 tests.
+- **`config/startup-safety.ts`** — auth/cookie subset of `StartupSafetyValidator`: production fail-fast on auth-disabled, weak/short JWT secret, or a non-`None`/non-Secure refresh cookie; the SameSite=None-requires-Secure and unknown-SameSite checks apply in every environment. 7 tests.
+- **`worker.ts`** — wires the fail-fast guard (unsafe config ⇒ 503 on every request), the authorization gate (skipped when auth is disabled, mirroring `authEnabled=false`→permitAll), and the auth routes. A worker integration test proves the gate end-to-end (public health; 401 without a token; login→token→authorized read; role-gated 403). 3 tests.
 
-**backend-ts 54 tests — 53 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Remaining #105 slices: auth middleware enforcing the role-gate route table (port of `JwtAuthFilter` + `SecurityConfig`), and the production fail-fast invariants (auth-enabled, strong secret, SameSite=None/Secure in prod). PR opens once those land.
+**backend-ts 73 tests — 72 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Audit-event emission on auth actions is deferred to when the audit module is ported (no audit store on the TS side yet); CORS-origin + demo-flag fail-fast checks stay with the Java validator until the CORS layer is ported in Phase 4. Next: Phase 4 API strangler (#107).
 
 ---
 
