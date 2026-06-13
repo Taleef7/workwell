@@ -8,7 +8,11 @@ Branch `feat/issue-96-runs-read-models` (board #107 → In Progress; #105 merged
 - **`stores/run-store.ts` + both adapters** — added `listRuns(limit)` (newest-first) and `listLogs(runId)` to the contract; implemented on the SQLite floor **and** the Postgres ceiling; both run the same two new cases in the shared `store-contract.ts` suite.
 - **`routes/runs.ts`** — `GET /api/runs` (list), `GET /api/runs/:id` (RunSummary, superset of RunListItem so it satisfies both frontend casts), `GET /api/runs/:id/logs`. Gated AUTHENTICATED by the #105 authz layer.
 
-**backend-ts 88 tests — 87 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Scoped honestly: `totalCases` is 0 and `triggerType` is "MANUAL" until the cases module + run finalization land (later #107 slices). Next runs slices: `/outcomes` RunOutcomeRow mapping (employee dir + evidence), then the manual-run/rerun pipeline; then the cases, measures, and programs modules.
+**backend-ts 90 tests — 89 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Scoped honestly: `totalCases` is 0 and `triggerType` is "MANUAL" until the cases module + run finalization land (later #107 slices). Next runs slices: `/outcomes` RunOutcomeRow mapping (employee dir + evidence), then the manual-run/rerun pipeline; then the cases, measures, and programs modules.
+
+Review follow-ups (Codex on PR #118), both fixed before merge:
+- **P2 — list filters.** `GET /api/runs` ignored the page's `status`/`scopeType`/`triggerType`/`site`/`from`/`to` params and returned all runs. Now honored via a pure `matchesRunFilters` (filter-then-cap so `limit` bounds the *matching* rows). `site` is derived from the run's requested scope — added `site` to `RunRecord`, populated from `requested_scope_json` on both the SQLite floor and the Postgres ceiling.
+- **P2 — log limit.** `GET /api/runs/:id/logs?limit=200` dropped the param and returned every row. `listLogs` now takes an optional `limit` (both adapters) and the route clamps `?limit` to [1, 1000]; the list `?limit` is clamped the same way.
 
 ---
 

@@ -15,18 +15,33 @@ interface RunRow {
   status: string;
   scope_type: string;
   scope_id: string | null;
+  requested_scope_json: string | null;
   started_at: string;
   completed_at: string | null;
 }
+
+/** A run's site lives in the requested scope (set by the scoped-run pipeline). */
+const siteOf = (requestedScopeJson: string | null): string | null => {
+  if (!requestedScopeJson) return null;
+  try {
+    const site = (JSON.parse(requestedScopeJson) as { site?: unknown }).site;
+    return typeof site === "string" && site ? site : null;
+  } catch {
+    return null;
+  }
+};
 
 const toRecord = (r: RunRow): RunRecord => ({
   id: r.id,
   status: r.status as RunStatus,
   scopeType: r.scope_type as CreateRunInput["scopeType"],
   scopeId: r.scope_id,
+  site: siteOf(r.requested_scope_json),
   startedAt: r.started_at,
   completedAt: r.completed_at,
 });
+
+const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, started_at, completed_at";
 
 export class SqliteRunStore implements RunStore {
   constructor(private readonly db: CloudDatabase) {}
@@ -58,22 +73,13 @@ export class SqliteRunStore implements RunStore {
   }
 
   async getRun(id: string): Promise<RunRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT id, status, scope_type, scope_id, started_at, completed_at
-           FROM runs WHERE id = ?`,
-      )
-      .bind(id)
-      .first<RunRow>();
+    const row = await this.db.prepare(`SELECT ${RUN_COLS} FROM runs WHERE id = ?`).bind(id).first<RunRow>();
     return row ? toRecord(row) : null;
   }
 
   async listRuns(limit = 100): Promise<RunRecord[]> {
     const { results } = await this.db
-      .prepare(
-        `SELECT id, status, scope_type, scope_id, started_at, completed_at
-           FROM runs ORDER BY started_at DESC, id DESC LIMIT ?`,
-      )
+      .prepare(`SELECT ${RUN_COLS} FROM runs ORDER BY started_at DESC, id DESC LIMIT ?`)
       .bind(limit)
       .all<RunRow>();
     return (results ?? []).map(toRecord);
@@ -86,11 +92,10 @@ export class SqliteRunStore implements RunStore {
       .run();
   }
 
-  async listLogs(runId: string): Promise<RunLogRow[]> {
-    const { results } = await this.db
-      .prepare(`SELECT ts, level, message FROM run_logs WHERE run_id = ? ORDER BY id ASC`)
-      .bind(runId)
-      .all<RunLogRow>();
+  async listLogs(runId: string, limit?: number): Promise<RunLogRow[]> {
+    const sql = `SELECT ts, level, message FROM run_logs WHERE run_id = ? ORDER BY id ASC${limit != null ? " LIMIT ?" : ""}`;
+    const stmt = this.db.prepare(sql);
+    const { results } = await (limit != null ? stmt.bind(runId, limit) : stmt.bind(runId)).all<RunLogRow>();
     return results ?? [];
   }
 
@@ -108,7 +113,7 @@ export class SqliteRunStore implements RunStore {
             SELECT id FROM runs WHERE status = 'QUEUED'
             ORDER BY started_at ASC LIMIT 1
           )
-        RETURNING id, status, scope_type, scope_id, started_at, completed_at`,
+        RETURNING ${RUN_COLS}`,
       )
       .bind(workerId)
       .first<RunRow>();

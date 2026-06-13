@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toRunListItem, toRunSummary, toRunLogEntries } from "./read-models.ts";
+import { toRunListItem, toRunSummary, toRunLogEntries, matchesRunFilters } from "./read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 
@@ -13,6 +13,7 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   status: "COMPLETED",
   scopeType: "MEASURE",
   scopeId: "audiogram",
+  site: null,
   startedAt: "2026-06-13T10:00:00.000Z",
   completedAt: "2026-06-13T10:00:05.000Z",
   ...over,
@@ -68,6 +69,27 @@ test("an ALL_PROGRAMS run (no scopeId) is labelled 'All Programs', and empty run
 
 test("an in-flight run (no completedAt) has durationMs 0", () => {
   assert.equal(toRunListItem(run({ completedAt: null, status: "RUNNING" }), []).durationMs, 0);
+});
+
+test("matchesRunFilters AND-s status/scopeType/triggerType/site and day-bounded from/to", () => {
+  const r = run({ status: "FAILED", scopeType: "SITE", site: "PLANT_A", startedAt: "2026-06-13T10:00:00.000Z" });
+  // each filter in isolation
+  assert.equal(matchesRunFilters(r, { status: "FAILED" }), true);
+  assert.equal(matchesRunFilters(r, { status: "COMPLETED" }), false);
+  assert.equal(matchesRunFilters(r, { scopeType: "SITE" }), true);
+  assert.equal(matchesRunFilters(r, { scopeType: "MEASURE" }), false);
+  assert.equal(matchesRunFilters(r, { site: "PLANT_A" }), true);
+  assert.equal(matchesRunFilters(r, { site: "PLANT_B" }), false);
+  // triggerType: floor runs are MANUAL, so a SCHEDULED filter excludes them
+  assert.equal(matchesRunFilters(r, { triggerType: "MANUAL" }), true);
+  assert.equal(matchesRunFilters(r, { triggerType: "SCHEDULED" }), false);
+  // day-granular, inclusive bounds
+  assert.equal(matchesRunFilters(r, { from: "2026-06-13", to: "2026-06-13" }), true);
+  assert.equal(matchesRunFilters(r, { from: "2026-06-14" }), false);
+  assert.equal(matchesRunFilters(r, { to: "2026-06-12" }), false);
+  // combined AND
+  assert.equal(matchesRunFilters(r, { status: "FAILED", site: "PLANT_A", scopeType: "SITE" }), true);
+  assert.equal(matchesRunFilters(r, { status: "FAILED", site: "PLANT_B" }), false);
 });
 
 test("toRunLogEntries maps the store row (ts) to the frontend shape (timestamp)", () => {

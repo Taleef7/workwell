@@ -19,6 +19,7 @@ interface RunRow {
   status: string;
   scope_type: string;
   scope_id: string | null;
+  requested_scope_json: unknown; // JSONB → already parsed by pg
   started_at: Date | string;
   completed_at: Date | string | null;
 }
@@ -26,16 +27,24 @@ interface RunRow {
 const iso = (v: Date | string | null): string | null =>
   v == null ? null : v instanceof Date ? v.toISOString() : v;
 
+/** A run's site lives in the requested scope (set by the scoped-run pipeline). */
+const siteOf = (requestedScope: unknown): string | null => {
+  const site = (requestedScope as { site?: unknown } | null)?.site;
+  return typeof site === "string" && site ? site : null;
+};
+
 const toRecord = (r: RunRow): RunRecord => ({
   id: r.id,
   status: r.status as RunStatus,
   scopeType: r.scope_type as CreateRunInput["scopeType"],
   scopeId: r.scope_id,
+  site: siteOf(r.requested_scope_json),
   startedAt: iso(r.started_at)!,
   completedAt: iso(r.completed_at),
 });
 
 const T = `${SPIKE_SCHEMA}.runs`;
+const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, started_at, completed_at";
 
 export class PgRunStore implements RunStore {
   constructor(private readonly pool: PgPool) {}
@@ -48,7 +57,7 @@ export class PgRunStore implements RunStore {
          (id, status, scope_type, scope_id, triggered_by, requested_scope_json,
           measurement_period_start, measurement_period_end, started_at)
        VALUES ($1, 'QUEUED', $2, $3, $4, $5::jsonb, $6, $7, $8)
-       RETURNING id, status, scope_type, scope_id, started_at, completed_at`,
+       RETURNING ${RUN_COLS}`,
       [
         id,
         input.scopeType,
@@ -68,7 +77,7 @@ export class PgRunStore implements RunStore {
     // Postgres throw `invalid input syntax for type uuid` — match the contract.
     if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<RunRow>(
-      `SELECT id, status, scope_type, scope_id, started_at, completed_at
+      `SELECT ${RUN_COLS}
          FROM ${T} WHERE id = $1`,
       [id],
     );
@@ -77,7 +86,7 @@ export class PgRunStore implements RunStore {
 
   async listRuns(limit = 100): Promise<RunRecord[]> {
     const { rows } = await this.pool.query<RunRow>(
-      `SELECT id, status, scope_type, scope_id, started_at, completed_at
+      `SELECT ${RUN_COLS}
          FROM ${T} ORDER BY started_at DESC, id DESC LIMIT $1`,
       [limit],
     );
@@ -91,11 +100,11 @@ export class PgRunStore implements RunStore {
     );
   }
 
-  async listLogs(runId: string): Promise<RunLogRow[]> {
+  async listLogs(runId: string, limit?: number): Promise<RunLogRow[]> {
     if (!isUuid(runId)) return [];
     const { rows } = await this.pool.query<{ ts: Date | string; level: string; message: string }>(
-      `SELECT ts, level, message FROM ${SPIKE_SCHEMA}.run_logs WHERE run_id = $1 ORDER BY id ASC`,
-      [runId],
+      `SELECT ts, level, message FROM ${SPIKE_SCHEMA}.run_logs WHERE run_id = $1 ORDER BY id ASC${limit != null ? " LIMIT $2" : ""}`,
+      limit != null ? [runId, limit] : [runId],
     );
     return rows.map((r) => ({ ts: iso(r.ts)!, level: r.level, message: r.message }));
   }
@@ -125,7 +134,7 @@ export class PgRunStore implements RunStore {
         `UPDATE ${T}
             SET status = 'RUNNING', claimed_by = $2
           WHERE id = $1
-        RETURNING id, status, scope_type, scope_id, started_at, completed_at`,
+        RETURNING ${RUN_COLS}`,
         [picked.rows[0].id, workerId],
       );
       await client.query("COMMIT");

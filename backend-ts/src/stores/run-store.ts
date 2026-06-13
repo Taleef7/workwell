@@ -41,6 +41,8 @@ export interface RunRecord {
   status: RunStatus;
   scopeType: CreateRunInput["scopeType"];
   scopeId: string | null;
+  /** Site the run targeted, if any (from the requested scope) — drives the `site` list filter. */
+  site: string | null;
   startedAt: string;
   completedAt: string | null;
 }
@@ -57,8 +59,8 @@ export interface RunStore {
   /** Runs newest-first (by started_at), capped at `limit` — the /api/runs list read model. */
   listRuns(limit?: number): Promise<RunRecord[]>;
   appendLog(runId: string, level: string, message: string): Promise<void>;
-  /** A run's log timeline, oldest-first. */
-  listLogs(runId: string): Promise<RunLogRow[]>;
+  /** A run's log timeline, oldest-first, capped at `limit` when given. */
+  listLogs(runId: string, limit?: number): Promise<RunLogRow[]>;
   /** Atomically claim the next QUEUED run for a worker (locking is adapter-specific). */
   claimNextQueuedRun(workerId: string): Promise<RunRecord | null>;
   /** Move a QUEUED run to RUNNING (no-op if already past QUEUED) so it leaves the claim path. */
