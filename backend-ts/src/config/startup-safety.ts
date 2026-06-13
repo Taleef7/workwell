@@ -4,9 +4,10 @@
  * misconfigured production deploy crashes loudly instead of silently shipping an
  * auth-disabled / weak-secret / wrong-cookie backend.
  *
- * (CORS-origin and demo-flag checks stay with the Java validator until the CORS layer
- * is ported in Phase 4; the auth + cookie invariants are the ones #105 owns.)
+ * (Demo-flag checks stay with the Java validator until those flags are ported; the
+ * auth, cookie, and CORS-origin invariants are the ones #105 owns.)
  */
+import { parseAllowedOrigins } from "./cors.ts";
 const PRODUCTION_LIKE_PROFILES = new Set(["prod", "production", "fly", "staging"]);
 const KNOWN_WEAK_JWT_SECRETS = new Set([
   "change-me",
@@ -25,6 +26,7 @@ export interface StartupEnv {
   WORKWELL_AUTH_JWT_SECRET?: string;
   WORKWELL_AUTH_COOKIE_SAME_SITE?: string;
   WORKWELL_AUTH_COOKIE_SECURE?: string;
+  WORKWELL_CORS_ALLOWED_ORIGINS?: string;
 }
 
 export function isProductionLike(env: StartupEnv): boolean {
@@ -59,6 +61,11 @@ export function assertSafeStartup(env: StartupEnv): void {
         "Unsafe WorkWell configuration: WORKWELL_AUTH_JWT_SECRET must be at least 32 characters and not a demo/default value in production.",
       );
     }
+    const origins = parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS);
+    if (origins.length === 0) {
+      throw new Error("Unsafe WorkWell configuration: WORKWELL_CORS_ALLOWED_ORIGINS must define at least one exact origin in production.");
+    }
+    origins.forEach(validateCorsOrigin);
   }
 
   // Default SameSite=Lax / Secure=false match the Java @Value defaults (local same-origin dev).
@@ -67,6 +74,32 @@ export function assertSafeStartup(env: StartupEnv): void {
     env.WORKWELL_AUTH_COOKIE_SAME_SITE ?? "Lax",
     (env.WORKWELL_AUTH_COOKIE_SECURE ?? "false").trim().toLowerCase() === "true",
   );
+}
+
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+/** Port of StartupSafetyValidator.validateCorsOrigin: reject blank/wildcard/invalid/localhost. */
+export function validateCorsOrigin(origin: string): void {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    throw new Error("Unsafe WorkWell configuration: WORKWELL_CORS_ALLOWED_ORIGINS contains a blank origin in production.");
+  }
+  if (trimmed.includes("*")) {
+    throw new Error("Unsafe WorkWell configuration: wildcard CORS origins are not allowed in production.");
+  }
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`Unsafe WorkWell configuration: invalid CORS origin in production: ${trimmed}`);
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!url.protocol || !host) {
+    throw new Error(`Unsafe WorkWell configuration: invalid CORS origin in production: ${trimmed}`);
+  }
+  if (LOCALHOST_HOSTS.has(host)) {
+    throw new Error("Unsafe WorkWell configuration: localhost CORS origins are not allowed in production.");
+  }
 }
 
 export function assertSafeCookiePolicy(productionLike: boolean, cookieSameSite: string | undefined, cookieSecure: boolean): void {

@@ -50,9 +50,23 @@ test("prod: weak secret throws", () => {
 });
 
 test("prod: SameSite must be None and Secure true", () => {
-  const base = { SPRING_PROFILES_ACTIVE: "prod", WORKWELL_AUTH_JWT_SECRET: STRONG };
+  const base = { SPRING_PROFILES_ACTIVE: "prod", WORKWELL_AUTH_JWT_SECRET: STRONG, WORKWELL_CORS_ALLOWED_ORIGINS: "https://twh.os.mieweb.org" };
   assert.throws(() => assertSafeStartup({ ...base, WORKWELL_AUTH_COOKIE_SAME_SITE: "Lax" }), /must be 'None'/);
   assert.throws(() => assertSafeStartup({ ...base, WORKWELL_AUTH_COOKIE_SAME_SITE: "None", WORKWELL_AUTH_COOKIE_SECURE: "false" }), /Secure/);
+});
+
+test("prod: CORS origins must be set, exact, and non-localhost", () => {
+  const base = {
+    SPRING_PROFILES_ACTIVE: "prod",
+    WORKWELL_AUTH_JWT_SECRET: STRONG,
+    WORKWELL_AUTH_COOKIE_SAME_SITE: "None",
+    WORKWELL_AUTH_COOKIE_SECURE: "true",
+  };
+  // default origins are localhost → rejected in prod
+  assert.throws(() => assertSafeStartup(base), /localhost CORS origins/);
+  assert.throws(() => assertSafeStartup({ ...base, WORKWELL_CORS_ALLOWED_ORIGINS: "https://*.mieweb.org" }), /wildcard/);
+  assert.throws(() => assertSafeStartup({ ...base, WORKWELL_CORS_ALLOWED_ORIGINS: "not-a-url" }), /invalid CORS origin/);
+  assert.throws(() => assertSafeStartup({ ...base, WORKWELL_CORS_ALLOWED_ORIGINS: "   " }), /at least one exact origin/);
 });
 
 test("prod: a fully safe config passes", () => {
@@ -63,6 +77,7 @@ test("prod: a fully safe config passes", () => {
       WORKWELL_AUTH_JWT_SECRET: STRONG,
       WORKWELL_AUTH_COOKIE_SAME_SITE: "None",
       WORKWELL_AUTH_COOKIE_SECURE: "true",
+      WORKWELL_CORS_ALLOWED_ORIGINS: "https://twh.os.mieweb.org",
     }),
   );
 });

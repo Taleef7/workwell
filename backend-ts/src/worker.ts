@@ -24,6 +24,7 @@ import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
+import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -45,6 +46,7 @@ export interface Env {
   WORKWELL_ENVIRONMENT?: string;
   SPRING_PROFILES_ACTIVE?: string;
   NODE_ENV?: string;
+  WORKWELL_CORS_ALLOWED_ORIGINS?: string;
   OPENAI_API_KEY?: string;
 }
 
@@ -97,64 +99,69 @@ const json = (data: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
+/** Route a request to a Response (no CORS decoration — the caller adds that). */
+async function route(req: Request, env: Env): Promise<Response> {
+  const { pathname } = new URL(req.url);
+
+  // Fail-fast: refuse to serve under an unsafe auth/cookie/CORS configuration.
+  const unsafe = startupGuard(env);
+  if (unsafe) return json({ error: "unsafe_configuration", message: unsafe }, 503);
+
+  // Health — parity with the Java backend's GET /actuator/health.
+  if (pathname === "/actuator/health" || pathname === "/health") {
+    return json({ status: "UP", stack: "workwell-ts", phase: "1-spike" });
+  }
+
+  // Version — parity with GET /api/version (unauthenticated discovery).
+  if (pathname === "/api/version") {
+    return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
+  }
+
+  // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
+  // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
+  if (authEnabled(env)) {
+    const principal = extractPrincipal(req, getVerifier(env)!);
+    const decision = authorize(req.method, pathname, principal);
+    if (!decision.ok) {
+      return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);
+    }
+  }
+
+  // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
+  const auth = getAuthHandler(env);
+  if (auth) {
+    const authResponse = await auth(req);
+    if (authResponse) return authResponse;
+  } else if (pathname.startsWith("/api/auth/")) {
+    return json({ error: "auth_not_configured", hint: "WORKWELL_AUTH_JWT_SECRET is unset" }, 503);
+  }
+
+  // Measures — live CQL/eCQM evaluation in Node (no JVM), #106.
+  const measuresResponse = await handleMeasures(req);
+  if (measuresResponse) return measuresResponse;
+
+  // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
+  const runsResponse = await handleRuns(req, env);
+  if (runsResponse) return runsResponse;
+
+  // Everything else is not ported yet. Be honest (no faked behavior), the
+  // same principle as UnsupportedBindingError / "AI never decides compliance".
+  return json(
+    {
+      error: "not_implemented",
+      path: pathname,
+      hint: "TS backend skeleton — endpoint groups are ported in Phase 4 (#107/#108)",
+    },
+    501,
+  );
+}
+
 export default {
-  async fetch(
-    req: Request,
-    env: Env,
-    _ctx: CloudExecutionContext,
-  ): Promise<Response> {
-    const { pathname } = new URL(req.url);
-
-    // Fail-fast: refuse to serve under an unsafe auth/cookie configuration.
-    const unsafe = startupGuard(env);
-    if (unsafe) return json({ error: "unsafe_configuration", message: unsafe }, 503);
-
-    // Health — parity with the Java backend's GET /actuator/health.
-    if (pathname === "/actuator/health" || pathname === "/health") {
-      return json({ status: "UP", stack: "workwell-ts", phase: "1-spike" });
-    }
-
-    // Version — parity with GET /api/version (unauthenticated discovery).
-    if (pathname === "/api/version") {
-      return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
-    }
-
-    // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
-    // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
-    if (authEnabled(env)) {
-      const principal = extractPrincipal(req, getVerifier(env)!);
-      const decision = authorize(req.method, pathname, principal);
-      if (!decision.ok) {
-        return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);
-      }
-    }
-
-    // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
-    const auth = getAuthHandler(env);
-    if (auth) {
-      const authResponse = await auth(req);
-      if (authResponse) return authResponse;
-    } else if (pathname.startsWith("/api/auth/")) {
-      return json({ error: "auth_not_configured", hint: "WORKWELL_AUTH_JWT_SECRET is unset" }, 503);
-    }
-
-    // Measures — live CQL/eCQM evaluation in Node (no JVM), #106.
-    const measuresResponse = await handleMeasures(req);
-    if (measuresResponse) return measuresResponse;
-
-    // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
-    const runsResponse = await handleRuns(req, env);
-    if (runsResponse) return runsResponse;
-
-    // Everything else is not ported yet. Be honest (no faked behavior), the
-    // same principle as UnsupportedBindingError / "AI never decides compliance".
-    return json(
-      {
-        error: "not_implemented",
-        path: pathname,
-        hint: "TS backend skeleton — endpoint groups are ported in Phase 4 (#107/#108)",
-      },
-      501,
-    );
+  async fetch(req: Request, env: Env, _ctx: CloudExecutionContext): Promise<Response> {
+    const origins = parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS);
+    // CORS preflight must be answered before auth — browsers send OPTIONS without
+    // credentials, so the real cross-site login/API call is blocked otherwise.
+    if (req.method === "OPTIONS") return preflightResponse(req, origins);
+    return withCors(await route(req, env), req, origins);
   },
 };
