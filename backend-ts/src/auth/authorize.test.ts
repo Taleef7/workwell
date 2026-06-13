@@ -47,6 +47,18 @@ test("runs/cases writes require CASE_MANAGER or ADMIN", () => {
   assert.deepEqual(authorize("POST", "/api/runs/manual", author), { ok: false, status: 403 });
 });
 
+test("the runs COLLECTION create (POST /api/runs, no trailing slash) is also CM/ADMIN-gated", () => {
+  // regression: /api/runs/** must match the base path too (Spring AntPathMatcher),
+  // else POST /api/runs falls through to the generic authenticated /api/** rule.
+  assert.equal(authorize("POST", "/api/runs", cm).ok, true);
+  assert.equal(authorize("POST", "/api/runs", admin).ok, true);
+  assert.deepEqual(authorize("POST", "/api/runs", author), { ok: false, status: 403 });
+  assert.deepEqual(authorize("POST", "/api/runs", approver), { ok: false, status: 403 });
+  // and the same for cases + the admin base
+  assert.deepEqual(authorize("POST", "/api/cases", author), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/admin", author), { ok: false, status: 403 });
+});
+
 test("the ELM Explorer endpoints are gated to any authenticated user", () => {
   assert.deepEqual(authorize("POST", "/api/measures/compile", null), { ok: false, status: 401 });
   assert.equal(authorize("POST", "/api/measures/compile", author).ok, true);

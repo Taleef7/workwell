@@ -10,10 +10,17 @@ All JVM-free, **zero new deps** (Node `crypto` + WebCrypto — portable to the C
 - **`auth/demo-users.ts`** — the four hardcoded roles from the Java `demo_users` seed (V003): author/approver/cm/admin@workwell.dev, shared `Workwell123!`, case-insensitive lookup. 3 tests.
 - **`routes/auth.ts`** — `POST /api/auth/login|refresh|logout` port of `AuthController`: access token in the JSON body + HttpOnly `refresh_token` cookie scoped to `/api/auth`, SameSite/Secure (None ⇒ Secure forced), rotation on refresh. 8 tests.
 - **`auth/authorize.ts`** — port of `JwtAuthFilter` + the `SecurityConfig` role matrix: Bearer-token principal extraction + ordered, first-match-wins rules (admin→ADMIN, evidence/runs/cases→CASE_MANAGER, approve/activate→APPROVER, spec/cql/tests→AUTHOR, etc.), 401 vs 403 semantics, public allowlist. The two TS-only ELM-Explorer endpoints (GET `…/elm`, POST `/compile`) are gated to AUTHENTICATED. 9 tests.
-- **`config/startup-safety.ts`** — auth/cookie subset of `StartupSafetyValidator`: production fail-fast on auth-disabled, weak/short JWT secret, or a non-`None`/non-Secure refresh cookie; the SameSite=None-requires-Secure and unknown-SameSite checks apply in every environment. 7 tests.
-- **`worker.ts`** — wires the fail-fast guard (unsafe config ⇒ 503 on every request), the authorization gate (skipped when auth is disabled, mirroring `authEnabled=false`→permitAll), and the auth routes. A worker integration test proves the gate end-to-end (public health; 401 without a token; login→token→authorized read; role-gated 403). 3 tests.
+- **`config/cors.ts`** — port of `SecurityConfig.corsConfigurationSource`: exact allowed origins, credentials enabled, methods GET/POST/PUT/PATCH/DELETE/OPTIONS, ACAO echoes the specific origin (never `*`), Allow-Headers echoes the requested headers. `preflightResponse` answers `OPTIONS`; `withCors` decorates every response. 4 tests.
+- **`config/startup-safety.ts`** — auth/cookie/**CORS** subset of `StartupSafetyValidator`: production fail-fast on auth-disabled, weak/short JWT secret, a non-`None`/non-Secure refresh cookie, or empty/wildcard/localhost CORS origins; the SameSite=None-requires-Secure and unknown-SameSite checks apply in every environment. 8 tests.
+- **`worker.ts`** — answers the CORS preflight before auth, decorates every response with `withCors`, then wires the fail-fast guard (unsafe config ⇒ 503), the authorization gate (skipped when auth disabled, mirroring `authEnabled=false`→permitAll), and the auth routes. Worker integration tests prove the gate + CORS end-to-end (public health; preflight 204; cross-site login carries ACAO; 401 without a token; login→token→authorized read; role-gated 403). 5 tests.
 
-**backend-ts 73 tests — 72 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Audit-event emission on auth actions is deferred to when the audit module is ported (no audit store on the TS side yet); CORS-origin + demo-flag fail-fast checks stay with the Java validator until the CORS layer is ported in Phase 4. Next: Phase 4 API strangler (#107).
+**backend-ts 81 tests — 80 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.**
+
+Review follow-ups (Codex on PR #117), both fixed before merge:
+- **P2 — run-collection gate.** The glob→regex helper required a trailing slash, so `/api/runs/**` matched `/api/runs/claim` but not `POST /api/runs`, letting it fall through to the generic authenticated rule. Reworked `rx` to Spring AntPathMatcher semantics (`/**` matches the base path too); added a regression test.
+- **P1 — auth preflight/CORS.** The split frontend/backend is cross-origin, so login is preceded by `OPTIONS /api/auth/login`; with no CORS the browser blocked it. Implemented the CORS layer above (this also un-defers the CORS fail-fast checks that were previously punted to Phase 4).
+
+Audit-event emission on auth actions is still deferred to when the audit module is ported (no audit store on the TS side yet). Next: Phase 4 API strangler (#107).
 
 ---
 

@@ -17,6 +17,26 @@ test("health is public", async () => {
   assert.equal((await call("/actuator/health")).status, 200);
 });
 
+test("CORS preflight on login is answered (204 + allow-origin) before auth", async () => {
+  const res = await call("/api/auth/login", {
+    method: "OPTIONS",
+    headers: { origin: "http://localhost:3000", "access-control-request-method": "POST", "access-control-request-headers": "content-type" },
+  });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get("access-control-allow-origin"), "http://localhost:3000");
+  assert.equal(res.headers.get("access-control-allow-credentials"), "true");
+});
+
+test("an actual cross-site response carries the allow-origin header", async () => {
+  const res = await call("/api/auth/login", {
+    method: "POST",
+    headers: { origin: "http://localhost:3000", "content-type": "application/json" },
+    body: JSON.stringify({ email: "admin@workwell.dev", password: "Workwell123!" }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("access-control-allow-origin"), "http://localhost:3000");
+});
+
 test("a protected route without a token is 401", async () => {
   assert.equal((await call("/api/runs")).status, 401);
 });
