@@ -12,7 +12,7 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CreateRunInput, RunRecord, RunStore, RunStatus } from "../run-store.ts";
+import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -75,11 +75,29 @@ export class PgRunStore implements RunStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async listRuns(limit = 100): Promise<RunRecord[]> {
+    const { rows } = await this.pool.query<RunRow>(
+      `SELECT id, status, scope_type, scope_id, started_at, completed_at
+         FROM ${T} ORDER BY started_at DESC, id DESC LIMIT $1`,
+      [limit],
+    );
+    return rows.map(toRecord);
+  }
+
   async appendLog(runId: string, level: string, message: string): Promise<void> {
     await this.pool.query(
       `INSERT INTO ${SPIKE_SCHEMA}.run_logs (run_id, ts, level, message) VALUES ($1, $2, $3, $4)`,
       [runId, new Date().toISOString(), level, message],
     );
+  }
+
+  async listLogs(runId: string): Promise<RunLogRow[]> {
+    if (!isUuid(runId)) return [];
+    const { rows } = await this.pool.query<{ ts: Date | string; level: string; message: string }>(
+      `SELECT ts, level, message FROM ${SPIKE_SCHEMA}.run_logs WHERE run_id = $1 ORDER BY id ASC`,
+      [runId],
+    );
+    return rows.map((r) => ({ ts: iso(r.ts)!, level: r.level, message: r.message }));
   }
 
   /**

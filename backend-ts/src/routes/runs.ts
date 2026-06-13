@@ -1,15 +1,18 @@
 /**
- * Runs route (#103/#106) — the start of the run pipeline in TS: worker → RunStore +
- * OutcomeStore → CloudDatabase (SQLite floor), with subject evaluation through the
- * JVM-free CQL engine. NOT yet the full frontend `/api/runs` contract (Phase-4
- * strangler port, #107) — it wires the storage + engine seams together live.
+ * Runs route (#103/#106/#107) — the run pipeline + read models in TS: worker →
+ * RunStore + OutcomeStore → CloudDatabase (SQLite floor), with subject evaluation
+ * through the JVM-free CQL engine. The GET endpoints serve the unchanged frontend
+ * `/api/runs` contract (RunListItem / RunSummary / RunLogEntry) — Phase-4 strangler
+ * port (#107), runs module, read-model slice.
  *
+ *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
+ *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
+ *   GET  /api/runs/:id/logs         run log timeline                 → 200 RunLogEntry[]
+ *   GET  /api/runs/:id/outcomes     persisted outcomes for a run     → 200 OutcomeRecord[]
  *   POST /api/runs                  create a QUEUED run              → 201 RunRecord
  *   POST /api/runs/claim            claim next queued (?workerId)    → 200 RunRecord | 204
  *   POST /api/runs/:id/evaluate     evaluate a subject + persist     → 201 OutcomeRecord
  *                                   body {measureId, patientBundle, evaluationDate?}
- *   GET  /api/runs/:id/outcomes     list persisted outcomes for a run → 200 OutcomeRecord[]
- *   GET  /api/runs/:id              read a run                       → 200 RunRecord | 404
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
@@ -18,6 +21,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { toRunListItem, toRunSummary, toRunLogEntries } from "../run/read-models.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -50,6 +54,23 @@ const json = (data: unknown, status = 200): Response =>
 export async function handleRuns(req: Request, env: RunsEnv): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
+
+  // ---- read models (#107 strangler — runs module) -------------------------
+  // List: newest-first run summaries for the worklist/history grid.
+  if (pathname === "/api/runs" && req.method === "GET") {
+    const limit = Number(url.searchParams.get("limit") ?? "100");
+    const runStore = await store(env);
+    const outcomeStore = await outcomes(env);
+    const runs = await runStore.listRuns(Number.isFinite(limit) && limit > 0 ? limit : 100);
+    const items = await Promise.all(runs.map(async (r) => toRunListItem(r, await outcomeStore.listOutcomes(r.id))));
+    return json(items);
+  }
+
+  // Run log timeline.
+  const logsId = pathname.match(/^\/api\/runs\/([^/]+)\/logs$/)?.[1];
+  if (logsId && req.method === "GET") {
+    return json(toRunLogEntries(await (await store(env)).listLogs(logsId)));
+  }
 
   if (pathname === "/api/runs" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as Partial<CreateRunInput>;
@@ -109,10 +130,12 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
     return json(await (await outcomes(env)).listOutcomes(outcomesId));
   }
 
+  // Run detail/summary — the RunSummary contract (superset of RunListItem).
   const id = pathname.match(/^\/api\/runs\/([^/]+)$/)?.[1];
   if (id && id !== "claim" && req.method === "GET") {
     const run = await (await store(env)).getRun(id);
-    return run ? json(run) : json({ error: "not_found", id }, 404);
+    if (!run) return json({ error: "not_found", id }, 404);
+    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id)));
   }
 
   return null;

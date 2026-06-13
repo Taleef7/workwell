@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 4 (#107): API strangler — runs module, read-model slice
+
+Branch `feat/issue-96-runs-read-models` (board #107 → In Progress; #105 merged via PR #117, board Done). First slice of the runs module: the GET read endpoints behind the **unchanged** frontend contract (`RunListItem` / `RunSummary` / `RunLogEntry` from `app/(dashboard)/runs/page.tsx`).
+
+- **`run/read-models.ts`** — pure builders matching the Java `RunPersistenceService` read model exactly: `passRate = compliant*100/totalEvaluated` (percentage), `nonCompliant = DUE_SOON|OVERDUE|MISSING_DATA` (EXCLUDED is neither), `dataFreshAsOf = MAX(evaluated_at)` / `dataFreshnessMinutes = -1` when empty, measureName/Version resolved from `scopeId` via the measure registry (null → "All Programs"/""). Computed from the floor `runs` + `outcomes` rows — **no schema change** (keeps the #104 Postgres adapter + contract stable). 5 unit tests.
+- **`stores/run-store.ts` + both adapters** — added `listRuns(limit)` (newest-first) and `listLogs(runId)` to the contract; implemented on the SQLite floor **and** the Postgres ceiling; both run the same two new cases in the shared `store-contract.ts` suite.
+- **`routes/runs.ts`** — `GET /api/runs` (list), `GET /api/runs/:id` (RunSummary, superset of RunListItem so it satisfies both frontend casts), `GET /api/runs/:id/logs`. Gated AUTHENTICATED by the #105 authz layer.
+
+**backend-ts 88 tests — 87 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Scoped honestly: `totalCases` is 0 and `triggerType` is "MANUAL" until the cases module + run finalization land (later #107 slices). Next runs slices: `/outcomes` RunOutcomeRow mapping (employee dir + evidence), then the manual-run/rerun pipeline; then the cases, measures, and programs modules.
+
+---
+
 ## 2026-06-13 — Issue #96 Phase 2 (#105): TS auth — JWT + PBKDF2 + login/refresh/logout + role gates + fail-fast
 
 Branch `feat/issue-96-auth-ts` → **PR #117**. Full port of the Java auth/security layer to the TS backend (board #105). Housekeeping first: closed #103 (Phase-1 spike, delivered via #114) and #104 (Postgres adapter, #115) — board auto-set both to Done; restored the 2026-06-12 "direction accepted" JOURNAL entry #115 had overwritten.

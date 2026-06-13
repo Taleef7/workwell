@@ -45,10 +45,20 @@ export interface RunRecord {
   completedAt: string | null;
 }
 
+export interface RunLogRow {
+  ts: string;
+  level: string;
+  message: string;
+}
+
 export interface RunStore {
   createRun(input: CreateRunInput): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | null>;
+  /** Runs newest-first (by started_at), capped at `limit` — the /api/runs list read model. */
+  listRuns(limit?: number): Promise<RunRecord[]>;
   appendLog(runId: string, level: string, message: string): Promise<void>;
+  /** A run's log timeline, oldest-first. */
+  listLogs(runId: string): Promise<RunLogRow[]>;
   /** Atomically claim the next QUEUED run for a worker (locking is adapter-specific). */
   claimNextQueuedRun(workerId: string): Promise<RunRecord | null>;
   /** Move a QUEUED run to RUNNING (no-op if already past QUEUED) so it leaves the claim path. */
