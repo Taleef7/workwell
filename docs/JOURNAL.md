@@ -26,6 +26,25 @@ Verification (Docker Postgres up via `infra/docker-compose.yml`): `tsc --noEmit`
 
 ---
 
+## 2026-06-12 — Issue #96 de-Java re-platform: direction accepted, ADR-008 + plan + board + sub-issues
+
+> Restored 2026-06-13: this entry was inadvertently overwritten on `main` when the Phase-2 Postgres entry above replaced (rather than prepended) the top of the journal; re-added verbatim to keep the record intact.
+
+Doug's #96 ("don't depend on Java/Spring Boot; make `@mieweb/cloud` the pluggable backend") is now a committed direction with full tracking. Decided the **shape** after the feasibility homework: **strangler-fig re-platform onto TypeScript / `@mieweb/cloud`, CQL Path C** — keep the CQL/eCQM engine but run the Java `cql-to-elm` translator **offline at build time** (commit ELM JSON) and execute ELM in Node via `cql-execution`/`fqm-execution`, so the JVM leaves the run/test/deploy path entirely. Key reframing that kills the FHIR-server question: **WorkWell is not a FHIR server** (Postgres is the system of record; FHIR R4 bundles are transient eval input), so no TS FHIR server is adopted — `node-on-fhir/honeycomb` (Meteor + Mongo + AGPL, no CQL) is **rejected**; we only need TS FHIR *typing* + an eval engine. Deploy target = Node container on MIE.
+
+Why strangler + Path C: satisfies all of Taleef's constraints — don't give up work done (frontend untouched; ports/adapters from E1 carry over; nothing deleted until its TS replacement passes parity), follow Doug's end-state (no JVM), low friction (Path C is the only option that keeps the eCQM differentiator *and* removes Java from deploy), and contributes upstream (build the missing `@mieweb/cloud-postgres`).
+
+Artifacts landed (docs only; no code/schema/API change):
+- **ADR-008** at top of `docs/DECISIONS.md` (supersedes ADR-001 for the backend runtime; ADR-001 kept as historical record).
+- **Execution plan** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md` (keep/transition/retire table, Phases 0–5, risks, verification).
+- **Labels:** `replatform-96`, `mieweb-cloud`, `cql-engine`, `spike`, `typescript`.
+- **Project board** "WorkWell 96 - De-Java Re-platform" (users/Taleef7/projects/6, linked to repo) with custom **Phase** (0–5) + **Workstream** (Platform/Engine/API/Infra/Docs) + Status fields, README, all 9 issues added with field values set.
+- **Sub-issues of #96 (Phases 0–5):** #102 (P0 scaffolding), #103 (P1 spike — **GO/NO-GO gate**), #104 (P2 storage adapters), #105 (P2 auth/audit), #106 (P3 engine parity), #107 + #108 (P4 API strangler), #109 (P5 deploy cutover + JVM retirement). Summary comment posted on #96 with two open questions flagged to @horner (confirm Path C; storage-floor stance to be settled on Phase-1 evidence).
+
+**Phase 1 (#103) is the cheap gate before the expensive months**: prove one measure hits golden parity in Node against the Java engine first. `@mieweb/cloud` to be added as a submodule and co-developed (v0.0.0; `@mieweb/cloud-postgres` doesn't exist yet). Schema migrations remain Taleef-owned. Nothing built yet — next action is Phase 0 scaffolding once Doug confirms the framing.
+
+---
+
 ## 2026-06-11 — Note: vendored DataVis a11y fixes are upstream-PR candidates (`mieweb/datavis`)
 
 Capturing this so it isn't lost: the two accessibility fixes we carry as **local patches** on the vendored NITRO grid (`frontend/vendor/datavis/src/components/table/useKeyboardNav.ts` + its call site in `PlainTable.tsx`, recorded in `vendor/datavis/VENDORING.md` "Local patches") are **genuine latent upstream bugs**, not WorkWell-specific workarounds. They reproduce in upstream's own Storybook with no WorkWell context, so they're clean candidates for a real PR to `mieweb/datavis`:
