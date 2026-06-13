@@ -1,0 +1,104 @@
+/**
+ * Request authorization (#105) — TS port of JwtAuthFilter + the SecurityConfig
+ * authorizeHttpRequests matrix. JVM-free.
+ *
+ * `extractPrincipal` reads a `Bearer` access token (refresh tokens are rejected by
+ * the JWT layer). `authorize` resolves the first matching rule, Spring-style, and
+ * returns 401 (unauthenticated) or 403 (authenticated but missing the required
+ * authority), or ok. Public routes (auth + health/version) are permitted.
+ */
+import type { JwtPrincipal, JwtService } from "./jwt.ts";
+
+export function extractPrincipal(req: Request, jwt: JwtService): JwtPrincipal | null {
+  const header = req.headers.get("authorization");
+  if (!header || !header.startsWith("Bearer ")) return null;
+  return jwt.verifyAccessToken(header.slice(7));
+}
+
+type Access = "PERMIT" | "AUTHENTICATED" | string[]; // string[] = allowed authorities
+interface Rule {
+  method?: string; // undefined = any method
+  pattern: RegExp;
+  access: Access;
+}
+
+const A = "ROLE_ADMIN";
+const APPROVER = "ROLE_APPROVER";
+const AUTHOR = "ROLE_AUTHOR";
+const CM = "ROLE_CASE_MANAGER";
+const MCP = "ROLE_MCP_CLIENT";
+
+/**
+ * Glob → anchored regex, Spring AntPathMatcher semantics:
+ *   `*`   = exactly one path segment
+ *   `/**` = zero or more trailing segments INCLUDING the base, so `/api/runs/**`
+ *           matches `/api/runs`, `/api/runs/`, and `/api/runs/claim` alike.
+ * `/**` is parked behind a private-use sentinel so the later `*`→segment rewrite
+ * doesn't corrupt the `.*` it expands to.
+ */
+function rx(glob: string): RegExp {
+  const GLOBSTAR = "\uE000"; // private-use char; never appears in a route glob
+  const body = glob
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\/\*\*/g, GLOBSTAR)
+    .replace(/\*\*/g, ".*") // bare "**"
+    .replace(/\*/g, "[^/]+") // single segment
+    .replaceAll(GLOBSTAR, "(?:/.*)?");
+  return new RegExp(`^${body}$`);
+}
+
+// Ordered, first-match-wins — mirrors SecurityConfig. The two TS-only measure
+// endpoints (GET .../elm, POST /compile from the ELM Explorer) are read-only and
+// gated to AUTHENTICATED, placed before the generic author-only measures POST rule.
+const RULES: Rule[] = [
+  { pattern: rx("/api/auth/login"), access: "PERMIT" },
+  { pattern: rx("/api/auth/refresh"), access: "PERMIT" },
+  { pattern: rx("/api/auth/logout"), access: "PERMIT" },
+  { pattern: rx("/actuator/health"), access: "PERMIT" },
+  { pattern: rx("/api/health"), access: "PERMIT" },
+  { pattern: rx("/api/version"), access: "PERMIT" },
+  { pattern: rx("/health"), access: "PERMIT" },
+
+  { pattern: rx("/sse"), access: [A, CM, MCP] },
+  { pattern: rx("/mcp/**"), access: [A, CM, MCP] },
+  { pattern: rx("/api/admin/**"), access: [A] },
+
+  { method: "POST", pattern: rx("/api/cases/*/evidence"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/cases/*/evidence"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/evidence/*/download"), access: [CM, A] },
+
+  { method: "POST", pattern: rx("/api/measures/*/approve"), access: [APPROVER, A] },
+  { method: "POST", pattern: rx("/api/measures/*/activate"), access: [APPROVER, A] },
+  { method: "POST", pattern: rx("/api/measures/*/deprecate"), access: [A] },
+  { method: "POST", pattern: rx("/api/measures/*/status"), access: [APPROVER, A] },
+  { method: "PUT", pattern: rx("/api/measures/*/spec"), access: [AUTHOR, A] },
+  { method: "PUT", pattern: rx("/api/measures/*/cql"), access: [AUTHOR, A] },
+  { method: "PUT", pattern: rx("/api/measures/*/tests"), access: [AUTHOR, A] },
+
+  { method: "POST", pattern: rx("/api/measures/compile"), access: "AUTHENTICATED" },
+  { method: "POST", pattern: rx("/api/measures/**"), access: [AUTHOR, A] },
+  { method: "POST", pattern: rx("/api/runs/**"), access: [CM, A] },
+  { method: "POST", pattern: rx("/api/cases/**"), access: [CM, A] },
+
+  { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
+  { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
+  { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
+  { pattern: rx("/api/**"), access: "AUTHENTICATED" },
+];
+
+export interface AuthzDecision {
+  ok: boolean;
+  status?: 401 | 403;
+}
+
+export function authorize(method: string, pathname: string, principal: JwtPrincipal | null): AuthzDecision {
+  for (const rule of RULES) {
+    if (rule.method && rule.method !== method) continue;
+    if (!rule.pattern.test(pathname)) continue;
+    if (rule.access === "PERMIT") return { ok: true };
+    if (!principal) return { ok: false, status: 401 };
+    if (rule.access === "AUTHENTICATED") return { ok: true };
+    return rule.access.includes(principal.role) ? { ok: true } : { ok: false, status: 403 };
+  }
+  return { ok: true }; // non-/api default permitAll (mirrors anyRequest().permitAll())
+}
