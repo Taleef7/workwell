@@ -49,11 +49,34 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(await store.markRunning("not-a-uuid"), null);
   });
 
-  test(`[${label}] appendLog writes without error`, async () => {
+  test(`[${label}] appendLog writes, listLogs reads them back oldest-first`, async () => {
     const store = await freshStore();
     const run = await store.createRun(sampleRun());
     await store.appendLog(run.id, "INFO", "run started");
-    await store.appendLog(run.id, "INFO", "evaluated 1 employee");
+    await store.appendLog(run.id, "WARN", "evaluated 1 employee");
+    const logs = await store.listLogs(run.id);
+    assert.equal(logs.length, 2);
+    assert.deepEqual(
+      logs.map((l) => `${l.level}:${l.message}`),
+      ["INFO:run started", "WARN:evaluated 1 employee"],
+    );
+    assert.ok(logs[0]!.ts, "log carries a timestamp");
+    // the limit bounds the payload (oldest-first window)
+    assert.equal((await store.listLogs(run.id, 1)).length, 1);
+  });
+
+  test(`[${label}] listRuns returns runs newest-first, capped at limit`, async () => {
+    const store = await freshStore();
+    const a = await store.createRun(sampleRun("a"));
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await store.createRun(sampleRun("b"));
+    const all = await store.listRuns();
+    assert.deepEqual(
+      all.map((r) => r.id),
+      [b.id, a.id],
+      "newest started_at first",
+    );
+    assert.equal((await store.listRuns(1)).length, 1, "respects the limit");
   });
 
   test(`[${label}] claimNextQueuedRun atomically flips QUEUED → RUNNING, FIFO, then null`, async () => {
