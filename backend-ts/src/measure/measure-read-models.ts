@@ -115,8 +115,8 @@ export function toMeasureDetail(r: MeasureRecord): MeasureDetail {
     requiredDataElements: r.spec.requiredDataElements,
     cqlText: r.cqlText,
     compileStatus: r.compileStatus,
-    valueSets: [],
-    testFixtures: [],
+    valueSets: [], // value-set governance (attached value sets) is a separate surface
+    testFixtures: r.spec.testFixtures ?? [],
   };
 }
 
@@ -144,23 +144,40 @@ export interface ActivationReadiness {
 /** Compile gate: activation allowed only from COMPILED or WARNINGS (Java allowsActivationCompileStatus). */
 export const compileAllowsActivation = (s: string) => s.toUpperCase() === "COMPILED" || s.toUpperCase() === "WARNINGS";
 
+const OUTCOME_BUCKETS = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
+
+/** Port of MeasureService.validateTests: a fixture set passes when non-empty and each fixture is well-formed. */
+export function validateTests(fixtures: MeasureSpec["testFixtures"]): { passed: boolean; failures: string[] } {
+  if (fixtures.length === 0) return { passed: false, failures: ["At least one test fixture is required before activation."] };
+  const failures: string[] = [];
+  fixtures.forEach((f, i) => {
+    if (!f.fixtureName?.trim()) failures.push(`Fixture ${i + 1} must include fixtureName.`);
+    if (!f.employeeExternalId?.trim()) failures.push(`Fixture ${i + 1} must include employeeExternalId.`);
+    if (!OUTCOME_BUCKETS.has(f.expectedOutcome)) failures.push(`Fixture ${i + 1} has unsupported expectedOutcome: ${f.expectedOutcome}`);
+  });
+  return { passed: failures.length === 0, failures };
+}
+
 /**
- * Whether a measure can be activated (MeasureService.activationReadiness). No test fixtures or
- * attached value sets are ported yet, so validateTests fails with the "at least one fixture
- * required" blocker → `ready` is false for every measure (faithful: the Java seed has no
- * fixtures either). NOT_COMPILED measures additionally carry the compile blocker.
+ * Whether a measure can be activated (MeasureService.activationReadiness). The seeded OSHA
+ * measures carry demo test fixtures (V015) → they validate and report `ready` true; measures
+ * without fixtures (HEDIS/CMS runnable + catalog drafts) report the fixture blocker — matching
+ * the Java contract. valueSetCount stays 0 until the value-set governance surface lands (a
+ * separate module); it is informational and does not gate activation.
  */
 export function toActivationReadiness(r: MeasureRecord): ActivationReadiness {
+  const fixtures = r.spec.testFixtures ?? [];
   const compilePassed = compileAllowsActivation(r.compileStatus);
+  const tv = validateTests(fixtures);
   const blockers: string[] = [];
   if (!compilePassed) blockers.push("Compile status must be COMPILED or WARNINGS.");
-  blockers.push("At least one test fixture is required before activation.");
+  if (!tv.passed) blockers.push(...tv.failures);
   return {
-    ready: false, // compilePassed && testValidationPassed; testValidation fails with no fixtures
+    ready: compilePassed && tv.passed,
     compileStatus: r.compileStatus,
-    testFixtureCount: 0,
+    testFixtureCount: fixtures.length,
     valueSetCount: 0,
-    testValidationPassed: false,
+    testValidationPassed: tv.passed,
     activationBlockers: blockers,
   };
 }

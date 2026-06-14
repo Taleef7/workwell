@@ -100,7 +100,8 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   assert.equal(d.compileStatus, "COMPILED");
   assert.match(d.cqlText, /^library AnnualAudiogramCompleted version '1\.0\.0'/);
   assert.deepEqual(d.valueSets, []);
-  assert.deepEqual(d.testFixtures, []);
+  // V015 seeds 5 demo fixtures for audiogram — they must be carried into the detail.
+  assert.equal((d.testFixtures as unknown[]).length, 5);
 });
 
 test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
@@ -134,25 +135,30 @@ test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' excl
 });
 
 test("GET /api/measures/:id/activation-readiness reflects the compile + fixture gate", async () => {
-  // Runnable (COMPILED) but no fixtures → not ready, only the fixture blocker.
+  // Seeded OSHA measure: COMPILED + V015 demo fixtures → ready, no blockers (Java parity).
   const a = (await get("/api/measures/audiogram/activation-readiness").then((r) => r!.json())) as {
     ready: boolean;
     compileStatus: string;
     testFixtureCount: number;
-    valueSetCount: number;
     testValidationPassed: boolean;
     activationBlockers: string[];
   };
-  assert.equal(a.ready, false);
+  assert.equal(a.ready, true, "seeded fixtures make it activatable");
   assert.equal(a.compileStatus, "COMPILED");
-  assert.equal(a.testValidationPassed, false);
-  assert.equal(a.testFixtureCount, 0);
-  assert.equal(a.valueSetCount, 0);
-  assert.ok(a.activationBlockers.some((b) => /test fixture/i.test(b)));
-  assert.ok(!a.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
+  assert.equal(a.testValidationPassed, true);
+  assert.equal(a.testFixtureCount, 5);
+  assert.deepEqual(a.activationBlockers, []);
 
-  // Draft (NOT_COMPILED) → adds the compile blocker too.
-  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { activationBlockers: string[]; compileStatus: string };
+  // Runnable HEDIS measure with no seeded fixtures: COMPILED but not ready → only the fixture blocker.
+  const h = (await get("/api/measures/hypertension/activation-readiness").then((r) => r!.json())) as { ready: boolean; testFixtureCount: number; activationBlockers: string[] };
+  assert.equal(h.ready, false);
+  assert.equal(h.testFixtureCount, 0);
+  assert.ok(h.activationBlockers.some((b) => /test fixture/i.test(b)));
+  assert.ok(!h.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
+
+  // Draft (NOT_COMPILED, no fixtures) → both blockers.
+  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
+  assert.equal(d.ready, false);
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
 

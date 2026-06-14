@@ -33,6 +33,7 @@ const EMPTY_SPEC: MeasureSpec = {
   exclusions: [],
   complianceWindow: "",
   requiredDataElements: [],
+  testFixtures: [],
 };
 
 const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : v);

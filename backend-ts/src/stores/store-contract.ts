@@ -445,7 +445,7 @@ export function measureStoreContract(label: string, freshStore: () => Promise<Me
     versionId: "audiogram-v1.0",
     version: "v1.0",
     status: "Active",
-    spec: { description: "d", eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" }, exclusions: [], complianceWindow: "Annual", requiredDataElements: [] },
+    spec: { description: "d", eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" }, exclusions: [], complianceWindow: "Annual", requiredDataElements: [], testFixtures: [] },
     cqlText: "library X",
     compileStatus: "COMPILED",
     createdAt: "2026-06-10T00:00:00.000Z",

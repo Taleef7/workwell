@@ -16,13 +16,47 @@ const javaSvc = `${here}../../backend/src/main/java/com/workwell/measure/Measure
 const outFile = `${here}../src/measure/measure-catalog.ts`;
 
 const elig = (roleFilter, siteFilter, programEnrollmentText) => ({ roleFilter, siteFilter, programEnrollmentText });
-const spec = (description, eligibilityCriteria, exclusions, complianceWindow, requiredDataElements) => ({
+const spec = (description, eligibilityCriteria, exclusions, complianceWindow, requiredDataElements, testFixtures = []) => ({
   description,
   eligibilityCriteria,
   exclusions,
   complianceWindow,
   requiredDataElements,
+  testFixtures,
 });
+const fx = (fixtureName, employeeExternalId, expectedOutcome, notes) => ({ fixtureName, employeeExternalId, expectedOutcome, notes });
+
+// Demo test fixtures seeded by V015__seed_demo_test_fixtures.sql for the 4 OSHA measures —
+// these make activationReadiness report the seeded measures as validatable (ready), matching
+// the Java contract. (The HEDIS/CMS runnable measures have no seeded fixtures.)
+const FIXTURES = {
+  audiogram: [
+    fx("Compliant — audiogram within annual window", "emp-001", "COMPLIANT", "120 days since last exam; threshold 335 days"),
+    fx("Due soon — audiogram approaching due date", "emp-002", "DUE_SOON", "350 days since last exam; DUE_SOON window 336–365"),
+    fx("Overdue — annual audiogram past due", "emp-003", "OVERDUE", "420 days since last exam; threshold 365 days"),
+    fx("Missing data — no audiogram on record", "emp-004", "MISSING_DATA", "No exam date present in employee record"),
+    fx("Excluded — active audiogram waiver on file", "emp-005", "EXCLUDED", "Valid waiver exempts from annual requirement"),
+  ],
+  hazwoper: [
+    fx("Compliant — HAZWOPER surveillance current", "emp-003", "COMPLIANT", "120 days since HAZWOPER exam; threshold 335 days"),
+    fx("Due soon — HAZWOPER surveillance approaching", "emp-008", "DUE_SOON", "355 days since exam; DUE_SOON window 335–365"),
+    fx("Overdue — HAZWOPER surveillance past due", "emp-013", "OVERDUE", "380 days since exam; threshold 365 days"),
+    fx("Missing data — no HAZWOPER exam on record", "emp-018", "MISSING_DATA", "No surveillance exam date in employee record"),
+    fx("Excluded — HAZWOPER medical exemption on file", "emp-023", "EXCLUDED", "Medical exemption exempts from annual requirement"),
+  ],
+  tb_surveillance: [
+    fx("Compliant — TB screen within annual window", "emp-041", "COMPLIANT", "120 days since last TB screen; threshold 330 days"),
+    fx("Due soon — TB screen approaching due date", "emp-045", "DUE_SOON", "365 days since last screen; DUE_SOON window 330–365"),
+    fx("Overdue — TB screen past due", "emp-046", "OVERDUE", "380 days since last screen; threshold 365 days"),
+    fx("Missing data — no TB screen on record", "emp-049", "MISSING_DATA", "No TB screen date in employee record"),
+    fx("Excluded — TB medical exemption on file", "emp-050", "EXCLUDED", "Medical exemption exempts from TB screening requirement"),
+  ],
+  flu_vaccine: [
+    fx("Compliant — flu vaccine documented this season", "emp-001", "COMPLIANT", "Vaccine administered within the current flu season window"),
+    fx("Missing data — no flu vaccine record found", "emp-021", "MISSING_DATA", "No vaccine record present; employee is clinical-facing and not exempt"),
+    fx("Excluded — documented vaccine contraindication", "emp-032", "EXCLUDED", "Valid medical contraindication exempts from flu vaccine requirement"),
+  ],
+};
 
 // --- 1. CMS eCQM catalog, parsed from MeasureService.CMS_ECQM_CATALOG ----------
 const java = readFileSync(javaSvc, "utf8");
@@ -61,16 +95,16 @@ const osha = (id, name, policyRef, tags, s) => ({ id, name, policyRef, version: 
 const runnable = [
   osha("audiogram", "Annual Audiogram Completed", "OSHA 29 CFR 1910.95", ["surveillance", "hearing", "osha"],
     spec("Annual audiogram monitoring for noise-exposed employees.", elig("Maintenance Tech, Welder", "Plant A, Plant B", "Hearing Conservation Program"),
-      [{ label: "Waiver", criteriaText: "Valid audiogram waiver on file" }], "Annual", ["Last audiogram date", "Role", "Site", "Program enrollment"])),
+      [{ label: "Waiver", criteriaText: "Valid audiogram waiver on file" }], "Annual", ["Last audiogram date", "Role", "Site", "Program enrollment"], FIXTURES.audiogram)),
   osha("hazwoper", "HAZWOPER Surveillance", "OSHA 29 CFR 1910.120", ["surveillance", "hazmat", "osha"],
     spec("Annual HAZWOPER medical surveillance for hazardous-waste operations employees.", elig("Industrial Hygienist, Maintenance Tech", "Plant A, Plant B", "HAZWOPER Program"),
-      [{ label: "Exemption", criteriaText: "Temporary medical exemption documented" }], "Annual", ["Last surveillance exam date", "Role", "Site", "Exemption status"])),
+      [{ label: "Exemption", criteriaText: "Temporary medical exemption documented" }], "Annual", ["Last surveillance exam date", "Role", "Site", "Exemption status"], FIXTURES.hazwoper)),
   osha("tb_surveillance", "TB Surveillance", "CDC TB Screening Guidance", ["surveillance", "infection-control", "cdc"],
     spec("Annual TB surveillance for clinic-based nursing and clinic staff.", elig("Nurse, Clinic Staff", "Clinic", "Occupational TB Screening Program"),
-      [{ label: "Medical Exemption", criteriaText: "Valid exemption documented" }], "Annual", ["Last TB screening date", "Role", "Site", "Exemption status"])),
+      [{ label: "Medical Exemption", criteriaText: "Valid exemption documented" }], "Annual", ["Last TB screening date", "Role", "Site", "Exemption status"], FIXTURES.tb_surveillance)),
   osha("flu_vaccine", "Flu Vaccine", "CDC Seasonal Influenza Guidance", ["vaccine", "seasonal", "immunization"],
     spec("Seasonal influenza vaccination compliance for active employees.", elig("All", "Plant A, Plant B, Clinic", "Seasonal Flu Program"),
-      [{ label: "Clinical Contraindication", criteriaText: "Documented contraindication for current season" }], "Seasonal", ["Last flu vaccine date", "Current season", "Contraindication status"])),
+      [{ label: "Clinical Contraindication", criteriaText: "Documented contraindication for current season" }], "Seasonal", ["Last flu vaccine date", "Current season", "Contraindication status"], FIXTURES.flu_vaccine)),
   osha("hypertension", "Hypertension BP Screening", "HEDIS BPC / JPMC Wellness Rewards", ["wellness", "hypertension", "cardiovascular"],
     spec("Annual blood pressure screening for employees enrolled in the wellness program.", elig("All", "All Sites", "Wellness Program"),
       [{ label: "Medical Exemption", criteriaText: "Documented medical exemption on file" }], "Annual", ["Last BP screening date", "Program enrollment", "Exemption status"])),
@@ -131,12 +165,20 @@ const out = `/**
  */
 export type MeasureStatus = "Draft" | "Approved" | "Active" | "Deprecated";
 
+export interface TestFixture {
+  fixtureName: string;
+  employeeExternalId: string;
+  expectedOutcome: string;
+  notes: string;
+}
+
 export interface MeasureSpec {
   description: string;
   eligibilityCriteria: { roleFilter: string; siteFilter: string; programEnrollmentText: string };
   exclusions: Array<{ label: string; criteriaText: string }>;
   complianceWindow: string;
   requiredDataElements: string[];
+  testFixtures: TestFixture[];
 }
 
 export interface CatalogMeasure {
