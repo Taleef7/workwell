@@ -47,4 +47,11 @@ export interface CaseEventStore {
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
   /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
+  /** True once an OUTREACH_SENT action exists — the precondition for a delivery-state update. */
+  hasOutreachSent(caseId: string): Promise<boolean>;
+  /**
+   * The `deliveryStatus` from the most recent OUTREACH_DELIVERY_UPDATED / OUTREACH_SENT
+   * case_action payload (CaseDetail.latestOutreachDeliveryStatus), or null if none.
+   */
+  latestOutreachDeliveryStatus(caseId: string): Promise<string | null>;
 }

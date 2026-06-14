@@ -8,9 +8,12 @@
  *   GET  /api/cases/:id         case detail + evidence/why_flagged + timeline → 200 | 404
  *   POST /api/cases/:id/assign  ?assignee=…  set/clear the case owner    → 200 CaseDetail | 404
  *   POST /api/cases/:id/escalate              force HIGH/OPEN            → 200 CaseDetail | 404
+ *   GET  /api/cases/:id/actions/outreach/preview ?templateId=…           → 200 OutreachPreview | 404
+ *   POST /api/cases/:id/actions/outreach         ?templateId=…  send     → 200 CaseDetail | 404
+ *   POST /api/cases/:id/actions/outreach/delivery ?deliveryStatus=…      → 200 CaseDetail | 400 | 404
  *
  * Each mutating action writes a case_action + an audit_event; the detail timeline is
- * the merged ledger. Outreach (send/preview/delivery) + rerun-to-verify are later slices.
+ * the merged ledger. rerun-to-verify + evidence/appointments/ai are later slices.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
@@ -20,6 +23,7 @@ import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.t
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, type CaseActionDeps } from "../case/case-actions.ts";
+import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -78,7 +82,7 @@ const day = (s: string): string => s.slice(0, 10);
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
 
-  // Case actions (POST) — assign / escalate. Each writes a case_action + audit_event.
+  // Case actions (POST) — assign / escalate / outreach send / outreach delivery.
   if (req.method === "POST") {
     const assignId = url.pathname.match(/^\/api\/cases\/([^/]+)\/assign$/)?.[1];
     if (assignId) {
@@ -90,7 +94,34 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       const detail = await escalateCase(await actionDeps(env), escalateId, actor);
       return detail ? json(detail) : json({ error: "not_found", id: escalateId }, 404);
     }
-    return null; // other case POSTs (outreach/rerun) not ported yet
+    const deliveryId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach\/delivery$/)?.[1];
+    if (deliveryId) {
+      try {
+        const detail = await updateOutreachDelivery(
+          await actionDeps(env),
+          deliveryId,
+          url.searchParams.get("deliveryStatus") ?? "",
+          actor,
+        );
+        return detail ? json(detail) : json({ error: "not_found", id: deliveryId }, 404);
+      } catch (err) {
+        if (err instanceof OutreachError) return json({ error: "bad_request", message: err.message }, 400);
+        throw err;
+      }
+    }
+    const sendId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach$/)?.[1];
+    if (sendId) {
+      const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"));
+      return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
+    }
+    return null; // other case POSTs (rerun/evidence/appointments) not ported yet
+  }
+
+  // Outreach preview (GET) — render the default template for the case (no state change).
+  const previewId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach\/preview$/)?.[1];
+  if (previewId && req.method === "GET") {
+    const preview = await previewOutreach(await actionDeps(env), previewId, url.searchParams.get("templateId"));
+    return preview ? json(preview) : json({ error: "not_found", id: previewId }, 404);
   }
 
   // Case detail — the case row + its evidence (the outcome from the case's last run) + timeline.
@@ -100,8 +131,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
     const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
-    const timeline = await new SqliteCaseEventStore(env.DB).caseTimeline(detailId);
-    return json(toCaseDetail(c, outcome, timeline));
+    const events = new SqliteCaseEventStore(env.DB);
+    const timeline = await events.caseTimeline(detailId);
+    const latest = await events.latestOutreachDeliveryStatus(detailId);
+    return json(toCaseDetail(c, outcome, timeline, latest));
   }
 
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;

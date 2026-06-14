@@ -323,4 +323,29 @@ export function caseEventStoreContract(
     assert.ok(types.includes("ESCALATED"), "case_action committed");
     assert.ok(types.includes("CASE_ESCALATED"), "audit_event committed in the same transaction");
   });
+
+  test(`[${label}] hasOutreachSent + latestOutreachDeliveryStatus track the OUTREACH_* actions`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    assert.equal(await eventStore.hasOutreachSent(c.id), false, "no outreach yet");
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), null);
+
+    await eventStore.insertAction({
+      caseId: c.id,
+      actionType: "OUTREACH_SENT",
+      actor: "cm@x",
+      payload: { deliveryStatus: "SIMULATED" },
+    });
+    assert.equal(await eventStore.hasOutreachSent(c.id), true, "outreach recorded");
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), "SIMULATED");
+
+    await new Promise((r) => setTimeout(r, 2)); // ensure a later performed_at
+    await eventStore.insertAction({
+      caseId: c.id,
+      actionType: "OUTREACH_DELIVERY_UPDATED",
+      actor: "cm@x",
+      payload: { deliveryStatus: "SENT" },
+    });
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), "SENT", "latest wins");
+  });
 }

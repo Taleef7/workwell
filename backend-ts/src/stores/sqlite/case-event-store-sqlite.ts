@@ -69,6 +69,27 @@ export class SqliteCaseEventStore implements CaseEventStore {
     await this.db.batch([this.actionStmt(input.action), this.auditStmt(input.audit)]);
   }
 
+  async hasOutreachSent(caseId: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM case_actions WHERE case_id = ? AND action_type = 'OUTREACH_SENT'")
+      .bind(caseId)
+      .first<{ n: number }>();
+    return (row?.n ?? 0) > 0;
+  }
+
+  async latestOutreachDeliveryStatus(caseId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT json_extract(payload_json, '$.deliveryStatus') AS delivery_status
+           FROM case_actions
+          WHERE case_id = ? AND action_type IN ('OUTREACH_DELIVERY_UPDATED', 'OUTREACH_SENT')
+          ORDER BY performed_at DESC, id DESC LIMIT 1`,
+      )
+      .bind(caseId)
+      .first<{ delivery_status: string | null }>();
+    return row?.delivery_status ?? null;
+  }
+
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
     const { results } = await this.db
       .prepare(
