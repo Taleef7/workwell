@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 4 (#107): cases module (1/n) — idempotent upsert + worklist
+
+Branch `feat/issue-96-cases-worklist`. First slice of the cases module: cases are now upserted from run outcomes (the spike's critical **idempotency** invariant) and surfaced as the worklist.
+
+- **Cases store (floor + ceiling)** — added a `cases` table to the TS spike scaffolding (`stores/sqlite/schema.ts` + `stores/postgres/schema-pg.ts`, isolated `workwell_spike` schema). *This is the same kind of TS adapter scaffolding as the already-merged runs/outcomes floor tables — NOT a canonical Flyway migration; canonical schema stays Taleef-owned.* `CaseStore` (`upsertFromOutcome` / `getCase` / `listCases`) on both the SQLite floor and Postgres ceiling; the idempotent upsert uses `INSERT … ON CONFLICT(employee_id, measure_id, evaluation_period) DO UPDATE`.
+- **`case/case-logic.ts`** — pure port of `CaseFlowService` routing: DUE_SOON/OVERDUE/MISSING_DATA → OPEN (priority OVERDUE=HIGH, else MEDIUM), EXCLUDED → EXCLUDED, COMPLIANT → resolve an existing case; measure-specific `next_action` hints.
+- **Run pipeline** — each outcome now upserts/resolves a case (optional `caseStore` dep; the route enables it). The run's `evaluationDate` is persisted in the requested scope so a **rerun reuses the same period** → cases upsert rather than duplicate.
+- **`GET /api/cases`** (`routes/cases.ts`) — worklist `CaseSummary[]` with status/measure/priority/assignee/site/search filters + limit/offset paging; employee (name/site) + measure (name/version) resolved from the directory/registry. Gated AUTHENTICATED.
+
+**Idempotency proven on both backends** via a new `caseStoreContract` (a rerun upserts the same case, never a duplicate) plus a pipeline test (rerun over the same period keeps the case count stable). Gotcha fixed: the floor DDL loader flattens newlines, so a `--` line comment would have swallowed the table — switched to a `/* */` block comment.
+
+**backend-ts 132 tests — 131 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Next cases slices: case **detail** (`GET /api/cases/:id` + `CaseDetail` + timeline) and **actions** (assign/escalate/outreach/delivery, rerun-to-verify). Run `totalCases` + the case-linked run scopes can then be wired.
+
+Review follow-ups (Codex on PR #122), three worklist-filter fidelity fixes vs the Java controller, all fixed before merge:
+- **Default status = OPEN.** Blank/missing `status` now defaults to `OPEN` (Java default); `status=all` is the explicit unfiltered view (previously blank → all, leaking resolved/excluded rows into the default worklist).
+- **`assignee=unassigned`.** New cases store `assignee` as NULL, so `assignee = ?` matched nothing; both adapters now use `LOWER(COALESCE(assignee, 'unassigned')) = LOWER(?)`, so the unassigned filter selects NULL rows (case-insensitive), matching Java.
+- **`from`/`to`.** The route dropped these; now applied (day-granular, inclusive) against case `created_at`, matching Java. Added store-contract + route tests for each. backend-ts 136 tests — 135 pass / 1 skip / 0 fail.
+
+---
+
 ## 2026-06-13 — Issue #96 Phase 4 (#107): runs write pipeline (2/2) — manual run + rerun
 
 Branch `feat/issue-96-run-pipeline`. The run **write** path: scope resolution → seeded distribution → evaluate → persist → `ManualRunResponse`, completing the runs module's authoring side (read side already merged: list/summary/logs/outcomes).

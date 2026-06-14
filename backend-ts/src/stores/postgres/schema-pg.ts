@@ -56,4 +56,23 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outcomes (
 
 CREATE INDEX IF NOT EXISTS spike_outcomes_run_id_idx
   ON ${SPIKE_SCHEMA}.outcomes (run_id);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
+  id                     UUID PRIMARY KEY,
+  employee_id            TEXT NOT NULL,
+  measure_id             TEXT NOT NULL,
+  evaluation_period      TEXT NOT NULL,
+  status                 TEXT NOT NULL,
+  priority               TEXT NOT NULL,
+  assignee               TEXT,
+  next_action            TEXT,
+  current_outcome_status TEXT NOT NULL,
+  last_run_id            UUID NOT NULL,
+  created_at             TIMESTAMPTZ NOT NULL,
+  updated_at             TIMESTAMPTZ NOT NULL,
+  closed_at              TIMESTAMPTZ,
+  UNIQUE (employee_id, measure_id, evaluation_period)
+);
+
+CREATE INDEX IF NOT EXISTS spike_cases_status_idx ON ${SPIKE_SCHEMA}.cases (status);
 `;
