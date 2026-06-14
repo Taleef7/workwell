@@ -2,6 +2,8 @@
  * Measures route (#106) — the live, JVM-free compliance engine behind the worker.
  *
  *   GET  /api/measures                    full TWH catalog (Measure[]); ?status=&search=
+ *   GET  /api/measures/:id                MeasureDetail (spec + CQL + compile status)
+ *   GET  /api/measures/:id/versions       VersionHistoryItem[]
  *   GET  /api/measures/:id/elm            compiled ELM (the AST) for the measure
  *   POST /api/measures/:id/evaluate       body = FHIR R4 bundle, ?date=YYYY-MM-DD
  *                                         → { subjectId, measure, outcome, evidence }
@@ -19,7 +21,14 @@ import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
-import { listCatalog } from "../measure/measure-read-models.ts";
+import { listCatalog, findMeasure, toMeasureDetail, toVersionHistory } from "../measure/measure-read-models.ts";
+
+/** Reconstruct the measure's CQL from its compiled ELM (runnable measures); "" otherwise. */
+function measureCql(measureId: string): string {
+  const meta = MEASURES[measureId];
+  const elm = meta ? ELM_LIBRARIES[meta.library] : undefined;
+  return elm ? reconstructCql(elm) : "";
+}
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
 const MAX_CQL_BYTES = 64 * 1024;
@@ -36,6 +45,20 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
 
   if (pathname === "/api/measures" && req.method === "GET") {
     return json(listCatalog({ status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
+  }
+
+  // Measure version history (declared before the bare /:id so the suffix wins).
+  const versionsId = pathname.match(/^\/api\/measures\/([^/]+)\/versions$/)?.[1];
+  if (versionsId && req.method === "GET") {
+    const m = findMeasure(versionsId);
+    return m ? json(toVersionHistory(m)) : json({ error: "not_found", measureId: versionsId }, 404);
+  }
+
+  // Measure detail (spec + reconstructed CQL + compile status).
+  const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
+  if (detailId && detailId !== "compile" && req.method === "GET") {
+    const m = findMeasure(detailId);
+    return m ? json(toMeasureDetail(m, measureCql(detailId))) : json({ error: "not_found", measureId: detailId }, 404);
   }
 
   // Live CQL → ELM compile (no JVM) — powers the ELM-explorer playground.

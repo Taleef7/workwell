@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (2/n) — detail + versions (read)
+
+Branch `feat/issue-96-measures-detail`. Second measures slice: the Studio `MeasureDetail` + version history reads, ported from `MeasureService.getMeasure`.
+
+- **Catalog spec** — extended `scripts/gen-measure-catalog.mjs` to emit each measure's authoring **spec** (description, eligibility, exclusions, complianceWindow, requiredDataElements) + `compileStatus`, sourced from the Java seed: the 10 runnable measures' spec maps, the 3 OSHA catalog-only specs from V017, and the generic CMS-catalog spec for the 47 drafts. `compileStatus` is faithful (COMPILED for the 10 runnable + Hep B + Lead; NOT_COMPILED for Respirator + the 47 CMS drafts).
+- **`measure/measure-read-models.ts`** — `toMeasureDetail(measure, cqlText)` (the frontend `MeasureDetail` shape: spec fields + cqlText + compileStatus; `oshaReferenceId=null`, `valueSets=[]`, `testFixtures=[]` — value-set governance is a later/separate surface) + `toVersionHistory` (the static catalog carries one version per measure).
+- **`routes/measures.ts`** — `GET /api/measures/:id` (detail; CQL **reconstructed from the compiled ELM** at request time for runnable measures, "" otherwise) + `GET /api/measures/:id/versions`. 404 for unknown; the `/versions` + `/compile` suffixes are matched before the bare `/:id`.
+
+Deferred (need a persisted measures store): `/activation-readiness` (read), create (`POST /api/measures`), lifecycle transitions (approve/activate/deprecate), spec/CQL edits, and the compile/test-fixture activation gate. The value-set governance surface (attached value sets, terminology mappings) is its own module.
+
+**backend-ts 210 tests — all pass / 0 fail; typecheck clean.** New coverage: detail with spec + reconstructed CQL + COMPILED (runnable), generic-spec + empty-CQL + NOT_COMPILED (catalog draft), version history + 404. Frontend `/studio/[id]` Spec/CQL tab reads are now served (read-only). Next: the measures authoring/lifecycle slice (persisted store) — the remaining Phase-4 work.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (3/n) — risk-outlook (+ outcomes.evaluation_period)
 
 Branch `feat/issue-96-programs-risk`. Final programs slice: the predictive risk-outlook on the per-measure `/programs/[measureId]` page, ported from `RiskOutlookService`. **The `programs` module is now complete.**
