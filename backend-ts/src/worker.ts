@@ -21,6 +21,7 @@ import type {
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
 import { handleCases } from "./routes/cases.ts";
+import { handlePrograms } from "./routes/programs.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -151,6 +152,10 @@ async function route(req: Request, env: Env): Promise<Response> {
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
   const casesResponse = await handleCases(req, env, actor);
   if (casesResponse) return casesResponse;
+
+  // Programs — compliance KPI overview + site list over runs/outcomes/cases (#107).
+  const programsResponse = await handlePrograms(req, env);
+  if (programsResponse) return programsResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
   // same principle as UnsupportedBindingError / "AI never decides compliance".
