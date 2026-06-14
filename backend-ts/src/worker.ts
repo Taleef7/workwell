@@ -20,6 +20,7 @@ import type {
 } from "@mieweb/cloud";
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
+import { handleCases } from "./routes/cases.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -143,6 +144,10 @@ async function route(req: Request, env: Env): Promise<Response> {
   // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
   const runsResponse = await handleRuns(req, env);
   if (runsResponse) return runsResponse;
+
+  // Cases — worklist over the cases upserted from run outcomes (#107).
+  const casesResponse = await handleCases(req, env);
+  if (casesResponse) return casesResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
   // same principle as UnsupportedBindingError / "AI never decides compliance".
