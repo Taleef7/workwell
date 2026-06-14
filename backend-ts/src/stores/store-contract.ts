@@ -364,6 +364,27 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.caseTimeline(c.id), []);
   });
 
+  test(`[${label}] listAuditEvents returns the ledger oldest-first with refs + payload`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    await eventStore.appendAudit({
+      eventType: "CASE_ASSIGNED",
+      entityType: "case",
+      entityId: c.id,
+      actor: "cm@x",
+      refRunId: c.lastRunId,
+      refCaseId: c.id,
+      refMeasureVersionId: c.measureId,
+      payload: { assignee: "cm@x" },
+    });
+    const events = await eventStore.listAuditEvents();
+    assert.ok(events.length >= 1);
+    const e = events.find((x) => x.eventType === "CASE_ASSIGNED")!;
+    assert.equal(e.refCaseId, c.id);
+    assert.equal(e.actor, "cm@x");
+    assert.deepEqual(e.payload, { assignee: "cm@x" });
+  });
+
   test(`[${label}] recordCaseEvent writes the action + audit atomically (both on the timeline)`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;

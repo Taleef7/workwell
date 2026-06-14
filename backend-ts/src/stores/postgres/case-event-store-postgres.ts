@@ -8,6 +8,7 @@ import type { PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type {
   AppendAuditInput,
+  AuditEventRow,
   CaseEventStore,
   InsertActionInput,
   TimelineEntry,
@@ -101,6 +102,31 @@ export class PgCaseEventStore implements CaseEventStore {
       [caseId],
     );
     return rows[0]?.delivery_status ?? null;
+  }
+
+  async listAuditEvents(limit = 100000): Promise<AuditEventRow[]> {
+    const { rows } = await this.pool.query<{
+      occurred_at: Date | string;
+      event_type: string;
+      actor: string | null;
+      ref_run_id: string | null;
+      ref_case_id: string | null;
+      ref_measure_version_id: string | null;
+      payload_json: unknown;
+    }>(
+      `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+         FROM ${SPIKE_SCHEMA}.audit_events ORDER BY occurred_at ASC, id ASC LIMIT $1`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      occurredAt: r.occurred_at instanceof Date ? r.occurred_at.toISOString() : r.occurred_at,
+      eventType: r.event_type,
+      actor: r.actor,
+      refRunId: r.ref_run_id,
+      refCaseId: r.ref_case_id,
+      refMeasureVersionId: r.ref_measure_version_id,
+      payload: (r.payload_json as Record<string, unknown>) ?? {},
+    }));
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {

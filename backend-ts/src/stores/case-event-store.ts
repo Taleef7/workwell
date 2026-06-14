@@ -35,6 +35,17 @@ export interface TimelineEntry {
   payload: Record<string, unknown>;
 }
 
+/** A raw audit_events row (the audit CSV export source), oldest-first. */
+export interface AuditEventRow {
+  occurredAt: string;
+  eventType: string;
+  actor: string | null;
+  refRunId: string | null;
+  refCaseId: string | null;
+  refMeasureVersionId: string | null;
+  payload: Record<string, unknown>;
+}
+
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
@@ -47,6 +58,8 @@ export interface CaseEventStore {
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
   /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
+  /** All audit events, oldest-first (the audit CSV export); capped at `limit`. */
+  listAuditEvents(limit?: number): Promise<AuditEventRow[]>;
   /** True once an OUTREACH_SENT action exists — the precondition for a delivery-state update. */
   hasOutreachSent(caseId: string): Promise<boolean>;
   /**
