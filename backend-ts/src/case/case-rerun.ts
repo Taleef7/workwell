@@ -97,6 +97,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     runId: run.id,
     subjectId: existing.employeeId,
     measureId: existing.measureId,
+    evaluationPeriod: existing.evaluationPeriod,
     status: verifiedStatus,
     evidence,
   });

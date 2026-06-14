@@ -8,6 +8,8 @@ export interface RecordOutcomeInput {
   runId: string;
   subjectId: string;
   measureId: string;
+  /** The run's evaluation period (the canonical outcomes.evaluation_period); defaults to "". */
+  evaluationPeriod?: string;
   /** Bucket from the CQL `Outcome Status` define. */
   status: string;
   /** Define-level evidence (`evidence_json` contract, ADR-002). */
@@ -19,9 +21,19 @@ export interface OutcomeRecord {
   runId: string;
   subjectId: string;
   measureId: string;
+  evaluationPeriod: string;
   status: string;
   evidence: unknown;
   evaluatedAt: string;
+}
+
+/** Per-subject outcome history row for a measure (risk-outlook): status + period + evidence. */
+export interface MeasureOutcomeRow {
+  subjectId: string;
+  status: string;
+  evaluationPeriod: string;
+  evaluatedAt: string;
+  evidence: unknown;
 }
 
 /**
@@ -53,4 +65,9 @@ export interface OutcomeStore {
    * the programs read models; site filtering stays in the app (employee directory).
    */
   listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]>;
+  /**
+   * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence —
+   * the per-subject history the risk-outlook analytics group in the app.
+   */
+  listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]>;
 }
