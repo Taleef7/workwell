@@ -7,7 +7,7 @@
  *
  * The merged audit/case-action timeline and latestOutreachDeliveryStatus are passed
  * in by the caller (CaseEventStore); they default to []/null for read paths that don't
- * load them. Still deferred until later slices: closedReason/closedBy = null.
+ * load them. closedReason/closedBy come from the case row (set by rerun-to-verify).
  */
 import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -142,8 +142,8 @@ export function toCaseDetail(
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     closedAt: c.closedAt,
-    closedReason: null,
-    closedBy: null,
+    closedReason: c.closedReason,
+    closedBy: c.closedBy,
     exclusionReason: null,
     waiverExpiresAt: null,
     waiverExpired: false,

@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   created_at             TIMESTAMPTZ NOT NULL,
   updated_at             TIMESTAMPTZ NOT NULL,
   closed_at              TIMESTAMPTZ,
+  closed_reason          TEXT,
+  closed_by              TEXT,
   UNIQUE (employee_id, measure_id, evaluation_period)
 );
 

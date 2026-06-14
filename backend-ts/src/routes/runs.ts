@@ -195,7 +195,8 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   if (id && id !== "claim" && req.method === "GET") {
     const run = await (await store(env)).getRun(id);
     if (!run) return json({ error: "not_found", id }, 404);
-    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id)));
+    const totalCases = await (await cases(env)).countByLastRun(id);
+    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id), totalCases));
   }
 
   return null;

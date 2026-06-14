@@ -9,8 +9,9 @@
  *   - dataFreshAsOf = MAX(evaluated_at); dataFreshnessMinutes = -1 when no outcomes
  *   - measureName/Version resolved from scopeId (null → "All Programs" / "")
  *
- * Note: `totalCases` is 0 until the cases module is ported (later #107 slice), and
- * `triggerType` is "MANUAL" — the floor only holds manually-created runs so far.
+ * Note: `totalCases` is supplied by the caller (COUNT of cases with last_run_id = runId,
+ * matching Java); it defaults to 0 for callers that don't compute it. `triggerType` is
+ * "MANUAL" — the floor only holds manually-created runs so far.
  */
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -103,14 +104,14 @@ export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunLis
   };
 }
 
-export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[]): RunSummary {
+export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCases = 0): RunSummary {
   const { name, version } = measureLabel(run.scopeId);
   const t = tally(outcomes);
   return {
     ...toRunListItem(run, outcomes),
     measureName: name,
     measureVersion: version,
-    totalCases: 0,
+    totalCases,
     passRate: t.total === 0 ? 0 : (t.compliant * 100) / t.total,
     outcomeCounts: [...t.byStatus.entries()].map(([status, count]) => ({ status, count })),
     dataFreshAsOf: t.freshAsOf,
