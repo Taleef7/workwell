@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
 import type { CaseStore } from "./case-store.ts";
+import type { CaseEventStore } from "./case-event-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -226,5 +227,79 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await store.listCases({ assignee: "unassigned" })).length, 1, "unassigned selects NULL rows");
     assert.equal((await store.listCases({ assignee: "Unassigned" })).length, 1, "case-insensitive");
     assert.equal((await store.listCases({ assignee: "someone@workwell.dev" })).length, 0);
+  });
+
+  test(`[${label}] patchCase updates only the given fields, bumps updated_at, returns null for unknown id`, async () => {
+    const store = await freshStore();
+    const c = (await upsert(store, "OVERDUE"))!;
+    const patched = await store.patchCase(c.id, { assignee: "cm@workwell.dev" });
+    assert.equal(patched?.assignee, "cm@workwell.dev");
+    assert.equal(patched?.priority, "HIGH", "untouched fields preserved");
+    assert.ok(patched!.updatedAt >= c.updatedAt, "updated_at bumped");
+    // assignee: null clears it; nextAction patch is independent
+    assert.equal((await store.patchCase(c.id, { assignee: null }))?.assignee, null);
+    assert.equal((await store.patchCase(c.id, { nextAction: "Do the thing" }))?.nextAction, "Do the thing");
+    assert.equal(await store.patchCase(crypto.randomUUID(), { priority: "LOW" }), null, "unknown id → null");
+  });
+}
+
+/** Registers the CaseEventStore contract — actions + audit ledger + merged timeline. */
+export function caseEventStoreContract(
+  label: string,
+  fresh: () => Promise<{ caseStore: CaseStore; eventStore: CaseEventStore }>,
+): void {
+  const newCase = (caseStore: CaseStore) =>
+    caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-006",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    });
+
+  test(`[${label}] timeline merges audit_events + case_actions oldest-first; CASE_VIEWED excluded`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    await eventStore.insertAction({ caseId: c.id, actionType: "ASSIGNED", actor: "cm@x", payload: { assignee: "cm@x" } });
+    await eventStore.appendAudit({
+      eventType: "CASE_ASSIGNED",
+      entityType: "case",
+      entityId: c.id,
+      actor: "cm@x",
+      refRunId: c.lastRunId,
+      refCaseId: c.id,
+      refMeasureVersionId: c.measureId,
+      payload: { assignee: "cm@x" },
+    });
+    // CASE_VIEWED must never surface on the timeline.
+    await eventStore.appendAudit({
+      eventType: "CASE_VIEWED",
+      entityType: "case",
+      entityId: c.id,
+      actor: "cm@x",
+      refRunId: null,
+      refCaseId: c.id,
+      refMeasureVersionId: null,
+      payload: {},
+    });
+
+    const timeline = await eventStore.caseTimeline(c.id);
+    const types = timeline.map((t) => t.eventType);
+    assert.ok(types.includes("ASSIGNED") && types.includes("CASE_ASSIGNED"), "both sources present");
+    assert.ok(!types.includes("CASE_VIEWED"), "CASE_VIEWED excluded");
+    assert.ok(
+      timeline.every((t) => t.payload.timelineSource === "audit_event" || t.payload.timelineSource === "case_action"),
+      "each entry carries a timelineSource discriminator",
+    );
+    // oldest-first
+    for (let i = 1; i < timeline.length; i++) {
+      assert.ok(timeline[i - 1]!.occurredAt <= timeline[i]!.occurredAt, "ordered by occurred_at ascending");
+    }
+  });
+
+  test(`[${label}] caseTimeline is [] for a case with no events`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    assert.deepEqual(await eventStore.caseTimeline(c.id), []);
   });
 }

@@ -6,7 +6,7 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CaseRecord, CaseQuery, CaseStore, UpsertCaseInput } from "../case-store.ts";
+import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput } from "../case-store.ts";
 import { dispositionFor, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -99,6 +99,22 @@ export class PgCaseStore implements CaseStore {
   async getCase(id: string): Promise<CaseRecord | null> {
     if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<CaseRow>(`SELECT ${COLS} FROM ${T} WHERE id = $1`, [id]);
+    return rows[0] ? toRecord(rows[0]) : null;
+  }
+
+  async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
+    if (!isUuid(id)) return null;
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (patch.status !== undefined) sets.push(`status = $${binds.push(patch.status)}`);
+    if (patch.priority !== undefined) sets.push(`priority = $${binds.push(patch.priority)}`);
+    if (patch.assignee !== undefined) sets.push(`assignee = $${binds.push(patch.assignee)}`);
+    if (patch.nextAction !== undefined) sets.push(`next_action = $${binds.push(patch.nextAction)}`);
+    sets.push(`updated_at = $${binds.push(new Date().toISOString())}`);
+    const { rows } = await this.pool.query<CaseRow>(
+      `UPDATE ${T} SET ${sets.join(", ")} WHERE id = $${binds.push(id)} RETURNING ${COLS}`,
+      binds,
+    );
     return rows[0] ? toRecord(rows[0]) : null;
   }
 

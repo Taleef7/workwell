@@ -37,6 +37,15 @@ export interface CaseQuery {
   offset?: number;
 }
 
+/** Mutable case fields an operator action may patch (assign/escalate/outreach/…). */
+export interface CasePatch {
+  status?: string;
+  priority?: string;
+  /** `assignee: null` clears the assignee; omit to leave it unchanged. */
+  assignee?: string | null;
+  nextAction?: string;
+}
+
 export interface CaseStore {
   /**
    * Upsert a case from one outcome (idempotent on the unique key):
@@ -47,4 +56,6 @@ export interface CaseStore {
   upsertFromOutcome(input: UpsertCaseInput): Promise<CaseRecord | null>;
   getCase(id: string): Promise<CaseRecord | null>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
+  /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
+  patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;
 }

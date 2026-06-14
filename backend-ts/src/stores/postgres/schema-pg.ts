@@ -75,4 +75,30 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
 );
 
 CREATE INDEX IF NOT EXISTS spike_cases_status_idx ON ${SPIKE_SCHEMA}.cases (status);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.case_actions (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_id       UUID NOT NULL,
+  action_type   TEXT NOT NULL,
+  payload_json  JSONB,
+  performed_by  TEXT,
+  performed_at  TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spike_case_actions_case_id_idx ON ${SPIKE_SCHEMA}.case_actions (case_id);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.audit_events (
+  id                     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  event_type             TEXT NOT NULL,
+  entity_type            TEXT NOT NULL,
+  entity_id              TEXT,
+  actor                  TEXT,
+  ref_run_id             TEXT,
+  ref_case_id            TEXT,
+  ref_measure_version_id TEXT,
+  payload_json           JSONB,
+  occurred_at            TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spike_audit_events_ref_case_id_idx ON ${SPIKE_SCHEMA}.audit_events (ref_case_id);
 `;

@@ -4,18 +4,22 @@
  * this serves the worklist with the page's status/measure/priority/assignee/site/
  * search filters + limit/offset paging.
  *
- *   GET /api/cases       newest-first case summaries (filtered)   → 200 CaseSummary[]
- *   GET /api/cases/:id   case detail + evidence/why_flagged       → 200 CaseDetail | 404
+ *   GET  /api/cases             newest-first case summaries (filtered) → 200 CaseSummary[]
+ *   GET  /api/cases/:id         case detail + evidence/why_flagged + timeline → 200 | 404
+ *   POST /api/cases/:id/assign  ?assignee=…  set/clear the case owner    → 200 CaseDetail | 404
+ *   POST /api/cases/:id/escalate              force HIGH/OPEN            → 200 CaseDetail | 404
  *
- * Actions (assign/escalate/outreach) and the audit timeline are later slices
- * (CaseDetail.timeline is [] until the audit module is ported).
+ * Each mutating action writes a case_action + an audit_event; the detail timeline is
+ * the merged ledger. Outreach (send/preview/delivery) + rerun-to-verify are later slices.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
+import { assignCase, escalateCase, type CaseActionDeps } from "../case/case-actions.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -35,6 +39,14 @@ async function caseStore(env: CasesEnv): Promise<SqliteCaseStore> {
 async function outcomeStore(env: CasesEnv): Promise<SqliteOutcomeStore> {
   await ensure(env);
   return new SqliteOutcomeStore(env.DB);
+}
+async function actionDeps(env: CasesEnv): Promise<CaseActionDeps> {
+  await ensure(env);
+  return {
+    cases: new SqliteCaseStore(env.DB),
+    events: new SqliteCaseEventStore(env.DB),
+    outcomes: new SqliteOutcomeStore(env.DB),
+  };
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -63,17 +75,33 @@ function statusesFor(raw: string | null): string[] | undefined {
 /** Day portion (YYYY-MM-DD) for day-granular, inclusive from/to comparison. */
 const day = (s: string): string => s.slice(0, 10);
 
-export async function handleCases(req: Request, env: CasesEnv): Promise<Response | null> {
+export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
 
-  // Case detail — the case row + its evidence (the outcome from the case's last run).
+  // Case actions (POST) — assign / escalate. Each writes a case_action + audit_event.
+  if (req.method === "POST") {
+    const assignId = url.pathname.match(/^\/api\/cases\/([^/]+)\/assign$/)?.[1];
+    if (assignId) {
+      const detail = await assignCase(await actionDeps(env), assignId, url.searchParams.get("assignee"), actor);
+      return detail ? json(detail) : json({ error: "not_found", id: assignId }, 404);
+    }
+    const escalateId = url.pathname.match(/^\/api\/cases\/([^/]+)\/escalate$/)?.[1];
+    if (escalateId) {
+      const detail = await escalateCase(await actionDeps(env), escalateId, actor);
+      return detail ? json(detail) : json({ error: "not_found", id: escalateId }, 404);
+    }
+    return null; // other case POSTs (outreach/rerun) not ported yet
+  }
+
+  // Case detail — the case row + its evidence (the outcome from the case's last run) + timeline.
   const detailId = url.pathname.match(/^\/api\/cases\/([^/]+)$/)?.[1];
   if (detailId && req.method === "GET") {
     const c = await (await caseStore(env)).getCase(detailId);
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
     const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
-    return json(toCaseDetail(c, outcome));
+    const timeline = await new SqliteCaseEventStore(env.DB).caseTimeline(detailId);
+    return json(toCaseDetail(c, outcome, timeline));
   }
 
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;

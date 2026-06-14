@@ -120,12 +120,15 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
   // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
+  // The authenticated subject becomes the audit actor (SecurityActor.currentActor()).
+  let actor = "system";
   if (authEnabled(env)) {
     const principal = extractPrincipal(req, getVerifier(env)!);
     const decision = authorize(req.method, pathname, principal);
     if (!decision.ok) {
       return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);
     }
+    if (principal?.email) actor = principal.email;
   }
 
   // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
@@ -145,8 +148,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   const runsResponse = await handleRuns(req, env);
   if (runsResponse) return runsResponse;
 
-  // Cases — worklist over the cases upserted from run outcomes (#107).
-  const casesResponse = await handleCases(req, env);
+  // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
+  const casesResponse = await handleCases(req, env, actor);
   if (casesResponse) return casesResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
