@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4b (#108): AI surfaces — draft-spec/cql/fixtures + explain + run-insight
+
+Branch `feat/issue-96-ai`. Third Phase 4b batch — the five assistive surfaces, ported from `AiController`/`AiAssistService`. *(backend-ts only — does not touch the deployed Java demo.)* Hard guardrail held throughout (AI_GUARDRAILS.md): **AI never decides compliance** — every surface returns advisory text/drafts and degrades to deterministic fallback; the CQL `Outcome Status` stays the sole compliance source.
+
+- **`ai/openai-chat.ts`** — JVM-free replacement for Spring AI's ChatClient: a plain `fetch` against the OpenAI Chat Completions REST API (**no new dependency**), same options (temperature 0.3, max_tokens 1000) and primary→fallback-model behavior. Throws on missing key / non-2xx / empty content → the signal each surface uses to fall back. When `OPENAI_API_KEY` is unset every call falls back (the demo posture).
+- **`ai/ai-assist.ts`** — the five surfaces with faithful prompts + deterministic fallbacks: `draftSpec` (JSON spec or "fill manually" fallback), `draftCql` (fence-stripped CQL or the TODO template), `generateTestFixtures` (parse + all-5-outcomes coverage gate, else the 5 canonical fallback fixtures), `explainCase` (2–3 sentences or the structured-evidence fallback), `runInsight` (3–5 bullets or empty fallback). Every call writes an `audit_events` row (`entity_type='ai'`, payload wrapped `{timestamp, payload}` per AI_GUARDRAILS §4) via `CaseEventStore.appendAudit`.
+- **`routes/ai.ts`** — `POST /api/ai/draft-spec` (+ `/api/measures/:id/ai/draft-spec` alias), `/api/measures/:id/ai/draft-cql` (404 unknown), `/api/measures/:id/ai/generate-test-fixtures` (404 unknown), `/api/cases/:id/explain` (+ `/ai/explain` alias, 404 unknown), `/api/runs/:id/ai/insight` (404 unknown). Loads case detail / run summary / measure record from the existing stores; the case-explanation cache is keyed `caseId:measureVersion` and invalidated by case `updatedAt` (the Java ConcurrentHashMap behavior). Reuses a new exported `ensureMeasureStore` from `routes/measures.ts` so draft-cql/fixtures read the catalog without re-running the non-idempotent seed. Role gates are unchanged and already faithful (measure-scoped → AUTHOR/ADMIN, cases → CASE_MANAGER/ADMIN, runs → CASE_MANAGER/ADMIN, bare `/api/ai/**` → AUTHENTICATED).
+
+Deferred: live integration-health AI status recording (Java's `recordAiHealth`) — the TS admin integration health is still the static seed, so the AI surfaces don't mutate it yet.
+
+**backend-ts 262 tests — all pass / 0 fail; typecheck clean.** New coverage: the chat client (no-key throw, primary→fallback, success), each surface's success + fallback parse paths + audit wrapper, and the route's fallback contracts + 404/400 gates + explanation cache + AI audit persistence. Frontend AI fetch contracts (`/cases/[id]`, `/runs`, Studio Spec/CQL/Tests tabs) unchanged. Next #108 batch: MCP tools.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4b (#108): admin dashboard read surface + toggles
 
 Branch `feat/issue-96-admin`. Second Phase 4b batch — the `/admin` dashboard reads + the two stateless toggles, ported from `AdminController`. Goal: the admin page renders fully under the TS backend. *(backend-ts only — does not touch the deployed Java demo.)*

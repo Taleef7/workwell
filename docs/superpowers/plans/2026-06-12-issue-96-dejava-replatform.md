@@ -255,8 +255,10 @@ contracts; per-PR JOURNAL entries carry the detail):
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
 - **Phase 4b API strangler (#108)** — in progress: **exports** (runs/outcomes/cases/audit CSV) ✅;
   **admin** dashboard reads + integrations/scheduler toggles ✅ (waivers/delivery-log/mapping-CRUD/
-  demo-reset deferred). AI surfaces + MCP tools pending.
+  demo-reset deferred); **AI surfaces** (draft-spec/cql/fixtures + explain + run-insight) ✅ — fetch-based
+  OpenAI client (no JVM, no new dep), deterministic fallbacks, AI-never-decides-compliance guardrail,
+  per-call AI audit (`recordAiHealth` integration-health status deferred). **MCP tools** pending.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~187 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~262 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.
