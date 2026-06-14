@@ -4,7 +4,13 @@
  * ceiling). Raw D1 to stay close to the contract for the slice.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { OutcomeRecord, OutcomeStore, RecordOutcomeInput } from "../outcome-store.ts";
+import type {
+  OutcomeRecord,
+  OutcomeStore,
+  RecordOutcomeInput,
+  OutcomeWithRun,
+  OutcomeMeasureFilter,
+} from "../outcome-store.ts";
 
 interface OutcomeRow {
   id: string;
@@ -59,5 +65,31 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(runId)
       .all<OutcomeRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {
+    // Join outcomes→runs and filter by measure + day-granular run period in SQL so the scan
+    // is bounded to the selected measure/range (not all run history). substr(started_at,1,10)
+    // is the run's started day (started_at is TEXT ISO on the floor).
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (filter.measureId) (where.push("o.measure_id = ?"), binds.push(filter.measureId));
+    if (filter.from) (where.push("substr(r.started_at, 1, 10) >= ?"), binds.push(filter.from));
+    if (filter.to) (where.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));
+    const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    const { results } = await this.db
+      .prepare(
+        `SELECT o.run_id, r.started_at AS run_started_at, o.subject_id, o.measure_id, o.status
+           FROM outcomes o JOIN runs r ON r.id = o.run_id${clause}`,
+      )
+      .bind(...binds)
+      .all<{ run_id: string; run_started_at: string; subject_id: string; measure_id: string; status: string }>();
+    return (results ?? []).map((r) => ({
+      runId: r.run_id,
+      runStartedAt: r.run_started_at,
+      subjectId: r.subject_id,
+      measureId: r.measure_id,
+      status: r.status,
+    }));
   }
 }
