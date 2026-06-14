@@ -4,26 +4,37 @@
  * this serves the worklist with the page's status/measure/priority/assignee/site/
  * search filters + limit/offset paging.
  *
- *   GET /api/cases   newest-first case summaries (filtered)   → 200 CaseSummary[]
+ *   GET /api/cases       newest-first case summaries (filtered)   → 200 CaseSummary[]
+ *   GET /api/cases/:id   case detail + evidence/why_flagged       → 200 CaseDetail | 404
  *
- * Actions (assign/escalate/outreach), case detail, and timeline are later slices.
+ * Actions (assign/escalate/outreach) and the audit timeline are later slices
+ * (CaseDetail.timeline is [] until the audit module is ported).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
+import { toCaseDetail } from "../case/case-detail-read-model.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
 }
 
 const ready = new WeakSet<object>();
-async function caseStore(env: CasesEnv): Promise<SqliteCaseStore> {
+async function ensure(env: CasesEnv): Promise<void> {
   if (!ready.has(env.DB)) {
     await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
     ready.add(env.DB);
   }
+}
+async function caseStore(env: CasesEnv): Promise<SqliteCaseStore> {
+  await ensure(env);
   return new SqliteCaseStore(env.DB);
+}
+async function outcomeStore(env: CasesEnv): Promise<SqliteOutcomeStore> {
+  await ensure(env);
+  return new SqliteOutcomeStore(env.DB);
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -54,6 +65,17 @@ const day = (s: string): string => s.slice(0, 10);
 
 export async function handleCases(req: Request, env: CasesEnv): Promise<Response | null> {
   const url = new URL(req.url);
+
+  // Case detail — the case row + its evidence (the outcome from the case's last run).
+  const detailId = url.pathname.match(/^\/api\/cases\/([^/]+)$/)?.[1];
+  if (detailId && req.method === "GET") {
+    const c = await (await caseStore(env)).getCase(detailId);
+    if (!c) return json({ error: "not_found", id: detailId }, 404);
+    const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
+    const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+    return json(toCaseDetail(c, outcome));
+  }
+
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;
 
   const q = url.searchParams;
