@@ -32,6 +32,7 @@ const EMPTY_SPEC: MeasureSpec = {
   exclusions: [],
   complianceWindow: "",
   requiredDataElements: [],
+  testFixtures: [],
 };
 
 const toRecord = (r: JoinRow): MeasureRecord => ({
