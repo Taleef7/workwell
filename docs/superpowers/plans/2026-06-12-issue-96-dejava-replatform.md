@@ -241,12 +241,12 @@ contracts; per-PR JOURNAL entries carry the detail):
     generation, seeded distribution, PARTIAL_FAILURE). ✅ merged (PRs #118–#121). MEASURE/EMPLOYEE sync;
     ALL_PROGRAMS/SITE (async) + CASE pending.
   - `cases` — worklist + idempotent upsert ✅ (PR #122); case detail + why_flagged ✅ (PR #123);
-    actions (assign/escalate) + audit timeline ✅ (PR #124); outreach (preview/send/delivery) +
-    `latestOutreachDeliveryStatus` ✅ (simulated EmailService, `CaseEventStore.hasOutreachSent` /
-    `latestOutreachDeliveryStatus`). rerun-to-verify, evidence upload/download, appointments, ai/explain,
-    and the `outreach_delivery_log` table (admin reader, #108) still pending.
+    actions (assign/escalate) + audit timeline ✅ (PR #124); outreach (preview/send/delivery) ✅ (PR #125);
+    rerun-to-verify (CASE scope) + run `totalCases` ✅ (closed_reason/closed_by columns, `countByLastRun`).
+    **Functionally complete bar evidence upload/download, appointments, ai/explain, the
+    `outreach_delivery_log` table, and the run-grid per-row caseId — all #108-adjacent.**
   - `measures`, `programs` — not started.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~152 tests green (1 Postgres-harness skip without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~159 tests green (1 Postgres-harness skip without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

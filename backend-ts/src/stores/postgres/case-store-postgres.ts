@@ -23,11 +23,13 @@ interface CaseRow {
   created_at: Date | string;
   updated_at: Date | string;
   closed_at: Date | string | null;
+  closed_reason: string | null;
+  closed_by: string | null;
 }
 
 const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : v);
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 const T = `${SPIKE_SCHEMA}.cases`;
 
 const toRecord = (r: CaseRow): CaseRecord => ({
@@ -44,6 +46,8 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   createdAt: iso(r.created_at)!,
   updatedAt: iso(r.updated_at)!,
   closedAt: iso(r.closed_at),
+  closedReason: r.closed_reason,
+  closedBy: r.closed_by,
 });
 
 export class PgCaseStore implements CaseStore {
@@ -110,12 +114,26 @@ export class PgCaseStore implements CaseStore {
     if (patch.priority !== undefined) sets.push(`priority = $${binds.push(patch.priority)}`);
     if (patch.assignee !== undefined) sets.push(`assignee = $${binds.push(patch.assignee)}`);
     if (patch.nextAction !== undefined) sets.push(`next_action = $${binds.push(patch.nextAction)}`);
+    if (patch.currentOutcomeStatus !== undefined) sets.push(`current_outcome_status = $${binds.push(patch.currentOutcomeStatus)}`);
+    if (patch.lastRunId !== undefined) sets.push(`last_run_id = $${binds.push(patch.lastRunId)}::uuid`);
+    if (patch.closedAt !== undefined) sets.push(`closed_at = $${binds.push(patch.closedAt)}`);
+    if (patch.closedReason !== undefined) sets.push(`closed_reason = $${binds.push(patch.closedReason)}`);
+    if (patch.closedBy !== undefined) sets.push(`closed_by = $${binds.push(patch.closedBy)}`);
     sets.push(`updated_at = $${binds.push(new Date().toISOString())}`);
     const { rows } = await this.pool.query<CaseRow>(
       `UPDATE ${T} SET ${sets.join(", ")} WHERE id = $${binds.push(id)} RETURNING ${COLS}`,
       binds,
     );
     return rows[0] ? toRecord(rows[0]) : null;
+  }
+
+  async countByLastRun(runId: string): Promise<number> {
+    if (!isUuid(runId)) return 0;
+    const { rows } = await this.pool.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM ${T} WHERE last_run_id = $1::uuid`,
+      [runId],
+    );
+    return Number(rows[0]?.n ?? 0);
   }
 
   async listCases(query: CaseQuery): Promise<CaseRecord[]> {

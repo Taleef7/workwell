@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS cases (
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL,
   closed_at              TEXT,
+  closed_reason          TEXT,
+  closed_by              TEXT,
   UNIQUE (employee_id, measure_id, evaluation_period)
 );
 
