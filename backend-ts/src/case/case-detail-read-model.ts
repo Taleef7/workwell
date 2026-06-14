@@ -5,8 +5,9 @@
  * measure binding. why_flagged is derived from the CQL define results (the TS engine
  * stores expressionResults, not a why_flagged block), matching the Java field shape.
  *
- * Honest deferrals for this slice (audit + actions modules not ported yet):
- *   timeline = [], latestOutreachDeliveryStatus = null, closedReason/closedBy = null.
+ * The merged audit/case-action timeline is passed in by the caller (CaseEventStore);
+ * it defaults to [] for read paths that don't load it. Still deferred until later
+ * slices: latestOutreachDeliveryStatus = null, closedReason/closedBy = null.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -116,7 +117,7 @@ function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod
   };
 }
 
-export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null): CaseDetail {
+export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null, timeline: unknown[] = []): CaseDetail {
   const emp = employeeById(c.employeeId);
   const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
   return {
@@ -149,6 +150,6 @@ export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null): Case
     outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
     latestOutreachDeliveryStatus: null,
-    timeline: [],
+    timeline,
   };
 }

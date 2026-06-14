@@ -20,7 +20,8 @@ import { RUN_STORE_PG_DDL, SPIKE_SCHEMA } from "./schema-pg.ts";
 import { PgRunStore } from "./run-store-postgres.ts";
 import { PgOutcomeStore } from "./outcome-store-postgres.ts";
 import { PgCaseStore } from "./case-store-postgres.ts";
-import { runStoreContract, outcomeStoreContract, caseStoreContract } from "../store-contract.ts";
+import { PgCaseEventStore } from "./case-event-store-postgres.ts";
+import { runStoreContract, outcomeStoreContract, caseStoreContract, caseEventStoreContract } from "../store-contract.ts";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
 
@@ -52,7 +53,7 @@ if (!reachable) {
 
   const truncate = () =>
     pool.query(
-      `TRUNCATE ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs RESTART IDENTITY CASCADE`,
+      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs RESTART IDENTITY CASCADE`,
     );
 
   runStoreContract("postgres", async () => {
@@ -68,5 +69,10 @@ if (!reachable) {
   caseStoreContract("postgres", async () => {
     await truncate();
     return new PgCaseStore(pool);
+  });
+
+  caseEventStoreContract("postgres", async () => {
+    await truncate();
+    return { caseStore: new PgCaseStore(pool), eventStore: new PgCaseEventStore(pool) };
   });
 }

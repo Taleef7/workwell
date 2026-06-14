@@ -16,7 +16,8 @@ import { RUN_STORE_FLOOR_DDL } from "./schema.ts";
 import { SqliteRunStore } from "./run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "./outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "./case-store-sqlite.ts";
-import { runStoreContract, outcomeStoreContract, caseStoreContract } from "../store-contract.ts";
+import { SqliteCaseEventStore } from "./case-event-store-sqlite.ts";
+import { runStoreContract, outcomeStoreContract, caseStoreContract, caseEventStoreContract } from "../store-contract.ts";
 
 const created: string[] = [];
 
@@ -46,3 +47,8 @@ outcomeStoreContract("sqlite", async () => {
 });
 
 caseStoreContract("sqlite", async () => new SqliteCaseStore(await freshDb()));
+
+caseEventStoreContract("sqlite", async () => {
+  const db = await freshDb();
+  return { caseStore: new SqliteCaseStore(db), eventStore: new SqliteCaseEventStore(db) };
+});

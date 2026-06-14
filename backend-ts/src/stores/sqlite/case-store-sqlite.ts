@@ -5,7 +5,7 @@
  * case invariant). COMPLIANT resolves an existing case without inserting a new one.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CaseRecord, CaseQuery, CaseStore, UpsertCaseInput } from "../case-store.ts";
+import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput } from "../case-store.ts";
 import { dispositionFor, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -103,6 +103,22 @@ export class SqliteCaseStore implements CaseStore {
 
   async getCase(id: string): Promise<CaseRecord | null> {
     const row = await this.db.prepare(`SELECT ${COLS} FROM cases WHERE id = ?`).bind(id).first<CaseRow>();
+    return row ? toRecord(row) : null;
+  }
+
+  async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (patch.status !== undefined) (sets.push("status = ?"), binds.push(patch.status));
+    if (patch.priority !== undefined) (sets.push("priority = ?"), binds.push(patch.priority));
+    if (patch.assignee !== undefined) (sets.push("assignee = ?"), binds.push(patch.assignee));
+    if (patch.nextAction !== undefined) (sets.push("next_action = ?"), binds.push(patch.nextAction));
+    sets.push("updated_at = ?");
+    binds.push(new Date().toISOString());
+    const row = await this.db
+      .prepare(`UPDATE cases SET ${sets.join(", ")} WHERE id = ? RETURNING ${COLS}`)
+      .bind(...binds, id)
+      .first<CaseRow>();
     return row ? toRecord(row) : null;
   }
 
