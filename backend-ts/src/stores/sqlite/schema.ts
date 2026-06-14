@@ -47,4 +47,27 @@ CREATE TABLE IF NOT EXISTS outcomes (
 );
 
 CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
+
+/* Cases (#107). Floor analogue of the canonical cases table (docs/DATA_MODEL.md):
+   measure_id (slug) stands in for the canonical measure_version_id UUID. The
+   idempotency invariant is UNIQUE (employee_id, measure_id, evaluation_period) — a
+   rerun upserts, never duplicates. (Block comment: this DDL is newline-flattened.) */
+CREATE TABLE IF NOT EXISTS cases (
+  id                     TEXT PRIMARY KEY,
+  employee_id            TEXT NOT NULL,
+  measure_id             TEXT NOT NULL,
+  evaluation_period      TEXT NOT NULL,
+  status                 TEXT NOT NULL,
+  priority               TEXT NOT NULL,
+  assignee               TEXT,
+  next_action            TEXT,
+  current_outcome_status TEXT NOT NULL,
+  last_run_id            TEXT NOT NULL,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL,
+  closed_at              TEXT,
+  UNIQUE (employee_id, measure_id, evaluation_period)
+);
+
+CREATE INDEX IF NOT EXISTS cases_status_idx ON cases (status);
 `;

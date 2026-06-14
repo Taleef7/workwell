@@ -13,6 +13,7 @@
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
+import type { CaseStore } from "../stores/case-store.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -50,6 +51,8 @@ export interface RunPipelineDeps {
   runStore: RunStore;
   outcomeStore: OutcomeStore;
   engine: EvaluateMeasureBinding;
+  /** When present, each outcome upserts/resolves a case (idempotent). */
+  caseStore?: CaseStore;
   /** Injectable for tests (defaults to the full synthetic directory). */
   employees?: readonly EmployeeProfile[];
 }
@@ -107,7 +110,9 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
     scopeType: req.scopeType,
     scopeId: scopeId ?? undefined,
     triggeredBy: req.triggeredBy ?? "manual",
-    requestedScope: pruneUndefined({ measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site }),
+    // Persist the resolved evaluationDate so a rerun reuses the same evaluation period
+    // (and the case upsert stays idempotent rather than opening a fresh-period case).
+    requestedScope: pruneUndefined({ measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site, evaluationDate: evalDate }),
     measurementPeriodStart: periodStart,
     measurementPeriodEnd: periodEnd,
   });
@@ -141,6 +146,14 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
       status,
       evidence,
     });
+    // Idempotent case upsert: non-compliant opens, EXCLUDED excludes, COMPLIANT resolves.
+    await deps.caseStore?.upsertFromOutcome({
+      runId: run.id,
+      subjectId: item.employee.externalId,
+      measureId: item.measureId,
+      evaluationPeriod: evalDate,
+      outcomeStatus: status,
+    });
     if (status === "COMPLIANT") compliant++;
     else if (NON_COMPLIANT.has(status)) nonCompliant++;
   }
@@ -173,6 +186,7 @@ export async function executeRerun(deps: RunPipelineDeps, runId: string): Promis
     measureId: (scope.measureId as string | undefined) ?? prior.scopeId ?? undefined,
     employeeExternalId: scope.employeeExternalId as string | undefined,
     site: scope.site as string | undefined,
+    evaluationDate: scope.evaluationDate as string | undefined, // reuse the period → idempotent cases
     triggeredBy: "rerun",
   });
 }
