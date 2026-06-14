@@ -4,6 +4,7 @@
  *   GET  /api/measures                    full TWH catalog (Measure[]); ?status=&search=
  *   GET  /api/measures/:id                MeasureDetail (spec + CQL + compile status)
  *   GET  /api/measures/:id/versions       VersionHistoryItem[]
+ *   GET  /api/measures/:id/activation-readiness   ActivationReadiness (compile/fixture gate)
  *   GET  /api/measures/:id/elm            compiled ELM (the AST) for the measure
  *   POST /api/measures/:id/evaluate       body = FHIR R4 bundle, ?date=YYYY-MM-DD
  *                                         → { subjectId, measure, outcome, evidence }
@@ -21,7 +22,7 @@ import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
-import { listCatalog, findMeasure, toMeasureDetail, toVersionHistory } from "../measure/measure-read-models.ts";
+import { listCatalog, findMeasure, toMeasureDetail, toVersionHistory, toActivationReadiness } from "../measure/measure-read-models.ts";
 
 /** Reconstruct the measure's CQL from its compiled ELM (runnable measures); "" otherwise. */
 function measureCql(measureId: string): string {
@@ -52,6 +53,13 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
   if (versionsId && req.method === "GET") {
     const m = findMeasure(versionsId);
     return m ? json(toVersionHistory(m)) : json({ error: "not_found", measureId: versionsId }, 404);
+  }
+
+  // Activation readiness (compile + test-fixture gate).
+  const readinessId = pathname.match(/^\/api\/measures\/([^/]+)\/activation-readiness$/)?.[1];
+  if (readinessId && req.method === "GET") {
+    const m = findMeasure(readinessId);
+    return m ? json(toActivationReadiness(m)) : json({ error: "not_found", measureId: readinessId }, 404);
   }
 
   // Measure detail (spec + reconstructed CQL + compile status).

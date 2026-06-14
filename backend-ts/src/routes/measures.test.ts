@@ -114,6 +114,32 @@ test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' excl
   );
 });
 
+test("GET /api/measures/:id/activation-readiness reflects the compile + fixture gate", async () => {
+  // Runnable (COMPILED) but no fixtures → not ready, only the fixture blocker.
+  const a = (await get("/api/measures/audiogram/activation-readiness").then((r) => r!.json())) as {
+    ready: boolean;
+    compileStatus: string;
+    testFixtureCount: number;
+    valueSetCount: number;
+    testValidationPassed: boolean;
+    activationBlockers: string[];
+  };
+  assert.equal(a.ready, false);
+  assert.equal(a.compileStatus, "COMPILED");
+  assert.equal(a.testValidationPassed, false);
+  assert.equal(a.testFixtureCount, 0);
+  assert.equal(a.valueSetCount, 0);
+  assert.ok(a.activationBlockers.some((b) => /test fixture/i.test(b)));
+  assert.ok(!a.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
+
+  // Draft (NOT_COMPILED) → adds the compile blocker too.
+  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { activationBlockers: string[]; compileStatus: string };
+  assert.equal(d.compileStatus, "NOT_COMPILED");
+  assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
+
+  assert.equal((await get("/api/measures/nope/activation-readiness"))?.status, 404);
+});
+
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
   const res = await get("/api/measures/audiogram/elm");
   assert.equal(res?.status, 200);
