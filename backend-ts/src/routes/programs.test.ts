@@ -115,3 +115,13 @@ test("GET /api/programs/sites lists distinct employee sites", async () => {
   assert.ok(sites.includes("Plant A") && sites.includes("HQ"));
   assert.deepEqual([...sites].sort(), sites, "ascending");
 });
+
+test("malformed from/to date filters → 400 (Java parseFromDate/parseToDate parity)", async () => {
+  assert.equal((await get("/overview?from=2026-13-01"))?.status, 400, "bad month");
+  assert.equal((await get("/overview?to=2026-02-30"))?.status, 400, "overflow day rejected like LocalDate");
+  assert.equal((await get("/overview?from=not-a-date"))?.status, 400);
+  const msg = (await get("/overview?from=2026-13-01").then((r) => r!.json())) as { message: string };
+  assert.match(msg.message, /from must use YYYY-MM-DD/);
+  // a valid date still returns 200 (blank → no filter, also 200)
+  assert.equal((await get("/overview?from=2026-01-01&to=2026-12-31"))?.status, 200);
+});
