@@ -11,6 +11,7 @@ import type {
   RecordOutcomeInput,
   OutcomeWithRun,
   OutcomeMeasureFilter,
+  MeasureOutcomeRow,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -18,6 +19,7 @@ interface OutcomeRow {
   run_id: string;
   subject_id: string;
   measure_id: string;
+  evaluation_period: string;
   status: string;
   evidence_json: unknown;
   evaluated_at: Date | string;
@@ -28,6 +30,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   runId: r.run_id,
   subjectId: r.subject_id,
   measureId: r.measure_id,
+  evaluationPeriod: r.evaluation_period,
   status: r.status,
   // pg returns JSONB already parsed.
   evidence: r.evidence_json,
@@ -42,16 +45,18 @@ export class PgOutcomeStore implements OutcomeStore {
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
     const evaluatedAt = new Date().toISOString();
+    const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.pool.query(
-      `INSERT INTO ${T} (id, run_id, subject_id, measure_id, status, evidence_json, evaluated_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
-      [id, input.runId, input.subjectId, input.measureId, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt],
+      `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+      [id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt],
     );
     return {
       id,
       runId: input.runId,
       subjectId: input.subjectId,
       measureId: input.measureId,
+      evaluationPeriod,
       status: input.status,
       evidence: input.evidence ?? {},
       evaluatedAt,
@@ -63,11 +68,32 @@ export class PgOutcomeStore implements OutcomeStore {
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
     if (!isUuid(runId)) return [];
     const { rows } = await this.pool.query<OutcomeRow>(
-      `SELECT id, run_id, subject_id, measure_id, status, evidence_json, evaluated_at
+      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
          FROM ${T} WHERE run_id = $1 ORDER BY evaluated_at ASC`,
       [runId],
     );
     return rows.map(toRecord);
+  }
+
+  async listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]> {
+    const { rows } = await this.pool.query<{
+      subject_id: string;
+      status: string;
+      evaluation_period: string;
+      evaluated_at: Date | string;
+      evidence_json: unknown;
+    }>(
+      `SELECT subject_id, status, evaluation_period, evaluated_at, evidence_json
+         FROM ${T} WHERE measure_id = $1 ORDER BY evaluated_at ASC`,
+      [measureId],
+    );
+    return rows.map((r) => ({
+      subjectId: r.subject_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+      evidence: r.evidence_json,
+    }));
   }
 
   async listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {

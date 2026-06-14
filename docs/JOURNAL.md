@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (3/n) — risk-outlook (+ outcomes.evaluation_period)
+
+Branch `feat/issue-96-programs-risk`. Final programs slice: the predictive risk-outlook on the per-measure `/programs/[measureId]` page, ported from `RiskOutlookService`. **The `programs` module is now complete.**
+
+- **Enabling schema field** — added `evaluation_period` to the TS `outcomes` table (floor + ceiling + idempotent backfill), the canonical column (DATA_MODEL §3.9) the TS floor had omitted. `RecordOutcomeInput.evaluationPeriod` (optional, defaults `''`); the run pipeline, rerun-to-verify, and the `/evaluate` route now thread the run's evaluation period. New bounded `OutcomeStore.listOutcomesForMeasure(measureId)` returns the measure's per-subject history (status + period + evidence).
+- **`program/program-read-models.ts`** — `programRiskOutlook(measureId, horizonDays)` (horizon clamped 1–180): latest outcome per subject → who becomes **DUE_SOON within the horizon** (`threshold = window − 30`, derived `last_exam_date` from the recency define like case detail), per-site **current vs predicted** compliance, and **repeat non-compliers** (OVERDUE/MISSING_DATA streak ≥ 3 across distinct `evaluation_period`s, dedupe latest-per-period). Unknown measure → null → 404.
+- **`routes/programs.ts`** — `GET /api/programs/:id/risk-outlook?horizonDays=30`.
+
+**backend-ts 206 tests — all pass / 0 fail; typecheck clean.** New coverage: risk-outlook upcoming-due-soon prediction (daysUntilDueSoon math) + repeat-non-complier streak + 404; `listOutcomesForMeasure` contract (both backends, period+evidence round-trip); `outcomes.evaluation_period` floor backfill (idempotent). Postgres ceiling validated the new column + query. Frontend `/programs/[measureId]` fetch contract unchanged. **Programs module done — next: the store-backed measures detail/authoring slice (the last major Phase-4 piece).**
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (2/n) — trend + top-drivers
 
 Branch `feat/issue-96-programs-trend`. Second programs slice: the per-measure trend chart + top-drivers panel on `/programs`, ported from `ProgramService.trend` / `topDrivers`.

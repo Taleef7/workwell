@@ -218,6 +218,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
         runId: evalId,
         subjectId: result.subjectId,
         measureId: body.measureId,
+        evaluationPeriod: body.evaluationDate ?? "",
         status: result.outcome,
         evidence: result.evidence,
       });

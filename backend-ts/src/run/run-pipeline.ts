@@ -155,6 +155,7 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
       runId: run.id,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
+      evaluationPeriod: evalDate,
       status,
       evidence,
     });

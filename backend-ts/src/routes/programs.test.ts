@@ -154,6 +154,56 @@ test("trend honors the date validation too (malformed from → 400)", async () =
   assert.equal((await get("/audiogram/trend?from=2026-13-01"))?.status, 400);
 });
 
+test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon + repeat non-compliers", async () => {
+  // Seed hazwoper outcomes (separate measure, doesn't disturb the audiogram assertions above).
+  const runStore = new SqliteRunStore(env.DB as never);
+  const oc = new SqliteOutcomeStore(env.DB as never);
+  const mk = () =>
+    runStore.createRun({
+      scopeType: "MEASURE",
+      scopeId: "hazwoper",
+      triggeredBy: "test",
+      requestedScope: { measureId: "hazwoper" },
+      measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+      measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    });
+  // emp-006 COMPLIANT with an exam 320 days ago → within 30 days of the due-soon threshold (365-30=335).
+  const lastExam = new Date(Date.now() - 320 * 86400000).toISOString().slice(0, 10);
+  const r1 = await mk();
+  await oc.recordOutcome({
+    runId: r1.id,
+    subjectId: "emp-006",
+    measureId: "hazwoper",
+    evaluationPeriod: "2026-06-13",
+    status: "COMPLIANT",
+    evidence: { expressionResults: [{ define: "Most Recent Surveillance Exam Date", result: lastExam }] },
+  });
+  // emp-001 OVERDUE across 3 distinct evaluation periods → repeat non-complier (streak 3).
+  for (const period of ["2024-06-13", "2025-06-13", "2026-06-13"]) {
+    await oc.recordOutcome({ runId: r1.id, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: period, status: "OVERDUE", evidence: {} });
+  }
+
+  const res = await get("/hazwoper/risk-outlook?horizonDays=30");
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as {
+    upcomingNonCompliantCount: number;
+    upcomingExpirations: Array<{ externalId: string; daysUntilDueSoon: number; predictedDueSoonDate: string }>;
+    repeatNonCompliers: Array<{ externalId: string; streakCount: number }>;
+    siteComplianceRates: Array<{ site: string }>;
+  };
+  const omar = d.upcomingExpirations.find((e) => e.externalId === "emp-006")!;
+  assert.ok(omar, "emp-006 is becoming due soon");
+  assert.equal(omar.daysUntilDueSoon, 15, "335 threshold − 320 days since");
+  assert.equal(d.upcomingNonCompliantCount, d.upcomingExpirations.length);
+  const repeat = d.repeatNonCompliers.find((r) => r.externalId === "emp-001")!;
+  assert.equal(repeat.streakCount, 3, "3 flagged periods in a row");
+  assert.ok(d.siteComplianceRates.length >= 1);
+});
+
+test("GET /api/programs/:id/risk-outlook for an unknown measure → 404", async () => {
+  assert.equal((await get("/does-not-exist/risk-outlook"))?.status, 404);
+});
+
 test("malformed from/to date filters → 400 (Java parseFromDate/parseToDate parity)", async () => {
   assert.equal((await get("/overview?from=2026-13-01"))?.status, 400, "bad month");
   assert.equal((await get("/overview?to=2026-02-30"))?.status, 400, "overflow day rejected like LocalDate");
