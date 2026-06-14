@@ -1,7 +1,7 @@
 /**
  * Measures route (#106) — the live, JVM-free compliance engine behind the worker.
  *
- *   GET  /api/measures                    list runnable measures
+ *   GET  /api/measures                    full TWH catalog (Measure[]); ?status=&search=
  *   GET  /api/measures/:id/elm            compiled ELM (the AST) for the measure
  *   POST /api/measures/:id/evaluate       body = FHIR R4 bundle, ?date=YYYY-MM-DD
  *                                         → { subjectId, measure, outcome, evidence }
@@ -9,15 +9,17 @@
  * This is Doug's "given a patient and a measure, are they compliant?" as a live TS
  * endpoint — CQL/eCQM evaluation in Node, no JVM (ELM compiled by @cqframework/cql).
  *
- * The /elm read endpoint serves the same compiled ELM the engine executes — the AST,
- * with CQL source narrative (EnableAnnotations) + locators (EnableLocators) — so the
- * Studio ELM-explorer can show source↔AST without a JVM. Read-only, no compliance.
+ * The list now serves the full 60-measure TWH catalog (#107 measures module) — the
+ * `/measures` page contract — ordered Active-first so the runs/studio pickers still
+ * default to a runnable measure. The /elm read endpoint serves the same compiled ELM the
+ * engine executes (source↔AST narrative for the Studio explorer). Read-only, no compliance.
  */
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
+import { listCatalog } from "../measure/measure-read-models.ts";
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
 const MAX_CQL_BYTES = 64 * 1024;
@@ -33,7 +35,7 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
   const { pathname } = url;
 
   if (pathname === "/api/measures" && req.method === "GET") {
-    return json(Object.values(MEASURES).map((m) => ({ id: m.id, name: m.name })));
+    return json(listCatalog({ status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
   }
 
   // Live CQL → ELM compile (no JVM) — powers the ELM-explorer playground.
