@@ -27,6 +27,10 @@ import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matches
 import {
   executeManualRun,
   executeRerun,
+  planManualRun,
+  finishManualRun,
+  runningResponse,
+  ASYNC_SCOPES,
   UnsupportedScopeError,
   InvalidRunRequestError,
   type ManualRunRequest,
@@ -96,7 +100,10 @@ function caseRerunResponse(detail: {
 }
 
 /** Returns a Response if this module owns the route, else null (let the worker continue). */
-export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): Promise<Response | null> {
+/** Schedules background work that must outlive the response (ctx.waitUntil); awaits inline if absent. */
+export type WaitUntil = (p: Promise<unknown>) => void;
+
+export async function handleRuns(req: Request, env: RunsEnv, actor = "system", waitUntil?: WaitUntil): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
@@ -131,11 +138,19 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
   }
 
   // ---- write pipeline (#107 runs module) ----------------------------------
-  // Manual scoped run (MEASURE / EMPLOYEE): evaluate + persist + summarize.
+  // Manual scoped run: evaluate + persist + summarize. MEASURE/EMPLOYEE run synchronously
+  // (≤ a few seconds); ALL_PROGRAMS/SITE fan out to ~1000 evaluations (~1 min), so they create
+  // the run, return RUNNING immediately, and finish in the background (the page polls to terminal).
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
+      if (ASYNC_SCOPES.has(body.scopeType) && waitUntil) {
+        const planned = await planManualRun(deps, body);
+        waitUntil(finishManualRun(deps, planned));
+        return json(runningResponse(planned), 201);
+      }
+      // No waitUntil (e.g. tests) → fall back to synchronous completion for every scope.
       return json(await executeManualRun(deps, body), 201);
     } catch (err) {
       if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
