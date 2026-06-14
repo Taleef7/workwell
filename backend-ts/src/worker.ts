@@ -23,6 +23,7 @@ import { handleMeasures } from "./routes/measures.ts";
 import { handleCases } from "./routes/cases.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleExports } from "./routes/exports.ts";
+import { handleAdmin } from "./routes/admin.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -161,6 +162,10 @@ async function route(req: Request, env: Env): Promise<Response> {
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
   const exportsResponse = await handleExports(req, env);
   if (exportsResponse) return exportsResponse;
+
+  // Admin — dashboard read surface + simple toggles (#108). Gated to ADMIN by the matrix.
+  const adminResponse = await handleAdmin(req, env);
+  if (adminResponse) return adminResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
   // same principle as UnsupportedBindingError / "AI never decides compliance".
