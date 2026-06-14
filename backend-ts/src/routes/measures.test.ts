@@ -14,11 +14,46 @@ const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { me
 const post = (path: string, body?: unknown) =>
   handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }));
 
-test("GET /api/measures lists runnable measures with id + name", async () => {
+interface CatalogRow {
+  id: string;
+  name: string;
+  policyRef: string;
+  version: string;
+  status: string;
+  owner: string;
+  tags: string[];
+  lastUpdated: string;
+  statusUpdatedAt: string;
+  statusUpdatedBy: string;
+}
+
+test("GET /api/measures returns the full 60-measure catalog (Measure shape), Active-first", async () => {
   const res = await get("/api/measures");
   assert.equal(res?.status, 200);
-  const rows = (await res!.json()) as Array<{ id: string; name: string }>;
-  assert.ok(rows.some((m) => m.id === "audiogram" && m.name === "Audiogram"));
+  const rows = (await res!.json()) as CatalogRow[];
+  assert.equal(rows.length, 60, "full TWH catalog");
+  // The first row is Active so the runs/studio pickers default to a runnable measure.
+  assert.equal(rows[0]!.status, "Active");
+  const audiogram = rows.find((m) => m.id === "audiogram")!;
+  assert.equal(audiogram.name, "Annual Audiogram Completed");
+  assert.equal(audiogram.policyRef, "OSHA 29 CFR 1910.95");
+  assert.equal(audiogram.status, "Active");
+  assert.ok(audiogram.tags.includes("hearing"));
+  // exactly the 10 runnable measures are Active
+  assert.equal(rows.filter((m) => m.status === "Active").length, 10);
+});
+
+test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
+  const rows = (await get("/api/measures?status=Draft").then((r) => r!.json())) as CatalogRow[];
+  assert.ok(rows.length >= 47, "the CMS eCQM drafts (+ Respirator Fit Test)");
+  assert.ok(rows.every((m) => m.status === "Draft"));
+});
+
+test("GET /api/measures?search matches name or tag (case-insensitive)", async () => {
+  const byName = (await get("/api/measures?search=hazwoper").then((r) => r!.json())) as CatalogRow[];
+  assert.ok(byName.some((m) => m.id === "hazwoper"));
+  const byTag = (await get("/api/measures?search=cardiovascular").then((r) => r!.json())) as CatalogRow[];
+  assert.ok(byTag.length >= 2 && byTag.every((m) => m.tags.includes("cardiovascular")));
 });
 
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
