@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-13 — Issue #96 Phase 4 (#107): cases module (2/n) — case detail + why_flagged
+
+Branch `feat/issue-96-case-detail`. Second cases slice: `GET /api/cases/:id` → the frontend `CaseDetail`.
+
+- **`case/case-detail-read-model.ts`** — `toCaseDetail(caseRecord, outcome)`: the case row + the case's **evidence** (the outcome from its `last_run_id`, matched by subject+measure) + the measure binding. `outcomeSummary` is the Java `outcomeSummaryFor` switch. `why_flagged` is derived from the CQL define results (the TS engine stores `expressionResults`, not a why_flagged block): `waiver_status` from the waiver/exemption/exclusion define, `days_overdue` = `daysSince − window`, `last_exam_date` = evaluation date − daysSince — matching the Java field shape.
+- **`routes/cases.ts`** — `GET /api/cases/:id` (404 for unknown); sources evidence via the OutcomeStore.
+
+Honest deferrals (audit + actions modules not ported yet): `timeline = []`, `latestOutreachDeliveryStatus = null`, `closedReason/closedBy = null`.
+
+**backend-ts 138 tests — 137 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Docs/board synced this slice: #107 issue checklist updated (runs ✓, cases worklist+detail in progress), plan doc progress log + README status refreshed. Next cases slice: **actions** (assign/escalate/outreach/delivery, rerun-to-verify) + the audit timeline; then run `totalCases` wiring, then the measures + programs modules.
+
+---
+
 ## 2026-06-13 — Issue #96 Phase 4 (#107): cases module (1/n) — idempotent upsert + worklist
 
 Branch `feat/issue-96-cases-worklist`. First slice of the cases module: cases are now upserted from run outcomes (the spike's critical **idempotency** invariant) and surfaced as the worklist.

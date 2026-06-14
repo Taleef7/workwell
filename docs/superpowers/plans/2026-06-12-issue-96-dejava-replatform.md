@@ -226,3 +226,24 @@ Folded in from `Workwell Vision Doc.md` so nothing from Doug's direction is drop
 - Storage floor stance: Postgres-primary + D1 best-effort vs. true SQLite/D1 floor — **decided in the
   Phase 1 spike on evidence.**
 - Whether any endpoint groups can be retired rather than ported (dead-surface audit during Phase 4).
+
+## 11. Build progress (live)
+
+Phase status as of 2026-06-13 (each merged behind Codex review on its own PR; floor+ceiling store
+contracts; per-PR JOURNAL entries carry the detail):
+
+- **Phase 1 spike (#103)** — GO; run→evaluate→persist slice. ✅ merged.
+- **Phase 2 storage (#104)** — Postgres ceiling adapter + shared store contract (floor+ceiling). ✅ merged.
+- **Phase 2 auth (#105)** — JWT + PBKDF2 + login/refresh/logout + role gates + CORS + prod fail-fast. ✅ merged (PR #117).
+- **Phase 3 engine (#106)** — CQL→ELM build-time compile + Node execution; ELM Explorer (live no-JVM compile). ✅ merged.
+- **Phase 4 API strangler (#107)** — in progress, per module:
+  - `runs` — read models (list/summary/logs/outcomes) + write pipeline (manual/rerun, synthetic
+    generation, seeded distribution, PARTIAL_FAILURE). ✅ merged (PRs #118–#121). MEASURE/EMPLOYEE sync;
+    ALL_PROGRAMS/SITE (async) + CASE pending.
+  - `cases` — worklist + idempotent upsert ✅ (PR #122); case detail + why_flagged ✅; actions + audit
+    timeline pending.
+  - `measures`, `programs` — not started.
+- **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
+
+Test posture: `backend-ts` ~138 tests green (1 Postgres-harness skip without local Docker); `tsc --noEmit`
+clean; the frontend fetch contract is unchanged throughout.

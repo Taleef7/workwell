@@ -1,0 +1,142 @@
+/**
+ * Case detail read model (#107) — `GET /api/cases/:id` → `CaseDetail` for the case page.
+ *
+ * Built from the case row + the case's evidence (the outcome from its last run) + the
+ * measure binding. why_flagged is derived from the CQL define results (the TS engine
+ * stores expressionResults, not a why_flagged block), matching the Java field shape.
+ *
+ * Honest deferrals for this slice (audit + actions modules not ported yet):
+ *   timeline = [], latestOutreachDeliveryStatus = null, closedReason/closedBy = null.
+ */
+import type { CaseRecord } from "../stores/case-store.ts";
+import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+
+export interface CaseDetail {
+  caseId: string;
+  employeeId: string;
+  employeeName: string;
+  measureName: string;
+  measureVersionId: string;
+  measureVersion: string;
+  evaluationPeriod: string;
+  status: string;
+  priority: string;
+  assignee: string | null;
+  nextAction: string;
+  currentOutcomeStatus: string;
+  lastRunId: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  closedReason: string | null;
+  closedBy: string | null;
+  exclusionReason: string | null;
+  waiverExpiresAt: string | null;
+  waiverExpired: boolean;
+  evidenceJson: Record<string, unknown>;
+  outcomeStatus: string;
+  outcomeSummary: string;
+  outcomeEvaluatedAt: string;
+  latestOutreachDeliveryStatus: string | null;
+  timeline: unknown[];
+}
+
+function outcomeSummaryFor(outcome: string): string {
+  switch (outcome) {
+    case "COMPLIANT":
+      return "Measure outcome is compliant for the current window.";
+    case "DUE_SOON":
+      return "Measure outcome is due soon within the compliance window.";
+    case "OVERDUE":
+      return "Measure outcome is overdue and requires follow-up.";
+    case "MISSING_DATA":
+      return "Measure outcome could not be evaluated due to missing data.";
+    case "EXCLUDED":
+      return "Measure outcome is excluded due to documented exemption/waiver.";
+    default:
+      return "Unknown status.";
+  }
+}
+
+function measureVersion(measureId: string): string {
+  const lib = MEASURES[measureId]?.library ?? "";
+  const dash = lib.lastIndexOf("-");
+  return dash >= 0 ? lib.slice(dash + 1) : "";
+}
+
+interface ExprResult {
+  define: string;
+  result: unknown;
+}
+function expressionResults(evidence: unknown): ExprResult[] {
+  const er = (evidence as { expressionResults?: unknown } | null)?.expressionResults;
+  return Array.isArray(er) ? (er as ExprResult[]) : [];
+}
+
+/** Derive the why_flagged block (matching the Java shape) from the CQL define results. */
+function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
+  const ers = expressionResults(evidence);
+  const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
+  const daysDefine = ers.find((r) => /^days since/i.test(r.define));
+  const days = typeof daysDefine?.result === "number" ? daysDefine.result : null;
+  const waiverDefine = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
+  const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
+  // last_exam_date = evaluation date minus days-since (best effort), days_overdue past the window.
+  let lastExamDate: string | null = null;
+  if (days !== null) {
+    const d = new Date(`${evaluationPeriod.slice(0, 10)}T00:00:00Z`);
+    if (!Number.isNaN(d.getTime())) {
+      d.setUTCDate(d.getUTCDate() - days);
+      lastExamDate = d.toISOString().slice(0, 10);
+    }
+  }
+  return {
+    last_exam_date: lastExamDate,
+    compliance_window_days: window,
+    days_overdue: days !== null ? Math.max(days - window, 0) : null,
+    role_eligible: true,
+    site_eligible: true,
+    waiver_status: waiverStatus,
+    outcome_status: outcomeStatus,
+  };
+}
+
+export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null): CaseDetail {
+  const emp = employeeById(c.employeeId);
+  const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
+  return {
+    caseId: c.id,
+    employeeId: c.employeeId,
+    employeeName: emp?.name ?? c.employeeId,
+    measureName: MEASURES[c.measureId]?.name ?? c.measureId,
+    measureVersionId: c.measureId,
+    measureVersion: measureVersion(c.measureId),
+    evaluationPeriod: c.evaluationPeriod,
+    status: c.status,
+    priority: c.priority,
+    assignee: c.assignee,
+    nextAction: c.nextAction ?? "",
+    currentOutcomeStatus: c.currentOutcomeStatus,
+    lastRunId: c.lastRunId,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    closedAt: c.closedAt,
+    closedReason: null,
+    closedBy: null,
+    exclusionReason: null,
+    waiverExpiresAt: null,
+    waiverExpired: false,
+    evidenceJson: {
+      ...evidence,
+      why_flagged: deriveWhyFlagged(outcome?.evidence, c.measureId, c.evaluationPeriod, c.currentOutcomeStatus),
+    },
+    outcomeStatus: c.currentOutcomeStatus,
+    outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
+    outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
+    latestOutreachDeliveryStatus: null,
+    timeline: [],
+  };
+}
