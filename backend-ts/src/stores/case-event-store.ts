@@ -38,6 +38,13 @@ export interface TimelineEntry {
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
+  /**
+   * Write a case_action AND its audit_event atomically (D1 batch on the floor,
+   * a single-client transaction on the ceiling) so the two halves of a mutating
+   * action can never be split. Callers run this BEFORE patching case state, so a
+   * partial failure can never leave a state change without its ledger entry.
+   */
+  recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
   /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
 }
