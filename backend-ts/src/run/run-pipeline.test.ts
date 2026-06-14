@@ -68,6 +68,28 @@ test("rerun re-executes the prior run's scope as a NEW run", async () => {
   assert.equal(again.totalEvaluated, 4);
 });
 
+test("a subject evaluation failure is non-fatal but flags the run PARTIAL_FAILURE", async () => {
+  const failing: RunPipelineDeps = {
+    ...deps,
+    engine: {
+      async evaluate() {
+        throw new Error("boom");
+      },
+    },
+  };
+  const res = await executeManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "PARTIAL_FAILURE");
+  assert.match(res.message, /evaluation failure/);
+
+  const run = await deps.runStore.getRun(res.runId);
+  assert.equal(run?.status, "PARTIAL_FAILURE", "terminal status is not silently COMPLETED");
+
+  const outcomes = await deps.outcomeStore.listOutcomes(res.runId);
+  assert.equal(outcomes.length, 4, "every subject is still persisted (run not aborted)");
+  assert.ok(outcomes.every((o) => o.status === "MISSING_DATA"));
+  assert.ok(outcomes.every((o) => (o.evidence as { evaluationError?: string }).evaluationError));
+});
+
 test("unsupported scope and invalid requests are typed errors", async () => {
   await assert.rejects(executeManualRun(deps, { scopeType: "ALL_PROGRAMS" }), UnsupportedScopeError);
   await assert.rejects(executeManualRun(deps, { scopeType: "MEASURE" }), InvalidRunRequestError);

@@ -14,6 +14,9 @@ Scope: **MEASURE** (one measure × all employees, ~8s) and **EMPLOYEE** (all run
 
 **backend-ts 120 tests — 119 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** With this the runs module is read+write complete except the async/case scopes. Next: the cases module (worklist, idempotent upsert, outreach/assign/escalate, rerun-to-verify, timeline) — which also unblocks ALL_PROGRAMS/SITE case linkage + run `totalCases`.
 
+Review follow-up (Codex on PR #121), fixed before merge:
+- **P2 — PARTIAL_FAILURE status.** A per-subject evaluation failure was persisted as MISSING_DATA + error evidence, but the run still finalized `COMPLETED`, so an engine error looked fully successful. Now the pipeline counts failures and finalizes `PARTIAL_FAILURE` (the `RunStatus` contract + Java behavior) when any subject failed, with the count surfaced in `ManualRunResponse.status`/`message`. Added a throwing-engine test pinning it. 121 tests — 120 pass / 1 skip / 0 fail.
+
 ---
 
 ## 2026-06-13 — Issue #96 Phase 4 (#107): runs write pipeline (1/2) — synthetic FHIR generation engine
