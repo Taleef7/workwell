@@ -253,8 +253,9 @@ contracts; per-PR JOURNAL entries carry the detail):
   - `programs` — **complete** ✅: overview + sites, trend + top-drivers, risk-outlook (`/:id/risk-outlook`,
     upcoming due-soon + repeat non-compliers + per-site predicted compliance). Added the canonical
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
-- **Phase 4b API strangler (#108)** — in progress: **exports** (runs/outcomes/cases/audit CSV) ✅.
-  admin surface, AI surfaces, MCP tools pending.
+- **Phase 4b API strangler (#108)** — in progress: **exports** (runs/outcomes/cases/audit CSV) ✅;
+  **admin** dashboard reads + integrations/scheduler toggles ✅ (waivers/delivery-log/mapping-CRUD/
+  demo-reset deferred). AI surfaces + MCP tools pending.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
 Test posture: `backend-ts` ~187 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
