@@ -323,4 +323,52 @@ export function caseEventStoreContract(
     assert.ok(types.includes("ESCALATED"), "case_action committed");
     assert.ok(types.includes("CASE_ESCALATED"), "audit_event committed in the same transaction");
   });
+
+  test(`[${label}] hasOutreachSent + latestOutreachDeliveryStatus track the OUTREACH_* actions`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    assert.equal(await eventStore.hasOutreachSent(c.id), false, "no outreach yet");
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), null);
+
+    await eventStore.insertAction({
+      caseId: c.id,
+      actionType: "OUTREACH_SENT",
+      actor: "cm@x",
+      payload: { deliveryStatus: "SIMULATED" },
+    });
+    assert.equal(await eventStore.hasOutreachSent(c.id), true, "outreach recorded");
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), "SIMULATED");
+
+    await new Promise((r) => setTimeout(r, 2)); // ensure a later performed_at
+    await eventStore.insertAction({
+      caseId: c.id,
+      actionType: "OUTREACH_DELIVERY_UPDATED",
+      actor: "cm@x",
+      payload: { deliveryStatus: "SENT" },
+    });
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), "SENT", "latest wins");
+  });
+
+  test(`[${label}] outreachSentCounts groups OUTREACH_SENT per case ([] for no ids)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const a = (await newCase(caseStore))!;
+    const b = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-007",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    const sent = (caseId: string) =>
+      eventStore.insertAction({ caseId, actionType: "OUTREACH_SENT", actor: "cm@x", payload: { deliveryStatus: "SIMULATED" } });
+    await sent(a.id);
+    await sent(a.id); // two sends on a
+    // a delivery-updated row must NOT inflate the send count
+    await eventStore.insertAction({ caseId: a.id, actionType: "OUTREACH_DELIVERY_UPDATED", actor: "cm@x", payload: {} });
+
+    const counts = await eventStore.outreachSentCounts([a.id, b.id]);
+    assert.equal(counts[a.id], 2, "two OUTREACH_SENT for a");
+    assert.equal(counts[b.id] ?? 0, 0, "no sends for b → absent/0");
+    assert.deepEqual(await eventStore.outreachSentCounts([]), {}, "empty input → {}");
+  });
 }

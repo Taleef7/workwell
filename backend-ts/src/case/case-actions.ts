@@ -32,7 +32,8 @@ async function buildDetail(deps: CaseActionDeps, caseId: string): Promise<CaseDe
   const outcomes = await deps.outcomes.listOutcomes(c.lastRunId);
   const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
   const timeline = await deps.events.caseTimeline(caseId);
-  return toCaseDetail(c, outcome, timeline);
+  const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
+  return toCaseDetail(c, outcome, timeline, latest);
 }
 
 /** Assign (or clear, when `assignee` is blank) the case owner. */

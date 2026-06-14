@@ -204,3 +204,60 @@ test("the detail timeline is oldest-first and excludes nothing we wrote", async 
 test("POST /api/cases/:id/assign for an unknown case → 404", async () => {
   assert.equal((await post(`/api/cases/${crypto.randomUUID()}/assign?assignee=x`))?.status, 404);
 });
+
+test("GET outreach/preview renders the default template with the case's employee + measure", async () => {
+  const res = await getPath(`/api/cases/${omarCaseId}/actions/outreach/preview`);
+  assert.equal(res?.status, 200);
+  const p = (await res!.json()) as { subject: string; bodyText: string; employeeName: string; measureName: string };
+  assert.equal(p.employeeName, "Omar Siddiq");
+  assert.equal(p.measureName, "Audiogram");
+  assert.match(p.subject, /Audiogram/);
+  assert.match(p.bodyText, /Omar Siddiq/);
+});
+
+test("delivery update before a send → 400; send then delivery flips latestOutreachDeliveryStatus", async () => {
+  // before any send, delivery update is rejected
+  assert.equal((await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=SENT`))?.status, 400);
+
+  // send outreach (simulated) → OPEN + latest status SIMULATED
+  const sent = await post(`/api/cases/${omarCaseId}/actions/outreach`);
+  assert.equal(sent?.status, 200);
+  const sd = (await sent!.json()) as {
+    status: string;
+    nextAction: string;
+    latestOutreachDeliveryStatus: string;
+    timeline: Array<{ eventType: string }>;
+  };
+  assert.equal(sd.status, "OPEN");
+  assert.match(sd.nextAction, /rerun to verify/i);
+  assert.equal(sd.latestOutreachDeliveryStatus, "SIMULATED");
+  const types = sd.timeline.map((t) => t.eventType);
+  assert.ok(types.includes("OUTREACH_SENT") && types.includes("CASE_OUTREACH_SENT"));
+
+  // now a delivery update is allowed and updates the latest status
+  const del = await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=SENT`);
+  assert.equal(del?.status, 200);
+  const dd = (await del!.json()) as { latestOutreachDeliveryStatus: string; nextAction: string };
+  assert.equal(dd.latestOutreachDeliveryStatus, "SENT");
+  assert.match(dd.nextAction, /rerun to verify/i);
+});
+
+test("delivery update with an invalid status → 400", async () => {
+  assert.equal((await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=NONSENSE`))?.status, 400);
+});
+
+test("POST outreach for an unknown case → 404", async () => {
+  assert.equal((await post(`/api/cases/${crypto.randomUUID()}/actions/outreach`))?.status, 404);
+});
+
+test("worklist exposes outreachRecordCount; a sent case is no longer a gap (badge parity)", async () => {
+  // Omar's case had outreach sent in an earlier test → count > 0; others stay 0.
+  const rows = (await get("?status=open").then((r) => r!.json())) as Array<{
+    employeeName: string;
+    outreachRecordCount: number;
+  }>;
+  const omar = rows.find((r) => r.employeeName === "Omar Siddiq")!;
+  assert.ok(omar.outreachRecordCount >= 1, "sent case reflects the outreach send");
+  const missing = rows.find((r) => r.employeeName !== "Omar Siddiq");
+  if (missing) assert.equal(missing.outreachRecordCount, 0, "un-contacted case is a gap (0)");
+});
