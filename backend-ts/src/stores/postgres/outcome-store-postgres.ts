@@ -12,6 +12,7 @@ import type {
   OutcomeWithRun,
   OutcomeMeasureFilter,
   MeasureOutcomeRow,
+  EmployeeOutcomeRow,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -73,6 +74,27 @@ export class PgOutcomeStore implements OutcomeStore {
       [runId],
     );
     return rows.map(toRecord);
+  }
+
+  async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
+    const { rows } = await this.pool.query<{
+      measure_id: string;
+      status: string;
+      evaluation_period: string;
+      evaluated_at: Date | string;
+      evidence_json: unknown;
+    }>(
+      `SELECT measure_id, status, evaluation_period, evaluated_at, evidence_json
+         FROM ${T} WHERE subject_id = $1 ORDER BY evaluated_at DESC LIMIT $2`,
+      [subjectId, Math.max(1, limit)],
+    );
+    return rows.map((r) => ({
+      measureId: r.measure_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+      evidence: r.evidence_json,
+    }));
   }
 
   async listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]> {
