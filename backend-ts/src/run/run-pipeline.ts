@@ -116,6 +116,7 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
 
   let compliant = 0;
   let nonCompliant = 0;
+  let failures = 0;
   for (const item of items) {
     const config = deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target);
     const bundle = buildSyntheticBundle(item.employee, config, evalDate);
@@ -126,9 +127,12 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
       status = result.outcome;
       evidence = result.evidence;
     } catch (err) {
-      // One subject's failure must not abort the run (runtime invariant).
+      // One subject's failure must not abort the run (runtime invariant): persist it as
+      // MISSING_DATA with the error, but flag the run PARTIAL_FAILURE so it isn't reported
+      // as fully successful.
       status = "MISSING_DATA";
       evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
+      failures++;
     }
     await deps.outcomeStore.recordOutcome({
       runId: run.id,
@@ -141,17 +145,20 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
     else if (NON_COMPLIANT.has(status)) nonCompliant++;
   }
 
-  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
+  await deps.runStore.finalizeRun(run.id, terminalStatus);
   return {
     runId: run.id,
     scopeType: req.scopeType,
     scopeLabel,
-    status: "COMPLETED",
+    status: terminalStatus,
     activeMeasuresExecuted: measureIds.length,
     totalEvaluated: items.length,
     compliant,
     nonCompliant,
-    message: `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).`,
+    message:
+      `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
+      (failures > 0 ? ` ${failures} evaluation failure(s).` : ""),
     measuresExecuted: measureIds.map((id) => MEASURES[id]!.name),
   };
 }
