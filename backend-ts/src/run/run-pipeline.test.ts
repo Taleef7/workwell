@@ -13,6 +13,7 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
@@ -26,6 +27,7 @@ before(async () => {
   deps = {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
+    caseStore: new SqliteCaseStore(db),
     engine: new CqlExecutionEngine(),
     employees: EMPLOYEES.slice(0, 4), // emp-001..004 — keeps the test fast
   };
@@ -66,6 +68,21 @@ test("rerun re-executes the prior run's scope as a NEW run", async () => {
   assert.notEqual(again.runId, first.runId, "rerun creates a new run");
   assert.equal(again.scopeType, "MEASURE");
   assert.equal(again.totalEvaluated, 4);
+});
+
+test("a run upserts cases from non-compliant outcomes — idempotent on rerun (no duplicates)", async () => {
+  const caseStore = deps.caseStore!;
+  // Unique evaluation period isolates this test's cases in the shared DB.
+  const period = "2099-01-01";
+  const res = await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: period });
+  const mine = async () => (await caseStore.listCases({})).filter((c) => c.evaluationPeriod === period);
+  const before1 = await mine();
+  assert.ok(before1.length >= 1, "non-compliant outcomes opened cases for this period");
+  assert.ok(before1.every((c) => c.lastRunId === res.runId));
+
+  // rerun reuses the persisted evaluationDate → same (employee, measure, period) keys → upsert.
+  await executeRerun(deps, res.runId);
+  assert.equal((await mine()).length, before1.length, "rerun upserts the same cases, never duplicates");
 });
 
 test("a subject evaluation failure is non-fatal but flags the run PARTIAL_FAILURE", async () => {

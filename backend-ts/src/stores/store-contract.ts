@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
+import type { CaseStore } from "./case-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -169,5 +170,53 @@ export function outcomeStoreContract(
   test(`[${label}] listOutcomes returns [] for a malformed (non-UUID) run id`, async () => {
     const { outcomeStore } = await fresh();
     assert.deepEqual(await outcomeStore.listOutcomes("not-a-uuid"), []);
+  });
+}
+
+/** Registers the CaseStore contract — the idempotency invariant is the headline case. */
+export function caseStoreContract(label: string, freshStore: () => Promise<CaseStore>): void {
+  const upsert = (store: CaseStore, outcomeStatus: string, over: Partial<{ subjectId: string; measureId: string }> = {}) =>
+    store.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: over.subjectId ?? "emp-006",
+      measureId: over.measureId ?? "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus,
+    });
+
+  test(`[${label}] a rerun upserts the SAME case — never a duplicate (idempotency invariant)`, async () => {
+    const store = await freshStore();
+    const first = await upsert(store, "OVERDUE");
+    assert.equal(first?.status, "OPEN");
+    assert.equal(first?.priority, "HIGH");
+    const second = await upsert(store, "OVERDUE"); // rerun, same (employee, measure, period)
+    assert.equal(second?.id, first?.id, "same case id on rerun");
+    assert.equal((await store.listCases({})).length, 1, "exactly one case, not two");
+  });
+
+  test(`[${label}] non-compliant priorities + EXCLUDED + COMPLIANT routing`, async () => {
+    const store = await freshStore();
+    assert.equal((await upsert(store, "DUE_SOON", { subjectId: "emp-007" }))?.priority, "MEDIUM");
+    assert.equal((await upsert(store, "EXCLUDED", { subjectId: "emp-008" }))?.status, "EXCLUDED");
+    // COMPLIANT with no existing case → no row created
+    assert.equal(await upsert(store, "COMPLIANT", { subjectId: "emp-009" }), null);
+  });
+
+  test(`[${label}] COMPLIANT resolves an existing open case (closed_at set)`, async () => {
+    const store = await freshStore();
+    await upsert(store, "OVERDUE");
+    const resolved = await upsert(store, "COMPLIANT"); // same key
+    assert.equal(resolved?.status, "RESOLVED");
+    assert.ok(resolved?.closedAt, "closed_at stamped");
+    assert.equal((await store.listCases({ statuses: ["OPEN"] })).length, 0, "no longer open");
+  });
+
+  test(`[${label}] listCases filters by status`, async () => {
+    const store = await freshStore();
+    await upsert(store, "OVERDUE", { subjectId: "emp-005" });
+    await upsert(store, "EXCLUDED", { subjectId: "emp-006" });
+    assert.equal((await store.listCases({ statuses: ["OPEN"] })).length, 1);
+    assert.equal((await store.listCases({ statuses: ["EXCLUDED"] })).length, 1);
+    assert.equal((await store.listCases({})).length, 2);
   });
 }

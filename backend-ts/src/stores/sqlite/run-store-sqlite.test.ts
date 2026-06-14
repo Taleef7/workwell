@@ -15,7 +15,8 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "./schema.ts";
 import { SqliteRunStore } from "./run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "./outcome-store-sqlite.ts";
-import { runStoreContract, outcomeStoreContract } from "../store-contract.ts";
+import { SqliteCaseStore } from "./case-store-sqlite.ts";
+import { runStoreContract, outcomeStoreContract, caseStoreContract } from "../store-contract.ts";
 
 const created: string[] = [];
 
@@ -43,3 +44,5 @@ outcomeStoreContract("sqlite", async () => {
   const db = await freshDb();
   return { runStore: new SqliteRunStore(db), outcomeStore: new SqliteOutcomeStore(db) };
 });
+
+caseStoreContract("sqlite", async () => new SqliteCaseStore(await freshDb()));

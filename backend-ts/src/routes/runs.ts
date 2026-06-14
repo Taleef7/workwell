@@ -18,6 +18,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
@@ -52,6 +53,10 @@ async function store(env: RunsEnv): Promise<SqliteRunStore> {
 async function outcomes(env: RunsEnv): Promise<SqliteOutcomeStore> {
   await ensure(env);
   return new SqliteOutcomeStore(env.DB);
+}
+async function cases(env: RunsEnv): Promise<SqliteCaseStore> {
+  await ensure(env);
+  return new SqliteCaseStore(env.DB);
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -103,7 +108,7 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   // Manual scoped run (MEASURE / EMPLOYEE): evaluate + persist + summarize.
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
-    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), engine };
+    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
       return json(await executeManualRun(deps, body), 201);
     } catch (err) {
@@ -116,7 +121,7 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   // Rerun an existing run's scope as a new run.
   const rerunId = pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/)?.[1];
   if (rerunId && req.method === "POST") {
-    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), engine };
+    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
       return json(await executeRerun(deps, rerunId), 201);
     } catch (err) {
