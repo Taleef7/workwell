@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (2/n) — trend + top-drivers
+
+Branch `feat/issue-96-programs-trend`. Second programs slice: the per-measure trend chart + top-drivers panel on `/programs`, ported from `ProgramService.trend` / `topDrivers`.
+
+- **`program/program-read-models.ts`** — `programTrend(measureId, {site,from,to})`: per-run compliance points (outcome-bucket counts + `complianceRate`), newest-first, capped at 10. Java unions a `run_based` branch for aggregate-only seeded runs, but the TS floor `runs` table has no `compliant`/`total_evaluated` columns — every TS run with data has outcomes, so the outcome-based branch is complete (documented in-code). `programTopDrivers(...)`: from the measure's **latest filtered run**, overdue concentration `bySite`/`byRole` (count desc, tiebreak name asc, top 5) + flagged-reason mix `byOutcomeReason` (OVERDUE/MISSING_DATA/DUE_SOON, count + pct, 1 dp). Shared `runsWithOutcomes` helper resolves employee site/role from the synthetic directory.
+- **`routes/programs.ts`** — `GET /api/programs/:id/trend` + `/:id/top-drivers`; both reuse the strict `?from=/to=` date validation (400 on malformed). Unknown / no-data measure → empty (Java parity, no 404).
+
+Deferred: per-measure `/risk-outlook` (the page degrades gracefully without it). The programs dashboard now renders KPIs + trend + drivers.
+
+**backend-ts 199 tests — all pass / 0 fail; typecheck clean.** New coverage: trend newest-first per-run points, top-drivers site/role/reason ranking, empty for unknown/no-data, date-validation on trend. Frontend `/programs` fetch contract unchanged. Next: programs risk-outlook, then the store-backed measures detail/authoring slice.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (1/n) — compliance overview + sites
 
 Branch `feat/issue-96-programs-overview`. First slice of the programs module: the `/programs` dashboard's compliance KPIs, ported from `ProgramService.listPrograms` / `listSites`. Self-contained read analytics over the runs/outcomes/cases already in TS — no new data dependency.
