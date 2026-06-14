@@ -248,9 +248,9 @@ contracts; per-PR JOURNAL entries carry the detail):
   - `measures` — catalog read ✅ (`GET /api/measures` full 60-measure `Measure[]` with status/search,
     generated `measure-catalog.ts` from the Java seed, Active-first ordering). Detail/versions/
     activation-readiness (read) + create/lifecycle/spec/CQL/compile-gate (need a measures store) pending.
-  - `programs` — overview ✅ (`GET /api/programs` + `/overview` per-Active-measure KPIs + open case
-    count, `/sites`; latest-run aggregation over runs/outcomes/cases, site/from/to filters).
-    Per-measure trend / top-drivers / risk-outlook pending (the page degrades gracefully without them).
+  - `programs` — overview + sites ✅; per-measure trend + top-drivers ✅ (`/:id/trend`, `/:id/top-drivers`,
+    site/from/to + strict date validation). Risk-outlook (`/:id/risk-outlook`) pending (page degrades
+    gracefully without it).
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
 Test posture: `backend-ts` ~187 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`

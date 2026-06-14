@@ -172,6 +172,25 @@ export function outcomeStoreContract(
     const { outcomeStore } = await fresh();
     assert.deepEqual(await outcomeStore.listOutcomes("not-a-uuid"), []);
   });
+
+  test(`[${label}] listOutcomesWithRun joins started_at + filters by measure/date in the store`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+
+    const all = await outcomeStore.listOutcomesWithRun({});
+    assert.equal(all.length, 2);
+    assert.ok(all.every((r) => r.runStartedAt && r.runId === run.id), "each row carries the run's started_at");
+
+    const justAudiogram = await outcomeStore.listOutcomesWithRun({ measureId: "audiogram" });
+    assert.deepEqual(justAudiogram.map((r) => r.measureId), ["audiogram"], "measure filter applied in SQL");
+
+    // date filter is on the run's started day (the run started ~now)
+    assert.equal((await outcomeStore.listOutcomesWithRun({ from: "2099-01-01" })).length, 0, "future from → none");
+    assert.equal((await outcomeStore.listOutcomesWithRun({ to: "2000-01-01" })).length, 0, "past to → none");
+    assert.equal((await outcomeStore.listOutcomesWithRun({ from: "2000-01-01", to: "2099-12-31" })).length, 2, "wide range → all");
+  });
 }
 
 /** Registers the CaseStore contract — the idempotency invariant is the headline case. */

@@ -1,19 +1,21 @@
 /**
  * Programs route (#107 programs module) — the `/programs` dashboard read surface.
  *
- *   GET /api/programs            program overview (alias of /overview, Java parity) → ProgramSummary[]
- *   GET /api/programs/overview   per-Active-measure KPIs + open case count          → ProgramSummary[]
- *   GET /api/programs/sites      distinct employee sites (the global site filter)    → string[]
+ *   GET /api/programs                   overview (alias of /overview, Java parity)   → ProgramSummary[]
+ *   GET /api/programs/overview          per-Active-measure KPIs + open case count    → ProgramSummary[]
+ *   GET /api/programs/sites             distinct employee sites (global site filter) → string[]
+ *   GET /api/programs/:id/trend         per-run compliance trend (newest 10)         → ProgramTrendPoint[]
+ *   GET /api/programs/:id/top-drivers   overdue site/role + flagged-reason mix       → TopDrivers
  *
- * All three honor the page's ?site=&from=&to= filters. Per-measure trend, top-drivers,
- * and risk-outlook are later slices (the page degrades gracefully — empty — without them).
+ * All honor the page's ?site=&from=&to= filters. Risk-outlook is a later slice (the page
+ * degrades gracefully — empty — without it).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { programOverview, listSites, type ProgramDeps } from "../program/program-read-models.ts";
+import { programOverview, programTrend, programTopDrivers, listSites, type ProgramDeps } from "../program/program-read-models.ts";
 
 interface ProgramsEnv {
   DB: CloudDatabase;
@@ -65,19 +67,28 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
     return json(listSites());
   }
 
+  // Shared ?site=&from=&to= parsing (date filters validated like the Java controller).
+  const q = url.searchParams;
+  let filters: { site: string | null; from?: string; to?: string };
+  try {
+    filters = { site: q.get("site"), from: parseDateParam(q.get("from"), "from"), to: parseDateParam(q.get("to"), "to") };
+  } catch (err) {
+    if (err instanceof ProgramDateError) return json({ error: "invalid_request", message: err.message }, 400);
+    throw err;
+  }
+
   if (pathname === "/api/programs" || pathname === "/api/programs/overview") {
-    const q = url.searchParams;
-    let from: string | undefined;
-    let to: string | undefined;
-    try {
-      from = parseDateParam(q.get("from"), "from");
-      to = parseDateParam(q.get("to"), "to");
-    } catch (err) {
-      if (err instanceof ProgramDateError) return json({ error: "invalid_request", message: err.message }, 400);
-      throw err;
-    }
-    const overview = await programOverview(await deps(env), { site: q.get("site"), from, to });
-    return json(overview);
+    return json(await programOverview(await deps(env), filters));
+  }
+
+  const trendId = pathname.match(/^\/api\/programs\/([^/]+)\/trend$/)?.[1];
+  if (trendId) {
+    return json(await programTrend(await deps(env), trendId, filters));
+  }
+
+  const driversId = pathname.match(/^\/api\/programs\/([^/]+)\/top-drivers$/)?.[1];
+  if (driversId) {
+    return json(await programTopDrivers(await deps(env), driversId, filters));
   }
 
   return null;

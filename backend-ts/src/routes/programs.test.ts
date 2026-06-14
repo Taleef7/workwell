@@ -116,6 +116,44 @@ test("GET /api/programs/sites lists distinct employee sites", async () => {
   assert.deepEqual([...sites].sort(), sites, "ascending");
 });
 
+test("GET /api/programs/:id/trend returns per-run points newest-first (compliance over runs)", async () => {
+  const trend = (await get("/audiogram/trend").then((r) => r!.json())) as Array<{
+    runId: string;
+    complianceRate: number;
+    totalEvaluated: number;
+    overdue: number;
+  }>;
+  assert.equal(trend.length, 2, "both audiogram runs");
+  assert.equal(trend[0]!.runId, latestRunId, "newest run first");
+  assert.equal(trend[0]!.totalEvaluated, 2);
+  assert.equal(trend[0]!.complianceRate, 50);
+  assert.equal(trend[1]!.complianceRate, 100, "older run was all-compliant");
+});
+
+test("GET /api/programs/:id/top-drivers ranks overdue by site/role + flagged-reason mix", async () => {
+  const d = (await get("/audiogram/top-drivers").then((r) => r!.json())) as {
+    bySite: Array<{ site: string; overdueCount: number; note: string }>;
+    byRole: Array<{ role: string; overdueCount: number }>;
+    byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
+  };
+  assert.deepEqual(d.bySite, [{ site: "Plant A", overdueCount: 1, note: "High overdue concentration" }]);
+  assert.deepEqual(d.byRole, [{ role: "Welder", overdueCount: 1 }]);
+  assert.deepEqual(d.byOutcomeReason, [{ reason: "OVERDUE", count: 1, pct: 100 }]);
+});
+
+test("trend/top-drivers for an unknown or no-data measure → empty (Java parity, no 404)", async () => {
+  assert.deepEqual(await get("/flu_vaccine/trend").then((r) => r!.json()), []);
+  assert.deepEqual(await get("/does-not-exist/top-drivers").then((r) => r!.json()), {
+    bySite: [],
+    byRole: [],
+    byOutcomeReason: [],
+  });
+});
+
+test("trend honors the date validation too (malformed from → 400)", async () => {
+  assert.equal((await get("/audiogram/trend?from=2026-13-01"))?.status, 400);
+});
+
 test("malformed from/to date filters → 400 (Java parseFromDate/parseToDate parity)", async () => {
   assert.equal((await get("/overview?from=2026-13-01"))?.status, 400, "bad month");
   assert.equal((await get("/overview?to=2026-02-30"))?.status, 400, "overflow day rejected like LocalDate");
