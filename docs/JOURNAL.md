@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (3/n) — activation-readiness (read)
+
+Branch `feat/issue-96-measures-readiness`. Third measures slice: the Studio activation gate, ported from `MeasureService.activationReadiness`. **This completes the measures READ surface** (catalog + detail + versions + activation-readiness).
+
+- **`measure/measure-read-models.ts`** — `toActivationReadiness(measure)`: compile gate (`COMPILED`/`WARNINGS` allow activation) + test-fixture gate. The static catalog carries no test fixtures or attached value sets, so `validateTests` fails with the "at least one fixture required" blocker → `ready` is **false** for every catalog measure (the Java seed likewise has no fixtures, so this is faithful — `ready=false` until real fixtures + a passing gate land with the persisted store). NOT_COMPILED measures additionally carry the compile blocker.
+- **`routes/measures.ts`** — `GET /api/measures/:id/activation-readiness` (404 unknown).
+
+Remaining measures work (the **mutations** — genuinely need a persisted measures store): create (`POST /api/measures`), lifecycle transitions (approve/activate/deprecate), spec/CQL edits, and the value-set/test-fixture governance that would let the activation gate actually pass.
+
+**backend-ts 212 tests — all pass / 0 fail; typecheck clean.** New coverage: readiness for a COMPILED-no-fixtures measure (not ready, fixture blocker only) + a NOT_COMPILED draft (compile blocker added) + 404. Frontend `/studio/[id]` read contract unchanged. Next: the measures authoring/lifecycle slices (persisted store) — or runs ALL_PROGRAMS/SITE async scopes.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (2/n) — detail + versions (read)
 
 Branch `feat/issue-96-measures-detail`. Second measures slice: the Studio `MeasureDetail` + version history reads, ported from `MeasureService.getMeasure`.

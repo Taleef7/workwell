@@ -146,6 +146,40 @@ export function toMeasureDetail(m: CatalogMeasure, cqlText: string): MeasureDeta
  */
 export const measureVersionId = (m: CatalogMeasure): string => `${m.id}-${m.version}`;
 
+export interface ActivationReadiness {
+  ready: boolean;
+  compileStatus: string;
+  testFixtureCount: number;
+  valueSetCount: number;
+  testValidationPassed: boolean;
+  activationBlockers: string[];
+}
+
+/** Compile gate: a measure may activate only from COMPILED or WARNINGS (Java allowsActivationCompileStatus). */
+const compileAllowsActivation = (s: string) => s.toUpperCase() === "COMPILED" || s.toUpperCase() === "WARNINGS";
+
+/**
+ * Whether a measure can be activated, ported from MeasureService.activationReadiness. The static
+ * catalog carries no test fixtures or attached value sets yet, so `validateTests` fails with the
+ * "at least one fixture required" blocker — i.e. `ready` is false for every catalog measure (the
+ * Java seed likewise has no fixtures). Real fixtures/value sets + a passing gate arrive with the
+ * persisted measures store + value-set governance surface.
+ */
+export function toActivationReadiness(m: CatalogMeasure): ActivationReadiness {
+  const compilePassed = compileAllowsActivation(m.compileStatus);
+  const blockers: string[] = [];
+  if (!compilePassed) blockers.push("Compile status must be COMPILED or WARNINGS.");
+  blockers.push("At least one test fixture is required before activation.");
+  return {
+    ready: false, // compilePassed && testValidationPassed; testValidation fails with no fixtures
+    compileStatus: m.compileStatus,
+    testFixtureCount: 0,
+    valueSetCount: 0,
+    testValidationPassed: false,
+    activationBlockers: blockers,
+  };
+}
+
 /** Version history for a measure — the static catalog carries one version per measure. */
 export function toVersionHistory(m: CatalogMeasure): VersionHistoryItem[] {
   return [
