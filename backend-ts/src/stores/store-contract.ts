@@ -206,6 +206,20 @@ export function outcomeStoreContract(
     assert.equal(rows[0]!.evaluationPeriod, "2026-06-13", "evaluation_period round-trips");
     assert.deepEqual(rows[0]!.evidence, evidence, "evidence carried for recency derivation");
   });
+
+  test(`[${label}] listOutcomesForEmployee returns the employee's outcomes newest-first, capped`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-13", status: "COMPLIANT", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "COMPLIANT", evidence: {} });
+
+    const rows = await outcomeStore.listOutcomesForEmployee("emp-006", 5);
+    assert.equal(rows.length, 2, "employee-scoped (emp-006 only)");
+    assert.ok(rows.every((r) => ["audiogram", "hazwoper"].includes(r.measureId)));
+    assert.equal((await outcomeStore.listOutcomesForEmployee("emp-006", 1)).length, 1, "limit honored");
+    assert.deepEqual(await outcomeStore.listOutcomesForEmployee("emp-404", 5), [], "unknown employee → []");
+  });
 }
 
 /** Registers the CaseStore contract — the idempotency invariant is the headline case. */
