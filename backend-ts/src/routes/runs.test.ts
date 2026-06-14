@@ -87,6 +87,26 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   assert.deepEqual(summary.outcomeCounts, [{ status: "COMPLIANT", count: 1 }]);
 });
 
+test("evaluate without evaluationDate persists the engine's effective period (today / run's period), not blank", async () => {
+  // No date in body, no period in the run → falls back to today (the engine default), not "".
+  const r1 = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t" });
+  const run1 = (await r1!.json()) as { id: string };
+  const e1 = await post(`/api/runs/${run1.id}/evaluate`, { measureId: "audiogram", patientBundle: bundle });
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(((await e1!.json()) as { evaluationPeriod: string }).evaluationPeriod, today);
+
+  // The run's persisted requestedScope.evaluationDate is preferred when the body omits it.
+  const r2 = await post("/api/runs", {
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "t",
+    requestedScope: { evaluationDate: "2025-01-15" },
+  });
+  const run2 = (await r2!.json()) as { id: string };
+  const e2 = await post(`/api/runs/${run2.id}/evaluate`, { measureId: "audiogram", patientBundle: bundle });
+  assert.equal(((await e2!.json()) as { evaluationPeriod: string }).evaluationPeriod, "2025-01-15");
+});
+
 test("run summary totalCases counts cases whose last_run_id is the run", async () => {
   const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
   const run = (await created!.json()) as { id: string };
