@@ -173,6 +173,23 @@ test("POST /api/runs/manual SITE runs async: 201 RUNNING immediately, then compl
   assert.equal(summary.totalEvaluated, 10 * 4, "10 runnable measures × 4 HQ employees evaluated in the background");
 });
 
+test("POST /api/runs/:id/rerun on a SITE run also goes async (RUNNING immediately, completes in background)", async () => {
+  // Create a SITE run, then rerun it — the rerun must use the async waitUntil path too (a wide-scope
+  // rerun carries the same fan-out), not block synchronously.
+  const first = await postAsync("/api/runs/manual", { scopeType: "SITE", site: "HQ", evaluationDate: "2096-04-04" });
+  const firstBody = (await first.res!.json()) as { runId: string };
+  await first.drain();
+
+  const rerun = await postAsync(`/api/runs/${firstBody.runId}/rerun`);
+  assert.equal(rerun.res?.status, 201);
+  const rerunBody = (await rerun.res!.json()) as { runId: string; status: string };
+  assert.equal(rerunBody.status, "RUNNING", "wide-scope rerun returns immediately, not after the fan-out");
+  assert.notEqual(rerunBody.runId, firstBody.runId, "rerun is a new run");
+  await rerun.drain();
+  const summary = (await get(`/api/runs/${rerunBody.runId}`).then((r) => r!.json())) as { status: string };
+  assert.equal(summary.status, "COMPLETED");
+});
+
 test("POST /api/runs/manual maps invalid requests (unknown site → 400, missing measure → 400)", async () => {
   const badSite = await post("/api/runs/manual", { scopeType: "SITE", site: "Atlantis" });
   assert.equal(badSite?.status, 400);

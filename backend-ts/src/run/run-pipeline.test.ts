@@ -16,7 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
-import { executeManualRun, executeRerun, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
+import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -142,6 +142,24 @@ test("SITE manual run scopes to one site's employees, with full-population targe
 test("SITE run with an unknown site is an invalid request", async () => {
   await assert.rejects(executeManualRun(deps, { scopeType: "SITE", site: "Atlantis" }), InvalidRunRequestError);
   await assert.rejects(executeManualRun(deps, { scopeType: "SITE" }), InvalidRunRequestError);
+});
+
+test("finishOrFail finalizes the run FAILED when background completion rejects (no stuck RUNNING)", async () => {
+  // A failure OUTSIDE the per-subject engine try/catch (here: recordOutcome throws) must not
+  // leave an async run stuck RUNNING — finishOrFail catches it and finalizes FAILED.
+  const failing: RunPipelineDeps = {
+    ...deps,
+    outcomeStore: {
+      ...deps.outcomeStore,
+      async recordOutcome() {
+        throw new Error("store down");
+      },
+    } as RunPipelineDeps["outcomeStore"],
+  };
+  const planned = await planManualRun(failing, { scopeType: "EMPLOYEE", employeeExternalId: "emp-001" });
+  assert.equal((await deps.runStore.getRun(planned.run.id))?.status, "RUNNING", "planned run starts RUNNING");
+  await finishOrFail(failing, planned); // must not throw
+  assert.equal((await deps.runStore.getRun(planned.run.id))?.status, "FAILED", "finalized FAILED, not left RUNNING");
 });
 
 test("unsupported scope and invalid requests are typed errors", async () => {

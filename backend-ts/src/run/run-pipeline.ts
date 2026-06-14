@@ -255,19 +255,47 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
   return finishManualRun(deps, await planManualRun(deps, req));
 }
 
-/** Rerun an existing run's scope as a new run. */
-export async function executeRerun(deps: RunPipelineDeps, runId: string): Promise<ManualRunResponse> {
-  const prior = await deps.runStore.getRun(runId);
-  if (!prior) throw new InvalidRunRequestError(`Unknown run: ${runId}`);
+/**
+ * Background completion for an async run: run `finishManualRun`, but if it REJECTS after the client
+ * already got `201 RUNNING` (e.g. recordOutcome / case upsert / finalize throws — failures outside
+ * the per-subject engine try/catch), finalize the run FAILED so it never sticks RUNNING (which the
+ * page would poll forever). Never throws — safe to hand to ctx.waitUntil.
+ */
+export async function finishOrFail(deps: RunPipelineDeps, planned: PlannedRun): Promise<void> {
+  try {
+    await finishManualRun(deps, planned);
+  } catch (err) {
+    try {
+      await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${String((err as Error)?.message ?? err)}`);
+      await deps.runStore.finalizeRun(planned.run.id, "FAILED");
+    } catch {
+      /* best effort — the host's waitUntil also logs the original rejection */
+    }
+  }
+}
+
+/** Build the ManualRunRequest that reruns a prior run's scope (reusing its evaluation period). */
+export function rerunRequest(prior: {
+  scopeType: RunScopeType;
+  scopeId: string | null;
+  requestedScope: Record<string, unknown>;
+}): ManualRunRequest {
   const scope = prior.requestedScope;
-  return executeManualRun(deps, {
+  return {
     scopeType: prior.scopeType,
     measureId: (scope.measureId as string | undefined) ?? prior.scopeId ?? undefined,
     employeeExternalId: scope.employeeExternalId as string | undefined,
     site: scope.site as string | undefined,
     evaluationDate: scope.evaluationDate as string | undefined, // reuse the period → idempotent cases
     triggeredBy: "rerun",
-  });
+  };
+}
+
+/** Rerun an existing run's scope as a new run (synchronous; the route routes async scopes via waitUntil). */
+export async function executeRerun(deps: RunPipelineDeps, runId: string): Promise<ManualRunResponse> {
+  const prior = await deps.runStore.getRun(runId);
+  if (!prior) throw new InvalidRunRequestError(`Unknown run: ${runId}`);
+  return executeManualRun(deps, rerunRequest(prior));
 }
 
 function pruneUndefined(o: Record<string, unknown>): Record<string, unknown> {
