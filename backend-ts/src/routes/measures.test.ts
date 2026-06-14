@@ -92,12 +92,26 @@ test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, N
 });
 
 test("GET /api/measures/:id/versions returns the version history; unknown measure → 404", async () => {
-  const versions = (await get("/api/measures/audiogram/versions").then((r) => r!.json())) as Array<{ version: string; status: string; author: string }>;
+  const versions = (await get("/api/measures/audiogram/versions").then((r) => r!.json())) as Array<{ id: string; version: string; status: string; author: string }>;
   assert.equal(versions.length, 1);
   assert.equal(versions[0]!.version, "v1.0");
   assert.equal(versions[0]!.status, "Active");
+  // The version id must be DISTINCT from the measure slug so version-scoped Studio actions
+  // (auditor packet, MAT export) target the version, not the measure.
+  assert.notEqual(versions[0]!.id, "audiogram");
+  assert.equal(versions[0]!.id, "audiogram-v1.0");
   assert.equal((await get("/api/measures/does-not-exist"))?.status, 404);
   assert.equal((await get("/api/measures/does-not-exist/versions"))?.status, 404);
+});
+
+test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' exclusion (V017 parity)", async () => {
+  const d = (await get("/api/measures/hepatitis_b_vaccination_series").then((r) => r!.json())) as {
+    exclusions: Array<{ label: string; criteriaText: string }>;
+  };
+  assert.ok(
+    d.exclusions.some((e) => e.label === "Documented Immunity" && /anti-HBs titer/i.test(e.criteriaText)),
+    "the V017 exclusion is carried through",
+  );
 });
 
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {

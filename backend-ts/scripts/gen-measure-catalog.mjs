@@ -108,7 +108,7 @@ const catalogOnly = [
   { id: "hepatitis_b_vaccination_series", name: "Hepatitis B Vaccination Series", policyRef: "OSHA 29 CFR 1910.1030", version: "v2.0", status: "Approved", owner: "K. Williams", tags: ["vaccine", "bbp", "osha"], compileStatus: "COMPILED",
     spec: spec("Hepatitis B vaccination series completion for employees with occupational exposure to blood or other potentially infectious materials.",
       elig("Nurse, Lab Technician, Phlebotomist, Emergency Responder", "Clinic, Medical Center", "Bloodborne pathogen exposure risk role"),
-      [], "Series of 3 doses over 6 months", ["HBV Dose 1 Date", "HBV Dose 2 Date", "HBV Dose 3 Date", "Anti-HBs Titer Result"]) },
+      [{ label: "Documented Immunity", criteriaText: "Positive anti-HBs titer on file" }], "Series of 3 doses over 6 months", ["HBV Dose 1 Date", "HBV Dose 2 Date", "HBV Dose 3 Date", "Anti-HBs Titer Result"]) },
   { id: "lead_medical_surveillance", name: "Lead Medical Surveillance", policyRef: "OSHA 29 CFR 1910.1025", version: "v1.1", status: "Deprecated", owner: "M. Patel", tags: ["surveillance", "lead", "osha"], compileStatus: "COMPILED",
     spec: spec("DEPRECATED — Replaced by updated Lead Exposure Monitoring Protocol. Blood lead level monitoring for employees exposed to lead above the action level.",
       elig("Battery Plant Worker, Smelter, Lead Paint Handler", "Plant A", "Lead exposure above action level (30 µg/m³)"),
