@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4b (#108): admin dashboard read surface + toggles
+
+Branch `feat/issue-96-admin`. Second Phase 4b batch — the `/admin` dashboard reads + the two stateless toggles, ported from `AdminController`. Goal: the admin page renders fully under the TS backend. *(backend-ts only — does not touch the deployed Java demo.)*
+
+- **`admin/admin-data.ts`** — faithful/seeded data: **integration health** (fhir/mcp/ai/hris with display names + statuses; hris=simulated), **scheduler** settings (in-process enable toggle, cron), **terminology mappings** (the DATA_MODEL §3.4a demo seeds — 3 APPROVED / 1 REVIEWED / 1 PROPOSED), **data-element mappings** (HRIS/FHIR source map), **outreach templates** (the built-in default + preview), and the **audit viewer** projection over the persisted `audit_events` (scope derived from the event-type prefix; employeeId resolved via `ref_case_id` → case employee, same as the audit CSV).
+- **`routes/admin.ts`** — `GET /api/admin/{integrations,scheduler,audit-events,terminology-mappings,data-mappings,outreach-templates}` + `/outreach-templates/:id/preview`, `POST /api/admin/integrations/:id/sync` (404 unknown), `POST /api/admin/scheduler?enabled=`. Subsystems not yet ported — **waivers** + **outreach delivery-log** — return their empty shape so the dashboard renders. Gated to ADMIN by the security matrix (`/api/admin/**`).
+
+Deferred (need persistence): create/PUT/DELETE on templates/mappings/waivers, `data-mappings/validate`, `demo-reset`, and the waiver + delivery-log subsystems.
+
+**backend-ts 235 tests — all pass / 0 fail; typecheck clean.** New coverage: integrations list+sync+404, scheduler toggle, audit viewer (scope + employeeId from case), terminology/data/template reads + preview, deferred-subsystem empties. Frontend `/admin` fetch contract unchanged. Next #108 batches: AI surfaces, MCP tools.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4b (#108): exports module — runs/outcomes/cases/audit CSV
 
 Branch `feat/issue-96-exports`. First **Phase 4b** slice (larger-batch cadence). The CSV export surface, ported from `ExportController`/`AuditExportService`, matching the column contracts in DATA_MODEL §6. *(Demo-safety note: this is `backend-ts/` only — it does not touch the deployed Java backend or frontend.)*
