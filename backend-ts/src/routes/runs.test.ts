@@ -25,6 +25,17 @@ let env: { DB: unknown };
 const post = (path: string, body?: unknown) =>
   handleRuns(new Request(`http://x${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }), env as never);
 const get = (path: string) => handleRuns(new Request(`http://x${path}`, { method: "GET" }), env as never);
+/** POST that captures ctx.waitUntil background work so the async-scope path can be awaited deterministically. */
+const postAsync = async (path: string, body?: unknown) => {
+  const tasks: Promise<unknown>[] = [];
+  const res = await handleRuns(
+    new Request(`http://x${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+    env as never,
+    "system",
+    (p) => tasks.push(p),
+  );
+  return { res, drain: () => Promise.allSettled(tasks) };
+};
 
 before(async () => {
   env = { DB: await createSqliteD1(dbPath) };
@@ -147,9 +158,24 @@ test("POST /api/runs/:id/rerun on a CASE run reruns the case (no 501)", async ()
   assert.match(body.message, /rerun-to-verify/i);
 });
 
-test("POST /api/runs/manual maps scope errors (ALL_PROGRAMS → 501, missing measure → 400)", async () => {
-  const unsupported = await post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
-  assert.equal(unsupported?.status, 501);
+test("POST /api/runs/manual SITE runs async: 201 RUNNING immediately, then completes in the background", async () => {
+  // SITE/ALL_PROGRAMS share the async branch; SITE=HQ (4 employees) keeps the round-trip fast.
+  // ALL_PROGRAMS correctness is covered in run-pipeline.test (injected population).
+  const { res, drain } = await postAsync("/api/runs/manual", { scopeType: "SITE", site: "HQ", evaluationDate: "2097-03-03" });
+  assert.equal(res?.status, 201);
+  const body = (await res!.json()) as { runId: string; status: string; scopeLabel: string };
+  assert.equal(body.status, "RUNNING", "returns immediately before the fan-out finishes");
+  assert.equal(body.scopeLabel, "Site: HQ");
+
+  await drain(); // run the ctx.waitUntil background work to completion
+  const summary = (await get(`/api/runs/${body.runId}`).then((r) => r!.json())) as { status: string; totalEvaluated: number };
+  assert.equal(summary.status, "COMPLETED");
+  assert.equal(summary.totalEvaluated, 10 * 4, "10 runnable measures × 4 HQ employees evaluated in the background");
+});
+
+test("POST /api/runs/manual maps invalid requests (unknown site → 400, missing measure → 400)", async () => {
+  const badSite = await post("/api/runs/manual", { scopeType: "SITE", site: "Atlantis" });
+  assert.equal(badSite?.status, 400);
   const invalid = await post("/api/runs/manual", { scopeType: "MEASURE" });
   assert.equal(invalid?.status, 400);
 });
