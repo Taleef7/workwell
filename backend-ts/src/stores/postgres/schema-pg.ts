@@ -45,13 +45,14 @@ CREATE INDEX IF NOT EXISTS spike_run_logs_run_id_idx
   ON ${SPIKE_SCHEMA}.run_logs (run_id);
 
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outcomes (
-  id            UUID PRIMARY KEY,
-  run_id        UUID NOT NULL REFERENCES ${SPIKE_SCHEMA}.runs(id),
-  subject_id    TEXT NOT NULL,
-  measure_id    TEXT NOT NULL,
-  status        TEXT NOT NULL,
-  evidence_json JSONB NOT NULL,
-  evaluated_at  TIMESTAMPTZ NOT NULL
+  id                UUID PRIMARY KEY,
+  run_id            UUID NOT NULL REFERENCES ${SPIKE_SCHEMA}.runs(id),
+  subject_id        TEXT NOT NULL,
+  measure_id        TEXT NOT NULL,
+  evaluation_period TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL,
+  evidence_json     JSONB NOT NULL,
+  evaluated_at      TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS spike_outcomes_run_id_idx
@@ -109,4 +110,5 @@ CREATE INDEX IF NOT EXISTS spike_audit_events_ref_case_id_idx ON ${SPIKE_SCHEMA}
 -- (the ceiling persists across test runs; CREATE TABLE IF NOT EXISTS would not alter it).
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_reason TEXT;
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_by TEXT;
+ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS evaluation_period TEXT NOT NULL DEFAULT '';
 `;

@@ -191,6 +191,20 @@ export function outcomeStoreContract(
     assert.equal((await outcomeStore.listOutcomesWithRun({ to: "2000-01-01" })).length, 0, "past to → none");
     assert.equal((await outcomeStore.listOutcomesWithRun({ from: "2000-01-01", to: "2099-12-31" })).length, 2, "wide range → all");
   });
+
+  test(`[${label}] listOutcomesForMeasure returns the measure's outcomes with period + evidence`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    const evidence = { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2025-04-19" }] };
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence });
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-06-13", status: "COMPLIANT", evidence: {} });
+
+    const rows = await outcomeStore.listOutcomesForMeasure("audiogram");
+    assert.equal(rows.length, 1, "measure-scoped");
+    assert.equal(rows[0]!.subjectId, "emp-006");
+    assert.equal(rows[0]!.evaluationPeriod, "2026-06-13", "evaluation_period round-trips");
+    assert.deepEqual(rows[0]!.evidence, evidence, "evidence carried for recency derivation");
+  });
 }
 
 /** Registers the CaseStore contract — the idempotency invariant is the headline case. */

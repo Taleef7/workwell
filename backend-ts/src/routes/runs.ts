@@ -198,13 +198,20 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
   const evalId = pathname.match(/^\/api\/runs\/([^/]+)\/evaluate$/)?.[1];
   if (evalId && req.method === "POST") {
     const runStore = await store(env);
-    if (!(await runStore.getRun(evalId))) return json({ error: "not_found", id: evalId }, 404);
+    const run = await runStore.getRun(evalId);
+    if (!run) return json({ error: "not_found", id: evalId }, 404);
     const body = (await req.json().catch(() => null)) as
       | { measureId?: string; patientBundle?: unknown; evaluationDate?: string }
       | null;
     if (!body?.measureId || !body.patientBundle) {
       return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle }" }, 400);
     }
+    // The outcome's evaluation_period must equal the date the engine actually evaluates with,
+    // so repeat-non-complier history (grouped by period) doesn't collapse into a blank period.
+    // Engine default when omitted is today (cql-execution-engine) — prefer the run's persisted
+    // period, then today, mirroring that default.
+    const evaluationPeriod =
+      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
     // A run being processed must leave the QUEUED claim path so it isn't re-handed
     // to a worker (QUEUED → RUNNING; idempotent for already-running runs).
     await runStore.markRunning(evalId);
@@ -218,6 +225,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
         runId: evalId,
         subjectId: result.subjectId,
         measureId: body.measureId,
+        evaluationPeriod,
         status: result.outcome,
         evidence: result.evidence,
       });
