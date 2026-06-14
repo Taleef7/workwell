@@ -128,6 +128,18 @@ test("list_cases returns snake_case rows; status filter scopes", async () => {
   assert.ok("case_id" in results[0]! && "employee_name" in results[0]! && "current_outcome_status" in results[0]!);
 });
 
+test("list_cases with an unresolved measure filter errors (no silent leak of all cases)", async () => {
+  const { payload } = await call("list_cases", { measureName: "No Such Measure" });
+  assert.equal(payload.code, "MEASURE_NOT_FOUND");
+  const byId = await call("list_cases", { measureId: "not-a-real-slug" });
+  assert.equal(byId.payload.code, "MEASURE_NOT_FOUND");
+});
+
+test("list_noncompliant with an unresolved measure filter errors (no silent leak)", async () => {
+  const { payload } = await call("list_noncompliant", { measureName: "No Such Measure" });
+  assert.equal(payload.code, "MEASURE_NOT_FOUND");
+});
+
 test("get_run_summary by id, and latest when omitted", async () => {
   const byId = await call("get_run_summary", { runId });
   assert.equal((byId.payload as JsonRecord).run_id, runId);
