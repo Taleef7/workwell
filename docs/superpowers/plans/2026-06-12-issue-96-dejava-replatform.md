@@ -245,9 +245,10 @@ contracts; per-PR JOURNAL entries carry the detail):
     rerun-to-verify (CASE scope) + run `totalCases` ✅ (closed_reason/closed_by columns, `countByLastRun`).
     **Functionally complete bar evidence upload/download, appointments, ai/explain, the
     `outreach_delivery_log` table, and the run-grid per-row caseId — all #108-adjacent.**
-  - `measures` — catalog read ✅ (`GET /api/measures` full 60-measure `Measure[]` with status/search,
-    generated `measure-catalog.ts` from the Java seed, Active-first ordering). Detail/versions/
-    activation-readiness (read) + create/lifecycle/spec/CQL/compile-gate (need a measures store) pending.
+  - `measures` — catalog read ✅; **detail + versions read ✅** (`GET /api/measures/:id` + `/versions`;
+    catalog now carries the authoring spec + compileStatus, CQL reconstructed from ELM). Pending:
+    activation-readiness (read) + create/lifecycle/spec/CQL-edits/compile-gate (need a persisted
+    measures store) + value-set governance (separate surface).
   - `programs` — **complete** ✅: overview + sites, trend + top-drivers, risk-outlook (`/:id/risk-outlook`,
     upcoming due-soon + repeat non-compliers + per-site predicted compliance). Added the canonical
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
