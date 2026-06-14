@@ -44,6 +44,25 @@ export interface ProgramDeps {
   employees?: readonly EmployeeProfile[];
 }
 
+/** Per-run trend point (Java ProgramTrendPoint). The chart reads runId/startedAt/complianceRate/totalEvaluated. */
+export interface ProgramTrendPoint {
+  runId: string;
+  startedAt: string;
+  complianceRate: number;
+  totalEvaluated: number;
+  compliant: number;
+  dueSoon: number;
+  overdue: number;
+  missingData: number;
+  excluded: number;
+}
+
+export interface TopDrivers {
+  bySite: Array<{ site: string; overdueCount: number; note: string }>;
+  byRole: Array<{ role: string; overdueCount: number }>;
+  byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
+}
+
 const day = (s: string): string => s.slice(0, 10);
 const eq = (a: string | null | undefined, b: string) => (a ?? "").toLowerCase() === b.toLowerCase();
 
@@ -101,4 +120,108 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     };
   });
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
+}
+
+/** Filters bundled into predicates over outcomes (resolving employee site from the directory). */
+function predicates(filters: ProgramFilters) {
+  const site = filters.site?.trim() || null;
+  const from = filters.from?.trim() || null;
+  const to = filters.to?.trim() || null;
+  const inPeriod = (iso: string) => (!from || day(iso) >= day(from)) && (!to || day(iso) <= day(to));
+  const siteMatch = (subjectId: string) => !site || eq(employeeById(subjectId)?.site ?? null, site);
+  return { inPeriod, siteMatch };
+}
+
+/** Period-filtered runs, each with its site-filtered outcomes for the measure (only runs with ≥1). */
+async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: ProgramFilters) {
+  const { inPeriod, siteMatch } = predicates(filters);
+  const runs = (await deps.runStore.listRuns(100000)).filter((r) => inPeriod(r.startedAt));
+  const pairs = await Promise.all(
+    runs.map(async (run) => {
+      const outcomes = (await deps.outcomeStore.listOutcomes(run.id)).filter(
+        (o) => o.measureId === measureId && siteMatch(o.subjectId),
+      );
+      return { run, outcomes };
+    }),
+  );
+  return pairs.filter((p) => p.outcomes.length > 0);
+}
+
+const round1 = (compliant: number, total: number) => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
+
+/** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity). */
+export async function programTrend(
+  deps: ProgramDeps,
+  measureId: string,
+  filters: ProgramFilters,
+): Promise<ProgramTrendPoint[]> {
+  // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
+  // table has no compliant/total columns, so every TS run with data has outcomes — the
+  // outcome-based branch is complete here.
+  const pairs = await runsWithOutcomes(deps, measureId, filters);
+  const n = (os: OutcomeRecord[], s: string) => os.filter((o) => o.status === s).length;
+  return pairs
+    .map(({ run, outcomes }): ProgramTrendPoint => {
+      const total = outcomes.length;
+      const compliant = n(outcomes, "COMPLIANT");
+      return {
+        runId: run.id,
+        startedAt: run.startedAt,
+        complianceRate: round1(compliant, total),
+        totalEvaluated: total,
+        compliant,
+        dueSoon: n(outcomes, "DUE_SOON"),
+        overdue: n(outcomes, "OVERDUE"),
+        missingData: n(outcomes, "MISSING_DATA"),
+        excluded: n(outcomes, "EXCLUDED"),
+      };
+    })
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, 10);
+}
+
+/** Overdue concentration (site/role) + flagged-reason mix for a measure's latest filtered run. */
+export async function programTopDrivers(
+  deps: ProgramDeps,
+  measureId: string,
+  filters: ProgramFilters,
+): Promise<TopDrivers> {
+  const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
+  const pairs = await runsWithOutcomes(deps, measureId, filters);
+  if (pairs.length === 0) return empty;
+  // Latest filtered run with outcomes for this measure.
+  const latest = pairs.reduce((a, b) => (b.run.startedAt > a.run.startedAt ? b : a));
+  const outcomes = latest.outcomes;
+
+  const overdue = outcomes.filter((o) => o.status === "OVERDUE");
+  const tally = (key: (subjectId: string) => string) => {
+    const counts = new Map<string, number>();
+    for (const o of overdue) {
+      const k = key(o.subjectId);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const siteCounts = tally((id) => employeeById(id)?.site ?? "");
+  const roleCounts = tally((id) => employeeById(id)?.role ?? "");
+
+  const bySite = [...siteCounts.entries()]
+    .map(([site, overdueCount]) => ({ site, overdueCount, note: "High overdue concentration" }))
+    .sort((a, b) => b.overdueCount - a.overdueCount || a.site.localeCompare(b.site))
+    .slice(0, 5);
+  const byRole = [...roleCounts.entries()]
+    .map(([role, overdueCount]) => ({ role, overdueCount }))
+    .sort((a, b) => b.overdueCount - a.overdueCount || a.role.localeCompare(b.role))
+    .slice(0, 5);
+
+  const FLAGGED = new Set(["OVERDUE", "MISSING_DATA", "DUE_SOON"]);
+  const flagged = outcomes.filter((o) => FLAGGED.has(o.status));
+  const totalFlagged = flagged.length;
+  const reasonCounts = new Map<string, number>();
+  for (const o of flagged) reasonCounts.set(o.status, (reasonCounts.get(o.status) ?? 0) + 1);
+  const byOutcomeReason = [...reasonCounts.entries()]
+    .map(([reason, count]) => ({ reason, count, pct: totalFlagged === 0 ? 0 : Math.round((count / totalFlagged) * 1000) / 10 }))
+    .sort((a, b) => b.count - a.count);
+
+  return { bySite, byRole, byOutcomeReason };
 }
