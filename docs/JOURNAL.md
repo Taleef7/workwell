@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): programs module (1/n) — compliance overview + sites
+
+Branch `feat/issue-96-programs-overview`. First slice of the programs module: the `/programs` dashboard's compliance KPIs, ported from `ProgramService.listPrograms` / `listSites`. Self-contained read analytics over the runs/outcomes/cases already in TS — no new data dependency.
+
+- **`program/program-read-models.ts`** — `programOverview({site, from, to})`: for each **Active** measure (the catalog's Active set = the engine's runnable 10), find the LATEST run (filtered by employee site + run period) carrying outcomes for that measure, aggregate its outcome-bucket counts, `complianceRate = compliant/total × 100` (1 decimal), and the OPEN case count (same site/period filter). Employee site is resolved from the synthetic directory (outcomes carry only `subjectId`). Ordered by measure name — matches the Java CTE (`active_versions`/`latest_run`/`outcome_counts`/`open_cases`). `listSites()` = distinct employee sites, ascending.
+- **`routes/programs.ts`** — `GET /api/programs` + `/api/programs/overview` (aliases, Java parity) → `ProgramSummary[]`; `GET /api/programs/sites` → `string[]`. All honor `?site=&from=&to=`. Wired into the worker; auth catch-all gates them AUTHENTICATED.
+
+Deferred to later programs slices: per-measure `/{id}/trend`, `/{id}/top-drivers`, `/{id}/risk-outlook`. The `/programs` page loads those after the overview and **degrades gracefully** (catches → empty) without them, so the dashboard renders KPIs now.
+
+**backend-ts 194 tests — all pass / 0 fail; typecheck clean.** New coverage: overview row-per-Active-measure (10), latest-run-wins aggregation + complianceRate + open case count, zeros for a measure with no outcomes, site-filter scoping, `/api/programs` alias, `/sites` distinct+sorted. Frontend `/programs` fetch contract unchanged. Next: programs trend + top-drivers, then the measures detail/authoring slice (with a persisted measures store).
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (1/n) — catalog read
 
 Branch `feat/issue-96-measures-catalog`. First slice of the measures module: the `/measures` page's catalog list, ported from `MeasureService.listMeasures`.
