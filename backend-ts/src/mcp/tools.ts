@@ -64,6 +64,14 @@ function measureVersionOf(measureId: string): string {
   return dash >= 0 ? lib.slice(dash + 1) : "";
 }
 
+/** The measure filter the client actually supplied (measureId or measureName), or null if none. */
+function measureFilterRef(args: JsonRecord): string | null {
+  const id = args.measureId != null ? String(args.measureId).trim() : "";
+  if (id) return id;
+  const name = args.measureName != null ? String(args.measureName).trim() : "";
+  return name || null;
+}
+
 /** Resolve a measure record from measureId (slug) or measureName (case-insensitive); null if unresolved. */
 async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<MeasureRecord | null> {
   const rawId = args.measureId != null ? String(args.measureId).trim() : "";
@@ -111,7 +119,11 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
 
 async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const status = args.status != null && String(args.status).trim() ? String(args.status).trim() : "open";
-  const measure = await resolveMeasure(deps, args);
+  // A supplied-but-unresolved measure filter must NOT silently drop to "all cases" (would leak
+  // unrelated restricted cases) — error instead. Java throws "Measure not found"; we return safeError.
+  const ref = measureFilterRef(args);
+  const measure = ref ? await resolveMeasure(deps, args) : null;
+  if (ref && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${ref}`);
   const rows = await deps.caseStore.listCases({ statuses: caseStatusesFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
   const results = rows.map((c) => {
     const s = toCaseSummary(c);
@@ -333,6 +345,8 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
   }
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
+  // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
+  if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
   let rows = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measure?.measureId, limit: 100000, offset: 0 });
   rows = rows.filter((c) => NON_COMPLIANT.includes(c.currentOutcomeStatus));
   if (statusFilter) rows = rows.filter((c) => c.currentOutcomeStatus === statusFilter);
