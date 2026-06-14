@@ -80,13 +80,25 @@ function expressionResults(evidence: unknown): ExprResult[] {
 function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
-  const daysDefine = ers.find((r) => /^days since/i.test(r.define));
-  const days = typeof daysDefine?.result === "number" ? daysDefine.result : null;
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
-  // last_exam_date = evaluation date minus days-since (best effort), days_overdue past the window.
+
+  // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
+  // The "Days Since …" define coalesces that date with an @1900-01-01 fallback, so it is NEVER
+  // null even when there was no exam — using it directly would report a bogus 1900-era
+  // last_exam_date and tens of thousands of days_overdue for MISSING_DATA cases. Java keyed off
+  // the source date being null (CqlEvaluationService#buildEvidenceJson) and left both fields null
+  // on that path; we do the same by suppressing unless the recency date is present/non-null.
+  const recentDefine = ers.find((r) => /^most recent .*date$/i.test(r.define));
+  const hadExam = recentDefine != null && recentDefine.result != null;
+  const daysDefine = ers.find((r) => /^days since/i.test(r.define));
+  const days = hadExam && typeof daysDefine?.result === "number" ? daysDefine.result : null;
+
   let lastExamDate: string | null = null;
-  if (days !== null) {
+  if (hadExam && typeof recentDefine!.result === "string") {
+    lastExamDate = recentDefine!.result.slice(0, 10);
+  } else if (days !== null) {
+    // Fallback: derive from days-since only when we know an exam happened.
     const d = new Date(`${evaluationPeriod.slice(0, 10)}T00:00:00Z`);
     if (!Number.isNaN(d.getTime())) {
       d.setUTCDate(d.getUTCDate() - days);

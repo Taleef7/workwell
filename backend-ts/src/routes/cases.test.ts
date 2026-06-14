@@ -44,7 +44,7 @@ before(async () => {
   omarCaseId = omar!.id;
   await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-06-13", outcomeStatus: "MISSING_DATA" });
   await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "EXCLUDED" });
-  // evidence for Omar's case (drives the detail's why_flagged)
+  // evidence for Omar's case (drives the detail's why_flagged): a real exam 420 days ago.
   await outcomes.recordOutcome({
     runId,
     subjectId: "emp-006",
@@ -53,8 +53,25 @@ before(async () => {
     evidence: {
       expressionResults: [
         { define: "Has Active Waiver", result: false },
+        { define: "Most Recent Audiogram Date", result: "2025-04-19T00:00:00.000Z" },
         { define: "Days Since Last Audiogram", result: 420 },
         { define: "Outcome Status", result: "OVERDUE" },
+      ],
+    },
+  });
+  // MISSING_DATA evidence for emp-001: NO recency date; "Days Since" carries the @1900 fallback
+  // distance. why_flagged must suppress last_exam_date/days_overdue (must not report 1900-era dates).
+  await outcomes.recordOutcome({
+    runId,
+    subjectId: "emp-001",
+    measureId: "hazwoper",
+    status: "MISSING_DATA",
+    evidence: {
+      expressionResults: [
+        { define: "Has Medical Exemption", result: false },
+        { define: "Most Recent Surveillance Exam Date", result: null },
+        { define: "Days Since Last Exam", result: 46186 },
+        { define: "Outcome Status", result: "MISSING_DATA" },
       ],
     },
   });
@@ -122,9 +139,20 @@ test("GET /api/cases/:id returns CaseDetail with evidence + derived why_flagged"
   assert.match(d.outcomeSummary, /overdue/i);
   // why_flagged derived from the CQL define results (420 days, window 365 → 55 overdue)
   assert.equal(d.evidenceJson.why_flagged.days_overdue, 55);
+  assert.equal(d.evidenceJson.why_flagged.last_exam_date, "2025-04-19", "last_exam_date from the recency define");
   assert.equal(d.evidenceJson.why_flagged.waiver_status, "none");
   assert.ok(d.evidenceJson.expressionResults.length >= 1, "raw expressionResults preserved");
   assert.deepEqual(d.timeline, [], "timeline empty until the audit module is ported");
+});
+
+test("GET /api/cases/:id for MISSING_DATA suppresses last_exam_date/days_overdue (no @1900 fallback leak)", async () => {
+  const open = (await get("?status=open").then((r) => r!.json())) as Array<{ caseId: string; measureName: string }>;
+  const missing = open.find((r) => r.measureName === "HAZWOPER Surveillance")!;
+  const res = await getPath(`/api/cases/${missing.caseId}`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as { evidenceJson: { why_flagged: { last_exam_date: string | null; days_overdue: number | null } } };
+  assert.equal(d.evidenceJson.why_flagged.last_exam_date, null, "no exam → null, not a 1900-era date");
+  assert.equal(d.evidenceJson.why_flagged.days_overdue, null, "no exam → null, not ~45k days");
 });
 
 test("GET /api/cases/:id for an unknown case → 404", async () => {
