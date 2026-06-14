@@ -45,16 +45,22 @@ function measureCql(measureId: string): string {
 const MAX_CQL_BYTES = 64 * 1024;
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
-const ready = new WeakSet<object>();
+// One-shot per-DB init (DDL + migrate + catalog seed). The seed uses non-idempotent INSERTs
+// with fixed catalog ids, so concurrent cold-start requests must NOT each run it — an in-flight
+// promise keyed by the DB lets every caller await the same single initialization.
+const initializing = new WeakMap<object, Promise<void>>();
 async function store(env: MeasuresEnv): Promise<SqliteMeasureStore> {
-  const s = new SqliteMeasureStore(env.DB);
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    await seedMeasureStore(s, measureCql);
-    ready.add(env.DB);
+  let init = initializing.get(env.DB);
+  if (!init) {
+    init = (async () => {
+      await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+      await migrateFloorSchema(env.DB);
+      await seedMeasureStore(new SqliteMeasureStore(env.DB), measureCql);
+    })();
+    initializing.set(env.DB, init);
   }
-  return s;
+  await init;
+  return new SqliteMeasureStore(env.DB);
 }
 async function lifecycleDeps(env: MeasuresEnv): Promise<MeasureLifecycleDeps> {
   return { measures: await store(env), events: new SqliteCaseEventStore(env.DB) };
