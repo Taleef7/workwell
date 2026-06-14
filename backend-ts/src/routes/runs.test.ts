@@ -134,6 +134,18 @@ test("POST /api/runs/manual maps scope errors (ALL_PROGRAMS → 501, missing mea
   assert.equal(invalid?.status, 400);
 });
 
+test("POST /api/runs/manual on a catalog-but-non-runnable (Draft) measure → 400 with an honest message", async () => {
+  // cms2v15 is a Draft catalog entry (no compiled CQL) — the run picker lists all 60, but
+  // only Active measures run (same as Java). The error must say so, not "Unknown measure".
+  const res = await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "cms2v15" });
+  assert.equal(res?.status, 400);
+  const body = (await res!.json()) as { message: string };
+  assert.match(body.message, /not Active\/runnable/i);
+  // a genuinely unknown id still reads as unknown
+  const unknown = await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "does-not-exist" });
+  assert.match(((await unknown!.json()) as { message: string }).message, /Unknown measure/i);
+});
+
 test("GET /api/runs honors status/scopeType/site filters", async () => {
   const a = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t", requestedScope: { site: "PLANT_A" } });
   const aRun = (await a!.json()) as { id: string };

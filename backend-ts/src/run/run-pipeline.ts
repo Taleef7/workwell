@@ -18,6 +18,7 @@ import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededDistribution, seededTargetFor } from "./distribution.ts";
@@ -76,7 +77,18 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
   switch (req.scopeType) {
     case "MEASURE": {
       const measureId = req.measureId;
-      if (!measureId || !MEASURES[measureId]) throw new InvalidRunRequestError(`Unknown measure: ${measureId}`);
+      if (!measureId || !MEASURES[measureId]) {
+        // The /measures catalog (and so the run picker, unchanged) lists all 60 measures;
+        // only the Active ones are runnable (have compiled CQL) — same as Java, whose
+        // MEASURE run resolves the measure's `status = 'Active'` version. Distinguish a
+        // catalog-but-not-runnable measure from a genuinely unknown id so the 400 is honest.
+        const inCatalog = MEASURE_CATALOG.some((m) => m.id === measureId);
+        throw new InvalidRunRequestError(
+          inCatalog
+            ? `Measure '${measureId}' is not Active/runnable (no compiled CQL); only Active measures can be run.`
+            : `Unknown measure: ${measureId}`,
+        );
+      }
       const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
       const items = seededDistribution(employees, rateKey).map((a) => ({ employee: a.employee, measureId, target: a.target }));
       return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${MEASURES[measureId]!.name}` };

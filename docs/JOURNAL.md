@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (1/n) — catalog read
+
+Branch `feat/issue-96-measures-catalog`. First slice of the measures module: the `/measures` page's catalog list, ported from `MeasureService.listMeasures`.
+
+- **Generated catalog** — `scripts/gen-measure-catalog.mjs` emits `measure/measure-catalog.ts` (the full 60-measure TWH catalog) from the Java seed (the single source of truth): 49 CMS eCQM entries parsed from `MeasureService.CMS_ECQM_CATALOG` (47 Draft + CMS125v14/CMS122v14 promoted to Active), the 8 Active runnable OSHA/HEDIS measures (ids aligned with the engine `MEASURES` registry), and the 3 OSHA catalog-only measures from `V017__seed_additional_measures.sql` (Respirator Fit Draft v0.9 / Hep B Approved v2.0 / Lead Deprecated v1.1). Same generator pattern as `gen-measure-bindings.mjs` / the employee catalog — reproducible from source, not hand-typed; the script asserts the 60-count + id-uniqueness.
+- **`measure/measure-read-models.ts`** — `listCatalog({status, search})` ports the Java list semantics: status exact-match (blank/"All" = no filter), search case-insensitive on name OR any tag, ordered `lastUpdated DESC, name ASC`. Java orders by `COALESCE(activated_at, created_at, updated_at) DESC`; the static catalog mirrors that with a per-status recency tier (**Active first**) so the runs/studio measure pickers — which default to the first row — still land on a runnable measure. The 10 Active measures are exactly the engine's runnable set.
+- **`routes/measures.ts`** — `GET /api/measures` now returns the full `Measure[]` catalog (was a `{id,name}` stub of the 10 runnable) with `?status=`/`?search=`. The `/elm` + `/compile` + `/evaluate` engine endpoints are unchanged.
+
+Deferred to later measures slices (need a persisted measures store): `GET /api/measures/:id` detail, `/versions`, `/activation-readiness`, create (`POST /api/measures`), lifecycle transitions (approve/activate/deprecate), spec/CQL edits, and the compile/test-fixture activation gate. `lastUpdated`/`statusUpdatedAt` are a deterministic static seed until those land.
+
+**backend-ts 187 tests — all pass (Postgres reachable this run) / 0 fail; typecheck clean.** New coverage: full-catalog list (60, Active-first, Measure shape), status filter, name/tag search. Frontend `/measures` fetch contract unchanged. Next: measures detail + versions (read), then the authoring/lifecycle mutations (with the measures store), or the `programs` module.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (5/n) — rerun-to-verify + run totalCases
 
 Branch `feat/issue-96-rerun-verify`. Fifth cases slice: the CASE run scope, ported from `CaseFlowService.rerunToVerify`, plus the run summary's `totalCases` wiring.
