@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (4/n) — outreach (preview/send/delivery)
+
+Branch `feat/issue-96-case-outreach`. Fourth cases slice: the outreach action surface on case detail, ported from `CaseFlowService.previewOutreach` / `sendOutreach` / `updateOutreachDelivery`.
+
+- **`case/email-service.ts`** — simulated `EmailService` (port of the Java provider switch). The demo stack is `WORKWELL_EMAIL_PROVIDER=simulated` (CLAUDE.md hard rule); `send` never sends a real email and returns a `SIMULATED` delivery record. SendGrid wiring is intentionally **not** ported (stays inert until a non-demo deployment, as in Java).
+- **`case/case-outreach.ts`** — `previewOutreach` (renders the built-in default template; the DB-backed `outreach_templates` + admin CRUD are #108, so `templateId` resolves to the default per Java's `resolveByIdOrDefault` fallback), `sendOutreach` (simulated send → `OUTREACH_SENT` case_action + `CASE_OUTREACH_SENT` audit, sets case OPEN + follow-up next action), `updateOutreachDelivery` (guards `hasOutreachSent`, validates the status, sets the next action, writes `OUTREACH_DELIVERY_UPDATED` + audit). `dueDate` derives from the **detail's** `why_flagged` (`last_exam_date + compliance_window_days`), matching Java's `loadCase(...).evidenceJson`. Send/delivery use the same **event-before-patch** ordering (atomic `recordCaseEvent`) as assign/escalate.
+- **`CaseEventStore`** — added `hasOutreachSent` + `latestOutreachDeliveryStatus` (the `deliveryStatus` from the most recent `OUTREACH_DELIVERY_UPDATED`/`OUTREACH_SENT` payload). `CaseDetail.latestOutreachDeliveryStatus` is now populated (prior null deferral closed).
+- **`routes/cases.ts`** — `GET …/actions/outreach/preview`, `POST …/actions/outreach` (send), `POST …/actions/outreach/delivery` (400 on invalid/too-early). Role gates unchanged (`POST /api/cases/**` → CM/admin).
+
+Deferred to later slices: **rerun-to-verify** (CASE engine path), **evidence** upload/download, **appointments**, **ai/explain**, and the `outreach_delivery_log` table (its only reader is the Admin delivery-log panel — lands with the admin module, #108). `closedReason`/`closedBy` stay null.
+
+**backend-ts 152 tests — 151 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** New coverage: `hasOutreachSent`/`latestOutreachDeliveryStatus` contract cases on both backends + route tests for preview/send/delivery (incl. the before-send 400 and invalid-status 400). Next: rerun-to-verify + run `totalCases` wiring, then the measures + programs modules.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (3/n) — actions (assign/escalate) + audit timeline
 
 Branch `feat/issue-96-case-actions`. Third cases slice: the case detail's **timeline** is now real, and the first two mutating **actions** are ported. Each action writes BOTH a `case_action` (operator record) and an `audit_event` (immutable ledger — CLAUDE.md: every state change writes audit_event), with payloads matching the Java `CaseFlowService` shapes.

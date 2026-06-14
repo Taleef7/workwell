@@ -71,6 +71,25 @@ export class PgCaseEventStore implements CaseEventStore {
     }
   }
 
+  async hasOutreachSent(caseId: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions WHERE case_id = $1::uuid AND action_type = 'OUTREACH_SENT'`,
+      [caseId],
+    );
+    return Number(rows[0]?.n ?? 0) > 0;
+  }
+
+  async latestOutreachDeliveryStatus(caseId: string): Promise<string | null> {
+    const { rows } = await this.pool.query<{ delivery_status: string | null }>(
+      `SELECT payload_json ->> 'deliveryStatus' AS delivery_status
+         FROM ${SPIKE_SCHEMA}.case_actions
+        WHERE case_id = $1::uuid AND action_type IN ('OUTREACH_DELIVERY_UPDATED', 'OUTREACH_SENT')
+        ORDER BY performed_at DESC, id DESC LIMIT 1`,
+      [caseId],
+    );
+    return rows[0]?.delivery_status ?? null;
+  }
+
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
     // Two separate bind params (not a reused $1): audit_events.ref_case_id is TEXT while
     // case_actions.case_id is UUID, so a single placeholder forces Postgres to deduce one
