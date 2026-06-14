@@ -5,7 +5,13 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { OutcomeRecord, OutcomeStore, RecordOutcomeInput } from "../outcome-store.ts";
+import type {
+  OutcomeRecord,
+  OutcomeStore,
+  RecordOutcomeInput,
+  OutcomeWithRun,
+  OutcomeMeasureFilter,
+} from "../outcome-store.ts";
 
 interface OutcomeRow {
   id: string;
@@ -62,5 +68,34 @@ export class PgOutcomeStore implements OutcomeStore {
       [runId],
     );
     return rows.map(toRecord);
+  }
+
+  async listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {
+    // Measure + day-granular run-period filter pushed into SQL (bounded scan). started_at::date
+    // is the run's started day; the casts keep a null bind from constraining the predicate.
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (filter.measureId) where.push(`o.measure_id = $${binds.push(filter.measureId)}`);
+    if (filter.from) where.push(`r.started_at::date >= $${binds.push(filter.from)}::date`);
+    if (filter.to) where.push(`r.started_at::date <= $${binds.push(filter.to)}::date`);
+    const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    const { rows } = await this.pool.query<{
+      run_id: string;
+      run_started_at: Date | string;
+      subject_id: string;
+      measure_id: string;
+      status: string;
+    }>(
+      `SELECT o.run_id, r.started_at AS run_started_at, o.subject_id, o.measure_id, o.status
+         FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
+      binds,
+    );
+    return rows.map((r) => ({
+      runId: r.run_id,
+      runStartedAt: r.run_started_at instanceof Date ? r.run_started_at.toISOString() : r.run_started_at,
+      subjectId: r.subject_id,
+      measureId: r.measure_id,
+      status: r.status,
+    }));
   }
 }
