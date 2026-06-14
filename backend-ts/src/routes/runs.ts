@@ -15,10 +15,11 @@
  *                                   body {measureId, patientBundle, evaluationDate?}
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
+import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
@@ -29,7 +30,9 @@ import {
   UnsupportedScopeError,
   InvalidRunRequestError,
   type ManualRunRequest,
+  type ManualRunResponse,
 } from "../run/run-pipeline.ts";
+import { rerunToVerify } from "../case/case-rerun.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -43,6 +46,7 @@ const ready = new WeakSet<object>();
 async function ensure(env: RunsEnv): Promise<void> {
   if (!ready.has(env.DB)) {
     await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+    await migrateFloorSchema(env.DB);
     ready.add(env.DB);
   }
 }
@@ -69,8 +73,30 @@ const clampInt = (raw: string | null, def: number, min: number, max: number): nu
   return Math.min(max, Math.max(min, Math.trunc(n)));
 };
 
+/** Build a ManualRunResponse from a completed rerun-to-verify (the runs page's contract). */
+function caseRerunResponse(detail: {
+  lastRunId: string;
+  measureName: string;
+  employeeName: string;
+  currentOutcomeStatus: string;
+}): ManualRunResponse {
+  const compliant = detail.currentOutcomeStatus === "COMPLIANT" ? 1 : 0;
+  return {
+    runId: detail.lastRunId,
+    scopeType: "CASE",
+    scopeLabel: `Case: ${detail.measureName} / ${detail.employeeName}`,
+    status: "COMPLETED",
+    activeMeasuresExecuted: 1,
+    totalEvaluated: 1,
+    compliant,
+    nonCompliant: 1 - compliant,
+    message: `Rerun-to-verify completed with status ${detail.currentOutcomeStatus}.`,
+    measuresExecuted: [detail.measureName],
+  };
+}
+
 /** Returns a Response if this module owns the route, else null (let the worker continue). */
-export async function handleRuns(req: Request, env: RunsEnv): Promise<Response | null> {
+export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
@@ -121,7 +147,24 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   // Rerun an existing run's scope as a new run.
   const rerunId = pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/)?.[1];
   if (rerunId && req.method === "POST") {
-    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
+    const runStore = await store(env);
+    // A CASE run reruns through rerun-to-verify (the case scope), reading the caseId
+    // persisted in requested_scope — matches Java's rerunSameScope CASE branch. Other
+    // scopes go through executeRerun.
+    const prior = await runStore.getRun(rerunId);
+    if (!prior) return json({ error: "not_found", id: rerunId }, 404);
+    if (prior.scopeType === "CASE") {
+      const caseId = prior.requestedScope.caseId as string | undefined;
+      if (!caseId) return json({ error: "invalid_request", message: "CASE run has no caseId to rerun" }, 400);
+      const detail = await rerunToVerify(
+        { cases: await cases(env), events: new SqliteCaseEventStore(env.DB), outcomes: await outcomes(env), runStore, engine },
+        caseId,
+        actor,
+      );
+      if (!detail) return json({ error: "not_found", id: caseId }, 404);
+      return json(caseRerunResponse(detail), 201);
+    }
+    const deps = { runStore, outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
       return json(await executeRerun(deps, rerunId), 201);
     } catch (err) {
@@ -195,7 +238,8 @@ export async function handleRuns(req: Request, env: RunsEnv): Promise<Response |
   if (id && id !== "claim" && req.method === "GET") {
     const run = await (await store(env)).getRun(id);
     if (!run) return json({ error: "not_found", id }, 404);
-    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id)));
+    const totalCases = await (await cases(env)).countByLastRun(id);
+    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id), totalCases));
   }
 
   return null;

@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (5/n) — rerun-to-verify + run totalCases
+
+Branch `feat/issue-96-rerun-verify`. Fifth cases slice: the CASE run scope, ported from `CaseFlowService.rerunToVerify`, plus the run summary's `totalCases` wiring.
+
+- **`case/case-rerun.ts`** — `rerunToVerify(caseId, actor)`: creates a verification run (`scopeType=CASE`) with the Java run-log breadcrumbs, re-evaluates the case subject through the JVM-free CQL engine for the case's measure + evaluation period (deterministic per-subject seeded target → a non-compliant case re-confirms, same as the Java demo), persists the verification outcome, then transitions the case — `COMPLIANT → RESOLVED` (`closed_reason=RERUN_VERIFIED`), `EXCLUDED → EXCLUDED` (`RERUN_EXCLUDED`), else stays open. Records `RERUN_TO_VERIFY` + `CASE_RERUN_VERIFIED` atomically (event-before-patch), then `CASE_RESOLVED`/`CASE_EXCLUDED`, then finalizes the run (`COMPLETED`/`PARTIAL_FAILURE`). Waiver auto-linkage on EXCLUDED is deferred (waivers are admin, #108).
+- **Schema + store** — added `closed_reason` / `closed_by` columns to the cases table (floor + ceiling); `CaseRecord`/`CasePatch` extended; `patchCase` now covers `currentOutcomeStatus`/`lastRunId`/`closedAt`/`closedReason`/`closedBy`. `CaseDetail.closedReason`/`closedBy` are now populated (prior null deferral closed). Added `CaseStore.countByLastRun`.
+- **`totalCases`** — `toRunSummary` now takes the count; the `GET /api/runs/:id` route supplies `COUNT(cases WHERE last_run_id = runId)` (matches Java). Prior hard-coded `0` removed.
+- **`routes/cases.ts`** — `POST /api/cases/:id/rerun-to-verify` (404 unknown). Role gate unchanged (`POST /api/cases/**` → CM/admin).
+
+Deferred to later slices: **evidence** upload/download, **appointments**, **ai/explain**, the `outreach_delivery_log` table, and the run-outcome grid's per-row `caseId` link (#108-adjacent). Waiver linkage on excluded reruns lands with the admin module.
+
+**backend-ts 159 tests — 158 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** New coverage: `countByLastRun` + rerun-close `patchCase` contract cases (both backends), a `rerun-to-verify` route test (verification recorded on the timeline; closing outcomes set closed_reason/closed_by), and a run-summary `totalCases` route test. **The `cases` module is now functionally complete bar evidence/appointments/ai.** Next: the **measures** module (catalog/versioning/lifecycle/compile gate) or **programs** (KPIs/trend/risk outlook).
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (4/n) — outreach (preview/send/delivery)
 
 Branch `feat/issue-96-case-outreach`. Fourth cases slice: the outreach action surface on case detail, ported from `CaseFlowService.previewOutreach` / `sendOutreach` / `updateOutreachDelivery`.

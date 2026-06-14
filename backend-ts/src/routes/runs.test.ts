@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-runs-route-${crypto.randomUUID()}.sqlite`);
 const bundle = JSON.parse(
@@ -84,6 +85,46 @@ test("create run → evaluate subject via engine → persist + list outcome", as
   assert.equal(summary.passRate, 100); // the one subject is COMPLIANT
   assert.equal(summary.totalCases, 0);
   assert.deepEqual(summary.outcomeCounts, [{ status: "COMPLIANT", count: 1 }]);
+});
+
+test("run summary totalCases counts cases whose last_run_id is the run", async () => {
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  // upsert a case against this run (the cases table is ensured by handleRuns' floor DDL)
+  await new SqliteCaseStore(env.DB as never).upsertFromOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  });
+  const summary = (await get(`/api/runs/${run.id}`).then((r) => r!.json())) as { totalCases: number };
+  assert.equal(summary.totalCases, 1, "the open case is counted against its last run");
+});
+
+test("POST /api/runs/:id/rerun on a CASE run reruns the case (no 501)", async () => {
+  // Seed a case + a persisted CASE-scope run carrying its caseId (as rerun-to-verify writes).
+  const caseRow = (await new SqliteCaseStore(env.DB as never).upsertFromOutcome({
+    runId: crypto.randomUUID(),
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  }))!;
+  const caseRun = await post("/api/runs", {
+    scopeType: "CASE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { caseId: caseRow.id, measureId: "audiogram", employeeExternalId: "emp-006", evaluationDate: "2026-06-13" },
+  });
+  const cr = (await caseRun!.json()) as { id: string };
+
+  const res = await post(`/api/runs/${cr.id}/rerun`);
+  assert.equal(res?.status, 201, "CASE rerun succeeds (was 501 before)");
+  const body = (await res!.json()) as { scopeType: string; totalEvaluated: number; message: string };
+  assert.equal(body.scopeType, "CASE");
+  assert.equal(body.totalEvaluated, 1);
+  assert.match(body.message, /rerun-to-verify/i);
 });
 
 test("POST /api/runs/manual maps scope errors (ALL_PROGRAMS → 501, missing measure → 400)", async () => {

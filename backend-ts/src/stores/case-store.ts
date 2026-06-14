@@ -17,6 +17,8 @@ export interface CaseRecord {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  closedReason: string | null;
+  closedBy: string | null;
 }
 
 export interface UpsertCaseInput {
@@ -37,13 +39,20 @@ export interface CaseQuery {
   offset?: number;
 }
 
-/** Mutable case fields an operator action may patch (assign/escalate/outreach/…). */
+/**
+ * Mutable case fields an operator action may patch (assign/escalate/outreach/rerun).
+ * A nullable field set to `null` clears that column; omit a field to leave it unchanged.
+ */
 export interface CasePatch {
   status?: string;
   priority?: string;
-  /** `assignee: null` clears the assignee; omit to leave it unchanged. */
   assignee?: string | null;
   nextAction?: string;
+  currentOutcomeStatus?: string;
+  lastRunId?: string;
+  closedAt?: string | null;
+  closedReason?: string | null;
+  closedBy?: string | null;
 }
 
 export interface CaseStore {
@@ -58,4 +67,6 @@ export interface CaseStore {
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
   patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;
+  /** Count cases whose last_run_id is the given run (the run summary's totalCases). */
+  countByLastRun(runId: string): Promise<number>;
 }

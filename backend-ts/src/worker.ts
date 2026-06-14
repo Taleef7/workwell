@@ -145,7 +145,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (measuresResponse) return measuresResponse;
 
   // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
-  const runsResponse = await handleRuns(req, env);
+  const runsResponse = await handleRuns(req, env, actor);
   if (runsResponse) return runsResponse;
 
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
