@@ -29,11 +29,17 @@ const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));
 
 export const listIntegrations = (): IntegrationHealth[] => INTEGRATIONS.map((i) => ({ ...i }));
 
-/** Manual sync — whitelisted to {fhir,mcp,ai,hris}; returns the refreshed health or null (→404). */
+/**
+ * Manual sync — whitelisted to {fhir,mcp,ai,hris}; null when unknown (→404). The update is
+ * PERSISTED into INTEGRATIONS so the page's subsequent GET /api/admin/integrations reload
+ * reflects the new lastSyncAt/detail (the frontend discards the POST body and refetches).
+ */
 export function syncIntegration(integration: string): IntegrationHealth | null {
-  if (!INTEGRATION_IDS.has(integration)) return null;
-  const base = INTEGRATIONS.find((i) => i.integration === integration)!;
-  return { ...base, lastSyncAt: new Date().toISOString(), detail: `Manual sync completed (${base.status}).` };
+  const entry = INTEGRATIONS.find((i) => i.integration === integration);
+  if (!entry) return null;
+  entry.lastSyncAt = new Date().toISOString();
+  entry.detail = `Manual sync completed (${entry.status}).`;
+  return { ...entry };
 }
 
 // ---- scheduler (in-process toggle; resets on restart — demo settings) --------
@@ -130,17 +136,16 @@ export interface AdminAuditRow {
   detail: string | null;
 }
 
-/** Derive the admin audit "scope" from the event type prefix (the page's scope filter). */
-export function auditScopeOf(eventType: string): string {
-  if (eventType.startsWith("CASE_")) return "case";
-  if (eventType.startsWith("RUN_")) return "run";
-  if (eventType.startsWith("MEASURE_")) return "measure";
-  if (eventType.startsWith("AI_")) return "ai";
-  return "system";
-}
+/**
+ * The admin audit "scope" the page filters on: CASE_VIEWED is `access`, everything else is
+ * `mutation` (Java AuditQueryService — access review vs action history). NOT a per-entity scope.
+ */
+export const auditScopeOf = (eventType: string): "access" | "mutation" => (eventType === "CASE_VIEWED" ? "access" : "mutation");
 
 export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<string, string>, scope: string, limit: number): AdminAuditRow[] {
-  const wanted = scope && scope.toLowerCase() !== "all" ? scope.toLowerCase() : null;
+  // scope: "access" → CASE_VIEWED; "mutation"/"mutations" → everything else; "all"/blank → no filter.
+  const raw = scope?.trim().toLowerCase();
+  const wanted = raw === "access" ? "access" : raw === "mutation" || raw === "mutations" ? "mutation" : null;
   const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
   return events
     .slice()

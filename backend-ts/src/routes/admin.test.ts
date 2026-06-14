@@ -51,6 +51,9 @@ test("integrations: list + manual sync; unknown → 404", async () => {
   const synced = await post("/api/admin/integrations/fhir/sync");
   assert.equal(synced?.status, 200);
   assert.ok(((await synced!.json()) as { lastSyncAt: string }).lastSyncAt, "sync stamps lastSyncAt");
+  // The sync must PERSIST so the page's reload reflects it (not revert to null).
+  const reloaded = (await body("/api/admin/integrations")) as Array<{ integration: string; lastSyncAt: string | null }>;
+  assert.ok(reloaded.find((i) => i.integration === "fhir")!.lastSyncAt, "lastSyncAt persisted across the reload");
   assert.equal((await post("/api/admin/integrations/nope/sync"))?.status, 404);
 });
 
@@ -62,15 +65,18 @@ test("scheduler: status + enable toggle", async () => {
   await post("/api/admin/scheduler?enabled=false");
 });
 
-test("audit-events viewer: scope + employeeId resolved from the case", async () => {
+test("audit-events viewer: access/mutation scope + employeeId resolved from the case", async () => {
   const all = (await body("/api/admin/audit-events?scope=all&limit=50")) as Array<{ eventType: string; scope: string; employeeExternalId: string | null; actor: string }>;
   const row = all.find((r) => r.eventType === "CASE_ESCALATED")!;
-  assert.equal(row.scope, "case");
+  // Scope is access (CASE_VIEWED) vs mutation (everything else) — the Java/admin contract.
+  assert.equal(row.scope, "mutation");
   assert.equal(row.employeeExternalId, "emp-006", "resolved via ref_case_id → case employee");
   assert.equal(row.actor, "cm@workwell.dev");
-  // scope filter narrows
-  assert.ok(((await body("/api/admin/audit-events?scope=run")) as unknown[]).every((r) => (r as { scope: string }).scope === "run"));
-  assert.equal(((await body("/api/admin/audit-events?scope=run")) as unknown[]).length, 0, "no run-scoped events here");
+  // The "mutations" tab (frontend default-adjacent) shows the escalation; "access" (CASE_VIEWED only) is empty here.
+  const mutations = (await body("/api/admin/audit-events?scope=mutations")) as Array<{ scope: string; eventType: string }>;
+  assert.ok(mutations.every((r) => r.scope === "mutation"));
+  assert.ok(mutations.some((r) => r.eventType === "CASE_ESCALATED"));
+  assert.deepEqual(await body("/api/admin/audit-events?scope=access"), [], "no CASE_VIEWED events → access tab empty");
 });
 
 test("static reads: terminology + data mappings + outreach templates + preview", async () => {
