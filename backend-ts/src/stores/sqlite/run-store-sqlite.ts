@@ -20,26 +20,31 @@ interface RunRow {
   completed_at: string | null;
 }
 
-/** A run's site lives in the requested scope (set by the scoped-run pipeline). */
-const siteOf = (requestedScopeJson: string | null): string | null => {
-  if (!requestedScopeJson) return null;
+const parseScope = (json: string | null): Record<string, unknown> => {
+  if (!json) return {};
   try {
-    const site = (JSON.parse(requestedScopeJson) as { site?: unknown }).site;
-    return typeof site === "string" && site ? site : null;
+    const v = JSON.parse(json);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
   } catch {
-    return null;
+    return {};
   }
 };
+const siteOf = (scope: Record<string, unknown>): string | null =>
+  typeof scope.site === "string" && scope.site ? scope.site : null;
 
-const toRecord = (r: RunRow): RunRecord => ({
-  id: r.id,
-  status: r.status as RunStatus,
-  scopeType: r.scope_type as CreateRunInput["scopeType"],
-  scopeId: r.scope_id,
-  site: siteOf(r.requested_scope_json),
-  startedAt: r.started_at,
-  completedAt: r.completed_at,
-});
+const toRecord = (r: RunRow): RunRecord => {
+  const requestedScope = parseScope(r.requested_scope_json);
+  return {
+    id: r.id,
+    status: r.status as RunStatus,
+    scopeType: r.scope_type as CreateRunInput["scopeType"],
+    scopeId: r.scope_id,
+    site: siteOf(requestedScope),
+    requestedScope,
+    startedAt: r.started_at,
+    completedAt: r.completed_at,
+  };
+};
 
 const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, started_at, completed_at";
 
@@ -129,6 +134,14 @@ export class SqliteRunStore implements RunStore {
     await this.db
       .prepare(`UPDATE runs SET status = 'RUNNING' WHERE id = ? AND status = 'QUEUED'`)
       .bind(runId)
+      .run();
+    return this.getRun(runId);
+  }
+
+  async finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null> {
+    await this.db
+      .prepare(`UPDATE runs SET status = ?, completed_at = ? WHERE id = ?`)
+      .bind(status, new Date().toISOString(), runId)
       .run();
     return this.getRun(runId);
   }

@@ -14,6 +14,7 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   scopeType: "MEASURE",
   scopeId: "audiogram",
   site: null,
+  requestedScope: {},
   startedAt: "2026-06-13T10:00:00.000Z",
   completedAt: "2026-06-13T10:00:05.000Z",
   ...over,

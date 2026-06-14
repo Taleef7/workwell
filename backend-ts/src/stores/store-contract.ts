@@ -121,6 +121,16 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(await store.claimNextQueuedRun("worker-X"), null, "a RUNNING run is not claimable");
     assert.equal((await store.markRunning(run.id))?.status, "RUNNING", "idempotent");
   });
+
+  test(`[${label}] finalizeRun sets a terminal status + completed_at, and createRun preserves requestedScope`, async () => {
+    const store = await freshStore();
+    const run = await store.createRun(sampleRun("audiogram"));
+    assert.deepEqual(run.requestedScope, { measureId: "audiogram" }, "requestedScope round-trips");
+    assert.equal(run.completedAt, null);
+    const done = await store.finalizeRun(run.id, "COMPLETED");
+    assert.equal(done?.status, "COMPLETED");
+    assert.ok(done?.completedAt, "completed_at is stamped");
+  });
 }
 
 /** Registers the OutcomeStore contract. `fresh` → isolated, empty {run, outcome} pair. */
