@@ -25,6 +25,7 @@ import { handlePrograms } from "./routes/programs.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
+import { handleMcp } from "./routes/mcp.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -128,13 +129,16 @@ async function route(req: Request, env: Env): Promise<Response> {
   // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
   // The authenticated subject becomes the audit actor (SecurityActor.currentActor()).
   let actor = "system";
-  if (authEnabled(env)) {
+  let principalRole: string | null = null;
+  const enforceAuth = authEnabled(env);
+  if (enforceAuth) {
     const principal = extractPrincipal(req, getVerifier(env)!);
     const decision = authorize(req.method, pathname, principal);
     if (!decision.ok) {
       return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);
     }
     if (principal?.email) actor = principal.email;
+    principalRole = principal?.role ?? null;
   }
 
   // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
@@ -174,6 +178,11 @@ async function route(req: Request, env: Env): Promise<Response> {
   // text/drafts only (AI never decides compliance); deterministic fallback when no OPENAI_API_KEY.
   const aiResponse = await handleAi(req, env, actor);
   if (aiResponse) return aiResponse;
+
+  // MCP — read-only tools over SSE + JSON-RPC (#108). Transport gate ([ADMIN/CASE_MANAGER/
+  // MCP_CLIENT] on /sse + /mcp/**) is applied above; per-tool role gates run in dispatch.
+  const mcpResponse = await handleMcp(req, env, { actor, role: principalRole, enforce: enforceAuth });
+  if (mcpResponse) return mcpResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
   // same principle as UnsupportedBindingError / "AI never decides compliance".

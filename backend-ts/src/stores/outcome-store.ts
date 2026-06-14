@@ -36,6 +36,15 @@ export interface MeasureOutcomeRow {
   evidence: unknown;
 }
 
+/** Per-measure outcome history row for one employee (MCP get_employee / check_compliance). */
+export interface EmployeeOutcomeRow {
+  measureId: string;
+  status: string;
+  evaluationPeriod: string;
+  evaluatedAt: string;
+  evidence: unknown;
+}
+
 /**
  * Minimal outcome+run projection for the programs analytics (overview/trend/top-drivers):
  * the run's `startedAt` joined per outcome, so aggregation groups by run without an
@@ -70,4 +79,9 @@ export interface OutcomeStore {
    * the per-subject history the risk-outlook analytics group in the app.
    */
   listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]>;
+  /**
+   * The latest `limit` outcomes for one employee (by subjectId), newest-first — the MCP
+   * get_employee history and check_compliance lookup. Bounded scan over the outcomes table.
+   */
+  listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]>;
 }

@@ -257,8 +257,12 @@ contracts; per-PR JOURNAL entries carry the detail):
   **admin** dashboard reads + integrations/scheduler toggles ✅ (waivers/delivery-log/mapping-CRUD/
   demo-reset deferred); **AI surfaces** (draft-spec/cql/fixtures + explain + run-insight) ✅ — fetch-based
   OpenAI client (no JVM, no new dep), deterministic fallbacks, AI-never-decides-compliance guardrail,
-  per-call AI audit (`recordAiHealth` integration-health status deferred). **MCP tools** pending.
+  per-call AI audit (`recordAiHealth` integration-health status deferred); **MCP tools** (13 read-only
+  tools + SSE/JSON-RPC transport) ✅ — hand-rolled JSON-RPC+SSE over the worker fetch (no new dep; the
+  official SDK transports assume Node http vs our fetch host), per-tool role gates + `MCP_TOOL_CALLED`
+  audit (sanitized args + SHA-256 hash); `get_measure_traceability`/`list_data_quality_gaps` return a
+  faithful `NOT_IMPLEMENTED` (their backend services aren't ported). **#108 complete.**
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~262 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~293 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.
