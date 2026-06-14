@@ -102,6 +102,31 @@ test("run summary totalCases counts cases whose last_run_id is the run", async (
   assert.equal(summary.totalCases, 1, "the open case is counted against its last run");
 });
 
+test("POST /api/runs/:id/rerun on a CASE run reruns the case (no 501)", async () => {
+  // Seed a case + a persisted CASE-scope run carrying its caseId (as rerun-to-verify writes).
+  const caseRow = (await new SqliteCaseStore(env.DB as never).upsertFromOutcome({
+    runId: crypto.randomUUID(),
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  }))!;
+  const caseRun = await post("/api/runs", {
+    scopeType: "CASE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { caseId: caseRow.id, measureId: "audiogram", employeeExternalId: "emp-006", evaluationDate: "2026-06-13" },
+  });
+  const cr = (await caseRun!.json()) as { id: string };
+
+  const res = await post(`/api/runs/${cr.id}/rerun`);
+  assert.equal(res?.status, 201, "CASE rerun succeeds (was 501 before)");
+  const body = (await res!.json()) as { scopeType: string; totalEvaluated: number; message: string };
+  assert.equal(body.scopeType, "CASE");
+  assert.equal(body.totalEvaluated, 1);
+  assert.match(body.message, /rerun-to-verify/i);
+});
+
 test("POST /api/runs/manual maps scope errors (ALL_PROGRAMS → 501, missing measure → 400)", async () => {
   const unsupported = await post("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
   assert.equal(unsupported?.status, 501);
