@@ -5,9 +5,9 @@
  * measure binding. why_flagged is derived from the CQL define results (the TS engine
  * stores expressionResults, not a why_flagged block), matching the Java field shape.
  *
- * The merged audit/case-action timeline is passed in by the caller (CaseEventStore);
- * it defaults to [] for read paths that don't load it. Still deferred until later
- * slices: latestOutreachDeliveryStatus = null, closedReason/closedBy = null.
+ * The merged audit/case-action timeline and latestOutreachDeliveryStatus are passed
+ * in by the caller (CaseEventStore); they default to []/null for read paths that don't
+ * load them. Still deferred until later slices: closedReason/closedBy = null.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -117,7 +117,12 @@ function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod
   };
 }
 
-export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null, timeline: unknown[] = []): CaseDetail {
+export function toCaseDetail(
+  c: CaseRecord,
+  outcome: OutcomeRecord | null,
+  timeline: unknown[] = [],
+  latestOutreachDeliveryStatus: string | null = null,
+): CaseDetail {
   const emp = employeeById(c.employeeId);
   const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
   return {
@@ -149,7 +154,7 @@ export function toCaseDetail(c: CaseRecord, outcome: OutcomeRecord | null, timel
     outcomeStatus: c.currentOutcomeStatus,
     outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
-    latestOutreachDeliveryStatus: null,
+    latestOutreachDeliveryStatus,
     timeline,
   };
 }
