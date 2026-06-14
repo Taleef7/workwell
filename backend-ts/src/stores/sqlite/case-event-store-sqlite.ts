@@ -9,6 +9,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import type {
   AppendAuditInput,
+  AuditEventRow,
   CaseEventStore,
   InsertActionInput,
   TimelineEntry,
@@ -104,6 +105,25 @@ export class SqliteCaseEventStore implements CaseEventStore {
       .bind(caseId)
       .first<{ delivery_status: string | null }>();
     return row?.delivery_status ?? null;
+  }
+
+  async listAuditEvents(limit = 100000): Promise<AuditEventRow[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+           FROM audit_events ORDER BY occurred_at ASC, id ASC LIMIT ?`,
+      )
+      .bind(limit)
+      .all<{ occurred_at: string; event_type: string; actor: string | null; ref_run_id: string | null; ref_case_id: string | null; ref_measure_version_id: string | null; payload_json: string | null }>();
+    return (results ?? []).map((r) => ({
+      occurredAt: r.occurred_at,
+      eventType: r.event_type,
+      actor: r.actor,
+      refRunId: r.ref_run_id,
+      refCaseId: r.ref_case_id,
+      refMeasureVersionId: r.ref_measure_version_id,
+      payload: r.payload_json ? JSON.parse(r.payload_json) : {},
+    }));
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {

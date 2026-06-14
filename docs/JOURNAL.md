@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4b (#108): exports module — runs/outcomes/cases/audit CSV
+
+Branch `feat/issue-96-exports`. First **Phase 4b** slice (larger-batch cadence). The CSV export surface, ported from `ExportController`/`AuditExportService`, matching the column contracts in DATA_MODEL §6. *(Demo-safety note: this is `backend-ts/` only — it does not touch the deployed Java backend or frontend.)*
+
+- **`export/csv.ts`** — RFC-4180 CSV writer (quote-on-demand, doubled quotes, CRLF).
+- **`export/export-csv.ts`** — `runsCsv` (§6.1, reuses `toRunSummary` for per-bucket counts + passRate), `outcomesCsv` (§6.2, derives the why_flagged columns — last_exam_date/compliance_window_days/days_overdue/waiver_status — from the CQL defines like case detail; `?runId` scopes to one run), `casesCsv` (§6.3, + `latestOutreachDeliveryStatus`; honors status/measureId/priority/assignee filters), `auditCsv` (Java `AuditExportService` header: timestamp,eventType,caseId,runId,measureName,employeeId,actor,detail). Employee name/role/site from the directory, measure name/version from the registry.
+- **`CaseEventStore.listAuditEvents`** (floor + ceiling) — the ordered ledger for the audit CSV.
+- **`routes/exports.ts`** — `GET /api/exports/{runs,outcomes,cases}` + `/api/audit-events/export`; `text/csv` + `Content-Disposition: attachment`; non-csv `format` → 400 "Unsupported format. Use format=csv." (Java parity). Wired into the worker (AUTHENTICATED).
+
+**backend-ts 228 tests — all pass / 0 fail; typecheck clean** (Postgres ceiling validated `listAuditEvents`). New coverage: each CSV (headers + rows, derived why_flagged, audit ledger) + the format gate. Frontend export buttons (`/runs`, `/cases`) fetch contract unchanged. Next #108 batches: admin surface, AI surfaces, MCP tools.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (4/n) — persisted store + authoring/lifecycle
 
 Branch `feat/issue-96-measures-authoring` (based on the readiness branch — **supersedes/includes #132**). The largest measures slice: a **persisted measures store** so the read surface reflects mutations, plus **create + lifecycle** transitions. Ported from `MeasureService` create/approve/deprecate/transitionStatus. *(Bigger-PR cadence per the maintainer's request.)*
