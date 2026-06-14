@@ -70,4 +70,36 @@ CREATE TABLE IF NOT EXISTS cases (
 );
 
 CREATE INDEX IF NOT EXISTS cases_status_idx ON cases (status);
+
+/* Case actions (#107). Floor analogue of case_actions (docs/DATA_MODEL.md): one row per
+   operator/system action on a case (ASSIGNED, ESCALATED, OUTREACH_SENT, …). payload_json
+   is the action detail. INTEGER autoincrement id doubles as the stable tiebreak sort_key. */
+CREATE TABLE IF NOT EXISTS case_actions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id       TEXT NOT NULL,
+  action_type   TEXT NOT NULL,
+  payload_json  TEXT,
+  performed_by  TEXT,
+  performed_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS case_actions_case_id_idx ON case_actions (case_id);
+
+/* Audit events (#107). Append-only ledger (docs/DATA_MODEL.md): every state change writes
+   one row (CLAUDE.md hard rule). measure_version_id holds the floor measure slug. The
+   case timeline is audit_events (excl CASE_VIEWED) UNION case_actions ordered by occurred_at. */
+CREATE TABLE IF NOT EXISTS audit_events (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type           TEXT NOT NULL,
+  entity_type          TEXT NOT NULL,
+  entity_id            TEXT,
+  actor                TEXT,
+  ref_run_id           TEXT,
+  ref_case_id          TEXT,
+  ref_measure_version_id TEXT,
+  payload_json         TEXT,
+  occurred_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS audit_events_ref_case_id_idx ON audit_events (ref_case_id);
 `;

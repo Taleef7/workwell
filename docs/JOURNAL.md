@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): cases module (3/n) — actions (assign/escalate) + audit timeline
+
+Branch `feat/issue-96-case-actions`. Third cases slice: the case detail's **timeline** is now real, and the first two mutating **actions** are ported. Each action writes BOTH a `case_action` (operator record) and an `audit_event` (immutable ledger — CLAUDE.md: every state change writes audit_event), with payloads matching the Java `CaseFlowService` shapes.
+
+- **Stores (floor + ceiling + shared contract)** — added `case_actions` + `audit_events` tables to the TS spike scaffolding (`stores/sqlite/schema.ts`, `stores/postgres/schema-pg.ts`, isolated `workwell_spike` schema). *Same TS adapter scaffolding as the merged runs/outcomes/cases floor tables — NOT a canonical Flyway migration; canonical schema stays Taleef-owned.* New `CaseEventStore` (`insertAction` / `appendAudit` / `caseTimeline`) on both backends; `caseTimeline` is the Java `loadCaseTimeline` UNION — `audit_events` (excl `CASE_VIEWED`) ∪ `case_actions`, ordered `occurred_at, id`, each entry stamped with a `timelineSource` discriminator. Added `CaseStore.patchCase` (floor + ceiling) for targeted field updates.
+- **`case/case-actions.ts`** — pure port of `assignCase` / `escalateCase`: load → patch → `case_action` + `audit_event` → return the refreshed `CaseDetail` (incl. evidence + merged timeline). `assign` normalizes blank → clears the owner (`CASE_ASSIGNED`, payload `{assignee, previousAssignee}`); `escalate` forces `HIGH`/`OPEN` + the supervisor-queue next action (`CASE_ESCALATED`).
+- **`routes/cases.ts`** — `POST /api/cases/:id/assign?assignee=…` + `POST /api/cases/:id/escalate` (404 unknown); case detail now loads the merged timeline (the prior `timeline = []` deferral is closed). The authenticated subject (`JwtPrincipal.email`) is threaded from the worker as the audit **actor** (`SecurityActor.currentActor()` parity).
+
+Still deferred to later cases slices: **outreach** (send/preview/delivery + simulated email + delivery log), **rerun-to-verify** (CASE engine path), **evidence** upload/download (multipart + role gates), **appointments**, **ai/explain**. `latestOutreachDeliveryStatus`/`closedReason`/`closedBy` stay null until those land.
+
+**backend-ts 146 tests — 145 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** New coverage: `caseEventStoreContract` (timeline merge/order + CASE_VIEWED exclusion) on both backends, a `patchCase` contract case, and route tests for assign/escalate + timeline ordering. Docs/board synced this slice (plan §11, #107 checklist). Next: outreach actions, then rerun-to-verify + run `totalCases` wiring, then the measures + programs modules.
+
+---
+
 ## 2026-06-13 — Issue #96 Phase 4 (#107): cases module (2/n) — case detail + why_flagged
 
 Branch `feat/issue-96-case-detail`. Second cases slice: `GET /api/cases/:id` → the frontend `CaseDetail`.
