@@ -241,6 +241,33 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await store.patchCase(c.id, { nextAction: "Do the thing" }))?.nextAction, "Do the thing");
     assert.equal(await store.patchCase(crypto.randomUUID(), { priority: "LOW" }), null, "unknown id → null");
   });
+
+  test(`[${label}] patchCase sets the rerun-close fields (status/outcome/closedReason/closedBy)`, async () => {
+    const store = await freshStore();
+    const c = (await upsert(store, "OVERDUE"))!;
+    const closedAt = new Date().toISOString();
+    const verified = await store.patchCase(c.id, {
+      status: "RESOLVED",
+      currentOutcomeStatus: "COMPLIANT",
+      closedAt,
+      closedReason: "RERUN_VERIFIED",
+      closedBy: "cm@workwell.dev",
+    });
+    assert.equal(verified?.status, "RESOLVED");
+    assert.equal(verified?.currentOutcomeStatus, "COMPLIANT");
+    assert.equal(verified?.closedReason, "RERUN_VERIFIED");
+    assert.equal(verified?.closedBy, "cm@workwell.dev");
+    assert.ok(verified?.closedAt, "closed_at stamped");
+  });
+
+  test(`[${label}] countByLastRun counts cases whose last_run_id matches`, async () => {
+    const store = await freshStore();
+    const runId = crypto.randomUUID();
+    await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+    await store.upsertFromOutcome({ runId, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "DUE_SOON" });
+    assert.equal(await store.countByLastRun(runId), 2);
+    assert.equal(await store.countByLastRun(crypto.randomUUID()), 0, "unrelated run → 0");
+  });
 }
 
 /** Registers the CaseEventStore contract — actions + audit ledger + merged timeline. */

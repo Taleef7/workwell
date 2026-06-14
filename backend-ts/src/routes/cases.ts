@@ -11,28 +11,36 @@
  *   GET  /api/cases/:id/actions/outreach/preview ?templateId=…           → 200 OutreachPreview | 404
  *   POST /api/cases/:id/actions/outreach         ?templateId=…  send     → 200 CaseDetail | 404
  *   POST /api/cases/:id/actions/outreach/delivery ?deliveryStatus=…      → 200 CaseDetail | 400 | 404
+ *   POST /api/cases/:id/rerun-to-verify    re-evaluate + transition      → 200 CaseDetail | 404
  *
  * Each mutating action writes a case_action + an audit_event; the detail timeline is
- * the merged ledger. rerun-to-verify + evidence/appointments/ai are later slices.
+ * the merged ledger. evidence/appointments/ai are later slices.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
+import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
+import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
+import { rerunToVerify, type RerunDeps } from "../case/case-rerun.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
 }
 
+const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
+
 const ready = new WeakSet<object>();
 async function ensure(env: CasesEnv): Promise<void> {
   if (!ready.has(env.DB)) {
     await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+    await migrateFloorSchema(env.DB);
     ready.add(env.DB);
   }
 }
@@ -50,6 +58,16 @@ async function actionDeps(env: CasesEnv): Promise<CaseActionDeps> {
     cases: new SqliteCaseStore(env.DB),
     events: new SqliteCaseEventStore(env.DB),
     outcomes: new SqliteOutcomeStore(env.DB),
+  };
+}
+async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
+  await ensure(env);
+  return {
+    cases: new SqliteCaseStore(env.DB),
+    events: new SqliteCaseEventStore(env.DB),
+    outcomes: new SqliteOutcomeStore(env.DB),
+    runStore: new SqliteRunStore(env.DB),
+    engine,
   };
 }
 
@@ -114,7 +132,12 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"));
       return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
     }
-    return null; // other case POSTs (rerun/evidence/appointments) not ported yet
+    const rerunId = url.pathname.match(/^\/api\/cases\/([^/]+)\/rerun-to-verify$/)?.[1];
+    if (rerunId) {
+      const detail = await rerunToVerify(await rerunDeps(env), rerunId, actor);
+      return detail ? json(detail) : json({ error: "not_found", id: rerunId }, 404);
+    }
+    return null; // other case POSTs (evidence/appointments) not ported yet
   }
 
   // Outreach preview (GET) — render the default template for the case (no state change).

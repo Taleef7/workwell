@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS cases (
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL,
   closed_at              TEXT,
+  closed_reason          TEXT,
+  closed_by              TEXT,
   UNIQUE (employee_id, measure_id, evaluation_period)
 );
 
@@ -103,3 +105,30 @@ CREATE TABLE IF NOT EXISTS audit_events (
 
 CREATE INDEX IF NOT EXISTS audit_events_ref_case_id_idx ON audit_events (ref_case_id);
 `;
+
+/**
+ * Columns added to existing tables after their initial CREATE. SQLite has no
+ * `ADD COLUMN IF NOT EXISTS`, and `CREATE TABLE IF NOT EXISTS` won't alter a table that
+ * already exists — so a floor DB created by an earlier release keeps the old shape and a
+ * SELECT of the new column fails. `migrateFloorSchema` backfills these idempotently by
+ * checking `PRAGMA table_info` first. Add an entry here whenever a column is introduced.
+ */
+const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl: string }> = [
+  { table: "cases", column: "closed_reason", ddl: "closed_reason TEXT" },
+  { table: "cases", column: "closed_by", ddl: "closed_by TEXT" },
+];
+
+interface MinimalDb {
+  prepare(sql: string): { all<T = Record<string, unknown>>(): Promise<{ results?: T[] }> };
+  exec(sql: string): Promise<unknown>;
+}
+
+/** Idempotently add any missing backfill columns to an existing floor DB. Safe to run every boot. */
+export async function migrateFloorSchema(db: MinimalDb): Promise<void> {
+  for (const { table, column, ddl } of FLOOR_COLUMN_BACKFILL) {
+    const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    if (!(results ?? []).some((r) => r.name === column)) {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    }
+  }
+}

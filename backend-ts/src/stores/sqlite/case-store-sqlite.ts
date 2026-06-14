@@ -22,10 +22,12 @@ interface CaseRow {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  closed_reason: string | null;
+  closed_by: string | null;
 }
 
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 
 const toRecord = (r: CaseRow): CaseRecord => ({
   id: r.id,
@@ -41,6 +43,8 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   closedAt: r.closed_at,
+  closedReason: r.closed_reason,
+  closedBy: r.closed_by,
 });
 
 export class SqliteCaseStore implements CaseStore {
@@ -113,6 +117,11 @@ export class SqliteCaseStore implements CaseStore {
     if (patch.priority !== undefined) (sets.push("priority = ?"), binds.push(patch.priority));
     if (patch.assignee !== undefined) (sets.push("assignee = ?"), binds.push(patch.assignee));
     if (patch.nextAction !== undefined) (sets.push("next_action = ?"), binds.push(patch.nextAction));
+    if (patch.currentOutcomeStatus !== undefined) (sets.push("current_outcome_status = ?"), binds.push(patch.currentOutcomeStatus));
+    if (patch.lastRunId !== undefined) (sets.push("last_run_id = ?"), binds.push(patch.lastRunId));
+    if (patch.closedAt !== undefined) (sets.push("closed_at = ?"), binds.push(patch.closedAt));
+    if (patch.closedReason !== undefined) (sets.push("closed_reason = ?"), binds.push(patch.closedReason));
+    if (patch.closedBy !== undefined) (sets.push("closed_by = ?"), binds.push(patch.closedBy));
     sets.push("updated_at = ?");
     binds.push(new Date().toISOString());
     const row = await this.db
@@ -120,6 +129,14 @@ export class SqliteCaseStore implements CaseStore {
       .bind(...binds, id)
       .first<CaseRow>();
     return row ? toRecord(row) : null;
+  }
+
+  async countByLastRun(runId: string): Promise<number> {
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM cases WHERE last_run_id = ?")
+      .bind(runId)
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
   }
 
   async listCases(query: CaseQuery): Promise<CaseRecord[]> {

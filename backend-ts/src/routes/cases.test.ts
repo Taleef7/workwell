@@ -261,3 +261,36 @@ test("worklist exposes outreachRecordCount; a sent case is no longer a gap (badg
   const missing = rows.find((r) => r.employeeName !== "Omar Siddiq");
   if (missing) assert.equal(missing.outreachRecordCount, 0, "un-contacted case is a gap (0)");
 });
+
+// Runs last: rerun-to-verify may transition Omar's case to a closing status, which would
+// remove it from the open worklist asserted above.
+test("POST /api/cases/:id/rerun-to-verify re-evaluates and records the verification on the timeline", async () => {
+  const res = await post(`/api/cases/${omarCaseId}/rerun-to-verify`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as {
+    currentOutcomeStatus: string;
+    status: string;
+    closedReason: string | null;
+    closedBy: string | null;
+    timeline: Array<{ eventType: string }>;
+  };
+  const buckets = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
+  assert.ok(buckets.includes(d.currentOutcomeStatus), "verified to a known outcome bucket");
+  const types = d.timeline.map((t) => t.eventType);
+  assert.ok(types.includes("RERUN_TO_VERIFY"), "case_action recorded");
+  assert.ok(types.includes("CASE_RERUN_VERIFIED"), "audit_event recorded");
+  // closing outcomes set the closed_reason/closed_by columns (else they stay null)
+  if (d.currentOutcomeStatus === "COMPLIANT") {
+    assert.equal(d.status, "RESOLVED");
+    assert.equal(d.closedReason, "RERUN_VERIFIED");
+    assert.equal(d.closedBy, "cm@workwell.dev");
+  } else if (d.currentOutcomeStatus === "EXCLUDED") {
+    assert.equal(d.closedReason, "RERUN_EXCLUDED");
+  } else {
+    assert.equal(d.closedReason, null, "non-closing outcome leaves the case open");
+  }
+});
+
+test("POST /api/cases/:id/rerun-to-verify for an unknown case → 404", async () => {
+  assert.equal((await post(`/api/cases/${crypto.randomUUID()}/rerun-to-verify`))?.status, 404);
+});

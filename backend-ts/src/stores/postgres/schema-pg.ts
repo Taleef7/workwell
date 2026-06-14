@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   created_at             TIMESTAMPTZ NOT NULL,
   updated_at             TIMESTAMPTZ NOT NULL,
   closed_at              TIMESTAMPTZ,
+  closed_reason          TEXT,
+  closed_by              TEXT,
   UNIQUE (employee_id, measure_id, evaluation_period)
 );
 
@@ -101,4 +103,10 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS spike_audit_events_ref_case_id_idx ON ${SPIKE_SCHEMA}.audit_events (ref_case_id);
+
+-- Backfill columns added after the cases table's initial release. Postgres supports
+-- ADD COLUMN IF NOT EXISTS, so these are idempotent and upgrade an existing spike schema
+-- (the ceiling persists across test runs; CREATE TABLE IF NOT EXISTS would not alter it).
+ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_reason TEXT;
+ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_by TEXT;
 `;
