@@ -1,28 +1,38 @@
 /**
- * Measures route (#106) — the live, JVM-free compliance engine behind the worker.
+ * Measures route (#106/#107) — the measure catalog + authoring surface + the JVM-free engine.
  *
- *   GET  /api/measures                    full TWH catalog (Measure[]); ?status=&search=
+ *   GET  /api/measures                    catalog (Measure[]); ?status=&search=
+ *   POST /api/measures                    create a Draft measure → { id }
  *   GET  /api/measures/:id                MeasureDetail (spec + CQL + compile status)
  *   GET  /api/measures/:id/versions       VersionHistoryItem[]
  *   GET  /api/measures/:id/activation-readiness   ActivationReadiness (compile/fixture gate)
- *   GET  /api/measures/:id/elm            compiled ELM (the AST) for the measure
- *   POST /api/measures/:id/evaluate       body = FHIR R4 bundle, ?date=YYYY-MM-DD
- *                                         → { subjectId, measure, outcome, evidence }
+ *   POST /api/measures/:id/approve        Draft → Approved (gated)        → { status }
+ *   POST /api/measures/:id/status         { targetStatus } transition     → { status }
+ *   POST /api/measures/:id/deprecate      { reason } Active → Deprecated   → { status }
+ *   GET  /api/measures/:id/elm            compiled ELM (the AST)
+ *   POST /api/measures/:id/evaluate       FHIR R4 bundle → outcome
+ *   POST /api/measures/compile            live CQL → ELM (ELM-explorer)
  *
- * This is Doug's "given a patient and a measure, are they compliant?" as a live TS
- * endpoint — CQL/eCQM evaluation in Node, no JVM (ELM compiled by @cqframework/cql).
- *
- * The list now serves the full 60-measure TWH catalog (#107 measures module) — the
- * `/measures` page contract — ordered Active-first so the runs/studio pickers still
- * default to a runnable measure. The /elm read endpoint serves the same compiled ELM the
- * engine executes (source↔AST narrative for the Studio explorer). Read-only, no compliance.
+ * The catalog + authoring reads/writes go through the persisted MeasureStore (seeded from
+ * MEASURE_CATALOG on first use), so create/lifecycle mutations are reflected. The engine
+ * endpoints (/elm, /evaluate, /compile) stay on the compiled-ELM path — no JVM, no DB.
  */
+import type { CloudDatabase } from "@mieweb/cloud";
+import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
+import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
-import { listCatalog, findMeasure, toMeasureDetail, toVersionHistory, toActivationReadiness } from "../measure/measure-read-models.ts";
+import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness } from "../measure/measure-read-models.ts";
+import { seedMeasureStore } from "../measure/measure-seed.ts";
+import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
+
+interface MeasuresEnv {
+  DB: CloudDatabase;
+}
 
 /** Reconstruct the measure's CQL from its compiled ELM (runnable measures); "" otherwise. */
 function measureCql(measureId: string): string {
@@ -33,40 +43,45 @@ function measureCql(measureId: string): string {
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
 const MAX_CQL_BYTES = 64 * 1024;
-
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
+
+const ready = new WeakSet<object>();
+async function store(env: MeasuresEnv): Promise<SqliteMeasureStore> {
+  const s = new SqliteMeasureStore(env.DB);
+  if (!ready.has(env.DB)) {
+    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+    await migrateFloorSchema(env.DB);
+    await seedMeasureStore(s, measureCql);
+    ready.add(env.DB);
+  }
+  return s;
+}
+async function lifecycleDeps(env: MeasuresEnv): Promise<MeasureLifecycleDeps> {
+  return { measures: await store(env), events: new SqliteCaseEventStore(env.DB) };
+}
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
 /** Returns a Response if this module owns the route, else null. */
-export async function handleMeasures(req: Request): Promise<Response | null> {
+export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
   if (pathname === "/api/measures" && req.method === "GET") {
-    return json(listCatalog({ status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
+    const records = await (await store(env)).listLatest();
+    return json(listMeasures(records, { status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
   }
 
-  // Measure version history (declared before the bare /:id so the suffix wins).
-  const versionsId = pathname.match(/^\/api\/measures\/([^/]+)\/versions$/)?.[1];
-  if (versionsId && req.method === "GET") {
-    const m = findMeasure(versionsId);
-    return m ? json(toVersionHistory(m)) : json({ error: "not_found", measureId: versionsId }, 404);
-  }
-
-  // Activation readiness (compile + test-fixture gate).
-  const readinessId = pathname.match(/^\/api\/measures\/([^/]+)\/activation-readiness$/)?.[1];
-  if (readinessId && req.method === "GET") {
-    const m = findMeasure(readinessId);
-    return m ? json(toActivationReadiness(m)) : json({ error: "not_found", measureId: readinessId }, 404);
-  }
-
-  // Measure detail (spec + reconstructed CQL + compile status).
-  const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
-  if (detailId && detailId !== "compile" && req.method === "GET") {
-    const m = findMeasure(detailId);
-    return m ? json(toMeasureDetail(m, measureCql(detailId))) : json({ error: "not_found", measureId: detailId }, 404);
+  if (pathname === "/api/measures" && req.method === "POST") {
+    const body = (await req.json().catch(() => ({}))) as { name?: string; policyRef?: string; owner?: string };
+    try {
+      const id = await createMeasure(await lifecycleDeps(env), { name: body.name ?? "", policyRef: body.policyRef ?? "", owner: body.owner ?? "" }, actor);
+      return json({ id }, 201);
+    } catch (err) {
+      if (err instanceof MeasureError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
   }
 
   // Live CQL → ELM compile (no JVM) — powers the ELM-explorer playground.
@@ -75,33 +90,77 @@ export async function handleMeasures(req: Request): Promise<Response | null> {
     const cql = body?.cql;
     if (typeof cql !== "string") return json({ error: "invalid_cql" }, 400);
     if (cql.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
-    const result = compileCql(cql);
-    return json(result);
+    return json(compileCql(cql));
   }
 
+  // ---- lifecycle (POST) ----------------------------------------------------
+  if (req.method === "POST") {
+    const approveId = pathname.match(/^\/api\/measures\/([^/]+)\/approve$/)?.[1];
+    const deprecateId = pathname.match(/^\/api\/measures\/([^/]+)\/deprecate$/)?.[1];
+    const statusId = pathname.match(/^\/api\/measures\/([^/]+)\/status$/)?.[1];
+    if (approveId || deprecateId || statusId) {
+      try {
+        if (approveId) {
+          const s = await approveMeasure(await lifecycleDeps(env), approveId, actor);
+          return s ? json({ status: s }) : json({ error: "not_found", measureId: approveId }, 404);
+        }
+        if (deprecateId) {
+          const reason = ((await req.json().catch(() => ({}))) as { reason?: string }).reason ?? "";
+          const s = await deprecateMeasure(await lifecycleDeps(env), deprecateId, reason, actor);
+          return s ? json({ status: s }) : json({ error: "not_found", measureId: deprecateId }, 404);
+        }
+        const targetStatus = ((await req.json().catch(() => ({}))) as { targetStatus?: string }).targetStatus ?? "";
+        const s = await transitionStatus(await lifecycleDeps(env), statusId!, targetStatus, actor);
+        return s ? json({ status: s }) : json({ error: "not_found", measureId: statusId }, 404);
+      } catch (err) {
+        if (err instanceof MeasureError) return json({ error: "invalid_request", message: err.message }, 400);
+        throw err;
+      }
+    }
+
+    // Evaluate a subject against the measure's compiled ELM (engine path).
+    const evalId = pathname.match(/^\/api\/measures\/([^/]+)\/evaluate$/)?.[1];
+    if (evalId) {
+      if (!MEASURES[evalId]) return json({ error: "unknown_measure", measureId: evalId }, 404);
+      const bundle = (await req.json().catch(() => null)) as unknown;
+      if (!bundle || typeof bundle !== "object") return json({ error: "invalid_bundle" }, 400);
+      try {
+        const outcome = await engine.evaluate({ measureId: evalId, patientBundle: bundle, evaluationDate: url.searchParams.get("date") ?? undefined });
+        return json(outcome);
+      } catch (err) {
+        return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);
+      }
+    }
+    return null;
+  }
+
+  // ---- reads (GET) ---------------------------------------------------------
+  // Compiled ELM (engine registry — runnable measures only).
   const elmId = pathname.match(/^\/api\/measures\/([^/]+)\/elm$/)?.[1];
   if (elmId && req.method === "GET") {
     const meta = MEASURES[elmId];
     if (!meta) return json({ error: "unknown_measure", measureId: elmId }, 404);
     const elm = ELM_LIBRARIES[meta.library];
     if (!elm) return json({ error: "elm_not_found", measureId: elmId, library: meta.library }, 404);
-    // `cql` is the original source rebuilt from the ELM annotation narrative, so the
-    // explorer can seed its editor with real, recompilable measure CQL.
     return json({ measureId: meta.id, name: meta.name, library: meta.library, cql: reconstructCql(elm), elm });
   }
 
-  const measureId = pathname.match(/^\/api\/measures\/([^/]+)\/evaluate$/)?.[1];
-  if (measureId && req.method === "POST") {
-    if (!MEASURES[measureId]) return json({ error: "unknown_measure", measureId }, 404);
-    const bundle = (await req.json().catch(() => null)) as unknown;
-    if (!bundle || typeof bundle !== "object") return json({ error: "invalid_bundle" }, 400);
-    const evaluationDate = url.searchParams.get("date") ?? undefined;
-    try {
-      const outcome = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate });
-      return json(outcome);
-    } catch (err) {
-      return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);
-    }
+  const versionsId = pathname.match(/^\/api\/measures\/([^/]+)\/versions$/)?.[1];
+  if (versionsId && req.method === "GET") {
+    const versions = await (await store(env)).listVersions(versionsId);
+    return versions.length ? json(toVersionHistory(versions)) : json({ error: "not_found", measureId: versionsId }, 404);
+  }
+
+  const readinessId = pathname.match(/^\/api\/measures\/([^/]+)\/activation-readiness$/)?.[1];
+  if (readinessId && req.method === "GET") {
+    const r = await (await store(env)).getLatest(readinessId);
+    return r ? json(toActivationReadiness(r)) : json({ error: "not_found", measureId: readinessId }, 404);
+  }
+
+  const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
+  if (detailId && detailId !== "compile" && req.method === "GET") {
+    const r = await (await store(env)).getLatest(detailId);
+    return r ? json(toMeasureDetail(r)) : json({ error: "not_found", measureId: detailId }, 404);
   }
 
   return null;

@@ -141,8 +141,8 @@ async function route(req: Request, env: Env): Promise<Response> {
     return json({ error: "auth_not_configured", hint: "WORKWELL_AUTH_JWT_SECRET is unset" }, 503);
   }
 
-  // Measures — live CQL/eCQM evaluation in Node (no JVM), #106.
-  const measuresResponse = await handleMeasures(req);
+  // Measures — catalog + authoring (persisted store) + live CQL/eCQM evaluation (no JVM), #106/#107.
+  const measuresResponse = await handleMeasures(req, env, actor);
   if (measuresResponse) return measuresResponse;
 
   // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.

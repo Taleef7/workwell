@@ -13,6 +13,7 @@ import type { CreateRunInput, RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
 import type { CaseStore } from "./case-store.ts";
 import type { CaseEventStore } from "./case-event-store.ts";
+import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -430,5 +431,59 @@ export function caseEventStoreContract(
     assert.equal(counts[a.id], 2, "two OUTREACH_SENT for a");
     assert.equal(counts[b.id] ?? 0, 0, "no sends for b → absent/0");
     assert.deepEqual(await eventStore.outreachSentCounts([]), {}, "empty input → {}");
+  });
+}
+
+/** Registers the MeasureStore contract — seed, latest-version reads, create, lifecycle status. */
+export function measureStoreContract(label: string, freshStore: () => Promise<MeasureStore>): void {
+  const seed = (over: Partial<SeedMeasureInput> = {}): SeedMeasureInput => ({
+    measureId: "audiogram",
+    name: "Annual Audiogram Completed",
+    policyRef: "OSHA 29 CFR 1910.95",
+    owner: "system",
+    tags: ["surveillance", "hearing"],
+    versionId: "audiogram-v1.0",
+    version: "v1.0",
+    status: "Active",
+    spec: { description: "d", eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" }, exclusions: [], complianceWindow: "Annual", requiredDataElements: [] },
+    cqlText: "library X",
+    compileStatus: "COMPILED",
+    createdAt: "2026-06-10T00:00:00.000Z",
+    changeSummary: "Seeded",
+    ...over,
+  });
+
+  test(`[${label}] seedMeasure + getLatest round-trips tags/spec; isEmpty flips`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.isEmpty(), true);
+    await store.seedMeasure(seed());
+    assert.equal(await store.isEmpty(), false);
+    const r = (await store.getLatest("audiogram"))!;
+    assert.equal(r.name, "Annual Audiogram Completed");
+    assert.deepEqual(r.tags, ["surveillance", "hearing"]);
+    assert.equal(r.spec.complianceWindow, "Annual");
+    assert.equal(r.compileStatus, "COMPILED");
+    assert.equal(r.versionId, "audiogram-v1.0");
+    assert.ok(r.activatedAt, "Active seed stamps activated_at");
+    assert.equal((await store.listLatest()).length, 1);
+    assert.equal((await store.listVersions("audiogram")).length, 1);
+    assert.equal(await store.getLatest("missing"), null);
+  });
+
+  test(`[${label}] createMeasure inserts a Draft v1.0; setVersionStatus drives the lifecycle`, async () => {
+    const store = await freshStore();
+    const created = await store.createMeasure({ name: "New M", policyRef: "P", owner: "o@x" });
+    assert.equal(created.status, "Draft");
+    assert.equal(created.version, "v1.0");
+    assert.equal(created.compileStatus, "ERROR");
+    assert.notEqual(created.measureId, created.versionId, "real distinct ids");
+
+    const approved = await store.setVersionStatus(created.measureId, created.versionId, { status: "Approved", approvedBy: "appr@x" });
+    assert.equal(approved?.status, "Approved");
+    assert.equal(approved?.approvedBy, "appr@x");
+    const active = await store.setVersionStatus(created.measureId, created.versionId, { status: "Active", activate: true });
+    assert.equal(active?.status, "Active");
+    assert.ok(active?.activatedAt, "activate stamps activated_at");
+    assert.equal(await store.setVersionStatus("nope", "nope", { status: "Active" }), null);
   });
 }

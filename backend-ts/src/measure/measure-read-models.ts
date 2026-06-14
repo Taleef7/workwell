@@ -1,15 +1,11 @@
 /**
- * Measure catalog read models (#107 measures module) — the `Measure` shape the
- * `/measures` page consumes and the list filters, ported from MeasureService.listMeasures.
- *
- * The catalog is static read data for this slice (lifecycle mutations + persisted
- * timestamps land with the measures store). Java orders by COALESCE(activated_at,
- * created_at, updated_at) DESC — i.e. Active (recently activated) first; we mirror that
- * intent with a per-status recency tier so an Active (runnable) measure surfaces first
- * (the runs/studio pickers default to the first row). `lastUpdated`/`statusUpdatedAt` are
- * a deterministic static seed; `statusUpdatedBy` is the owner.
+ * Measure read models (#107 measures module) — the frontend shapes (`Measure`,
+ * `MeasureDetail`, `VersionHistoryItem`, `ActivationReadiness`) built from the persisted
+ * MeasureStore records. Ported from MeasureService.listMeasures / getMeasure /
+ * listVersionHistory / activationReadiness.
  */
-import { MEASURE_CATALOG, type CatalogMeasure, type MeasureStatus, type MeasureSpec } from "./measure-catalog.ts";
+import type { MeasureRecord } from "../stores/measure-store.ts";
+import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 
 export interface Measure {
   id: string;
@@ -24,64 +20,53 @@ export interface Measure {
   statusUpdatedBy: string;
 }
 
-// Static recency tiers (newest first): Active > Approved > Draft > Deprecated. Within a
-// tier, name ASC. Fixed dates keep the list deterministic until real timestamps exist.
-const TIER: Record<MeasureStatus, string> = {
-  Active: "2026-06-10T00:00:00.000Z",
-  Approved: "2026-04-01T00:00:00.000Z",
-  Draft: "2026-02-01T00:00:00.000Z",
-  Deprecated: "2025-06-01T00:00:00.000Z",
-};
+/** Java's COALESCE(activated_at, created_at, updated_at) — the version's effective recency. */
+const lastUpdatedOf = (r: MeasureRecord): string => r.activatedAt ?? r.createdAt ?? r.updatedAt;
 
-export function toMeasure(c: CatalogMeasure): Measure {
-  const ts = TIER[c.status];
+export function toMeasure(r: MeasureRecord): Measure {
+  const ts = lastUpdatedOf(r);
   return {
-    id: c.id,
-    name: c.name,
-    policyRef: c.policyRef,
-    version: c.version,
-    status: c.status,
-    owner: c.owner,
+    id: r.measureId,
+    name: r.name,
+    policyRef: r.policyRef,
+    version: r.version,
+    status: r.status,
+    owner: r.owner,
     lastUpdated: ts,
-    tags: c.tags,
+    tags: r.tags,
     statusUpdatedAt: ts,
-    statusUpdatedBy: c.owner,
+    statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
   };
 }
 
 const STATUSES = new Set<MeasureStatus>(["Draft", "Approved", "Active", "Deprecated"]);
+export const isMeasureStatus = (s: string): s is MeasureStatus => STATUSES.has(s as MeasureStatus);
 
 /**
- * Filter + order the catalog like the Java list endpoint:
- *   - status: exact (case-insensitive) match on the lifecycle status; "All"/blank = no filter
- *   - search: case-insensitive substring on the name OR any tag
- *   - order: lastUpdated DESC (status recency tier), then name ASC
+ * Filter + order latest-version records like the Java list endpoint:
+ *   - status: exact (case-insensitive) match; "All"/blank = no filter
+ *   - search: case-insensitive substring on name OR any tag
+ *   - order: lastUpdated DESC, then name ASC
  */
-export function listCatalog(opts: { status?: string | null; search?: string | null }): Measure[] {
+export function listMeasures(records: MeasureRecord[], opts: { status?: string | null; search?: string | null }): Measure[] {
   const status = opts.status?.trim();
   const normalizedStatus = status && status.toLowerCase() !== "all" ? status.toLowerCase() : null;
   const search = opts.search?.trim().toLowerCase() || null;
-
-  return MEASURE_CATALOG.filter((m) => {
-    if (normalizedStatus && m.status.toLowerCase() !== normalizedStatus) return false;
-    if (search) {
-      const inName = m.name.toLowerCase().includes(search);
-      const inTags = m.tags.some((t) => t.toLowerCase().includes(search));
-      if (!inName && !inTags) return false;
-    }
-    return true;
-  })
+  return records
+    .filter((r) => {
+      if (normalizedStatus && r.status.toLowerCase() !== normalizedStatus) return false;
+      if (search) {
+        const inName = r.name.toLowerCase().includes(search);
+        const inTags = r.tags.some((t) => t.toLowerCase().includes(search));
+        if (!inName && !inTags) return false;
+      }
+      return true;
+    })
     .map(toMeasure)
     .sort((a, b) => (a.lastUpdated === b.lastUpdated ? a.name.localeCompare(b.name) : b.lastUpdated.localeCompare(a.lastUpdated)));
 }
 
-/** Whether a string is a recognized lifecycle status (for validation/UX). */
-export const isMeasureStatus = (s: string): s is MeasureStatus => STATUSES.has(s as MeasureStatus);
-
-/** Look up a catalog measure by id (the detail/versions routes resolve through this). */
-export const findMeasure = (id: string): CatalogMeasure | undefined => MEASURE_CATALOG.find((m) => m.id === id);
-
-// ---- detail + version history (#107 measures module) ------------------------
+// ---- detail + version history ------------------------------------------------
 export interface MeasureDetail {
   id: string;
   name: string;
@@ -111,41 +96,42 @@ export interface VersionHistoryItem {
 }
 
 /**
- * Build the Studio `MeasureDetail` from the catalog (spec) + the measure's CQL (reconstructed
- * from ELM by the caller for runnable measures; "" otherwise). osha_references aren't ported,
- * so oshaReferenceId is null; valueSets/testFixtures are [] until the value-set governance
- * surface lands (a separate module). Matches the Java MeasureService.getMeasure field shape.
+ * The Studio MeasureDetail. osha_references aren't ported (oshaReferenceId = null);
+ * valueSets/testFixtures are [] until the value-set governance surface lands.
  */
-export function toMeasureDetail(m: CatalogMeasure, cqlText: string): MeasureDetail {
+export function toMeasureDetail(r: MeasureRecord): MeasureDetail {
   return {
-    id: m.id,
-    name: m.name,
-    policyRef: m.policyRef,
+    id: r.measureId,
+    name: r.name,
+    policyRef: r.policyRef,
     oshaReferenceId: null,
-    version: m.version,
-    status: m.status,
-    owner: m.owner,
-    description: m.spec.description,
-    eligibilityCriteria: m.spec.eligibilityCriteria,
-    exclusions: m.spec.exclusions,
-    complianceWindow: m.spec.complianceWindow,
-    requiredDataElements: m.spec.requiredDataElements,
-    cqlText,
-    compileStatus: m.compileStatus,
+    version: r.version,
+    status: r.status,
+    owner: r.owner,
+    description: r.spec.description,
+    eligibilityCriteria: r.spec.eligibilityCriteria,
+    exclusions: r.spec.exclusions,
+    complianceWindow: r.spec.complianceWindow,
+    requiredDataElements: r.spec.requiredDataElements,
+    cqlText: r.cqlText,
+    compileStatus: r.compileStatus,
     valueSets: [],
     testFixtures: [],
   };
 }
 
-/**
- * Stable static version id for a measure version — distinct from the measure slug, since the
- * Studio uses the version id (not the measure id) to scope `/api/auditor/measure-versions/:id`
- * + MAT-export actions. Until a persisted measures store mints real `measure_versions.id`
- * UUIDs, this `<measureId>-<version>` form keeps those actions version-scoped (not a measure-id
- * masquerade) and forward-compatible.
- */
-export const measureVersionId = (m: CatalogMeasure): string => `${m.id}-${m.version}`;
+export function toVersionHistory(records: MeasureRecord[]): VersionHistoryItem[] {
+  return records.map((r) => ({
+    id: r.versionId,
+    version: r.version,
+    status: r.status,
+    author: r.approvedBy ?? r.owner ?? "system",
+    createdAt: r.createdAt,
+    changeSummary: r.changeSummary ?? "",
+  }));
+}
 
+// ---- activation readiness ----------------------------------------------------
 export interface ActivationReadiness {
   ready: boolean;
   compileStatus: string;
@@ -155,41 +141,26 @@ export interface ActivationReadiness {
   activationBlockers: string[];
 }
 
-/** Compile gate: a measure may activate only from COMPILED or WARNINGS (Java allowsActivationCompileStatus). */
-const compileAllowsActivation = (s: string) => s.toUpperCase() === "COMPILED" || s.toUpperCase() === "WARNINGS";
+/** Compile gate: activation allowed only from COMPILED or WARNINGS (Java allowsActivationCompileStatus). */
+export const compileAllowsActivation = (s: string) => s.toUpperCase() === "COMPILED" || s.toUpperCase() === "WARNINGS";
 
 /**
- * Whether a measure can be activated, ported from MeasureService.activationReadiness. The static
- * catalog carries no test fixtures or attached value sets yet, so `validateTests` fails with the
- * "at least one fixture required" blocker — i.e. `ready` is false for every catalog measure (the
- * Java seed likewise has no fixtures). Real fixtures/value sets + a passing gate arrive with the
- * persisted measures store + value-set governance surface.
+ * Whether a measure can be activated (MeasureService.activationReadiness). No test fixtures or
+ * attached value sets are ported yet, so validateTests fails with the "at least one fixture
+ * required" blocker → `ready` is false for every measure (faithful: the Java seed has no
+ * fixtures either). NOT_COMPILED measures additionally carry the compile blocker.
  */
-export function toActivationReadiness(m: CatalogMeasure): ActivationReadiness {
-  const compilePassed = compileAllowsActivation(m.compileStatus);
+export function toActivationReadiness(r: MeasureRecord): ActivationReadiness {
+  const compilePassed = compileAllowsActivation(r.compileStatus);
   const blockers: string[] = [];
   if (!compilePassed) blockers.push("Compile status must be COMPILED or WARNINGS.");
   blockers.push("At least one test fixture is required before activation.");
   return {
     ready: false, // compilePassed && testValidationPassed; testValidation fails with no fixtures
-    compileStatus: m.compileStatus,
+    compileStatus: r.compileStatus,
     testFixtureCount: 0,
     valueSetCount: 0,
     testValidationPassed: false,
     activationBlockers: blockers,
   };
-}
-
-/** Version history for a measure — the static catalog carries one version per measure. */
-export function toVersionHistory(m: CatalogMeasure): VersionHistoryItem[] {
-  return [
-    {
-      id: measureVersionId(m),
-      version: m.version,
-      status: m.status,
-      author: m.owner,
-      createdAt: TIER[m.status],
-      changeSummary: "Seeded measure version",
-    },
-  ];
 }

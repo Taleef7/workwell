@@ -6,13 +6,32 @@
  * the compiled ELM (the AST that the Node engine actually executes), served as
  * JSON so the Studio ELM-explorer can render source↔AST without a JVM.
  */
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
+// @ts-expect-error — @mieweb/cloud-local ships .mjs without types
+import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 
-const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { method: "GET" }));
+const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
+let env: { DB: unknown };
+
+const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { method: "GET" }), env as never, "author@workwell.dev");
 const post = (path: string, body?: unknown) =>
-  handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }));
+  handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), env as never, "author@workwell.dev");
+
+before(async () => {
+  env = { DB: await createSqliteD1(dbPath) };
+});
+after(() => {
+  try {
+    rmSync(dbPath, { force: true });
+  } catch {
+    /* best effort */
+  }
+});
 
 interface CatalogRow {
   id: string;
@@ -190,4 +209,60 @@ test("POST /api/measures/compile surfaces CQL errors as diagnostics (ok:false), 
 test("POST /api/measures/compile rejects a non-string body → 400", async () => {
   const res = await post("/api/measures/compile", { cql: 42 });
   assert.equal(res?.status, 400);
+});
+
+// ---- authoring (run last — these mutate the seeded store) --------------------
+test("POST /api/measures creates a Draft measure persisted to the store", async () => {
+  const res = await post("/api/measures", { name: "Custom Audiometry", policyRef: "OSHA 29 CFR 1910.95", owner: "author@workwell.dev" });
+  assert.equal(res?.status, 201);
+  const { id } = (await res!.json()) as { id: string };
+  assert.ok(id);
+  const d = (await get(`/api/measures/${id}`).then((r) => r!.json())) as { name: string; status: string; owner: string; compileStatus: string };
+  assert.equal(d.name, "Custom Audiometry");
+  assert.equal(d.status, "Draft");
+  assert.equal(d.owner, "author@workwell.dev");
+  assert.equal(d.compileStatus, "ERROR", "an empty Draft has no compiled CQL");
+  // missing fields → 400
+  assert.equal((await post("/api/measures", { name: "x" }))?.status, 400);
+});
+
+test("POST /api/measures/:id/status transitions Draft→Approved, but Approved→Active is gated on fixtures", async () => {
+  const { id } = (await post("/api/measures", { name: "Lifecycle Demo", policyRef: "CDC", owner: "author@workwell.dev" }).then((r) => r!.json())) as { id: string };
+  const approved = await post(`/api/measures/${id}/status`, { targetStatus: "Approved" });
+  assert.equal(approved?.status, 200);
+  assert.equal(((await approved!.json()) as { status: string }).status, "Approved");
+  // Approved→Active is gated: a fresh Draft has compileStatus ERROR, so the compile gate
+  // fires first (and if it passed, the no-fixtures gate would block it next) → 400, faithful to Java.
+  const activate = await post(`/api/measures/${id}/status`, { targetStatus: "Active" });
+  assert.equal(activate?.status, 400);
+  assert.match(((await activate!.json()) as { message: string }).message, /compile status|test fixtures/i);
+  // an invalid jump (Approved→Deprecated) is rejected
+  assert.equal((await post(`/api/measures/${id}/status`, { targetStatus: "Deprecated" }))?.status, 400);
+});
+
+test("POST /api/measures/:id/approve is gated; non-Draft → 400", async () => {
+  const { id } = (await post("/api/measures", { name: "Approve Gate", policyRef: "CDC", owner: "a@b.c" }).then((r) => r!.json())) as { id: string };
+  const res = await post(`/api/measures/${id}/approve`);
+  assert.equal(res?.status, 400);
+  // a fresh Draft has compileStatus ERROR → the compile gate fires first (Java order)
+  assert.match(((await res!.json()) as { message: string }).message, /compile status/i);
+  // audiogram is Active, not Draft → "Only Draft measures can be approved"
+  const a = await post("/api/measures/audiogram/approve");
+  assert.equal(a?.status, 400);
+  assert.match(((await a!.json()) as { message: string }).message, /Only Draft/i);
+});
+
+test("POST /api/measures/:id/deprecate works on an Active measure; gated otherwise (run last)", async () => {
+  // reason required
+  assert.equal((await post("/api/measures/hazwoper/deprecate", {}))?.status, 400);
+  // a Draft cannot be deprecated
+  const { id } = (await post("/api/measures", { name: "Draft NoDep", policyRef: "CDC", owner: "a@b.c" }).then((r) => r!.json())) as { id: string };
+  assert.equal((await post(`/api/measures/${id}/deprecate`, { reason: "x" }))?.status, 400);
+  // hazwoper is Active → deprecate succeeds and persists
+  const res = await post("/api/measures/hazwoper/deprecate", { reason: "Superseded by updated protocol" });
+  assert.equal(res?.status, 200);
+  assert.equal(((await res!.json()) as { status: string }).status, "Deprecated");
+  const d = (await get("/api/measures/hazwoper").then((r) => r!.json())) as { status: string };
+  assert.equal(d.status, "Deprecated", "the lifecycle change is persisted");
+  assert.equal((await post("/api/measures/nope/deprecate", { reason: "x" }))?.status, 404);
 });
