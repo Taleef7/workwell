@@ -284,13 +284,25 @@ define "Outcome Status":
 `;
 }
 
+/**
+ * Reduce a measure display name to a valid CQL library identifier
+ * (`([A-Za-z]|_)([A-Za-z0-9]|_)*`). Whitespace + non-identifier chars (`&`, `:`, `(`, `)`, …)
+ * are dropped so catalog names like "BMI Screening & Counseling" still yield a *compilable*
+ * fallback template; a leading digit is prefixed and an empty result defaults to "Measure".
+ */
+function toCqlIdentifier(name: string): string {
+  const cleaned = (name ?? "").replace(/[^A-Za-z0-9_]/g, "");
+  const safe = /^[0-9]/.test(cleaned) ? `M${cleaned}` : cleaned;
+  return safe || "Measure";
+}
+
 export async function draftCql(
   deps: AiDeps,
   input: { measureId: string; measureName: string; specJson: string; oshaText?: string | null },
   actor: string,
 ): Promise<DraftCqlResponse> {
   const measureName = input.measureName;
-  const safeMeasureName = measureName.replace(/\s+/g, "");
+  const safeMeasureName = toCqlIdentifier(measureName);
   const policyText = (input.oshaText ?? "").trim();
   const userPrompt =
     "Generate a CQL library for this occupational health compliance measure.\n\n" +

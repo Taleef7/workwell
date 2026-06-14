@@ -72,6 +72,21 @@ test("draftCql falls back to template on model failure", async () => {
   assert.match(res.cql, /"Outcome Status"/);
 });
 
+test("draftCql fallback sanitizes special chars into a valid CQL library identifier", async () => {
+  const r = recorder();
+  const res = await draftCql(r.deps(async () => { throw new Error("boom"); }), { measureId: "obesity_bmi", measureName: "BMI Screening & Counseling", specJson: "{}" }, "a@x");
+  assert.equal(res.fallbackUsed, true);
+  // No stray '&'/':'/'('/')' in the identifier; header is a valid `library <Ident>CQL`.
+  assert.match(res.cql, /^library BMIScreeningCounselingCQL version '1\.0\.0'/);
+  assert.doesNotMatch(res.cql.split("\n")[0]!, /[^A-Za-z0-9 '.]/);
+});
+
+test("draftCql fallback prefixes a leading-digit name to keep a valid identifier", async () => {
+  const r = recorder();
+  const res = await draftCql(r.deps(async () => { throw new Error("boom"); }), { measureId: "cms125", measureName: "125 Breast Cancer", specJson: "{}" }, "a@x");
+  assert.match(res.cql, /^library M125BreastCancerCQL version '1\.0\.0'/);
+});
+
 test("generateTestFixtures parses + orders model fixtures, all 5 outcomes", async () => {
   const r = recorder();
   const model = JSON.stringify([
