@@ -217,6 +217,21 @@ test("POST /api/measures/compile rejects a non-string body → 400", async () =>
   assert.equal(res?.status, 400);
 });
 
+test("concurrent cold-start requests seed the store once (no duplicate-PK 500)", async () => {
+  // A brand-new DB: fire two requests before init completes. The in-flight init promise must
+  // serialize the (non-idempotent) catalog seed so neither request hits a duplicate-key 500.
+  const coldDb = await createSqliteD1(join(tmpdir(), `workwell-measures-cold-${crypto.randomUUID()}.sqlite`));
+  const coldEnv = { DB: coldDb } as never;
+  const both = await Promise.all([
+    handleMeasures(new Request("http://x/api/measures", { method: "GET" }), coldEnv, "a@b.c"),
+    handleMeasures(new Request("http://x/api/measures", { method: "GET" }), coldEnv, "a@b.c"),
+  ]);
+  for (const res of both) {
+    assert.equal(res?.status, 200, "no 500 from a racing duplicate seed");
+    assert.equal(((await res!.json()) as unknown[]).length, 60, "seeded exactly once");
+  }
+});
+
 // ---- authoring (run last — these mutate the seeded store) --------------------
 test("POST /api/measures creates a Draft measure persisted to the store", async () => {
   const res = await post("/api/measures", { name: "Custom Audiometry", policyRef: "OSHA 29 CFR 1910.95", owner: "author@workwell.dev" });
