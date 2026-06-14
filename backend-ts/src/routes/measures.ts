@@ -66,6 +66,15 @@ async function lifecycleDeps(env: MeasuresEnv): Promise<MeasureLifecycleDeps> {
   return { measures: await store(env), events: new SqliteCaseEventStore(env.DB) };
 }
 
+/**
+ * Shared, race-safe measure-store accessor (DDL + migrate + catalog seed via the same
+ * per-DB in-flight promise). Exported so sibling modules (e.g. the AI route's draft-cql /
+ * generate-test-fixtures, #108) read the catalog without re-running the non-idempotent seed.
+ */
+export async function ensureMeasureStore(env: MeasuresEnv): Promise<SqliteMeasureStore> {
+  return store(env);
+}
+
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
