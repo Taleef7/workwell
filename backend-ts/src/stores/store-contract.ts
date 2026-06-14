@@ -302,4 +302,25 @@ export function caseEventStoreContract(
     const c = (await newCase(caseStore))!;
     assert.deepEqual(await eventStore.caseTimeline(c.id), []);
   });
+
+  test(`[${label}] recordCaseEvent writes the action + audit atomically (both on the timeline)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    await eventStore.recordCaseEvent({
+      action: { caseId: c.id, actionType: "ESCALATED", actor: "cm@x", payload: { priority: "HIGH" } },
+      audit: {
+        eventType: "CASE_ESCALATED",
+        entityType: "case",
+        entityId: c.id,
+        actor: "cm@x",
+        refRunId: c.lastRunId,
+        refCaseId: c.id,
+        refMeasureVersionId: c.measureId,
+        payload: { priority: "HIGH" },
+      },
+    });
+    const types = (await eventStore.caseTimeline(c.id)).map((t) => t.eventType);
+    assert.ok(types.includes("ESCALATED"), "case_action committed");
+    assert.ok(types.includes("CASE_ESCALATED"), "audit_event committed in the same transaction");
+  });
 }

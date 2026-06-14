@@ -25,21 +25,23 @@ interface TimelineRow {
 export class SqliteCaseEventStore implements CaseEventStore {
   constructor(private readonly db: CloudDatabase) {}
 
-  async insertAction(input: InsertActionInput): Promise<void> {
-    await this.db
+  // Both inserts end with `RETURNING id`: harmless for `.run()` (insertAction/appendAudit),
+  // and required for the atomic `batch()` path — the cloud-local D1 adapter executes batched
+  // statements via `.all()`, which throws on a non-returning statement.
+  private actionStmt(input: InsertActionInput) {
+    return this.db
       .prepare(
-        "INSERT INTO case_actions (case_id, action_type, payload_json, performed_by, performed_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO case_actions (case_id, action_type, payload_json, performed_by, performed_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
       )
-      .bind(input.caseId, input.actionType, JSON.stringify(input.payload), input.actor, new Date().toISOString())
-      .run();
+      .bind(input.caseId, input.actionType, JSON.stringify(input.payload), input.actor, new Date().toISOString());
   }
 
-  async appendAudit(input: AppendAuditInput): Promise<void> {
-    await this.db
+  private auditStmt(input: AppendAuditInput) {
+    return this.db
       .prepare(
         `INSERT INTO audit_events
            (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json, occurred_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
       .bind(
         input.eventType,
@@ -51,8 +53,20 @@ export class SqliteCaseEventStore implements CaseEventStore {
         input.refMeasureVersionId,
         JSON.stringify(input.payload),
         new Date().toISOString(),
-      )
-      .run();
+      );
+  }
+
+  async insertAction(input: InsertActionInput): Promise<void> {
+    await this.actionStmt(input).run();
+  }
+
+  async appendAudit(input: AppendAuditInput): Promise<void> {
+    await this.auditStmt(input).run();
+  }
+
+  async recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void> {
+    // D1 runs a batch atomically (single transaction) — action + audit commit together or not at all.
+    await this.db.batch([this.actionStmt(input.action), this.auditStmt(input.audit)]);
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
