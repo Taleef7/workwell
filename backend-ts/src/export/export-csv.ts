@@ -74,36 +74,23 @@ function whyFlagged(evidence: unknown, measureId: string) {
   };
 }
 
-export async function outcomesCsv(outcomeStore: OutcomeStore, runId?: string): Promise<string> {
-  // With a runId, the run's outcomes; otherwise every measure's outcomes (bounded query reused).
-  let rows: OutcomeWithRun[] = [];
-  if (runId) {
-    rows = (await outcomeStore.listOutcomes(runId)).map((o) => ({
-      runId: o.runId,
-      runStartedAt: o.evaluatedAt,
-      subjectId: o.subjectId,
-      measureId: o.measureId,
-      status: o.status,
-    }));
-  } else {
-    rows = await outcomeStore.listOutcomesWithRun({});
-  }
-  // Re-read full records (with evidence) per run so why_flagged can be derived.
-  const byRun = new Map<string, Awaited<ReturnType<OutcomeStore["listOutcomes"]>>>();
-  for (const r of rows) if (!byRun.has(r.runId)) byRun.set(r.runId, await outcomeStore.listOutcomes(r.runId));
-  const out: unknown[][] = [];
-  for (const [, records] of byRun) {
-    for (const o of records) {
-      if (runId && o.runId !== runId) continue;
+export async function outcomesCsv(outcomeStore: OutcomeStore, runStore: RunStore, runId?: string): Promise<string> {
+  // Java exportOutcomeCsv: an explicit runId, otherwise the LATEST run (not every run's
+  // outcomes — that would mix historical duplicate employee rows). Export exactly one run.
+  const resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+  const records = resolvedRunId ? await outcomeStore.listOutcomes(resolvedRunId) : [];
+  const out = records
+    .slice()
+    .sort((a, b) => a.subjectId.localeCompare(b.subjectId)) // Java ORDER BY e.external_id ASC
+    .map((o) => {
       const emp = employeeById(o.subjectId);
       const wf = whyFlagged(o.evidence, o.measureId);
-      out.push([
+      return [
         o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
         measureName(o.measureId), measureVersion(o.measureId), o.evaluationPeriod, o.status,
         wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
-      ]);
-    }
-  }
+      ];
+    });
   return toCsv(OUTCOME_HEADERS, out);
 }
 
@@ -114,8 +101,24 @@ const CASE_HEADERS = [
   "closedAt", "latestOutreachDeliveryStatus",
 ] as const;
 
-export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore, query: CaseQuery): Promise<string> {
-  const cases = await caseStore.listCases({ ...query, limit: 100000 });
+export interface CaseExportFilter extends CaseQuery {
+  /** Explicit case ids (the worklist's bulk-export of a selected set) — comma list in the route. */
+  caseIds?: string[];
+  /** Employee site (resolved from the directory, not stored on the case). */
+  site?: string;
+}
+
+export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore, filter: CaseExportFilter): Promise<string> {
+  let cases = await caseStore.listCases({ ...filter, limit: 100000 });
+  // caseIds + site aren't SQL-filterable here (site lives in the directory), so apply them in-app.
+  if (filter.caseIds?.length) {
+    const wanted = new Set(filter.caseIds);
+    cases = cases.filter((c) => wanted.has(c.id));
+  }
+  if (filter.site) {
+    const site = filter.site.toLowerCase();
+    cases = cases.filter((c) => (employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
+  }
   const rows = await Promise.all(
     cases.map(async (c) => {
       const emp = employeeById(c.employeeId);
@@ -133,10 +136,21 @@ export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore,
 // ---- audit (Java AuditExportService header) ---------------------------------
 const AUDIT_HEADERS = ["timestamp", "eventType", "caseId", "runId", "measureName", "employeeId", "actor", "detail"] as const;
 
-export async function auditCsv(eventStore: CaseEventStore): Promise<string> {
+export async function auditCsv(eventStore: CaseEventStore, caseStore: CaseStore): Promise<string> {
   const events = await eventStore.listAuditEvents();
+  // Java derives the employee via the referenced case (COALESCE(case.employee_id, outcome.employee_id)).
+  // Case audit payloads (assign/escalate/outreach) don't carry subjectId, so resolve it from the case.
+  const caseEmployee = new Map<string, string>();
+  for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
+    const c = await caseStore.getCase(id);
+    if (c) caseEmployee.set(id, c.employeeId);
+  }
   const rows = events.map((e) => {
-    const employeeId = (e.payload.subjectId ?? e.payload.employeeId ?? "") as string;
+    const employeeId =
+      (e.payload.subjectId as string | undefined) ??
+      (e.payload.employeeId as string | undefined) ??
+      (e.refCaseId ? caseEmployee.get(e.refCaseId) : undefined) ??
+      "";
     const name = e.refMeasureVersionId ? measureName(e.refMeasureVersionId.replace(/-v[\d.]+$/, "")) : "";
     return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, name, employeeId, e.actor, JSON.stringify(e.payload)];
   });

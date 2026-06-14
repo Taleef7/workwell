@@ -71,17 +71,23 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
   if (pathname === "/api/exports/outcomes") {
     if (!isCsv) return badFormat();
     await ensure(env);
-    return csvResponse("outcomes.csv", await outcomesCsv(new SqliteOutcomeStore(env.DB), q.get("runId") ?? undefined));
+    return csvResponse(
+      "outcomes.csv",
+      await outcomesCsv(new SqliteOutcomeStore(env.DB), new SqliteRunStore(env.DB), q.get("runId") ?? undefined),
+    );
   }
 
   if (pathname === "/api/exports/cases") {
     if (!isCsv) return badFormat();
     await ensure(env);
+    const caseIds = q.get("caseIds")?.split(",").map((s) => s.trim()).filter(Boolean);
     const csv = await casesCsv(new SqliteCaseStore(env.DB), new SqliteCaseEventStore(env.DB), {
       statuses: caseStatuses(q.get("status")),
       measureId: q.get("measureId") ?? undefined,
       priority: q.get("priority") ?? undefined,
       assignee: q.get("assignee") ?? undefined,
+      site: q.get("site")?.trim() || undefined,
+      caseIds: caseIds?.length ? caseIds : undefined,
     });
     return csvResponse("cases.csv", csv);
   }
@@ -89,7 +95,7 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
   if (pathname === "/api/audit-events/export") {
     if (!isCsv) return badFormat();
     await ensure(env);
-    return csvResponse("audit-events.csv", await auditCsv(new SqliteCaseEventStore(env.DB)));
+    return csvResponse("audit-events.csv", await auditCsv(new SqliteCaseEventStore(env.DB), new SqliteCaseStore(env.DB)));
   }
 
   return null;
