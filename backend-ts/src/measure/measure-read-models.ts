@@ -137,11 +137,20 @@ export function toMeasureDetail(m: CatalogMeasure, cqlText: string): MeasureDeta
   };
 }
 
+/**
+ * Stable static version id for a measure version — distinct from the measure slug, since the
+ * Studio uses the version id (not the measure id) to scope `/api/auditor/measure-versions/:id`
+ * + MAT-export actions. Until a persisted measures store mints real `measure_versions.id`
+ * UUIDs, this `<measureId>-<version>` form keeps those actions version-scoped (not a measure-id
+ * masquerade) and forward-compatible.
+ */
+export const measureVersionId = (m: CatalogMeasure): string => `${m.id}-${m.version}`;
+
 /** Version history for a measure — the static catalog carries one version per measure. */
 export function toVersionHistory(m: CatalogMeasure): VersionHistoryItem[] {
   return [
     {
-      id: m.id,
+      id: measureVersionId(m),
       version: m.version,
       status: m.status,
       author: m.owner,
