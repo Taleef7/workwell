@@ -1,15 +1,32 @@
 /**
  * Worker integration test (#105): the auth gate protects real routes end-to-end
  * through the default fetch — public health, 401 without a token, login → token →
- * authorized access, role-gated 403. No JVM, no DB needed (gated/​public paths only).
+ * authorized access, role-gated 403. A SQLite floor DB backs the store-backed routes
+ * (e.g. /api/measures).
  *   node --import tsx --test src/worker.test.ts
  */
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
+// @ts-expect-error — @mieweb/cloud-local ships .mjs without types
+import { createSqliteD1 } from "@mieweb/cloud-local";
 import worker from "./worker.ts";
 import type { Env } from "./worker.ts";
 
+const dbPath = join(tmpdir(), `workwell-worker-${crypto.randomUUID()}.sqlite`);
 const env = { WORKWELL_AUTH_JWT_SECRET: "x".repeat(40) } as unknown as Env;
+before(async () => {
+  (env as unknown as { DB: unknown }).DB = await createSqliteD1(dbPath);
+});
+after(() => {
+  try {
+    rmSync(dbPath, { force: true });
+  } catch {
+    /* best effort */
+  }
+});
 const ctx = {} as never;
 const call = (path: string, init?: RequestInit) => worker.fetch(new Request(`http://x${path}`, init), env, ctx);
 

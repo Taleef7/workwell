@@ -6,13 +6,32 @@
  * the compiled ELM (the AST that the Node engine actually executes), served as
  * JSON so the Studio ELM-explorer can render source↔AST without a JVM.
  */
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
+// @ts-expect-error — @mieweb/cloud-local ships .mjs without types
+import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 
-const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { method: "GET" }));
+const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
+let env: { DB: unknown };
+
+const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { method: "GET" }), env as never, "author@workwell.dev");
 const post = (path: string, body?: unknown) =>
-  handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }));
+  handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), env as never, "author@workwell.dev");
+
+before(async () => {
+  env = { DB: await createSqliteD1(dbPath) };
+});
+after(() => {
+  try {
+    rmSync(dbPath, { force: true });
+  } catch {
+    /* best effort */
+  }
+});
 
 interface CatalogRow {
   id: string;
@@ -81,7 +100,8 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   assert.equal(d.compileStatus, "COMPILED");
   assert.match(d.cqlText, /^library AnnualAudiogramCompleted version '1\.0\.0'/);
   assert.deepEqual(d.valueSets, []);
-  assert.deepEqual(d.testFixtures, []);
+  // V015 seeds 5 demo fixtures for audiogram — they must be carried into the detail.
+  assert.equal((d.testFixtures as unknown[]).length, 5);
 });
 
 test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
@@ -115,25 +135,30 @@ test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' excl
 });
 
 test("GET /api/measures/:id/activation-readiness reflects the compile + fixture gate", async () => {
-  // Runnable (COMPILED) but no fixtures → not ready, only the fixture blocker.
+  // Seeded OSHA measure: COMPILED + V015 demo fixtures → ready, no blockers (Java parity).
   const a = (await get("/api/measures/audiogram/activation-readiness").then((r) => r!.json())) as {
     ready: boolean;
     compileStatus: string;
     testFixtureCount: number;
-    valueSetCount: number;
     testValidationPassed: boolean;
     activationBlockers: string[];
   };
-  assert.equal(a.ready, false);
+  assert.equal(a.ready, true, "seeded fixtures make it activatable");
   assert.equal(a.compileStatus, "COMPILED");
-  assert.equal(a.testValidationPassed, false);
-  assert.equal(a.testFixtureCount, 0);
-  assert.equal(a.valueSetCount, 0);
-  assert.ok(a.activationBlockers.some((b) => /test fixture/i.test(b)));
-  assert.ok(!a.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
+  assert.equal(a.testValidationPassed, true);
+  assert.equal(a.testFixtureCount, 5);
+  assert.deepEqual(a.activationBlockers, []);
 
-  // Draft (NOT_COMPILED) → adds the compile blocker too.
-  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { activationBlockers: string[]; compileStatus: string };
+  // Runnable HEDIS measure with no seeded fixtures: COMPILED but not ready → only the fixture blocker.
+  const h = (await get("/api/measures/hypertension/activation-readiness").then((r) => r!.json())) as { ready: boolean; testFixtureCount: number; activationBlockers: string[] };
+  assert.equal(h.ready, false);
+  assert.equal(h.testFixtureCount, 0);
+  assert.ok(h.activationBlockers.some((b) => /test fixture/i.test(b)));
+  assert.ok(!h.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
+
+  // Draft (NOT_COMPILED, no fixtures) → both blockers.
+  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
+  assert.equal(d.ready, false);
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
 
@@ -190,4 +215,75 @@ test("POST /api/measures/compile surfaces CQL errors as diagnostics (ok:false), 
 test("POST /api/measures/compile rejects a non-string body → 400", async () => {
   const res = await post("/api/measures/compile", { cql: 42 });
   assert.equal(res?.status, 400);
+});
+
+test("concurrent cold-start requests seed the store once (no duplicate-PK 500)", async () => {
+  // A brand-new DB: fire two requests before init completes. The in-flight init promise must
+  // serialize the (non-idempotent) catalog seed so neither request hits a duplicate-key 500.
+  const coldDb = await createSqliteD1(join(tmpdir(), `workwell-measures-cold-${crypto.randomUUID()}.sqlite`));
+  const coldEnv = { DB: coldDb } as never;
+  const both = await Promise.all([
+    handleMeasures(new Request("http://x/api/measures", { method: "GET" }), coldEnv, "a@b.c"),
+    handleMeasures(new Request("http://x/api/measures", { method: "GET" }), coldEnv, "a@b.c"),
+  ]);
+  for (const res of both) {
+    assert.equal(res?.status, 200, "no 500 from a racing duplicate seed");
+    assert.equal(((await res!.json()) as unknown[]).length, 60, "seeded exactly once");
+  }
+});
+
+// ---- authoring (run last — these mutate the seeded store) --------------------
+test("POST /api/measures creates a Draft measure persisted to the store", async () => {
+  const res = await post("/api/measures", { name: "Custom Audiometry", policyRef: "OSHA 29 CFR 1910.95", owner: "author@workwell.dev" });
+  assert.equal(res?.status, 201);
+  const { id } = (await res!.json()) as { id: string };
+  assert.ok(id);
+  const d = (await get(`/api/measures/${id}`).then((r) => r!.json())) as { name: string; status: string; owner: string; compileStatus: string };
+  assert.equal(d.name, "Custom Audiometry");
+  assert.equal(d.status, "Draft");
+  assert.equal(d.owner, "author@workwell.dev");
+  assert.equal(d.compileStatus, "ERROR", "an empty Draft has no compiled CQL");
+  // missing fields → 400
+  assert.equal((await post("/api/measures", { name: "x" }))?.status, 400);
+});
+
+test("POST /api/measures/:id/status transitions Draft→Approved, but Approved→Active is gated on fixtures", async () => {
+  const { id } = (await post("/api/measures", { name: "Lifecycle Demo", policyRef: "CDC", owner: "author@workwell.dev" }).then((r) => r!.json())) as { id: string };
+  const approved = await post(`/api/measures/${id}/status`, { targetStatus: "Approved" });
+  assert.equal(approved?.status, 200);
+  assert.equal(((await approved!.json()) as { status: string }).status, "Approved");
+  // Approved→Active is gated: a fresh Draft has compileStatus ERROR, so the compile gate
+  // fires first (and if it passed, the no-fixtures gate would block it next) → 400, faithful to Java.
+  const activate = await post(`/api/measures/${id}/status`, { targetStatus: "Active" });
+  assert.equal(activate?.status, 400);
+  assert.match(((await activate!.json()) as { message: string }).message, /compile status|test fixtures/i);
+  // an invalid jump (Approved→Deprecated) is rejected
+  assert.equal((await post(`/api/measures/${id}/status`, { targetStatus: "Deprecated" }))?.status, 400);
+});
+
+test("POST /api/measures/:id/approve is gated; non-Draft → 400", async () => {
+  const { id } = (await post("/api/measures", { name: "Approve Gate", policyRef: "CDC", owner: "a@b.c" }).then((r) => r!.json())) as { id: string };
+  const res = await post(`/api/measures/${id}/approve`);
+  assert.equal(res?.status, 400);
+  // a fresh Draft has compileStatus ERROR → the compile gate fires first (Java order)
+  assert.match(((await res!.json()) as { message: string }).message, /compile status/i);
+  // audiogram is Active, not Draft → "Only Draft measures can be approved"
+  const a = await post("/api/measures/audiogram/approve");
+  assert.equal(a?.status, 400);
+  assert.match(((await a!.json()) as { message: string }).message, /Only Draft/i);
+});
+
+test("POST /api/measures/:id/deprecate works on an Active measure; gated otherwise (run last)", async () => {
+  // reason required
+  assert.equal((await post("/api/measures/hazwoper/deprecate", {}))?.status, 400);
+  // a Draft cannot be deprecated
+  const { id } = (await post("/api/measures", { name: "Draft NoDep", policyRef: "CDC", owner: "a@b.c" }).then((r) => r!.json())) as { id: string };
+  assert.equal((await post(`/api/measures/${id}/deprecate`, { reason: "x" }))?.status, 400);
+  // hazwoper is Active → deprecate succeeds and persists
+  const res = await post("/api/measures/hazwoper/deprecate", { reason: "Superseded by updated protocol" });
+  assert.equal(res?.status, 200);
+  assert.equal(((await res!.json()) as { status: string }).status, "Deprecated");
+  const d = (await get("/api/measures/hazwoper").then((r) => r!.json())) as { status: string };
+  assert.equal(d.status, "Deprecated", "the lifecycle change is persisted");
+  assert.equal((await post("/api/measures/nope/deprecate", { reason: "x" }))?.status, 404);
 });
