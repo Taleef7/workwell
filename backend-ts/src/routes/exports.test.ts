@@ -19,6 +19,8 @@ import { handleExports } from "./exports.ts";
 const dbPath = join(tmpdir(), `workwell-exports-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
 let runId: string;
+let latestRunId: string;
+let caseId: string;
 
 const get = (path: string) => handleExports(new Request(`http://x${path}`, { method: "GET" }), env as never);
 const text = async (path: string) => (await get(path).then((r) => r!.text())).split("\r\n");
@@ -45,17 +47,32 @@ before(async () => {
     status: "OVERDUE",
     evidence: { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2025-04-19" }, { define: "Days Since Last Audiogram", result: 420 }] },
   });
-  await new SqliteCaseStore(db).upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
-  await new SqliteCaseEventStore(db).appendAudit({
-    eventType: "CASE_ASSIGNED",
+  const caseRec = await new SqliteCaseStore(db).upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  caseId = caseRec!.id;
+  const events = new SqliteCaseEventStore(db);
+  // A case-action audit WITHOUT subjectId in the payload — employeeId must come from the case.
+  await events.appendAudit({
+    eventType: "CASE_ESCALATED",
     entityType: "case",
-    entityId: "c1",
+    entityId: caseId,
     actor: "cm@workwell.dev",
     refRunId: runId,
-    refCaseId: "c1",
+    refCaseId: caseId,
     refMeasureVersionId: "audiogram-v1.0",
-    payload: { subjectId: "emp-006", assignee: "cm@workwell.dev" },
+    payload: { priority: "HIGH", reason: "Manual escalation requested" },
   });
+
+  // A later run (no outcomes) so the default outcomes export must resolve the LATEST run.
+  await new Promise((r) => setTimeout(r, 8));
+  const later = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "hazwoper",
+    triggeredBy: "test",
+    requestedScope: { measureId: "hazwoper" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  latestRunId = later.id;
 });
 after(() => {
   try {
@@ -93,10 +110,36 @@ test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus col
   assert.ok(lines.some((l) => l.includes("Omar Siddiq") && l.includes("OVERDUE")));
 });
 
-test("GET /api/audit-events/export lists the audit ledger", async () => {
+test("GET /api/audit-events/export lists the ledger; employeeId derived from the referenced case", async () => {
   const lines = await text("/api/audit-events/export?format=csv");
   assert.equal(lines[0], "timestamp,eventType,caseId,runId,measureName,employeeId,actor,detail");
-  assert.ok(lines.some((l) => l.includes("CASE_ASSIGNED") && l.includes("cm@workwell.dev")));
+  const row = lines.find((l) => l.includes("CASE_ESCALATED"))!;
+  assert.ok(row, "the escalation audit row is present");
+  // The payload has no subjectId — employeeId column must come from the case's employee (emp-006).
+  const cols = row.split(",");
+  assert.equal(cols[5], "emp-006", "employeeId resolved via ref_case_id → case.employee_id");
+  assert.equal(cols[6], "cm@workwell.dev", "actor");
+});
+
+test("default outcomes export (no runId) resolves the LATEST run", async () => {
+  // The latest run (hazwoper) has no outcomes → just the header row (not the older audiogram run's rows).
+  const lines = (await text("/api/exports/outcomes?format=csv")).filter((l) => l.length > 0);
+  assert.equal(lines.length, 1, "only the header — the latest run has no outcomes");
+  assert.ok(!lines.some((l) => l.includes("emp-006")), "older run's outcomes are NOT mixed in");
+  // explicit older runId still works
+  assert.ok((await text(`/api/exports/outcomes?format=csv&runId=${runId}`)).some((l) => l.includes("emp-006")));
+});
+
+test("cases export honors caseIds (selected set) and the site filter", async () => {
+  // caseIds → exactly the selected case(s); a non-matching id → header only.
+  const sel = (await text(`/api/exports/cases?format=csv&caseIds=${caseId}`)).filter((l) => l.length > 0);
+  assert.equal(sel.length, 2, "header + the one selected case");
+  assert.ok(sel.some((l) => l.startsWith(caseId)));
+  const none = (await text(`/api/exports/cases?format=csv&caseIds=${crypto.randomUUID()}`)).filter((l) => l.length > 0);
+  assert.equal(none.length, 1, "no case matched → header only");
+  // site filter: Plant A keeps emp-006; HQ drops it
+  assert.ok((await text("/api/exports/cases?format=csv&site=Plant%20A")).some((l) => l.includes("Omar Siddiq")));
+  assert.ok(!(await text("/api/exports/cases?format=csv&site=HQ")).some((l) => l.includes("Omar Siddiq")));
 });
 
 test("non-csv format → 400 with the Java parity message", async () => {
