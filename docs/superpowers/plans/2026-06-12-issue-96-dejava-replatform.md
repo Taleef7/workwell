@@ -245,8 +245,11 @@ contracts; per-PR JOURNAL entries carry the detail):
     rerun-to-verify (CASE scope) + run `totalCases` ✅ (closed_reason/closed_by columns, `countByLastRun`).
     **Functionally complete bar evidence upload/download, appointments, ai/explain, the
     `outreach_delivery_log` table, and the run-grid per-row caseId — all #108-adjacent.**
-  - `measures`, `programs` — not started.
+  - `measures` — catalog read ✅ (`GET /api/measures` full 60-measure `Measure[]` with status/search,
+    generated `measure-catalog.ts` from the Java seed, Active-first ordering). Detail/versions/
+    activation-readiness (read) + create/lifecycle/spec/CQL/compile-gate (need a measures store) pending.
+  - `programs` — not started.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~159 tests green (1 Postgres-harness skip without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~187 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.
