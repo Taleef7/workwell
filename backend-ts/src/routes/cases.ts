@@ -17,7 +17,7 @@
  * the merged ledger. evidence/appointments/ai are later slices.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
+import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
@@ -40,6 +40,7 @@ const ready = new WeakSet<object>();
 async function ensure(env: CasesEnv): Promise<void> {
   if (!ready.has(env.DB)) {
     await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+    await migrateFloorSchema(env.DB);
     ready.add(env.DB);
   }
 }
