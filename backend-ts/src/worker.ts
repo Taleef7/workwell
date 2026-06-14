@@ -24,6 +24,7 @@ import { handleCases } from "./routes/cases.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
+import { handleAi } from "./routes/ai.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -52,6 +53,8 @@ export interface Env {
   NODE_ENV?: string;
   WORKWELL_CORS_ALLOWED_ORIGINS?: string;
   OPENAI_API_KEY?: string;
+  WORKWELL_AI_OPENAI_MODEL?: string;
+  WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -166,6 +169,11 @@ async function route(req: Request, env: Env): Promise<Response> {
   // Admin — dashboard read surface + simple toggles (#108). Gated to ADMIN by the matrix.
   const adminResponse = await handleAdmin(req, env);
   if (adminResponse) return adminResponse;
+
+  // AI surfaces — draft-spec/draft-cql/test-fixtures/explain/run-insight (#108). Advisory
+  // text/drafts only (AI never decides compliance); deterministic fallback when no OPENAI_API_KEY.
+  const aiResponse = await handleAi(req, env, actor);
+  if (aiResponse) return aiResponse;
 
   // Everything else is not ported yet. Be honest (no faked behavior), the
   // same principle as UnsupportedBindingError / "AI never decides compliance".
