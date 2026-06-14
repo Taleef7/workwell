@@ -219,4 +219,12 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await store.listCases({ statuses: ["EXCLUDED"] })).length, 1);
     assert.equal((await store.listCases({})).length, 2);
   });
+
+  test(`[${label}] assignee=unassigned matches NULL-assignee cases (COALESCE parity)`, async () => {
+    const store = await freshStore();
+    await upsert(store, "OVERDUE"); // new case → assignee NULL
+    assert.equal((await store.listCases({ assignee: "unassigned" })).length, 1, "unassigned selects NULL rows");
+    assert.equal((await store.listCases({ assignee: "Unassigned" })).length, 1, "case-insensitive");
+    assert.equal((await store.listCases({ assignee: "someone@workwell.dev" })).length, 0);
+  });
 }

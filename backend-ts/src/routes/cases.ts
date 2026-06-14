@@ -29,22 +29,28 @@ async function caseStore(env: CasesEnv): Promise<SqliteCaseStore> {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/** Map the page's status filter to concrete case statuses (undefined = all). */
+/**
+ * Map the page's status filter to concrete case statuses. Blank/missing defaults to
+ * OPEN (matching the Java controller); `all` is the explicit unfiltered view.
+ */
 function statusesFor(raw: string | null): string[] | undefined {
   switch ((raw ?? "").toLowerCase()) {
-    case "":
     case "all":
-      return undefined;
-    case "open":
-      return ["OPEN"];
+      return undefined; // explicit: include every status
     case "closed":
       return ["RESOLVED", "CLOSED"];
     case "excluded":
       return ["EXCLUDED"];
+    case "":
+    case "open":
+      return ["OPEN"]; // default
     default:
       return [(raw as string).toUpperCase()];
   }
 }
+
+/** Day portion (YYYY-MM-DD) for day-granular, inclusive from/to comparison. */
+const day = (s: string): string => s.slice(0, 10);
 
 export async function handleCases(req: Request, env: CasesEnv): Promise<Response | null> {
   const url = new URL(req.url);
@@ -55,11 +61,14 @@ export async function handleCases(req: Request, env: CasesEnv): Promise<Response
   const offset = Math.max(0, Number(q.get("offset") ?? "0") || 0);
   const site = q.get("site")?.trim() || undefined;
   const search = q.get("search")?.trim().toLowerCase() || undefined;
+  const from = q.get("from")?.trim() || undefined;
+  const to = q.get("to")?.trim() || undefined;
 
   const store = await caseStore(env);
-  // Fetch all rows matching the SQL-filterable predicates, then post-filter site/search
-  // (employee-derived, not stored) and page in the read model — correct paging at floor scale.
-  const rows = await store.listCases({
+  // Fetch all rows matching the SQL-filterable predicates, then post-filter the
+  // record-derived ones (created_at range, employee site/search) and page in the read
+  // model — correct paging at floor scale.
+  let rows = await store.listCases({
     statuses: statusesFor(q.get("status")),
     measureId: q.get("measureId") ?? undefined,
     priority: q.get("priority") ?? undefined,
@@ -67,6 +76,10 @@ export async function handleCases(req: Request, env: CasesEnv): Promise<Response
     limit: 100000,
     offset: 0,
   });
+
+  // from/to filter case creation time (day-granular, inclusive) — matches the Java route.
+  if (from) rows = rows.filter((c) => day(c.createdAt) >= day(from));
+  if (to) rows = rows.filter((c) => day(c.createdAt) <= day(to));
 
   let summaries: CaseSummary[] = rows.map(toCaseSummary);
   if (site) summaries = summaries.filter((c) => c.site === site);

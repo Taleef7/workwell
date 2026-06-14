@@ -118,7 +118,8 @@ export class PgCaseStore implements CaseStore {
       binds.push(query.priority);
     }
     if (query.assignee) {
-      where.push(`assignee = $${binds.length + 1}`);
+      // Match the Java COALESCE: `assignee=unassigned` selects rows with a NULL assignee.
+      where.push(`LOWER(COALESCE(assignee, 'unassigned')) = LOWER($${binds.length + 1})`);
       binds.push(query.assignee);
     }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";

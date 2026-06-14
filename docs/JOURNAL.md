@@ -13,6 +13,11 @@ Branch `feat/issue-96-cases-worklist`. First slice of the cases module: cases ar
 
 **backend-ts 132 tests — 131 pass / 1 skip (Postgres harness, no local Docker) / 0 fail; typecheck clean.** Next cases slices: case **detail** (`GET /api/cases/:id` + `CaseDetail` + timeline) and **actions** (assign/escalate/outreach/delivery, rerun-to-verify). Run `totalCases` + the case-linked run scopes can then be wired.
 
+Review follow-ups (Codex on PR #122), three worklist-filter fidelity fixes vs the Java controller, all fixed before merge:
+- **Default status = OPEN.** Blank/missing `status` now defaults to `OPEN` (Java default); `status=all` is the explicit unfiltered view (previously blank → all, leaking resolved/excluded rows into the default worklist).
+- **`assignee=unassigned`.** New cases store `assignee` as NULL, so `assignee = ?` matched nothing; both adapters now use `LOWER(COALESCE(assignee, 'unassigned')) = LOWER(?)`, so the unassigned filter selects NULL rows (case-insensitive), matching Java.
+- **`from`/`to`.** The route dropped these; now applied (day-granular, inclusive) against case `created_at`, matching Java. Added store-contract + route tests for each. backend-ts 136 tests — 135 pass / 1 skip / 0 fail.
+
 ---
 
 ## 2026-06-13 — Issue #96 Phase 4 (#107): runs write pipeline (2/2) — manual run + rerun
