@@ -12,23 +12,69 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { handleCases } from "./cases.ts";
 
 const dbPath = join(tmpdir(), `workwell-cases-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
+let omarCaseId: string;
 
 const get = (qs = "") => handleCases(new Request(`http://x/api/cases${qs}`, { method: "GET" }), env as never);
+const getPath = (path: string) => handleCases(new Request(`http://x${path}`, { method: "GET" }), env as never);
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   env = { DB: db };
   const store = new SqliteCaseStore(db);
-  const runId = crypto.randomUUID();
+  const outcomes = new SqliteOutcomeStore(db);
+  // a real run row so the outcome FK is satisfied
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const runId = run.id;
   // emp-006 = Omar Siddiq (Plant A): OVERDUE; emp-001 = Demo Author (HQ): MISSING_DATA; emp-008 EXCLUDED
-  await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  omarCaseId = omar!.id;
   await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-06-13", outcomeStatus: "MISSING_DATA" });
   await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "EXCLUDED" });
+  // evidence for Omar's case (drives the detail's why_flagged): a real exam 420 days ago.
+  await outcomes.recordOutcome({
+    runId,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    status: "OVERDUE",
+    evidence: {
+      expressionResults: [
+        { define: "Has Active Waiver", result: false },
+        { define: "Most Recent Audiogram Date", result: "2025-04-19T00:00:00.000Z" },
+        { define: "Days Since Last Audiogram", result: 420 },
+        { define: "Outcome Status", result: "OVERDUE" },
+      ],
+    },
+  });
+  // MISSING_DATA evidence for emp-001: NO recency date; "Days Since" carries the @1900 fallback
+  // distance. why_flagged must suppress last_exam_date/days_overdue (must not report 1900-era dates).
+  await outcomes.recordOutcome({
+    runId,
+    subjectId: "emp-001",
+    measureId: "hazwoper",
+    status: "MISSING_DATA",
+    evidence: {
+      expressionResults: [
+        { define: "Has Medical Exemption", result: false },
+        { define: "Most Recent Surveillance Exam Date", result: null },
+        { define: "Days Since Last Exam", result: 46186 },
+        { define: "Outcome Status", result: "MISSING_DATA" },
+      ],
+    },
+  });
 });
 after(() => {
   try {
@@ -74,6 +120,44 @@ test("from/to filter by case creation day (inclusive)", async () => {
   assert.equal(((await get("?status=open&from=2999-01-01").then((r) => r!.json())) as unknown[]).length, 0, "future from → none");
   assert.equal(((await get("?status=open&to=2000-01-01").then((r) => r!.json())) as unknown[]).length, 0, "past to → none");
   assert.equal(((await get("?status=open&from=2000-01-01&to=2999-12-31").then((r) => r!.json())) as unknown[]).length, 2, "wide range → all open");
+});
+
+test("GET /api/cases/:id returns CaseDetail with evidence + derived why_flagged", async () => {
+  const res = await getPath(`/api/cases/${omarCaseId}`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as {
+    caseId: string;
+    employeeName: string;
+    measureName: string;
+    outcomeSummary: string;
+    evidenceJson: { why_flagged: { days_overdue: number; waiver_status: string; last_exam_date: string }; expressionResults: unknown[] };
+    timeline: unknown[];
+  };
+  assert.equal(d.caseId, omarCaseId);
+  assert.equal(d.employeeName, "Omar Siddiq");
+  assert.equal(d.measureName, "Audiogram");
+  assert.match(d.outcomeSummary, /overdue/i);
+  // why_flagged derived from the CQL define results (420 days, window 365 → 55 overdue)
+  assert.equal(d.evidenceJson.why_flagged.days_overdue, 55);
+  assert.equal(d.evidenceJson.why_flagged.last_exam_date, "2025-04-19", "last_exam_date from the recency define");
+  assert.equal(d.evidenceJson.why_flagged.waiver_status, "none");
+  assert.ok(d.evidenceJson.expressionResults.length >= 1, "raw expressionResults preserved");
+  assert.deepEqual(d.timeline, [], "timeline empty until the audit module is ported");
+});
+
+test("GET /api/cases/:id for MISSING_DATA suppresses last_exam_date/days_overdue (no @1900 fallback leak)", async () => {
+  const open = (await get("?status=open").then((r) => r!.json())) as Array<{ caseId: string; measureName: string }>;
+  const missing = open.find((r) => r.measureName === "HAZWOPER Surveillance")!;
+  const res = await getPath(`/api/cases/${missing.caseId}`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as { evidenceJson: { why_flagged: { last_exam_date: string | null; days_overdue: number | null } } };
+  assert.equal(d.evidenceJson.why_flagged.last_exam_date, null, "no exam → null, not a 1900-era date");
+  assert.equal(d.evidenceJson.why_flagged.days_overdue, null, "no exam → null, not ~45k days");
+});
+
+test("GET /api/cases/:id for an unknown case → 404", async () => {
+  const res = await getPath(`/api/cases/${crypto.randomUUID()}`);
+  assert.equal(res?.status, 404);
 });
 
 test("paging via limit/offset", async () => {
