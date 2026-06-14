@@ -6,16 +6,23 @@
  *   GET /api/programs/sites             distinct employee sites (global site filter) → string[]
  *   GET /api/programs/:id/trend         per-run compliance trend (newest 10)         → ProgramTrendPoint[]
  *   GET /api/programs/:id/top-drivers   overdue site/role + flagged-reason mix       → TopDrivers
+ *   GET /api/programs/:id/risk-outlook  ?horizonDays= predictive outlook             → RiskOutlook | 404
  *
- * All honor the page's ?site=&from=&to= filters. Risk-outlook is a later slice (the page
- * degrades gracefully — empty — without it).
+ * Overview/trend/top-drivers honor the page's ?site=&from=&to= filters.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { programOverview, programTrend, programTopDrivers, listSites, type ProgramDeps } from "../program/program-read-models.ts";
+import {
+  programOverview,
+  programTrend,
+  programTopDrivers,
+  programRiskOutlook,
+  listSites,
+  type ProgramDeps,
+} from "../program/program-read-models.ts";
 
 interface ProgramsEnv {
   DB: CloudDatabase;
@@ -89,6 +96,13 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
   const driversId = pathname.match(/^\/api\/programs\/([^/]+)\/top-drivers$/)?.[1];
   if (driversId) {
     return json(await programTopDrivers(await deps(env), driversId, filters));
+  }
+
+  const riskId = pathname.match(/^\/api\/programs\/([^/]+)\/risk-outlook$/)?.[1];
+  if (riskId) {
+    const horizonDays = Number(q.get("horizonDays") ?? "30");
+    const outlook = await programRiskOutlook(await deps(env), riskId, horizonDays);
+    return outlook ? json(outlook) : json({ error: "not_found", message: `Measure not found: ${riskId}` }, 404);
   }
 
   return null;

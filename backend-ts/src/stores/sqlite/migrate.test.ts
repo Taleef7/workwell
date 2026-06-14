@@ -59,3 +59,35 @@ test("migrateFloorSchema backfills closed_reason/closed_by on an existing cases 
   assert.equal(closed?.closedReason, "RERUN_VERIFIED");
   assert.equal(closed?.closedBy, "cm@workwell.dev");
 });
+
+test("migrateFloorSchema backfills outcomes.evaluation_period on an existing outcomes table", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-migrate-oc-${crypto.randomUUID()}.sqlite`));
+  // PRE-evaluation_period outcomes table (the shape shipped before the risk-outlook slice).
+  await db.exec(
+    "CREATE TABLE runs (id TEXT PRIMARY KEY, status TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT, " +
+      "triggered_by TEXT, requested_scope_json TEXT NOT NULL DEFAULT '{}', measurement_period_start TEXT NOT NULL, " +
+      "measurement_period_end TEXT NOT NULL, claimed_by TEXT, started_at TEXT NOT NULL, completed_at TEXT)",
+  );
+  await db.exec(
+    "CREATE TABLE outcomes (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, subject_id TEXT NOT NULL, " +
+      "measure_id TEXT NOT NULL, status TEXT NOT NULL, evidence_json TEXT NOT NULL, evaluated_at TEXT NOT NULL)",
+  );
+  await migrateFloorSchema(db);
+  await migrateFloorSchema(db); // idempotent
+
+  const { SqliteRunStore } = await import("./run-store-sqlite.ts");
+  const { SqliteOutcomeStore } = await import("./outcome-store-sqlite.ts");
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "t",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const oc = new SqliteOutcomeStore(db);
+  // SELECT/INSERT now reference evaluation_period — would throw "no such column" pre-migration.
+  await oc.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence: {} });
+  const rows = await oc.listOutcomesForMeasure("audiogram");
+  assert.equal(rows[0]!.evaluationPeriod, "2026-06-13");
+});

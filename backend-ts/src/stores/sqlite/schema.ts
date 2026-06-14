@@ -37,13 +37,14 @@ CREATE TABLE IF NOT EXISTS run_logs (
 CREATE INDEX IF NOT EXISTS run_logs_run_id_idx ON run_logs (run_id);
 
 CREATE TABLE IF NOT EXISTS outcomes (
-  id            TEXT PRIMARY KEY,
-  run_id        TEXT NOT NULL REFERENCES runs(id),
-  subject_id    TEXT NOT NULL,
-  measure_id    TEXT NOT NULL,
-  status        TEXT NOT NULL,
-  evidence_json TEXT NOT NULL,
-  evaluated_at  TEXT NOT NULL
+  id                TEXT PRIMARY KEY,
+  run_id            TEXT NOT NULL REFERENCES runs(id),
+  subject_id        TEXT NOT NULL,
+  measure_id        TEXT NOT NULL,
+  evaluation_period TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL,
+  evidence_json     TEXT NOT NULL,
+  evaluated_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
@@ -116,6 +117,7 @@ CREATE INDEX IF NOT EXISTS audit_events_ref_case_id_idx ON audit_events (ref_cas
 const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl: string }> = [
   { table: "cases", column: "closed_reason", ddl: "closed_reason TEXT" },
   { table: "cases", column: "closed_by", ddl: "closed_by TEXT" },
+  { table: "outcomes", column: "evaluation_period", ddl: "evaluation_period TEXT NOT NULL DEFAULT ''" },
 ];
 
 interface MinimalDb {
@@ -127,7 +129,11 @@ interface MinimalDb {
 export async function migrateFloorSchema(db: MinimalDb): Promise<void> {
   for (const { table, column, ddl } of FLOOR_COLUMN_BACKFILL) {
     const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
-    if (!(results ?? []).some((r) => r.name === column)) {
+    const cols = results ?? [];
+    // Empty table_info ⇒ the table doesn't exist yet; the CREATE TABLE IF NOT EXISTS DDL
+    // creates it (with the column) — nothing to backfill, and ALTERing it would error.
+    if (cols.length === 0) continue;
+    if (!cols.some((r) => r.name === column)) {
       await db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
     }
   }
