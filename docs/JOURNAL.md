@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (4/n) — persisted store + authoring/lifecycle
+
+Branch `feat/issue-96-measures-authoring` (based on the readiness branch — **supersedes/includes #132**). The largest measures slice: a **persisted measures store** so the read surface reflects mutations, plus **create + lifecycle** transitions. Ported from `MeasureService` create/approve/deprecate/transitionStatus. *(Bigger-PR cadence per the maintainer's request.)*
+
+- **Store (floor + ceiling + shared contract)** — new `measures` + `measure_versions` tables (`stores/sqlite/schema.ts`, isolated `workwell_spike` on the ceiling; tags/spec are JSON TEXT on the floor, JSONB on the ceiling). `MeasureStore` (`isEmpty`/`seedMeasure`/`listLatest`/`getLatest`/`listVersions`/`createMeasure`/`setVersionStatus`) on both backends; a `measureStoreContract` runs on the SQLite floor + the Postgres ceiling.
+- **Seed + reads migrated** — `measure/measure-seed.ts` loads `MEASURE_CATALOG` into the store on first use (version ids stay `<measureId>-<version>`; per-status tier timestamps keep Active-first ordering). The read models (`listMeasures`/`toMeasureDetail`/`toVersionHistory`/`toActivationReadiness`) now operate on store records (real `activated_at`/`approved_by`/timestamps), and `GET /api/measures(/:id|/versions|/activation-readiness)` read from the store — so created/edited measures are reflected.
+- **`measure/measure-lifecycle.ts`** — `createMeasure` (Draft v1.0), `approveMeasure` (Draft→Approved, gated on readiness), `deprecateMeasure` (Active→Deprecated, reason required), `transitionStatus` (Draft→Approved / Approved→Active / Active→Deprecated). Each writes a `MEASURE_*` audit_event (entity_type `measure_version`). **Gates are faithful:** approve + Approved→Active require passing test fixtures (none ported), so they're blocked exactly as a fresh Java measure is — **deprecate works on the seeded Active measures**; the Tests-tab fixtures that unblock approve/activate are a follow-up.
+- **`routes/measures.ts`** — `POST /api/measures` (create → `{id}`), `/:id/approve`, `/:id/deprecate {reason}`, `/:id/status {targetStatus}`; engine endpoints (`/elm`, `/evaluate`, `/compile`) unchanged. Worker threads `env` + the authenticated actor; existing role gates apply (AUTHOR/APPROVER/admin).
+
+Deferred (follow-up): spec/CQL edits (+ recompile), test-fixture CRUD (unblocks approve/activate), version cloning, value-set governance.
+
+**backend-ts 220 tests — all pass / 0 fail; typecheck clean** (Postgres ceiling included — `MeasureStore` contract + new tables validated on real PG). New coverage: store contract (seed/reads/create/lifecycle, both backends) + route authoring (create persisted, Draft→Approved via status, Approved→Active + approve faithfully gated, deprecate persists + gated). Frontend `/measures` + `/studio/[id]` contract unchanged. **Measures module now substantially complete** bar spec/CQL edits + fixtures. Next: those edits, or runs ALL_PROGRAMS/SITE async, or Phase 4b (#108).
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): measures module (3/n) — activation-readiness (read)
 
 Branch `feat/issue-96-measures-readiness`. Third measures slice: the Studio activation gate, ported from `MeasureService.activationReadiness`. **This completes the measures READ surface** (catalog + detail + versions + activation-readiness).

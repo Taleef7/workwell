@@ -111,4 +111,30 @@ CREATE INDEX IF NOT EXISTS spike_audit_events_ref_case_id_idx ON ${SPIKE_SCHEMA}
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_reason TEXT;
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_by TEXT;
 ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS evaluation_period TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measures (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  policy_ref  TEXT,
+  owner       TEXT,
+  tags        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measure_versions (
+  id             TEXT PRIMARY KEY,
+  measure_id     TEXT NOT NULL REFERENCES ${SPIKE_SCHEMA}.measures(id),
+  version        TEXT NOT NULL,
+  status         TEXT NOT NULL,
+  spec_json      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  cql_text       TEXT NOT NULL DEFAULT '',
+  compile_status TEXT NOT NULL DEFAULT 'NOT_COMPILED',
+  change_summary TEXT,
+  approved_by    TEXT,
+  activated_at   TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spike_measure_versions_measure_id_idx ON ${SPIKE_SCHEMA}.measure_versions (measure_id);
 `;

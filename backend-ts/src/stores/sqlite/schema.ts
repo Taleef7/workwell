@@ -105,6 +105,36 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS audit_events_ref_case_id_idx ON audit_events (ref_case_id);
+
+/* Measures + measure_versions (#107 authoring). Floor analogue of the canonical tables
+   (docs/DATA_MODEL.md): tags + spec_json are JSON TEXT on the floor (TEXT[]/JSONB on the
+   ceiling). Seeded from MEASURE_CATALOG on first use; create/lifecycle mutate these rows.
+   One latest version per measure for the catalog seed (version cloning is a later slice). */
+CREATE TABLE IF NOT EXISTS measures (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  policy_ref  TEXT,
+  owner       TEXT,
+  tags        TEXT NOT NULL DEFAULT '[]',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS measure_versions (
+  id             TEXT PRIMARY KEY,
+  measure_id     TEXT NOT NULL REFERENCES measures(id),
+  version        TEXT NOT NULL,
+  status         TEXT NOT NULL,
+  spec_json      TEXT NOT NULL DEFAULT '{}',
+  cql_text       TEXT NOT NULL DEFAULT '',
+  compile_status TEXT NOT NULL DEFAULT 'NOT_COMPILED',
+  change_summary TEXT,
+  approved_by    TEXT,
+  activated_at   TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS measure_versions_measure_id_idx ON measure_versions (measure_id);
 `;
 
 /**
