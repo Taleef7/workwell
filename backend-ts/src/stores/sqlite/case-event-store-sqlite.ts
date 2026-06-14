@@ -1,0 +1,81 @@
+/**
+ * SQLite/D1 floor implementation of the CaseEventStore contract (#107 cases actions).
+ *
+ * The timeline query mirrors the Java loadCaseTimeline UNION: audit_events (excluding
+ * CASE_VIEWED) ∪ case_actions, ordered by occurred_at then the autoincrement id as a
+ * stable tiebreak. payload_json round-trips as parsed JSON with a `timelineSource`
+ * discriminator injected so the UI can tell ledger rows from operator actions.
+ */
+import type { CloudDatabase } from "@mieweb/cloud";
+import type {
+  AppendAuditInput,
+  CaseEventStore,
+  InsertActionInput,
+  TimelineEntry,
+} from "../case-event-store.ts";
+
+interface TimelineRow {
+  event_type: string;
+  actor: string | null;
+  occurred_at: string;
+  payload_json: string | null;
+  timeline_source: string;
+}
+
+export class SqliteCaseEventStore implements CaseEventStore {
+  constructor(private readonly db: CloudDatabase) {}
+
+  async insertAction(input: InsertActionInput): Promise<void> {
+    await this.db
+      .prepare(
+        "INSERT INTO case_actions (case_id, action_type, payload_json, performed_by, performed_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .bind(input.caseId, input.actionType, JSON.stringify(input.payload), input.actor, new Date().toISOString())
+      .run();
+  }
+
+  async appendAudit(input: AppendAuditInput): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO audit_events
+           (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        input.eventType,
+        input.entityType,
+        input.entityId,
+        input.actor,
+        input.refRunId,
+        input.refCaseId,
+        input.refMeasureVersionId,
+        JSON.stringify(input.payload),
+        new Date().toISOString(),
+      )
+      .run();
+  }
+
+  async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT event_type, actor, occurred_at, payload_json, timeline_source FROM (
+            SELECT event_type, actor, occurred_at, payload_json, 'audit_event' AS timeline_source, id AS sort_key
+              FROM audit_events
+             WHERE ref_case_id = ? AND event_type <> 'CASE_VIEWED'
+            UNION ALL
+            SELECT action_type AS event_type, performed_by AS actor, performed_at AS occurred_at,
+                   payload_json, 'case_action' AS timeline_source, id AS sort_key
+              FROM case_actions
+             WHERE case_id = ?
+         ) ORDER BY occurred_at ASC, sort_key ASC`,
+      )
+      .bind(caseId, caseId)
+      .all<TimelineRow>();
+    return (results ?? []).map((r) => ({
+      eventType: r.event_type,
+      actor: r.actor,
+      occurredAt: r.occurred_at,
+      payload: { ...(r.payload_json ? JSON.parse(r.payload_json) : {}), timelineSource: r.timeline_source },
+    }));
+  }
+}

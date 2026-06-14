@@ -22,6 +22,8 @@ let omarCaseId: string;
 
 const get = (qs = "") => handleCases(new Request(`http://x/api/cases${qs}`, { method: "GET" }), env as never);
 const getPath = (path: string) => handleCases(new Request(`http://x${path}`, { method: "GET" }), env as never);
+const post = (path: string, actor = "cm@workwell.dev") =>
+  handleCases(new Request(`http://x${path}`, { method: "POST" }), env as never, actor);
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
@@ -142,7 +144,7 @@ test("GET /api/cases/:id returns CaseDetail with evidence + derived why_flagged"
   assert.equal(d.evidenceJson.why_flagged.last_exam_date, "2025-04-19", "last_exam_date from the recency define");
   assert.equal(d.evidenceJson.why_flagged.waiver_status, "none");
   assert.ok(d.evidenceJson.expressionResults.length >= 1, "raw expressionResults preserved");
-  assert.deepEqual(d.timeline, [], "timeline empty until the audit module is ported");
+  assert.deepEqual(d.timeline, [], "timeline empty before any action is taken on this case");
 });
 
 test("GET /api/cases/:id for MISSING_DATA suppresses last_exam_date/days_overdue (no @1900 fallback leak)", async () => {
@@ -163,4 +165,42 @@ test("GET /api/cases/:id for an unknown case → 404", async () => {
 test("paging via limit/offset", async () => {
   assert.equal(((await get("?status=open&limit=1&offset=0").then((r) => r!.json())) as unknown[]).length, 1);
   assert.equal(((await get("?status=open&limit=1&offset=2").then((r) => r!.json())) as unknown[]).length, 0);
+});
+
+test("POST /api/cases/:id/assign sets the assignee and records ASSIGNED on the timeline", async () => {
+  const res = await post(`/api/cases/${omarCaseId}/assign?assignee=cm@workwell.dev`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as { assignee: string; timeline: Array<{ eventType: string; actor: string }> };
+  assert.equal(d.assignee, "cm@workwell.dev");
+  const types = d.timeline.map((t) => t.eventType);
+  assert.ok(types.includes("ASSIGNED"), "case_action recorded");
+  assert.ok(types.includes("CASE_ASSIGNED"), "audit_event recorded");
+  // blank assignee clears it back to unassigned
+  const cleared = (await post(`/api/cases/${omarCaseId}/assign`).then((r) => r!.json())) as { assignee: string | null };
+  assert.equal(cleared.assignee, null);
+});
+
+test("POST /api/cases/:id/escalate forces HIGH/OPEN and records ESCALATED", async () => {
+  const res = await post(`/api/cases/${omarCaseId}/escalate`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as { priority: string; status: string; nextAction: string; timeline: Array<{ eventType: string }> };
+  assert.equal(d.priority, "HIGH");
+  assert.equal(d.status, "OPEN");
+  assert.match(d.nextAction, /supervisor/i);
+  assert.ok(d.timeline.map((t) => t.eventType).includes("ESCALATED"));
+});
+
+test("the detail timeline is oldest-first and excludes nothing we wrote", async () => {
+  const d = (await getPath(`/api/cases/${omarCaseId}`).then((r) => r!.json())) as {
+    timeline: Array<{ eventType: string; occurredAt: string; payload: { timelineSource: string } }>;
+  };
+  assert.ok(d.timeline.length >= 2, "actions accumulated from earlier tests");
+  for (let i = 1; i < d.timeline.length; i++) {
+    assert.ok(d.timeline[i - 1]!.occurredAt <= d.timeline[i]!.occurredAt, "ascending by occurredAt");
+  }
+  assert.ok(d.timeline.every((t) => ["audit_event", "case_action"].includes(t.payload.timelineSource)));
+});
+
+test("POST /api/cases/:id/assign for an unknown case → 404", async () => {
+  assert.equal((await post(`/api/cases/${crypto.randomUUID()}/assign?assignee=x`))?.status, 404);
 });
