@@ -56,6 +56,64 @@ test("GET /api/measures?search matches name or tag (case-insensitive)", async ()
   assert.ok(byTag.length >= 2 && byTag.every((m) => m.tags.includes("cardiovascular")));
 });
 
+test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL (runnable)", async () => {
+  const res = await get("/api/measures/audiogram");
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as {
+    id: string;
+    name: string;
+    description: string;
+    eligibilityCriteria: { roleFilter: string; programEnrollmentText: string };
+    exclusions: Array<{ label: string }>;
+    complianceWindow: string;
+    requiredDataElements: string[];
+    cqlText: string;
+    compileStatus: string;
+    valueSets: unknown[];
+    testFixtures: unknown[];
+  };
+  assert.equal(d.id, "audiogram");
+  assert.equal(d.name, "Annual Audiogram Completed");
+  assert.match(d.description, /noise-exposed/);
+  assert.equal(d.eligibilityCriteria.programEnrollmentText, "Hearing Conservation Program");
+  assert.ok(d.exclusions.some((e) => e.label === "Waiver"));
+  assert.ok(d.requiredDataElements.includes("Last audiogram date"));
+  assert.equal(d.compileStatus, "COMPILED");
+  assert.match(d.cqlText, /^library AnnualAudiogramCompleted version '1\.0\.0'/);
+  assert.deepEqual(d.valueSets, []);
+  assert.deepEqual(d.testFixtures, []);
+});
+
+test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
+  const d = (await get("/api/measures/cms2v15").then((r) => r!.json())) as { cqlText: string; compileStatus: string; description: string };
+  assert.equal(d.compileStatus, "NOT_COMPILED");
+  assert.equal(d.cqlText, "", "no compiled CQL for a draft");
+  assert.match(d.description, /CQL authoring pending/);
+});
+
+test("GET /api/measures/:id/versions returns the version history; unknown measure → 404", async () => {
+  const versions = (await get("/api/measures/audiogram/versions").then((r) => r!.json())) as Array<{ id: string; version: string; status: string; author: string }>;
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0]!.version, "v1.0");
+  assert.equal(versions[0]!.status, "Active");
+  // The version id must be DISTINCT from the measure slug so version-scoped Studio actions
+  // (auditor packet, MAT export) target the version, not the measure.
+  assert.notEqual(versions[0]!.id, "audiogram");
+  assert.equal(versions[0]!.id, "audiogram-v1.0");
+  assert.equal((await get("/api/measures/does-not-exist"))?.status, 404);
+  assert.equal((await get("/api/measures/does-not-exist/versions"))?.status, 404);
+});
+
+test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' exclusion (V017 parity)", async () => {
+  const d = (await get("/api/measures/hepatitis_b_vaccination_series").then((r) => r!.json())) as {
+    exclusions: Array<{ label: string; criteriaText: string }>;
+  };
+  assert.ok(
+    d.exclusions.some((e) => e.label === "Documented Immunity" && /anti-HBs titer/i.test(e.criteriaText)),
+    "the V017 exclusion is carried through",
+  );
+});
+
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
   const res = await get("/api/measures/audiogram/elm");
   assert.equal(res?.status, 200);

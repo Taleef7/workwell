@@ -9,7 +9,7 @@
  * (the runs/studio pickers default to the first row). `lastUpdated`/`statusUpdatedAt` are
  * a deterministic static seed; `statusUpdatedBy` is the owner.
  */
-import { MEASURE_CATALOG, type CatalogMeasure, type MeasureStatus } from "./measure-catalog.ts";
+import { MEASURE_CATALOG, type CatalogMeasure, type MeasureStatus, type MeasureSpec } from "./measure-catalog.ts";
 
 export interface Measure {
   id: string;
@@ -77,3 +77,85 @@ export function listCatalog(opts: { status?: string | null; search?: string | nu
 
 /** Whether a string is a recognized lifecycle status (for validation/UX). */
 export const isMeasureStatus = (s: string): s is MeasureStatus => STATUSES.has(s as MeasureStatus);
+
+/** Look up a catalog measure by id (the detail/versions routes resolve through this). */
+export const findMeasure = (id: string): CatalogMeasure | undefined => MEASURE_CATALOG.find((m) => m.id === id);
+
+// ---- detail + version history (#107 measures module) ------------------------
+export interface MeasureDetail {
+  id: string;
+  name: string;
+  policyRef: string;
+  oshaReferenceId: string | null;
+  version: string;
+  status: string;
+  owner: string;
+  description: string;
+  eligibilityCriteria: MeasureSpec["eligibilityCriteria"];
+  exclusions: MeasureSpec["exclusions"];
+  complianceWindow: string;
+  requiredDataElements: string[];
+  cqlText: string;
+  compileStatus: string;
+  valueSets: unknown[];
+  testFixtures: unknown[];
+}
+
+export interface VersionHistoryItem {
+  id: string;
+  version: string;
+  status: string;
+  author: string;
+  createdAt: string;
+  changeSummary: string;
+}
+
+/**
+ * Build the Studio `MeasureDetail` from the catalog (spec) + the measure's CQL (reconstructed
+ * from ELM by the caller for runnable measures; "" otherwise). osha_references aren't ported,
+ * so oshaReferenceId is null; valueSets/testFixtures are [] until the value-set governance
+ * surface lands (a separate module). Matches the Java MeasureService.getMeasure field shape.
+ */
+export function toMeasureDetail(m: CatalogMeasure, cqlText: string): MeasureDetail {
+  return {
+    id: m.id,
+    name: m.name,
+    policyRef: m.policyRef,
+    oshaReferenceId: null,
+    version: m.version,
+    status: m.status,
+    owner: m.owner,
+    description: m.spec.description,
+    eligibilityCriteria: m.spec.eligibilityCriteria,
+    exclusions: m.spec.exclusions,
+    complianceWindow: m.spec.complianceWindow,
+    requiredDataElements: m.spec.requiredDataElements,
+    cqlText,
+    compileStatus: m.compileStatus,
+    valueSets: [],
+    testFixtures: [],
+  };
+}
+
+/**
+ * Stable static version id for a measure version — distinct from the measure slug, since the
+ * Studio uses the version id (not the measure id) to scope `/api/auditor/measure-versions/:id`
+ * + MAT-export actions. Until a persisted measures store mints real `measure_versions.id`
+ * UUIDs, this `<measureId>-<version>` form keeps those actions version-scoped (not a measure-id
+ * masquerade) and forward-compatible.
+ */
+export const measureVersionId = (m: CatalogMeasure): string => `${m.id}-${m.version}`;
+
+/** Version history for a measure — the static catalog carries one version per measure. */
+export function toVersionHistory(m: CatalogMeasure): VersionHistoryItem[] {
+  return [
+    {
+      id: measureVersionId(m),
+      version: m.version,
+      status: m.status,
+      author: m.owner,
+      createdAt: TIER[m.status],
+      changeSummary: "Seeded measure version",
+    },
+  ];
+}
