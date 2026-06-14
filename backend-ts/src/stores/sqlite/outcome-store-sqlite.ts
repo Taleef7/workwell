@@ -11,6 +11,7 @@ import type {
   OutcomeWithRun,
   OutcomeMeasureFilter,
   MeasureOutcomeRow,
+  EmployeeOutcomeRow,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -70,6 +71,23 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(runId)
       .all<OutcomeRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT measure_id, status, evaluation_period, evaluated_at, evidence_json
+           FROM outcomes WHERE subject_id = ? ORDER BY evaluated_at DESC LIMIT ?`,
+      )
+      .bind(subjectId, Math.max(1, limit))
+      .all<{ measure_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
+    return (results ?? []).map((r) => ({
+      measureId: r.measure_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at,
+      evidence: JSON.parse(r.evidence_json),
+    }));
   }
 
   async listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]> {
