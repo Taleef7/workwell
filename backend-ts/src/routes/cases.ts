@@ -164,7 +164,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if (from) rows = rows.filter((c) => day(c.createdAt) >= day(from));
   if (to) rows = rows.filter((c) => day(c.createdAt) <= day(to));
 
-  let summaries: CaseSummary[] = rows.map(toCaseSummary);
+  // outreachRecordCount per case (derived from OUTREACH_SENT actions) — drives the
+  // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.
+  const counts = await new SqliteCaseEventStore(env.DB).outreachSentCounts(rows.map((c) => c.id));
+  let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0));
   if (site) summaries = summaries.filter((c) => c.site === site);
   if (search) {
     summaries = summaries.filter(

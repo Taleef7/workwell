@@ -249,3 +249,15 @@ test("delivery update with an invalid status → 400", async () => {
 test("POST outreach for an unknown case → 404", async () => {
   assert.equal((await post(`/api/cases/${crypto.randomUUID()}/actions/outreach`))?.status, 404);
 });
+
+test("worklist exposes outreachRecordCount; a sent case is no longer a gap (badge parity)", async () => {
+  // Omar's case had outreach sent in an earlier test → count > 0; others stay 0.
+  const rows = (await get("?status=open").then((r) => r!.json())) as Array<{
+    employeeName: string;
+    outreachRecordCount: number;
+  }>;
+  const omar = rows.find((r) => r.employeeName === "Omar Siddiq")!;
+  assert.ok(omar.outreachRecordCount >= 1, "sent case reflects the outreach send");
+  const missing = rows.find((r) => r.employeeName !== "Omar Siddiq");
+  if (missing) assert.equal(missing.outreachRecordCount, 0, "un-contacted case is a gap (0)");
+});

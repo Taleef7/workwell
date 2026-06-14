@@ -77,6 +77,22 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return (row?.n ?? 0) > 0;
   }
 
+  async outreachSentCounts(caseIds: string[]): Promise<Record<string, number>> {
+    if (caseIds.length === 0) return {};
+    const placeholders = caseIds.map(() => "?").join(", ");
+    const { results } = await this.db
+      .prepare(
+        `SELECT case_id, COUNT(*) AS n FROM case_actions
+          WHERE action_type = 'OUTREACH_SENT' AND case_id IN (${placeholders})
+          GROUP BY case_id`,
+      )
+      .bind(...caseIds)
+      .all<{ case_id: string; n: number }>();
+    const out: Record<string, number> = {};
+    for (const r of results ?? []) out[r.case_id] = Number(r.n);
+    return out;
+  }
+
   async latestOutreachDeliveryStatus(caseId: string): Promise<string | null> {
     const row = await this.db
       .prepare(

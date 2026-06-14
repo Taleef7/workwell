@@ -31,6 +31,12 @@ export interface CaseSummary {
   updatedAt: string;
   slaRemainingDays: number | null;
   slaBreached: boolean;
+  /**
+   * Number of outreach sends recorded for this case (Java counts `outreach_records`;
+   * the TS port derives it from the `OUTREACH_SENT` case_actions). The frontend
+   * worklist-gap badge counts open cases with `outreachRecordCount === 0`.
+   */
+  outreachRecordCount: number;
 }
 
 function measureVersion(measureId: string): string {
@@ -39,7 +45,7 @@ function measureVersion(measureId: string): string {
   return dash >= 0 ? lib.slice(dash + 1) : "";
 }
 
-export function toCaseSummary(c: CaseRecord): CaseSummary {
+export function toCaseSummary(c: CaseRecord, outreachRecordCount = 0): CaseSummary {
   const emp = employeeById(c.employeeId);
   return {
     caseId: c.id,
@@ -61,5 +67,6 @@ export function toCaseSummary(c: CaseRecord): CaseSummary {
     updatedAt: c.updatedAt,
     slaRemainingDays: null,
     slaBreached: false,
+    outreachRecordCount,
   };
 }

@@ -79,6 +79,19 @@ export class PgCaseEventStore implements CaseEventStore {
     return Number(rows[0]?.n ?? 0) > 0;
   }
 
+  async outreachSentCounts(caseIds: string[]): Promise<Record<string, number>> {
+    if (caseIds.length === 0) return {};
+    const { rows } = await this.pool.query<{ case_id: string; n: string }>(
+      `SELECT case_id, COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions
+        WHERE action_type = 'OUTREACH_SENT' AND case_id = ANY($1::uuid[])
+        GROUP BY case_id`,
+      [caseIds],
+    );
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.case_id] = Number(r.n);
+    return out;
+  }
+
   async latestOutreachDeliveryStatus(caseId: string): Promise<string | null> {
     const { rows } = await this.pool.query<{ delivery_status: string | null }>(
       `SELECT payload_json ->> 'deliveryStatus' AS delivery_status
