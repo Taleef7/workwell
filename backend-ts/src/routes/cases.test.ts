@@ -57,6 +57,25 @@ test("status=excluded selects EXCLUDED; site and search filters apply", async ()
   assert.deepEqual(search.map((r) => r.measureName), ["HAZWOPER Surveillance"]);
 });
 
+test("missing status defaults to OPEN (not all); status=all is the unfiltered view", async () => {
+  const def = (await get().then((r) => r!.json())) as Array<{ status: string }>;
+  assert.equal(def.length, 2, "default worklist shows only OPEN cases");
+  assert.ok(def.every((c) => c.status === "OPEN"));
+  const all = (await get("?status=all").then((r) => r!.json())) as unknown[];
+  assert.equal(all.length, 3, "status=all includes the EXCLUDED case");
+});
+
+test("assignee=unassigned matches the NULL-assignee cases", async () => {
+  assert.equal(((await get("?status=open&assignee=unassigned").then((r) => r!.json())) as unknown[]).length, 2);
+  assert.equal(((await get("?status=open&assignee=someone@workwell.dev").then((r) => r!.json())) as unknown[]).length, 0);
+});
+
+test("from/to filter by case creation day (inclusive)", async () => {
+  assert.equal(((await get("?status=open&from=2999-01-01").then((r) => r!.json())) as unknown[]).length, 0, "future from → none");
+  assert.equal(((await get("?status=open&to=2000-01-01").then((r) => r!.json())) as unknown[]).length, 0, "past to → none");
+  assert.equal(((await get("?status=open&from=2000-01-01&to=2999-12-31").then((r) => r!.json())) as unknown[]).length, 2, "wide range → all open");
+});
+
 test("paging via limit/offset", async () => {
   assert.equal(((await get("?status=open&limit=1&offset=0").then((r) => r!.json())) as unknown[]).length, 1);
   assert.equal(((await get("?status=open&limit=1&offset=2").then((r) => r!.json())) as unknown[]).length, 0);
