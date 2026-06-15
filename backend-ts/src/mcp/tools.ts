@@ -18,6 +18,7 @@ import { toCaseSummary } from "../case/case-read-models.ts";
 import { toRunSummary, toRunListItem } from "../run/read-models.ts";
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
+import { computeDataReadiness } from "../measure/data-readiness.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -411,8 +412,20 @@ async function getMeasureTraceability(args: JsonRecord, deps: McpToolDeps): Prom
   return generateTraceability(rec);
 }
 
-async function listDataQualityGaps(): Promise<unknown> {
-  return safeError("NOT_IMPLEMENTED", "Data quality gaps (data readiness) is not yet available on the TypeScript backend.");
+async function listDataQualityGaps(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
+  if (!(args.measureId != null && String(args.measureId).trim()) && !(args.measureName != null && String(args.measureName).trim())) {
+    return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
+  }
+  const rec = await resolveMeasure(deps, args);
+  if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
+  const readiness = await computeDataReadiness({ outcomes: deps.outcomeStore }, rec);
+  return {
+    measureId: rec.measureId,
+    overallStatus: readiness.overallStatus,
+    blockers: readiness.blockers,
+    warnings: readiness.warnings,
+    elementReadiness: readiness.requiredElements,
+  };
 }
 
 // ---- registry ----------------------------------------------------------------

@@ -39,6 +39,8 @@ import {
 } from "../measure/measure-authoring.ts";
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
+import { computeDataReadiness } from "../measure/data-readiness.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
 
 interface MeasuresEnv {
@@ -233,6 +235,14 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (traceId && req.method === "GET") {
     const r = await (await store(env)).getLatest(traceId);
     return r ? json(generateTraceability(r)) : json({ error: "not_found", measureId: traceId }, 404);
+  }
+
+  // Data readiness: required-element source mapping + freshness + missingness gaps.
+  const readyId = pathname.match(/^\/api\/measures\/([^/]+)\/data-readiness$/)?.[1];
+  if (readyId && req.method === "GET") {
+    const r = await (await store(env)).getLatest(readyId);
+    if (!r) return json({ error: "not_found", measureId: readyId }, 404);
+    return json(await computeDataReadiness({ outcomes: new SqliteOutcomeStore(env.DB) }, r));
   }
 
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];

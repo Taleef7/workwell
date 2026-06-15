@@ -390,3 +390,14 @@ test("GET /api/measures/:id/traceability returns rows + gaps; unknown → 404", 
   assert.ok(Array.isArray(t.gaps));
   assert.equal((await get("/api/measures/does-not-exist/traceability"))?.status, 404);
 });
+
+test("GET /api/measures/:id/data-readiness returns element readiness + overall status; unknown → 404", async () => {
+  const res = await get("/api/measures/audiogram/data-readiness");
+  assert.equal(res?.status, 200);
+  const r = (await res!.json()) as { overallStatus: string; requiredElements: Array<{ canonicalElement: string; mappingStatus: string }>; blockers: string[]; warnings: string[] };
+  assert.ok(["READY", "READY_WITH_WARNINGS", "NOT_READY"].includes(r.overallStatus));
+  assert.ok(r.requiredElements.length >= 1);
+  // audiogram's "Last audiogram date" resolves to the seeded procedure.audiogram mapping (MAPPED)
+  assert.ok(r.requiredElements.some((e) => e.canonicalElement === "procedure.audiogram" && e.mappingStatus === "MAPPED"));
+  assert.equal((await get("/api/measures/does-not-exist/data-readiness"))?.status, 404);
+});
