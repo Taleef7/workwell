@@ -133,7 +133,9 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     }
     const cqlId = pathname.match(/^\/api\/measures\/([^/]+)\/cql$/)?.[1];
     if (cqlId) {
-      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: string }).cqlText ?? "";
+      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
+      if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
+      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const ok = await updateMeasureCql(await lifecycleDeps(env), cqlId, cqlText, actor);
       return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: cqlId }, 404);
     }
@@ -151,7 +153,9 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     // Save CQL + compile (persists compile_status, returns the CompileResponse).
     const compileId = pathname.match(/^\/api\/measures\/([^/]+)\/cql\/compile$/)?.[1];
     if (compileId) {
-      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: string }).cqlText ?? "";
+      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
+      if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
+      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const res = await compileMeasureCql(await lifecycleDeps(env), compileId, cqlText, actor);
       return res ? json(res) : json({ error: "not_found", measureId: compileId }, 404);
     }

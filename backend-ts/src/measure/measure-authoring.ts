@@ -74,9 +74,13 @@ export async function updateMeasureSpec(deps: MeasureAuthoringDeps, measureId: s
   return true;
 }
 
-/** PUT /api/measures/:id/cql — replace the CQL text (no compile). */
+/**
+ * PUT /api/measures/:id/cql — replace the CQL text (no compile). Resets compile_status to
+ * NOT_COMPILED: the CQL just changed, so any prior COMPILED/WARNINGS is stale and must not let
+ * the approval/activation gate pass on uncompiled text (the author must re-run compile).
+ */
 export async function updateMeasureCql(deps: MeasureAuthoringDeps, measureId: string, cqlText: string, actor: string): Promise<boolean> {
-  const updated = await deps.measures.updateCql(measureId, cqlText);
+  const updated = await deps.measures.updateCql(measureId, cqlText, "NOT_COMPILED");
   if (!updated) return false;
   await auditDraftSaved(deps, updated, actor, { field: "cql", measureId });
   return true;
@@ -96,8 +100,13 @@ export function toCompileResponse(cqlText: string): CompileResponse {
   return { status, warnings, errors };
 }
 
-/** POST /api/measures/:id/cql/compile — save the CQL, compile it, persist compile_status, return the result. */
+/**
+ * POST /api/measures/:id/cql/compile — save the CQL, compile it, persist compile_status, return
+ * the result. Verifies the measure exists BEFORE compiling so an unknown id can't burn the
+ * translator (the route also enforces the byte cap before calling this).
+ */
 export async function compileMeasureCql(deps: MeasureAuthoringDeps, measureId: string, cqlText: string, actor: string): Promise<CompileResponse | null> {
+  if (!(await deps.measures.getLatest(measureId))) return null;
   const response = toCompileResponse(cqlText);
   const updated = await deps.measures.updateCql(measureId, cqlText, response.status);
   if (!updated) return null;
