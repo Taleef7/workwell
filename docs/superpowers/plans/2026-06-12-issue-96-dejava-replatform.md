@@ -256,8 +256,10 @@ contracts; per-PR JOURNAL entries carry the detail):
     schema), `MEASURE_VERSION_DRAFT_SAVED` audits, translator→`CompileResponse` mapping. **Traceability ✅**
     + **data-readiness ✅** (`GET /:id/traceability`, `GET /:id/data-readiness` + both MCP tools real, ports
     of `MeasureTraceabilityService`/`DataReadinessService`; data-mappings seeded faithfully from V012 as a
-    static constant — no migration; `POST /api/admin/data-mappings/validate` added).
-    Pending: impact-preview (eval-heavy), value-set governance (needs `value_sets` table), version cloning, MAT export.
+    static constant — no migration; `POST /api/admin/data-mappings/validate` added) + **impact-preview ✅**
+    (`POST /:id/impact-preview` dry-run: population eval w/o persistence + case-impact estimate + breakdowns,
+    port of `MeasureImpactPreviewService`). **Measure analytics trio complete.**
+    Pending: value-set governance (needs `value_sets` table), version cloning, MAT export.
   - `programs` — **complete** ✅: overview + sites, trend + top-drivers, risk-outlook (`/:id/risk-outlook`,
     upcoming due-soon + repeat non-compliers + per-site predicted compliance). Added the canonical
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
@@ -272,5 +274,5 @@ contracts; per-PR JOURNAL entries carry the detail):
   **both real** (traceability + data-readiness ports) — **all 13 MCP tools implemented**. **#108 complete.**
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~325 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~330 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

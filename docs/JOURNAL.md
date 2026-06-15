@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-06-15 — Issue #96 Phase 4b (#108): measure activation impact preview (analytics trio complete)
+
+Branch `feat/issue-96-impact-preview` (off `main`). Ported `MeasureImpactPreviewService.preview` — the Studio activation **dry-run**: `POST /api/measures/:id/impact-preview`. With traceability + data-readiness already merged, this **completes the measure-analytics trio**. *(backend-ts only. No new schema.)*
+
+- **`measure/impact-preview.ts`** — `previewImpact(deps, measure, req, actor)`: evaluates the measure across the population through the **same** synthetic eval path as the run pipeline (seeded distribution → exam config → FHIR bundle → JVM-free engine) **without persisting** outcomes/cases, then estimates how a real activation run would change open cases for that evaluation period — `wouldCreate` (non-compliant, no open case) / `wouldUpdate` (non-compliant, has open case) / `wouldClose` (COMPLIANT, has case) / `wouldExclude` (EXCLUDED, has case) — plus per-site/per-role outcome breakdowns. Scope filter (site/employee) with an empty-match warning; MISSING_DATA warning; writes a `MEASURE_IMPACT_PREVIEWED` audit (`dryRun: true`). Invalid `evaluationDate` → typed 400; a non-runnable measure → empty preview + warning (Java parity). Eval-heavy (~one measure × population) but synchronous like Java — a single measure stays under the request timeout.
+- **`routes/measures.ts`** — `POST /api/measures/:id/impact-preview` (404 unknown, 400 bad date), AUTHOR/ADMIN-gated by the existing matrix.
+
+**backend-ts ~330 tests — all pass / 0 fail; typecheck clean.** New coverage: dry-run preview (counts sum to population, site/role breakdowns, **no run/outcome persisted**, audit actor + dryRun), case-impact create-vs-update (seed an open case → subject flips from wouldCreate to wouldUpdate), scope filter + empty-match warning, invalid-date 400, non-runnable empty preview; route 200/404/400. Frontend `/studio/[id]` impact-preview panel now served. **Measure analytics (traceability + data-readiness + impact-preview) all done.** Next: auditor packets (run/measure-version now unblocked), evidence upload/download, value-set governance, MAT export, admin write CRUD.
+
+---
+
 ## 2026-06-15 — Issue #96 Phase 4b (#108): data readiness + list_data_quality_gaps MCP tool (last NOT_IMPLEMENTED flipped)
 
 Branch `feat/issue-96-data-readiness` (off `main`). Ported `DataReadinessService.computeReadiness` + `validateMappings`, flipping the **second/last** NOT_IMPLEMENTED MCP tool — so all 13 MCP tools are now real. *(backend-ts only.)* **No migration needed** — the `data_element_mappings`/`integration_sources` data is read-only reference seed (V012), modeled as a static constant like the other admin seeds.
