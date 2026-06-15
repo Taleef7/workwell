@@ -85,8 +85,9 @@ test("static reads: terminology + data mappings + outreach templates + preview",
   assert.equal(tm.filter((m) => m.mappingStatus === "APPROVED").length, 3);
   assert.ok(((await body("/api/admin/data-mappings")) as unknown[]).length >= 3);
   const templates = (await body("/api/admin/outreach-templates")) as Array<{ id: string; subject: string; type: string }>;
-  assert.equal(templates.length, 4, "V007 demo templates seeded");
+  assert.equal(templates.length, 5, "V007 + V008 demo templates seeded");
   assert.ok(templates.some((t) => t.id === "11111111-0000-0000-0000-000000000001"));
+  assert.ok(templates.some((t) => t.id === "11111111-0000-0000-0000-000000000005"), "V008 Missing Data Follow-Up seeded");
   const preview = (await body("/api/admin/outreach-templates/11111111-0000-0000-0000-000000000001/preview")) as { subject: string };
   assert.match(preview.subject, /Overdue Audiogram/);
   assert.equal((await get("/api/admin/outreach-templates/nope/preview"))?.status, 404);
@@ -137,6 +138,11 @@ test("outreach-templates: create → appears in list (created_by actor); update 
   assert.equal(((await upd!.json()) as { name: string; active: boolean }).name, "New Tpl v2");
   const after = (await body("/api/admin/outreach-templates")) as Array<{ id: string }>;
   assert.ok(!after.some((t) => t.id === rec.id), "deactivated template no longer active");
+
+  // every state change writes an audit_event (CLAUDE.md/AGENTS.md): create + update appear in the ledger.
+  const audits = (await body("/api/admin/audit-events?scope=all&limit=50")) as Array<{ eventType: string; actor: string }>;
+  assert.ok(audits.some((a) => a.eventType === "OUTREACH_TEMPLATE_CREATED" && a.actor === "admin@workwell.dev"));
+  assert.ok(audits.some((a) => a.eventType === "OUTREACH_TEMPLATE_UPDATED" && a.actor === "admin@workwell.dev"));
 });
 
 test("outreach-templates: create with missing fields → 400; bad type → 400; update unknown → 404", async () => {

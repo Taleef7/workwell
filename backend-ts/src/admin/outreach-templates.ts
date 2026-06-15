@@ -3,6 +3,7 @@
  * list / preview (with placeholder render) / create / update over the OutreachTemplateStore,
  * plus the V007 demo-template seed. Backs Admin → Outreach Templates.
  */
+import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type {
   OutreachTemplateRecord,
   OutreachTemplateStore,
@@ -10,7 +11,23 @@ import type {
 
 export class OutreachTemplateError extends Error {}
 
-/** The 4 demo templates from V007 (fixed ids so the seed is idempotent). */
+/** Audit sink for template writes (CLAUDE.md/AGENTS.md: every state change writes audit_event). */
+type TemplateAudit = Pick<CaseEventStore, "appendAudit">;
+
+async function auditTemplate(events: TemplateAudit, eventType: string, t: OutreachTemplateRecord, actor: string): Promise<void> {
+  await events.appendAudit({
+    eventType,
+    entityType: "outreach_template",
+    entityId: t.id,
+    actor,
+    refRunId: null,
+    refCaseId: null,
+    refMeasureVersionId: null,
+    payload: { templateId: t.id, name: t.name, type: t.type, active: t.active },
+  });
+}
+
+/** The demo templates from V007 + V008 (fixed ids so the seed is idempotent). */
 const DEMO_TEMPLATES = [
   {
     id: "11111111-0000-0000-0000-000000000001",
@@ -39,6 +56,14 @@ const DEMO_TEMPLATES = [
     subject: "Appointment Scheduled: Occupational Health Follow-up",
     bodyText: "Your appointment has been scheduled. Please arrive on time and bring any required documentation.",
     type: "APPOINTMENT_REMINDER",
+  },
+  {
+    // V008 — selected for MISSING_DATA auto-notifications on the Java side.
+    id: "11111111-0000-0000-0000-000000000005",
+    name: "Missing Data Follow-Up",
+    subject: "Action Needed: Missing Occupational Health Documentation",
+    bodyText: "We could not complete your occupational health review because documentation is missing. Please provide the required records or contact the clinic for assistance.",
+    type: "OUTREACH",
   },
 ] as const;
 
@@ -94,13 +119,14 @@ export interface CreateTemplateRequest {
 
 export async function createTemplate(
   store: OutreachTemplateStore,
+  events: TemplateAudit,
   req: CreateTemplateRequest,
   actor: string,
 ): Promise<OutreachTemplateRecord> {
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
   }
-  return store.create({
+  const created = await store.create({
     id: crypto.randomUUID(),
     name: req.name.trim(),
     subject: req.subject.trim(),
@@ -108,6 +134,8 @@ export async function createTemplate(
     type: normalizeType(req.type),
     createdBy: actor,
   });
+  await auditTemplate(events, "OUTREACH_TEMPLATE_CREATED", created, actor);
+  return created;
 }
 
 export interface UpdateTemplateRequest {
@@ -120,17 +148,21 @@ export interface UpdateTemplateRequest {
 
 export async function updateTemplate(
   store: OutreachTemplateStore,
+  events: TemplateAudit,
   id: string,
   req: UpdateTemplateRequest,
+  actor: string,
 ): Promise<OutreachTemplateRecord | null> {
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
   }
-  return store.update(id, {
+  const updated = await store.update(id, {
     name: req.name.trim(),
     subject: req.subject.trim(),
     bodyText: req.bodyText.trim(),
     type: normalizeType(req.type),
     active: req.active,
   });
+  if (updated) await auditTemplate(events, "OUTREACH_TEMPLATE_UPDATED", updated, actor);
+  return updated;
 }

@@ -11,6 +11,8 @@ Branch `feat/issue-96-admin-write-crud` (off `main`). Ported `OutreachTemplateSe
 
 **backend-ts 359 tests — all pass / 0 fail (1 PG suite skipped without local Docker); typecheck clean.** New coverage: the store contract (seed idempotency, active-only list ordering, create + update + deactivate, unknown→null, on floor + ceiling) and the admin route suite (template create→list→preview-render→update-deactivate, create 400 [missing fields + bad type], update 404, demo-reset clears the ledger + 403 under prod). Frontend Admin → Outreach Templates (create/edit) + Demo Reset now served end-to-end. **Remaining before deploy cutover (#109): waivers (list + grant).**
 
+**Codex P2 fixes (same PR):** (1) **template writes now audited** — create/update append `OUTREACH_TEMPLATE_CREATED`/`UPDATED` audit_events (CLAUDE.md/AGENTS.md "every state change writes audit_event"; the Java service omitted these — fixed in the port). (2) **demo-reset uses the shared production-like detection** (`isProductionLike` from `config/startup-safety.ts`) so `WORKWELL_ENVIRONMENT=production` / `NODE_ENV=production` also 403 it, not just the Spring profile. (3) **V008 `Missing Data Follow-Up` template added** to the demo seed (5 templates total) — the canonical MISSING_DATA notification template, previously missing.
+
 ---
 
 ## 2026-06-15 — Issue #96 Phase 4b (#108): value-set governance (registry + links + resolve-check/diff/detail + terminology)
