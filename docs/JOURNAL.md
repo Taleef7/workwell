@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-15 — Issue #96 Phase 4b (#108): evidence + appointments + CASE auditor packet
+
+Branch `feat/issue-96-evidence-appointments` (off `main`). Ported the case-detail completeness trio — `EvidenceService`, `CaseFlowService.scheduleAppointment`/`listAppointments`, and `resolveCase` — and used them to light up the **CASE** auditor packet (deferred in #144). *(backend-ts only. Floor+ceiling DDL adds `evidence_attachments` + `scheduled_appointments`, mirroring canonical Flyway V006/V005; the V005 `outreach_records` side is intentionally not modeled — TS represents outreach as `case_actions`.)*
+
+- **`case/evidence-service.ts`** — `uploadEvidence`/`listEvidence`/`downloadEvidence`. Content type is detected from **magic bytes** (PNG/JPEG/PDF signatures ported exactly; ZIP+`.xlsx`→xlsx; UTF-8-decodes → text/csv|text/plain), never the client header; 10MB cap + allow-list (415 otherwise). Bytes live in the **BUCKET** binding (R2/fs) under `<caseId>/<evidenceId>-<safeName>`; metadata in the new `EvidenceStore`. Every upload/download writes an audit event. No Apache Tika (the Java text/csv/xlsx detector) — the signature+extension heuristic is the JVM-free analogue; a spoofed extension on binary content is still caught.
+- **`case/appointment-service.ts`** — `scheduleAppointment` writes the appointment + an atomic `SCHEDULE_APPOINTMENT` action / `APPOINTMENT_SCHEDULED` audit, moves an OPEN case to IN_PROGRESS, returns the refreshed CaseDetail; `listAppointments`. **`case/case-actions.ts`** — added `resolveCase` (manual CLOSE, required note, OPEN/IN_PROGRESS only → `CASE_MANUALLY_CLOSED`).
+- **stores** — new `EvidenceStore` + `AppointmentStore` contracts + SQLite-floor and Postgres-ceiling adapters, exercised by the shared store-contract suite.
+- **`routes/cases.ts`** — `POST /api/cases/:id/evidence` (multipart), `GET /api/cases/:id/evidence`, `GET /api/evidence/:id/download` (inline for images, else attachment), `POST /api/cases/:id/actions` (RESOLVE + SCHEDULE_APPOINTMENT), `GET /api/cases/:id/appointments`. Env widened with the BUCKET binding. RESOLVE was previously unported (501) — the frontend's resolve button now works.
+- **`audit/audit-packet.ts` + `routes/auditor.ts`** — `buildCasePacket` + `GET /api/auditor/cases/:id/packet` (CM/ADMIN gate already added in #144): case/employee/measure/decisionEvidence sections, the timeline partitioned into actions/auditEvents/aiAssistance, outreach (from case_actions), appointments, and evidence **attachments by metadata only** (CASE_DISCLAIMERS note that raw bytes are excluded).
+
+**backend-ts 330 tests — all pass / 0 fail (1 PG suite skipped without local Docker); typecheck clean.** New coverage: evidence MIME detection + sanitizeFileName unit; evidence upload(415)/list/download(inline); appointment schedule(OPEN→IN_PROGRESS)/list/validation; RESOLVE close + note-required + already-closed; CASE packet sections (appointments + attachments + disclaimers); EvidenceStore + AppointmentStore contracts on floor + ceiling. Frontend case-detail evidence/appointments/resolve + the CASE packet download now served. Next: value-set governance, admin write CRUD, then Phase 5 cutover.
+
+---
+
 ## 2026-06-15 — Issue #96 Phase 4b (#108): MAT-compatible FHIR R4 export
 
 Branch `feat/issue-96-mat-export` (off `main`). Ported `MeasureExportService.exportAsMatBundle` — the `GET /api/measures/:id/versions/:vid/export/mat` measure-portability download. *(backend-ts only. No new schema.)*

@@ -20,6 +20,9 @@ import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 
 const ESCALATION_NEXT_ACTION = "Escalated to supervisor queue for immediate handling.";
 
+/** 400 — an action precondition failed (e.g. resolving a non-open case, missing closure note). */
+export class CaseActionError extends Error {}
+
 export interface CaseActionDeps {
   cases: CaseStore;
   events: CaseEventStore;
@@ -93,5 +96,61 @@ export async function escalateCase(deps: CaseActionDeps, caseId: string, actor: 
     },
   });
   await deps.cases.patchCase(caseId, { priority: "HIGH", status: "OPEN", nextAction: ESCALATION_NEXT_ACTION });
+  return buildDetail(deps, caseId);
+}
+
+const MANUAL_RESOLVE_NEXT_ACTION = "Manually resolved by case manager/admin.";
+
+/**
+ * Manually resolve (CLOSE) an OPEN/IN_PROGRESS case with a required closure note. Throws
+ * CaseActionError (→ 400) on a bad state/note; returns null when the case is unknown (→ 404).
+ */
+export async function resolveCase(
+  deps: CaseActionDeps,
+  caseId: string,
+  note: string | null,
+  resolvedAt: string | null,
+  actor: string,
+): Promise<CaseDetail | null> {
+  const existing = await deps.cases.getCase(caseId);
+  if (!existing) return null;
+  if (existing.status !== "OPEN" && existing.status !== "IN_PROGRESS") {
+    throw new CaseActionError("Only OPEN or IN_PROGRESS cases can be manually resolved");
+  }
+  const trimmedNote = (note ?? "").trim();
+  if (trimmedNote === "") throw new CaseActionError("Closure note is required");
+
+  // resolvedAt is optional, but if a client supplies one it must parse — a typo must 400, not
+  // silently record the current time as the closure timestamp (mirrors SCHEDULE_APPOINTMENT).
+  let effectiveResolvedAt: string;
+  if (resolvedAt !== null && resolvedAt.trim() !== "") {
+    const parsed = new Date(resolvedAt);
+    if (Number.isNaN(parsed.getTime())) throw new CaseActionError("resolvedAt is not a valid timestamp");
+    effectiveResolvedAt = parsed.toISOString();
+  } else {
+    effectiveResolvedAt = new Date().toISOString();
+  }
+
+  const payload = { note: trimmedNote, resolvedAt: effectiveResolvedAt, resolvedBy: actor, closedReason: "MANUAL_RESOLVE" };
+  await deps.events.recordCaseEvent({
+    action: { caseId, actionType: "RESOLVE", actor, payload: { type: "RESOLVE", ...payload } },
+    audit: {
+      eventType: "CASE_MANUALLY_CLOSED",
+      entityType: "case",
+      entityId: caseId,
+      actor,
+      refRunId: existing.lastRunId,
+      refCaseId: caseId,
+      refMeasureVersionId: existing.measureId,
+      payload: { caseId, ...payload },
+    },
+  });
+  await deps.cases.patchCase(caseId, {
+    status: "CLOSED",
+    nextAction: MANUAL_RESOLVE_NEXT_ACTION,
+    closedAt: effectiveResolvedAt,
+    closedReason: "MANUAL_RESOLVE",
+    closedBy: actor,
+  });
   return buildDetail(deps, caseId);
 }

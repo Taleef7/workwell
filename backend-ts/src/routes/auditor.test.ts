@@ -16,6 +16,8 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteEvidenceStore } from "../stores/sqlite/evidence-store-sqlite.ts";
+import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlite.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { handleAuditor } from "./auditor.ts";
 
@@ -141,6 +143,63 @@ test("GET /api/auditor/measure-versions/:id/packet → MEASURE_VERSION packet", 
   assert.ok(p.dataReadiness && typeof p.dataReadiness.overallStatus === "string", "data-readiness section present");
   assert.ok(p.approvalHistory.some((e: { eventType: string }) => e.eventType === "MEASURE_APPROVED"), "approval history filtered");
   assert.ok(Array.isArray(p.disclaimers) && p.disclaimers.length === 4);
+});
+
+test("GET /api/auditor/cases/:id/packet → CASE packet with appointments + attachments + sections", async () => {
+  // Seed a case + an appointment + an evidence row so the packet sections are populated.
+  const db = (env as { DB: never }).DB;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const c = (await new SqliteCaseStore(db).upsertFromOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  }))!;
+  await new SqliteAppointmentStore(db).insert({
+    id: crypto.randomUUID(),
+    caseId: c.id,
+    employeeId: "emp-006",
+    measureId: "audiogram",
+    appointmentType: "AUDIOGRAM",
+    scheduledAt: "2026-07-01T15:00:00.000Z",
+    location: "Plant A Clinic",
+    status: "PENDING",
+    notes: null,
+    createdBy: "cm@workwell.dev",
+  });
+  await new SqliteEvidenceStore(db).insert({
+    id: crypto.randomUUID(),
+    caseId: c.id,
+    uploadedBy: "cm@workwell.dev",
+    fileName: "scan.png",
+    fileSizeBytes: 10,
+    mimeType: "image/png",
+    storageKey: `${c.id}/x-scan.png`,
+    description: "audiogram scan",
+  });
+
+  const res = await get(`/api/auditor/cases/${c.id}/packet?format=json`);
+  assert.equal(res?.status, 200);
+  const p = JSON.parse(await res!.text());
+  assert.equal(p.packetType, "CASE");
+  assert.equal(p.case.caseId, c.id);
+  assert.equal(p.employee.externalId, "emp-006");
+  assert.equal(p.measure.name, "Audiogram");
+  assert.ok(p.decisionEvidence && typeof p.decisionEvidence.outcomeStatus === "string", "decision evidence present");
+  assert.equal(p.appointments.length, 1);
+  assert.equal(p.attachments.length, 1);
+  assert.equal(p.attachments[0].filename, "scan.png", "evidence by metadata only");
+  assert.ok(Array.isArray(p.disclaimers) && p.disclaimers.length === 4);
+  // unknown case → 404
+  assert.equal((await get(`/api/auditor/cases/${crypto.randomUUID()}/packet`))?.status, 404);
 });
 
 test("format gate + not-found", async () => {

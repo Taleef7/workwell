@@ -148,4 +148,34 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.audit_packet_exports (
   payload_hash       TEXT,
   payload_size_bytes BIGINT
 );
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.evidence_attachments (
+  id              UUID PRIMARY KEY,
+  case_id         TEXT NOT NULL,
+  uploaded_by     TEXT NOT NULL,
+  file_name       TEXT NOT NULL,
+  file_size_bytes BIGINT NOT NULL,
+  mime_type       TEXT NOT NULL,
+  storage_key     TEXT NOT NULL,
+  description     TEXT,
+  uploaded_at     TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spike_evidence_attachments_case_id_idx ON ${SPIKE_SCHEMA}.evidence_attachments (case_id);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.scheduled_appointments (
+  id               UUID PRIMARY KEY,
+  case_id          TEXT NOT NULL,
+  employee_id      TEXT NOT NULL,
+  measure_id       TEXT NOT NULL,
+  appointment_type TEXT NOT NULL,
+  scheduled_at     TIMESTAMPTZ NOT NULL,
+  location         TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  notes            TEXT,
+  created_by       TEXT NOT NULL,
+  created_at       TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spike_scheduled_appointments_case_id_idx ON ${SPIKE_SCHEMA}.scheduled_appointments (case_id);
 `;

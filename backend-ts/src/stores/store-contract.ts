@@ -14,6 +14,8 @@ import type { OutcomeStore } from "./outcome-store.ts";
 import type { CaseStore } from "./case-store.ts";
 import type { CaseEventStore } from "./case-event-store.ts";
 import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
+import type { EvidenceStore } from "./evidence-store.ts";
+import type { AppointmentStore } from "./appointment-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -609,5 +611,88 @@ export function measureStoreContract(label: string, freshStore: () => Promise<Me
 
     assert.equal(await store.updateSpec("missing", newSpec), null);
     assert.equal(await store.updateCql("missing", "x"), null);
+  });
+}
+
+/** Registers the EvidenceStore contract — metadata insert/list/get (bytes live in the BUCKET). */
+export function evidenceStoreContract(label: string, freshStore: () => Promise<EvidenceStore>): void {
+  test(`[${label}] insert + getById round-trips; listByCase is newest-first; unknown → null`, async () => {
+    const store = await freshStore();
+    const a = await store.insert({
+      id: crypto.randomUUID(),
+      caseId: "case-1",
+      uploadedBy: "cm@x",
+      fileName: "report.pdf",
+      fileSizeBytes: 1234,
+      mimeType: "application/pdf",
+      storageKey: "case-1/a-report.pdf",
+      description: "Q2 audiogram",
+    });
+    assert.equal(a.fileName, "report.pdf");
+    assert.equal(a.fileSizeBytes, 1234);
+    assert.ok(a.uploadedAt, "uploadedAt stamped");
+
+    const back = (await store.getById(a.id))!;
+    assert.equal(back.storageKey, "case-1/a-report.pdf");
+    assert.equal(back.description, "Q2 audiogram");
+    assert.equal(await store.getById(crypto.randomUUID()), null);
+    // A malformed id (e.g. /api/evidence/not-a-uuid/download) must be a clean miss, not a
+    // Postgres uuid-cast error — the ceiling adapter guards with isUuid before the ::uuid cast.
+    assert.equal(await store.getById("not-a-uuid"), null);
+
+    await new Promise((r) => setTimeout(r, 2));
+    const b = await store.insert({
+      id: crypto.randomUUID(),
+      caseId: "case-1",
+      uploadedBy: "cm@x",
+      fileName: "later.png",
+      fileSizeBytes: 9,
+      mimeType: "image/png",
+      storageKey: "case-1/b-later.png",
+      description: null,
+    });
+    const list = await store.listByCase("case-1");
+    assert.equal(list.length, 2);
+    assert.equal(list[0]!.id, b.id, "newest-first (uploaded_at DESC)");
+    assert.deepEqual(await store.listByCase("case-none"), []);
+  });
+}
+
+/** Registers the AppointmentStore contract — insert + newest-first list. */
+export function appointmentStoreContract(label: string, freshStore: () => Promise<AppointmentStore>): void {
+  test(`[${label}] insert round-trips; listByCase is scheduled-at DESC; unknown → []`, async () => {
+    const store = await freshStore();
+    const earlier = await store.insert({
+      id: crypto.randomUUID(),
+      caseId: "case-1",
+      employeeId: "emp-006",
+      measureId: "audiogram",
+      appointmentType: "AUDIOGRAM",
+      scheduledAt: "2026-07-01T15:00:00.000Z",
+      location: "Plant A Clinic",
+      status: "PENDING",
+      notes: "bring earplugs",
+      createdBy: "cm@x",
+    });
+    assert.equal(earlier.status, "PENDING");
+    assert.ok(earlier.createdAt, "createdAt stamped");
+
+    const later = await store.insert({
+      id: crypto.randomUUID(),
+      caseId: "case-1",
+      employeeId: "emp-006",
+      measureId: "audiogram",
+      appointmentType: "AUDIOGRAM",
+      scheduledAt: "2026-08-01T15:00:00.000Z",
+      location: "Plant A Clinic",
+      status: "PENDING",
+      notes: null,
+      createdBy: "cm@x",
+    });
+    const list = await store.listByCase("case-1");
+    assert.equal(list.length, 2);
+    assert.equal(list[0]!.id, later.id, "latest scheduled_at first");
+    assert.equal(list[1]!.id, earlier.id);
+    assert.deepEqual(await store.listByCase("case-none"), []);
   });
 }
