@@ -2,6 +2,11 @@
  * Demo value-set + terminology seed (#108 value-set governance) — port of
  * ValueSetGovernanceService.ensureDemoValueSets + the V013 demo terminology rows.
  *
+ * INVARIANT: each value set's `name` MUST match the `valueset "<name>":` declaration in its
+ * measure's CQL — resolveCheck flags a CQL valueset whose name isn't among the attached sets as
+ * an unattached-reference blocker. (The wellness names here are aligned to the CQL, which fixes a
+ * latent mismatch in the Java seed's longer display names.)
+ *
  * Seeds the 22 demo value sets (the 4 OSHA procedure sets the CQL matches by name, their
  * enrollment/waiver sets, and the wellness sets) with stable ids that mirror the Java UUIDs,
  * then links each to its measure's latest version. Links are keyed by measure SLUG (the TS
@@ -60,12 +65,12 @@ const VALUE_SETS: SeedVs[] = [
   { id: "a0000001-0000-0000-0000-000000000012", oid: "urn:workwell:vs:flu-exemption", name: "Flu Vaccine Exemption", codes: [c("flu-exemption", "Flu Vaccine Exemption", "urn:workwell:vs:flu-exemption")] },
   // wellness sets
   { id: "b0000001-0000-0000-0000-000000000001", oid: "urn:workwell:vs:wellness-enrollment", name: "Wellness Program Enrollment", codes: [c("wellness-enrolled", "Wellness Program Enrollment", "urn:workwell:vs:wellness-enrollment")] },
-  { id: "b0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:wellness-exemption", name: "Wellness Exemption Conditions", codes: [c("wellness-exempt", "Wellness Exemption Conditions", "urn:workwell:vs:wellness-exemption")] },
+  { id: "b0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:wellness-exemption", name: "Wellness Exemption", codes: [c("wellness-exempt", "Wellness Exemption", "urn:workwell:vs:wellness-exemption")] },
   { id: "b0000001-0000-0000-0000-000000000003", oid: "urn:workwell:vs:bp-screening", name: "BP Screening Procedures", codes: [
     c("bp-screen", "Blood Pressure Screening", "urn:workwell:vs:bp-screening"),
     c("99213", "Office visit established patient", CPT),
   ] },
-  { id: "b0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:diabetes-program", name: "Diabetes Management Enrollment", codes: [c("diabetes-enrolled", "Diabetes Management Enrollment", "urn:workwell:vs:diabetes-program")] },
+  { id: "b0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:diabetes-program", name: "Diabetes Program Enrollment", codes: [c("diabetes-enrolled", "Diabetes Program Enrollment", "urn:workwell:vs:diabetes-program")] },
   { id: "b0000001-0000-0000-0000-000000000005", oid: "urn:workwell:vs:diabetes-exemption", name: "Diabetes Program Exemption", codes: [c("diabetes-exempt", "Diabetes Program Exemption", "urn:workwell:vs:diabetes-exemption")] },
   { id: "b0000001-0000-0000-0000-000000000006", oid: "urn:workwell:vs:hba1c-labs", name: "HbA1c Lab Procedures", codes: [
     c("hba1c-lab", "HbA1c Lab", "urn:workwell:vs:hba1c-labs"),
@@ -75,9 +80,9 @@ const VALUE_SETS: SeedVs[] = [
     c("bmi-screen", "BMI Screening", "urn:workwell:vs:bmi-screening"),
     c("99401", "Preventive medicine counseling", CPT),
   ] },
-  { id: "b0000001-0000-0000-0000-000000000008", oid: "urn:workwell:vs:cholesterol-program", name: "Cholesterol Risk Program Enrollment", codes: [c("cholesterol-enrolled", "Cholesterol Risk Program Enrollment", "urn:workwell:vs:cholesterol-program")] },
+  { id: "b0000001-0000-0000-0000-000000000008", oid: "urn:workwell:vs:cholesterol-program", name: "Cholesterol Program Enrollment", codes: [c("cholesterol-enrolled", "Cholesterol Program Enrollment", "urn:workwell:vs:cholesterol-program")] },
   { id: "b0000001-0000-0000-0000-000000000009", oid: "urn:workwell:vs:cholesterol-exemption", name: "Cholesterol Program Exemption", codes: [c("cholesterol-exempt", "Cholesterol Program Exemption", "urn:workwell:vs:cholesterol-exemption")] },
-  { id: "b0000001-0000-0000-0000-000000000010", oid: "urn:workwell:vs:ldl-labs", name: "LDL Cholesterol Lab Procedures", codes: [
+  { id: "b0000001-0000-0000-0000-000000000010", oid: "urn:workwell:vs:ldl-labs", name: "LDL Lab Procedures", codes: [
     c("ldl-lab", "LDL Cholesterol Lab", "urn:workwell:vs:ldl-labs"),
     c("83721", "LDL cholesterol direct measurement", CPT),
   ] },

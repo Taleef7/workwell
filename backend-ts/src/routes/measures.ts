@@ -212,7 +212,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const attach = pathname.match(/^\/api\/measures\/([^/]+)\/value-sets\/([^/]+)$/);
     if (attach) {
       try {
-        await attachValueSet(await governanceDeps(env), attach[1]!, attach[2]!);
+        await attachValueSet(await governanceDeps(env), attach[1]!, attach[2]!, actor);
         return json({ status: "linked" });
       } catch (err) {
         if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
@@ -292,7 +292,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const detach = pathname.match(/^\/api\/measures\/([^/]+)\/value-sets\/([^/]+)$/);
     if (detach) {
       try {
-        await detachValueSet(await governanceDeps(env), detach[1]!, detach[2]!);
+        await detachValueSet(await governanceDeps(env), detach[1]!, detach[2]!, actor);
         return json({ status: "unlinked" });
       } catch (err) {
         if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);

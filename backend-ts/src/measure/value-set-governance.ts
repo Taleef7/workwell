@@ -133,24 +133,24 @@ export async function createValueSet(store: ValueSetStore, oid: string, name: st
   return store.create(oid, name, version);
 }
 
-export async function attachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string): Promise<void> {
+export async function attachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string, actor = "system"): Promise<void> {
   const versionId = await latestVersionId(deps, measureId);
   await deps.valueSets.link(versionId, valueSetId);
-  await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_LINKED", versionId, measureId, valueSetId));
+  await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_LINKED", versionId, measureId, valueSetId, actor));
 }
 
-export async function detachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string): Promise<void> {
+export async function detachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string, actor = "system"): Promise<void> {
   const versionId = await latestVersionId(deps, measureId);
   await deps.valueSets.unlink(versionId, valueSetId);
-  await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_UNLINKED", versionId, measureId, valueSetId));
+  await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_UNLINKED", versionId, measureId, valueSetId, actor));
 }
 
-function auditLink(eventType: string, versionId: string, measureId: string, valueSetId: string) {
+function auditLink(eventType: string, versionId: string, measureId: string, valueSetId: string, actor: string) {
   return {
     eventType,
     entityType: "measure_version",
     entityId: versionId,
-    actor: "system",
+    actor,
     refRunId: null,
     refCaseId: null,
     refMeasureVersionId: versionId,
