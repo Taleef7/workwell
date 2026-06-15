@@ -251,8 +251,10 @@ contracts; per-PR JOURNAL entries carry the detail):
   - `measures` — **persisted store + read surface + authoring** ✅: catalog/detail/versions/
     activation-readiness read the store; `POST /api/measures` (create), `/:id/{approve,deprecate,status}`
     lifecycle with audit events (faithful gates — deprecate works on Active; approve/activate blocked on
-    fixtures until the Tests tab). Pending: spec/CQL edits + test-fixture CRUD + version cloning +
-    value-set governance.
+    fixtures until the Tests tab). **Authoring writes ✅** (PR pending): `PUT spec|cql|tests`, `POST cql/compile`,
+    `POST tests/validate`, `GET osha-references` — store `updateSpec`/`updateCql` (latest version, no new
+    schema), `MEASURE_VERSION_DRAFT_SAVED` audits, translator→`CompileResponse` mapping. Pending: value-set
+    governance (needs `value_sets` table), version cloning, MAT export, traceability/data-readiness/impact-preview.
   - `programs` — **complete** ✅: overview + sites, trend + top-drivers, risk-outlook (`/:id/risk-outlook`,
     upcoming due-soon + repeat non-compliers + per-site predicted compliance). Added the canonical
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
@@ -267,5 +269,5 @@ contracts; per-PR JOURNAL entries carry the detail):
   faithful `NOT_IMPLEMENTED` (their backend services aren't ported). **#108 complete.**
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~299 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~309 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

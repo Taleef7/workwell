@@ -14,6 +14,7 @@ import { rmSync } from "node:fs";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -21,6 +22,8 @@ let env: { DB: unknown };
 const get = (path: string) => handleMeasures(new Request(`http://x${path}`, { method: "GET" }), env as never, "author@workwell.dev");
 const post = (path: string, body?: unknown) =>
   handleMeasures(new Request(`http://x${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), env as never, "author@workwell.dev");
+const put = (path: string, body?: unknown) =>
+  handleMeasures(new Request(`http://x${path}`, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) }), env as never, "author@workwell.dev");
 
 before(async () => {
   env = { DB: await createSqliteD1(dbPath) };
@@ -286,4 +289,76 @@ test("POST /api/measures/:id/deprecate works on an Active measure; gated otherwi
   const d = (await get("/api/measures/hazwoper").then((r) => r!.json())) as { status: string };
   assert.equal(d.status, "Deprecated", "the lifecycle change is persisted");
   assert.equal((await post("/api/measures/nope/deprecate", { reason: "x" }))?.status, 404);
+});
+
+// ---- authoring writes (Spec/CQL/Tests tabs) + osha-references (#107) ---------
+
+test("GET /api/osha-references returns the curated lookup (sorted, stable ids)", async () => {
+  const rows = (await get("/api/osha-references").then((r) => r!.json())) as Array<{ id: string; cfrCitation: string; title: string; programArea: string }>;
+  assert.equal(rows.length, 8);
+  assert.ok(rows.every((r) => r.id && r.cfrCitation && r.title && r.programArea));
+  assert.ok(rows.some((r) => r.cfrCitation === "29 CFR 1910.95"));
+  const ids = rows.map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, "ids unique");
+});
+
+test("PUT /api/measures/:id/spec saves spec + policyRef, preserves fixtures, audits", async () => {
+  const body = {
+    policyRef: "OSHA 29 CFR 1910.95 — rev",
+    oshaReferenceId: "osha-29-cfr-1910-95",
+    description: "edited via spec tab",
+    eligibilityCriteria: { roleFilter: "Welder", siteFilter: "Plant A", programEnrollmentText: "HCP" },
+    exclusions: [{ label: "Waiver", criteriaText: "on file" }],
+    complianceWindow: "Annual",
+    requiredDataElements: ["Last audiogram date"],
+  };
+  const res = await put("/api/measures/audiogram/spec", body);
+  assert.equal(res?.status, 200);
+  const detail = (await get("/api/measures/audiogram").then((r) => r!.json())) as { description: string; policyRef: string; testFixtures: unknown[] };
+  assert.equal(detail.description, "edited via spec tab");
+  assert.equal(detail.policyRef, "OSHA 29 CFR 1910.95 — rev");
+  assert.ok(detail.testFixtures.length >= 1, "audiogram's seeded fixtures preserved by a spec edit");
+  const audits = await new SqliteCaseEventStore(env.DB as never).listAuditEvents();
+  assert.ok(audits.some((a) => a.eventType === "MEASURE_VERSION_DRAFT_SAVED" && (a.payload as { field?: string }).field === "spec"));
+});
+
+test("PUT /api/measures/:id/spec → 404 unknown measure", async () => {
+  assert.equal((await put("/api/measures/nope/spec", { description: "x" }))?.status, 404);
+});
+
+test("PUT /api/measures/:id/cql saves CQL; POST /cql/compile compiles + persists status", async () => {
+  const saved = await put("/api/measures/audiogram/cql", { cqlText: "library AudiogramCQL version '1.0.0'" });
+  assert.equal(saved?.status, 200);
+
+  const compiled = await post("/api/measures/audiogram/cql/compile", { cqlText: "define \"X\": 1 +" });
+  assert.equal(compiled?.status, 200);
+  const body = (await compiled!.json()) as { status: string; errors: string[]; warnings: string[] };
+  assert.ok(["ERROR", "WARNINGS", "COMPILED"].includes(body.status));
+  assert.ok(Array.isArray(body.errors) && Array.isArray(body.warnings));
+});
+
+test("PUT /api/measures/:id/tests replaces fixtures; POST /tests/validate validates them", async () => {
+  const fixtures = [
+    { fixtureName: "f-compliant", employeeExternalId: "emp-001", expectedOutcome: "COMPLIANT", notes: "" },
+    { fixtureName: "f-overdue", employeeExternalId: "emp-002", expectedOutcome: "OVERDUE", notes: "" },
+  ];
+  const res = await put("/api/measures/audiogram/tests", { fixtures });
+  assert.equal(res?.status, 200);
+  const valid = await post("/api/measures/audiogram/tests/validate");
+  assert.equal(valid?.status, 200);
+  assert.equal(((await valid!.json()) as { passed: boolean }).passed, true);
+
+  // empty fixtures → validation fails with the required-fixture failure
+  await put("/api/measures/audiogram/tests", { fixtures: [] });
+  const empty = await post("/api/measures/audiogram/tests/validate");
+  const emptyBody = (await empty!.json()) as { passed: boolean; failures: string[] };
+  assert.equal(emptyBody.passed, false);
+  assert.ok(emptyBody.failures.length >= 1);
+});
+
+test("authoring writes → 404 for unknown measure", async () => {
+  assert.equal((await put("/api/measures/nope/cql", { cqlText: "x" }))?.status, 404);
+  assert.equal((await put("/api/measures/nope/tests", { fixtures: [] }))?.status, 404);
+  assert.equal((await post("/api/measures/nope/cql/compile", { cqlText: "x" }))?.status, 404);
+  assert.equal((await post("/api/measures/nope/tests/validate"))?.status, 404);
 });
