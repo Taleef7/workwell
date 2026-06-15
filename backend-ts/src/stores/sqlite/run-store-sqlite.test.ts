@@ -20,6 +20,7 @@ import { SqliteCaseEventStore } from "./case-event-store-sqlite.ts";
 import { SqliteMeasureStore } from "./measure-store-sqlite.ts";
 import { SqliteEvidenceStore } from "./evidence-store-sqlite.ts";
 import { SqliteAppointmentStore } from "./appointment-store-sqlite.ts";
+import { SqliteValueSetStore } from "./value-set-store-sqlite.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -28,6 +29,7 @@ import {
   measureStoreContract,
   evidenceStoreContract,
   appointmentStoreContract,
+  valueSetStoreContract,
 } from "../store-contract.ts";
 
 const created: string[] = [];
@@ -69,3 +71,5 @@ measureStoreContract("sqlite", async () => new SqliteMeasureStore(await freshDb(
 evidenceStoreContract("sqlite", async () => new SqliteEvidenceStore(await freshDb()));
 
 appointmentStoreContract("sqlite", async () => new SqliteAppointmentStore(await freshDb()));
+
+valueSetStoreContract("sqlite", async () => new SqliteValueSetStore(await freshDb()));

@@ -76,6 +76,10 @@ const RULES: Rule[] = [
   { method: "PUT", pattern: rx("/api/measures/*/tests"), access: [AUTHOR, A] },
 
   { method: "POST", pattern: rx("/api/measures/compile"), access: "AUTHENTICATED" },
+  // Value-set governance writes (Studio Value Sets tab): create, attach (POST .../value-sets/*
+  // matches the measures rule below), detach. Authoring-scoped → AUTHOR/ADMIN.
+  { method: "POST", pattern: rx("/api/value-sets"), access: [AUTHOR, A] },
+  { method: "DELETE", pattern: rx("/api/measures/*/value-sets/*"), access: [AUTHOR, A] },
   { method: "POST", pattern: rx("/api/measures/**"), access: [AUTHOR, A] },
   { method: "POST", pattern: rx("/api/runs/**"), access: [CM, A] },
   { method: "POST", pattern: rx("/api/cases/**"), access: [CM, A] },

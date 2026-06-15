@@ -178,4 +178,48 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.scheduled_appointments (
 );
 
 CREATE INDEX IF NOT EXISTS spike_scheduled_appointments_case_id_idx ON ${SPIKE_SCHEMA}.scheduled_appointments (case_id);
+
+-- Value-set governance (#108). Ceiling analogue of value_sets (V001 + V013), measure_value_set_links
+-- (V001), terminology_mappings (V013). ids are TEXT (not UUID) to match the spike's TEXT measure ids
+-- (value sets carry demo UUIDs + crypto.randomUUID() ids as strings; links FK measure_versions TEXT id).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.value_sets (
+  id                TEXT PRIMARY KEY,
+  oid               TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  version           TEXT,
+  codes_json        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  last_resolved_at  TIMESTAMPTZ,
+  canonical_url     TEXT,
+  code_systems      TEXT[] NOT NULL DEFAULT '{}',
+  source            TEXT,
+  status            TEXT NOT NULL DEFAULT 'DRAFT',
+  expansion_hash    TEXT,
+  resolution_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+  resolution_error  TEXT,
+  UNIQUE (oid, version)
+);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measure_value_set_links (
+  measure_version_id TEXT NOT NULL,
+  value_set_id       TEXT NOT NULL REFERENCES ${SPIKE_SCHEMA}.value_sets(id),
+  PRIMARY KEY (measure_version_id, value_set_id)
+);
+
+CREATE INDEX IF NOT EXISTS spike_mvsl_vs_idx ON ${SPIKE_SCHEMA}.measure_value_set_links (value_set_id);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.terminology_mappings (
+  id                 TEXT PRIMARY KEY,
+  local_code         TEXT NOT NULL,
+  local_display      TEXT,
+  local_system       TEXT NOT NULL,
+  standard_code      TEXT NOT NULL,
+  standard_display   TEXT,
+  standard_system    TEXT NOT NULL,
+  mapping_status     TEXT NOT NULL,
+  mapping_confidence NUMERIC,
+  reviewed_by        TEXT,
+  reviewed_at        TIMESTAMPTZ,
+  notes              TEXT,
+  UNIQUE (local_system, local_code, standard_system, standard_code)
+);
 `;

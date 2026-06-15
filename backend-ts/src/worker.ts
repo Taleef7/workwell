@@ -183,7 +183,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (auditorResponse) return auditorResponse;
 
   // Admin — dashboard read surface + simple toggles (#108). Gated to ADMIN by the matrix.
-  const adminResponse = await handleAdmin(req, env);
+  const adminResponse = await handleAdmin(req, env, actor);
   if (adminResponse) return adminResponse;
 
   // AI surfaces — draft-spec/draft-cql/test-fixtures/explain/run-insight (#108). Advisory

@@ -289,8 +289,17 @@ contracts; per-PR JOURNAL entries carry the detail):
   and `resolveCase` (manual CLOSE; was 501). New `EvidenceStore`/`AppointmentStore` (floor+ceiling+contract);
   `evidence_attachments`/`scheduled_appointments` mirror V006/V005 (outreach_records side omitted — TS
   outreach is case_actions). `buildCasePacket` + `GET /api/auditor/cases/:id/packet` now real (attachments
-  by metadata only). Remaining #108-adjacent: value-set governance, admin write CRUD.
+  by metadata only).
+  **Value-set governance** ✅ — port of `ValueSetGovernanceService` + the catalog value-set methods of
+  `MeasureService`: `value_sets`/`measure_value_set_links`/`terminology_mappings` mirrored on the
+  floor+ceiling (canonical V001+V013); a `ValueSetStore` (+ contract) + the 22-value-set demo seed
+  (linked by measure slug) + the 5 demo terminology rows; `GET/POST /api/value-sets`,
+  `GET /api/measures/versions/:vid/value-sets`, attach/detach, `resolve-check`, `diff`, `detail`, and
+  `GET/POST /api/admin/terminology-mappings` (persisted). Wired `valueSets` into measure-detail, folded
+  resolve-check into activation-readiness, and lit up the previously-dormant value-set paths in
+  traceability + MAT export. Audits: `MEASURE_VALUE_SET_LINKED`/`UNLINKED`, `TERMINOLOGY_MAPPING_CREATED`.
+  Remaining #108-adjacent: admin write CRUD (waivers, outreach-template CRUD, demo-reset).
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~330 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~350 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

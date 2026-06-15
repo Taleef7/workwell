@@ -96,10 +96,11 @@ export interface VersionHistoryItem {
 }
 
 /**
- * The Studio MeasureDetail. osha_references aren't ported (oshaReferenceId = null);
- * valueSets/testFixtures are [] until the value-set governance surface lands.
+ * The Studio MeasureDetail. osha_references aren't ported (oshaReferenceId = null). `valueSets`
+ * is the measure version's attached value sets (value-set governance, #108) — supplied by the
+ * route from the ValueSetStore; defaults to [] for callers that don't resolve them.
  */
-export function toMeasureDetail(r: MeasureRecord): MeasureDetail {
+export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): MeasureDetail {
   return {
     id: r.measureId,
     name: r.name,
@@ -115,7 +116,7 @@ export function toMeasureDetail(r: MeasureRecord): MeasureDetail {
     requiredDataElements: r.spec.requiredDataElements,
     cqlText: r.cqlText,
     compileStatus: r.compileStatus,
-    valueSets: [], // value-set governance (attached value sets) is a separate surface
+    valueSets,
     testFixtures: r.spec.testFixtures ?? [],
   };
 }
@@ -179,5 +180,22 @@ export function toActivationReadiness(r: MeasureRecord): ActivationReadiness {
     valueSetCount: 0,
     testValidationPassed: tv.passed,
     activationBlockers: blockers,
+  };
+}
+
+/**
+ * Fold a value-set resolve-check into the base readiness (MeasureController.activationReadiness):
+ * ready becomes base.ready && allResolved, the value-set blockers append, and valueSetCount is
+ * the count of attached value sets.
+ */
+export function withValueSetResolution(
+  base: ActivationReadiness,
+  vs: { allResolved: boolean; blockers: string[]; valueSetCount: number },
+): ActivationReadiness {
+  return {
+    ...base,
+    ready: base.ready && vs.allResolved,
+    valueSetCount: vs.valueSetCount,
+    activationBlockers: [...base.activationBlockers, ...vs.blockers],
   };
 }
