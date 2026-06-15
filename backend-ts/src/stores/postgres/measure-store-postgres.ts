@@ -131,4 +131,38 @@ export class PgMeasureStore implements MeasureStore {
     await this.pool.query(`UPDATE ${M} SET updated_at = $1 WHERE id = $2`, [now, measureId]);
     return this.getLatest(measureId);
   }
+
+  private async latestVersionId(measureId: string): Promise<string | null> {
+    const { rows } = await this.pool.query<{ id: string }>(
+      `SELECT id FROM ${V} WHERE measure_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [measureId],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string): Promise<MeasureRecord | null> {
+    const versionId = await this.latestVersionId(measureId);
+    if (!versionId) return null;
+    const now = new Date().toISOString();
+    await this.pool.query(`UPDATE ${V} SET spec_json = $1::jsonb WHERE id = $2`, [JSON.stringify(spec), versionId]);
+    if (policyRef !== undefined) {
+      await this.pool.query(`UPDATE ${M} SET policy_ref = $1, updated_at = $2 WHERE id = $3`, [policyRef, now, measureId]);
+    } else {
+      await this.pool.query(`UPDATE ${M} SET updated_at = $1 WHERE id = $2`, [now, measureId]);
+    }
+    return this.getLatest(measureId);
+  }
+
+  async updateCql(measureId: string, cqlText: string, compileStatus?: string): Promise<MeasureRecord | null> {
+    const versionId = await this.latestVersionId(measureId);
+    if (!versionId) return null;
+    const now = new Date().toISOString();
+    if (compileStatus !== undefined) {
+      await this.pool.query(`UPDATE ${V} SET cql_text = $1, compile_status = $2 WHERE id = $3`, [cqlText, compileStatus, versionId]);
+    } else {
+      await this.pool.query(`UPDATE ${V} SET cql_text = $1 WHERE id = $2`, [cqlText, versionId]);
+    }
+    await this.pool.query(`UPDATE ${M} SET updated_at = $1 WHERE id = $2`, [now, measureId]);
+    return this.getLatest(measureId);
+  }
 }
