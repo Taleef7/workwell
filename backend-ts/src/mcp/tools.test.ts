@@ -227,8 +227,16 @@ test("explain_rule extracts CQL defines from the measure", async () => {
   assert.equal(payload.source, "deterministic_metadata");
 });
 
-test("traceability + data-quality tools return NOT_IMPLEMENTED (faithful, not faked)", async () => {
-  assert.equal((await call("get_measure_traceability", { measureId: "audiogram" })).payload.code, "NOT_IMPLEMENTED");
+test("get_measure_traceability returns the matrix; missing ref + unknown measure error", async () => {
+  const { payload } = await call("get_measure_traceability", { measureId: "audiogram" });
+  assert.equal(payload.measureId, "audiogram");
+  assert.ok(Array.isArray(payload.rows) && (payload.rows as unknown[]).length > 0);
+  assert.ok(Array.isArray(payload.gaps));
+  assert.equal((await call("get_measure_traceability", {})).payload.code, "INVALID_ARGUMENT");
+  assert.equal((await call("get_measure_traceability", { measureId: "nope" })).payload.code, "MEASURE_NOT_FOUND");
+});
+
+test("list_data_quality_gaps still returns NOT_IMPLEMENTED (data-readiness port pending)", async () => {
   assert.equal((await call("list_data_quality_gaps", { measureId: "audiogram" })).payload.code, "NOT_IMPLEMENTED");
 });
 
