@@ -71,4 +71,15 @@ export interface MeasureStore {
   createMeasure(input: CreateMeasureInput): Promise<MeasureRecord>;
   /** Apply a lifecycle status change to a version; touches the measure's updated_at. */
   setVersionStatus(measureId: string, versionId: string, change: StatusChange): Promise<MeasureRecord | null>;
+  /**
+   * Replace the latest version's `spec_json` (Studio Spec/Tests edits), optionally updating the
+   * measure's policy_ref. Touches the measure's updated_at. Returns the updated record, or null
+   * when the measure is unknown. (osha_reference_id is not modeled on the TS floor — see route.)
+   */
+  updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string): Promise<MeasureRecord | null>;
+  /**
+   * Replace the latest version's `cql_text` (Studio CQL edit), optionally setting compile_status
+   * (the compile endpoint). Touches the measure's updated_at. Null when the measure is unknown.
+   */
+  updateCql(measureId: string, cqlText: string, compileStatus?: string): Promise<MeasureRecord | null>;
 }

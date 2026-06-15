@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): Studio authoring writes — spec/CQL/tests edits + osha-references
+
+Branch `feat/issue-96-measures-authoring-writes`. Makes the Studio **writable** (Spec/CQL/Tests tabs were read-only on the TS backend), ported from `MeasureController`/`MeasureService` authoring. Larger batch (the whole authoring write surface in one PR, per the maintainer's cadence ask). *(backend-ts only — does not touch the deployed Java demo.)* **No new schema** — the `measure_versions` table already has `spec_json`/`cql_text`/`compile_status`, so these are `UPDATE`s, not migrations.
+
+- **Store (floor + ceiling + contract)** — `MeasureStore.updateSpec(measureId, spec, policyRef?)` and `updateCql(measureId, cqlText, compileStatus?)`, both targeting the **latest** version (max `created_at`) and touching `measures.updated_at`; null for an unknown measure. Contract test covers spec/CQL round-trip + fixture preservation + the no-status CQL update path on both SQLite and Postgres.
+- **`measure/measure-authoring.ts`** — `updateMeasureSpec` (preserves existing `testFixtures`; `updateTests` owns those), `updateMeasureCql`, `compileMeasureCql` (maps the JVM-free translator diagnostics → the Java `CompileResponse {status,warnings,errors}` and persists `compile_status`), `updateMeasureTests`, `validateMeasureTests` (reuses the read-model `validateTests`). Each edit writes a `MEASURE_VERSION_DRAFT_SAVED` audit event (field=spec|cql|tests).
+- **`measure/osha-references.ts`** — the curated `osha_references` seed (8 rows) as a static list with deterministic ids (the FK is opaque to the frontend), behind `GET /api/osha-references`.
+- **`routes/measures.ts`** — `PUT /api/measures/:id/{spec,cql,tests}`, `POST /api/measures/:id/cql/compile`, `POST /api/measures/:id/tests/validate`, `GET /api/osha-references`. Role gates unchanged (PUT spec/cql/tests + the measure-scoped POSTs → AUTHOR/ADMIN via the existing matrix).
+
+**Fidelity notes (documented, not silent):** the TS floor has no `osha_reference_id` or `compile_result` column, so the request's `oshaReferenceId` is accepted but not persisted as an FK, and compile persists only `compile_status` (the activation-gate input) — the full result is returned, not stored. Value-set governance (attach/detach/resolve-check) is a **separate** batch (needs the `value_sets` table → schema, maintainer-owned).
+
+**backend-ts 309 tests — all pass / 0 fail; typecheck clean** (Postgres ceiling validated the new store methods). New coverage: osha-references list, spec save (+ policyRef + fixture preservation + audit), cql save + compile (status/warnings/errors), tests replace + validate (pass + empty-fails), and 404s. Frontend `/studio/[id]` Spec/CQL/Tests tabs now write end-to-end. Next: measure analytics (traceability + data-readiness + impact-preview — also unblocks the 2 NOT_IMPLEMENTED MCP tools), then schema-gated surfaces (value-set governance, evidence, auditor packets, admin writes) pending migrations.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): runs ALL_PROGRAMS + SITE scopes (async via ctx.waitUntil)
 
 Branch `feat/issue-96-runs-scopes`. Closes the last big run-scope gap before any deploy-cutover thinking: the manual-run path threw `UnsupportedScopeError` (501) for **ALL_PROGRAMS** and **SITE**, so the `/runs` "Run Measures Now → All Programs" action didn't work on the TS backend. *(backend-ts only — does not touch the deployed Java demo.)*
