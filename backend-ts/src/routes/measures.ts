@@ -26,7 +26,7 @@ import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
-import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness } from "../measure/measure-read-models.ts";
+import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness, withValueSetResolution } from "../measure/measure-read-models.ts";
 import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
 import {
@@ -44,7 +44,21 @@ import { exportMatBundle } from "../fhir/mat-export.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
+import { seedValueSets } from "../measure/value-set-seed.ts";
+import {
+  listValueSets,
+  listValueSetsByVersion,
+  createValueSet,
+  attachValueSet,
+  detachValueSet,
+  resolveCheck,
+  diffValueSets,
+  getValueSetDetail,
+  ValueSetError,
+  type ValueSetGovernanceDeps,
+} from "../measure/value-set-governance.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -71,7 +85,15 @@ async function store(env: MeasuresEnv): Promise<SqliteMeasureStore> {
     init = (async () => {
       await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
       await migrateFloorSchema(env.DB);
-      await seedMeasureStore(new SqliteMeasureStore(env.DB), measureCql);
+      const measureStore = new SqliteMeasureStore(env.DB);
+      await seedMeasureStore(measureStore, measureCql);
+      // Value-set governance demo seed — after measures (links target version ids). Idempotent.
+      const valueSetStore = new SqliteValueSetStore(env.DB);
+      if (await valueSetStore.isEmpty()) {
+        const records = await measureStore.listLatest();
+        const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
+        await seedValueSets(valueSetStore, (slug) => versionBySlug.get(slug));
+      }
     })();
     initializing.set(env.DB, init);
   }
@@ -80,6 +102,15 @@ async function store(env: MeasuresEnv): Promise<SqliteMeasureStore> {
 }
 async function lifecycleDeps(env: MeasuresEnv): Promise<MeasureLifecycleDeps> {
   return { measures: await store(env), events: new SqliteCaseEventStore(env.DB) };
+}
+/** Governance deps (measure store + value-set store + audit) for the value-set surfaces. */
+async function governanceDeps(env: MeasuresEnv): Promise<ValueSetGovernanceDeps> {
+  return { measures: await store(env), valueSets: new SqliteValueSetStore(env.DB), events: new SqliteCaseEventStore(env.DB) };
+}
+/** Value-set store with the shared one-shot init (DDL + measure + value-set demo seed) guaranteed. */
+async function valueSetStore(env: MeasuresEnv): Promise<SqliteValueSetStore> {
+  await store(env);
+  return new SqliteValueSetStore(env.DB);
 }
 
 /**
@@ -156,6 +187,38 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
 
   // ---- lifecycle (POST) ----------------------------------------------------
   if (req.method === "POST") {
+    // Create a value set (Studio Value Sets tab) → { id }.
+    if (pathname === "/api/value-sets") {
+      const body = (await req.json().catch(() => ({}))) as { oid?: string; name?: string; version?: string | null };
+      try {
+        const id = await createValueSet(await valueSetStore(env), body.oid ?? "", body.name ?? "", body.version ?? null);
+        return json({ id });
+      } catch (err) {
+        if (err instanceof ValueSetError) return json({ error: "invalid_request", message: err.message }, 400);
+        throw err;
+      }
+    }
+    // Resolve-check the measure's attached value sets (governance panel + activation gate).
+    const resolveId = pathname.match(/^\/api\/measures\/([^/]+)\/value-sets\/resolve-check$/)?.[1];
+    if (resolveId) {
+      try {
+        return json(await resolveCheck(await governanceDeps(env), resolveId));
+      } catch (err) {
+        if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
+        throw err;
+      }
+    }
+    // Attach a value set to a measure's latest version → { status: "linked" }.
+    const attach = pathname.match(/^\/api\/measures\/([^/]+)\/value-sets\/([^/]+)$/);
+    if (attach) {
+      try {
+        await attachValueSet(await governanceDeps(env), attach[1]!, attach[2]!);
+        return json({ status: "linked" });
+      } catch (err) {
+        if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
+        throw err;
+      }
+    }
     // Save CQL + compile (persists compile_status, returns the CompileResponse).
     const compileId = pathname.match(/^\/api\/measures\/([^/]+)\/cql\/compile$/)?.[1];
     if (compileId) {
@@ -224,7 +287,51 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     return null;
   }
 
+  // ---- detach a value set (DELETE) -----------------------------------------
+  if (req.method === "DELETE") {
+    const detach = pathname.match(/^\/api\/measures\/([^/]+)\/value-sets\/([^/]+)$/);
+    if (detach) {
+      try {
+        await detachValueSet(await governanceDeps(env), detach[1]!, detach[2]!);
+        return json({ status: "unlinked" });
+      } catch (err) {
+        if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
+        throw err;
+      }
+    }
+    return null;
+  }
+
   // ---- reads (GET) ---------------------------------------------------------
+  // Value-set catalog + linked-by-version + diff + detail.
+  if (pathname === "/api/value-sets" && req.method === "GET") {
+    return json(await listValueSets(await valueSetStore(env)));
+  }
+  const byVersion = pathname.match(/^\/api\/measures\/versions\/([^/]+)\/value-sets$/)?.[1];
+  if (byVersion && req.method === "GET") {
+    return json(await listValueSetsByVersion(await valueSetStore(env), byVersion));
+  }
+  const vsDiff = pathname.match(/^\/api\/value-sets\/([^/]+)\/diff$/)?.[1];
+  if (vsDiff && req.method === "GET") {
+    const toId = url.searchParams.get("toId");
+    if (!toId) return json({ error: "invalid_request", message: "toId query parameter is required" }, 400);
+    try {
+      return json(await diffValueSets(await valueSetStore(env), vsDiff, toId));
+    } catch (err) {
+      if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
+      throw err;
+    }
+  }
+  const vsDetail = pathname.match(/^\/api\/value-sets\/([^/]+)\/detail$/)?.[1];
+  if (vsDetail && req.method === "GET") {
+    try {
+      return json(await getValueSetDetail(await valueSetStore(env), vsDetail));
+    } catch (err) {
+      if (err instanceof ValueSetError) return json({ error: "not_found", message: err.message }, 404);
+      throw err;
+    }
+  }
+
   // Compiled ELM (engine registry — runnable measures only).
   const elmId = pathname.match(/^\/api\/measures\/([^/]+)\/elm$/)?.[1];
   if (elmId && req.method === "GET") {
@@ -244,7 +351,16 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const record = await (await store(env)).getByVersionId(versionId!);
     // 404 unless the version exists AND belongs to the measure in the path (Java WHERE m.id=? AND mv.id=?).
     if (!record || record.measureId !== measureId) return json({ error: "not_found", measureId, versionId }, 404);
-    return new Response(exportMatBundle(record), {
+    const attached = await (new SqliteValueSetStore(env.DB)).listByVersion(record.versionId);
+    const exportValueSets = attached.map((vs) => ({
+      id: vs.id,
+      oid: vs.oid,
+      name: vs.name,
+      version: vs.version,
+      canonicalUrl: vs.canonicalUrl || null,
+      codes: vs.codes,
+    }));
+    return new Response(exportMatBundle(record, exportValueSets), {
       status: 200,
       headers: {
         "content-type": "application/fhir+xml",
@@ -262,14 +378,19 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   const readinessId = pathname.match(/^\/api\/measures\/([^/]+)\/activation-readiness$/)?.[1];
   if (readinessId && req.method === "GET") {
     const r = await (await store(env)).getLatest(readinessId);
-    return r ? json(toActivationReadiness(r)) : json({ error: "not_found", measureId: readinessId }, 404);
+    if (!r) return json({ error: "not_found", measureId: readinessId }, 404);
+    // Fold the value-set resolve-check into the readiness (Java MeasureController.activationReadiness).
+    const vs = await resolveCheck(await governanceDeps(env), readinessId);
+    return json(withValueSetResolution(toActivationReadiness(r), { allResolved: vs.allResolved, blockers: vs.blockers, valueSetCount: vs.valueSets.length }));
   }
 
   // Policy→spec→CQL→evidence traceability matrix + governance gaps.
   const traceId = pathname.match(/^\/api\/measures\/([^/]+)\/traceability$/)?.[1];
   if (traceId && req.method === "GET") {
     const r = await (await store(env)).getLatest(traceId);
-    return r ? json(generateTraceability(r)) : json({ error: "not_found", measureId: traceId }, 404);
+    if (!r) return json({ error: "not_found", measureId: traceId }, 404);
+    const attached = await (new SqliteValueSetStore(env.DB)).listByVersion(r.versionId);
+    return json(generateTraceability(r, attached.map((vs) => ({ name: vs.name, oid: vs.oid, version: vs.version ?? "" }))));
   }
 
   // Data readiness: required-element source mapping + freshness + missingness gaps.
@@ -283,7 +404,9 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
   if (detailId && detailId !== "compile" && req.method === "GET") {
     const r = await (await store(env)).getLatest(detailId);
-    return r ? json(toMeasureDetail(r)) : json({ error: "not_found", measureId: detailId }, 404);
+    if (!r) return json({ error: "not_found", measureId: detailId }, 404);
+    const valueSets = await listValueSetsByVersion(new SqliteValueSetStore(env.DB), r.versionId);
+    return json(toMeasureDetail(r, valueSets));
   }
 
   return null;
