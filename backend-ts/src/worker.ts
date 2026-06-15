@@ -21,6 +21,7 @@ import type {
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
 import { handleCases } from "./routes/cases.ts";
+import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
@@ -162,6 +163,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
   const casesResponse = await handleCases(req, env, actor);
   if (casesResponse) return casesResponse;
+
+  // Employees — directory profile + search over the synthetic directory + outcomes/cases (#107).
+  const employeesResponse = await handleEmployees(req, env);
+  if (employeesResponse) return employeesResponse;
 
   // Programs — compliance KPI overview + site list over runs/outcomes/cases (#107).
   const programsResponse = await handlePrograms(req, env);

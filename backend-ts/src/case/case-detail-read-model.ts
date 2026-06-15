@@ -78,7 +78,7 @@ function expressionResults(evidence: unknown): ExprResult[] {
 }
 
 /** Derive the why_flagged block (matching the Java shape) from the CQL define results. */
-function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
+export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
