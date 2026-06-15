@@ -29,6 +29,16 @@ import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
 import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness } from "../measure/measure-read-models.ts";
 import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
+import {
+  updateMeasureSpec,
+  updateMeasureCql,
+  compileMeasureCql,
+  updateMeasureTests,
+  validateMeasureTests,
+  type SpecUpdate,
+} from "../measure/measure-authoring.ts";
+import { listOshaReferences } from "../measure/osha-references.ts";
+import type { TestFixture } from "../measure/measure-catalog.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -83,6 +93,11 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   const url = new URL(req.url);
   const { pathname } = url;
 
+  // OSHA reference lookup for the Studio Spec tab policy-reference combobox (static seed).
+  if (pathname === "/api/osha-references" && req.method === "GET") {
+    return json(listOshaReferences());
+  }
+
   if (pathname === "/api/measures" && req.method === "GET") {
     const records = await (await store(env)).listLatest();
     return json(listMeasures(records, { status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
@@ -108,8 +123,48 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     return json(compileCql(cql));
   }
 
+  // ---- authoring edits (PUT) — Studio Spec/CQL/Tests tabs ------------------
+  if (req.method === "PUT") {
+    const specId = pathname.match(/^\/api\/measures\/([^/]+)\/spec$/)?.[1];
+    if (specId) {
+      const body = (await req.json().catch(() => ({}))) as SpecUpdate;
+      const ok = await updateMeasureSpec(await lifecycleDeps(env), specId, body, actor);
+      return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: specId }, 404);
+    }
+    const cqlId = pathname.match(/^\/api\/measures\/([^/]+)\/cql$/)?.[1];
+    if (cqlId) {
+      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
+      if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
+      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+      const ok = await updateMeasureCql(await lifecycleDeps(env), cqlId, cqlText, actor);
+      return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: cqlId }, 404);
+    }
+    const testsId = pathname.match(/^\/api\/measures\/([^/]+)\/tests$/)?.[1];
+    if (testsId) {
+      const fixtures = ((await req.json().catch(() => ({}))) as { fixtures?: TestFixture[] }).fixtures ?? [];
+      const ok = await updateMeasureTests(await lifecycleDeps(env), testsId, fixtures, actor);
+      return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: testsId }, 404);
+    }
+    return null;
+  }
+
   // ---- lifecycle (POST) ----------------------------------------------------
   if (req.method === "POST") {
+    // Save CQL + compile (persists compile_status, returns the CompileResponse).
+    const compileId = pathname.match(/^\/api\/measures\/([^/]+)\/cql\/compile$/)?.[1];
+    if (compileId) {
+      const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
+      if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
+      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+      const res = await compileMeasureCql(await lifecycleDeps(env), compileId, cqlText, actor);
+      return res ? json(res) : json({ error: "not_found", measureId: compileId }, 404);
+    }
+    // Validate the version's persisted test fixtures.
+    const testsValidateId = pathname.match(/^\/api\/measures\/([^/]+)\/tests\/validate$/)?.[1];
+    if (testsValidateId) {
+      const res = await validateMeasureTests(await lifecycleDeps(env), testsValidateId);
+      return res ? json(res) : json({ error: "not_found", measureId: testsValidateId }, 404);
+    }
     const approveId = pathname.match(/^\/api\/measures\/([^/]+)\/approve$/)?.[1];
     const deprecateId = pathname.match(/^\/api\/measures\/([^/]+)\/deprecate$/)?.[1];
     const statusId = pathname.match(/^\/api\/measures\/([^/]+)\/status$/)?.[1];

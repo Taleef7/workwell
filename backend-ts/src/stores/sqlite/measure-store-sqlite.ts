@@ -134,4 +134,39 @@ export class SqliteMeasureStore implements MeasureStore {
     await this.db.prepare("UPDATE measures SET updated_at = ? WHERE id = ?").bind(now, measureId).run();
     return this.getLatest(measureId);
   }
+
+  // The latest version's id for a measure (max created_at) — the row Studio edits target.
+  private async latestVersionId(measureId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT id FROM measure_versions WHERE measure_id = ? ORDER BY created_at DESC LIMIT 1")
+      .bind(measureId)
+      .first<{ id: string }>();
+    return row?.id ?? null;
+  }
+
+  async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string): Promise<MeasureRecord | null> {
+    const versionId = await this.latestVersionId(measureId);
+    if (!versionId) return null;
+    const now = new Date().toISOString();
+    await this.db.prepare("UPDATE measure_versions SET spec_json = ? WHERE id = ?").bind(JSON.stringify(spec), versionId).run();
+    if (policyRef !== undefined) {
+      await this.db.prepare("UPDATE measures SET policy_ref = ?, updated_at = ? WHERE id = ?").bind(policyRef, now, measureId).run();
+    } else {
+      await this.db.prepare("UPDATE measures SET updated_at = ? WHERE id = ?").bind(now, measureId).run();
+    }
+    return this.getLatest(measureId);
+  }
+
+  async updateCql(measureId: string, cqlText: string, compileStatus?: string): Promise<MeasureRecord | null> {
+    const versionId = await this.latestVersionId(measureId);
+    if (!versionId) return null;
+    const now = new Date().toISOString();
+    if (compileStatus !== undefined) {
+      await this.db.prepare("UPDATE measure_versions SET cql_text = ?, compile_status = ? WHERE id = ?").bind(cqlText, compileStatus, versionId).run();
+    } else {
+      await this.db.prepare("UPDATE measure_versions SET cql_text = ? WHERE id = ?").bind(cqlText, versionId).run();
+    }
+    await this.db.prepare("UPDATE measures SET updated_at = ? WHERE id = ?").bind(now, measureId).run();
+    return this.getLatest(measureId);
+  }
 }

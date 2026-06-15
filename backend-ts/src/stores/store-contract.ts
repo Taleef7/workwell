@@ -521,4 +521,31 @@ export function measureStoreContract(label: string, freshStore: () => Promise<Me
     assert.ok(active?.activatedAt, "activate stamps activated_at");
     assert.equal(await store.setVersionStatus("nope", "nope", { status: "Active" }), null);
   });
+
+  test(`[${label}] updateSpec/updateCql replace the latest version (authoring edits); null for unknown`, async () => {
+    const store = await freshStore();
+    await store.seedMeasure(seed());
+    const newSpec = {
+      description: "edited",
+      eligibilityCriteria: { roleFilter: "Welder", siteFilter: "Plant A", programEnrollmentText: "HCP" },
+      exclusions: [{ label: "Waiver", criteriaText: "on file" }],
+      complianceWindow: "Annual",
+      requiredDataElements: ["Last exam"],
+      testFixtures: [{ fixtureName: "f1", employeeExternalId: "emp-001", expectedOutcome: "COMPLIANT", notes: "" }],
+    };
+    const specUpdated = await store.updateSpec("audiogram", newSpec, "OSHA 29 CFR 1910.95 — edited");
+    assert.equal(specUpdated?.spec.description, "edited");
+    assert.equal(specUpdated?.spec.testFixtures.length, 1);
+    assert.equal(specUpdated?.policyRef, "OSHA 29 CFR 1910.95 — edited", "policyRef updated when provided");
+
+    const cqlUpdated = await store.updateCql("audiogram", "library Edited version '1.0.0'", "WARNINGS");
+    assert.equal(cqlUpdated?.cqlText, "library Edited version '1.0.0'");
+    assert.equal(cqlUpdated?.compileStatus, "WARNINGS");
+    // updateCql without a status leaves compile_status unchanged
+    const cqlNoStatus = await store.updateCql("audiogram", "library Again", undefined);
+    assert.equal(cqlNoStatus?.compileStatus, "WARNINGS");
+
+    assert.equal(await store.updateSpec("missing", newSpec), null);
+    assert.equal(await store.updateCql("missing", "x"), null);
+  });
 }
