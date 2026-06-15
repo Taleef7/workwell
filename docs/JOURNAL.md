@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-15 — Issue #96 Phase 4b (#108): waivers (list + grant) — **Phase 4b complete**
+
+Branch `feat/issue-96-waivers` (off `main`). Ported `WaiverService.listWaivers`/`grantWaiver` — the last Admin write surface. This **completes the Phase-4 API strangler (#107) + Phase-4b (#108)**; only the Phase-5 deploy cutover (#109) remains. *(backend-ts only. Floor+ceiling DDL mirrors the canonical `waivers` table [V009]; like the other TS tables the FK columns are TEXT.)*
+
+- **`stores/waiver-store.ts` (+ floor/ceiling/contract)** — `WaiverStore`: `insert`, `list(query)` (active DESC, expires_at ASC NULLS LAST, granted_at DESC; SQL filters measureId/active/expiresAfter/expiresBefore), `getById`. FK columns are TEXT — `employee_external_id` (no employees table in the synthetic model), `measure_id` (slug), `measure_version_id` (floor version id). `active` INTEGER 0/1 floor / BOOLEAN ceiling. (Floor's NULLS-last is emulated via `(expires_at IS NULL) ASC`.)
+- **`admin/waivers.ts`** — `listWaivers` + `grantWaiver`: the store holds raw rows; the service **resolves display fields at read time** — employee name/site from the synthetic `employeeById`, measure name/version from the measure store — and computes `expired` (active && expires_at < now), matching Java's read JOIN. `site` filter is applied in JS (no site column). Grant validates employee exists + measure resolves + reason non-blank + a present-but-unparsable `expiresAt` → 400, then writes a `WAIVER_GRANTED` audit. Granting is record-keeping only (the synthetic engine derives EXCLUDED from its seeded distribution, not this table) — documented, same as the Java admin surface.
+- **`routes/admin.ts`** — `GET /api/admin/waivers` (was the deferred empty stub) with the measureId/site/active/expiresAfter/expiresBefore filters + `POST /api/admin/waivers` (201, 400 on validation). Both ADMIN-gated by the matrix; deps resolve the measure store via `ensureMeasureStore` (DDL + catalog seed).
+
+**backend-ts 362 tests — all pass / 0 fail (1 PG suite skipped without local Docker); typecheck clean.** New coverage: the store contract (insert/getById round-trip, the active/expiry ordering, all four SQL filters — floor + ceiling) and the admin route suite (grant resolves employee+measure display fields + lists, measureId/active/site filters, the `WAIVER_GRANTED` audit, and grant validation 400s for unknown employee / unknown measure / blank reason / bad date). Frontend Admin → Waivers (list + grant) now served end-to-end. **Phase 4b (#108) complete — next is Phase 5 deploy cutover (#109): binding selection + JVM retirement.**
+
+---
+
 ## 2026-06-15 — Issue #96 Phase 4b (#108): admin write CRUD — outreach-template create/update + demo-reset
 
 Branch `feat/issue-96-admin-write-crud` (off `main`). Ported `OutreachTemplateService` (create/update/preview, now persisted) and `DemoResetService` — the two admin writes with no cross-model FK friction. *(backend-ts only. Floor+ceiling DDL mirrors the canonical `outreach_templates` table [V007]; demo-reset clears volatile floor tables only.)* **Waivers are the one remaining Phase-4b surface** — split out because they JOIN `employees`/`measures` UUID tables that the synthetic TS model doesn't have (needs employee-directory + measure-store resolution); they get their own focused batch next.

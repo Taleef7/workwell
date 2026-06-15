@@ -235,4 +235,21 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outreach_templates (
   updated_at  TIMESTAMPTZ NOT NULL,
   active      BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- Waivers (#108 admin write CRUD). Ceiling analogue of waivers (V009); FK columns are TEXT to
+-- match the spike's TEXT employee/measure ids (display fields resolved at read time).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.waivers (
+  id                   TEXT PRIMARY KEY,
+  employee_external_id TEXT NOT NULL,
+  measure_id           TEXT NOT NULL,
+  measure_version_id   TEXT NOT NULL,
+  exclusion_reason     TEXT NOT NULL,
+  granted_by           TEXT NOT NULL,
+  granted_at           TIMESTAMPTZ NOT NULL,
+  expires_at           TIMESTAMPTZ,
+  notes                TEXT,
+  active               BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS spike_waivers_measure_idx ON ${SPIKE_SCHEMA}.waivers (measure_id, active);
 `;

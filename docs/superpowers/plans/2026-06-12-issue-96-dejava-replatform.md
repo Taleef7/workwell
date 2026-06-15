@@ -300,11 +300,14 @@ contracts; per-PR JOURNAL entries carry the detail):
   traceability + MAT export. Audits: `MEASURE_VALUE_SET_LINKED`/`UNLINKED`, `TERMINOLOGY_MAPPING_CREATED`.
   **Admin write CRUD (part 1)** ✅ — `OutreachTemplateService` (persisted: `outreach_templates` mirrors
   V007 on floor+ceiling; list/preview-render/create/update behind `OutreachTemplateStore`) +
-  `DemoResetService` (`POST /api/admin/demo-reset` clears volatile floor tables, **403 under the `prod`
-  profile** via `SPRING_PROFILES_ACTIVE`). Remaining #108-adjacent: **waivers** (list + grant — split
-  out because they JOIN employees/measures UUID tables the synthetic TS model lacks; need
-  employee-directory + measure-store resolution).
-- **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
+  `DemoResetService` (`POST /api/admin/demo-reset` clears volatile floor tables, **403 under any
+  production-like env** via `isProductionLike`). **Waivers** ✅ — `WaiverService.listWaivers`/`grantWaiver`
+  ported (`waivers` mirrors V009 on floor+ceiling with TEXT FK columns; `WaiverStore` list/insert/getById
+  with the active/expiry ordering + SQL filters; the service resolves employee name/site [synthetic
+  directory] + measure name/version [measure store] at read time and writes a `WAIVER_GRANTED` audit).
+  **Phase 4 (#107) + Phase 4b (#108) are complete.**
+- **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement). **This is the
+  only remaining phase.**
 
-Test posture: `backend-ts` ~360 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~362 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

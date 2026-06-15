@@ -245,6 +245,24 @@ CREATE TABLE IF NOT EXISTS outreach_templates (
   updated_at  TEXT NOT NULL,
   active      INTEGER NOT NULL DEFAULT 1
 );
+
+/* Waivers (#108 admin write CRUD). Floor analogue of waivers (V009). FK columns are TEXT:
+   employee_external_id (no employees table on the floor), measure_id (slug), measure_version_id
+   (floor version id). Employee/measure display fields are resolved at read time. */
+CREATE TABLE IF NOT EXISTS waivers (
+  id                   TEXT PRIMARY KEY,
+  employee_external_id TEXT NOT NULL,
+  measure_id           TEXT NOT NULL,
+  measure_version_id   TEXT NOT NULL,
+  exclusion_reason     TEXT NOT NULL,
+  granted_by           TEXT NOT NULL,
+  granted_at           TEXT NOT NULL,
+  expires_at           TEXT,
+  notes                TEXT,
+  active               INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS waivers_measure_idx ON waivers (measure_id, active);
 `;
 
 /**

@@ -22,6 +22,7 @@ import { SqliteEvidenceStore } from "./evidence-store-sqlite.ts";
 import { SqliteAppointmentStore } from "./appointment-store-sqlite.ts";
 import { SqliteValueSetStore } from "./value-set-store-sqlite.ts";
 import { SqliteOutreachTemplateStore } from "./outreach-template-store-sqlite.ts";
+import { SqliteWaiverStore } from "./waiver-store-sqlite.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -32,6 +33,7 @@ import {
   appointmentStoreContract,
   valueSetStoreContract,
   outreachTemplateStoreContract,
+  waiverStoreContract,
 } from "../store-contract.ts";
 
 const created: string[] = [];
@@ -77,3 +79,5 @@ appointmentStoreContract("sqlite", async () => new SqliteAppointmentStore(await 
 valueSetStoreContract("sqlite", async () => new SqliteValueSetStore(await freshDb()));
 
 outreachTemplateStoreContract("sqlite", async () => new SqliteOutreachTemplateStore(await freshDb()));
+
+waiverStoreContract("sqlite", async () => new SqliteWaiverStore(await freshDb()));
