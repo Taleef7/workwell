@@ -25,6 +25,7 @@ import {
   setSchedulerEnabled,
   listTerminologyMappings,
   listDataMappings,
+  validateDataMappings,
   listOutreachTemplates,
   findOutreachTemplate,
   toAdminAuditRows,
@@ -86,6 +87,7 @@ export async function handleAdmin(req: Request, env: AdminEnv): Promise<Response
   // ---- static / faithful reads --------------------------------------------
   if (pathname === "/api/admin/terminology-mappings" && req.method === "GET") return json(listTerminologyMappings());
   if (pathname === "/api/admin/data-mappings" && req.method === "GET") return json(listDataMappings());
+  if (pathname === "/api/admin/data-mappings/validate" && req.method === "POST") return json(validateDataMappings());
   if (pathname === "/api/admin/outreach-templates" && req.method === "GET") return json(listOutreachTemplates());
   const previewId = pathname.match(/^\/api\/admin\/outreach-templates\/([^/]+)\/preview$/)?.[1];
   if (previewId && req.method === "GET") {
