@@ -9,10 +9,10 @@ import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { OutcomeStore, MeasureOutcomeRow } from "../stores/outcome-store.ts";
 import { computeDataReadiness } from "./data-readiness.ts";
 
-function record(requiredDataElements: string[]): MeasureRecord {
+function record(requiredDataElements: string[], measureId = "audiogram"): MeasureRecord {
   return {
-    measureId: "audiogram",
-    name: "Audiogram",
+    measureId,
+    name: measureId,
     policyRef: "OSHA 29 CFR 1910.95",
     owner: "system",
     tags: [],
@@ -47,6 +47,24 @@ test("all required elements resolve to MAPPED + FRESH → READY when no missingn
   const audiogram = r.requiredElements.find((e) => e.canonicalElement === "procedure.audiogram")!;
   assert.equal(audiogram.mappingStatus, "MAPPED");
   assert.equal(audiogram.freshnessStatus, "FRESH");
+});
+
+test("'Program enrollment' resolves by measure: audiogram → hearingConservation MAPPED", async () => {
+  const deps = { outcomes: outcomesStub([{ subjectId: "emp-001", status: "COMPLIANT" }]) };
+  const r = await computeDataReadiness(deps, record(["Program enrollment"], "audiogram"));
+  const enrollment = r.requiredElements[0]!;
+  assert.equal(enrollment.canonicalElement, "programEnrollment.hearingConservation");
+  assert.equal(enrollment.mappingStatus, "MAPPED");
+});
+
+test("'Program enrollment' for a HEDIS measure is UNMAPPED, not mis-certified as hearing-conservation", async () => {
+  const deps = { outcomes: outcomesStub([{ subjectId: "emp-001", status: "COMPLIANT" }]) };
+  const r = await computeDataReadiness(deps, record(["Program enrollment"], "hypertension"));
+  const enrollment = r.requiredElements[0]!;
+  assert.equal(enrollment.canonicalElement, "programEnrollment.hypertension", "measure-specific canonical, not hearingConservation");
+  assert.equal(enrollment.mappingStatus, "UNMAPPED");
+  assert.equal(r.overallStatus, "NOT_READY");
+  assert.ok(r.blockers.some((b) => /Program enrollment.*no source mapping/i.test(b)));
 });
 
 test("an unresolvable required element is a blocker → NOT_READY", async () => {

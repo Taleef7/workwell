@@ -29,6 +29,10 @@ export interface DataReadinessResponse {
 }
 
 // Longest-match-first: specific phrases before general keywords (DataReadinessService.LABEL_TO_CANONICAL).
+// NOTE: the generic "program enrollment"/"enrollment" phrases are NOT in this table — enrollment is
+// resolved by MEASURE CONTEXT instead (see resolveCanonical), because the same generic spec label
+// means a different source per measure. The flat Java table mapped them all to hearingConservation,
+// which falsely certified the hearing-conservation source for the HEDIS wellness measures.
 const LABEL_TO_CANONICAL: ReadonlyArray<[string, string]> = [
   ["last audiogram date", "procedure.audiogram"],
   ["last tb screening date", "procedure.tbScreen"],
@@ -36,7 +40,6 @@ const LABEL_TO_CANONICAL: ReadonlyArray<[string, string]> = [
   ["last flu vaccine date", "procedure.fluVaccine"],
   ["contraindication status", "waiver.flu"],
   ["exemption status", "waiver.medical"],
-  ["program enrollment", "programEnrollment.hearingConservation"],
   ["current season", "policy.fluSeason"],
   ["audiogram", "procedure.audiogram"],
   ["tb screening", "procedure.tbScreen"],
@@ -44,14 +47,25 @@ const LABEL_TO_CANONICAL: ReadonlyArray<[string, string]> = [
   ["flu vaccine", "procedure.fluVaccine"],
   ["contraindication", "waiver.flu"],
   ["exemption", "waiver.medical"],
-  ["enrollment", "programEnrollment.hearingConservation"],
   ["season", "policy.fluSeason"],
   ["role", "employee.role"],
   ["site", "employee.site"],
 ];
 
-function resolveCanonical(label: string): string | null {
+// The program-enrollment source canonical per measure (the OSHA programs are seeded in V012; the
+// HEDIS wellness measures have no enrollment source, so they fall through to a measure-specific
+// canonical that isn't in the seed → honestly reported UNMAPPED rather than mis-certified).
+const MEASURE_ENROLLMENT_CANONICAL: Record<string, string> = {
+  audiogram: "programEnrollment.hearingConservation",
+  hazwoper: "programEnrollment.hazwoper",
+  tb_surveillance: "programEnrollment.tbScreening",
+  flu_vaccine: "programEnrollment.clinicalFacing",
+};
+
+function resolveCanonical(label: string, measureId: string): string | null {
   const lower = label.toLowerCase().trim();
+  // Enrollment is measure-specific: don't certify one program's source for another's generic label.
+  if (lower.includes("enrollment")) return MEASURE_ENROLLMENT_CANONICAL[measureId] ?? `programEnrollment.${measureId}`;
   for (const [phrase, canonical] of LABEL_TO_CANONICAL) {
     if (lower.includes(phrase)) return canonical;
   }
@@ -82,7 +96,7 @@ export async function computeDataReadiness(deps: DataReadinessDeps, measure: Mea
   const warnings: string[] = [];
 
   for (const label of specElements) {
-    const canonical = resolveCanonical(label);
+    const canonical = resolveCanonical(label, measure.measureId);
     const mapping = canonical != null ? canonicalToMapping.get(canonical) ?? null : null;
     const mappingStatus = mapping ? mapping.mappingStatus : "UNMAPPED";
     const sourceId = mapping ? mapping.sourceId : null;
