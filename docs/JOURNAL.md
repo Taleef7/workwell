@@ -10,6 +10,8 @@ Branch `feat/issue-96-waivers` (off `main`). Ported `WaiverService.listWaivers`/
 
 **backend-ts 362 tests — all pass / 0 fail (1 PG suite skipped without local Docker); typecheck clean.** New coverage: the store contract (insert/getById round-trip, the active/expiry ordering, all four SQL filters — floor + ceiling) and the admin route suite (grant resolves employee+measure display fields + lists, measureId/active/site filters, the `WAIVER_GRANTED` audit, and grant validation 400s for unknown employee / unknown measure / blank reason / bad date). Frontend Admin → Waivers (list + grant) now served end-to-end. **Phase 4b (#108) complete — next is Phase 5 deploy cutover (#109): binding selection + JVM retirement.**
 
+**Codex P2 fix (same PR):** the `expiresAfter`/`expiresBefore` waiver filters take a bare `YYYY-MM-DD` (the Admin date input) and are now expanded to UTC **day bounds** before the query — `after` → start-of-day `00:00:00Z`, `before` → end-of-day `23:59:59Z` (Java `parseFromDate`/`parseToDate`) — so a waiver expiring at `00:00:00Z` is correctly included by `expiresBefore=<that day>` instead of being excluded by a raw `YYYY-MM-DD` < ISO-timestamp string comparison; a non-date value now returns 400. Covered by new route tests.
+
 ---
 
 ## 2026-06-15 — Issue #96 Phase 4b (#108): admin write CRUD — outreach-template create/update + demo-reset
