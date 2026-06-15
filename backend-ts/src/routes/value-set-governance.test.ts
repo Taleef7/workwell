@@ -12,6 +12,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 import { handleAdmin } from "./admin.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-vsg-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -87,6 +88,19 @@ test("resolve-check on an unknown measure → 404", async () => {
   assert.equal(res?.status, 404);
 });
 
+// Regression: seeded value-set names must match the CQL `valueset "..."` declarations, or
+// resolveCheck reports them as unattached-reference blockers (the wellness names were aligned).
+for (const measureId of ["cholesterol_ldl", "diabetes_hba1c", "obesity_bmi", "hypertension", "hazwoper", "tb_surveillance", "flu_vaccine"]) {
+  test(`resolve-check on ${measureId}: all resolved, no unattached-reference blockers`, async () => {
+    const res = (await post(`/api/measures/${measureId}/value-sets/resolve-check`).then((r) => r!.json())) as {
+      allResolved: boolean;
+      blockers: string[];
+    };
+    assert.equal(res.allResolved, true, `blockers: ${JSON.stringify(res.blockers)}`);
+    assert.ok(!res.blockers.some((b) => b.includes("not attached")), `no unattached refs: ${JSON.stringify(res.blockers)}`);
+  });
+}
+
 test("create → attach → detach a value set drives listByVersion", async () => {
   const detail = (await get("/api/measures/tb_surveillance").then((r) => r!.json())) as { version: string };
   const versionId = `tb_surveillance-${detail.version}`;
@@ -108,6 +122,17 @@ test("create → attach → detach a value set drives listByVersion", async () =
   assert.equal((await detach!.json() as { status: string }).status, "unlinked");
   const afterDetach = (await get(`/api/measures/versions/${versionId}/value-sets`).then((r) => r!.json())) as ValueSetRef[];
   assert.equal(afterDetach.length, before);
+});
+
+test("attach/detach audits carry the authenticated actor (not 'system')", async () => {
+  const created = (await post("/api/value-sets", { oid: "urn:test:vs:actor", name: "Actor Set", version: "v1" }).then((r) => r!.json())) as { id: string };
+  await post(`/api/measures/hazwoper/value-sets/${created.id}`); // author@workwell.dev
+  await del(`/api/measures/hazwoper/value-sets/${created.id}`);
+  const audits = await new SqliteCaseEventStore(env.DB as never).listAuditEvents();
+  const linked = audits.find((a) => a.eventType === "MEASURE_VALUE_SET_LINKED" && (a.payload as { valueSetId?: string }).valueSetId === created.id);
+  const unlinked = audits.find((a) => a.eventType === "MEASURE_VALUE_SET_UNLINKED" && (a.payload as { valueSetId?: string }).valueSetId === created.id);
+  assert.equal(linked?.actor, "author@workwell.dev");
+  assert.equal(unlinked?.actor, "author@workwell.dev");
 });
 
 test("POST /api/value-sets with missing oid/name → 400", async () => {
