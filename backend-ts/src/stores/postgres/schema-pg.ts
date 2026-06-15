@@ -137,4 +137,15 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measure_versions (
 );
 
 CREATE INDEX IF NOT EXISTS spike_measure_versions_measure_id_idx ON ${SPIKE_SCHEMA}.measure_versions (measure_id);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.audit_packet_exports (
+  id                 UUID PRIMARY KEY,
+  packet_type        TEXT NOT NULL,
+  entity_id          TEXT NOT NULL,
+  format             TEXT NOT NULL,
+  generated_by       TEXT NOT NULL,
+  generated_at       TIMESTAMPTZ NOT NULL,
+  payload_hash       TEXT,
+  payload_size_bytes BIGINT
+);
 `;

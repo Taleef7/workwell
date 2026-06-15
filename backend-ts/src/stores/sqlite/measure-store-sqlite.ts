@@ -94,6 +94,11 @@ export class SqliteMeasureStore implements MeasureStore {
     return row ? toRecord(row) : null;
   }
 
+  async getByVersionId(versionId: string): Promise<MeasureRecord | null> {
+    const row = await this.db.prepare(`${SELECT} WHERE mv.id = ?`).bind(versionId).first<JoinRow>();
+    return row ? toRecord(row) : null;
+  }
+
   async listVersions(measureId: string): Promise<MeasureRecord[]> {
     const { results } = await this.db
       .prepare(`${SELECT} WHERE m.id = ? ORDER BY mv.created_at DESC`)
