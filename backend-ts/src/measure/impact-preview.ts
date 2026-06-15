@@ -65,8 +65,49 @@ const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
 const OUTCOME_KEYS = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** True only for a real calendar date in YYYY-MM-DD form (rejects 2026-13-01 / 2026-02-30 etc.). */
+function isValidIsoDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+const zeroCounts = (): Record<string, number> => Object.fromEntries(OUTCOME_KEYS.map((k) => [k, 0]));
+
 /** A bad-request-class error (invalid evaluationDate) — the route maps this to 400. */
 export class ImpactPreviewError extends Error {}
+
+/** Every preview attempt — success OR early-empty — writes a dry-run MEASURE_IMPACT_PREVIEWED audit. */
+async function writePreviewAudit(
+  deps: ImpactPreviewDeps,
+  measure: MeasureRecord,
+  evaluationDate: string,
+  populationEvaluated: number,
+  outcomeCounts: Record<string, number>,
+  warnings: string[],
+  actor: string,
+): Promise<void> {
+  await deps.events.appendAudit({
+    eventType: "MEASURE_IMPACT_PREVIEWED",
+    entityType: "measure_version",
+    entityId: measure.versionId,
+    actor,
+    refRunId: null,
+    refCaseId: null,
+    refMeasureVersionId: measure.versionId,
+    payload: {
+      measureId: measure.measureId,
+      measureVersionId: measure.versionId,
+      measureName: measure.name,
+      version: measure.version,
+      evaluationDate,
+      populationEvaluated,
+      outcomeCounts,
+      warningCount: warnings.length,
+      dryRun: true,
+    },
+  });
+}
 
 function emptyResponse(measure: MeasureRecord, evaluationDate: string, warnings: string[]): ImpactPreviewResponse {
   return {
@@ -95,8 +136,8 @@ function breakdown(outcomes: PreviewOutcome[], key: "site" | "role"): Array<Reco
 
 export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRecord, req: ImpactPreviewRequest = {}, actor = "system"): Promise<ImpactPreviewResponse> {
   const rawDate = req.evaluationDate?.trim();
-  if (rawDate && !DATE_RE.test(rawDate)) {
-    throw new ImpactPreviewError(`Invalid evaluationDate format: '${rawDate}' — expected YYYY-MM-DD`);
+  if (rawDate && !isValidIsoDate(rawDate)) {
+    throw new ImpactPreviewError(`Invalid evaluationDate: '${rawDate}' — expected a real calendar date in YYYY-MM-DD form`);
   }
   const evaluationDate = rawDate || new Date().toISOString().slice(0, 10);
   const binding = MEASURE_BINDINGS[measure.measureId];
@@ -105,6 +146,7 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
   // Only runnable measures (compiled CQL + a synthetic binding) can be previewed.
   if (!binding) {
     warnings.push("CQL evaluation unavailable: measure has no runnable CQL binding.");
+    await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
     return emptyResponse(measure, evaluationDate, warnings);
   }
 
@@ -120,6 +162,7 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
     );
   } catch (err) {
     warnings.push(`CQL evaluation failed: ${String((err as Error)?.message ?? err)}`);
+    await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
     return emptyResponse(measure, evaluationDate, warnings);
   }
 
@@ -157,26 +200,7 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
     warnings.push(`${missingData} employee(s) would have MISSING_DATA outcome — required exam records may be absent.`);
   }
 
-  await deps.events.appendAudit({
-    eventType: "MEASURE_IMPACT_PREVIEWED",
-    entityType: "measure_version",
-    entityId: measure.versionId,
-    actor,
-    refRunId: null,
-    refCaseId: null,
-    refMeasureVersionId: measure.versionId,
-    payload: {
-      measureId: measure.measureId,
-      measureVersionId: measure.versionId,
-      measureName: measure.name,
-      version: measure.version,
-      evaluationDate,
-      populationEvaluated: outcomes.length,
-      outcomeCounts,
-      warningCount: warnings.length,
-      dryRun: true,
-    },
-  });
+  await writePreviewAudit(deps, measure, evaluationDate, outcomes.length, outcomeCounts, warnings, actor);
 
   return {
     measureId: measure.measureId,
