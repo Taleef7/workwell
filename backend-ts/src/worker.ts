@@ -108,7 +108,7 @@ const json = (data: unknown, status = 200): Response =>
   });
 
 /** Route a request to a Response (no CORS decoration — the caller adds that). */
-async function route(req: Request, env: Env): Promise<Response> {
+async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promise<Response> {
   const { pathname } = new URL(req.url);
 
   // Fail-fast: refuse to serve under an unsafe auth/cookie/CORS configuration.
@@ -154,8 +154,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   const measuresResponse = await handleMeasures(req, env, actor);
   if (measuresResponse) return measuresResponse;
 
-  // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103.
-  const runsResponse = await handleRuns(req, env, actor);
+  // Runs — live through RunStore → CloudDatabase (SQLite floor). Spike, #103. ALL_PROGRAMS/SITE
+  // finish in the background via ctx.waitUntil (long fan-out); the page polls to terminal.
+  const runsResponse = await handleRuns(req, env, actor, (p) => ctx.waitUntil(p));
   if (runsResponse) return runsResponse;
 
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
@@ -202,6 +203,6 @@ export default {
     // CORS preflight must be answered before auth — browsers send OPTIONS without
     // credentials, so the real cross-site login/API call is blocked otherwise.
     if (req.method === "OPTIONS") return preflightResponse(req, origins);
-    return withCors(await route(req, env), req, origins);
+    return withCors(await route(req, env, _ctx), req, origins);
   },
 };

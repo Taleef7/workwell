@@ -238,8 +238,11 @@ contracts; per-PR JOURNAL entries carry the detail):
 - **Phase 3 engine (#106)** — CQL→ELM build-time compile + Node execution; ELM Explorer (live no-JVM compile). ✅ merged.
 - **Phase 4 API strangler (#107)** — in progress, per module:
   - `runs` — read models (list/summary/logs/outcomes) + write pipeline (manual/rerun, synthetic
-    generation, seeded distribution, PARTIAL_FAILURE). ✅ merged (PRs #118–#121). MEASURE/EMPLOYEE sync;
-    ALL_PROGRAMS/SITE (async) + CASE pending.
+    generation, seeded distribution, PARTIAL_FAILURE). ✅ merged (PRs #118–#121). All manual scopes now
+    served: MEASURE/EMPLOYEE sync; **ALL_PROGRAMS/SITE async** via `ctx.waitUntil` (full ALL_PROGRAMS ≈
+    1000 evals/58s → return RUNNING immediately, finish in background, page polls; SITE distribution
+    computed over the full population then filtered so outcomes match across scopes); CASE via
+    rerun-to-verify. ✅
   - `cases` — worklist + idempotent upsert ✅ (PR #122); case detail + why_flagged ✅ (PR #123);
     actions (assign/escalate) + audit timeline ✅ (PR #124); outreach (preview/send/delivery) ✅ (PR #125);
     rerun-to-verify (CASE scope) + run `totalCases` ✅ (closed_reason/closed_by columns, `countByLastRun`).
@@ -264,5 +267,5 @@ contracts; per-PR JOURNAL entries carry the detail):
   faithful `NOT_IMPLEMENTED` (their backend services aren't ported). **#108 complete.**
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~293 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~299 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

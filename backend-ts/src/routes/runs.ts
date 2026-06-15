@@ -27,10 +27,16 @@ import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matches
 import {
   executeManualRun,
   executeRerun,
+  planManualRun,
+  finishOrFail,
+  rerunRequest,
+  runningResponse,
+  ASYNC_SCOPES,
   UnsupportedScopeError,
   InvalidRunRequestError,
   type ManualRunRequest,
   type ManualRunResponse,
+  type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
 
@@ -66,6 +72,24 @@ async function cases(env: RunsEnv): Promise<SqliteCaseStore> {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
+/**
+ * Run an async-scope (ALL_PROGRAMS/SITE) manual run or rerun: create the run + return RUNNING
+ * immediately, finish the fan-out in the background via waitUntil. The background promise gets a
+ * rejection handler so a failure AFTER the response (recordOutcome/upsert/finalize) finalizes the
+ * run FAILED instead of leaving it stuck RUNNING (which the page would poll forever). Returns the
+ * RUNNING response, or null when this request should fall through to the synchronous path.
+ */
+async function scheduleAsyncRun(
+  deps: RunPipelineDeps,
+  body: ManualRunRequest,
+  waitUntil: WaitUntil | undefined,
+): Promise<ManualRunResponse | null> {
+  if (!waitUntil || !ASYNC_SCOPES.has(body.scopeType)) return null;
+  const planned = await planManualRun(deps, body);
+  waitUntil(finishOrFail(deps, planned)); // finishOrFail finalizes FAILED on a post-response error
+  return runningResponse(planned);
+}
+
 /** Parse a query int, falling back to `def`, clamped to [min, max] (bounds payloads). */
 const clampInt = (raw: string | null, def: number, min: number, max: number): number => {
   const n = raw == null ? def : Number(raw);
@@ -96,7 +120,10 @@ function caseRerunResponse(detail: {
 }
 
 /** Returns a Response if this module owns the route, else null (let the worker continue). */
-export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): Promise<Response | null> {
+/** Schedules background work that must outlive the response (ctx.waitUntil); awaits inline if absent. */
+export type WaitUntil = (p: Promise<unknown>) => void;
+
+export async function handleRuns(req: Request, env: RunsEnv, actor = "system", waitUntil?: WaitUntil): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
@@ -131,11 +158,16 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
   }
 
   // ---- write pipeline (#107 runs module) ----------------------------------
-  // Manual scoped run (MEASURE / EMPLOYEE): evaluate + persist + summarize.
+  // Manual scoped run: evaluate + persist + summarize. MEASURE/EMPLOYEE run synchronously
+  // (≤ a few seconds); ALL_PROGRAMS/SITE fan out to ~1000 evaluations (~1 min), so they create
+  // the run, return RUNNING immediately, and finish in the background (the page polls to terminal).
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
+      const running = await scheduleAsyncRun(deps, body, waitUntil);
+      if (running) return json(running, 201);
+      // No waitUntil (e.g. tests) → fall back to synchronous completion for every scope.
       return json(await executeManualRun(deps, body), 201);
     } catch (err) {
       if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
@@ -166,6 +198,10 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system"): 
     }
     const deps = { runStore, outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
     try {
+      // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,
+      // so they must use the async waitUntil path too — not a synchronous executeRerun.
+      const running = await scheduleAsyncRun(deps, rerunRequest(prior), waitUntil);
+      if (running) return json(running, 201);
       return json(await executeRerun(deps, rerunId), 201);
     } catch (err) {
       if (err instanceof InvalidRunRequestError) return json({ error: "not_found", message: err.message }, 404);

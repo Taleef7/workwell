@@ -16,7 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
-import { executeManualRun, executeRerun, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
+import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -107,8 +107,63 @@ test("a subject evaluation failure is non-fatal but flags the run PARTIAL_FAILUR
   assert.ok(outcomes.every((o) => (o.evidence as { evaluationError?: string }).evaluationError));
 });
 
+test("ALL_PROGRAMS manual run evaluates every runnable measure × the whole population", async () => {
+  const res = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  assert.equal(res.scopeType, "ALL_PROGRAMS");
+  assert.equal(res.scopeLabel, "All Programs");
+  assert.equal(res.activeMeasuresExecuted, 10);
+  assert.equal(res.totalEvaluated, 10 * 4, "10 runnable measures × 4 injected employees");
+  const run = await deps.runStore.getRun(res.runId);
+  assert.equal(run?.scopeType, "ALL_PROGRAMS");
+  assert.equal(run?.scopeId, null);
+  assert.equal((await deps.outcomeStore.listOutcomes(res.runId)).length, 40);
+});
+
+test("SITE manual run scopes to one site's employees, with full-population targets", async () => {
+  // emp-001..004 are all site "HQ" in the injected slice.
+  const res = await executeManualRun(deps, { scopeType: "SITE", site: "HQ" });
+  assert.equal(res.scopeLabel, "Site: HQ");
+  assert.equal(res.activeMeasuresExecuted, 10);
+  assert.equal(res.totalEvaluated, 10 * 4, "all 4 HQ employees × 10 measures");
+  const run = await deps.runStore.getRun(res.runId);
+  assert.equal(run?.scopeType, "SITE");
+  assert.equal(run?.site, "HQ", "site derived from requestedScope drives the list filter");
+
+  // An employee's outcome must match between a SITE run and an ALL_PROGRAMS run (same target).
+  const all = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS", evaluationDate: "2098-02-02" });
+  const siteRun = await executeManualRun(deps, { scopeType: "SITE", site: "HQ", evaluationDate: "2098-02-02" });
+  const pick = (rows: { subjectId: string; measureId: string; status: string }[]) =>
+    rows.filter((o) => o.subjectId === "emp-001").sort((a, b) => a.measureId.localeCompare(b.measureId)).map((o) => `${o.measureId}:${o.status}`);
+  const allRows = await deps.outcomeStore.listOutcomes(all.runId);
+  const siteRows = await deps.outcomeStore.listOutcomes(siteRun.runId);
+  assert.deepEqual(pick(siteRows), pick(allRows), "emp-001 outcomes identical across SITE and ALL_PROGRAMS");
+});
+
+test("SITE run with an unknown site is an invalid request", async () => {
+  await assert.rejects(executeManualRun(deps, { scopeType: "SITE", site: "Atlantis" }), InvalidRunRequestError);
+  await assert.rejects(executeManualRun(deps, { scopeType: "SITE" }), InvalidRunRequestError);
+});
+
+test("finishOrFail finalizes the run FAILED when background completion rejects (no stuck RUNNING)", async () => {
+  // A failure OUTSIDE the per-subject engine try/catch (here: recordOutcome throws) must not
+  // leave an async run stuck RUNNING — finishOrFail catches it and finalizes FAILED.
+  const failing: RunPipelineDeps = {
+    ...deps,
+    outcomeStore: {
+      ...deps.outcomeStore,
+      async recordOutcome() {
+        throw new Error("store down");
+      },
+    } as RunPipelineDeps["outcomeStore"],
+  };
+  const planned = await planManualRun(failing, { scopeType: "EMPLOYEE", employeeExternalId: "emp-001" });
+  assert.equal((await deps.runStore.getRun(planned.run.id))?.status, "RUNNING", "planned run starts RUNNING");
+  await finishOrFail(failing, planned); // must not throw
+  assert.equal((await deps.runStore.getRun(planned.run.id))?.status, "FAILED", "finalized FAILED, not left RUNNING");
+});
+
 test("unsupported scope and invalid requests are typed errors", async () => {
-  await assert.rejects(executeManualRun(deps, { scopeType: "ALL_PROGRAMS" }), UnsupportedScopeError);
+  await assert.rejects(executeManualRun(deps, { scopeType: "CASE" }), UnsupportedScopeError);
   await assert.rejects(executeManualRun(deps, { scopeType: "MEASURE" }), InvalidRunRequestError);
   await assert.rejects(executeManualRun(deps, { scopeType: "EMPLOYEE", employeeExternalId: "ghost" }), InvalidRunRequestError);
   await assert.rejects(executeRerun(deps, crypto.randomUUID()), InvalidRunRequestError);
