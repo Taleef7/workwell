@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): employee directory (profile + search)
+
+Branch `feat/issue-96-employees` (**independent, off `main`** — new `routes/employees.ts` + worker wiring only, no shared files with the in-flight measures PRs #139/#140, so it merges in parallel). Ported `EmployeeProfileService` (getProfile + search) behind the unchanged frontend contract: the case-detail employee drawer + the worklist employee search. *(backend-ts only. No new schema.)*
+
+- **`run/employee-profile.ts`** — `getEmployeeProfile(externalId)`: identity + **latest outcome per measure** (newest-first history deduped by measure, with `daysSinceLastExam`/`daysUntilDue` derived via the shared `deriveWhyFlagged` — now exported from `case-detail-read-model` for DRY) + **open cases** (OPEN/IN_PROGRESS for the employee) + **recent audit timeline** (last 20 audit_events tied to the employee's cases, with the Java `humanReadable` summaries). `searchEmployees(q, limit)`: name/externalId/role substring (min 2 chars, limit clamped 1–50) + each match's latest outcome.
+- **`routes/employees.ts`** — `GET /api/employees/:externalId/profile` (404 unknown) + `GET /api/employees/search?q=&limit=`. AUTHENTICATED via the `/api/**` matrix. Wired into the worker before programs.
+
+**Fidelity (synthetic directory, documented):** the TS `EmployeeProfile` has only externalId/name/role/site, so `supervisorName`/`startDate`/`fhirPatientId` are null and `active` is true; SLA isn't modeled on the case row, so `slaDueDate`/`slaRemainingDays` are null and `slaBreached` false. The compliance data (outcomes, open cases, audit timeline) is real. Measure names use the engine registry short name (e.g. "Audiogram"), consistent with the cases/runs surfaces.
+
+**backend-ts 305 tests — all pass / 0 fail; typecheck clean.** New coverage: profile (identity + outcome with derived days + open-case link + audit summary), 404, search (name/role match, min-length, latest outcome, limit clamp). Frontend `/cases/[id]` employee drawer + worklist search now served. *(Codex P2 follow-up: `daysSinceLastExam` now reports actual recency, not `days_overdue`; `daysUntilDue = window − recency`.)*
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): measure traceability + get_measure_traceability MCP tool
 
 Branch `feat/issue-96-measure-analytics` (**stacked on the authoring-writes branch** — touches `measures.ts`, which #139 also edits, so it's based on that branch to avoid a conflict; retarget to main once #139 merges). Ported `MeasureTraceabilityService.generate` and flipped the first of the two NOT_IMPLEMENTED MCP tools to a real implementation. *(backend-ts only.)* **No new schema.**
