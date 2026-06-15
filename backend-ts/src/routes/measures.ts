@@ -40,6 +40,7 @@ import {
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
+import { exportMatBundle } from "../fhir/mat-export.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
@@ -232,6 +233,24 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const elm = ELM_LIBRARIES[meta.library];
     if (!elm) return json({ error: "elm_not_found", measureId: elmId, library: meta.library }, 404);
     return json({ measureId: meta.id, name: meta.name, library: meta.library, cql: reconstructCql(elm), elm });
+  }
+
+  // MAT-compatible FHIR R4 export (Library + Measure [+ ValueSets]) — APPROVER/ADMIN by the matrix.
+  const mat = pathname.match(/^\/api\/measures\/([^/]+)\/versions\/([^/]+)\/export\/mat$/);
+  if (mat && req.method === "GET") {
+    const [, measureId, versionId] = mat;
+    const format = (url.searchParams.get("format") ?? "xml").toLowerCase();
+    if (format !== "xml") return json({ error: "invalid_format", message: "Unsupported format. Use format=xml." }, 400);
+    const record = await (await store(env)).getByVersionId(versionId!);
+    // 404 unless the version exists AND belongs to the measure in the path (Java WHERE m.id=? AND mv.id=?).
+    if (!record || record.measureId !== measureId) return json({ error: "not_found", measureId, versionId }, 404);
+    return new Response(exportMatBundle(record), {
+      status: 200,
+      headers: {
+        "content-type": "application/fhir+xml",
+        "content-disposition": `attachment; filename="measure-${versionId}-mat.xml"`,
+      },
+    });
   }
 
   const versionsId = pathname.match(/^\/api\/measures\/([^/]+)\/versions$/)?.[1];

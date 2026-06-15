@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-15 — Issue #96 Phase 4b (#108): MAT-compatible FHIR R4 export
+
+Branch `feat/issue-96-mat-export` (off `main`). Ported `MeasureExportService.exportAsMatBundle` — the `GET /api/measures/:id/versions/:vid/export/mat` measure-portability download. *(backend-ts only. No new schema.)*
+
+- **`fhir/mat-export.ts`** — `exportMatBundle(record, valueSets?)`: builds a FHIR R4 `Bundle` (type=collection) carrying a **Library** (CQL logic library, CQL attached as base64 `text/cql`) + a **Measure** (referencing the library by `urn:uuid:`), plus a **ValueSet** per attached value set (compose/include grouped by code system, blank system → `urn:workwell:local`). Java used HAPI to assemble + serialize + validate; we have **no FHIR runtime** (no new dep), so a small hand-rolled emitter produces well-formed FHIR R4 XML **by construction** — elements in canonical R4 order, attribute values escaped, nested resources inheriting the Bundle's default namespace (HAPI's on-the-wire shape). Status maps Active/Approved → `active`, Deprecated → `retired`, else `draft`; description falls back spec.description → "Policy reference: …" → default; `safeIdentifier` strips non-alphanumerics.
+- **`routes/measures.ts`** — `GET /api/measures/:measureId/versions/:versionId/export/mat` (`?format` defaults `xml`; non-xml → 400; unknown version **or** measure/version mismatch → 404; `application/fhir+xml` attachment). APPROVER/ADMIN by the existing authorize rule. Resolves the version via the new `MeasureStore.getByVersionId` (added in the auditor-packets batch).
+
+**Fidelity (documented):** value-set *linkage* isn't ported yet (value-set governance is a later batch; the TS `MeasureRecord` carries no attached sets), so today's bundle is **Library + Measure**. The ValueSet path is fully built + unit-covered, so it lights up unchanged once governance supplies the attached sets. No runtime FHIR validator (Java's HAPI `validateWithResult` → 500 path) — the XML is correct by construction.
+
+**backend-ts 318 tests — all pass / 0 fail (1 PG suite skipped without local Docker); typecheck clean.** New coverage: builder unit (bundle scaffold, Library base64 CQL UTF-8 round-trip, Measure→Library urn ref, description fallbacks, status mapping, no-CQL/escaping, value-set compose grouping + blank-system + empty-code drop) + the route (XML + headers, format 400, unknown-version 404, measure/version-mismatch 404). Frontend MAT export download now served. Next: evidence upload/download (+ CASE packet), value-set governance, admin write CRUD.
+
+---
+
 ## 2026-06-15 — Issue #96 Phase 4b (#108): auditor packets (run + measure-version)
 
 Branch `feat/issue-96-auditor-packets` (off `main`). Ported `AuditPacketService` for the **RUN** and **MEASURE_VERSION** packet types — the downloadable, self-contained evidence bundles behind `AuditorController`'s `/api/auditor/**` routes. The **CASE** packet is deferred (depends on evidence attachments + scheduled appointments + outreach_records, none ported yet). *(backend-ts only. Floor+ceiling DDL adds the `audit_packet_exports` table — the canonical Flyway V014 already exists; this only mirrors it on the spike SQLite floor / `workwell_spike` Postgres ceiling.)*
