@@ -182,6 +182,16 @@ test("waivers: grant resolves employee + measure display fields, then lists newe
   // a WAIVER_GRANTED audit was written.
   const audits = (await body("/api/admin/audit-events?scope=all&limit=50")) as Array<{ eventType: string; actor: string }>;
   assert.ok(audits.some((a) => a.eventType === "WAIVER_GRANTED" && a.actor === "admin@workwell.dev"));
+
+  // expiry filters take a bare YYYY-MM-DD and expand to UTC day bounds (Java parseFrom/ToDate):
+  // the waiver expires 2027-03-01T00:00:00Z, so it's included by expiresBefore=2027-03-01 (end of day)
+  // and expiresAfter=2027-03-01 (start of day), and excluded by expiresBefore=2027-02-28.
+  assert.ok(((await body("/api/admin/waivers?expiresBefore=2027-03-01")) as unknown[]).length >= 1, "end-of-day bound includes the 00:00:00Z waiver");
+  assert.ok(((await body("/api/admin/waivers?expiresAfter=2027-03-01")) as unknown[]).length >= 1);
+  assert.deepEqual(await body("/api/admin/waivers?expiresBefore=2027-02-28"), [], "day before excludes it");
+  // a non-date filter value → 400.
+  assert.equal((await get("/api/admin/waivers?expiresBefore=2027-03-01T00:00:00Z"))?.status, 400);
+  assert.equal((await get("/api/admin/waivers?expiresAfter=garbage"))?.status, 400);
 });
 
 test("waivers: grant validation — unknown employee, unknown measure, missing reason, bad date → 400", async () => {
