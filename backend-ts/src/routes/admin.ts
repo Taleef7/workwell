@@ -40,18 +40,15 @@ import {
   OutreachTemplateError,
 } from "../admin/outreach-templates.ts";
 import { resetDemoData } from "../admin/demo-reset.ts";
+import { isProductionLike } from "../config/startup-safety.ts";
 
 interface AdminEnv {
   DB: CloudDatabase;
-  /** Spring-style active profiles; `prod` gates off demo-reset (mirrors @Profile("!prod")). */
+  /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
   SPRING_PROFILES_ACTIVE?: string;
+  WORKWELL_ENVIRONMENT?: string;
+  NODE_ENV?: string;
 }
-
-const isProd = (env: AdminEnv): boolean =>
-  (env.SPRING_PROFILES_ACTIVE ?? "")
-    .split(",")
-    .map((p) => p.trim().toLowerCase())
-    .includes("prod");
 
 const ready = new WeakSet<object>();
 async function ensure(env: AdminEnv): Promise<void> {
@@ -149,6 +146,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     try {
       const created = await createTemplate(
         new SqliteOutreachTemplateStore(env.DB),
+        new SqliteCaseEventStore(env.DB),
         { name: String(b.name ?? ""), subject: String(b.subject ?? ""), bodyText: String(b.bodyText ?? ""), type: b.type == null ? null : String(b.type) },
         actor,
       );
@@ -163,13 +161,19 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     await ensure(env);
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
-      const updated = await updateTemplate(new SqliteOutreachTemplateStore(env.DB), updateId, {
-        name: String(b.name ?? ""),
-        subject: String(b.subject ?? ""),
-        bodyText: String(b.bodyText ?? ""),
-        type: b.type == null ? null : String(b.type),
-        active: b.active == null ? true : Boolean(b.active),
-      });
+      const updated = await updateTemplate(
+        new SqliteOutreachTemplateStore(env.DB),
+        new SqliteCaseEventStore(env.DB),
+        updateId,
+        {
+          name: String(b.name ?? ""),
+          subject: String(b.subject ?? ""),
+          bodyText: String(b.bodyText ?? ""),
+          type: b.type == null ? null : String(b.type),
+          active: b.active == null ? true : Boolean(b.active),
+        },
+        actor,
+      );
       return updated ? json(updated) : json({ error: "not_found", id: updateId }, 404);
     } catch (err) {
       if (err instanceof OutreachTemplateError) return json({ error: "invalid_request", message: err.message }, 400);
@@ -189,7 +193,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
 
   // ---- demo reset (non-prod only; mirrors @Profile("!prod")) ---------------
   if (pathname === "/api/admin/demo-reset" && req.method === "POST") {
-    if (isProd(env)) return json({ error: "Demo reset is not available in production" }, 403);
+    if (isProductionLike(env)) return json({ error: "Demo reset is not available in production" }, 403);
     await ensure(env);
     await resetDemoData(env.DB);
     return json({ status: "reset_complete", message: "Demo data has been reset" });
