@@ -16,22 +16,36 @@
  * Each mutating action writes a case_action + an audit_event; the detail timeline is
  * the merged ledger. evidence/appointments/ai are later slices.
  */
-import type { CloudDatabase } from "@mieweb/cloud";
+import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
+import { SqliteEvidenceStore } from "../stores/sqlite/evidence-store-sqlite.ts";
+import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
-import { assignCase, escalateCase, type CaseActionDeps } from "../case/case-actions.ts";
+import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
 import { rerunToVerify, type RerunDeps } from "../case/case-rerun.ts";
+import {
+  uploadEvidence,
+  listEvidence,
+  downloadEvidence,
+  EvidenceError,
+  UnsupportedEvidenceTypeError,
+  EvidenceNotFoundError,
+  EvidenceMissingError,
+  type EvidenceDeps,
+} from "../case/evidence-service.ts";
+import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
+  BUCKET: CloudBucket;
 }
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
@@ -68,6 +82,24 @@ async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
     outcomes: new SqliteOutcomeStore(env.DB),
     runStore: new SqliteRunStore(env.DB),
     engine,
+  };
+}
+async function evidenceDeps(env: CasesEnv): Promise<EvidenceDeps> {
+  await ensure(env);
+  return {
+    evidence: new SqliteEvidenceStore(env.DB),
+    cases: new SqliteCaseStore(env.DB),
+    bucket: env.BUCKET,
+    events: new SqliteCaseEventStore(env.DB),
+  };
+}
+async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
+  await ensure(env);
+  return {
+    appointments: new SqliteAppointmentStore(env.DB),
+    cases: new SqliteCaseStore(env.DB),
+    events: new SqliteCaseEventStore(env.DB),
+    outcomes: new SqliteOutcomeStore(env.DB),
   };
 }
 
@@ -137,7 +169,100 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       const detail = await rerunToVerify(await rerunDeps(env), rerunId, actor);
       return detail ? json(detail) : json({ error: "not_found", id: rerunId }, 404);
     }
-    return null; // other case POSTs (evidence/appointments) not ported yet
+    // Evidence upload (multipart/form-data: file + optional description).
+    const evidenceId = url.pathname.match(/^\/api\/cases\/([^/]+)\/evidence$/)?.[1];
+    if (evidenceId) {
+      let form: FormData;
+      try {
+        form = await req.formData();
+      } catch {
+        return json({ error: "bad_request", message: "multipart/form-data with a file is required" }, 400);
+      }
+      const file = form.get("file") as unknown;
+      // FormData entry is either a string field or a file Blob; require a Blob-like with bytes.
+      if (!file || typeof file === "string" || typeof (file as Blob).arrayBuffer !== "function") {
+        return json({ error: "bad_request", message: "File is required" }, 400);
+      }
+      const blob = file as Blob & { name?: string };
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const descriptionRaw = form.get("description");
+      try {
+        const record = await uploadEvidence(
+          await evidenceDeps(env),
+          evidenceId,
+          { bytes, fileName: blob.name ?? null, description: typeof descriptionRaw === "string" ? descriptionRaw : null },
+          actor,
+        );
+        return json(record, 201);
+      } catch (err) {
+        if (err instanceof UnsupportedEvidenceTypeError) return json({ error: "unsupported_media_type", message: err.message }, 415);
+        if (err instanceof EvidenceError) return json({ error: "bad_request", message: err.message }, 400);
+        throw err;
+      }
+    }
+    // Case actions: RESOLVE (manual close) or SCHEDULE_APPOINTMENT.
+    const actionsId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions$/)?.[1];
+    if (actionsId) {
+      const body = (await req.json().catch(() => ({}))) as {
+        type?: string;
+        note?: string;
+        resolvedAt?: string;
+        appointmentType?: string;
+        scheduledAt?: string;
+        location?: string;
+        notes?: string;
+      };
+      const type = (body.type ?? "").toUpperCase();
+      try {
+        if (type === "RESOLVE") {
+          const detail = await resolveCase(await actionDeps(env), actionsId, body.note ?? null, body.resolvedAt ?? null, actor);
+          return detail ? json(detail) : json({ error: "not_found", id: actionsId }, 404);
+        }
+        if (type === "SCHEDULE_APPOINTMENT") {
+          const detail = await scheduleAppointment(
+            await appointmentDeps(env),
+            actionsId,
+            { appointmentType: body.appointmentType ?? null, scheduledAt: body.scheduledAt ?? null, location: body.location ?? null, notes: body.notes ?? null },
+            actor,
+          );
+          return detail ? json(detail) : json({ error: "not_found", id: actionsId }, 404);
+        }
+        return json({ error: "bad_request", message: "Unsupported action type" }, 400);
+      } catch (err) {
+        if (err instanceof CaseActionError || err instanceof AppointmentError) return json({ error: "bad_request", message: err.message }, 400);
+        throw err;
+      }
+    }
+    return null;
+  }
+
+  // Evidence download — bytes from the BUCKET (image/* inline, else attachment).
+  const downloadId = url.pathname.match(/^\/api\/evidence\/([^/]+)\/download$/)?.[1];
+  if (downloadId && req.method === "GET") {
+    try {
+      const dl = await downloadEvidence(await evidenceDeps(env), downloadId, actor);
+      return new Response(dl.bytes, {
+        status: 200,
+        headers: {
+          "content-type": dl.contentType,
+          "content-disposition": `${dl.inline ? "inline" : "attachment"}; filename="${dl.record.fileName}"`,
+        },
+      });
+    } catch (err) {
+      if (err instanceof EvidenceNotFoundError || err instanceof EvidenceError) return json({ error: "not_found", message: err.message }, 404);
+      if (err instanceof EvidenceMissingError) return json({ error: "evidence_missing", message: err.message }, 500);
+      throw err;
+    }
+  }
+
+  // Evidence list + appointments list (GET) for the case-detail page.
+  const evidenceListId = url.pathname.match(/^\/api\/cases\/([^/]+)\/evidence$/)?.[1];
+  if (evidenceListId && req.method === "GET") {
+    return json(await listEvidence(await evidenceDeps(env), evidenceListId));
+  }
+  const apptListId = url.pathname.match(/^\/api\/cases\/([^/]+)\/appointments$/)?.[1];
+  if (apptListId && req.method === "GET") {
+    return json(await listAppointments(await appointmentDeps(env), apptListId));
   }
 
   // Outreach preview (GET) — render the default template for the case (no state change).

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
-import { createSqliteD1 } from "@mieweb/cloud-local";
+import { createSqliteD1, createFsBucket } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
@@ -17,7 +17,8 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { handleCases } from "./cases.ts";
 
 const dbPath = join(tmpdir(), `workwell-cases-${crypto.randomUUID()}.sqlite`);
-let env: { DB: unknown };
+const bucketDir = join(tmpdir(), `workwell-cases-bucket-${crypto.randomUUID()}`);
+let env: { DB: unknown; BUCKET: unknown };
 let omarCaseId: string;
 
 const get = (qs = "") => handleCases(new Request(`http://x/api/cases${qs}`, { method: "GET" }), env as never);
@@ -28,7 +29,7 @@ const post = (path: string, actor = "cm@workwell.dev") =>
 before(async () => {
   const db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  env = { DB: db };
+  env = { DB: db, BUCKET: createFsBucket(bucketDir) };
   const store = new SqliteCaseStore(db);
   const outcomes = new SqliteOutcomeStore(db);
   // a real run row so the outcome FK is satisfied
@@ -81,6 +82,7 @@ before(async () => {
 after(() => {
   try {
     rmSync(dbPath, { force: true });
+    rmSync(bucketDir, { recursive: true, force: true });
   } catch {
     /* best effort */
   }
@@ -293,4 +295,101 @@ test("POST /api/cases/:id/rerun-to-verify re-evaluates and records the verificat
 
 test("POST /api/cases/:id/rerun-to-verify for an unknown case → 404", async () => {
   assert.equal((await post(`/api/cases/${crypto.randomUUID()}/rerun-to-verify`))?.status, 404);
+});
+
+// ---- evidence + appointments + resolve (#108) -------------------------------
+
+// A 5-byte PNG signature is enough for magic-byte detection.
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+
+function uploadReq(caseId: string, bytes: Uint8Array, fileName: string, description?: string) {
+  const form = new FormData();
+  form.set("file", new Blob([bytes], { type: "application/octet-stream" }), fileName);
+  if (description !== undefined) form.set("description", description);
+  return handleCases(new Request(`http://x/api/cases/${caseId}/evidence`, { method: "POST", body: form }), env as never, "cm@workwell.dev");
+}
+const postJson = (path: string, body: unknown) =>
+  handleCases(new Request(`http://x${path}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }), env as never, "cm@workwell.dev");
+
+test("evidence: upload (magic-byte detect) → list → download (inline for images)", async () => {
+  const up = await uploadReq(omarCaseId, PNG_BYTES, "scan.png", "audiogram scan");
+  assert.equal(up?.status, 201);
+  const rec = (await up!.json()) as { id: string; mimeType: string; fileName: string; description: string };
+  assert.equal(rec.mimeType, "image/png", "detected from magic bytes, not the octet-stream header");
+  assert.equal(rec.description, "audiogram scan");
+
+  const list = (await getPath(`/api/cases/${omarCaseId}/evidence`).then((r) => r!.json())) as Array<{ id: string }>;
+  assert.ok(list.some((e) => e.id === rec.id), "uploaded evidence is listed");
+
+  const dl = await getPath(`/api/evidence/${rec.id}/download`);
+  assert.equal(dl?.status, 200);
+  assert.equal(dl!.headers.get("content-type"), "image/png");
+  assert.match(dl!.headers.get("content-disposition") ?? "", /^inline; filename="scan\.png"/);
+  assert.deepEqual(new Uint8Array(await dl!.arrayBuffer()), PNG_BYTES, "bytes round-trip from the bucket");
+});
+
+test("evidence: unsupported content type → 415; unknown evidence download → 404", async () => {
+  const bad = await uploadReq(omarCaseId, new Uint8Array([0x00, 0x01, 0x02, 0x03, 0xff]), "x.bin");
+  assert.equal(bad?.status, 415);
+  assert.equal((await getPath(`/api/evidence/${crypto.randomUUID()}/download`))?.status, 404);
+});
+
+// A fresh OPEN case (own run) so action tests don't couple to other tests' state.
+async function freshOpenCase(subjectId: string): Promise<string> {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const c = await new SqliteCaseStore(db).upsertFromOutcome({
+    runId: run.id,
+    subjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  });
+  return c!.id;
+}
+
+test("appointments: SCHEDULE_APPOINTMENT action moves OPEN→IN_PROGRESS and lists", async () => {
+  const caseId = await freshOpenCase("emp-010");
+  const res = await postJson(`/api/cases/${caseId}/actions`, {
+    type: "SCHEDULE_APPOINTMENT",
+    appointmentType: "AUDIOGRAM",
+    scheduledAt: "2026-07-01T15:00:00.000Z",
+    location: "Plant A Clinic",
+    notes: "bring earplugs",
+  });
+  assert.equal(res?.status, 200);
+  const detail = (await res!.json()) as { status: string; timeline: Array<{ eventType: string }> };
+  assert.equal(detail.status, "IN_PROGRESS", "OPEN case advances to IN_PROGRESS");
+  assert.ok(detail.timeline.some((t) => t.eventType === "SCHEDULE_APPOINTMENT" || t.eventType === "APPOINTMENT_SCHEDULED"));
+
+  const list = (await getPath(`/api/cases/${caseId}/appointments`).then((r) => r!.json())) as Array<{ appointmentType: string; status: string; location: string }>;
+  assert.equal(list.length, 1);
+  assert.equal(list[0]!.appointmentType, "AUDIOGRAM");
+  assert.equal(list[0]!.status, "PENDING");
+  assert.equal(list[0]!.location, "Plant A Clinic");
+});
+
+test("appointments: missing required fields → 400; unsupported action type → 400", async () => {
+  const caseId = await freshOpenCase("emp-011");
+  assert.equal((await postJson(`/api/cases/${caseId}/actions`, { type: "SCHEDULE_APPOINTMENT", appointmentType: "X", location: "Y" }))?.status, 400);
+  assert.equal((await postJson(`/api/cases/${caseId}/actions`, { type: "FROBNICATE" }))?.status, 400);
+});
+
+test("RESOLVE action manually closes an open case (note required)", async () => {
+  const caseId = await freshOpenCase("emp-009");
+  assert.equal((await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE" }))?.status, 400, "note required");
+  const ok = await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE", note: "documented offline" });
+  assert.equal(ok?.status, 200);
+  const detail = (await ok!.json()) as { status: string; closedReason: string | null };
+  assert.equal(detail.status, "CLOSED");
+  assert.equal(detail.closedReason, "MANUAL_RESOLVE");
+  // resolving an already-closed case → 400
+  assert.equal((await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE", note: "again" }))?.status, 400);
 });
