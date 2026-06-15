@@ -337,6 +337,23 @@ test("PUT /api/measures/:id/cql saves CQL; POST /cql/compile compiles + persists
   assert.ok(Array.isArray(body.errors) && Array.isArray(body.warnings));
 });
 
+test("PUT /api/measures/:id/cql resets compile_status to NOT_COMPILED (no stale gate bypass)", async () => {
+  // Compile to a known-good status first, then a raw save must invalidate it.
+  await post("/api/measures/hypertension/cql/compile", { cqlText: 'library H version \'1.0.0\'\ndefine "Outcome Status": \'COMPLIANT\'' });
+  await put("/api/measures/hypertension/cql", { cqlText: "library H version '1.0.0'  // edited, not recompiled" });
+  const readiness = (await get("/api/measures/hypertension/activation-readiness").then((r) => r!.json())) as { compileStatus: string; activationBlockers: string[] };
+  assert.equal(readiness.compileStatus, "NOT_COMPILED", "raw save invalidates the prior compile status");
+  assert.ok(readiness.activationBlockers.some((b) => /compile/i.test(b)), "a NOT_COMPILED measure carries a compile blocker");
+});
+
+test("CQL authoring enforces type + size cap (translator DoS guard)", async () => {
+  const huge = "x".repeat(64 * 1024 + 1);
+  assert.equal((await post("/api/measures/audiogram/cql/compile", { cqlText: huge }))?.status, 413);
+  assert.equal((await put("/api/measures/audiogram/cql", { cqlText: huge }))?.status, 413);
+  assert.equal((await post("/api/measures/audiogram/cql/compile", { cqlText: 123 }))?.status, 400);
+  assert.equal((await put("/api/measures/audiogram/cql", { cqlText: null }))?.status, 400);
+});
+
 test("PUT /api/measures/:id/tests replaces fixtures; POST /tests/validate validates them", async () => {
   const fixtures = [
     { fixtureName: "f-compliant", employeeExternalId: "emp-001", expectedOutcome: "COMPLIANT", notes: "" },
