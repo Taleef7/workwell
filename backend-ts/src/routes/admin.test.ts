@@ -95,3 +95,17 @@ test("deferred subsystems return their empty shape (dashboard renders)", async (
   assert.deepEqual(await body("/api/admin/waivers?status=active"), []);
   assert.deepEqual(await body("/api/admin/outreach/delivery-log?limit=20"), []);
 });
+
+test("GET /api/admin/data-mappings returns the full V012 seed; POST /validate stamps + returns it", async () => {
+  const list = (await body("/api/admin/data-mappings")) as Array<{ canonicalElement: string; sourceId: string }>;
+  assert.equal(list.length, 14, "15-row V012 seed minus none; 14 distinct canonicals");
+  assert.ok(list.some((m) => m.canonicalElement === "procedure.audiogram" && m.sourceId === "fhir"));
+  assert.ok(list.some((m) => m.canonicalElement === "employee.role" && m.sourceId === "hris"));
+
+  const res = await handleAdmin(new Request("http://x/api/admin/data-mappings/validate", { method: "POST" }), env as never);
+  assert.equal(res?.status, 200);
+  const validated = (await res!.json()) as Array<{ mappingStatus: string; lastValidatedAt: string | null }>;
+  assert.equal(validated.length, 14);
+  assert.ok(validated.every((m) => m.mappingStatus === "MAPPED"), "no degraded source → all MAPPED");
+  assert.ok(validated.every((m) => m.lastValidatedAt != null), "validate stamps lastValidatedAt");
+});
