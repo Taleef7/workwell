@@ -7,6 +7,10 @@
  * (the operator-facing record) and an audit_event (the immutable ledger; CLAUDE.md
  * hard rule — every state change writes audit_event). The timeline is
  *   audit_events (excl CASE_VIEWED) ∪ case_actions  ordered by occurred_at, id.
+ *
+ * It is also the project's de-facto audit store (it owns the audit_events table): the
+ * audit CSV export, the by-run / by-measure-version ledger reads for auditor packets,
+ * and the audit_packet_exports record all live here (#108).
  */
 export interface InsertActionInput {
   caseId: string;
@@ -46,6 +50,17 @@ export interface AuditEventRow {
   payload: Record<string, unknown>;
 }
 
+/** One audit_packet_exports row to record (#108 auditor packets) — see docs/DATA_MODEL.md §3.15. */
+export interface PacketExportInput {
+  packetType: string;
+  entityId: string;
+  format: string;
+  generatedBy: string;
+  /** `sha256:<hex>` digest of the serialized packet bytes. */
+  payloadHash: string;
+  payloadSizeBytes: number;
+}
+
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
@@ -60,6 +75,12 @@ export interface CaseEventStore {
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
   /** All audit events, oldest-first (the audit CSV export); capped at `limit`. */
   listAuditEvents(limit?: number): Promise<AuditEventRow[]>;
+  /** Audit events for one run (ref_run_id), oldest-first — the run auditor packet ledger. */
+  auditEventsByRun(runId: string): Promise<AuditEventRow[]>;
+  /** Audit events for one measure version (ref_measure_version_id), oldest-first — the measure-version packet ledger. */
+  auditEventsByMeasureVersion(measureVersionId: string): Promise<AuditEventRow[]>;
+  /** Record a generated auditor packet in audit_packet_exports (#108). */
+  insertPacketExport(input: PacketExportInput): Promise<void>;
   /** True once an OUTREACH_SENT action exists — the precondition for a delivery-state update. */
   hasOutreachSent(caseId: string): Promise<boolean>;
   /**

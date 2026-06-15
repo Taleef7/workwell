@@ -59,6 +59,18 @@ test("the runs COLLECTION create (POST /api/runs, no trailing slash) is also CM/
   assert.deepEqual(authorize("GET", "/api/admin", author), { ok: false, status: 403 });
 });
 
+test("auditor packets: run packets are CM/ADMIN, measure-version packets are APPROVER/ADMIN", () => {
+  // run packets — CASE_MANAGER or ADMIN (operational), not AUTHOR/APPROVER
+  assert.equal(authorize("GET", "/api/auditor/runs/abc/packet", cm).ok, true);
+  assert.equal(authorize("GET", "/api/auditor/runs/abc/packet", admin).ok, true);
+  assert.deepEqual(authorize("GET", "/api/auditor/runs/abc/packet", approver), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/auditor/runs/abc/packet", null), { ok: false, status: 401 });
+  // measure-version packets — APPROVER or ADMIN (authoring/governance), not CASE_MANAGER
+  assert.equal(authorize("GET", "/api/auditor/measure-versions/v1/packet", approver).ok, true);
+  assert.equal(authorize("GET", "/api/auditor/measure-versions/v1/packet", admin).ok, true);
+  assert.deepEqual(authorize("GET", "/api/auditor/measure-versions/v1/packet", cm), { ok: false, status: 403 });
+});
+
 test("the ELM Explorer endpoints are gated to any authenticated user", () => {
   assert.deepEqual(authorize("POST", "/api/measures/compile", null), { ok: false, status: 401 });
   assert.equal(authorize("POST", "/api/measures/compile", author).ok, true);

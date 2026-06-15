@@ -272,6 +272,14 @@ contracts; per-PR JOURNAL entries carry the detail):
   official SDK transports assume Node http vs our fetch host), per-tool role gates + `MCP_TOOL_CALLED`
   audit (sanitized args + SHA-256 hash). `get_measure_traceability` + `list_data_quality_gaps` are now
   **both real** (traceability + data-readiness ports) — **all 13 MCP tools implemented**. **#108 complete.**
+  **Auditor packets** ✅ — `GET /api/auditor/runs/:id/packet` + `/measure-versions/:id/packet`
+  (`?format=json|html`), port of `AuditPacketService` (RUN + MEASURE_VERSION); each build serializes →
+  `sha256` digest → `AUDIT_PACKET_GENERATED` audit + `audit_packet_exports` record (table mirrored on the
+  floor+ceiling; canonical Flyway V014 already exists). New store methods: `auditEventsByRun` /
+  `auditEventsByMeasureVersion` / `insertPacketExport` (CaseEventStore) + `getByVersionId` (MeasureStore).
+  Role gates CM/ADMIN (run), APPROVER/ADMIN (measure-version). The **CASE** packet is deferred (needs
+  evidence attachments + appointments + outreach_records). Remaining #108-adjacent: evidence
+  upload/download (+ CASE packet), value-set governance, MAT export, admin write CRUD.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
 Test posture: `backend-ts` ~330 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
