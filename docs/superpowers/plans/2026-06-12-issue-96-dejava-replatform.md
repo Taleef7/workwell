@@ -278,8 +278,13 @@ contracts; per-PR JOURNAL entries carry the detail):
   floor+ceiling; canonical Flyway V014 already exists). New store methods: `auditEventsByRun` /
   `auditEventsByMeasureVersion` / `insertPacketExport` (CaseEventStore) + `getByVersionId` (MeasureStore).
   Role gates CM/ADMIN (run), APPROVER/ADMIN (measure-version). The **CASE** packet is deferred (needs
-  evidence attachments + appointments + outreach_records). Remaining #108-adjacent: evidence
-  upload/download (+ CASE packet), value-set governance, MAT export, admin write CRUD.
+  evidence attachments + appointments + outreach_records).
+  **MAT export** ✅ — `GET /api/measures/:id/versions/:vid/export/mat`, port of `MeasureExportService`:
+  a hand-rolled (no FHIR dep) FHIR R4 Bundle XML (Library + Measure [+ ValueSet]), canonical element
+  order, base64 `text/cql`, status/description mapping; APPROVER/ADMIN, resolves via `getByVersionId`.
+  Value-set linkage deferred to the governance batch (bundle is Library+Measure today; ValueSet path
+  built + unit-covered). Remaining #108-adjacent: evidence upload/download (+ CASE packet), value-set
+  governance, admin write CRUD.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
 Test posture: `backend-ts` ~330 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
