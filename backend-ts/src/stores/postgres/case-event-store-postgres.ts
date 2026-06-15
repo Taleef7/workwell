@@ -11,8 +11,29 @@ import type {
   AuditEventRow,
   CaseEventStore,
   InsertActionInput,
+  PacketExportInput,
   TimelineEntry,
 } from "../case-event-store.ts";
+
+interface AuditRow {
+  occurred_at: Date | string;
+  event_type: string;
+  actor: string | null;
+  ref_run_id: string | null;
+  ref_case_id: string | null;
+  ref_measure_version_id: string | null;
+  payload_json: unknown;
+}
+
+const toAuditEventRow = (r: AuditRow): AuditEventRow => ({
+  occurredAt: r.occurred_at instanceof Date ? r.occurred_at.toISOString() : r.occurred_at,
+  eventType: r.event_type,
+  actor: r.actor,
+  refRunId: r.ref_run_id,
+  refCaseId: r.ref_case_id,
+  refMeasureVersionId: r.ref_measure_version_id,
+  payload: (r.payload_json as Record<string, unknown>) ?? {},
+});
 
 interface TimelineRow {
   event_type: string;
@@ -105,28 +126,48 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async listAuditEvents(limit = 100000): Promise<AuditEventRow[]> {
-    const { rows } = await this.pool.query<{
-      occurred_at: Date | string;
-      event_type: string;
-      actor: string | null;
-      ref_run_id: string | null;
-      ref_case_id: string | null;
-      ref_measure_version_id: string | null;
-      payload_json: unknown;
-    }>(
+    const { rows } = await this.pool.query<AuditRow>(
       `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
          FROM ${SPIKE_SCHEMA}.audit_events ORDER BY occurred_at ASC, id ASC LIMIT $1`,
       [limit],
     );
-    return rows.map((r) => ({
-      occurredAt: r.occurred_at instanceof Date ? r.occurred_at.toISOString() : r.occurred_at,
-      eventType: r.event_type,
-      actor: r.actor,
-      refRunId: r.ref_run_id,
-      refCaseId: r.ref_case_id,
-      refMeasureVersionId: r.ref_measure_version_id,
-      payload: (r.payload_json as Record<string, unknown>) ?? {},
-    }));
+    return rows.map(toAuditEventRow);
+  }
+
+  async auditEventsByRun(runId: string): Promise<AuditEventRow[]> {
+    const { rows } = await this.pool.query<AuditRow>(
+      `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+         FROM ${SPIKE_SCHEMA}.audit_events WHERE ref_run_id = $1 ORDER BY occurred_at ASC, id ASC`,
+      [runId],
+    );
+    return rows.map(toAuditEventRow);
+  }
+
+  async auditEventsByMeasureVersion(measureVersionId: string): Promise<AuditEventRow[]> {
+    const { rows } = await this.pool.query<AuditRow>(
+      `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+         FROM ${SPIKE_SCHEMA}.audit_events WHERE ref_measure_version_id = $1 ORDER BY occurred_at ASC, id ASC`,
+      [measureVersionId],
+    );
+    return rows.map(toAuditEventRow);
+  }
+
+  async insertPacketExport(input: PacketExportInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ${SPIKE_SCHEMA}.audit_packet_exports
+         (id, packet_type, entity_id, format, generated_by, generated_at, payload_hash, payload_size_bytes)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        crypto.randomUUID(),
+        input.packetType,
+        input.entityId,
+        input.format,
+        input.generatedBy,
+        new Date().toISOString(),
+        input.payloadHash,
+        input.payloadSizeBytes,
+      ],
+    );
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {

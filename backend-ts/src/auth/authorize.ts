@@ -82,6 +82,12 @@ const RULES: Rule[] = [
 
   { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
+
+  // Auditor packets: run/case packets are case-operational (CM/ADMIN); measure-version
+  // packets carry authoring/governance detail (APPROVER/ADMIN). Mirrors AuditorController.
+  { method: "GET", pattern: rx("/api/auditor/runs/*/packet"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/auditor/cases/*/packet"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/auditor/measure-versions/*/packet"), access: [APPROVER, A] },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
 ];

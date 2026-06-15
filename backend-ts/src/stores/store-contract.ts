@@ -399,6 +399,62 @@ export function caseEventStoreContract(
     assert.deepEqual(e.payload, { assignee: "cm@x" });
   });
 
+  test(`[${label}] auditEventsByRun / auditEventsByMeasureVersion filter the ledger by ref`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    const versionId = crypto.randomUUID();
+    await eventStore.appendAudit({
+      eventType: "RUN_COMPLETED",
+      entityType: "run",
+      entityId: c.lastRunId,
+      actor: "cm@x",
+      refRunId: c.lastRunId,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload: { status: "COMPLETED" },
+    });
+    await eventStore.appendAudit({
+      eventType: "MEASURE_APPROVED",
+      entityType: "measure_version",
+      entityId: versionId,
+      actor: "approver@x",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: versionId,
+      payload: { version: "v1.0" },
+    });
+
+    const byRun = await eventStore.auditEventsByRun(c.lastRunId);
+    assert.ok(
+      byRun.some((e) => e.eventType === "RUN_COMPLETED"),
+      "run ledger includes the run event",
+    );
+    assert.ok(byRun.every((e) => e.refRunId === c.lastRunId), "only this run's events");
+
+    const byVersion = await eventStore.auditEventsByMeasureVersion(versionId);
+    assert.equal(byVersion.length, 1, "one event for the version");
+    assert.equal(byVersion[0]!.eventType, "MEASURE_APPROVED");
+    assert.deepEqual(byVersion[0]!.payload, { version: "v1.0" });
+
+    assert.deepEqual(await eventStore.auditEventsByRun(crypto.randomUUID()), [], "unknown run → []");
+    assert.deepEqual(await eventStore.auditEventsByMeasureVersion(crypto.randomUUID()), [], "unknown version → []");
+  });
+
+  test(`[${label}] insertPacketExport records an export row (idempotent inserts, distinct ids)`, async () => {
+    const { eventStore } = await fresh();
+    const input = {
+      packetType: "RUN",
+      entityId: crypto.randomUUID(),
+      format: "json",
+      generatedBy: "cm@x",
+      payloadHash: "sha256:deadbeef",
+      payloadSizeBytes: 1234,
+    };
+    // Two builds of the same packet write two distinct export rows (each gets a fresh id).
+    await eventStore.insertPacketExport(input);
+    await eventStore.insertPacketExport(input);
+  });
+
   test(`[${label}] recordCaseEvent writes the action + audit atomically (both on the timeline)`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;
@@ -503,6 +559,12 @@ export function measureStoreContract(label: string, freshStore: () => Promise<Me
     assert.equal((await store.listLatest()).length, 1);
     assert.equal((await store.listVersions("audiogram")).length, 1);
     assert.equal(await store.getLatest("missing"), null);
+
+    // getByVersionId resolves the version UUID → its measure record (auditor packet lookup).
+    const byVersion = (await store.getByVersionId("audiogram-v1.0"))!;
+    assert.equal(byVersion.measureId, "audiogram");
+    assert.equal(byVersion.versionId, "audiogram-v1.0");
+    assert.equal(await store.getByVersionId("nope"), null);
   });
 
   test(`[${label}] createMeasure inserts a Draft v1.0; setVersionStatus drives the lifecycle`, async () => {
