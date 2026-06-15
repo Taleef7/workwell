@@ -40,6 +40,8 @@ import {
   OutreachTemplateError,
 } from "../admin/outreach-templates.ts";
 import { resetDemoData } from "../admin/demo-reset.ts";
+import { SqliteWaiverStore } from "../stores/sqlite/waiver-store-sqlite.ts";
+import { listWaivers, grantWaiver, WaiverError, type WaiverDeps } from "../admin/waivers.ts";
 import { isProductionLike } from "../config/startup-safety.ts";
 
 interface AdminEnv {
@@ -58,6 +60,12 @@ async function ensure(env: AdminEnv): Promise<void> {
     await seedOutreachTemplates(new SqliteOutreachTemplateStore(env.DB));
     ready.add(env.DB);
   }
+}
+
+/** Waiver deps: the waiver store + the measure store (display resolution) + audit. */
+async function waiverDeps(env: AdminEnv): Promise<WaiverDeps> {
+  const measures = await ensureMeasureStore(env); // ensures DDL + catalog seed
+  return { waivers: new SqliteWaiverStore(env.DB), measures, events: new SqliteCaseEventStore(env.DB) };
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -199,8 +207,44 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     return json({ status: "reset_complete", message: "Demo data has been reset" });
   }
 
+  // ---- waivers (persisted; list + grant) -----------------------------------
+  if (pathname === "/api/admin/waivers" && req.method === "GET") {
+    const deps = await waiverDeps(env);
+    const activeRaw = q.get("active");
+    return json(
+      await listWaivers(deps, {
+        measureId: q.get("measureId"),
+        site: q.get("site"),
+        expiresAfter: q.get("expiresAfter"),
+        expiresBefore: q.get("expiresBefore"),
+        active: activeRaw == null || activeRaw === "" ? null : activeRaw.toLowerCase() === "true",
+      }),
+    );
+  }
+  if (pathname === "/api/admin/waivers" && req.method === "POST") {
+    const deps = await waiverDeps(env);
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const granted = await grantWaiver(
+        deps,
+        {
+          employeeExternalId: String(b.employeeExternalId ?? ""),
+          measureId: String(b.measureId ?? ""),
+          exclusionReason: String(b.exclusionReason ?? ""),
+          expiresAt: b.expiresAt == null ? null : String(b.expiresAt),
+          notes: b.notes == null ? null : String(b.notes),
+          active: b.active == null ? null : Boolean(b.active),
+        },
+        actor,
+      );
+      return json(granted, 201);
+    } catch (err) {
+      if (err instanceof WaiverError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
+
   // ---- deferred subsystems (honest empty so the dashboard renders) ---------
-  if (pathname === "/api/admin/waivers" && req.method === "GET") return json([]);
   if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") return json([]);
 
   return null;

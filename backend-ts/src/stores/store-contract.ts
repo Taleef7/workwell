@@ -18,6 +18,7 @@ import type { EvidenceStore } from "./evidence-store.ts";
 import type { AppointmentStore } from "./appointment-store.ts";
 import type { ValueSetStore } from "./value-set-store.ts";
 import type { OutreachTemplateStore } from "./outreach-template-store.ts";
+import type { WaiverStore } from "./waiver-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -824,5 +825,34 @@ export function outreachTemplateStoreContract(label: string, freshStore: () => P
     assert.equal(afterDeactivate.length, 1);
     assert.equal(afterDeactivate[0]!.id, "t-1");
     assert.equal(await store.update("missing", { name: "x", subject: "x", bodyText: "x", type: "OUTREACH", active: true }), null);
+  });
+}
+
+/** Registers the WaiverStore contract — insert, getById, ordering, and the SQL filters. */
+export function waiverStoreContract(label: string, freshStore: () => Promise<WaiverStore>): void {
+  test(`[${label}] waivers: insert + getById round-trip; list ordering (active DESC, expires NULLS LAST) + filters`, async () => {
+    const store = await freshStore();
+    assert.deepEqual(await store.list({}), []);
+
+    const w1 = await store.insert({ id: "w-1", employeeExternalId: "emp-006", measureId: "audiogram", measureVersionId: "audiogram-v1.0", exclusionReason: "Medical", grantedBy: "admin@x", expiresAt: "2027-01-01T00:00:00.000Z", notes: "n", active: true });
+    assert.equal(w1.active, true);
+    assert.ok(w1.grantedAt, "granted_at stamped");
+    const w2 = await store.insert({ id: "w-2", employeeExternalId: "emp-010", measureId: "tb_surveillance", measureVersionId: "tb_surveillance-v1.0", exclusionReason: "Religious", grantedBy: "admin@x", expiresAt: null, notes: null, active: true });
+    const w3 = await store.insert({ id: "w-3", employeeExternalId: "emp-011", measureId: "audiogram", measureVersionId: "audiogram-v1.0", exclusionReason: "Revoked", grantedBy: "admin@x", expiresAt: "2026-01-01T00:00:00.000Z", notes: null, active: false });
+
+    assert.deepEqual((await store.getById("w-1")), w1);
+    assert.equal(await store.getById("missing"), null);
+
+    // ordering: active first; among active, expiry ASC then NULLs last → w-1 (2027) before w-2 (null); inactive w-3 last.
+    const all = await store.list({});
+    assert.deepEqual(all.map((w) => w.id), ["w-1", "w-2", "w-3"]);
+
+    // filters
+    assert.deepEqual((await store.list({ measureId: "audiogram" })).map((w) => w.id).sort(), ["w-1", "w-3"]);
+    assert.deepEqual((await store.list({ active: true })).map((w) => w.id).sort(), ["w-1", "w-2"]);
+    assert.deepEqual((await store.list({ active: false })).map((w) => w.id), ["w-3"]);
+    assert.deepEqual((await store.list({ expiresBefore: "2026-06-01T00:00:00.000Z" })).map((w) => w.id), ["w-3"]);
+    assert.deepEqual((await store.list({ expiresAfter: "2026-06-01T00:00:00.000Z" })).map((w) => w.id), ["w-1"]);
+    void w2;
   });
 }
