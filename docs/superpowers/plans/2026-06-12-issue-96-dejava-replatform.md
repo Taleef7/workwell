@@ -298,8 +298,13 @@ contracts; per-PR JOURNAL entries carry the detail):
   `GET/POST /api/admin/terminology-mappings` (persisted). Wired `valueSets` into measure-detail, folded
   resolve-check into activation-readiness, and lit up the previously-dormant value-set paths in
   traceability + MAT export. Audits: `MEASURE_VALUE_SET_LINKED`/`UNLINKED`, `TERMINOLOGY_MAPPING_CREATED`.
-  Remaining #108-adjacent: admin write CRUD (waivers, outreach-template CRUD, demo-reset).
+  **Admin write CRUD (part 1)** ✅ — `OutreachTemplateService` (persisted: `outreach_templates` mirrors
+  V007 on floor+ceiling; list/preview-render/create/update behind `OutreachTemplateStore`) +
+  `DemoResetService` (`POST /api/admin/demo-reset` clears volatile floor tables, **403 under the `prod`
+  profile** via `SPRING_PROFILES_ACTIVE`). Remaining #108-adjacent: **waivers** (list + grant — split
+  out because they JOIN employees/measures UUID tables the synthetic TS model lacks; need
+  employee-directory + measure-store resolution).
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~350 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~360 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.

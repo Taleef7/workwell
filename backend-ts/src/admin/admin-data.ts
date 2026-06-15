@@ -163,27 +163,8 @@ export function sourceFreshness(sourceId: string): string {
   return "VERY_STALE";
 }
 
-// ---- outreach templates (built-in default) ----------------------------------
-export interface OutreachTemplate {
-  id: string;
-  name: string;
-  subject: string;
-  bodyText: string;
-  type: string;
-  active: boolean;
-}
-const DEFAULT_TEMPLATE: OutreachTemplate = {
-  id: "default-template",
-  name: "Default Template",
-  subject: "Outreach Reminder for {{measureName}}",
-  bodyText: "Hello {{employeeName}}, please complete required follow-up for {{measureName}}.",
-  type: "OUTREACH",
-  active: true,
-};
-export const listOutreachTemplates = (): OutreachTemplate[] => [{ ...DEFAULT_TEMPLATE }];
-export function findOutreachTemplate(id: string): OutreachTemplate | null {
-  return id === DEFAULT_TEMPLATE.id ? { ...DEFAULT_TEMPLATE } : null;
-}
+// Outreach templates moved to admin write CRUD (#108): persisted in the outreach_templates table
+// (V007 demo seed), served + created/updated via the OutreachTemplateStore + admin/outreach-templates.ts.
 
 // ---- audit viewer (over the persisted audit_events) -------------------------
 export interface AdminAuditRow {

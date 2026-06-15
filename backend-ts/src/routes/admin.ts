@@ -25,16 +25,29 @@ import {
   setSchedulerEnabled,
   listDataMappings,
   validateDataMappings,
-  listOutreachTemplates,
-  findOutreachTemplate,
   toAdminAuditRows,
 } from "../admin/admin-data.ts";
 import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
+import { SqliteOutreachTemplateStore } from "../stores/sqlite/outreach-template-store-sqlite.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
+import {
+  seedOutreachTemplates,
+  listTemplates,
+  previewTemplate,
+  createTemplate,
+  updateTemplate,
+  OutreachTemplateError,
+} from "../admin/outreach-templates.ts";
+import { resetDemoData } from "../admin/demo-reset.ts";
+import { isProductionLike } from "../config/startup-safety.ts";
 
 interface AdminEnv {
   DB: CloudDatabase;
+  /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
+  SPRING_PROFILES_ACTIVE?: string;
+  WORKWELL_ENVIRONMENT?: string;
+  NODE_ENV?: string;
 }
 
 const ready = new WeakSet<object>();
@@ -42,6 +55,7 @@ async function ensure(env: AdminEnv): Promise<void> {
   if (!ready.has(env.DB)) {
     await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
     await migrateFloorSchema(env.DB);
+    await seedOutreachTemplates(new SqliteOutreachTemplateStore(env.DB));
     ready.add(env.DB);
   }
 }
@@ -120,11 +134,69 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- static / faithful reads --------------------------------------------
   if (pathname === "/api/admin/data-mappings" && req.method === "GET") return json(listDataMappings());
   if (pathname === "/api/admin/data-mappings/validate" && req.method === "POST") return json(validateDataMappings());
-  if (pathname === "/api/admin/outreach-templates" && req.method === "GET") return json(listOutreachTemplates());
+
+  // ---- outreach templates (persisted; V007 demo seed + create/update) ------
+  if (pathname === "/api/admin/outreach-templates" && req.method === "GET") {
+    await ensure(env);
+    return json(await listTemplates(new SqliteOutreachTemplateStore(env.DB)));
+  }
+  if (pathname === "/api/admin/outreach-templates" && req.method === "POST") {
+    await ensure(env);
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const created = await createTemplate(
+        new SqliteOutreachTemplateStore(env.DB),
+        new SqliteCaseEventStore(env.DB),
+        { name: String(b.name ?? ""), subject: String(b.subject ?? ""), bodyText: String(b.bodyText ?? ""), type: b.type == null ? null : String(b.type) },
+        actor,
+      );
+      return json(created, 201);
+    } catch (err) {
+      if (err instanceof OutreachTemplateError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
+  const updateId = pathname.match(/^\/api\/admin\/outreach-templates\/([^/]+)$/)?.[1];
+  if (updateId && req.method === "PUT") {
+    await ensure(env);
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const updated = await updateTemplate(
+        new SqliteOutreachTemplateStore(env.DB),
+        new SqliteCaseEventStore(env.DB),
+        updateId,
+        {
+          name: String(b.name ?? ""),
+          subject: String(b.subject ?? ""),
+          bodyText: String(b.bodyText ?? ""),
+          type: b.type == null ? null : String(b.type),
+          active: b.active == null ? true : Boolean(b.active),
+        },
+        actor,
+      );
+      return updated ? json(updated) : json({ error: "not_found", id: updateId }, 404);
+    } catch (err) {
+      if (err instanceof OutreachTemplateError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
   const previewId = pathname.match(/^\/api\/admin\/outreach-templates\/([^/]+)\/preview$/)?.[1];
   if (previewId && req.method === "GET") {
-    const t = findOutreachTemplate(previewId);
-    return t ? json({ id: t.id, name: t.name, subject: t.subject, bodyText: t.bodyText }) : json({ error: "not_found", id: previewId }, 404);
+    await ensure(env);
+    try {
+      return json(await previewTemplate(new SqliteOutreachTemplateStore(env.DB), previewId));
+    } catch (err) {
+      if (err instanceof OutreachTemplateError) return json({ error: "not_found", id: previewId }, 404);
+      throw err;
+    }
+  }
+
+  // ---- demo reset (non-prod only; mirrors @Profile("!prod")) ---------------
+  if (pathname === "/api/admin/demo-reset" && req.method === "POST") {
+    if (isProductionLike(env)) return json({ error: "Demo reset is not available in production" }, 403);
+    await ensure(env);
+    await resetDemoData(env.DB);
+    return json({ status: "reset_complete", message: "Demo data has been reset" });
   }
 
   // ---- deferred subsystems (honest empty so the dashboard renders) ---------
