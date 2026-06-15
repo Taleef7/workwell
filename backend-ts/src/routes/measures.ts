@@ -40,7 +40,9 @@ import {
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
+import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
 
 interface MeasuresEnv {
@@ -161,6 +163,20 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const res = await compileMeasureCql(await lifecycleDeps(env), compileId, cqlText, actor);
       return res ? json(res) : json({ error: "not_found", measureId: compileId }, 404);
+    }
+    // Activation impact preview (dry-run): evaluate the population + estimate case impact.
+    const impactId = pathname.match(/^\/api\/measures\/([^/]+)\/impact-preview$/)?.[1];
+    if (impactId) {
+      const measure = await (await store(env)).getLatest(impactId);
+      if (!measure) return json({ error: "not_found", measureId: impactId }, 404);
+      const body = (await req.json().catch(() => ({}))) as ImpactPreviewRequest;
+      try {
+        const deps = { cases: new SqliteCaseStore(env.DB), events: new SqliteCaseEventStore(env.DB), engine };
+        return json(await previewImpact(deps, measure, body, actor));
+      } catch (err) {
+        if (err instanceof ImpactPreviewError) return json({ error: "invalid_request", message: err.message }, 400);
+        throw err;
+      }
     }
     // Validate the version's persisted test fixtures.
     const testsValidateId = pathname.match(/^\/api\/measures\/([^/]+)\/tests\/validate$/)?.[1];

@@ -401,3 +401,15 @@ test("GET /api/measures/:id/data-readiness returns element readiness + overall s
   assert.ok(r.requiredElements.some((e) => e.canonicalElement === "procedure.audiogram" && e.mappingStatus === "MAPPED"));
   assert.equal((await get("/api/measures/does-not-exist/data-readiness"))?.status, 404);
 });
+
+test("POST /api/measures/:id/impact-preview returns a dry-run preview; 404 unknown; 400 bad date", async () => {
+  assert.equal((await post("/api/measures/does-not-exist/impact-preview"))?.status, 404);
+  assert.equal((await post("/api/measures/audiogram/impact-preview", { evaluationDate: "06/15/2026" }))?.status, 400);
+  const res = await post("/api/measures/audiogram/impact-preview");
+  assert.equal(res?.status, 200);
+  const r = (await res!.json()) as { measureId: string; populationEvaluated: number; outcomeCounts: Record<string, number>; caseImpact: { wouldCreate: number }; siteBreakdown: unknown[] };
+  assert.equal(r.measureId, "audiogram");
+  assert.ok(r.populationEvaluated > 0);
+  assert.ok(Object.values(r.outcomeCounts).reduce((a, b) => a + b, 0) === r.populationEvaluated);
+  assert.ok(Array.isArray(r.siteBreakdown) && r.siteBreakdown.length >= 1);
+});
