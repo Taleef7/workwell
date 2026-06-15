@@ -379,3 +379,14 @@ test("authoring writes → 404 for unknown measure", async () => {
   assert.equal((await post("/api/measures/nope/cql/compile", { cqlText: "x" }))?.status, 404);
   assert.equal((await post("/api/measures/nope/tests/validate"))?.status, 404);
 });
+
+test("GET /api/measures/:id/traceability returns rows + gaps; unknown → 404", async () => {
+  const res = await get("/api/measures/audiogram/traceability");
+  assert.equal(res?.status, 200);
+  const t = (await res!.json()) as { measureId: string; measureVersionId: string; rows: unknown[]; gaps: unknown[] };
+  assert.equal(t.measureId, "audiogram");
+  assert.equal(t.measureVersionId, "audiogram-v1.0");
+  assert.ok(t.rows.length >= 3, "eligibility + compliance-window rows at minimum");
+  assert.ok(Array.isArray(t.gaps));
+  assert.equal((await get("/api/measures/does-not-exist/traceability"))?.status, 404);
+});
