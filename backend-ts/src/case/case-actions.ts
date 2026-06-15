@@ -120,8 +120,16 @@ export async function resolveCase(
   const trimmedNote = (note ?? "").trim();
   if (trimmedNote === "") throw new CaseActionError("Closure note is required");
 
-  const effectiveResolvedAt =
-    resolvedAt && !Number.isNaN(new Date(resolvedAt).getTime()) ? new Date(resolvedAt).toISOString() : new Date().toISOString();
+  // resolvedAt is optional, but if a client supplies one it must parse — a typo must 400, not
+  // silently record the current time as the closure timestamp (mirrors SCHEDULE_APPOINTMENT).
+  let effectiveResolvedAt: string;
+  if (resolvedAt !== null && resolvedAt.trim() !== "") {
+    const parsed = new Date(resolvedAt);
+    if (Number.isNaN(parsed.getTime())) throw new CaseActionError("resolvedAt is not a valid timestamp");
+    effectiveResolvedAt = parsed.toISOString();
+  } else {
+    effectiveResolvedAt = new Date().toISOString();
+  }
 
   const payload = { note: trimmedNote, resolvedAt: effectiveResolvedAt, resolvedBy: actor, closedReason: "MANUAL_RESOLVE" };
   await deps.events.recordCaseEvent({

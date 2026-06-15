@@ -636,6 +636,9 @@ export function evidenceStoreContract(label: string, freshStore: () => Promise<E
     assert.equal(back.storageKey, "case-1/a-report.pdf");
     assert.equal(back.description, "Q2 audiogram");
     assert.equal(await store.getById(crypto.randomUUID()), null);
+    // A malformed id (e.g. /api/evidence/not-a-uuid/download) must be a clean miss, not a
+    // Postgres uuid-cast error — the ceiling adapter guards with isUuid before the ::uuid cast.
+    assert.equal(await store.getById("not-a-uuid"), null);
 
     await new Promise((r) => setTimeout(r, 2));
     const b = await store.insert({

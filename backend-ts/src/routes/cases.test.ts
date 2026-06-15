@@ -393,3 +393,18 @@ test("RESOLVE action manually closes an open case (note required)", async () => 
   // resolving an already-closed case → 400
   assert.equal((await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE", note: "again" }))?.status, 400);
 });
+
+test("RESOLVE action with an unparsable resolvedAt → 400 (a typo must not silently record now())", async () => {
+  const caseId = await freshOpenCase("emp-012");
+  assert.equal(
+    (await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE", note: "documented offline", resolvedAt: "yesterday" }))?.status,
+    400,
+    "present-but-unparsable resolvedAt is rejected",
+  );
+  // the case is untouched by the rejected request, and a valid resolvedAt still closes it
+  const detail = (await getPath(`/api/cases/${caseId}`).then((r) => r!.json())) as { status: string };
+  assert.equal(detail.status, "OPEN", "rejected resolve did not close the case");
+  const ok = await postJson(`/api/cases/${caseId}/actions`, { type: "RESOLVE", note: "done", resolvedAt: "2026-06-14T12:00:00.000Z" });
+  assert.equal(ok?.status, 200);
+  assert.equal((await ok!.json() as { closedAt: string }).closedAt, "2026-06-14T12:00:00.000Z", "the supplied timestamp is honored");
+});

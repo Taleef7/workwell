@@ -2,7 +2,7 @@
  * Postgres-ceiling implementation of the EvidenceStore contract (#108 evidence).
  * Schema-qualified to the isolated `workwell_spike` schema (never the canonical `public` tables).
  */
-import type { PgPool } from "./pg-database.ts";
+import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { EvidenceRecord, EvidenceStore, InsertEvidenceInput } from "../evidence-store.ts";
 
@@ -66,6 +66,7 @@ export class PgEvidenceStore implements EvidenceStore {
   }
 
   async getById(id: string): Promise<EvidenceRecord | null> {
+    if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<Row>(`${SELECT(SPIKE_SCHEMA)} WHERE id = $1::uuid`, [id]);
     return rows[0] ? toRecord(rows[0]) : null;
   }
