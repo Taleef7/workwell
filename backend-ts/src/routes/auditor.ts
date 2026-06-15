@@ -14,10 +14,13 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteEvidenceStore } from "../stores/sqlite/evidence-store-sqlite.ts";
+import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlite.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import {
   buildRunPacket,
   buildMeasureVersionPacket,
+  buildCasePacket,
   PacketNotFoundError,
   type PacketFormat,
   type PacketResult,
@@ -59,7 +62,8 @@ export async function handleAuditor(req: Request, env: AuditorEnv, actor = "syst
 
   const runId = pathname.match(/^\/api\/auditor\/runs\/([^/]+)\/packet$/)?.[1];
   const mvId = pathname.match(/^\/api\/auditor\/measure-versions\/([^/]+)\/packet$/)?.[1];
-  if ((!runId && !mvId) || req.method !== "GET") return null;
+  const caseId = pathname.match(/^\/api\/auditor\/cases\/([^/]+)\/packet$/)?.[1];
+  if ((!runId && !mvId && !caseId) || req.method !== "GET") return null;
 
   const format = parseFormat(url.searchParams.get("format"));
   if (!format) return json({ error: "invalid_format", message: "Unsupported format. Use format=json or format=html." }, 400);
@@ -74,6 +78,16 @@ export async function handleAuditor(req: Request, env: AuditorEnv, actor = "syst
         events: new SqliteCaseEventStore(env.DB),
       };
       return packetResponse(await buildRunPacket(deps, runId, actor, format));
+    }
+    if (caseId) {
+      const deps = {
+        cases: new SqliteCaseStore(env.DB),
+        outcomes: new SqliteOutcomeStore(env.DB),
+        events: new SqliteCaseEventStore(env.DB),
+        evidence: new SqliteEvidenceStore(env.DB),
+        appointments: new SqliteAppointmentStore(env.DB),
+      };
+      return packetResponse(await buildCasePacket(deps, caseId, actor, format));
     }
     const deps = {
       measures: await ensureMeasureStore(env),

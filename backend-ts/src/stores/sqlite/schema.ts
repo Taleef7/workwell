@@ -150,6 +150,42 @@ CREATE TABLE IF NOT EXISTS audit_packet_exports (
   payload_hash       TEXT,
   payload_size_bytes INTEGER
 );
+
+/* Evidence attachments (#108). Floor analogue of evidence_attachments (docs/DATA_MODEL.md /
+   canonical V006): file METADATA only — the bytes live in the BUCKET binding under storage_key.
+   case_id is the floor case id (TEXT). */
+CREATE TABLE IF NOT EXISTS evidence_attachments (
+  id              TEXT PRIMARY KEY,
+  case_id         TEXT NOT NULL,
+  uploaded_by     TEXT NOT NULL,
+  file_name       TEXT NOT NULL,
+  file_size_bytes INTEGER NOT NULL,
+  mime_type       TEXT NOT NULL,
+  storage_key     TEXT NOT NULL,
+  description     TEXT,
+  uploaded_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS evidence_attachments_case_id_idx ON evidence_attachments (case_id);
+
+/* Scheduled appointments (#108). Floor analogue of scheduled_appointments (canonical V005):
+   employee_id/measure_id are the floor case's subject + measure slug (TEXT). The outreach_records
+   side of V005 is NOT modeled — TS represents outreach as case_actions, not a separate table. */
+CREATE TABLE IF NOT EXISTS scheduled_appointments (
+  id               TEXT PRIMARY KEY,
+  case_id          TEXT NOT NULL,
+  employee_id      TEXT NOT NULL,
+  measure_id       TEXT NOT NULL,
+  appointment_type TEXT NOT NULL,
+  scheduled_at     TEXT NOT NULL,
+  location         TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  notes            TEXT,
+  created_by       TEXT NOT NULL,
+  created_at       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS scheduled_appointments_case_id_idx ON scheduled_appointments (case_id);
 `;
 
 /**
