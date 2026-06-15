@@ -413,3 +413,25 @@ test("POST /api/measures/:id/impact-preview returns a dry-run preview; 404 unkno
   assert.ok(Object.values(r.outcomeCounts).reduce((a, b) => a + b, 0) === r.populationEvaluated);
   assert.ok(Array.isArray(r.siteBreakdown) && r.siteBreakdown.length >= 1);
 });
+
+test("GET /api/measures/:id/versions/:vid/export/mat → FHIR R4 Bundle XML; format + id gates", async () => {
+  // resolve the audiogram version id from the version history
+  const versions = (await get("/api/measures/audiogram/versions").then((r) => r!.json())) as Array<{ id: string }>;
+  const versionId = versions[0]!.id;
+
+  const res = await get(`/api/measures/audiogram/versions/${versionId}/export/mat`);
+  assert.equal(res?.status, 200);
+  assert.equal(res!.headers.get("content-type"), "application/fhir+xml");
+  assert.match(res!.headers.get("content-disposition") ?? "", new RegExp(`attachment; filename="measure-${versionId}-mat\.xml"`));
+  const xml = await res!.text();
+  assert.match(xml, /<Bundle xmlns="http:\/\/hl7\.org\/fhir">/);
+  assert.match(xml, /<Library>/);
+  assert.match(xml, /<Measure>/);
+
+  // non-xml format → 400
+  assert.equal((await get(`/api/measures/audiogram/versions/${versionId}/export/mat?format=json`))?.status, 400);
+  // unknown version → 404
+  assert.equal((await get(`/api/measures/audiogram/versions/${crypto.randomUUID()}/export/mat`))?.status, 404);
+  // version belongs to a DIFFERENT measure than the path → 404 (measure/version mismatch)
+  assert.equal((await get(`/api/measures/hazwoper/versions/${versionId}/export/mat`))?.status, 404);
+});
