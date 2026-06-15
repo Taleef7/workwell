@@ -283,8 +283,13 @@ contracts; per-PR JOURNAL entries carry the detail):
   a hand-rolled (no FHIR dep) FHIR R4 Bundle XML (Library + Measure [+ ValueSet]), canonical element
   order, base64 `text/cql`, status/description mapping; APPROVER/ADMIN, resolves via `getByVersionId`.
   Value-set linkage deferred to the governance batch (bundle is Library+Measure today; ValueSet path
-  built + unit-covered). Remaining #108-adjacent: evidence upload/download (+ CASE packet), value-set
-  governance, admin write CRUD.
+  built + unit-covered).
+  **Evidence + appointments + CASE packet** ✅ — `EvidenceService` (upload/list/download; magic-byte
+  MIME detect, 10MB+allow-list, bytes in the BUCKET binding, audited), `scheduleAppointment`/`listAppointments`,
+  and `resolveCase` (manual CLOSE; was 501). New `EvidenceStore`/`AppointmentStore` (floor+ceiling+contract);
+  `evidence_attachments`/`scheduled_appointments` mirror V006/V005 (outreach_records side omitted — TS
+  outreach is case_actions). `buildCasePacket` + `GET /api/auditor/cases/:id/packet` now real (attachments
+  by metadata only). Remaining #108-adjacent: value-set governance, admin write CRUD.
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
 Test posture: `backend-ts` ~330 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
