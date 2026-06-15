@@ -84,22 +84,105 @@ export const listTerminologyMappings = (): TerminologyMapping[] => [
 ];
 
 // ---- data-element mappings (data readiness source map) -----------------------
+// Faithful port of the V012__data_readiness seed (15 mappings × 2 active sources). The granular
+// canonicals (procedure.audiogram, waiver.medical, employee.role, …) are what DataReadinessService
+// resolves spec labels to — the earlier 4-row stub used coarse canonicals that never matched.
 export interface DataElementMapping {
   id: string;
   sourceId: string;
   sourceDisplayName: string;
+  sourceType: string;
   canonicalElement: string;
   sourceField: string;
+  fhirResourceType: string | null;
+  fhirPath: string | null;
+  codeSystem: string | null;
   mappingStatus: string;
   lastValidatedAt: string | null;
   notes: string | null;
 }
-export const listDataMappings = (): DataElementMapping[] => [
-  { id: "dm-1", sourceId: "hris", sourceDisplayName: "HRIS Sync", canonicalElement: "Employee.role", sourceField: "job_title", mappingStatus: "MAPPED", lastValidatedAt: "2026-06-01T00:00:00.000Z", notes: null },
-  { id: "dm-2", sourceId: "hris", sourceDisplayName: "HRIS Sync", canonicalElement: "Employee.site", sourceField: "location", mappingStatus: "MAPPED", lastValidatedAt: "2026-06-01T00:00:00.000Z", notes: null },
-  { id: "dm-3", sourceId: "fhir", sourceDisplayName: "FHIR Repository", canonicalElement: "Procedure.performed", sourceField: "performedDateTime", mappingStatus: "MAPPED", lastValidatedAt: "2026-06-01T00:00:00.000Z", notes: null },
-  { id: "dm-4", sourceId: "fhir", sourceDisplayName: "FHIR Repository", canonicalElement: "Immunization.occurrence", sourceField: "occurrenceDateTime", mappingStatus: "MAPPED", lastValidatedAt: "2026-06-01T00:00:00.000Z", notes: null },
+
+/** Integration-source metadata for the mapping rows (V012 integration_sources seed). */
+const SOURCE_META: Record<string, { displayName: string; sourceType: string }> = {
+  hris: { displayName: "HRIS", sourceType: "INTERNAL" },
+  fhir: { displayName: "FHIR Repository", sourceType: "FHIR_R4" },
+};
+
+interface MappingSeed {
+  canonicalElement: string;
+  sourceId: "hris" | "fhir";
+  sourceField: string;
+  fhirResourceType?: string;
+  fhirPath?: string;
+  notes: string;
+}
+const MAPPING_SEED: MappingSeed[] = [
+  { canonicalElement: "employee.role", sourceId: "hris", sourceField: "employee_role", notes: "Employee job role; used for eligibility filtering across all measures" },
+  { canonicalElement: "employee.site", sourceId: "hris", sourceField: "employee_site", notes: "Employee work site; used for site-level eligibility filters" },
+  { canonicalElement: "programEnrollment.hearingConservation", sourceId: "hris", sourceField: "program_enrollments[hearing_conservation]", notes: "Audiogram eligibility flag" },
+  { canonicalElement: "programEnrollment.hazwoper", sourceId: "hris", sourceField: "program_enrollments[hazwoper]", notes: "HAZWOPER surveillance eligibility flag" },
+  { canonicalElement: "programEnrollment.tbScreening", sourceId: "hris", sourceField: "program_enrollments[tb_screening]", notes: "TB screening eligibility flag" },
+  { canonicalElement: "programEnrollment.clinicalFacing", sourceId: "hris", sourceField: "program_enrollments[clinical_facing]", notes: "Flu vaccine eligibility flag" },
+  { canonicalElement: "waiver.hearingConservation", sourceId: "hris", sourceField: "waivers[hearing_conservation]", notes: "Active hearing conservation waiver" },
+  { canonicalElement: "waiver.medical", sourceId: "hris", sourceField: "waivers[medical]", notes: "Active medical exemption (TB, HAZWOPER)" },
+  { canonicalElement: "waiver.flu", sourceId: "hris", sourceField: "waivers[flu]", notes: "Flu vaccine contraindication flag" },
+  { canonicalElement: "procedure.audiogram", sourceId: "fhir", sourceField: "Procedure.performedDateTime", fhirResourceType: "Procedure", fhirPath: "Procedure.where(code in audiogram-vs).performedDateTime", notes: "Most recent audiogram procedure date" },
+  { canonicalElement: "procedure.hazwoperExam", sourceId: "fhir", sourceField: "Procedure.performedDateTime", fhirResourceType: "Procedure", fhirPath: "Procedure.where(code in hazwoper-vs).performedDateTime", notes: "Most recent HAZWOPER medical surveillance exam date" },
+  { canonicalElement: "procedure.tbScreen", sourceId: "fhir", sourceField: "Procedure.performedDateTime", fhirResourceType: "Procedure", fhirPath: "Procedure.where(code in tb-vs).performedDateTime", notes: "Most recent TB screening date" },
+  { canonicalElement: "procedure.fluVaccine", sourceId: "fhir", sourceField: "Immunization.occurrenceDateTime", fhirResourceType: "Immunization", fhirPath: "Immunization.where(vaccineCode in flu-vs).occurrenceDateTime", notes: "Current season flu vaccine date" },
+  { canonicalElement: "policy.fluSeason", sourceId: "hris", sourceField: "flu_season_config", notes: "Current flu season start/end window from site policy config" },
 ];
+
+function toMapping(seed: MappingSeed, lastValidatedAt: string | null, status = "MAPPED"): DataElementMapping {
+  const meta = SOURCE_META[seed.sourceId]!;
+  return {
+    id: `dm-${seed.canonicalElement}`,
+    sourceId: seed.sourceId,
+    sourceDisplayName: meta.displayName,
+    sourceType: meta.sourceType,
+    canonicalElement: seed.canonicalElement,
+    sourceField: seed.sourceField,
+    fhirResourceType: seed.fhirResourceType ?? null,
+    fhirPath: seed.fhirPath ?? null,
+    codeSystem: null,
+    mappingStatus: status,
+    lastValidatedAt,
+    notes: seed.notes,
+  };
+}
+
+/** GET /api/admin/data-mappings — the seeded source map (V012), ordered source then canonical. */
+export const listDataMappings = (): DataElementMapping[] =>
+  MAPPING_SEED.map((s) => toMapping(s, null)).sort((a, b) => (a.sourceId === b.sourceId ? a.canonicalElement.localeCompare(b.canonicalElement) : a.sourceId.localeCompare(b.sourceId)));
+
+/**
+ * POST /api/admin/data-mappings/validate — port of DataReadinessService.validateMappings: a source
+ * whose integration health is DEGRADED marks its mappings STALE; HEALTHY restores MAPPED; otherwise
+ * unchanged. Stamps last_validated_at = now. (Static seed → computed view, not a persisted mutation.)
+ */
+export function validateDataMappings(): DataElementMapping[] {
+  const now = new Date().toISOString();
+  const sourceStatus = (sourceId: string): string => {
+    const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
+    if (!ih) return "UNKNOWN";
+    return ih.status === "healthy" ? "HEALTHY" : ih.status === "degraded" ? "DEGRADED" : "UNKNOWN";
+  };
+  return listDataMappings().map((m) => {
+    const status = sourceStatus(m.sourceId) === "DEGRADED" ? "STALE" : m.mappingStatus;
+    return { ...m, mappingStatus: status, lastValidatedAt: now };
+  });
+}
+
+/** Freshness for a source from its integration-health last sync (DataReadinessService.computeFreshness). */
+export function sourceFreshness(sourceId: string): string {
+  const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
+  if (!ih) return "UNKNOWN";
+  if (ih.lastSyncAt == null) return sourceId === "hris" || sourceId === "fhir" ? "FRESH" : "UNKNOWN";
+  const hoursAgo = (Date.now() - new Date(ih.lastSyncAt).getTime()) / 3_600_000;
+  if (hoursAgo <= 24) return "FRESH";
+  if (hoursAgo <= 168) return "STALE";
+  return "VERY_STALE";
+}
 
 // ---- outreach templates (built-in default) ----------------------------------
 export interface OutreachTemplate {

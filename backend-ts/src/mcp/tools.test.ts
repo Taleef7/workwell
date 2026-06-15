@@ -236,8 +236,14 @@ test("get_measure_traceability returns the matrix; missing ref + unknown measure
   assert.equal((await call("get_measure_traceability", { measureId: "nope" })).payload.code, "MEASURE_NOT_FOUND");
 });
 
-test("list_data_quality_gaps still returns NOT_IMPLEMENTED (data-readiness port pending)", async () => {
-  assert.equal((await call("list_data_quality_gaps", { measureId: "audiogram" })).payload.code, "NOT_IMPLEMENTED");
+test("list_data_quality_gaps returns the readiness summary; missing ref + unknown measure error", async () => {
+  const { payload } = await call("list_data_quality_gaps", { measureId: "audiogram" });
+  assert.equal(payload.measureId, "audiogram");
+  assert.ok(typeof payload.overallStatus === "string");
+  assert.ok(Array.isArray(payload.elementReadiness) && (payload.elementReadiness as unknown[]).length > 0);
+  assert.ok(Array.isArray(payload.blockers) && Array.isArray(payload.warnings));
+  assert.equal((await call("list_data_quality_gaps", {})).payload.code, "INVALID_ARGUMENT");
+  assert.equal((await call("list_data_quality_gaps", { measureId: "nope" })).payload.code, "MEASURE_NOT_FOUND");
 });
 
 test("every tool call writes an MCP_TOOL_CALLED audit with sanitized args + hash", async () => {

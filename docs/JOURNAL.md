@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-15 — Issue #96 Phase 4b (#108): data readiness + list_data_quality_gaps MCP tool (last NOT_IMPLEMENTED flipped)
+
+Branch `feat/issue-96-data-readiness` (off `main`). Ported `DataReadinessService.computeReadiness` + `validateMappings`, flipping the **second/last** NOT_IMPLEMENTED MCP tool — so all 13 MCP tools are now real. *(backend-ts only.)* **No migration needed** — the `data_element_mappings`/`integration_sources` data is read-only reference seed (V012), modeled as a static constant like the other admin seeds.
+
+- **`admin/admin-data.ts`** — replaced the 4-row data-mappings **stub** (coarse canonicals like `Employee.role` that never matched) with the **faithful 14-row V012 seed** (granular canonicals `procedure.audiogram`/`waiver.medical`/`employee.role`/…, 2 active sources hris/fhir, fhirResourceType/fhirPath enriched onto the interface). Added `validateDataMappings()` (DEGRADED source → STALE, HEALTHY → MAPPED, stamps lastValidatedAt) and `sourceFreshness(sourceId)` (from integration-health last sync). The admin data-mappings panel now shows the real source map.
+- **`measure/data-readiness.ts`** — `computeDataReadiness(measure)`: resolves each `requiredDataElement` label → canonical (the `LABEL_TO_CANONICAL` longest-match table) → source mapping; reports per-element mappingStatus + freshness + (clinical elements only) the MISSING_DATA rate + sample subjects from the measure's outcomes; aggregates blockers (UNMAPPED/ERROR) + warnings (stale / >5% missingness) into READY / READY_WITH_WARNINGS / NOT_READY.
+- **`routes/measures.ts`** — `GET /api/measures/:id/data-readiness` (404 unknown). **`routes/admin.ts`** — `POST /api/admin/data-mappings/validate` (the deferred admin validate surface, ADMIN-gated). **`mcp/tools.ts`** — `list_data_quality_gaps` now returns `{measureId, overallStatus, blockers, warnings, elementReadiness}` (was NOT_IMPLEMENTED).
+
+**backend-ts 325 tests — all pass / 0 fail; typecheck clean.** New coverage: data-readiness unit (all-MAPPED→READY, unmapped→NOT_READY blocker, >5% missingness→warning with clinical-only rate/samples), the route (element readiness + 404), the admin data-mappings 14-row seed + validate stamp, and the MCP tool (real summary + INVALID_ARGUMENT + MEASURE_NOT_FOUND). **All 13 MCP tools now implemented.** Frontend `/studio/[id]` data-readiness panel + `/admin` data-mappings(+validate) now served. Next: impact-preview (eval-heavy), then auditor packets (measure packet now unblocked by traceability + data-readiness), evidence upload/download, admin write CRUD, MAT export.
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): employee directory (profile + search)
 
 Branch `feat/issue-96-employees` (**independent, off `main`** — new `routes/employees.ts` + worker wiring only, no shared files with the in-flight measures PRs #139/#140, so it merges in parallel). Ported `EmployeeProfileService` (getProfile + search) behind the unchanged frontend contract: the case-detail employee drawer + the worklist employee search. *(backend-ts only. No new schema.)*

@@ -254,9 +254,10 @@ contracts; per-PR JOURNAL entries carry the detail):
     fixtures until the Tests tab). **Authoring writes ✅** (PR pending): `PUT spec|cql|tests`, `POST cql/compile`,
     `POST tests/validate`, `GET osha-references` — store `updateSpec`/`updateCql` (latest version, no new
     schema), `MEASURE_VERSION_DRAFT_SAVED` audits, translator→`CompileResponse` mapping. **Traceability ✅**
-    (`GET /:id/traceability` + the `get_measure_traceability` MCP tool, port of `MeasureTraceabilityService`).
-    Pending: data-readiness (needs the `data_element_mappings` seed/migration; flips the last NOT_IMPLEMENTED
-    MCP tool), impact-preview (eval-heavy), value-set governance (needs `value_sets` table), version cloning, MAT export.
+    + **data-readiness ✅** (`GET /:id/traceability`, `GET /:id/data-readiness` + both MCP tools real, ports
+    of `MeasureTraceabilityService`/`DataReadinessService`; data-mappings seeded faithfully from V012 as a
+    static constant — no migration; `POST /api/admin/data-mappings/validate` added).
+    Pending: impact-preview (eval-heavy), value-set governance (needs `value_sets` table), version cloning, MAT export.
   - `programs` — **complete** ✅: overview + sites, trend + top-drivers, risk-outlook (`/:id/risk-outlook`,
     upcoming due-soon + repeat non-compliers + per-site predicted compliance). Added the canonical
     `outcomes.evaluation_period` column (floor+ceiling+backfill) to enable repeat-non-complier streaks.
@@ -267,9 +268,9 @@ contracts; per-PR JOURNAL entries carry the detail):
   per-call AI audit (`recordAiHealth` integration-health status deferred); **MCP tools** (13 read-only
   tools + SSE/JSON-RPC transport) ✅ — hand-rolled JSON-RPC+SSE over the worker fetch (no new dep; the
   official SDK transports assume Node http vs our fetch host), per-tool role gates + `MCP_TOOL_CALLED`
-  audit (sanitized args + SHA-256 hash); `get_measure_traceability`/`list_data_quality_gaps` return a
-  faithful `NOT_IMPLEMENTED` (their backend services aren't ported). **#108 complete.**
+  audit (sanitized args + SHA-256 hash). `get_measure_traceability` + `list_data_quality_gaps` are now
+  **both real** (traceability + data-readiness ports) — **all 13 MCP tools implemented**. **#108 complete.**
 - **Phase 5 deploy cutover (#109)** — not started (binding selection, Java retirement).
 
-Test posture: `backend-ts` ~316 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
+Test posture: `backend-ts` ~325 tests green (Postgres-harness skips without local Docker); `tsc --noEmit`
 clean; the frontend fetch contract is unchanged throughout.
