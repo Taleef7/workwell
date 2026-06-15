@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-14 — Issue #96 Phase 4 (#107): measure traceability + get_measure_traceability MCP tool
+
+Branch `feat/issue-96-measure-analytics` (**stacked on the authoring-writes branch** — touches `measures.ts`, which #139 also edits, so it's based on that branch to avoid a conflict; retarget to main once #139 merges). Ported `MeasureTraceabilityService.generate` and flipped the first of the two NOT_IMPLEMENTED MCP tools to a real implementation. *(backend-ts only.)* **No new schema.**
+
+**Scoping note (deliberate, evidence-based):** I set out to do the whole measure-analytics trio (traceability + data-readiness + impact-preview) but scoped to **traceability** after reading the sources: (1) **data-readiness** maps spec labels → granular canonicals (`procedure.audiogram`, …) and looks them up in `data_element_mappings`, but the TS floor only has a coarse 4-row static seed (`Employee.role`, `Procedure.performed`, …) — a faithful port needs the full `data_element_mappings`/`integration_sources` seed reconciled (a schema+seed task); (2) **impact-preview** runs a full population CQL evaluation (~1000 evals, eval-heavy) + open-case diffing. Both deserve their own batch; traceability is fully self-contained on the measure record, so it ships clean and correct now.
+
+- **`measure/measure-traceability.ts`** — `generateTraceability(measureRecord)` → `{measureId, measureVersionId, measureName, version, rows, gaps}`. Rows map each policy requirement (eligibility / exclusion / compliance-window / days-elapsed) to its spec field + best-matching CQL define (same `define "Name":` regex + keyword-priority matcher as Java) + the runtime `why_flagged` evidence keys. Gaps flag: missing policy citation, non-COMPILED/WARNINGS compile status (ERROR), missing/incomplete test fixtures (MISSING_DATA + EXCLUDED coverage), and no attached value sets. Fidelity: value-set governance isn't modeled on the floor, so `valueSets` is always `[]` and the value-set gap always fires (same gap Java raises for a version with no attached value sets).
+- **`routes/measures.ts`** — `GET /api/measures/:id/traceability` (404 unknown). Already gated AUTHENTICATED by the security matrix.
+- **`mcp/tools.ts`** — `get_measure_traceability` now returns the real matrix (resolve measure → `generateTraceability`; INVALID_ARGUMENT with no ref, MEASURE_NOT_FOUND when unresolved). `list_data_quality_gaps` still returns NOT_IMPLEMENTED (data-readiness port pending).
+
+**backend-ts 316 tests — all pass / 0 fail; typecheck clean.** New coverage: the generator (row→define mapping incl. the distinct days-elapsed row; gaps for healthy vs broken vs partial-fixture-coverage), the route (rows+gaps+404), and the MCP tool (matrix + INVALID_ARGUMENT + MEASURE_NOT_FOUND). Frontend `/studio/[id]` traceability panel + the MCP `get_measure_traceability` tool now served. Next: **data-readiness** (with the `data_element_mappings` seed + migration, now that I have migration authority) — flips the last NOT_IMPLEMENTED MCP tool — then impact-preview, then the auditor packets (whose measure packet depends on traceability + data-readiness).
+
+---
+
 ## 2026-06-14 — Issue #96 Phase 4 (#107): Studio authoring writes — spec/CQL/tests edits + osha-references
 
 Branch `feat/issue-96-measures-authoring-writes`. Makes the Studio **writable** (Spec/CQL/Tests tabs were read-only on the TS backend), ported from `MeasureController`/`MeasureService` authoring. Larger batch (the whole authoring write surface in one PR, per the maintainer's cadence ask). *(backend-ts only — does not touch the deployed Java demo.)* **No new schema** — the `measure_versions` table already has `spec_json`/`cql_text`/`compile_status`, so these are `UPDATE`s, not migrations.

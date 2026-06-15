@@ -17,6 +17,7 @@ import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { toCaseSummary } from "../case/case-read-models.ts";
 import { toRunSummary, toRunListItem } from "../run/read-models.ts";
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
+import { generateTraceability } from "../measure/measure-traceability.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -401,8 +402,13 @@ async function explainRule(args: JsonRecord, deps: McpToolDeps): Promise<unknown
   };
 }
 
-async function getMeasureTraceability(): Promise<unknown> {
-  return safeError("NOT_IMPLEMENTED", "Measure traceability is not yet available on the TypeScript backend.");
+async function getMeasureTraceability(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
+  if (!(args.measureId != null && String(args.measureId).trim()) && !(args.measureName != null && String(args.measureName).trim())) {
+    return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
+  }
+  const rec = await resolveMeasure(deps, args);
+  if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
+  return generateTraceability(rec);
 }
 
 async function listDataQualityGaps(): Promise<unknown> {

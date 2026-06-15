@@ -38,6 +38,7 @@ import {
   type SpecUpdate,
 } from "../measure/measure-authoring.ts";
 import { listOshaReferences } from "../measure/osha-references.ts";
+import { generateTraceability } from "../measure/measure-traceability.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
 
 interface MeasuresEnv {
@@ -225,6 +226,13 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (readinessId && req.method === "GET") {
     const r = await (await store(env)).getLatest(readinessId);
     return r ? json(toActivationReadiness(r)) : json({ error: "not_found", measureId: readinessId }, 404);
+  }
+
+  // Policy→spec→CQL→evidence traceability matrix + governance gaps.
+  const traceId = pathname.match(/^\/api\/measures\/([^/]+)\/traceability$/)?.[1];
+  if (traceId && req.method === "GET") {
+    const r = await (await store(env)).getLatest(traceId);
+    return r ? json(generateTraceability(r)) : json({ error: "not_found", measureId: traceId }, 404);
   }
 
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
