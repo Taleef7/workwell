@@ -17,6 +17,7 @@ import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
 import type { AppointmentStore } from "./appointment-store.ts";
 import type { ValueSetStore } from "./value-set-store.ts";
+import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -790,5 +791,38 @@ export function valueSetStoreContract(label: string, freshStore: () => Promise<V
     assert.equal(list.length, 2);
     assert.equal(list[0]!.mappingStatus, "APPROVED", "status ASC (APPROVED before PROPOSED)");
     assert.equal(list[1]!.mappingConfidence, 0.7);
+  });
+}
+
+/** Registers the OutreachTemplateStore contract — seed, list (active-only), create, update. */
+export function outreachTemplateStoreContract(label: string, freshStore: () => Promise<OutreachTemplateStore>): void {
+  test(`[${label}] outreach templates: seed is idempotent, listActive excludes inactive, create + update round-trip`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.isEmpty(), true);
+
+    await store.seed({ id: "t-1", name: "Alpha", subject: "S1", bodyText: "B1", type: "OUTREACH", createdBy: "system" });
+    await store.seed({ id: "t-1", name: "Alpha (dup)", subject: "x", bodyText: "x", type: "OUTREACH", createdBy: "system" }); // ON CONFLICT DO NOTHING
+    assert.equal(await store.isEmpty(), false);
+    assert.equal((await store.getById("t-1"))!.name, "Alpha", "seed is idempotent — first write wins");
+
+    await new Promise((r) => setTimeout(r, 2)); // distinct created_at so the DESC ordering is deterministic
+    const created = await store.create({ id: "t-2", name: "Bravo", subject: "S2", bodyText: "B2", type: "ESCALATION", createdBy: "admin@x" });
+    assert.equal(created.active, true);
+    assert.equal(created.createdBy, "admin@x");
+    assert.equal(created.type, "ESCALATION");
+
+    // create stamps created_at; listActive is created_at DESC — t-2 is newest.
+    const active = await store.listActive();
+    assert.equal(active.length, 2);
+    assert.equal(active[0]!.id, "t-2", "newest-first");
+
+    // update edits fields; deactivating removes it from listActive.
+    const updated = (await store.update("t-2", { name: "Bravo v2", subject: "S2b", bodyText: "B2b", type: "OUTREACH", active: false }))!;
+    assert.equal(updated.name, "Bravo v2");
+    assert.equal(updated.active, false);
+    const afterDeactivate = await store.listActive();
+    assert.equal(afterDeactivate.length, 1);
+    assert.equal(afterDeactivate[0]!.id, "t-1");
+    assert.equal(await store.update("missing", { name: "x", subject: "x", bodyText: "x", type: "OUTREACH", active: true }), null);
   });
 }

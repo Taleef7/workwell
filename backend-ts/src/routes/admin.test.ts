@@ -84,10 +84,11 @@ test("static reads: terminology + data mappings + outreach templates + preview",
   assert.equal(tm.length, 5);
   assert.equal(tm.filter((m) => m.mappingStatus === "APPROVED").length, 3);
   assert.ok(((await body("/api/admin/data-mappings")) as unknown[]).length >= 3);
-  const templates = (await body("/api/admin/outreach-templates")) as Array<{ id: string; subject: string }>;
-  assert.equal(templates[0]!.id, "default-template");
-  const preview = (await body("/api/admin/outreach-templates/default-template/preview")) as { subject: string };
-  assert.match(preview.subject, /Outreach Reminder/);
+  const templates = (await body("/api/admin/outreach-templates")) as Array<{ id: string; subject: string; type: string }>;
+  assert.equal(templates.length, 4, "V007 demo templates seeded");
+  assert.ok(templates.some((t) => t.id === "11111111-0000-0000-0000-000000000001"));
+  const preview = (await body("/api/admin/outreach-templates/11111111-0000-0000-0000-000000000001/preview")) as { subject: string };
+  assert.match(preview.subject, /Overdue Audiogram/);
   assert.equal((await get("/api/admin/outreach-templates/nope/preview"))?.status, 404);
 });
 
@@ -108,4 +109,52 @@ test("GET /api/admin/data-mappings returns the full V012 seed; POST /validate st
   assert.equal(validated.length, 14);
   assert.ok(validated.every((m) => m.mappingStatus === "MAPPED"), "no degraded source → all MAPPED");
   assert.ok(validated.every((m) => m.lastValidatedAt != null), "validate stamps lastValidatedAt");
+});
+
+const adminPost = (path: string, b: unknown) =>
+  handleAdmin(new Request(`http://x${path}`, { method: "POST", body: JSON.stringify(b) }), env as never, "admin@workwell.dev");
+const adminPut = (path: string, b: unknown) =>
+  handleAdmin(new Request(`http://x${path}`, { method: "PUT", body: JSON.stringify(b) }), env as never, "admin@workwell.dev");
+
+test("outreach-templates: create → appears in list (created_by actor); update edits + can deactivate", async () => {
+  const created = await adminPost("/api/admin/outreach-templates", { name: "New Tpl", subject: "Sub {measure_name}", bodyText: "Hi {employee_name}", type: "OUTREACH" });
+  assert.equal(created?.status, 201);
+  const rec = (await created!.json()) as { id: string; createdBy: string; active: boolean };
+  assert.equal(rec.createdBy, "admin@workwell.dev");
+  assert.equal(rec.active, true);
+
+  const list = (await body("/api/admin/outreach-templates")) as Array<{ id: string }>;
+  assert.ok(list.some((t) => t.id === rec.id), "new template listed");
+
+  // preview renders the placeholders.
+  const preview = (await body(`/api/admin/outreach-templates/${rec.id}/preview`)) as { subject: string; bodyText: string };
+  assert.match(preview.subject, /Annual Audiogram/);
+  assert.match(preview.bodyText, /Jane Smith/);
+
+  // update deactivates → drops off the active list.
+  const upd = await adminPut(`/api/admin/outreach-templates/${rec.id}`, { name: "New Tpl v2", subject: "S", bodyText: "B", type: "ESCALATION", active: false });
+  assert.equal(upd?.status, 200);
+  assert.equal(((await upd!.json()) as { name: string; active: boolean }).name, "New Tpl v2");
+  const after = (await body("/api/admin/outreach-templates")) as Array<{ id: string }>;
+  assert.ok(!after.some((t) => t.id === rec.id), "deactivated template no longer active");
+});
+
+test("outreach-templates: create with missing fields → 400; bad type → 400; update unknown → 404", async () => {
+  assert.equal((await adminPost("/api/admin/outreach-templates", { name: "x" }))?.status, 400);
+  assert.equal((await adminPost("/api/admin/outreach-templates", { name: "n", subject: "s", bodyText: "b", type: "WEIRD" }))?.status, 400);
+  assert.equal((await adminPut("/api/admin/outreach-templates/nope", { name: "n", subject: "s", bodyText: "b", type: "OUTREACH", active: true }))?.status, 404);
+});
+
+test("demo-reset: clears volatile data (non-prod); 403 under prod profile", async () => {
+  // a case + audit event exist from `before`; demo-reset clears them.
+  assert.ok(((await body("/api/admin/audit-events?scope=all&limit=50")) as unknown[]).length > 0);
+  const reset = await adminPost("/api/admin/demo-reset", {});
+  assert.equal(reset?.status, 200);
+  assert.equal(((await reset!.json()) as { status: string }).status, "reset_complete");
+  assert.deepEqual(await body("/api/admin/audit-events?scope=all&limit=50"), [], "audit ledger cleared");
+
+  // prod profile → 403, no reset performed.
+  const prodEnv = { DB: (env as { DB: unknown }).DB, SPRING_PROFILES_ACTIVE: "prod" };
+  const denied = await handleAdmin(new Request("http://x/api/admin/demo-reset", { method: "POST", body: "{}" }), prodEnv as never, "admin@workwell.dev");
+  assert.equal(denied?.status, 403);
 });

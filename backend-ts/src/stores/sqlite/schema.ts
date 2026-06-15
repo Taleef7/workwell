@@ -231,6 +231,20 @@ CREATE TABLE IF NOT EXISTS terminology_mappings (
   notes              TEXT,
   UNIQUE (local_system, local_code, standard_system, standard_code)
 );
+
+/* Outreach templates (#108 admin write CRUD). Floor analogue of outreach_templates (V007).
+   active is INTEGER 0/1 on the floor (BOOLEAN on the ceiling). */
+CREATE TABLE IF NOT EXISTS outreach_templates (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  body_text   TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  active      INTEGER NOT NULL DEFAULT 1
+);
 `;
 
 /**

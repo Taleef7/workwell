@@ -222,4 +222,17 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.terminology_mappings (
   notes              TEXT,
   UNIQUE (local_system, local_code, standard_system, standard_code)
 );
+
+-- Outreach templates (#108 admin write CRUD). Ceiling analogue of outreach_templates (V007).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outreach_templates (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  body_text   TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  created_by  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL,
+  active      BOOLEAN NOT NULL DEFAULT TRUE
+);
 `;
