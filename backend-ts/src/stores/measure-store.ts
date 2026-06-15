@@ -65,6 +65,8 @@ export interface MeasureStore {
   /** Latest version per measure (the catalog list / detail source). */
   listLatest(): Promise<MeasureRecord[]>;
   getLatest(measureId: string): Promise<MeasureRecord | null>;
+  /** A specific measure version by its version id (the auditor measure-version packet); null if unknown. */
+  getByVersionId(versionId: string): Promise<MeasureRecord | null>;
   /** All versions for a measure, newest-first (the version history). */
   listVersions(measureId: string): Promise<MeasureRecord[]>;
   /** Create a new measure with an empty Draft v1.0 version (POST /api/measures). */

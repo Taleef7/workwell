@@ -135,6 +135,21 @@ CREATE TABLE IF NOT EXISTS measure_versions (
 );
 
 CREATE INDEX IF NOT EXISTS measure_versions_measure_id_idx ON measure_versions (measure_id);
+
+/* Audit packet exports (#108 auditor packets). Floor analogue of audit_packet_exports
+   (docs/DATA_MODEL.md): one row per generated auditor packet (RUN / MEASURE_VERSION / CASE),
+   recording type, entity, format, actor, the SHA-256 payload hash + byte size for integrity.
+   Written alongside an AUDIT_PACKET_GENERATED audit_event on every packet build. */
+CREATE TABLE IF NOT EXISTS audit_packet_exports (
+  id                 TEXT PRIMARY KEY,
+  packet_type        TEXT NOT NULL,
+  entity_id          TEXT NOT NULL,
+  format             TEXT NOT NULL,
+  generated_by       TEXT NOT NULL,
+  generated_at       TEXT NOT NULL,
+  payload_hash       TEXT,
+  payload_size_bytes INTEGER
+);
 `;
 
 /**

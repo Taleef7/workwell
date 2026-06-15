@@ -95,6 +95,11 @@ export class PgMeasureStore implements MeasureStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async getByVersionId(versionId: string): Promise<MeasureRecord | null> {
+    const { rows } = await this.pool.query<JoinRow>(`${SELECT} WHERE mv.id = $1`, [versionId]);
+    return rows[0] ? toRecord(rows[0]) : null;
+  }
+
   async listVersions(measureId: string): Promise<MeasureRecord[]> {
     const { rows } = await this.pool.query<JoinRow>(`${SELECT} WHERE m.id = $1 ORDER BY mv.created_at DESC`, [measureId]);
     return rows.map(toRecord);

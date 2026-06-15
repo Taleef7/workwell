@@ -27,6 +27,7 @@ import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
+import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
@@ -175,6 +176,11 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
   const exportsResponse = await handleExports(req, env);
   if (exportsResponse) return exportsResponse;
+
+  // Auditor packets — downloadable run / measure-version evidence bundles (#108). Role gates
+  // (CASE_MANAGER/ADMIN for runs, APPROVER/ADMIN for measure versions) are in the authorize matrix.
+  const auditorResponse = await handleAuditor(req, env, actor);
+  if (auditorResponse) return auditorResponse;
 
   // Admin — dashboard read surface + simple toggles (#108). Gated to ADMIN by the matrix.
   const adminResponse = await handleAdmin(req, env);
