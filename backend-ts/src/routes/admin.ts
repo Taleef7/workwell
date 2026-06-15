@@ -23,13 +23,15 @@ import {
   syncIntegration,
   schedulerStatus,
   setSchedulerEnabled,
-  listTerminologyMappings,
   listDataMappings,
   validateDataMappings,
   listOutreachTemplates,
   findOutreachTemplate,
   toAdminAuditRows,
 } from "../admin/admin-data.ts";
+import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
+import { ensureMeasureStore } from "./measures.ts";
+import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
 
 interface AdminEnv {
   DB: CloudDatabase;
@@ -51,7 +53,7 @@ const clampInt = (raw: string | null, def: number, min: number, max: number) => 
   return !Number.isFinite(n) ? def : Math.min(max, Math.max(min, Math.trunc(n)));
 };
 
-export async function handleAdmin(req: Request, env: AdminEnv): Promise<Response | null> {
+export async function handleAdmin(req: Request, env: AdminEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
   const q = url.searchParams;
@@ -84,8 +86,38 @@ export async function handleAdmin(req: Request, env: AdminEnv): Promise<Response
     return json(toAdminAuditRows(events, caseEmployee, q.get("scope") ?? "all", limit));
   }
 
+  // ---- terminology mappings (persisted; demo rows seeded with the value sets) ----
+  if (pathname === "/api/admin/terminology-mappings" && req.method === "GET") {
+    await ensureMeasureStore(env); // runs the value-set + terminology demo seed
+    return json(await listTerminologyMappings(new SqliteValueSetStore(env.DB)));
+  }
+  if (pathname === "/api/admin/terminology-mappings" && req.method === "POST") {
+    await ensureMeasureStore(env);
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const deps = { valueSets: new SqliteValueSetStore(env.DB), events: new SqliteCaseEventStore(env.DB) };
+      const created = await createTerminologyMapping(
+        deps,
+        {
+          localCode: String(body.localCode ?? ""),
+          localDisplay: body.localDisplay == null ? null : String(body.localDisplay),
+          localSystem: String(body.localSystem ?? ""),
+          standardCode: String(body.standardCode ?? ""),
+          standardDisplay: body.standardDisplay == null ? null : String(body.standardDisplay),
+          standardSystem: String(body.standardSystem ?? ""),
+          mappingStatus: body.mappingStatus == null ? null : String(body.mappingStatus),
+          mappingConfidence: body.mappingConfidence == null ? null : Number(body.mappingConfidence),
+          notes: body.notes == null ? null : String(body.notes),
+        },
+        actor,
+      );
+      return json(created, 201);
+    } catch (err) {
+      if (err instanceof ValueSetError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
   // ---- static / faithful reads --------------------------------------------
-  if (pathname === "/api/admin/terminology-mappings" && req.method === "GET") return json(listTerminologyMappings());
   if (pathname === "/api/admin/data-mappings" && req.method === "GET") return json(listDataMappings());
   if (pathname === "/api/admin/data-mappings/validate" && req.method === "POST") return json(validateDataMappings());
   if (pathname === "/api/admin/outreach-templates" && req.method === "GET") return json(listOutreachTemplates());

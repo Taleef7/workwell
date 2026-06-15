@@ -16,6 +16,7 @@ import type { CaseEventStore } from "./case-event-store.ts";
 import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
 import type { AppointmentStore } from "./appointment-store.ts";
+import type { ValueSetStore } from "./value-set-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -694,5 +695,100 @@ export function appointmentStoreContract(label: string, freshStore: () => Promis
     assert.equal(list[0]!.id, later.id, "latest scheduled_at first");
     assert.equal(list[1]!.id, earlier.id);
     assert.deepEqual(await store.listByCase("case-none"), []);
+  });
+}
+
+/** Registers the ValueSetStore contract — value sets, links, terminology mappings. */
+export function valueSetStoreContract(label: string, freshStore: () => Promise<ValueSetStore>): void {
+  test(`[${label}] value sets: seed upserts by id, listAll is name-ordered, getById carries codes`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.isEmpty(), true);
+    await store.seedValueSet({
+      id: "vs-b",
+      oid: "urn:workwell:vs:bravo",
+      name: "Bravo Set",
+      version: "2025-demo",
+      codes: [{ code: "B1", display: "Bee one", system: "urn:demo" }],
+    });
+    await store.seedValueSet({
+      id: "vs-a",
+      oid: "urn:workwell:vs:alpha",
+      name: "Alpha Set",
+      version: "2025-demo",
+      codes: [
+        { code: "A1", display: "Ay one", system: "urn:demo" },
+        { code: "A2", display: "Ay two", system: "http://www.ama-assn.org/go/cpt" },
+      ],
+    });
+    assert.equal(await store.isEmpty(), false);
+
+    const all = await store.listAll();
+    assert.deepEqual(all.map((v) => v.name), ["Alpha Set", "Bravo Set"], "name ASC");
+    const a = (await store.getById("vs-a"))!;
+    assert.equal(a.codes.length, 2);
+    assert.equal(a.resolutionStatus, "RESOLVED");
+    assert.equal(a.governanceStatus, "ACTIVE");
+    assert.deepEqual(a.codeSystems.sort(), ["http://www.ama-assn.org/go/cpt", "urn:demo"]);
+    assert.equal(await store.getById("nope"), null);
+
+    // Re-seed the same id with different codes → upsert (no duplicate, codes replaced).
+    await store.seedValueSet({ id: "vs-a", oid: "urn:workwell:vs:alpha", name: "Alpha Set", version: "2025-demo", codes: [{ code: "A1", display: "Ay one", system: "urn:demo" }] });
+    assert.equal((await store.getById("vs-a"))!.codes.length, 1, "re-seed replaces codes");
+    assert.equal((await store.listAll()).length, 2, "re-seed did not duplicate");
+  });
+
+  test(`[${label}] create + links: create is DRAFT/empty, link/unlink drive listByVersion`, async () => {
+    const store = await freshStore();
+    const id = await store.create("urn:workwell:vs:new", "New Set", null);
+    const created = (await store.getById(id))!;
+    assert.equal(created.version, "unspecified", "blank version → unspecified");
+    assert.equal(created.governanceStatus, "DRAFT");
+    assert.equal(created.codes.length, 0);
+
+    await store.seedValueSet({ id: "vs-x", oid: "urn:workwell:vs:x", name: "X Set", version: "v1", codes: [{ code: "X", display: "X", system: "urn:demo" }] });
+    assert.deepEqual(await store.listByVersion("ver-1"), [], "no links yet");
+    await store.link("ver-1", "vs-x");
+    await store.link("ver-1", "vs-x"); // idempotent
+    const linked = await store.listByVersion("ver-1");
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0]!.id, "vs-x");
+    await store.unlink("ver-1", "vs-x");
+    assert.deepEqual(await store.listByVersion("ver-1"), []);
+    assert.deepEqual(await store.affectedMeasures([]), [], "empty ids → no measures");
+  });
+
+  test(`[${label}] terminology mappings: create round-trips, list is status-ordered`, async () => {
+    const store = await freshStore();
+    assert.deepEqual(await store.listTerminologyMappings(), []);
+    const rec = await store.createTerminologyMapping({
+      id: "tm-1",
+      localCode: "LOCAL-1",
+      localDisplay: "Local one",
+      localSystem: "urn:workwell:demo",
+      standardCode: "92557",
+      standardDisplay: "Audiometry",
+      standardSystem: "http://www.ama-assn.org/go/cpt",
+      mappingStatus: "PROPOSED",
+      mappingConfidence: 0.7,
+      notes: "note",
+    });
+    assert.equal(rec.localCode, "LOCAL-1");
+    assert.equal(rec.mappingConfidence, 0.7);
+    await store.createTerminologyMapping({
+      id: "tm-2",
+      localCode: "LOCAL-2",
+      localDisplay: null,
+      localSystem: "urn:workwell:demo",
+      standardCode: "86580",
+      standardDisplay: null,
+      standardSystem: "http://www.ama-assn.org/go/cpt",
+      mappingStatus: "APPROVED",
+      mappingConfidence: null,
+      notes: null,
+    });
+    const list = await store.listTerminologyMappings();
+    assert.equal(list.length, 2);
+    assert.equal(list[0]!.mappingStatus, "APPROVED", "status ASC (APPROVED before PROPOSED)");
+    assert.equal(list[1]!.mappingConfidence, 0.7);
   });
 }

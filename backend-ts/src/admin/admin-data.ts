@@ -58,30 +58,9 @@ export function setSchedulerEnabled(enabled: boolean): SchedulerStatus {
   return schedulerStatus();
 }
 
-// ---- terminology mappings (DATA_MODEL §3.4a demo seeds) ----------------------
-export interface TerminologyMapping {
-  id: string;
-  localCode: string;
-  localDisplay: string | null;
-  localSystem: string;
-  standardCode: string;
-  standardDisplay: string | null;
-  standardSystem: string;
-  mappingStatus: string;
-  mappingConfidence: number | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  notes: string | null;
-}
-const CPT = "http://www.ama-assn.org/go/cpt";
-const CVX = "http://hl7.org/fhir/sid/cvx";
-export const listTerminologyMappings = (): TerminologyMapping[] => [
-  { id: "tm-1", localCode: "LOCAL-AUD-002", localDisplay: "Annual audiogram evaluation", localSystem: "urn:workwell:demo", standardCode: "92557", standardDisplay: "Comprehensive audiometry evaluation", standardSystem: CPT, mappingStatus: "APPROVED", mappingConfidence: 0.98, reviewedBy: "admin@workwell.dev", reviewedAt: "2026-05-12T00:00:00.000Z", notes: null },
-  { id: "tm-2", localCode: "LOCAL-TB-001", localDisplay: "PPD skin test placement", localSystem: "urn:workwell:demo", standardCode: "86580", standardDisplay: "Intradermal skin test", standardSystem: CPT, mappingStatus: "APPROVED", mappingConfidence: 0.95, reviewedBy: "admin@workwell.dev", reviewedAt: "2026-05-12T00:00:00.000Z", notes: null },
-  { id: "tm-3", localCode: "LOCAL-FLU-001", localDisplay: "Flu vaccine administered", localSystem: "urn:workwell:demo", standardCode: "141", standardDisplay: "Influenza seasonal injectable", standardSystem: CVX, mappingStatus: "APPROVED", mappingConfidence: 0.97, reviewedBy: "admin@workwell.dev", reviewedAt: "2026-05-12T00:00:00.000Z", notes: null },
-  { id: "tm-4", localCode: "LOCAL-HAZ-001", localDisplay: "HAZWOPER medical surveillance exam", localSystem: "urn:workwell:demo", standardCode: "hazwoper-exam", standardDisplay: "HAZWOPER Surveillance Exams", standardSystem: "urn:workwell:vs:hazwoper-exams", mappingStatus: "REVIEWED", mappingConfidence: 0.8, reviewedBy: "admin@workwell.dev", reviewedAt: "2026-05-20T00:00:00.000Z", notes: "Internal code; no public standard." },
-  { id: "tm-5", localCode: "LOCAL-TB-002", localDisplay: "TB IGRA blood test", localSystem: "urn:workwell:demo", standardCode: "86480", standardDisplay: "Tuberculosis test, cell-mediated immunity", standardSystem: CPT, mappingStatus: "PROPOSED", mappingConfidence: 0.7, reviewedBy: null, reviewedAt: null, notes: "Awaiting review." },
-];
+// Terminology mappings moved to value-set governance (#108): they are now persisted in the
+// terminology_mappings table (demo rows seeded by value-set-seed.ts) and served from the
+// ValueSetStore via /api/admin/terminology-mappings (list + create). See value-set-governance.ts.
 
 // ---- data-element mappings (data readiness source map) -----------------------
 // Faithful port of the V012__data_readiness seed (15 mappings × 2 active sources). The granular
