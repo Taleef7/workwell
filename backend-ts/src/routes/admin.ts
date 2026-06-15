@@ -40,6 +40,8 @@ import {
   OutreachTemplateError,
 } from "../admin/outreach-templates.ts";
 import { resetDemoData } from "../admin/demo-reset.ts";
+import { SqliteWaiverStore } from "../stores/sqlite/waiver-store-sqlite.ts";
+import { listWaivers, grantWaiver, WaiverError, type WaiverDeps } from "../admin/waivers.ts";
 import { isProductionLike } from "../config/startup-safety.ts";
 
 interface AdminEnv {
@@ -58,6 +60,27 @@ async function ensure(env: AdminEnv): Promise<void> {
     await seedOutreachTemplates(new SqliteOutreachTemplateStore(env.DB));
     ready.add(env.DB);
   }
+}
+
+/** Waiver deps: the waiver store + the measure store (display resolution) + audit. */
+async function waiverDeps(env: AdminEnv): Promise<WaiverDeps> {
+  const measures = await ensureMeasureStore(env); // ensures DDL + catalog seed
+  return { waivers: new SqliteWaiverStore(env.DB), measures, events: new SqliteCaseEventStore(env.DB) };
+}
+
+/**
+ * Expand a bare `YYYY-MM-DD` waiver-expiry filter to a UTC instant bound (Java parseFromDate/
+ * parseToDate): `after` → start of that day (00:00:00Z), `before` → end of that day (23:59:59Z) so
+ * the bound compares correctly against the stored ISO timestamps. Throws on a non-date value.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+function parseDayBound(raw: string | null, edge: "start" | "end", field: string): string | null {
+  if (raw == null || raw.trim() === "") return null;
+  const d = raw.trim();
+  const start = DATE_ONLY.test(d) ? new Date(`${d}T00:00:00.000Z`) : new Date(NaN);
+  if (Number.isNaN(start.getTime())) throw new WaiverError(`${field} must use YYYY-MM-DD`);
+  if (edge === "start") return start.toISOString();
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1000).toISOString(); // end of UTC day (−1s, Java parity)
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -199,8 +222,49 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     return json({ status: "reset_complete", message: "Demo data has been reset" });
   }
 
+  // ---- waivers (persisted; list + grant) -----------------------------------
+  if (pathname === "/api/admin/waivers" && req.method === "GET") {
+    const deps = await waiverDeps(env);
+    const activeRaw = q.get("active");
+    try {
+      return json(
+        await listWaivers(deps, {
+          measureId: q.get("measureId"),
+          site: q.get("site"),
+          expiresAfter: parseDayBound(q.get("expiresAfter"), "start", "expiresAfter"),
+          expiresBefore: parseDayBound(q.get("expiresBefore"), "end", "expiresBefore"),
+          active: activeRaw == null || activeRaw === "" ? null : activeRaw.toLowerCase() === "true",
+        }),
+      );
+    } catch (err) {
+      if (err instanceof WaiverError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
+  if (pathname === "/api/admin/waivers" && req.method === "POST") {
+    const deps = await waiverDeps(env);
+    const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const granted = await grantWaiver(
+        deps,
+        {
+          employeeExternalId: String(b.employeeExternalId ?? ""),
+          measureId: String(b.measureId ?? ""),
+          exclusionReason: String(b.exclusionReason ?? ""),
+          expiresAt: b.expiresAt == null ? null : String(b.expiresAt),
+          notes: b.notes == null ? null : String(b.notes),
+          active: b.active == null ? null : Boolean(b.active),
+        },
+        actor,
+      );
+      return json(granted, 201);
+    } catch (err) {
+      if (err instanceof WaiverError) return json({ error: "invalid_request", message: err.message }, 400);
+      throw err;
+    }
+  }
+
   // ---- deferred subsystems (honest empty so the dashboard renders) ---------
-  if (pathname === "/api/admin/waivers" && req.method === "GET") return json([]);
   if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") return json([]);
 
   return null;
