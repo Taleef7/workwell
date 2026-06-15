@@ -151,6 +151,56 @@ test("outreach-templates: create with missing fields → 400; bad type → 400; 
   assert.equal((await adminPut("/api/admin/outreach-templates/nope", { name: "n", subject: "s", bodyText: "b", type: "OUTREACH", active: true }))?.status, 404);
 });
 
+test("waivers: grant resolves employee + measure display fields, then lists newest/active-first", async () => {
+  const granted = await adminPost("/api/admin/waivers", {
+    employeeExternalId: "emp-006",
+    measureId: "audiogram",
+    exclusionReason: "Documented medical contraindication",
+    expiresAt: "2027-03-01T00:00:00.000Z",
+    notes: "Reviewed by OH",
+    active: true,
+  });
+  assert.equal(granted?.status, 201);
+  const rec = (await granted!.json()) as { waiverId: string; employeeName: string; site: string; measureName: string; measureVersion: string; grantedBy: string; expired: boolean };
+  assert.equal(rec.employeeName, "Omar Siddiq", "resolved from the synthetic directory");
+  assert.equal(rec.site, "Plant A");
+  assert.equal(rec.measureName, "Annual Audiogram Completed", "resolved from the measure store");
+  assert.ok(rec.measureVersion, "measure version resolved");
+  assert.equal(rec.grantedBy, "admin@workwell.dev");
+  assert.equal(rec.expired, false);
+
+  const list = (await body("/api/admin/waivers?")) as Array<{ waiverId: string; measureId: string }>;
+  assert.ok(list.some((w) => w.waiverId === rec.waiverId));
+
+  // filters: measureId + active + site
+  assert.ok(((await body("/api/admin/waivers?measureId=audiogram")) as unknown[]).length >= 1);
+  assert.deepEqual(await body("/api/admin/waivers?measureId=hazwoper"), [], "no waiver for hazwoper");
+  assert.ok(((await body("/api/admin/waivers?active=true")) as unknown[]).length >= 1);
+  assert.ok(((await body("/api/admin/waivers?site=Plant A")) as unknown[]).length >= 1);
+  assert.deepEqual(await body("/api/admin/waivers?site=Nowhere"), [], "site filter excludes");
+
+  // a WAIVER_GRANTED audit was written.
+  const audits = (await body("/api/admin/audit-events?scope=all&limit=50")) as Array<{ eventType: string; actor: string }>;
+  assert.ok(audits.some((a) => a.eventType === "WAIVER_GRANTED" && a.actor === "admin@workwell.dev"));
+
+  // expiry filters take a bare YYYY-MM-DD and expand to UTC day bounds (Java parseFrom/ToDate):
+  // the waiver expires 2027-03-01T00:00:00Z, so it's included by expiresBefore=2027-03-01 (end of day)
+  // and expiresAfter=2027-03-01 (start of day), and excluded by expiresBefore=2027-02-28.
+  assert.ok(((await body("/api/admin/waivers?expiresBefore=2027-03-01")) as unknown[]).length >= 1, "end-of-day bound includes the 00:00:00Z waiver");
+  assert.ok(((await body("/api/admin/waivers?expiresAfter=2027-03-01")) as unknown[]).length >= 1);
+  assert.deepEqual(await body("/api/admin/waivers?expiresBefore=2027-02-28"), [], "day before excludes it");
+  // a non-date filter value → 400.
+  assert.equal((await get("/api/admin/waivers?expiresBefore=2027-03-01T00:00:00Z"))?.status, 400);
+  assert.equal((await get("/api/admin/waivers?expiresAfter=garbage"))?.status, 400);
+});
+
+test("waivers: grant validation — unknown employee, unknown measure, missing reason, bad date → 400", async () => {
+  assert.equal((await adminPost("/api/admin/waivers", { employeeExternalId: "ghost", measureId: "audiogram", exclusionReason: "x" }))?.status, 400);
+  assert.equal((await adminPost("/api/admin/waivers", { employeeExternalId: "emp-006", measureId: "nope", exclusionReason: "x" }))?.status, 400);
+  assert.equal((await adminPost("/api/admin/waivers", { employeeExternalId: "emp-006", measureId: "audiogram", exclusionReason: " " }))?.status, 400);
+  assert.equal((await adminPost("/api/admin/waivers", { employeeExternalId: "emp-006", measureId: "audiogram", exclusionReason: "x", expiresAt: "whenever" }))?.status, 400);
+});
+
 test("demo-reset: clears volatile data (non-prod); 403 under prod profile", async () => {
   // a case + audit event exist from `before`; demo-reset clears them.
   assert.ok(((await body("/api/admin/audit-events?scope=all&limit=50")) as unknown[]).length > 0);
