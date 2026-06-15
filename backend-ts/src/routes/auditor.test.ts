@@ -14,6 +14,7 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { handleAuditor } from "./auditor.ts";
@@ -22,6 +23,7 @@ const dbPath = join(tmpdir(), `workwell-auditor-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
 let runId: string;
 let versionId: string;
+let caseId: string;
 
 const get = (path: string) => handleAuditor(new Request(`http://x${path}`, { method: "GET" }), env as never, "auditor@workwell.dev");
 
@@ -48,6 +50,14 @@ before(async () => {
     status: "OVERDUE",
     evidence: { expressionResults: [{ define: "Days Since Last Audiogram", result: 420 }] },
   });
+  // The OVERDUE outcome opens a case — the run packet must trace the outcome row to it.
+  caseId = (await new SqliteCaseStore(db).upsertFromOutcome({
+    runId,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    outcomeStatus: "OVERDUE",
+  }))!.id;
   const events = new SqliteCaseEventStore(db);
   await events.appendAudit({
     eventType: "RUN_COMPLETED",
@@ -94,6 +104,7 @@ test("GET /api/auditor/runs/:id/packet?format=json → RUN packet + headers", as
   assert.equal(p.summary.totalEvaluated, 1);
   assert.equal(p.summary.nonCompliant, 1);
   assert.equal(p.outcomes.length, 1);
+  assert.equal(p.outcomes[0].caseId, caseId, "non-compliant outcome row traced to its case");
   assert.ok(p.runLogs.some((l: { message: string }) => l.message === "run started"));
   assert.ok(p.auditEvents.some((e: { eventType: string }) => e.eventType === "RUN_COMPLETED"));
   assert.ok(Array.isArray(p.disclaimers) && p.disclaimers.length === 3);
