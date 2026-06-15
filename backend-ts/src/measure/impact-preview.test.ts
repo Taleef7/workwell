@@ -109,10 +109,35 @@ test("scope filter narrows the population; an empty match warns", async () => {
   assert.ok(none.warnings.some((w) => /no employees matched/i.test(w)));
 });
 
-test("invalid evaluationDate is a typed error; a non-runnable measure returns an empty preview with a warning", async () => {
-  await assert.rejects(previewImpact(deps, audiogram(), { evaluationDate: "06/15/2026" }), ImpactPreviewError);
+test("rejects malformed AND impossible calendar dates (400)", async () => {
+  for (const bad of ["06/15/2026", "2026-13-01", "2026-02-30", "2026-00-10", "not-a-date"]) {
+    await assert.rejects(previewImpact(deps, audiogram(), { evaluationDate: bad }), ImpactPreviewError, `should reject ${bad}`);
+  }
+});
+
+test("a non-runnable measure returns an empty preview with a warning AND still writes a dry-run audit", async () => {
   const draft = { ...audiogram(), measureId: "cms2v15", versionId: "cms2v15-v1.0" };
-  const r = await previewImpact(deps, draft, {});
+  const r = await previewImpact(deps, draft, { evaluationDate: "2093-04-04" }, "approver@x");
   assert.equal(r.populationEvaluated, 0);
   assert.ok(r.warnings.some((w) => /no runnable CQL binding/i.test(w)));
+  const audits = await new SqliteCaseEventStore(db).listAuditEvents();
+  const ev = audits.find((a) => a.eventType === "MEASURE_IMPACT_PREVIEWED" && (a.payload as { measureVersionId: string }).measureVersionId === "cms2v15-v1.0");
+  assert.ok(ev, "non-runnable preview still audited");
+  assert.equal((ev!.payload as { populationEvaluated: number; dryRun: boolean }).populationEvaluated, 0);
+  assert.equal((ev!.payload as { dryRun: boolean }).dryRun, true);
+});
+
+test("an engine failure returns an empty preview + warning AND writes a dry-run audit", async () => {
+  const failing: ImpactPreviewDeps = {
+    ...deps,
+    engine: { async evaluate() { throw new Error("engine down"); } },
+  };
+  const r = await previewImpact(failing, audiogram(), { evaluationDate: "2094-05-05" }, "approver@x");
+  assert.equal(r.populationEvaluated, 0);
+  assert.ok(r.warnings.some((w) => /CQL evaluation failed/i.test(w)));
+  const audits = await new SqliteCaseEventStore(db).listAuditEvents();
+  assert.ok(
+    audits.some((a) => a.eventType === "MEASURE_IMPACT_PREVIEWED" && (a.payload as { evaluationDate: string }).evaluationDate === "2094-05-05"),
+    "eval-failure preview still audited",
+  );
 });
