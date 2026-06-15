@@ -81,7 +81,7 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
     name: string;
     site: string;
     active: boolean;
-    measureOutcomes: Array<{ measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; openCaseId: string | null }>;
+    measureOutcomes: Array<{ measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
     openCases: Array<{ caseId: string; outcomeStatus: string }>;
     recentAuditEvents: Array<{ eventType: string; summary: string }>;
   };
@@ -92,7 +92,9 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   const audiogram = p.measureOutcomes.find((o) => o.outcomeStatus === "OVERDUE")!;
   assert.equal(audiogram.measureName, "Audiogram");
   assert.equal(audiogram.outcomeStatus, "OVERDUE");
-  assert.equal(audiogram.daysSinceLastExam, 55, "days_overdue = 420 - 365 window");
+  // ACTUAL recency, not the overdue amount: exam was 420 days ago against a 365-day window.
+  assert.equal(audiogram.daysSinceLastExam, 420, "actual days since last exam");
+  assert.equal(audiogram.daysUntilDue, 365 - 420, "window − recency (negative ⇒ overdue)");
   assert.equal(audiogram.openCaseId, caseId, "outcome links its open case");
   assert.ok(p.openCases.some((c) => c.caseId === caseId));
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));

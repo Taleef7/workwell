@@ -77,6 +77,25 @@ const measureVersionOf = (measureId: string): string => {
 };
 const measureNameOf = (measureId: string): string => MEASURES[measureId]?.name ?? measureId;
 
+interface ExprResult {
+  define: string;
+  result: unknown;
+}
+/**
+ * The ACTUAL days since the last qualifying exam (the "Days Since …" define), gated on a real
+ * recency date so MISSING_DATA (no exam) → null rather than the @1900 fallback distance. This is
+ * the true recency — NOT `why_flagged.days_overdue` (= max(days − window, 0)), which would report
+ * the overdue amount (e.g. 55 for a 420-days-ago exam) as if it were the recency.
+ */
+function actualDaysSince(evidence: unknown): number | null {
+  const ers = (evidence as { expressionResults?: unknown } | null)?.expressionResults;
+  const list: ExprResult[] = Array.isArray(ers) ? (ers as ExprResult[]) : [];
+  const recent = list.find((r) => /^most recent .*date$/i.test(r.define));
+  const hadExam = recent != null && recent.result != null;
+  const daysDef = list.find((r) => /^days since/i.test(r.define));
+  return hadExam && typeof daysDef?.result === "number" ? daysDef.result : null;
+}
+
 function humanReadable(eventType: string, actor: string | null, measureName: string | null): string {
   const who = actor && actor !== "system" ? actor : "System";
   const measure = measureName ? ` (${measureName})` : "";
@@ -117,16 +136,17 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     if (seen.has(o.measureId)) continue;
     seen.add(o.measureId);
     const wf = deriveWhyFlagged(o.evidence, o.measureId, o.evaluationPeriod, o.status);
-    const daysOverdue = typeof wf.days_overdue === "number" ? wf.days_overdue : null;
     const window = typeof wf.compliance_window_days === "number" ? wf.compliance_window_days : null;
+    // daysSinceLastExam = actual recency; daysUntilDue = window − recency (negative ⇒ overdue).
+    const daysSince = actualDaysSince(o.evidence);
     measureOutcomes.push({
       measureVersionId: o.measureId,
       measureName: measureNameOf(o.measureId),
       measureVersion: measureVersionOf(o.measureId),
       outcomeStatus: o.status,
       lastRunDate: o.evaluatedAt,
-      daysSinceLastExam: daysOverdue,
-      daysUntilDue: daysOverdue !== null && window !== null ? window - daysOverdue : null,
+      daysSinceLastExam: daysSince,
+      daysUntilDue: daysSince !== null && window !== null ? window - daysSince : null,
       openCaseId: openCaseByMeasure.get(o.measureId) ?? null,
     });
   }
