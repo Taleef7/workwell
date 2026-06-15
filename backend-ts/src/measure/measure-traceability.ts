@@ -5,9 +5,9 @@
  * are parsed with the same `define "Name":` regex the Java side uses; rows map each policy
  * requirement to the best-matching define + the runtime `why_flagged` evidence keys it produces.
  *
- * Fidelity: attached value sets are not modeled on the TS floor yet (value-set governance is a
- * separate surface), so `valueSets` is always [] and the value-set gap fires accordingly — the
- * same gap the Java side raises for a version with no attached value sets.
+ * Attached value sets (value-set governance, #108) are passed in by the caller (resolved from
+ * the ValueSetStore for the measure version); each row carries them and the value-set gap fires
+ * only when none are attached — matching the Java side.
  */
 import type { MeasureRecord } from "../stores/measure-store.ts";
 
@@ -78,10 +78,10 @@ function findDefineByKeywords(defines: CqlDefine[], ...keywords: string[]): CqlD
   return null;
 }
 
-export function generateTraceability(measure: MeasureRecord): TraceabilityResponse {
+export function generateTraceability(measure: MeasureRecord, attachedValueSets: ValueSetRef[] = []): TraceabilityResponse {
   const spec = measure.spec;
   const defines = parseCqlDefines(measure.cqlText ?? "");
-  const valueSets: ValueSetRef[] = []; // value-set governance not modeled on the TS floor
+  const valueSets: ValueSetRef[] = attachedValueSets;
   const policyCitation = measure.policyRef ?? "";
   const requiredDataElements = spec.requiredDataElements ?? [];
   const fixtures: TestFixtureRef[] = (spec.testFixtures ?? []).map((f) => ({ fixtureName: f.fixtureName, expectedOutcome: f.expectedOutcome }));

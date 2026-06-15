@@ -102,7 +102,10 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   assert.ok(d.requiredDataElements.includes("Last audiogram date"));
   assert.equal(d.compileStatus, "COMPILED");
   assert.match(d.cqlText, /^library AnnualAudiogramCompleted version '1\.0\.0'/);
-  assert.deepEqual(d.valueSets, []);
+  // Value-set governance (#108): audiogram's 3 demo value sets (procedures + enrollment + waiver)
+  // are now attached and resolved to the detail.
+  assert.equal(d.valueSets.length, 3);
+  assert.ok((d.valueSets as Array<{ name: string }>).some((v) => v.name === "Audiogram Procedures"));
   // V015 seeds 5 demo fixtures for audiogram — they must be carried into the detail.
   assert.equal((d.testFixtures as unknown[]).length, 5);
 });

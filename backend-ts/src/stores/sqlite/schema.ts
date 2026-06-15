@@ -186,6 +186,51 @@ CREATE TABLE IF NOT EXISTS scheduled_appointments (
 );
 
 CREATE INDEX IF NOT EXISTS scheduled_appointments_case_id_idx ON scheduled_appointments (case_id);
+
+/* Value-set governance (#108). Floor analogue of value_sets (V001 + V013 columns),
+   measure_value_set_links (V001), and terminology_mappings (V013). codes_json / code_systems
+   are JSON TEXT on the floor (JSONB / text[] on the ceiling). measure_version_id is the floor
+   version id (<measureId>-<version> TEXT). */
+CREATE TABLE IF NOT EXISTS value_sets (
+  id                TEXT PRIMARY KEY,
+  oid               TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  version           TEXT,
+  codes_json        TEXT NOT NULL DEFAULT '[]',
+  last_resolved_at  TEXT,
+  canonical_url     TEXT,
+  code_systems      TEXT NOT NULL DEFAULT '[]',
+  source            TEXT,
+  status            TEXT NOT NULL DEFAULT 'DRAFT',
+  expansion_hash    TEXT,
+  resolution_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+  resolution_error  TEXT,
+  UNIQUE (oid, version)
+);
+
+CREATE TABLE IF NOT EXISTS measure_value_set_links (
+  measure_version_id TEXT NOT NULL,
+  value_set_id       TEXT NOT NULL REFERENCES value_sets(id),
+  PRIMARY KEY (measure_version_id, value_set_id)
+);
+
+CREATE INDEX IF NOT EXISTS measure_value_set_links_vs_idx ON measure_value_set_links (value_set_id);
+
+CREATE TABLE IF NOT EXISTS terminology_mappings (
+  id                 TEXT PRIMARY KEY,
+  local_code         TEXT NOT NULL,
+  local_display      TEXT,
+  local_system       TEXT NOT NULL,
+  standard_code      TEXT NOT NULL,
+  standard_display   TEXT,
+  standard_system    TEXT NOT NULL,
+  mapping_status     TEXT NOT NULL,
+  mapping_confidence REAL,
+  reviewed_by        TEXT,
+  reviewed_at        TEXT,
+  notes              TEXT,
+  UNIQUE (local_system, local_code, standard_system, standard_code)
+);
 `;
 
 /**
