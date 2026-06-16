@@ -3,6 +3,7 @@ package com.workwell.caseflow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.compile.CqlEvaluationService;
+import com.workwell.run.CompliancePeriodResolver;
 import com.workwell.admin.OutreachTemplateService;
 import com.workwell.admin.WaiverService;
 import com.workwell.notification.EmailDeliveryRecord;
@@ -33,6 +34,7 @@ public class CaseFlowService {
     private final OutreachTemplateService outreachTemplateService;
     private final WaiverService waiverService;
     private final CqlEvaluationService cqlEvaluationService;
+    private final CompliancePeriodResolver compliancePeriodResolver;
     private final CaseSlaService caseSlaService;
     private final EmailService emailService;
 
@@ -42,6 +44,7 @@ public class CaseFlowService {
             OutreachTemplateService outreachTemplateService,
             WaiverService waiverService,
             CqlEvaluationService cqlEvaluationService,
+            CompliancePeriodResolver compliancePeriodResolver,
             CaseSlaService caseSlaService,
             EmailService emailService
     ) {
@@ -50,6 +53,7 @@ public class CaseFlowService {
         this.outreachTemplateService = outreachTemplateService;
         this.waiverService = waiverService;
         this.cqlEvaluationService = cqlEvaluationService;
+        this.compliancePeriodResolver = compliancePeriodResolver;
         this.caseSlaService = caseSlaService;
         this.emailService = emailService;
     }
@@ -196,21 +200,27 @@ public class CaseFlowService {
         }
         if (period == null || period.isBlank()) {
             // #150 H1 (A): default the OPEN worklist to each measure's CURRENT compliance cycle so it
-            // isn't flooded by prior cycles' cases. The current cycle is the measure's LATEST EVALUATED
-            // cycle: MAX over OUTCOMES (every run writes one outcome per subject, even all-compliant
-            // ones), restricted to cycle-anchor periods (…-01-01 / …-07-01).
-            //  - Using OUTCOMES (not open cases) means a measure that rolled into a new cycle with no open
-            //    cases doesn't fall back to a prior cycle's stale opens (Codex P2).
-            //  - The anchor-period restriction keeps a pre-bucketing raw-date row (an unclosed EXCLUDED
-            //    case or a V022-closed case) from poisoning the MAX (Codex P1). Anchors are the only
-            //    values CompliancePeriod emits (annual→Jan 1, biannual→Jan 1/Jul 1, seasonal→Jul 1);
-            //    extend the pattern if a new cadence is added.
-            //  - The default applies ONLY to the open tab — the closed/excluded/all tabs (also called
-            //    without a period) must show full history, not be restricted to a cycle (Codex P2).
+            // isn't flooded by prior cycles' cases. The current cycle is derived from TODAY + each
+            // measure's CADENCE (`bucketPeriod(measure, today)`) — exact and cadence-correct (annual→Jan 1,
+            // biannual→Jan 1/Jul 1, seasonal→Jul 1), so it can't be poisoned by stale/raw rows or fall
+            // back to a prior cycle that still has open cases (Codex P1 + P2). Each Active measure is
+            // pinned to its own anchor via a (measure_version_id, evaluation_period) row-value IN.
+            // The default applies ONLY to the open tab — the closed/excluded/all tabs (also called
+            // without a period) must show full history, not be restricted to a cycle (Codex P2).
             if ("open".equals(normalizedStatusFilter)) {
-                sql.append(" AND c.evaluation_period = (SELECT MAX(o.evaluation_period) "
-                        + "FROM outcomes o WHERE o.measure_version_id = c.measure_version_id "
-                        + "AND (o.evaluation_period LIKE '%-01-01' OR o.evaluation_period LIKE '%-07-01'))");
+                Map<UUID, String> anchors = currentCycleAnchorsByMeasureVersion(measureId);
+                if (anchors.isEmpty()) {
+                    sql.append(" AND 1 = 0"); // no active measures → nothing in the current cycle
+                } else {
+                    sql.append(" AND (c.measure_version_id, c.evaluation_period) IN (");
+                    int i = 0;
+                    for (Map.Entry<UUID, String> entry : anchors.entrySet()) {
+                        sql.append(i++ == 0 ? "(?, ?)" : ", (?, ?)");
+                        params.add(entry.getKey());
+                        params.add(entry.getValue());
+                    }
+                    sql.append(")");
+                }
             }
         } else if (!"all".equalsIgnoreCase(period.trim())) {
             sql.append(" AND c.evaluation_period = ?");
@@ -245,6 +255,28 @@ public class CaseFlowService {
                 slaRemainingDays(toInstant(rs.getObject("sla_due_date"))),
                 rs.getTimestamp("updated_at").toInstant()
         ), params.toArray());
+    }
+
+    /**
+     * Each Active measure version mapped to its CURRENT compliance-cycle anchor (`bucketPeriod(name,
+     * today)`) — used to pin the open worklist to today's cycle per measure, cadence-correctly (#150 H1).
+     * Scoped to {@code measureId} when the worklist is filtered to one measure.
+     */
+    private Map<UUID, String> currentCycleAnchorsByMeasureVersion(UUID measureId) {
+        StringBuilder q = new StringBuilder(
+                "SELECT mv.id AS mvid, m.name AS mname FROM measure_versions mv "
+                        + "JOIN measures m ON mv.measure_id = m.id WHERE mv.status = 'Active'");
+        List<Object> args = new ArrayList<>();
+        if (measureId != null) {
+            q.append(" AND m.id = ?");
+            args.add(measureId);
+        }
+        LocalDate today = LocalDate.now();
+        Map<UUID, String> anchors = new LinkedHashMap<>();
+        jdbcTemplate.query(q.toString(), rs -> {
+            anchors.put((UUID) rs.getObject("mvid"), compliancePeriodResolver.bucketPeriod(rs.getString("mname"), today));
+        }, args.toArray());
+        return anchors;
     }
 
     private String normalizeStatusFilter(String statusFilter) {

@@ -15,6 +15,15 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { handleCases } from "./cases.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+
+// The open worklist is date-driven (today + the measure's cadence), so fixtures must sit on the
+// CURRENT cycle anchor to appear there. Annual (audiogram/hazwoper) → Jan 1 of this year; flu is
+// seasonal (Jul 1 of the current season).
+const TODAY = new Date().toISOString().slice(0, 10);
+const CYCLE = bucketPeriodForMeasure("audiogram", TODAY);
+const FLU_CYCLE = bucketPeriodForMeasure("flu_vaccine", TODAY);
+const FLU_PRIOR = bucketPeriodForMeasure("flu_vaccine", `${Number(TODAY.slice(0, 4)) - 2}-${TODAY.slice(5)}`);
 
 const dbPath = join(tmpdir(), `workwell-cases-${crypto.randomUUID()}.sqlite`);
 const bucketDir = join(tmpdir(), `workwell-cases-bucket-${crypto.randomUUID()}`);
@@ -43,10 +52,10 @@ before(async () => {
   });
   const runId = run.id;
   // emp-006 = Omar Siddiq (Plant A): OVERDUE; emp-001 = Demo Author (HQ): MISSING_DATA; emp-008 EXCLUDED
-  const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
+  const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
   omarCaseId = omar!.id;
-  await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-01-01", outcomeStatus: "MISSING_DATA" });
-  await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "EXCLUDED" });
+  await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: CYCLE, outcomeStatus: "MISSING_DATA" });
+  await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "EXCLUDED" });
   // evidence for Omar's case (drives the detail's why_flagged): a real exam 420 days ago.
   await outcomes.recordOutcome({
     runId,
@@ -424,19 +433,18 @@ test("terminal tabs (excluded) show full history, not just the current cycle (Co
     measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
   });
   const store = new SqliteCaseStore(db);
-  const outcomes = new SqliteOutcomeStore(db);
-  // An OPEN case at the current cycle anchor + an EXCLUDED case in a PRIOR cycle for the same measure.
-  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: "2026-01-01", outcomeStatus: "MISSING_DATA" });
-  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-014", measureId: "flu_vaccine", evaluationPeriod: "2025-07-01", outcomeStatus: "EXCLUDED" });
-  // The current cycle is the latest EVALUATED cycle (MAX over anchor-period outcomes) — record one at the anchor.
-  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: "2026-01-01", status: "MISSING_DATA", evidence: {} });
+  // An OPEN case at flu's CURRENT seasonal cycle + an EXCLUDED case in a PRIOR season (FLU_PRIOR !=
+  // FLU_CYCLE). flu's anchor is Jul 1 (seasonal), so this also guards cadence-correctness: an annual
+  // Jan-1 period would NOT be flu's current cycle (Codex P2).
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: FLU_CYCLE, outcomeStatus: "MISSING_DATA" });
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-014", measureId: "flu_vaccine", evaluationPeriod: FLU_PRIOR, outcomeStatus: "EXCLUDED" });
 
-  // Excluded tab (no period) → full history: the prior-cycle excluded case must show (the current-cycle
-  // default would hide it by restricting to 2026-01-01).
+  // Excluded tab (no period) → full history: the prior-season excluded case must show (the current-cycle
+  // default would hide it by restricting to FLU_CYCLE).
   const excluded = (await get("?status=excluded&measureId=flu_vaccine").then((r) => r!.json())) as Array<{ evaluationPeriod: string }>;
-  assert.ok(excluded.some((c) => c.evaluationPeriod === "2025-07-01"), "prior-cycle excluded case is shown in the excluded tab");
+  assert.ok(excluded.some((c) => c.evaluationPeriod === FLU_PRIOR), "prior-season excluded case is shown in the excluded tab");
 
-  // Open tab still defaults to the current cycle only.
+  // Open tab defaults to flu's current seasonal cycle only.
   const open = (await get("?status=open&measureId=flu_vaccine").then((r) => r!.json())) as Array<{ evaluationPeriod: string }>;
-  assert.deepEqual(open.map((c) => c.evaluationPeriod), ["2026-01-01"], "open tab stays on the current cycle");
+  assert.deepEqual(open.map((c) => c.evaluationPeriod), [FLU_CYCLE], "open tab stays on flu's current seasonal cycle");
 });
