@@ -196,9 +196,12 @@ public class CaseFlowService {
         }
         if (period == null || period.isBlank()) {
             // #150 H1 (A): default the worklist to each measure's CURRENT compliance cycle (its
-            // latest evaluation_period) so it isn't flooded by prior cycles' cases.
+            // latest evaluation_period) so it isn't flooded by prior cycles' cases. The MAX is taken
+            // over OPEN cases only (closed_at IS NULL): a CLOSED stale row (e.g. one administratively
+            // closed by V022, whose raw daily period is lexically later than the new cycle anchor)
+            // must not poison the MAX and hide the current cycle's open cases (Codex P1).
             sql.append(" AND c.evaluation_period = (SELECT MAX(c2.evaluation_period) "
-                    + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id)");
+                    + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id AND c2.closed_at IS NULL)");
         } else if (!"all".equalsIgnoreCase(period.trim())) {
             sql.append(" AND c.evaluation_period = ?");
             params.add(period.trim());

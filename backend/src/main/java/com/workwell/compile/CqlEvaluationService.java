@@ -74,7 +74,11 @@ public class CqlEvaluationService {
             outcomes.add(evaluateSeededInput(measureName, measureVersion, cqlText, evaluationDate, input));
         }
 
-        return new DemoRunPayload(runId, measureName, measureVersion, bucketPeriod(measureName, evaluationDate), outcomes);
+        // The payload carries the ACTUAL evaluation date (run metadata + the trend group by it, and
+        // backdated seed runs must keep their distinct dates). The compliance-cycle bucketing (#150 H1)
+        // is applied where outcomes + cases are PERSISTED (RunPersistenceService, via bucketPeriod) —
+        // it is a property of the persisted period key, not of the evaluation itself.
+        return new DemoRunPayload(runId, measureName, measureVersion, evaluationDate.toString(), outcomes);
     }
 
     /**

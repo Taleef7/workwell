@@ -35,6 +35,14 @@ before(async () => {
   // (the idempotency key includes evaluation_period): a prior cycle and the current one.
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2025-01-01", outcomeStatus: "OVERDUE" });
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
+
+  // Finding 1 (Codex P1) fixture on a SEPARATE measure: an OPEN case at the cycle anchor plus a
+  // CLOSED stale case whose RAW daily period ("2026-06-15") is lexically LATER than the anchor —
+  // mimicking a V022-cleaned row. `current` must still surface the open anchor, not be poisoned
+  // by the later closed period.
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
+  const stale = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-15", outcomeStatus: "OVERDUE" });
+  await store.patchCase(stale!.id, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "STALE_PERIOD_CLEANUP" });
 });
 after(() => {
   try {
@@ -62,4 +70,16 @@ test("period 'all' → every cycle (explicit, case-insensitive)", async () => {
 test("period '2025-01-01' → exactly that cycle", async () => {
   const rows = await store.listCases({ measureId: "audiogram", period: "2025-01-01" });
   assert.deepEqual(rows.map((c) => c.evaluationPeriod), ["2025-01-01"]);
+});
+
+test("period 'current' ignores a CLOSED stale row even when its raw period is later (Codex P1)", async () => {
+  // hazwoper has an OPEN anchor case at 2026-01-01 and a CLOSED stale case at 2026-06-15. The MAX
+  // is over OPEN cases only, so 'current' returns the open anchor — the later closed period must
+  // not hide it.
+  const rows = await store.listCases({ measureId: "hazwoper", period: "current" });
+  assert.deepEqual(
+    rows.map((c) => c.evaluationPeriod),
+    ["2026-01-01"],
+    "the later CLOSED 2026-06-15 row must not poison MAX and hide the open anchor",
+  );
 });

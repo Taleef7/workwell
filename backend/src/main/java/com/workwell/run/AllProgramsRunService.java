@@ -325,7 +325,7 @@ public class AllProgramsRunService {
                     runId.toString(),
                     target.measureName(),
                     target.measureVersion(),
-                    cqlEvaluationService.bucketPeriod(target.measureName(), evaluationDate),
+                    evaluationDate.toString(), // actual date; cycle-bucketing applied at persistence (#150 H1)
                     List.of()
             );
         }
@@ -586,7 +586,7 @@ public class AllProgramsRunService {
                 runId.toString(),
                 measureName,
                 measureVersion == null ? "v1.0" : measureVersion,
-                cqlEvaluationService.bucketPeriod(measureName, evaluationDate),
+                evaluationDate.toString(), // actual date; cycle-bucketing applied at persistence (#150 H1)
                 outcomes
         );
     }
