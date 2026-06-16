@@ -83,7 +83,7 @@ public class CaseFlowService {
             Instant from,
             Instant to
     ) {
-        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, 50, 0);
+        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, null, 50, 0);
     }
 
     public List<CaseSummary> listCases(
@@ -97,7 +97,7 @@ public class CaseFlowService {
             int limit,
             int offset
     ) {
-        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, limit, offset);
+        return listCases(statusFilter, measureId, priority, assignee, site, from, to, null, null, limit, offset);
     }
 
     public List<CaseSummary> listCases(
@@ -109,6 +109,7 @@ public class CaseFlowService {
             Instant from,
             Instant to,
             String search,
+            String period,
             int limit,
             int offset
     ) {
@@ -192,6 +193,15 @@ public class CaseFlowService {
             String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
             params.add(pattern);
             params.add(pattern);
+        }
+        if (period == null || period.isBlank()) {
+            // #150 H1 (A): default the worklist to each measure's CURRENT compliance cycle (its
+            // latest evaluation_period) so it isn't flooded by prior cycles' cases.
+            sql.append(" AND c.evaluation_period = (SELECT MAX(c2.evaluation_period) "
+                    + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id)");
+        } else if (!"all".equalsIgnoreCase(period.trim())) {
+            sql.append(" AND c.evaluation_period = ?");
+            params.add(period.trim());
         }
         sql.append(" AND mv.status = 'Active'");
         sql.append(" ORDER BY c.updated_at DESC");

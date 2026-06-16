@@ -210,4 +210,14 @@ flood; the trend needs distinct dates) — the Phase-5 cleanup migration handles
 Remaining: **A** (worklist default-to-current-cycle), **backend-ts parity**, **D** (Flyway cleanup), and
 the **M6** `why_flagged` day-math (the CASE eval-date half is done).
 
+**Phase A (worklist default) — backend DONE** (verified): `listCases` gains a `period` param — default
+→ each measure's latest cycle (per-measure-max `evaluation_period`), `"all"` → every cycle, specific →
+exact; `CaseController` exposes `?period=`; the 7/9-arg overloads + MCP `list_noncompliant` default to
+the current cycle too. The frontend auto-benefits (no period sent → current cycle); a period selector
+is optional polish. Verified: new `CaseWorklistPeriodIntegrationTest` + CaseController / CaseUpsert /
+CaseFlowRerun / Major1Population suites green. **Java side of H1 now complete** (Phase 1 + Phase 2 root
+fix + A). Remaining: **backend-ts parity** (run-pipeline bucket + case-rerun as-of-today + listCases
+default + a TS `CompliancePeriod`), **D** (Flyway cleanup migration), the **M6** `why_flagged` day-math,
+and the optional A period selector in the frontend.
+
 **Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
