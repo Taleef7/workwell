@@ -159,18 +159,10 @@ export class SqliteCaseStore implements CaseStore {
       where.push("LOWER(COALESCE(assignee, 'unassigned')) = LOWER(?)");
       binds.push(query.assignee);
     }
+    // The worklist's current-cycle default is computed per-measure from today's cadence in the route
+    // (date-driven, #150 H1 / Codex P2) and applied there; the store filters only by an explicit period.
     const period = query.period?.trim();
-    if (period === "current") {
-      // Each measure's LATEST EVALUATED cycle (#150 H1 worklist default): MAX over OUTCOMES (every run
-      // writes one outcome per subject, even all-compliant ones), restricted to cycle-anchor periods
-      // (…-01-01 / …-07-01). Using outcomes (not open cases) means a measure that rolled into a new cycle
-      // with no open cases doesn't fall back to a prior cycle's stale opens (Codex P2); the anchor
-      // restriction keeps a pre-bucketing raw-date row from poisoning the MAX (Codex P1). Anchors are the
-      // only values CompliancePeriod emits (annual→Jan 1, biannual→Jan 1/Jul 1, seasonal→Jul 1).
-      where.push(
-        "evaluation_period = (SELECT MAX(o.evaluation_period) FROM outcomes o WHERE o.measure_id = cases.measure_id AND (o.evaluation_period LIKE '%-01-01' OR o.evaluation_period LIKE '%-07-01'))",
-      );
-    } else if (period && period.toLowerCase() !== "all") {
+    if (period && !["all", "current"].includes(period.toLowerCase())) {
       where.push("evaluation_period = ?");
       binds.push(period);
     }

@@ -3,6 +3,8 @@ package com.workwell.caseflow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.workwell.AbstractIntegrationTest;
+import com.workwell.run.CompliancePeriodResolver;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,9 +14,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * #150 H1 (A): the worklist defaults to each measure's CURRENT compliance cycle (its latest
- * {@code evaluation_period}), so prior cycles' cases don't flood the default view. {@code period="all"}
- * shows every cycle; an explicit period filters to exactly one.
+ * #150 H1 (A): the open worklist defaults to each measure's CURRENT compliance cycle — derived from
+ * TODAY + the measure's cadence ({@code bucketPeriod(measure, today)}), so it is exact and
+ * cadence-correct (no fallback to a prior cycle, no poisoning by stale/raw rows; Codex P1+P2).
+ * {@code period="all"} shows every cycle; an explicit period filters to exactly one; the
+ * closed/excluded tabs show full history.
  */
 @SpringBootTest
 class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
@@ -25,6 +29,14 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private CompliancePeriodResolver compliancePeriodResolver;
+
+    /** Audiogram is annual → its current cycle anchor is Jan 1 of the year containing {@code asOf}. */
+    private String anchor(LocalDate asOf) {
+        return compliancePeriodResolver.bucketPeriod("Audiogram", asOf);
+    }
+
     @BeforeEach
     void reset() {
         jdbcTemplate.execute(
@@ -34,90 +46,84 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void defaultsToCurrentCyclePeriodWithAllAndExactOverrides() {
-        UUID measureVersionId = jdbcTemplate.queryForObject(
-                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
-                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
-                UUID.class);
+        UUID measureVersionId = audiogramVersion();
         UUID runId = insertRun();
+        String current = anchor(LocalDate.now());
+        String prior = anchor(LocalDate.now().minusYears(1));
         // Same measure, two compliance cycles. The default view must show only the current one.
-        insertOpenCase(insertEmployee("Old Cycle"), measureVersionId, "2025-01-01", runId);
-        insertOpenCase(insertEmployee("Current Cycle"), measureVersionId, "2026-01-01", runId);
+        insertOpenCase(insertEmployee("Old Cycle"), measureVersionId, prior, runId);
+        insertOpenCase(insertEmployee("Current Cycle"), measureVersionId, current, runId);
 
         assertThat(listCases(null))
-                .as("default view = the measure's latest cycle only")
+                .as("default view = the measure's current cycle only")
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .containsExactly("2026-01-01");
+                .containsExactly(current);
 
         assertThat(listCases("all"))
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .containsExactlyInAnyOrder("2025-01-01", "2026-01-01");
+                .containsExactlyInAnyOrder(prior, current);
 
-        assertThat(listCases("2025-01-01"))
+        assertThat(listCases(prior))
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .containsExactly("2025-01-01");
+                .containsExactly(prior);
     }
 
     @Test
-    void currentCycleIgnoresTerminalStaleRowsWithLaterPeriods() {
-        UUID measureVersionId = jdbcTemplate.queryForObject(
-                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
-                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
-                UUID.class);
+    void currentCycleUsesTheMeasureCadenceAnchorNotEveryAnchorFormat() {
+        UUID measureVersionId = audiogramVersion();
         UUID runId = insertRun();
-        // OPEN anchor at the cycle start, plus two TERMINAL stale rows whose raw daily periods are
-        // lexically LATER: a CLOSED row (V022-style) and an EXCLUDED row with closed_at = NULL
-        // (the upsertExcludedCase convention, which V022 does NOT close). The current-cycle MAX is
-        // over ACTIONABLE status only, so neither poisons it and the open anchor still shows (Codex P1).
-        insertOpenCase(insertEmployee("Anchor"), measureVersionId, "2026-01-01", runId);
-        insertTerminalCase(insertEmployee("Closed Stale"), measureVersionId, "2026-06-15", runId, "CLOSED", true);
-        insertTerminalCase(insertEmployee("Excluded Stale"), measureVersionId, "2026-09-09", runId, "EXCLUDED", false);
+        String current = anchor(LocalDate.now()); // annual → Jan 1 of this year
+        int year = LocalDate.now().getYear();
+        // For an ANNUAL measure, Jul 1 is NOT a valid cycle anchor — a stale OPEN case there must not
+        // appear in the open worklist (a broad '%-07-01' anchor check would have surfaced it; Codex P2).
+        insertOpenCase(insertEmployee("Current"), measureVersionId, current, runId);
+        insertOpenCase(insertEmployee("Wrong-cadence Jul 1"), measureVersionId, year + "-07-01", runId);
 
         assertThat(listCases(null))
-                .as("current cycle ignores later CLOSED + EXCLUDED stale rows (status-based MAX)")
+                .as("annual measure's current cycle is Jan 1 only; a Jul-1 open case is not part of it")
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .containsExactly("2026-01-01");
+                .containsExactly(current);
     }
 
     @Test
     void terminalTabsShowFullHistoryNotJustTheCurrentCycle() {
-        UUID measureVersionId = jdbcTemplate.queryForObject(
-                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
-                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
-                UUID.class);
+        UUID measureVersionId = audiogramVersion();
         UUID runId = insertRun();
-        // OPEN at the current cycle anchor + an EXCLUDED case in a PRIOR cycle.
-        insertOpenCase(insertEmployee("Open Current"), measureVersionId, "2026-01-01", runId);
-        insertTerminalCase(insertEmployee("Excluded Prior"), measureVersionId, "2025-01-01", runId, "EXCLUDED", false);
+        String current = anchor(LocalDate.now());
+        String prior = anchor(LocalDate.now().minusYears(1));
+        insertOpenCase(insertEmployee("Open Current"), measureVersionId, current, runId);
+        insertTerminalCase(insertEmployee("Excluded Prior"), measureVersionId, prior, runId, "EXCLUDED", false);
 
         // The excluded tab (no period) must show FULL history, not be restricted to the open cycle (Codex P2).
         assertThat(listCases("excluded", null))
                 .as("excluded tab shows prior-cycle excluded cases (full history)")
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .contains("2025-01-01");
+                .contains(prior);
         // The open tab still defaults to the current cycle only.
         assertThat(listCases("open", null))
                 .as("open tab stays on the current cycle")
                 .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
-                .containsExactly("2026-01-01");
+                .containsExactly(current);
     }
 
     @Test
-    void currentCycleIsTheLatestEvaluatedCycleNotTheLatestOpenRow() {
-        UUID measureVersionId = jdbcTemplate.queryForObject(
+    void priorCycleOpenCasesAreHiddenWhenCurrentCycleHasNone() {
+        UUID measureVersionId = audiogramVersion();
+        UUID runId = insertRun();
+        String prior = anchor(LocalDate.now().minusYears(1));
+        // A lingering OPEN case in a PRIOR cycle, with nothing in the current cycle.
+        insertOpenCase(insertEmployee("Lingering Open"), measureVersionId, prior, runId);
+
+        assertThat(listCases(null))
+                .as("open worklist follows today's cycle; a prior-cycle stale open is not surfaced")
+                .isEmpty();
+    }
+
+    private UUID audiogramVersion() {
+        return jdbcTemplate.queryForObject(
                 "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
                         + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
                 UUID.class);
-        UUID runId = insertRun();
-        // A lingering OPEN case in a PRIOR cycle (+ its outcome).
-        insertOpenCase(insertEmployee("Lingering Open"), measureVersionId, "2026-01-01", runId);
-        // A LATER cycle that was evaluated but produced NO open case (everyone compliant → an outcome only).
-        insertOutcome(insertEmployee("Now Compliant"), measureVersionId, "2027-01-01", "COMPLIANT", runId);
-
-        // The current cycle is the latest EVALUATED cycle (2027), which has no open cases — so the open
-        // worklist is empty, NOT the prior cycle's stale open (2026) (Codex P2).
-        assertThat(listCases(null))
-                .as("open worklist follows the latest evaluated cycle, not the latest open row")
-                .isEmpty();
     }
 
     private List<CaseFlowService.CaseSummary> listCases(String period) {
@@ -155,11 +161,10 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                         + "created_at, updated_at, closed_at) "
                         + "VALUES (?, ?, ?, ?, 'OPEN', 'HIGH', NULL, 'Send reminder', 'OVERDUE', ?, NULL, NOW(), NOW(), NULL)",
                 UUID.randomUUID(), employeeId, measureVersionId, period, runId);
-        insertOutcome(employeeId, measureVersionId, period, "OVERDUE", runId);
     }
 
-    /** A terminal case (CLOSED with closed_at set, or EXCLUDED with closed_at NULL) used to verify
-     *  it never wins the current-cycle MAX. */
+    /** A terminal case (CLOSED with closed_at set, or EXCLUDED with closed_at NULL) — used to verify it
+     *  never appears in the open worklist and that the closed/excluded tabs still show it. */
     private void insertTerminalCase(UUID employeeId, UUID measureVersionId, String period, UUID runId, String status, boolean closedAtSet) {
         jdbcTemplate.update(
                 "INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, "
@@ -167,15 +172,5 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                         + "created_at, updated_at, closed_at) "
                         + "VALUES (?, ?, ?, ?, ?, 'HIGH', NULL, 'n/a', ?, ?, NULL, NOW(), NOW(), " + (closedAtSet ? "NOW()" : "NULL") + ")",
                 UUID.randomUUID(), employeeId, measureVersionId, period, status, status, runId);
-        insertOutcome(employeeId, measureVersionId, period, status, runId);
-    }
-
-    /** A persisted outcome (every run writes one per subject) — the worklist's current cycle is the
-     *  latest cycle with outcomes at a cycle anchor, so cases without a matching outcome won't surface. */
-    private void insertOutcome(UUID employeeId, UUID measureVersionId, String period, String status, UUID runId) {
-        jdbcTemplate.update(
-                "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json) "
-                        + "VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, '{}'::jsonb)",
-                runId, employeeId, measureVersionId, period, status);
     }
 }
