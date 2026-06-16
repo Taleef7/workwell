@@ -198,4 +198,16 @@ cohorts never close → 4,703 perpetually-open cases, all "SLA Breached."
 **Safeguard:** compliance compute path untouched → demo numbers stable; only case bucketing + the
 worklist default change.
 
+**Phase 2 DONE** (verified): `CqlEvaluationService.evaluate` + the two `AllProgramsRunService` fallback
+payloads bucket `evaluation_period` via the new public `bucketPeriod` (window from `MeasureDefinition`,
+seasonal = flu-by-name); the CASE rerun (`CaseFlowService`) now evaluates **as-of today** keeping the
+case's cycle period as its upsert key (the **M6** date-decoupling) and the dead
+`verificationEvaluationDate` parser is removed. Verified: 6 affected integration suites green + new
+`NightlyRunIdempotencyIntegrationTest` (2nd nightly ALL_PROGRAMS run → **0** new cases; cases bucket to
+first-of-month anchors, never the run date) + CsvExport + MeasureImpactPreview. The legacy
+single-measure `*DemoService` classes + `SeedHistoricalRunsService` keep date periods (not the recurring
+flood; the trend needs distinct dates) — the Phase-5 cleanup migration handles their old-period cases.
+Remaining: **A** (worklist default-to-current-cycle), **backend-ts parity**, **D** (Flyway cleanup), and
+the **M6** `why_flagged` day-math (the CASE eval-date half is done).
+
 **Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.

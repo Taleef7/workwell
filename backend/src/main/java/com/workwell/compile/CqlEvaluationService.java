@@ -9,6 +9,7 @@ import com.workwell.engine.port.EvaluationConfigProvider;
 import com.workwell.engine.port.MeasureDefinitionProvider;
 import com.workwell.engine.port.PatientDataProvider;
 import com.workwell.measure.SyntheticEmployeeCatalog;
+import com.workwell.run.CompliancePeriod;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import org.cqframework.cql.cql2elm.CqlTranslator;
@@ -73,7 +74,19 @@ public class CqlEvaluationService {
             outcomes.add(evaluateSeededInput(measureName, measureVersion, cqlText, evaluationDate, input));
         }
 
-        return new DemoRunPayload(runId, measureName, measureVersion, evaluationDate.toString(), outcomes);
+        return new DemoRunPayload(runId, measureName, measureVersion, bucketPeriod(measureName, evaluationDate), outcomes);
+    }
+
+    /**
+     * The {@code evaluation_period} a run's outcomes + cases bucket into: the measure's current
+     * compliance cycle (#150 H1), not the run date. Compliance is still computed as of {@code asOf};
+     * this only keeps nightly re-evaluations idempotent (one case per employee × measure × cycle).
+     */
+    public String bucketPeriod(String measureName, LocalDate asOf) {
+        MeasureDefinition spec = measureDefinitionProvider.forMeasure(measureName);
+        int window = spec != null ? spec.complianceWindowDays() : 365;
+        boolean seasonal = FLU_VACCINE_MEASURE_NAME.equalsIgnoreCase(measureName);
+        return CompliancePeriod.cycleKey(window, seasonal, asOf);
     }
 
     public DemoOutcome evaluateSubject(
