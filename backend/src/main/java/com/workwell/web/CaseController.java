@@ -47,7 +47,7 @@ public class CaseController {
 
     @Operation(summary = "List cases", description = "Worklist with status, measure, priority, assignee, site, and search filters.")
     @GetMapping("/api/cases")
-    public List<CaseFlowService.CaseSummary> listCases(
+    public ResponseEntity<List<CaseFlowService.CaseSummary>> listCases(
             @RequestParam(name = "status", defaultValue = "open") String status,
             @RequestParam(name = "measureId", required = false) UUID measureId,
             @RequestParam(name = "priority", required = false) String priority,
@@ -61,19 +61,17 @@ public class CaseController {
             @RequestParam(name = "offset", defaultValue = "0") int offset
     ) {
         try {
-            return caseFlowService.listCases(
-                    status,
-                    measureId,
-                    priority,
-                    assignee,
-                    site,
-                    parseFromDate(from),
-                    parseToDate(to),
-                    search,
-                    period,
-                    limit,
-                    offset
-            );
+            Instant fromInstant = parseFromDate(from);
+            Instant toInstant = parseToDate(to);
+            List<CaseFlowService.CaseSummary> page = caseFlowService.listCases(
+                    status, measureId, priority, assignee, site, fromInstant, toInstant, search, period, limit, offset);
+            // #150 M10: surface the full filtered match count so clients can page past the cap instead of
+            // being silently truncated. Body stays the plain array (non-breaking); X-Total-Count is the total.
+            long total = caseFlowService.countCases(
+                    status, measureId, priority, assignee, site, fromInstant, toInstant, search, period);
+            return ResponseEntity.ok()
+                    .header("X-Total-Count", Long.toString(total))
+                    .body(page);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         }

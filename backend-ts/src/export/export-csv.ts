@@ -10,7 +10,7 @@ import { toRunSummary } from "../run/read-models.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { toCsv } from "./csv.ts";
+import { toCsv, csvCell } from "./csv.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
 const measureVersion = (measureId: string) => {
@@ -136,23 +136,68 @@ export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore,
 // ---- audit (Java AuditExportService header) ---------------------------------
 const AUDIT_HEADERS = ["timestamp", "eventType", "caseId", "runId", "measureName", "employeeId", "actor", "detail"] as const;
 
-export async function auditCsv(eventStore: CaseEventStore, caseStore: CaseStore): Promise<string> {
-  const events = await eventStore.listAuditEvents();
-  // Java derives the employee via the referenced case (COALESCE(case.employee_id, outcome.employee_id)).
-  // Case audit payloads (assign/escalate/outreach) don't carry subjectId, so resolve it from the case.
+type AuditEvent = Awaited<ReturnType<CaseEventStore["listAuditEvents"]>>[number];
+
+/**
+ * Resolve the employee id per referenced case for a page of events. Java derives the employee via the
+ * referenced case (COALESCE(case.employee_id, outcome.employee_id)); case audit payloads (assign/
+ * escalate/outreach) don't carry subjectId, so resolve it from the case.
+ */
+async function resolveCaseEmployees(events: AuditEvent[], caseStore: CaseStore): Promise<Map<string, string>> {
   const caseEmployee = new Map<string, string>();
   for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
     const c = await caseStore.getCase(id);
     if (c) caseEmployee.set(id, c.employeeId);
   }
-  const rows = events.map((e) => {
-    const employeeId =
-      (e.payload.subjectId as string | undefined) ??
-      (e.payload.employeeId as string | undefined) ??
-      (e.refCaseId ? caseEmployee.get(e.refCaseId) : undefined) ??
-      "";
-    const name = e.refMeasureVersionId ? measureName(e.refMeasureVersionId.replace(/-v[\d.]+$/, "")) : "";
-    return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, name, employeeId, e.actor, JSON.stringify(e.payload)];
+  return caseEmployee;
+}
+
+/** One audit CSV row (cell array) for an event, given its page's resolved case→employee map. */
+function auditRowCells(e: AuditEvent, caseEmployee: Map<string, string>): unknown[] {
+  const employeeId =
+    (e.payload.subjectId as string | undefined) ??
+    (e.payload.employeeId as string | undefined) ??
+    (e.refCaseId ? caseEmployee.get(e.refCaseId) : undefined) ??
+    "";
+  const name = e.refMeasureVersionId ? measureName(e.refMeasureVersionId.replace(/-v[\d.]+$/, "")) : "";
+  return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, name, employeeId, e.actor, JSON.stringify(e.payload)];
+}
+
+export async function auditCsv(eventStore: CaseEventStore, caseStore: CaseStore): Promise<string> {
+  const events = await eventStore.listAuditEvents();
+  const caseEmployee = await resolveCaseEmployees(events, caseStore);
+  return toCsv(AUDIT_HEADERS, events.map((e) => auditRowCells(e, caseEmployee)));
+}
+
+/** Page size for the streamed audit export — one page is the most rows held in memory at a time. */
+const AUDIT_STREAM_PAGE = 1000;
+
+/**
+ * Stream the full audit ledger as CSV (#150 M9 — parity with the Java StreamingResponseBody export):
+ * page the ledger so the export never materializes the whole table (or one giant string) at once. The
+ * bytes are identical to {@link auditCsv} — header then `\r\n`-prefixed rows, matching `toCsv`'s join.
+ */
+export function auditCsvStream(eventStore: CaseEventStore, caseStore: CaseStore): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let offset = 0;
+  let wroteHeader = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!wroteHeader) {
+        controller.enqueue(encoder.encode(AUDIT_HEADERS.join(",")));
+        wroteHeader = true;
+      }
+      const events = await eventStore.listAuditEvents(AUDIT_STREAM_PAGE, offset);
+      if (events.length === 0) {
+        controller.close();
+        return;
+      }
+      offset += events.length;
+      const caseEmployee = await resolveCaseEmployees(events, caseStore);
+      // Each row is CRLF-prefixed so the concatenation equals toCsv's `[header, ...rows].join("\r\n")`.
+      const chunk = events.map((e) => "\r\n" + auditRowCells(e, caseEmployee).map(csvCell).join(",")).join("");
+      controller.enqueue(encoder.encode(chunk));
+      if (events.length < AUDIT_STREAM_PAGE) controller.close();
+    },
   });
-  return toCsv(AUDIT_HEADERS, rows);
 }

@@ -104,8 +104,8 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
   };
 }
 
-const json = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
 
 /**
  * Map the page's status filter to concrete case statuses. Blank/missing defaults to
@@ -344,5 +344,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
         c.employeeId.toLowerCase().includes(search),
     );
   }
-  return json(summaries.slice(offset, offset + limit));
+  // #150 M10: expose the full filtered match count so clients can page past the limit instead of
+  // silently capping. The body stays a plain array (non-breaking); X-Total-Count carries the total.
+  return json(summaries.slice(offset, offset + limit), 200, { "X-Total-Count": String(summaries.length) });
 }

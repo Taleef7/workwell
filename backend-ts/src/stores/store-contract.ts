@@ -404,6 +404,32 @@ export function caseEventStoreContract(
     assert.deepEqual(e.payload, { assignee: "cm@x" });
   });
 
+  test(`[${label}] listAuditEvents pages with limit+offset (oldest-first) — backs the streamed audit export (#150 M9)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    for (const assignee of ["a@x", "b@x", "c@x"]) {
+      await eventStore.appendAudit({
+        eventType: "CASE_ASSIGNED",
+        entityType: "case",
+        entityId: c.id,
+        actor: assignee,
+        refRunId: c.lastRunId,
+        refCaseId: c.id,
+        refMeasureVersionId: c.measureId,
+        payload: { assignee },
+      });
+    }
+    const all = await eventStore.listAuditEvents();
+    const page1 = await eventStore.listAuditEvents(2, 0);
+    const page2 = await eventStore.listAuditEvents(2, 2);
+    // Paging concatenated == the full ledger, in the same oldest-first order (no overlap, no gaps).
+    assert.deepEqual(
+      [...page1, ...page2].map((e) => e.actor),
+      all.map((e) => e.actor),
+    );
+    assert.ok(page1.length === 2 && page2.length === all.length - 2);
+  });
+
   test(`[${label}] auditEventsByRun / auditEventsByMeasureVersion filter the ledger by ref`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;
