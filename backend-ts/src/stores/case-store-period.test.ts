@@ -36,13 +36,16 @@ before(async () => {
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2025-01-01", outcomeStatus: "OVERDUE" });
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
 
-  // Finding 1 (Codex P1) fixture on a SEPARATE measure: an OPEN case at the cycle anchor plus a
-  // CLOSED stale case whose RAW daily period ("2026-06-15") is lexically LATER than the anchor —
-  // mimicking a V022-cleaned row. `current` must still surface the open anchor, not be poisoned
-  // by the later closed period.
+  // Finding 1 (Codex P1) fixture on a SEPARATE measure: an OPEN case at the cycle anchor plus two
+  // TERMINAL stale cases whose RAW daily periods are lexically LATER than the anchor — a CLOSED row
+  // (a V022-cleaned row) and an EXCLUDED row with closed_at = NULL (mirroring the Java
+  // upsertExcludedCase convention, which V022 does NOT close). `current` must surface the open
+  // anchor and be poisoned by neither — so the MAX is over ACTIONABLE status, not closed_at.
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
-  const stale = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-15", outcomeStatus: "OVERDUE" });
-  await store.patchCase(stale!.id, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "STALE_PERIOD_CLEANUP" });
+  const closedStale = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-15", outcomeStatus: "OVERDUE" });
+  await store.patchCase(closedStale!.id, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "STALE_PERIOD_CLEANUP" });
+  const excludedStale = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-09-09", outcomeStatus: "EXCLUDED" });
+  await store.patchCase(excludedStale!.id, { status: "EXCLUDED", closedAt: null });
 });
 after(() => {
   try {
@@ -72,14 +75,14 @@ test("period '2025-01-01' → exactly that cycle", async () => {
   assert.deepEqual(rows.map((c) => c.evaluationPeriod), ["2025-01-01"]);
 });
 
-test("period 'current' ignores a CLOSED stale row even when its raw period is later (Codex P1)", async () => {
-  // hazwoper has an OPEN anchor case at 2026-01-01 and a CLOSED stale case at 2026-06-15. The MAX
-  // is over OPEN cases only, so 'current' returns the open anchor — the later closed period must
-  // not hide it.
+test("period 'current' ignores terminal (CLOSED + EXCLUDED) stale rows with later periods (Codex P1)", async () => {
+  // hazwoper: OPEN anchor at 2026-01-01, CLOSED stale at 2026-06-15, EXCLUDED stale (closed_at NULL)
+  // at 2026-09-09. The MAX is over ACTIONABLE status only, so 'current' returns the open anchor —
+  // neither later terminal row poisons it (the EXCLUDED-with-null-closed_at row is the Codex P1 case).
   const rows = await store.listCases({ measureId: "hazwoper", period: "current" });
   assert.deepEqual(
     rows.map((c) => c.evaluationPeriod),
     ["2026-01-01"],
-    "the later CLOSED 2026-06-15 row must not poison MAX and hide the open anchor",
+    "the later CLOSED (2026-06-15) and EXCLUDED (2026-09-09) rows must not poison MAX and hide the open anchor",
   );
 });
