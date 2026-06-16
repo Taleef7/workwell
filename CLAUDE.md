@@ -84,7 +84,7 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-06-10)
+## Current Focus (as of 2026-06-15)
 
 **All sprints through Sprint 7 are merged and closed; Sprint 8 scoped-run parity, the `@mieweb/ui` migration, and post-merge polish have all landed. The project has moved from polish into the strategic roadmap (epics tracked as GitHub issues #71–#78): decompose the engine into reusable ports/adapters so real EHR/FHIR data can plug in later, harden standalone first, then integrate. Wave 1 has started — E1 is merged; E2 is next.**
 
@@ -97,6 +97,7 @@ History (all on `main`):
 - Post-merge polish pass → PRs #60–#66: ADR-003, workwell.os redirect, CQL code-filter tightening, CMS125+CMS122 promoted to Active, compliance trend per-bucket chart, case code evidence explorer, SQL analogy panel
 - `@mieweb/ui` frontend migration → PR #68; measures/programs/runs latency fix → PR #69; systemd + reboot-policy docs → PR #70
 - **Roadmap Wave 1 — E1: reusable measure engine ports/adapters → PR #95** (epic #71 + sub-issues #79–#84, closed). `CqlEvaluationService` now runs behind `PatientDataProvider`/`EmployeeDirectory`/`MeasureDefinitionProvider`/`EvaluationConfigProvider`; synthetic adapters are the default (ADR-005). Roadmap epics tracked as issues #71–#78.
+- **Demo-readiness (#150) — part 1 merged (PR #151) + deployed.** A live QA pass found 21 defects/doc-mismatches. Shipped: frontend papercuts (H2/H3/M2/M3/M4/M7/M11/M12), **C2** CMS125/CMS122 promoted to Active (seeding-bug fix + CMS122 name reconciled to the modern "Glycemic Status Assessment Greater Than 9%" since the evaluator binds CQL by measure name), **C4** program rollups exclude single-subject CASE/EMPLOYEE reruns; both Codex findings (scope_type lowercase casing, promote `spec_json`) resolved with a Testcontainers regression test. **In progress — H1** (worklist flood) on `fix/issue-150-worklist-h1`: per-measure compliance-cycle case bucketing so nightly reruns stay idempotent (Phase 1 = `CompliancePeriod` helper done). Remaining: H1 phases 2–6, then H4/M1/M5/M8/M9/M10/M13. Running narrative in `docs/JOURNAL.md`; plan in `docs/superpowers/plans/2026-06-15-issue-150-demo-readiness.md`.
 
 Current posture:
 - **Live URL:** `https://twh.os.mieweb.org` — login: `admin@workwell.dev` / `Workwell123!`
