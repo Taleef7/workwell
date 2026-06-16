@@ -128,13 +128,13 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return row?.delivery_status ?? null;
   }
 
-  async listAuditEvents(limit = 100000): Promise<AuditEventRow[]> {
+  async listAuditEvents(limit = 100000, offset = 0): Promise<AuditEventRow[]> {
     const { results } = await this.db
       .prepare(
         `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
-           FROM audit_events ORDER BY occurred_at ASC, id ASC LIMIT ?`,
+           FROM audit_events ORDER BY occurred_at ASC, id ASC LIMIT ? OFFSET ?`,
       )
-      .bind(limit)
+      .bind(limit, offset)
       .all<AuditRow>();
     return (results ?? []).map(toAuditEventRow);
   }

@@ -73,8 +73,11 @@ export interface CaseEventStore {
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
   /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
-  /** All audit events, oldest-first (the audit CSV export); capped at `limit`. */
-  listAuditEvents(limit?: number): Promise<AuditEventRow[]>;
+  /**
+   * All audit events, oldest-first (the audit CSV export); capped at `limit` from `offset`.
+   * `offset` lets the export page the ledger so it never materializes the whole table (#150 M9).
+   */
+  listAuditEvents(limit?: number, offset?: number): Promise<AuditEventRow[]>;
   /** Audit events for one run (ref_run_id), oldest-first — the run auditor packet ledger. */
   auditEventsByRun(runId: string): Promise<AuditEventRow[]>;
   /** Audit events for one measure version (ref_measure_version_id), oldest-first — the measure-version packet ledger. */

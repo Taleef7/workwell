@@ -119,6 +119,28 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                 .isEmpty();
     }
 
+    @Test
+    void countCasesReturnsTheFullTotalIgnoringLimitOffset() {
+        // #150 M10: the worklist's X-Total-Count must report the full match count, not the capped page,
+        // so clients can page past the limit instead of being silently truncated.
+        UUID measureVersionId = audiogramVersion();
+        UUID runId = insertRun();
+        String current = anchor(LocalDate.now());
+        insertOpenCase(insertEmployee("A"), measureVersionId, current, runId);
+        insertOpenCase(insertEmployee("B"), measureVersionId, current, runId);
+        insertOpenCase(insertEmployee("C"), measureVersionId, current, runId);
+
+        // A capped page returns at most `limit` rows...
+        assertThat(caseFlowService.listCases("open", null, null, null, null, null, null, null, null, 1, 0))
+                .hasSize(1);
+        // ...but the count reports the full current-cycle total (this is what X-Total-Count carries).
+        assertThat(caseFlowService.countCases("open", null, null, null, null, null, null, null, null))
+                .isEqualTo(3L);
+        // countCases honors the same filters as listCases: an empty excluded tab is 0.
+        assertThat(caseFlowService.countCases("excluded", null, null, null, null, null, null, null, null))
+                .isEqualTo(0L);
+    }
+
     private UUID audiogramVersion() {
         return jdbcTemplate.queryForObject(
                 "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "

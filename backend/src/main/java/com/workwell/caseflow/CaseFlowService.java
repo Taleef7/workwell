@@ -160,6 +160,87 @@ public class CaseFlowService {
                 """);
 
         List<Object> params = new ArrayList<>();
+        appendCaseFilters(sql, params, normalizedStatusFilter, measureId, priority, assignee, site, from, to, search, period);
+        sql.append(" ORDER BY c.updated_at DESC");
+        sql.append(" LIMIT ? OFFSET ?");
+        params.add(safeLimit);
+        params.add(safeOffset);
+
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
+                (UUID) rs.getObject("case_id"),
+                rs.getString("employee_id"),
+                rs.getString("employee_name"),
+                rs.getString("employee_site"),
+                (UUID) rs.getObject("measure_version_id"),
+                rs.getString("measure_name"),
+                rs.getString("measure_version"),
+                rs.getString("evaluation_period"),
+                rs.getString("status"),
+                rs.getString("priority"),
+                rs.getString("assignee"),
+                rs.getString("current_outcome_status"),
+                (UUID) rs.getObject("last_run_id"),
+                rs.getString("exclusion_reason"),
+                toInstant(rs.getObject("waiver_expires_at")),
+                rs.getBoolean("waiver_expired"),
+                rs.getInt("outreach_record_count"),
+                toInstant(rs.getObject("sla_due_date")),
+                rs.getBoolean("sla_breached"),
+                slaRemainingDays(toInstant(rs.getObject("sla_due_date"))),
+                rs.getTimestamp("updated_at").toInstant()
+        ), params.toArray());
+    }
+
+    /**
+     * Total cases matching the same filters as {@link #listCases} (ignoring limit/offset) — backs the
+     * worklist's {@code X-Total-Count} header so clients can page past the cap instead of being silently
+     * truncated (#150 M10). Shares {@link #appendCaseFilters} with the list query so the two can't drift.
+     * The waiver LATERAL join is omitted (no WHERE predicate references it).
+     */
+    public long countCases(
+            String statusFilter,
+            UUID measureId,
+            String priority,
+            String assignee,
+            String site,
+            Instant from,
+            Instant to,
+            String search,
+            String period
+    ) {
+        String normalizedStatusFilter = normalizeStatusFilter(statusFilter);
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(*)
+                FROM cases c
+                JOIN employees e ON c.employee_id = e.id
+                JOIN measure_versions mv ON c.measure_version_id = mv.id
+                JOIN measures m ON mv.measure_id = m.id
+                WHERE 1=1
+                """);
+        List<Object> params = new ArrayList<>();
+        appendCaseFilters(sql, params, normalizedStatusFilter, measureId, priority, assignee, site, from, to, search, period);
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        return total == null ? 0L : total;
+    }
+
+    /**
+     * Append the shared worklist WHERE predicates (status, measure, priority, assignee, site, created-at
+     * range, search, compliance-cycle period, and the Active-version gate) to {@code sql}, binding into
+     * {@code params}. Single source of truth for {@link #listCases} + {@link #countCases}.
+     */
+    private void appendCaseFilters(
+            StringBuilder sql,
+            List<Object> params,
+            String normalizedStatusFilter,
+            UUID measureId,
+            String priority,
+            String assignee,
+            String site,
+            Instant from,
+            Instant to,
+            String search,
+            String period
+    ) {
         switch (normalizedStatusFilter) {
             case "all" -> {
             }
@@ -227,34 +308,6 @@ public class CaseFlowService {
             params.add(period.trim());
         }
         sql.append(" AND mv.status = 'Active'");
-        sql.append(" ORDER BY c.updated_at DESC");
-        sql.append(" LIMIT ? OFFSET ?");
-        params.add(safeLimit);
-        params.add(safeOffset);
-
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CaseSummary(
-                (UUID) rs.getObject("case_id"),
-                rs.getString("employee_id"),
-                rs.getString("employee_name"),
-                rs.getString("employee_site"),
-                (UUID) rs.getObject("measure_version_id"),
-                rs.getString("measure_name"),
-                rs.getString("measure_version"),
-                rs.getString("evaluation_period"),
-                rs.getString("status"),
-                rs.getString("priority"),
-                rs.getString("assignee"),
-                rs.getString("current_outcome_status"),
-                (UUID) rs.getObject("last_run_id"),
-                rs.getString("exclusion_reason"),
-                toInstant(rs.getObject("waiver_expires_at")),
-                rs.getBoolean("waiver_expired"),
-                rs.getInt("outreach_record_count"),
-                toInstant(rs.getObject("sla_due_date")),
-                rs.getBoolean("sla_breached"),
-                slaRemainingDays(toInstant(rs.getObject("sla_due_date"))),
-                rs.getTimestamp("updated_at").toInstant()
-        ), params.toArray());
     }
 
     /**
@@ -1711,7 +1764,12 @@ public class CaseFlowService {
             }
             java.time.LocalDate lastExam = java.time.LocalDate.parse(lastExamObj.toString());
             int windowDays = Integer.parseInt(windowObj.toString());
-            return lastExam.plusDays(windowDays).toString();
+            java.time.LocalDate due = lastExam.plusDays(windowDays);
+            // #150 M13: an OVERDUE case's due date (last_exam + window) is already in the past, so an
+            // outreach reading "complete by <past date>" is confusing. Never render a past due date —
+            // clamp to today ("due now"). UTC to match the backend-ts computeDueDate.
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            return (due.isBefore(today) ? today : due).toString();
         } catch (Exception ignored) {
             return detail.evaluationPeriod();
         }
