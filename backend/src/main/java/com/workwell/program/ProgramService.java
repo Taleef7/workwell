@@ -53,12 +53,16 @@ public class ProgramService {
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
                 ), latest_run AS (
+                    -- #150 C4: a per-measure rollup must reflect a full-population run, not a
+                    -- single-subject CASE/EMPLOYEE rerun-to-verify (which would crash the rate to
+                    -- 0%/100% from one employee). Restrict "latest run" to population-scope runs.
                     SELECT fo.measure_version_id,
                            fo.run_id,
                            r.started_at,
                            ROW_NUMBER() OVER (PARTITION BY fo.measure_version_id ORDER BY r.started_at DESC) AS rn
                     FROM filtered_outcomes fo
                     JOIN runs r ON r.id = fo.run_id
+                    WHERE UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')
                 ), outcome_counts AS (
                     SELECT fo.measure_version_id,
                            fo.run_id,
@@ -159,6 +163,7 @@ public class ProgramService {
                     WHERE (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
                       AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
+                      AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')  -- #150 C4: keep single-subject reruns out of the trend
                     GROUP BY o.run_id, r.started_at
                 ),
                 run_based AS (
@@ -246,6 +251,7 @@ public class ProgramService {
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(COALESCE(e.site, '')) = LOWER(CAST(? AS TEXT)))
                   AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at >= CAST(? AS TIMESTAMPTZ))
                   AND (CAST(? AS TIMESTAMPTZ) IS NULL OR r.started_at <= CAST(? AS TIMESTAMPTZ))
+                  AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')  -- #150 C4: drivers from a full-population run
                 GROUP BY o.run_id, r.started_at
                 ORDER BY r.started_at DESC
                 LIMIT 1
