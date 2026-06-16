@@ -144,13 +144,22 @@ On branch `fix/issue-150-demo-readiness`.
   `listOutcomesWithRun` impls (sqlite/pg), and filter `isPopulationRun` in `program-read-models`
   (`programOverview` rows + `runsWithOutcomes` → covers overview/trend/top-drivers). Added a
   DB-backed regression test in `programs.test.ts`.
-- **Verified:** backend-ts typecheck + 404 tests green; Java compiles (no DB-test harness on the
-  Java side — `ProgramControllerTest` mocks the service, so the SQL guard rests on reasoning + the
-  backend-ts regression test + runtime).
+- **Verified:** backend-ts typecheck + 404 tests; Java DB-backed regression test
+  `ProgramRollupRerunIntegrationTest` (Testcontainers Postgres) — seeds a population run + a
+  lowercase `"case"` rerun and asserts the rollup isn't skewed; **proven to fail without the fix
+  and pass with it**.
+- **Codex P1 (resolved):** the first cut used uppercase `NOT IN ('CASE','EMPLOYEE')`, but the Java
+  backend persists these scope types **lowercase** (`CaseFlowService` writes `"case"`; manual runs
+  `.name().toLowerCase()`), so the filter matched nothing — C4 wasn't actually fixed. Corrected to
+  `UPPER(r.scope_type)` in all three Java predicates and `.toUpperCase()` in backend-ts'
+  `isPopulationRun`. The new DB integration test is the regression guard that was missing (it's why
+  the casing slipped). backend-ts stores scope types uppercase (type-enforced), so it was already
+  correct; the normalization is defensive there.
 
-**Commits on `fix/issue-150-demo-readiness`:**
+**Commits on `fix/issue-150-demo-readiness` (PR #151):**
 - `45024bc` fix(web): #150 demo-readiness frontend papercuts + ELM-explorer doc (C1)
 - `b41d374` fix(measure): #150 C2 — promote CMS125/CMS122 to Active + reconcile CMS122 name
-- (this commit) fix(program): #150 C4 — exclude single-subject reruns from program rollups
+- `0baa0ff` fix(program): #150 C4 — exclude single-subject reruns from program rollups
+- (this commit) fix(program): #150 C4 — normalize scope_type case (Codex P1) + DB regression test
 
 **Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
