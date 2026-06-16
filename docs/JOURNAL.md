@@ -19,6 +19,12 @@
 
 Validation: backend-ts 417 tests / 0 fail + typecheck clean; Java `OutreachTemplateOutcomeIntegrationTest` (incl. manual==auto agreement) green vs real Postgres; frontend lint clean + build compiles. Lower-priority review notes left as-is for the demo (M8's fixed 90-day horizon is window-agnostic but defensible; value-based CMS122 still predicts==current structurally; the M5 polling path keeps its benign same-run pattern). **Remaining #150: M9/M10/M13 (post-demo).**
 
+**Codex re-review #2 on PR #153 (`f477743`) — 2 P2s, both fixed (no re-review requested — converging).** The outreach template-selection cluster had two follow-on gaps:
+- **P2 #1 — `backend-ts` recorded the wrong templateId in the audit/action payload.** `sendOutreach` rendered the resolved template `t` but wrote `templateId: templateId ?? null` (the *incoming* id) into the `OUTREACH_SENT` action + audit payload, so audit/export couldn't tell which message was actually sent. Java already recorded the resolved `template.id()` — TS now records `t.id` (and `t.name`) too. While here I also closed the documented parity gap that TS *ignored* an explicit templateId: added `templateById` + `resolveTemplate(templateId, outcome, measure)` so a known explicit id **wins** over the outcome default (mirroring Java `resolveForOutcome`; an unknown id still falls through to the outcome default). `previewOutreach`/`sendOutreach` both route through it. New preview test: an explicit hearing templateId on Omar's OVERDUE case wins over the generic default.
+- **P2 #2 — the case page pre-selected the first admin template, bypassing the outcome default.** `loadTemplates` auto-set `selectedTemplateId = data[0].id`, so the normal manual workflow **always** sent a non-null templateId — defeating the M1 outcome-aware default for any operator who never touched the dropdown. Fixed: don't pre-select (leave it empty), and the template `Select` now leads with an explicit **"Auto (by outcome)"** option (`value=""`) so the empty default is visible and selectable; an operator can still override by picking a specific template. Empty → no `templateId` query param → backend applies the outcome default.
+
+Validation: backend-ts **418 tests / 0 fail** + typecheck clean; frontend lint clean + build compiles. No Java change needed (it already recorded the resolved id). **Remaining #150: M9/M10/M13 (post-demo).**
+
 ---
 
 ## 2026-06-16 — Issue #150 H1: `backend-ts` parity (cycle-bucketing + worklist current-cycle + M6 eval-as-of-today)

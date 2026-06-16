@@ -240,6 +240,17 @@ test("outreach/preview picks the outcome-aware template — MISSING_DATA gets th
   assert.match(p.subject, /[Mm]issing/);
 });
 
+test("outreach/preview honors an explicit, known templateId over the outcome default (#150 M1 — Java parity)", async () => {
+  // Omar's case is OVERDUE → the default is the generic reminder, but an explicit hearing templateId wins.
+  const hearingId = "11111111-0000-0000-0000-000000000001";
+  const p = (await getPath(`/api/cases/${omarCaseId}/actions/outreach/preview?templateId=${hearingId}`).then((r) => r!.json())) as {
+    templateId: string;
+    templateName: string;
+  };
+  assert.equal(p.templateId, hearingId);
+  assert.equal(p.templateName, "Hearing Conservation Overdue Outreach");
+});
+
 test("delivery update before a send → 400; send then delivery flips latestOutreachDeliveryStatus", async () => {
   // before any send, delivery update is rejected
   assert.equal((await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=SENT`))?.status, 400);

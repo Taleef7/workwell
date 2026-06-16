@@ -1,10 +1,10 @@
 /**
  * Case outreach (#107) — TS port of CaseFlowService.previewOutreach / sendOutreach /
- * updateOutreachDelivery. Templates resolve to a built-in default chosen by the case's OUTCOME
- * bucket (#150 M1 — parity with Java's resolveForOutcome): OVERDUE/MISSING_DATA/DUE_SOON each get a
- * fitting message, falling back to the generic reminder. (The DB-backed outreach_templates + admin
- * CRUD live in the admin module; an explicit templateId still resolves to the outcome default here,
- * matching Java's resolveByIdOrDefault fallback when the id isn't found.)
+ * updateOutreachDelivery. Templates resolve via `resolveTemplate` (#150 M1 — parity with Java's
+ * resolveForOutcome): an explicit, known templateId wins; otherwise the case's OUTCOME bucket
+ * (OVERDUE/MISSING_DATA/DUE_SOON) chooses a fitting message, falling back to the generic reminder.
+ * (The DB-backed outreach_templates + admin CRUD live in the admin module; an unknown templateId
+ * falls through to the outcome default here, matching Java's resolveByIdOrDefault fallback.)
  *
  * Send/delivery are state-changing, so they follow the same event-before-patch
  * ordering as the other actions (recordCaseEvent writes the case_action + audit_event
@@ -71,6 +71,25 @@ function templateForOutcome(outcomeStatus: string | null | undefined, measureNam
     return TEMPLATES.general;
   }
   return TEMPLATES.general; // OVERDUE + everything else → generic
+}
+
+/** Look up a built-in template by its seeded id (V007/V008), else null. */
+function templateById(templateId: string | null | undefined): OutreachTemplateContent | null {
+  if (!templateId) return null;
+  return Object.values(TEMPLATES).find((t) => t.id === templateId) ?? null;
+}
+
+/**
+ * Resolve the template to send (#150 M1 — parity with Java `resolveForOutcome`): an explicit, known
+ * templateId wins; otherwise fall back to the outcome-aware default. An unknown id falls through to
+ * the outcome default (Java's resolveByIdOrDefault behavior).
+ */
+function resolveTemplate(
+  templateId: string | null | undefined,
+  outcomeStatus: string | null | undefined,
+  measureName: string | null | undefined,
+): OutreachTemplateContent {
+  return templateById(templateId) ?? templateForOutcome(outcomeStatus, measureName);
 }
 
 export interface OutreachPreview {
@@ -153,12 +172,12 @@ async function renderContext(deps: OutreachDeps, c: { lastRunId: string; employe
 export async function previewOutreach(
   deps: OutreachDeps,
   caseId: string,
-  _templateId?: string | null,
+  templateId?: string | null,
 ): Promise<OutreachPreview | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
-  const t = templateForOutcome(c.currentOutcomeStatus, measureName);
+  const t = resolveTemplate(templateId, c.currentOutcomeStatus, measureName);
   return {
     templateId: t.id,
     templateName: t.name,
@@ -181,7 +200,7 @@ export async function sendOutreach(
   if (!existing) return null;
   const email = deps.email ?? simulatedEmailService;
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
-  const t = templateForOutcome(existing.currentOutcomeStatus, measureName);
+  const t = resolveTemplate(templateId, existing.currentOutcomeStatus, measureName);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const toAddress = `${existing.employeeId}@workwell-demo.dev`; // deterministic, non-routable
@@ -193,7 +212,7 @@ export async function sendOutreach(
     channel: "SIMULATED_EMAIL",
     template: t.name,
     templateName: t.name,
-    templateId: templateId ?? null,
+    templateId: t.id,
     subject,
     deliveryStatus: delivery.status,
     note: `Outreach dispatched via ${delivery.provider} provider (${delivery.status}).`,

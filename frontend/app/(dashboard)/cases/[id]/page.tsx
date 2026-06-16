@@ -165,11 +165,13 @@ export default function CaseDetailPage() {
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   // Option lists for @mieweb/ui Select controls.
+  // The empty-value option is the default: no templateId is sent, so the backend picks the
+  // outcome-aware template (#150 M1). An operator can still override by choosing a specific one.
   const templateOptions = useMemo(
-    () =>
-      templates.length === 0
-        ? [{ value: "", label: "Default template" }]
-        : templates.map((template) => ({ value: template.id, label: template.name })),
+    () => [
+      { value: "", label: "Auto (by outcome)" },
+      ...templates.map((template) => ({ value: template.id, label: template.name })),
+    ],
     [templates],
   );
   const appointmentTypeOptions = useMemo(
@@ -203,9 +205,8 @@ export default function CaseDetailPage() {
     try {
       const data = await api.get<OutreachTemplate[]>("/api/admin/outreach-templates");
       setTemplates(data);
-      if (!selectedTemplateId && data.length > 0) {
-        setSelectedTemplateId(data[0].id);
-      }
+      // Do NOT pre-select a template: leaving selectedTemplateId empty makes the manual workflow
+      // send no templateId, so the backend applies the outcome-aware default (#150 M1).
     } catch {
       setTemplates([]);
     }
