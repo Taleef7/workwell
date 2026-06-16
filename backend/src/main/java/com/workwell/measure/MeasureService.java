@@ -1239,20 +1239,6 @@ public class MeasureService {
             );
         }
 
-        Integer existing = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
-                Integer.class, measureId, "v1.0"
-        );
-        if (existing != null && existing > 0) {
-            jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
-                    loadSeedCql("cms125.cql"),
-                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
-                    measureId, "v1.0"
-            );
-            return;
-        }
-
         Map<String, Object> spec = new LinkedHashMap<>();
         spec.put("description", "Breast Cancer Screening (CMS125v14 / MIPS 112): women 50–74 who had a mammogram in the measurement period or 26 months prior.");
         spec.put("eligibilityCriteria", Map.of(
@@ -1266,6 +1252,28 @@ public class MeasureService {
         spec.put("testFixtures", List.of());
         spec.put("cmsEcqmId", "CMS125v14");
         spec.put("mipsQualityId", "112");
+        String compileResult = toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of()));
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            // #150 C2: promote the pre-existing (catalog-seeded Draft) row to Active with full CQL
+            // AND the full authored spec_json (Codex P2) — otherwise an upgraded DB keeps the lean
+            // catalog spec (generic description, empty requiredDataElements) while fresh DBs get the
+            // rich one. Also normalize the display name to the exact YAML binding key (forMeasure).
+            jdbcTemplate.update("UPDATE measures SET name = ?, updated_at = NOW() WHERE id = ?",
+                    "Breast Cancer Screening", measureId);
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET status = 'Active', activated_at = COALESCE(activated_at, NOW()), "
+                            + "spec_json = ?::jsonb, cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb "
+                            + "WHERE measure_id = ? AND version = ?",
+                    toJson(spec), loadSeedCql("cms125.cql"), compileResult,
+                    measureId, "v1.0"
+            );
+            return;
+        }
 
         jdbcTemplate.update(
                 "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",
@@ -1292,25 +1300,11 @@ public class MeasureService {
             jdbcTemplate.update(
                     "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
                     measureId,
-                    "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)",
+                    "Diabetes: Glycemic Status Assessment Greater Than 9%",
                     "CMS122v14",
                     "WorkWell Studio",
                     "{ecqm,cms,diabetes}"
             );
-        }
-
-        Integer existing = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
-                Integer.class, measureId, "v1.0"
-        );
-        if (existing != null && existing > 0) {
-            jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
-                    loadSeedCql("cms122.cql"),
-                    toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
-                    measureId, "v1.0"
-            );
-            return;
         }
 
         Map<String, Object> spec = new LinkedHashMap<>();
@@ -1326,6 +1320,28 @@ public class MeasureService {
         spec.put("testFixtures", List.of());
         spec.put("cmsEcqmId", "CMS122v14");
         spec.put("mipsQualityId", "1");
+        String compileResult = toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of()));
+
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM measure_versions WHERE measure_id = ? AND version = ?",
+                Integer.class, measureId, "v1.0"
+        );
+        if (existing != null && existing > 0) {
+            // #150 C2: promote the pre-existing (catalog-seeded Draft) row to Active with full CQL
+            // AND the full authored spec_json (Codex P2) — otherwise an upgraded DB keeps the lean
+            // catalog spec (generic description, empty requiredDataElements) while fresh DBs get the
+            // rich one. Also normalize the display name to the exact YAML binding key (forMeasure).
+            jdbcTemplate.update("UPDATE measures SET name = ?, updated_at = NOW() WHERE id = ?",
+                    "Diabetes: Glycemic Status Assessment Greater Than 9%", measureId);
+            jdbcTemplate.update(
+                    "UPDATE measure_versions SET status = 'Active', activated_at = COALESCE(activated_at, NOW()), "
+                            + "spec_json = ?::jsonb, cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb "
+                            + "WHERE measure_id = ? AND version = ?",
+                    toJson(spec), loadSeedCql("cms122.cql"), compileResult,
+                    measureId, "v1.0"
+            );
+            return;
+        }
 
         jdbcTemplate.update(
                 "INSERT INTO measure_versions (id, measure_id, version, status, spec_json, cql_text, compile_status, compile_result, change_summary, approved_by, activated_at, created_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, NOW(), NOW())",

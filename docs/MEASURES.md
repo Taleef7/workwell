@@ -163,11 +163,12 @@ Outcome mapping:
 - `DUE_SOON` when enrolled, not excluded, days in (790..820]
 - `COMPLIANT` when enrolled, not excluded, days <= 790
 
-### 3b.2 Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1)
+### 3b.2 Diabetes: Glycemic Status Assessment Greater Than 9% (CMS122v14 / MIPS 1)
 - Policy reference: CMS122v14
 - CQL file: `backend/src/main/resources/measures/cms122.cql`
 - Tags: `ecqm`, `cms`, `diabetes`
 - Value-based (numeric): outcome is driven by HbA1c lab value, not recency
+- Catalog/display name follows the current CMS122v14 title ("Glycemic Status Assessment Greater Than 9%"); the CQL define is still named `HbA1c Poor Control`. This name is the exact key the evaluator binds CQL by (`forMeasure`), so it must match across the DB seed, `measures/cms122.yaml`, and `backend-ts`.
 
 Outcome mapping:
 - `EXCLUDED` when documented clinical exclusion

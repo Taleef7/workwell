@@ -43,7 +43,7 @@ class EngineGoldenParityTest {
         m.put("BMI Screening & Counseling", "obesity_bmi.cql");
         m.put("Cholesterol LDL Screening", "cholesterol_ldl.cql");
         m.put("Breast Cancer Screening", "cms125.cql");
-        m.put("Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)", "cms122.cql");
+        m.put("Diabetes: Glycemic Status Assessment Greater Than 9%", "cms122.cql");
         return m;
     }
 

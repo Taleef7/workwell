@@ -24,7 +24,7 @@ class YamlMeasureDefinitionProviderTest {
         assertEquals("audiogram", audiogram.rateKey());
         assertEquals(365, audiogram.complianceWindowDays());
 
-        MeasureDefinition cms122 = provider.forMeasure("Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)");
+        MeasureDefinition cms122 = provider.forMeasure("Diabetes: Glycemic Status Assessment Greater Than 9%");
         assertNotNull(cms122);
         assertTrue(cms122.observationBased());
 

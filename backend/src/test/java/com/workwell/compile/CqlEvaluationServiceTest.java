@@ -231,7 +231,7 @@ class CqlEvaluationServiceTest {
 
         DemoRunPayload payload = service.evaluate(
                 "55555555-5555-5555-5555-555555555555",
-                "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)",
+                "Diabetes: Glycemic Status Assessment Greater Than 9%",
                 "v1.0",
                 cqlText,
                 LocalDate.now()

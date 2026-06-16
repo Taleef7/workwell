@@ -130,7 +130,7 @@ export default function EmployeeProfilePage() {
               <div className="flex items-center justify-between">
                 <span className="font-medium text-neutral-900 dark:text-neutral-100">
                   {o.measureName}{' '}
-                  <span className="text-xs font-normal text-neutral-400">v{o.measureVersion}</span>
+                  <span className="text-xs font-normal text-neutral-400">{o.measureVersion}</span>
                 </span>
                 <span className="rounded-full border border-neutral-300 dark:border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-700 dark:text-neutral-300">
                   {o.outcomeStatus.replace(/_/g, ' ')}

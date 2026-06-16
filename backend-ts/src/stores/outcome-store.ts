@@ -53,6 +53,8 @@ export interface EmployeeOutcomeRow {
 export interface OutcomeWithRun {
   runId: string;
   runStartedAt: string;
+  /** The run's scope_type — lets rollups exclude single-subject CASE/EMPLOYEE reruns (#150 C4). */
+  runScopeType: string;
   subjectId: string;
   measureId: string;
   status: string;
