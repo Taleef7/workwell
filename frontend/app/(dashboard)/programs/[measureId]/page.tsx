@@ -215,7 +215,7 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 30 days)</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <div className="rounded border border-orange-200 bg-orange-50 p-3 dark:border-orange-900 dark:bg-orange-950/40">
                 <p className="text-xs text-orange-800 dark:text-orange-300">Upcoming due soon</p>

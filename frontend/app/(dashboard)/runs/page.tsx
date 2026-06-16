@@ -241,7 +241,7 @@ export default function RunsPage() {
     if (!selectedRunId) return;
     // Clear the prior run's detail first so a slow fetch can't leave another run's outcomes/logs
     // showing under the newly-selected run (#150 M5). Then fetch summary + logs + outcomes together
-    // and set them atomically — the outcomes grid is never scoped to a stale run.
+    // and set them atomically.
     setRunOutcomes([]);
     setRunLogs([]);
     try {
@@ -250,6 +250,9 @@ export default function RunsPage() {
         api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`),
         api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`).catch(() => [] as RunOutcomeRow[])
       ]);
+      // If the user switched runs while this was in flight, drop the stale result — otherwise a slow
+      // response could overwrite the newer run's data (last-writer-wins across rapid switches).
+      if (selectedRunIdRef.current !== selectedRunId) return;
       setSelectedRun(summary);
       setRunLogs(logs);
       setRunOutcomes(outcomes);

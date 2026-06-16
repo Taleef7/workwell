@@ -392,7 +392,7 @@ public class CaseFlowService {
             return Optional.empty();
         }
         CaseDetail c = detail.get();
-        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveForOutcome(templateId, c.currentOutcomeStatus());
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveForOutcome(templateId, c.currentOutcomeStatus(), c.measureName());
         String subjectTemplate = template == null ? "Outreach Reminder for {{measureName}}" : template.subject();
         String bodyTemplate = template == null
                 ? "Hello {{employeeName}}, please complete required follow-up for {{measureName}}."
@@ -419,7 +419,6 @@ public class CaseFlowService {
         }
 
         CaseContext existing = context.get();
-        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveForOutcome(templateId, existing.currentOutcomeStatus());
         String nextAction = "Wait for employee follow-up, then rerun to verify closure.";
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW() WHERE id = ?",
@@ -434,6 +433,10 @@ public class CaseFlowService {
         Optional<CaseDetail> renderDetail = loadCase(caseId);
         String employeeName = renderDetail.map(CaseDetail::employeeName).orElse("");
         String measureName = renderDetail.map(CaseDetail::measureName).orElse("");
+        // Resolve the outcome-aware default here (after measureName is known) so DUE_SOON picks the
+        // right measure's template; the same mapping the auto-notification path uses (#150 M1).
+        OutreachTemplateService.OutreachTemplate template =
+                outreachTemplateService.resolveForOutcome(templateId, existing.currentOutcomeStatus(), measureName);
         String dueDate = renderDetail.map(this::computeDueDate).orElse(existing.evaluationPeriod());
         String subjectTemplate = template == null ? "Outreach Reminder for {{measureName}}" : template.subject();
         String bodyTemplate = template == null
@@ -1617,7 +1620,7 @@ public class CaseFlowService {
 
     private void queueAutoNotification(UUID runId, UUID caseId, UUID measureVersionId, DemoOutcome outcome) {
         String measureName = measureNameFor(measureVersionId);
-        String templateName = autoNotificationTemplateName(outcome.outcome(), measureName);
+        String templateName = outreachTemplateService.templateNameForOutcome(outcome.outcome(), measureName);
         OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByNameOrDefault(templateName);
         if (template == null) {
             return;
@@ -1682,23 +1685,6 @@ public class CaseFlowService {
         );
     }
 
-    private String autoNotificationTemplateName(String outcome, String measureName) {
-        String normalizedMeasure = measureName == null ? "" : measureName.toLowerCase(Locale.ROOT);
-        return switch (outcome) {
-            case "MISSING_DATA" -> "Missing Data Follow-Up";
-            case "DUE_SOON" -> {
-                if (normalizedMeasure.contains("audiogram") || normalizedMeasure.contains("hearing")) {
-                    yield "Hearing Conservation Overdue Outreach";
-                }
-                if (normalizedMeasure.contains("tb")) {
-                    yield "TB Surveillance Follow-Up";
-                }
-                yield "General Compliance Reminder";
-            }
-            case "OVERDUE" -> "General Compliance Reminder";
-            default -> "General Compliance Reminder";
-        };
-    }
 
     private String normalizeDeliveryStatus(String deliveryStatus) {
         if (deliveryStatus == null || deliveryStatus.isBlank()) {
