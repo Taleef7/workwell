@@ -1244,8 +1244,16 @@ public class MeasureService {
                 Integer.class, measureId, "v1.0"
         );
         if (existing != null && existing > 0) {
+            // #150 C2: promote the pre-existing (catalog-seeded Draft) row to Active with full CQL.
+            // The earlier code only refreshed cql_text here, so on a non-fresh DB (e.g. live Neon)
+            // the measure stayed Draft forever. Also normalize the display name to the exact YAML
+            // binding key the evaluator resolves by (forMeasure-by-name).
+            jdbcTemplate.update("UPDATE measures SET name = ?, updated_at = NOW() WHERE id = ?",
+                    "Breast Cancer Screening", measureId);
             jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    "UPDATE measure_versions SET status = 'Active', activated_at = COALESCE(activated_at, NOW()), "
+                            + "cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb "
+                            + "WHERE measure_id = ? AND version = ?",
                     loadSeedCql("cms125.cql"),
                     toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                     measureId, "v1.0"
@@ -1292,7 +1300,7 @@ public class MeasureService {
             jdbcTemplate.update(
                     "INSERT INTO measures (id, name, policy_ref, owner, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?::text[], NOW(), NOW())",
                     measureId,
-                    "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)",
+                    "Diabetes: Glycemic Status Assessment Greater Than 9%",
                     "CMS122v14",
                     "WorkWell Studio",
                     "{ecqm,cms,diabetes}"
@@ -1304,8 +1312,16 @@ public class MeasureService {
                 Integer.class, measureId, "v1.0"
         );
         if (existing != null && existing > 0) {
+            // #150 C2: promote the pre-existing (catalog-seeded Draft) row to Active with full CQL.
+            // The earlier code only refreshed cql_text here, so on a non-fresh DB (e.g. live Neon)
+            // the measure stayed Draft forever. Also normalize the display name to the exact YAML
+            // binding key the evaluator resolves by (forMeasure-by-name) — CMS122v14's current title.
+            jdbcTemplate.update("UPDATE measures SET name = ?, updated_at = NOW() WHERE id = ?",
+                    "Diabetes: Glycemic Status Assessment Greater Than 9%", measureId);
             jdbcTemplate.update(
-                    "UPDATE measure_versions SET cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb WHERE measure_id = ? AND version = ?",
+                    "UPDATE measure_versions SET status = 'Active', activated_at = COALESCE(activated_at, NOW()), "
+                            + "cql_text = ?, compile_status = 'COMPILED', compile_result = ?::jsonb "
+                            + "WHERE measure_id = ? AND version = ?",
                     loadSeedCql("cms122.cql"),
                     toJson(Map.of("status", "COMPILED", "warnings", List.of(), "errors", List.of())),
                     measureId, "v1.0"
