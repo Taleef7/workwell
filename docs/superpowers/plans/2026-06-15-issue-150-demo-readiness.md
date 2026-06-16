@@ -160,6 +160,12 @@ On branch `fix/issue-150-demo-readiness`.
 - `45024bc` fix(web): #150 demo-readiness frontend papercuts + ELM-explorer doc (C1)
 - `b41d374` fix(measure): #150 C2 — promote CMS125/CMS122 to Active + reconcile CMS122 name
 - `0baa0ff` fix(program): #150 C4 — exclude single-subject reruns from program rollups
-- (this commit) fix(program): #150 C4 — normalize scope_type case (Codex P1) + DB regression test
+- `418984d` fix(program): #150 C4 — normalize scope_type case (Codex P1) + DB regression test
+- (this commit) fix(measure): #150 C2 — set full spec_json when promoting CMS seeds (Codex P2)
+
+**Codex P2 (resolved):** the C2 promote branch left the lean catalog `spec_json` in place on an
+upgraded DB (generic description, empty `requiredDataElements`), so measure-detail / data-readiness
+/ traceability differed by seed history. Hoisted the `spec` build above the existing-row check and
+set `spec_json` to the same authored spec in the promote `UPDATE` for both CMS125 and CMS122.
 
 **Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
