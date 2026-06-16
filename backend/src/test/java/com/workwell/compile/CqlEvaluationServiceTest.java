@@ -59,6 +59,39 @@ class CqlEvaluationServiceTest {
         assertTrue(hasOverdueTrue, "Expected real CQL define result Overdue=true");
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    void whyFlaggedUsesTheMeasureComplianceWindowNotAHardcoded365() throws Exception {
+        // #150 M6: why_flagged.compliance_window_days (and the days_overdue derived from it) must be
+        // the measure's ACTUAL window, not a hardcoded 365. CMS125's window is 820 days, so a person
+        // last screened ~400 days ago is COMPLIANT with days_overdue 0 — not "35 days overdue".
+        CqlEvaluationService service = newService();
+        String cqlText = readClasspathText("measures/cms125.cql");
+
+        DemoRunPayload payload = service.evaluate(
+                "22222222-2222-2222-2222-222222222222",
+                "Breast Cancer Screening",
+                "v1.0",
+                cqlText,
+                LocalDate.now());
+
+        boolean sawWhyFlagged = false;
+        for (DemoOutcome o : payload.outcomes()) {
+            Map<String, Object> whyFlagged = (Map<String, Object>) o.evidenceJson().get("why_flagged");
+            if (whyFlagged == null) {
+                continue; // evaluation-error fallbacks carry no why_flagged block
+            }
+            sawWhyFlagged = true;
+            assertEquals(820, whyFlagged.get("compliance_window_days"),
+                    "why_flagged must carry CMS125's 820-day window, not a hardcoded 365");
+            Object daysOverdue = whyFlagged.get("days_overdue");
+            if (daysOverdue instanceof Integer d) {
+                assertTrue(d >= 0, "days_overdue is clamped at 0 (computed against the 820-day window)");
+            }
+        }
+        assertTrue(sawWhyFlagged, "at least one CMS125 outcome should carry a why_flagged block to check");
+    }
+
     @Test
     void singleSubjectEvaluationMatchesBatchOutcome() throws Exception {
         CqlEvaluationService service = newService();
