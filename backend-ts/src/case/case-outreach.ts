@@ -136,7 +136,11 @@ function computeDueDate(evidence: Record<string, unknown>, evaluationPeriod: str
   const d = new Date(`${lastExam.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return evaluationPeriod;
   d.setUTCDate(d.getUTCDate() + windowDays);
-  return d.toISOString().slice(0, 10);
+  const due = d.toISOString().slice(0, 10);
+  // #150 M13: an OVERDUE case's due date (last_exam + window) is already in the past — never render a
+  // past "due by" date in outreach; clamp to today ("due now"). Parity with Java computeDueDate.
+  const today = new Date().toISOString().slice(0, 10);
+  return due < today ? today : due;
 }
 
 async function loadOutcomeEvidence(deps: OutreachDeps, lastRunId: string, employeeId: string, measureId: string) {

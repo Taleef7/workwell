@@ -137,6 +137,8 @@ public class SecurityConfig {
         config.setAllowedOrigins(parseAllowedOrigins(allowedOriginsConfig));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        // Let the cross-origin frontend read pagination metadata (#150 M10 — worklist X-Total-Count).
+        config.setExposedHeaders(List.of("X-Total-Count"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

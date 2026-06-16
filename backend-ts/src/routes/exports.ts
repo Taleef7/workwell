@@ -15,7 +15,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { runsCsv, outcomesCsv, casesCsv, auditCsv } from "../export/export-csv.ts";
+import { runsCsv, outcomesCsv, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 
 interface ExportsEnv {
   DB: CloudDatabase;
@@ -95,7 +95,13 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
   if (pathname === "/api/audit-events/export") {
     if (!isCsv) return badFormat();
     await ensure(env);
-    return csvResponse("audit-events.csv", await auditCsv(new SqliteCaseEventStore(env.DB), new SqliteCaseStore(env.DB)));
+    // #150 M9: stream the ledger in pages instead of building the whole CSV string first — bounded
+    // memory regardless of audit-trail size (parity with the Java StreamingResponseBody export).
+    const stream = auditCsvStream(new SqliteCaseEventStore(env.DB), new SqliteCaseStore(env.DB));
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="audit-events.csv"` },
+    });
   }
 
   return null;
