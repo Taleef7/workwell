@@ -104,8 +104,8 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
   };
 }
 
-const json = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
 
 /**
  * Map the page's status filter to concrete case statuses. Blank/missing defaults to
@@ -306,17 +306,21 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const wantCurrentCycle = isOpenWorklist && (!explicitPeriod || explicitPeriod.toLowerCase() === "current");
 
   const store = await caseStore(env);
-  // Fetch all rows matching the SQL-filterable predicates, then post-filter the
-  // record-derived ones (current-cycle, created_at range, employee site/search) and page in the read
-  // model — correct paging at floor scale. For the current cycle we fetch every period ("all") and
-  // filter to today's cadence anchor per measure in JS below.
+  // Fetch ALL rows matching the SQL-filterable predicates, then post-filter the record-derived ones
+  // (current-cycle, created_at range, employee site/search) and page in the read model — correct paging
+  // at floor scale. The fetch is uncapped on purpose: the default worklist always post-filters in JS
+  // (per-measure current cycle), so the loaded set must be complete or X-Total-Count would under-report
+  // and the frontend would stop paging early (#150 M10 — no silent truncation). For the current cycle we
+  // fetch every period ("all") and filter to today's cadence anchor per measure in JS below.
+  // (Ceiling-scale note: pushing these record-derived filters + LIMIT/OFFSET + COUNT into SQL — as the
+  // Java path does — is the future optimization if a single worklist ever holds very large result sets.)
   let rows = await store.listCases({
     statuses: statusesFor(q.get("status")),
     measureId: q.get("measureId") ?? undefined,
     priority: q.get("priority") ?? undefined,
     assignee: q.get("assignee") ?? undefined,
     period: wantCurrentCycle ? "all" : (explicitPeriod ?? "all"),
-    limit: 100000,
+    limit: Number.MAX_SAFE_INTEGER,
     offset: 0,
   });
 
@@ -344,5 +348,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
         c.employeeId.toLowerCase().includes(search),
     );
   }
-  return json(summaries.slice(offset, offset + limit));
+  // #150 M10: expose the full filtered match count so clients can page past the limit instead of
+  // silently capping. The body stays a plain array (non-breaking); X-Total-Count carries the total.
+  return json(summaries.slice(offset, offset + limit), 200, { "X-Total-Count": String(summaries.length) });
 }

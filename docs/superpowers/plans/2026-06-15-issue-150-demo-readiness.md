@@ -258,4 +258,11 @@ and seeds run through `evaluate()`); **re-layered** so `evaluate()` returns the 
 `CompliancePeriod`, mock-independent). `ScopedRunFailureIntegrationTest` (`@MockBean CqlEvaluationService`)
 fallout caught + fixed locally. All key integration tests + backend-ts green.
 
-**Remaining Batch 2:** H4, M1, M5, M8, M9, M10, M13.
+**Remaining Batch 2:** none — H4/M1/M5/M8 shipped in PR #153; **M9/M10/M13 shipped in the post-demo trio** (`fix/issue-150-post-demo-trio`). All 21 #150 items are now closed (part 1 + H1/#152 + #153 + the trio).
+
+**Trio close-out (M9/M10/M13), Java↔backend-ts parity:**
+- **M13** — clamp the outreach due date to today (`max(last_exam + window, today)`, UTC) so an overdue case never renders a past "due by" date. Java `computeDueDate` + backend-ts `case-outreach.ts`.
+- **M10** — keep `/api/cases` a plain array but add an `X-Total-Count` header (full filtered match count) + CORS `expose-headers` on both stacks; Java extracted a shared `appendCaseFilters` so `countCases` can't drift from `listCases`; the worklist shows "X of N" + pages off the real total.
+- **M9** — stream the audit CSV instead of building it in heap (audit completeness ⇒ no truncation). Java `StreamingResponseBody` + cursor; backend-ts paged `listAuditEvents(limit, offset)` + a `ReadableStream`. Byte-identical output.
+
+Next: **Batch 3 — #96/#109 deploy cutover** (binding selection + JVM retirement), gated on this now-complete parity matrix.

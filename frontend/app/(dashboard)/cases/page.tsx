@@ -93,6 +93,7 @@ export default function CasesPage() {
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
   const api = useApi();
@@ -163,9 +164,13 @@ export default function CasesPage() {
       if (urlSearch.trim()) params.set("search", urlSearch.trim());
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", "0");
-      const data = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
+      // #150 M10: X-Total-Count carries the full filtered match count, so paging is driven by the real
+      // total (not the brittle "page was full" heuristic, which mis-signals when total is an exact multiple).
+      const { data, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
+      const matchTotal = Number(headers.get("X-Total-Count") ?? data.length);
       setCases(data);
-      setHasMore(data.length === PAGE_SIZE);
+      setTotal(Number.isFinite(matchTotal) ? matchTotal : data.length);
+      setHasMore(data.length < (Number.isFinite(matchTotal) ? matchTotal : data.length));
       setSelectedCaseIds((existing) => existing.filter((id) => data.some((item) => item.caseId === id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -267,9 +272,14 @@ export default function CasesPage() {
       if (urlSearch.trim()) params.set("search", urlSearch.trim());
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(cases.length));
-      const next = await api.get<CaseSummary[]>(`/api/cases?${params.toString()}`);
-      setCases((prev) => [...prev, ...next]);
-      setHasMore(next.length === PAGE_SIZE);
+      const { data: next, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
+      const matchTotal = Number(headers.get("X-Total-Count") ?? 0);
+      setCases((prev) => {
+        const merged = [...prev, ...next];
+        setHasMore(merged.length < (Number.isFinite(matchTotal) && matchTotal > 0 ? matchTotal : merged.length));
+        return merged;
+      });
+      if (Number.isFinite(matchTotal) && matchTotal > 0) setTotal(matchTotal);
     } catch {
       // ignore
     } finally {
@@ -361,7 +371,9 @@ export default function CasesPage() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400">Filter, search, and bulk-act on flagged cases.</p>
         </div>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          {cases.length} case{cases.length !== 1 ? "s" : ""} loaded
+          {total > cases.length
+            ? `${cases.length} of ${total} cases`
+            : `${cases.length} case${cases.length !== 1 ? "s" : ""} loaded`}
         </p>
         <div className="flex items-center gap-2">
           <Button

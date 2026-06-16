@@ -251,6 +251,27 @@ test("outreach/preview honors an explicit, known templateId over the outcome def
   assert.equal(p.templateName, "Hearing Conservation Overdue Outreach");
 });
 
+test("outreach/preview clamps an already-past due date to today (#150 M13)", async () => {
+  // Omar's audiogram: last exam 2025-04-19 + 365d window = 2026-04-19, already elapsed → clamp to today
+  // so the message never reads "complete by <a past date>".
+  const p = (await getPath(`/api/cases/${omarCaseId}/actions/outreach/preview`).then((r) => r!.json())) as { dueDate: string };
+  const today = new Date().toISOString().slice(0, 10);
+  assert.ok(p.dueDate >= today, `due date ${p.dueDate} must not be before today ${today}`);
+  assert.equal(p.dueDate, today);
+});
+
+test("GET /api/cases exposes X-Total-Count so clients can page past the limit (#150 M10)", async () => {
+  const full = await get("?status=open&limit=500");
+  const total = Number(full!.headers.get("X-Total-Count"));
+  const body = (await full!.json()) as unknown[];
+  assert.ok(Number.isFinite(total) && total >= 1, "X-Total-Count present and >= 1");
+  assert.equal(total, body.length, "when limit >= total, the header equals the page length");
+  // A smaller limit caps the body, but the header still reports the FULL match total (not the page size).
+  const capped = await get("?status=open&limit=1");
+  assert.equal(((await capped!.json()) as unknown[]).length, Math.min(1, total));
+  assert.equal(Number(capped!.headers.get("X-Total-Count")), total);
+});
+
 test("delivery update before a send → 400; send then delivery flips latestOutreachDeliveryStatus", async () => {
   // before any send, delivery update is rejected
   assert.equal((await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=SENT`))?.status, 400);

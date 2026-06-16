@@ -116,6 +116,23 @@ export class ApiClient {
     })).then((r) => this.handleResponse<T>(r));
   }
 
+  /**
+   * Like {@link get} but also returns the response headers, so callers can read pagination
+   * metadata (e.g. `X-Total-Count` on the cases worklist — #150 M10). The server must expose
+   * the header via CORS `Access-Control-Expose-Headers` for cross-origin reads to succeed.
+   */
+  async getWithHeaders<T>(path: string, init?: RequestInit): Promise<{ data: T; headers: Headers }> {
+    const response = await this.fetchWithAuth(`${API_BASE}${path}`, () => ({
+      ...init,
+      method: "GET",
+      headers: this.buildHeaders(init?.headers),
+      cache: "no-store",
+      credentials: "include"
+    }));
+    const data = await this.handleResponse<T>(response);
+    return { data, headers: response.headers };
+  }
+
   post<TBody = unknown, TResponse = unknown>(path: string, body?: TBody, init?: RequestInit): Promise<TResponse> {
     const hasBody = body !== undefined;
     return this.fetchWithAuth(`${API_BASE}${path}`, () => {

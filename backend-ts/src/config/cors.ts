@@ -28,6 +28,8 @@ function originHeaders(req: Request, allowed: string[]): Record<string, string> 
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-credentials": "true",
+    // Let the browser read pagination metadata cross-origin (#150 M10 — the worklist X-Total-Count).
+    "access-control-expose-headers": "X-Total-Count",
     vary: "Origin",
   };
 }
