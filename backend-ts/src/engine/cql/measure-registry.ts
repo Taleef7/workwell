@@ -24,5 +24,5 @@ export const MEASURES: Record<string, MeasureMeta> = {
   obesity_bmi: { id: "obesity_bmi", name: "BMI Screening & Counseling", library: "ObesityBMIScreeningCQL-1.0.0", periodMonths: 0 },
   cholesterol_ldl: { id: "cholesterol_ldl", name: "Cholesterol LDL Screening", library: "CholesterolLDLScreeningCQL-1.0.0", periodMonths: 0 },
   cms125: { id: "cms125", name: "Breast Cancer Screening", library: "BreastCancerScreeningCQL-1.0.0", periodMonths: 0 },
-  cms122: { id: "cms122", name: "Diabetes: Hemoglobin A1c (HbA1c) Poor Control (> 9%)", library: "DiabetesHbA1cPoorControlCQL-1.0.0", periodMonths: 0 },
+  cms122: { id: "cms122", name: "Diabetes: Glycemic Status Assessment Greater Than 9%", library: "DiabetesHbA1cPoorControlCQL-1.0.0", periodMonths: 0 },
 };
