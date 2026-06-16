@@ -35,6 +35,16 @@ export interface CaseQuery {
   measureId?: string;
   priority?: string;
   assignee?: string;
+  /**
+   * Compliance-cycle filter (#150 H1):
+   *   - omitted / `undefined` / `"all"` → no period filter (every cycle; the default
+   *     primitive behaviour, used by exports / MCP / programs / analytics).
+   *   - `"current"` → only each measure's MOST RECENT cycle (MAX(evaluation_period) per
+   *     measure) — the worklist default, so a nightly rerun's new cycle doesn't pile prior
+   *     cycles onto the open list.
+   *   - a concrete `YYYY-MM-DD` anchor → exactly that cycle.
+   */
+  period?: string;
   limit?: number;
   offset?: number;
 }

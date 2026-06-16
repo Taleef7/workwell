@@ -156,6 +156,16 @@ export class PgCaseStore implements CaseStore {
       where.push(`LOWER(COALESCE(assignee, 'unassigned')) = LOWER($${binds.length + 1})`);
       binds.push(query.assignee);
     }
+    const period = query.period?.trim();
+    if (period === "current") {
+      // Only each measure's most-recent compliance cycle (#150 H1 worklist default). The
+      // correlated subquery is status-agnostic so a fully-resolved current cycle shows nothing
+      // rather than surfacing stale open cases from a prior cycle.
+      where.push(`evaluation_period = (SELECT MAX(c2.evaluation_period) FROM ${T} c2 WHERE c2.measure_id = ${T}.measure_id)`);
+    } else if (period && period.toLowerCase() !== "all") {
+      where.push(`evaluation_period = $${binds.length + 1}`);
+      binds.push(period);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     binds.push(query.limit ?? 50, query.offset ?? 0);
     const { rows } = await this.pool.query<CaseRow>(

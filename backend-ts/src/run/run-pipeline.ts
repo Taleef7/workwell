@@ -25,6 +25,7 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededDistribution, seededTargetFor } from "./distribution.ts";
+import { bucketPeriodForMeasure } from "./compliance-period.ts";
 
 export type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
 
@@ -198,6 +199,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   for (const item of items) {
     const config = deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target);
     const bundle = buildSyntheticBundle(item.employee, config, evalDate);
+    // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
+    // day-math is current, but the persisted evaluation_period is bucketed to the measure's
+    // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
+    // idempotent: same (employee, measure, cycle) key → case upsert, not a fresh cohort.
+    const period = bucketPeriodForMeasure(item.measureId, evalDate);
     let status: string;
     let evidence: unknown;
     try {
@@ -216,7 +222,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       runId: run.id,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
-      evaluationPeriod: evalDate,
+      evaluationPeriod: period,
       status,
       evidence,
     });
@@ -225,7 +231,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       runId: run.id,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
-      evaluationPeriod: evalDate,
+      evaluationPeriod: period,
       outcomeStatus: status,
     });
     if (status === "COMPLIANT") compliant++;

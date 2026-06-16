@@ -159,6 +159,16 @@ export class SqliteCaseStore implements CaseStore {
       where.push("LOWER(COALESCE(assignee, 'unassigned')) = LOWER(?)");
       binds.push(query.assignee);
     }
+    const period = query.period?.trim();
+    if (period === "current") {
+      // Only each measure's most-recent compliance cycle (#150 H1 worklist default). The
+      // correlated subquery is status-agnostic so a fully-resolved current cycle shows nothing
+      // rather than surfacing stale open cases from a prior cycle.
+      where.push("evaluation_period = (SELECT MAX(c2.evaluation_period) FROM cases c2 WHERE c2.measure_id = cases.measure_id)");
+    } else if (period && period.toLowerCase() !== "all") {
+      where.push("evaluation_period = ?");
+      binds.push(period);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
