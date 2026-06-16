@@ -57,6 +57,27 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                 .containsExactly("2025-01-01");
     }
 
+    @Test
+    void currentCycleIgnoresTerminalStaleRowsWithLaterPeriods() {
+        UUID measureVersionId = jdbcTemplate.queryForObject(
+                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
+                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
+                UUID.class);
+        UUID runId = insertRun();
+        // OPEN anchor at the cycle start, plus two TERMINAL stale rows whose raw daily periods are
+        // lexically LATER: a CLOSED row (V022-style) and an EXCLUDED row with closed_at = NULL
+        // (the upsertExcludedCase convention, which V022 does NOT close). The current-cycle MAX is
+        // over ACTIONABLE status only, so neither poisons it and the open anchor still shows (Codex P1).
+        insertOpenCase(insertEmployee("Anchor"), measureVersionId, "2026-01-01", runId);
+        insertTerminalCase(insertEmployee("Closed Stale"), measureVersionId, "2026-06-15", runId, "CLOSED", true);
+        insertTerminalCase(insertEmployee("Excluded Stale"), measureVersionId, "2026-09-09", runId, "EXCLUDED", false);
+
+        assertThat(listCases(null))
+                .as("current cycle ignores later CLOSED + EXCLUDED stale rows (status-based MAX)")
+                .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
+                .containsExactly("2026-01-01");
+    }
+
     private List<CaseFlowService.CaseSummary> listCases(String period) {
         return caseFlowService.listCases("open", null, null, null, null, null, null, null, period, 100, 0);
     }
@@ -88,5 +109,16 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                         + "created_at, updated_at, closed_at) "
                         + "VALUES (?, ?, ?, ?, 'OPEN', 'HIGH', NULL, 'Send reminder', 'OVERDUE', ?, NULL, NOW(), NOW(), NULL)",
                 UUID.randomUUID(), employeeId, measureVersionId, period, runId);
+    }
+
+    /** A terminal case (CLOSED with closed_at set, or EXCLUDED with closed_at NULL) used to verify
+     *  it never wins the current-cycle MAX. */
+    private void insertTerminalCase(UUID employeeId, UUID measureVersionId, String period, UUID runId, String status, boolean closedAtSet) {
+        jdbcTemplate.update(
+                "INSERT INTO cases (id, employee_id, measure_version_id, evaluation_period, status, priority, "
+                        + "assignee, next_action, current_outcome_status, last_run_id, sla_due_date, "
+                        + "created_at, updated_at, closed_at) "
+                        + "VALUES (?, ?, ?, ?, ?, 'HIGH', NULL, 'n/a', ?, ?, NULL, NOW(), NOW(), " + (closedAtSet ? "NOW()" : "NULL") + ")",
+                UUID.randomUUID(), employeeId, measureVersionId, period, status, status, runId);
     }
 }
