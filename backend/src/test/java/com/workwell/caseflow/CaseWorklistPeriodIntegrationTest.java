@@ -101,6 +101,25 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                 .containsExactly("2026-01-01");
     }
 
+    @Test
+    void currentCycleIsTheLatestEvaluatedCycleNotTheLatestOpenRow() {
+        UUID measureVersionId = jdbcTemplate.queryForObject(
+                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
+                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
+                UUID.class);
+        UUID runId = insertRun();
+        // A lingering OPEN case in a PRIOR cycle (+ its outcome).
+        insertOpenCase(insertEmployee("Lingering Open"), measureVersionId, "2026-01-01", runId);
+        // A LATER cycle that was evaluated but produced NO open case (everyone compliant → an outcome only).
+        insertOutcome(insertEmployee("Now Compliant"), measureVersionId, "2027-01-01", "COMPLIANT", runId);
+
+        // The current cycle is the latest EVALUATED cycle (2027), which has no open cases — so the open
+        // worklist is empty, NOT the prior cycle's stale open (2026) (Codex P2).
+        assertThat(listCases(null))
+                .as("open worklist follows the latest evaluated cycle, not the latest open row")
+                .isEmpty();
+    }
+
     private List<CaseFlowService.CaseSummary> listCases(String period) {
         return listCases("open", period);
     }
@@ -136,6 +155,7 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                         + "created_at, updated_at, closed_at) "
                         + "VALUES (?, ?, ?, ?, 'OPEN', 'HIGH', NULL, 'Send reminder', 'OVERDUE', ?, NULL, NOW(), NOW(), NULL)",
                 UUID.randomUUID(), employeeId, measureVersionId, period, runId);
+        insertOutcome(employeeId, measureVersionId, period, "OVERDUE", runId);
     }
 
     /** A terminal case (CLOSED with closed_at set, or EXCLUDED with closed_at NULL) used to verify
@@ -147,5 +167,15 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                         + "created_at, updated_at, closed_at) "
                         + "VALUES (?, ?, ?, ?, ?, 'HIGH', NULL, 'n/a', ?, ?, NULL, NOW(), NOW(), " + (closedAtSet ? "NOW()" : "NULL") + ")",
                 UUID.randomUUID(), employeeId, measureVersionId, period, status, status, runId);
+        insertOutcome(employeeId, measureVersionId, period, status, runId);
+    }
+
+    /** A persisted outcome (every run writes one per subject) — the worklist's current cycle is the
+     *  latest cycle with outcomes at a cycle anchor, so cases without a matching outcome won't surface. */
+    private void insertOutcome(UUID employeeId, UUID measureVersionId, String period, String status, UUID runId) {
+        jdbcTemplate.update(
+                "INSERT INTO outcomes (id, run_id, employee_id, measure_version_id, evaluation_period, status, evidence_json) "
+                        + "VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, '{}'::jsonb)",
+                runId, employeeId, measureVersionId, period, status);
     }
 }

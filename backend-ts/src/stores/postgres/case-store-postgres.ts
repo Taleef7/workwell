@@ -31,6 +31,7 @@ const iso = (v: Date | string | null): string | null => (v == null ? null : v in
 const COLS =
   "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 const T = `${SPIKE_SCHEMA}.cases`;
+const OUTCOMES_T = `${SPIKE_SCHEMA}.outcomes`;
 
 const toRecord = (r: CaseRow): CaseRecord => ({
   id: r.id,
@@ -158,11 +159,15 @@ export class PgCaseStore implements CaseStore {
     }
     const period = query.period?.trim();
     if (period === "current") {
-      // Only each measure's most-recent compliance cycle (#150 H1 worklist default). The MAX is over
-      // ACTIONABLE cases (status OPEN/IN_PROGRESS) — not closed_at — so a terminal stale row (a CLOSED
-      // V022 cleanup row, or an EXCLUDED row, whose raw daily period is lexically later than the cycle
-      // anchor) doesn't poison the MAX and hide the current cycle's open cases (Codex P1).
-      where.push(`evaluation_period = (SELECT MAX(c2.evaluation_period) FROM ${T} c2 WHERE c2.measure_id = ${T}.measure_id AND c2.status IN ('OPEN', 'IN_PROGRESS'))`);
+      // Each measure's LATEST EVALUATED cycle (#150 H1 worklist default): MAX over OUTCOMES (every run
+      // writes one outcome per subject, even all-compliant ones), restricted to cycle-anchor periods
+      // (…-01-01 / …-07-01). Using outcomes (not open cases) means a measure that rolled into a new cycle
+      // with no open cases doesn't fall back to a prior cycle's stale opens (Codex P2); the anchor
+      // restriction keeps a pre-bucketing raw-date row from poisoning the MAX (Codex P1). Anchors are the
+      // only values CompliancePeriod emits (annual→Jan 1, biannual→Jan 1/Jul 1, seasonal→Jul 1).
+      where.push(
+        `evaluation_period = (SELECT MAX(o.evaluation_period) FROM ${OUTCOMES_T} o WHERE o.measure_id = ${T}.measure_id AND (o.evaluation_period LIKE '%-01-01' OR o.evaluation_period LIKE '%-07-01'))`,
+      );
     } else if (period && period.toLowerCase() !== "all") {
       where.push(`evaluation_period = $${binds.length + 1}`);
       binds.push(period);
