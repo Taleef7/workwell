@@ -83,10 +83,14 @@ public class CqlEvaluationService {
      * this only keeps nightly re-evaluations idempotent (one case per employee × measure × cycle).
      */
     public String bucketPeriod(String measureName, LocalDate asOf) {
-        MeasureDefinition spec = measureDefinitionProvider.forMeasure(measureName);
-        int window = spec != null ? spec.complianceWindowDays() : 365;
         boolean seasonal = FLU_VACCINE_MEASURE_NAME.equalsIgnoreCase(measureName);
-        return CompliancePeriod.cycleKey(window, seasonal, asOf);
+        return CompliancePeriod.cycleKey(complianceWindowFor(measureName), seasonal, asOf);
+    }
+
+    /** The measure's compliance window in days, defaulting to 365 when the spec is unavailable. */
+    private int complianceWindowFor(String measureName) {
+        MeasureDefinition spec = measureDefinitionProvider.forMeasure(measureName);
+        return spec != null ? spec.complianceWindowDays() : 365;
     }
 
     public DemoOutcome evaluateSubject(
@@ -246,7 +250,7 @@ public class CqlEvaluationService {
             EvaluationResult eval = evaluateEmployee(measureName, measureVersion, cqlText, evaluationDate, input);
             Map<String, ?> expressionResultsMap = eval.expressionResults == null ? Map.of() : eval.expressionResults;
             String outcomeStatus = normalizeOutcomeStatus(expressionResultsMap.get("Outcome Status"));
-            Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate);
+            Map<String, Object> evidenceJson = buildEvidenceJson(input.employee(), expressionResultsMap, outcomeStatus, input.config(), evaluationDate, complianceWindowFor(measureName));
 
             return new DemoOutcome(
                     input.employee().externalId(),
@@ -280,7 +284,8 @@ public class CqlEvaluationService {
             Map<String, ?> expressionResults,
             String outcomeStatus,
             SyntheticFhirBundleBuilder.ExamConfig config,
-            LocalDate evaluationDate
+            LocalDate evaluationDate,
+            int complianceWindowDays
     ) {
         List<Map<String, Object>> expressionResultsList = expressionResults.entrySet().stream()
                 .map(entry -> {
@@ -291,12 +296,16 @@ public class CqlEvaluationService {
                 })
                 .toList();
 
+        // last_exam_date is anchored to the evaluation date (today / the run date), not the
+        // bucketed evaluation_period, so the day-math stays current (#150 H1/M6). days_overdue +
+        // compliance_window_days use the measure's ACTUAL window — a hardcoded 365 reported bogus
+        // overdue days for non-annual measures (e.g. CMS125's 820-day window, diabetes' 180).
         String lastExamDate = config.daysSinceLastExam() == null ? null : evaluationDate.minusDays(config.daysSinceLastExam()).toString();
-        Integer daysOverdue = config.daysSinceLastExam() == null ? null : Math.max(config.daysSinceLastExam() - 365, 0);
+        Integer daysOverdue = config.daysSinceLastExam() == null ? null : Math.max(config.daysSinceLastExam() - complianceWindowDays, 0);
 
         Map<String, Object> whyFlagged = new LinkedHashMap<>();
         whyFlagged.put("last_exam_date", lastExamDate);
-        whyFlagged.put("compliance_window_days", 365);
+        whyFlagged.put("compliance_window_days", complianceWindowDays);
         whyFlagged.put("days_overdue", daysOverdue);
         whyFlagged.put("role_eligible", config.programEnrolled());
         whyFlagged.put("site_eligible", true);

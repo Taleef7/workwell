@@ -232,9 +232,14 @@ no filter) and the current-cycle default is scoped to the worklist route — so 
 analytics keep full-history behavior (no silent change). Verified: new `compliance-period.test.ts` +
 `case-store-period.test.ts` + a nightly-idempotency run-pipeline test; full suite 375 pass / 0 fail; typecheck clean.
 
-**H1 now at Java ↔ backend-ts parity.** Remaining for H1: **D** (Flyway cleanup migration — production data,
-stops for explicit sign-off per the CLAUDE.md schema-ownership rule) and the **M6 `why_flagged` derivation
-half** (439-vs-60 day-math — a builder fix, open on *both* stacks, so not a parity gap); optional A period
-selector in the frontend; then the H1 PR.
+**M6 — DONE (Java-only, 2026-06-16).** `backend-ts` `deriveWhyFlagged` already used the measure's real
+window; the bug was Java `CqlEvaluationService#buildEvidenceJson` hardcoding `365` for `compliance_window_days`
++ `days_overdue` (wrong for CMS125's 820-day / diabetes' 180-day windows). Fixed via `complianceWindowFor()`
+(DRY'd with `bucketPeriod`); `last_exam_date` was already eval-date-anchored. Regression test: CMS125 carries
+`compliance_window_days = 820`. (M6's eval-date half — rerun as-of today — was already done in Phase 2/parity.)
 
-**Remaining Batch 2:** H1 (D + M6 derivation), H4, M1, M5, M6, M8, M9, M10, M13.
+**H1 now at Java ↔ backend-ts parity, M6 included.** One item remains: **D** (Flyway cleanup migration —
+production data; **Taleef explicitly authorized it**, overriding the CLAUDE.md schema-ownership rule for this
+case), designed audited + idempotent and bundled into the H1 PR. Optional: A period selector in the frontend.
+
+**Remaining Batch 2:** H1 (D only), H4, M1, M5, M8, M9, M10, M13.
