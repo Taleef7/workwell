@@ -122,9 +122,10 @@ const siteMatcher = (filters: ProgramFilters) => {
 const round1 = (compliant: number, total: number) => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
 
 /** Single-subject rerun scopes excluded from program/measure rollups so a CASE/EMPLOYEE
- *  rerun-to-verify can't skew the rate to 0%/100% (#150 C4 — Java ProgramService parity). */
+ *  rerun-to-verify can't skew the rate to 0%/100% (#150 C4 — Java ProgramService parity).
+ *  Compared case-insensitively: the Java backend persists these lowercase ("case"/"employee"). */
 const RERUN_SCOPES = new Set(["CASE", "EMPLOYEE"]);
-const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType);
+const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType.toUpperCase());
 
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;
