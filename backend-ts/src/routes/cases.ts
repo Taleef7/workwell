@@ -304,6 +304,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     measureId: q.get("measureId") ?? undefined,
     priority: q.get("priority") ?? undefined,
     assignee: q.get("assignee") ?? undefined,
+    // Worklist defaults to each measure's CURRENT compliance cycle (#150 H1) so a nightly
+    // rerun's new cycle doesn't pile prior cycles onto the open list; `?period=all` shows
+    // every cycle, `?period=YYYY-MM-DD` a specific one.
+    period: q.get("period") ?? "current",
     limit: 100000,
     offset: 0,
   });

@@ -220,4 +220,21 @@ fix + A). Remaining: **backend-ts parity** (run-pipeline bucket + case-rerun as-
 default + a TS `CompliancePeriod`), **D** (Flyway cleanup migration), the **M6** `why_flagged` day-math,
 and the optional A period selector in the frontend.
 
-**Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
+**backend-ts parity — DONE** (verified, 2026-06-16): `run/compliance-period.ts` ports `CompliancePeriod`
+(pure cadence/anchor + measure-aware `bucketPeriodForMeasure`); `run-pipeline.ts` buckets the persisted
+`evaluation_period` for both outcome + case while the engine evaluates as-of `evalDate` (Phase 2);
+`case-rerun.ts` evaluates as-of **today** keeping the case's cycle period as the key (M6 eval-date half);
+`CaseQuery` gains an optional `period` (omitted/`all` → no filter, `current` → per-measure-max correlated
+subquery, concrete → exact) in **both** SQLite-floor + Postgres-ceiling `listCases`, and only the worklist
+route defaults to `current`. **Intentional parity nuance:** Java made the *shared* `listCases` default
+current-cycle (7/9-arg overloads + MCP); the TS store primitive stays **backward-compatible** (default =
+no filter) and the current-cycle default is scoped to the worklist route — so exports / MCP / programs /
+analytics keep full-history behavior (no silent change). Verified: new `compliance-period.test.ts` +
+`case-store-period.test.ts` + a nightly-idempotency run-pipeline test; full suite 375 pass / 0 fail; typecheck clean.
+
+**H1 now at Java ↔ backend-ts parity.** Remaining for H1: **D** (Flyway cleanup migration — production data,
+stops for explicit sign-off per the CLAUDE.md schema-ownership rule) and the **M6 `why_flagged` derivation
+half** (439-vs-60 day-math — a builder fix, open on *both* stacks, so not a parity gap); optional A period
+selector in the frontend; then the H1 PR.
+
+**Remaining Batch 2:** H1 (D + M6 derivation), H4, M1, M5, M6, M8, M9, M10, M13.

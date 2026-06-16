@@ -57,9 +57,12 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // Unknown subject/measure can't be verified — leave the case untouched (no state change).
   if (!employee || !binding) return null;
 
-  const evalDate = /^\d{4}-\d{2}-\d{2}/.test(existing.evaluationPeriod)
-    ? existing.evaluationPeriod.slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  // Re-evaluate AS-OF today so the day-math (days overdue, etc.) is CURRENT, while the outcome
+  // stays keyed to the case's existing compliance-cycle period (`existing.evaluationPeriod`, the
+  // idempotency key, used unchanged below). Decoupling the two is the #150 H1/M6 fix: the period
+  // buckets the cycle (so rerun upserts, never duplicates); the eval date drives the numbers.
+  // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`).
+  const evalDate = new Date().toISOString().slice(0, 10);
   const periodStart = `${evalDate}T00:00:00.000Z`;
   const periodEnd = new Date(new Date(`${evalDate}T00:00:00.000Z`).getTime() + 86400000 - 1000).toISOString();
 
