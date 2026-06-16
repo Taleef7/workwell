@@ -2,6 +2,7 @@ package com.workwell.admin;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,47 @@ public class OutreachTemplateService {
                 .filter(t -> templateId.equals(t.id()))
                 .findFirst()
                 .orElse(templates.get(0));
+    }
+
+    /**
+     * Outcome-aware default selection (#150 M1): when the operator hasn't picked a template, choose
+     * the OUTREACH template whose name matches the case's outcome bucket (OVERDUE → "overdue",
+     * MISSING_DATA → "missing", DUE_SOON → "reminder") so the message fits the situation, instead of
+     * always sending the newest/first template. Falls back to the first OUTREACH template, then the
+     * first template. An explicit {@code templateId} always wins (the operator's choice is respected).
+     */
+    public OutreachTemplate resolveForOutcome(UUID templateId, String outcomeStatus) {
+        if (templateId != null) {
+            return resolveByIdOrDefault(templateId);
+        }
+        List<OutreachTemplate> templates = listTemplates();
+        if (templates.isEmpty()) {
+            return null;
+        }
+        String keyword = switch (outcomeStatus == null ? "" : outcomeStatus.trim().toUpperCase(Locale.ROOT)) {
+            case "MISSING_DATA" -> "missing";
+            case "OVERDUE" -> "overdue";
+            case "DUE_SOON" -> "reminder";
+            default -> null;
+        };
+        if (keyword != null) {
+            for (OutreachTemplate t : templates) {
+                if (isOutreachType(t) && t.name() != null && t.name().toLowerCase(Locale.ROOT).contains(keyword)) {
+                    return t;
+                }
+            }
+        }
+        for (OutreachTemplate t : templates) {
+            if (isOutreachType(t)) {
+                return t;
+            }
+        }
+        return templates.get(0);
+    }
+
+    /** OUTREACH-type templates are the auto-selectable ones (APPOINTMENT_REMINDER/ESCALATION are not). */
+    private static boolean isOutreachType(OutreachTemplate t) {
+        return t.type() == null || "OUTREACH".equalsIgnoreCase(t.type());
     }
 
     public OutreachTemplate resolveByNameOrDefault(String templateName) {

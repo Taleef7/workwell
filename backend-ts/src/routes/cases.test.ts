@@ -221,11 +221,23 @@ test("POST /api/cases/:id/assign for an unknown case → 404", async () => {
 test("GET outreach/preview renders the default template with the case's employee + measure", async () => {
   const res = await getPath(`/api/cases/${omarCaseId}/actions/outreach/preview`);
   assert.equal(res?.status, 200);
-  const p = (await res!.json()) as { subject: string; bodyText: string; employeeName: string; measureName: string };
+  const p = (await res!.json()) as { templateName: string; subject: string; bodyText: string; employeeName: string; measureName: string };
   assert.equal(p.employeeName, "Omar Siddiq");
   assert.equal(p.measureName, "Audiogram");
+  // Omar's case is OVERDUE → the outcome-aware default picks the overdue template (#150 M1).
+  assert.equal(p.templateName, "Overdue Outreach");
+  assert.match(p.subject, /[Oo]verdue/);
   assert.match(p.subject, /Audiogram/);
   assert.match(p.bodyText, /Omar Siddiq/);
+});
+
+test("outreach/preview picks the outcome-aware template — MISSING_DATA gets the missing-data template (#150 M1)", async () => {
+  // emp-001 / HAZWOPER is MISSING_DATA (seeded in before()).
+  const open = (await get("?status=open").then((r) => r!.json())) as Array<{ caseId: string; measureName: string }>;
+  const missing = open.find((r) => r.measureName === "HAZWOPER Surveillance")!;
+  const p = (await getPath(`/api/cases/${missing.caseId}/actions/outreach/preview`).then((r) => r!.json())) as { templateName: string; subject: string };
+  assert.equal(p.templateName, "Missing Data Follow-Up");
+  assert.match(p.subject, /[Mm]issing/);
 });
 
 test("delivery update before a send → 400; send then delivery flips latestOutreachDeliveryStatus", async () => {
