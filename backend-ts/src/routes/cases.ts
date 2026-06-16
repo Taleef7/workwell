@@ -27,6 +27,7 @@ import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlit
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
@@ -294,16 +295,27 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const search = q.get("search")?.trim().toLowerCase() || undefined;
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
+  // The OPEN worklist defaults to each measure's CURRENT compliance cycle — derived from TODAY + the
+  // measure's cadence (`bucketPeriodForMeasure`), so it's exact and cadence-correct (filtered in JS
+  // below). A blank `?period=` (empty string, not just absent) is treated as the default — `??` alone
+  // would leak it through and reintroduce the flood (Codex P2). The closed/excluded/all tabs (also
+  // called without a period) show full history, not a single cycle (Codex P2).
+  const statusParam = (q.get("status") ?? "").toLowerCase();
+  const isOpenWorklist = statusParam === "" || statusParam === "open";
+  const explicitPeriod = q.get("period")?.trim() || undefined;
+  const wantCurrentCycle = isOpenWorklist && (!explicitPeriod || explicitPeriod.toLowerCase() === "current");
 
   const store = await caseStore(env);
   // Fetch all rows matching the SQL-filterable predicates, then post-filter the
-  // record-derived ones (created_at range, employee site/search) and page in the read
-  // model — correct paging at floor scale.
+  // record-derived ones (current-cycle, created_at range, employee site/search) and page in the read
+  // model — correct paging at floor scale. For the current cycle we fetch every period ("all") and
+  // filter to today's cadence anchor per measure in JS below.
   let rows = await store.listCases({
     statuses: statusesFor(q.get("status")),
     measureId: q.get("measureId") ?? undefined,
     priority: q.get("priority") ?? undefined,
     assignee: q.get("assignee") ?? undefined,
+    period: wantCurrentCycle ? "all" : (explicitPeriod ?? "all"),
     limit: 100000,
     offset: 0,
   });
@@ -316,6 +328,13 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.
   const counts = await new SqliteCaseEventStore(env.DB).outreachSentCounts(rows.map((c) => c.id));
   let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0));
+  if (wantCurrentCycle) {
+    // Keep only each measure's CURRENT cycle, by today + the measure's cadence (Codex P2): exact and
+    // cadence-correct, so a stale row at another cadence's anchor can't appear and a rolled-over cycle
+    // with no open cases doesn't fall back to a prior cycle's stale opens.
+    const today = new Date().toISOString().slice(0, 10);
+    summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
+  }
   if (site) summaries = summaries.filter((c) => c.site === site);
   if (search) {
     summaries = summaries.filter(

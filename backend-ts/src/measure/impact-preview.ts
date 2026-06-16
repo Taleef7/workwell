@@ -18,6 +18,7 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededDistribution } from "../run/distribution.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 export interface ImpactPreviewScope {
   site?: string | null;
@@ -182,10 +183,13 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
   const outcomeCounts: Record<string, number> = Object.fromEntries(OUTCOME_KEYS.map((k) => [k, 0]));
   for (const o of outcomes) outcomeCounts[o.outcome] = (outcomeCounts[o.outcome] ?? 0) + 1;
 
-  // Case impact vs existing non-resolved cases for this measure + evaluation period.
+  // Case impact vs existing non-resolved cases for the compliance CYCLE this date falls in (#150 H1):
+  // cases are persisted under the bucketed period, so a raw-date match would miss them and mislabel
+  // every existing-cycle subject as wouldCreate (Codex P2).
+  const cyclePeriod = bucketPeriodForMeasure(measure.measureId, evaluationDate);
   const existing = await deps.cases.listCases({ measureId: measure.measureId, limit: 100000, offset: 0 });
   const openSubjects = new Set(
-    existing.filter((c) => c.evaluationPeriod === evaluationDate && c.status !== "RESOLVED").map((c) => c.employeeId),
+    existing.filter((c) => c.evaluationPeriod === cyclePeriod && c.status !== "RESOLVED").map((c) => c.employeeId),
   );
   const caseImpact: CaseImpact = { wouldCreate: 0, wouldUpdate: 0, wouldClose: 0, wouldExclude: 0 };
   for (const o of outcomes) {

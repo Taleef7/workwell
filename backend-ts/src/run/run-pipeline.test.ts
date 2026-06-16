@@ -168,3 +168,21 @@ test("unsupported scope and invalid requests are typed errors", async () => {
   await assert.rejects(executeManualRun(deps, { scopeType: "EMPLOYEE", employeeExternalId: "ghost" }), InvalidRunRequestError);
   await assert.rejects(executeRerun(deps, crypto.randomUUID()), InvalidRunRequestError);
 });
+
+test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle period, never duplicating cases", async () => {
+  // Two ALL_PROGRAMS runs with NO evaluationDate → today — the nightly-cron shape. Both bucket
+  // to the same compliance-cycle anchor, so the second run upserts the same cases (no fresh
+  // cohort) and every opened case sits on a cycle anchor (Jan 1 / Jul 1), not a raw run date.
+  const caseStore = deps.caseStore!;
+  const r1 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  const afterFirst = (await caseStore.listCases({})).length;
+  const r2 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  const all = await caseStore.listCases({});
+  assert.equal(all.length, afterFirst, "the second nightly run creates 0 new cases (bucketed → idempotent)");
+  const mine = all.filter((c) => c.lastRunId === r1.runId || c.lastRunId === r2.runId);
+  assert.ok(mine.length >= 1, "the runs opened at least one case");
+  assert.ok(
+    mine.every((c) => /-(01|07)-01$/.test(c.evaluationPeriod)),
+    "evaluation_period is a compliance-cycle anchor (Jan 1 / Jul 1), not the raw run date",
+  );
+});

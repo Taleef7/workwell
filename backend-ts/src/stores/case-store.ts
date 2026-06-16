@@ -35,6 +35,15 @@ export interface CaseQuery {
   measureId?: string;
   priority?: string;
   assignee?: string;
+  /**
+   * Compliance-cycle filter (#150 H1):
+   *   - omitted / `undefined` / `"all"` / `"current"` → no period filter (every cycle).
+   *   - a concrete `YYYY-MM-DD` anchor → exactly that cycle.
+   * The worklist's current-cycle default is computed per-measure from today + the measure's
+   * cadence in the route (date-driven, Codex P2), not by the store — `"current"` is accepted
+   * here as a no-op so a caller forwarding it doesn't accidentally match a literal period.
+   */
+  period?: string;
   limit?: number;
   offset?: number;
 }
