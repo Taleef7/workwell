@@ -135,7 +135,7 @@ export default function AdminPage() {
   const [loadingWaivers, setLoadingWaivers] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [auditScope, setAuditScope] = useState<"all" | "access" | "mutations">("access");
+  const [auditScope, setAuditScope] = useState<"all" | "access" | "mutations">("all");
   const [waiverMeasureFilter, setWaiverMeasureFilter] = useState("");
   const [waiverExpiresAfter, setWaiverExpiresAfter] = useState("");
   const [waiverExpiresBefore, setWaiverExpiresBefore] = useState("");
@@ -1030,7 +1030,7 @@ export default function AdminPage() {
                         {waiver.employeeName} <span className="text-xs text-neutral-500 dark:text-neutral-400">({waiver.employeeExternalId})</span>
                       </p>
                       <p className="text-xs text-neutral-600 dark:text-neutral-400">
-                        {waiver.measureName} • v{waiver.measureVersion} • {waiver.site || "Unknown site"}
+                        {waiver.measureName} • {waiver.measureVersion} • {waiver.site || "Unknown site"}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">

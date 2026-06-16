@@ -10,6 +10,24 @@ import { useApi } from "@/lib/api/hooks";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
+// CQL/FHIR measure-scaffolding defines that carry no domain meaning for the
+// Why-Flagged narrative (the custom WorkWell defines + "Outcome Status" tell the
+// story). Suppressed from the human-readable evidence list; the raw JSON view
+// below still contains them, so traceability is preserved.
+const INTERNAL_DEFINES = new Set([
+  "Patient",
+  "Initial Population",
+  "Numerator",
+  "Numerator Exclusion",
+  "Denominator",
+  "Denominator Exclusion",
+  "Denominator Exception",
+]);
+
+function isInternalDefine(define: string): boolean {
+  return INTERNAL_DEFINES.has(define.trim());
+}
+
 type AuditEvent = {
   eventType: string;
   actor: string;
@@ -544,7 +562,9 @@ export default function CaseDetailPage() {
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Why Flagged Evidence</summary>
             <div className="mt-3 space-y-2">
-              {(caseDetail.evidenceJson.expressionResults ?? []).map((row, index) => (
+              {(caseDetail.evidenceJson.expressionResults ?? [])
+                .filter((row) => !isInternalDefine(String(row.define ?? "")))
+                .map((row, index) => (
                 <div key={`${String(row.define ?? index)}-${index}`} className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
                   <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{String(row.define ?? "define")}</p>
                   <p className="text-xs text-neutral-700 dark:text-neutral-300">{String(row.result)}</p>
@@ -675,6 +695,7 @@ export default function CaseDetailPage() {
                     variant="primary"
                     onClick={() => void runAction("outreach")}
                     disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null}
+                    title={outreachPreview === null ? "Preview the message before sending" : undefined}
                     isLoading={acting === "outreach"}
                     loadingText="Sending outreach..."
                   >
@@ -825,7 +846,9 @@ export default function CaseDetailPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
               <h4 className="mt-2 text-xl font-semibold">Code evidence explorer</h4>
               <div className="mt-4 space-y-2">
-                {(caseDetail.evidenceJson.expressionResults ?? []).map((row, index) => {
+                {(caseDetail.evidenceJson.expressionResults ?? [])
+                  .filter((row) => !isInternalDefine(String(row.define ?? "")))
+                  .map((row, index) => {
                   const defineStr = String(row.define ?? "define");
                   const resultStr = String(row.result ?? "");
                   const isOutcomeStatus = defineStr === "Outcome Status";
