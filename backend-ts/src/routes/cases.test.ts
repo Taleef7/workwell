@@ -38,20 +38,21 @@ before(async () => {
     scopeId: "audiogram",
     triggeredBy: "test",
     requestedScope: { measureId: "audiogram" },
-    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
-    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
   });
   const runId = run.id;
   // emp-006 = Omar Siddiq (Plant A): OVERDUE; emp-001 = Demo Author (HQ): MISSING_DATA; emp-008 EXCLUDED
-  const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
   omarCaseId = omar!.id;
-  await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-06-13", outcomeStatus: "MISSING_DATA" });
-  await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "EXCLUDED" });
+  await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2026-01-01", outcomeStatus: "MISSING_DATA" });
+  await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "EXCLUDED" });
   // evidence for Omar's case (drives the detail's why_flagged): a real exam 420 days ago.
   await outcomes.recordOutcome({
     runId,
     subjectId: "emp-006",
     measureId: "audiogram",
+    evaluationPeriod: "2026-01-01",
     status: "OVERDUE",
     evidence: {
       expressionResults: [
@@ -68,6 +69,7 @@ before(async () => {
     runId,
     subjectId: "emp-001",
     measureId: "hazwoper",
+    evaluationPeriod: "2026-01-01",
     status: "MISSING_DATA",
     evidence: {
       expressionResults: [
@@ -342,14 +344,14 @@ async function freshOpenCase(subjectId: string): Promise<string> {
     scopeId: "audiogram",
     triggeredBy: "test",
     requestedScope: { measureId: "audiogram" },
-    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
-    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
   });
   const c = await new SqliteCaseStore(db).upsertFromOutcome({
     runId: run.id,
     subjectId,
     measureId: "audiogram",
-    evaluationPeriod: "2026-06-13",
+    evaluationPeriod: "2026-01-01",
     outcomeStatus: "OVERDUE",
   });
   return c!.id;
@@ -418,13 +420,16 @@ test("terminal tabs (excluded) show full history, not just the current cycle (Co
     scopeId: "flu_vaccine",
     triggeredBy: "test",
     requestedScope: { measureId: "flu_vaccine" },
-    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
-    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
   });
   const store = new SqliteCaseStore(db);
+  const outcomes = new SqliteOutcomeStore(db);
   // An OPEN case at the current cycle anchor + an EXCLUDED case in a PRIOR cycle for the same measure.
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: "2026-01-01", outcomeStatus: "MISSING_DATA" });
   await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-014", measureId: "flu_vaccine", evaluationPeriod: "2025-07-01", outcomeStatus: "EXCLUDED" });
+  // The current cycle is the latest EVALUATED cycle (MAX over anchor-period outcomes) — record one at the anchor.
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: "2026-01-01", status: "MISSING_DATA", evidence: {} });
 
   // Excluded tab (no period) → full history: the prior-cycle excluded case must show (the current-cycle
   // default would hide it by restricting to 2026-01-01).

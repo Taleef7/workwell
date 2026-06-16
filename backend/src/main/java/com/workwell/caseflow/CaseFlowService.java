@@ -195,19 +195,22 @@ public class CaseFlowService {
             params.add(pattern);
         }
         if (period == null || period.isBlank()) {
-            // #150 H1 (A): default the OPEN worklist to each measure's CURRENT compliance cycle (its
-            // latest evaluation_period) so it isn't flooded by prior cycles' cases. The MAX is taken
-            // over ACTIONABLE cases only (status OPEN/IN_PROGRESS) — not closed_at, because EXCLUDED
-            // cases keep closed_at = NULL (upsertExcludedCase) and V022 only closes OPEN/IN_PROGRESS
-            // stale rows. A stale EXCLUDED/closed row at a raw daily period (lexically later than the
-            // cycle anchor) must not win the MAX and hide the current cycle's open cases (Codex P1).
-            // The default applies ONLY to the open/actionable tab — the closed/excluded/all tabs (which
-            // the frontend also calls without a period) must show full history, not be restricted to a
-            // cycle that has open cases (else terminal history vanishes once work is resolved; Codex P2).
+            // #150 H1 (A): default the OPEN worklist to each measure's CURRENT compliance cycle so it
+            // isn't flooded by prior cycles' cases. The current cycle is the measure's LATEST EVALUATED
+            // cycle: MAX over OUTCOMES (every run writes one outcome per subject, even all-compliant
+            // ones), restricted to cycle-anchor periods (…-01-01 / …-07-01).
+            //  - Using OUTCOMES (not open cases) means a measure that rolled into a new cycle with no open
+            //    cases doesn't fall back to a prior cycle's stale opens (Codex P2).
+            //  - The anchor-period restriction keeps a pre-bucketing raw-date row (an unclosed EXCLUDED
+            //    case or a V022-closed case) from poisoning the MAX (Codex P1). Anchors are the only
+            //    values CompliancePeriod emits (annual→Jan 1, biannual→Jan 1/Jul 1, seasonal→Jul 1);
+            //    extend the pattern if a new cadence is added.
+            //  - The default applies ONLY to the open tab — the closed/excluded/all tabs (also called
+            //    without a period) must show full history, not be restricted to a cycle (Codex P2).
             if ("open".equals(normalizedStatusFilter)) {
-                sql.append(" AND c.evaluation_period = (SELECT MAX(c2.evaluation_period) "
-                        + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id "
-                        + "AND c2.status IN ('OPEN', 'IN_PROGRESS'))");
+                sql.append(" AND c.evaluation_period = (SELECT MAX(o.evaluation_period) "
+                        + "FROM outcomes o WHERE o.measure_version_id = c.measure_version_id "
+                        + "AND (o.evaluation_period LIKE '%-01-01' OR o.evaluation_period LIKE '%-07-01'))");
             }
         } else if (!"all".equalsIgnoreCase(period.trim())) {
             sql.append(" AND c.evaluation_period = ?");
