@@ -213,3 +213,36 @@ test("malformed from/to date filters → 400 (Java parseFromDate/parseToDate par
   // a valid date still returns 200 (blank → no filter, also 200)
   assert.equal((await get("/overview?from=2026-01-01&to=2026-12-31"))?.status, 200);
 });
+
+test("C4: a single-subject CASE rerun does not become a measure's latest run or skew the rollup", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const oc = new SqliteOutcomeStore(env.DB as never);
+  const mkRun = (scopeType: "MEASURE" | "CASE") =>
+    runStore.createRun({
+      scopeType,
+      scopeId: "tb_surveillance",
+      triggeredBy: "test",
+      requestedScope: { measureId: "tb_surveillance" },
+      measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+      measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    });
+
+  // Population MEASURE run: 2 evaluated, 1 compliant → 50%.
+  const measureRun = await mkRun("MEASURE");
+  await oc.recordOutcome({ runId: measureRun.id, subjectId: "emp-006", measureId: "tb_surveillance", status: "OVERDUE", evidence: {} });
+  await oc.recordOutcome({ runId: measureRun.id, subjectId: "emp-001", measureId: "tb_surveillance", status: "COMPLIANT", evidence: {} });
+  await new Promise((r) => setTimeout(r, 8)); // strictly later started_at
+
+  // A newer single-subject CASE rerun-to-verify: emp-006 re-confirmed OVERDUE (would skew to 0%).
+  const caseRerun = await mkRun("CASE");
+  await oc.recordOutcome({ runId: caseRerun.id, subjectId: "emp-006", measureId: "tb_surveillance", status: "OVERDUE", evidence: {} });
+
+  const tb = ((await get("/overview").then((r) => r!.json())) as Summary[]).find((p) => p.measureId === "tb_surveillance")!;
+  assert.equal(tb.latestRunId, measureRun.id, "rollup latest run is the population MEASURE run, not the CASE rerun");
+  assert.equal(tb.totalEvaluated, 2, "full population, not the single CASE-rerun subject");
+  assert.equal(tb.complianceRate, 50, "not crashed to 0% by the single-subject rerun");
+
+  const trend = (await get("/tb_surveillance/trend").then((r) => r!.json())) as Array<{ runId: string }>;
+  assert.equal(trend.length, 1, "only the population run appears in the trend");
+  assert.equal(trend[0]!.runId, measureRun.id);
+});
