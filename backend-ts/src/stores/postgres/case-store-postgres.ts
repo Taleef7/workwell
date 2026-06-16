@@ -158,10 +158,11 @@ export class PgCaseStore implements CaseStore {
     }
     const period = query.period?.trim();
     if (period === "current") {
-      // Only each measure's most-recent compliance cycle (#150 H1 worklist default). The
-      // correlated subquery is status-agnostic so a fully-resolved current cycle shows nothing
-      // rather than surfacing stale open cases from a prior cycle.
-      where.push(`evaluation_period = (SELECT MAX(c2.evaluation_period) FROM ${T} c2 WHERE c2.measure_id = ${T}.measure_id)`);
+      // Only each measure's most-recent compliance cycle (#150 H1 worklist default). The MAX is over
+      // OPEN cases (closed_at IS NULL) so a CLOSED stale row — e.g. one administratively closed by the
+      // V022 cleanup, whose raw daily period is lexically later than the new cycle anchor — doesn't
+      // poison the MAX and hide the current cycle's open cases (Codex P1).
+      where.push(`evaluation_period = (SELECT MAX(c2.evaluation_period) FROM ${T} c2 WHERE c2.measure_id = ${T}.measure_id AND c2.closed_at IS NULL)`);
     } else if (period && period.toLowerCase() !== "all") {
       where.push(`evaluation_period = $${binds.length + 1}`);
       binds.push(period);

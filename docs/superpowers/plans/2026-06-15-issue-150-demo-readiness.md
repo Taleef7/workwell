@@ -246,7 +246,16 @@ Neon:** 5,019 open / 5,019 stale / 0 anchored across 31 daily periods = **261** 
 cron; the next post-deploy run re-creates the 261 at the cycle anchor. Applies on merge → deploy (Flyway,
 transactional). Local Testcontainers apply-check blocked only by Docker-not-running; CI validates.
 
-**H1 COMPLETE** (Phase 1 + Phase 2 + A + M6 + D, Java ↔ backend-ts parity). Next: open the H1 PR → Codex.
+**H1 COMPLETE** (Phase 1 + Phase 2 + A + M6 + D, Java ↔ backend-ts parity). **PR #152 opened.**
 Optional polish: an A period selector in the frontend.
+
+**Codex (PR #152) — 2 P1s resolved:** (1) worklist `current`-cycle `MAX` now over OPEN cases only
+(`closed_at IS NULL`) so a V022-closed stale row (period lexically later than the anchor) can't hide the
+current cycle (Java + both TS stores + regression test). (2) per-measure period — Phase 2 had bucketed in
+`evaluate()`, which also corrupted `started_at` + collapsed the seed trend (both keyed on the actual date,
+and seeds run through `evaluate()`); **re-layered** so `evaluate()` returns the actual date and
+`RunPersistenceService` buckets per-measure at persistence (window via `MeasureDefinitionProvider` + pure
+`CompliancePeriod`, mock-independent). `ScopedRunFailureIntegrationTest` (`@MockBean CqlEvaluationService`)
+fallout caught + fixed locally. All key integration tests + backend-ts green.
 
 **Remaining Batch 2:** H4, M1, M5, M8, M9, M10, M13.
