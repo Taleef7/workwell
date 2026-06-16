@@ -121,7 +121,11 @@ export default function ProgramDetailPage() {
           setDrivers({ bySite: [], byRole: [], byOutcomeReason: [] });
         }
         try {
-          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=30`);
+          // 90-day lookahead (#150 M8): a 30-day horizon is too narrow for annual measures (a 365-day
+          // window), so almost no compliant employee crosses into "due soon" within it and the predicted
+          // rate is always identical to the current rate. A quarter-ahead horizon surfaces real upcoming
+          // expirations, so the projection is meaningful instead of a passthrough.
+          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`);
           setRiskOutlook(outlook);
         } catch {
           setRiskOutlook(null);
@@ -274,7 +278,7 @@ export default function ProgramDetailPage() {
                       <tr>
                         <th className="py-1 pr-3">Site</th>
                         <th className="py-1 pr-3">Current rate</th>
-                        <th className="py-1 pr-3">Predicted 30d</th>
+                        <th className="py-1 pr-3">Predicted 90d</th>
                         <th className="py-1 pr-3">Expiring</th>
                       </tr>
                     </thead>
