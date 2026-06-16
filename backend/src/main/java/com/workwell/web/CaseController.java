@@ -56,6 +56,7 @@ public class CaseController {
             @RequestParam(name = "from", required = false) String from,
             @RequestParam(name = "to", required = false) String to,
             @RequestParam(name = "search", required = false) String search,
+            @RequestParam(name = "period", required = false) String period,
             @RequestParam(name = "limit", defaultValue = "25") int limit,
             @RequestParam(name = "offset", defaultValue = "0") int offset
     ) {
@@ -69,6 +70,7 @@ public class CaseController {
                     parseFromDate(from),
                     parseToDate(to),
                     search,
+                    period,
                     limit,
                     offset
             );

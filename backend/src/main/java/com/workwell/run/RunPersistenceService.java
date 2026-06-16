@@ -38,11 +38,24 @@ public class RunPersistenceService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final CaseFlowService caseFlowService;
+    private final CompliancePeriodResolver compliancePeriodResolver;
 
-    public RunPersistenceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, CaseFlowService caseFlowService) {
+    public RunPersistenceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, CaseFlowService caseFlowService,
+            CompliancePeriodResolver compliancePeriodResolver) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.caseFlowService = caseFlowService;
+        this.compliancePeriodResolver = compliancePeriodResolver;
+    }
+
+    /**
+     * The compliance-cycle period a measure's outcomes + cases bucket into (#150 H1): keyed off the
+     * run's ACTUAL evaluation date but anchored to the measure's current cycle, so a nightly re-run
+     * upserts the same case (one per employee × measure × cycle) instead of minting a daily cohort.
+     * Run metadata (started_at, the trend) keeps the actual date.
+     */
+    private String bucketedPeriodFor(DemoRunPayload payload) {
+        return compliancePeriodResolver.bucketPeriod(payload.measureName(), LocalDate.parse(payload.evaluationDate()));
     }
 
     @Transactional
@@ -167,6 +180,9 @@ public class RunPersistenceService {
                 stage = "ensure-measure-version";
                 UUID measureVersionId = ensureMeasureVersion(measureId, payload.measureVersion(), payload.measureName());
                 List<UUID> employeeIds = ensureEmployees(payload.outcomes());
+                // This measure's outcomes + cases bucket into its OWN compliance cycle (#150 H1) —
+                // per-measure, since cadences differ (annual/biannual/season); run metadata stays today.
+                String measurePeriod = bucketedPeriodFor(payload);
 
                 stage = "insert-outcomes";
                 for (int i = 0; i < payload.outcomes().size(); i++) {
@@ -181,7 +197,7 @@ public class RunPersistenceService {
                                 ps.setObject(2, persistedRunId);
                                 ps.setObject(3, employeeId);
                                 ps.setObject(4, measureVersionId);
-                                ps.setString(5, evaluationPeriod);
+                                ps.setString(5, measurePeriod);
                                 ps.setString(6, outcome.outcome());
                                 ps.setString(7, toJsonb(outcome.evidenceJson()));
                                 ps.setObject(8, Timestamp.from(Instant.now()));
@@ -208,7 +224,7 @@ public class RunPersistenceService {
                 caseFlowService.upsertCases(
                         persistedRunId,
                         measureVersionId,
-                        evaluationPeriod,
+                        measurePeriod,
                         employeeIds,
                         payload.outcomes()
                 );
@@ -375,6 +391,9 @@ public class RunPersistenceService {
                 stage = "ensure-measure-version";
                 UUID measureVersionId = ensureMeasureVersion(measureId, payload.measureVersion(), payload.measureName());
                 List<UUID> employeeIds = ensureEmployees(payload.outcomes());
+                // This measure's outcomes + cases bucket into its OWN compliance cycle (#150 H1) —
+                // per-measure, since cadences differ (annual/biannual/season); run metadata stays today.
+                String measurePeriod = bucketedPeriodFor(payload);
 
                 stage = "insert-outcomes";
                 for (int i = 0; i < payload.outcomes().size(); i++) {
@@ -389,7 +408,7 @@ public class RunPersistenceService {
                                 ps.setObject(2, runId);
                                 ps.setObject(3, employeeId);
                                 ps.setObject(4, measureVersionId);
-                                ps.setString(5, evaluationPeriod);
+                                ps.setString(5, measurePeriod);
                                 ps.setString(6, outcome.outcome());
                                 ps.setString(7, toJsonb(outcome.evidenceJson()));
                                 ps.setObject(8, Timestamp.from(Instant.now()));
@@ -416,7 +435,7 @@ public class RunPersistenceService {
                 caseFlowService.upsertCases(
                         runId,
                         measureVersionId,
-                        evaluationPeriod,
+                        measurePeriod,
                         employeeIds,
                         payload.outcomes()
                 );
@@ -987,7 +1006,9 @@ public class RunPersistenceService {
 
             Instant startedAt = LocalDate.parse(run.evaluationDate()).atStartOfDay().toInstant(ZoneOffset.UTC);
             Instant completedAt = startedAt.plusSeconds(60);
-            String evaluationPeriod = run.evaluationDate();
+            // Outcomes + cases bucket into this measure's compliance cycle (#150 H1); run metadata
+            // (started_at above, requested_scope below) keeps the actual evaluation date.
+            String measurePeriod = bucketedPeriodFor(run);
 
             stage = "insert-run";
             jdbcTemplate.update(
@@ -1078,7 +1099,7 @@ public class RunPersistenceService {
                             ps.setObject(2, runId);
                             ps.setObject(3, employeeId);
                             ps.setObject(4, measureVersionId);
-                            ps.setString(5, evaluationPeriod);
+                            ps.setString(5, measurePeriod);
                             ps.setString(6, outcome.outcome());
                             ps.setString(7, toJsonb(outcome.evidenceJson()));
                             ps.setObject(8, Timestamp.from(Instant.now()));
@@ -1133,7 +1154,7 @@ public class RunPersistenceService {
                 caseFlowService.upsertCases(
                         runId,
                         measureVersionId,
-                        evaluationPeriod,
+                        measurePeriod,
                         employeeIds,
                         run.outcomes()
                 );

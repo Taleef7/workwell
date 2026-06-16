@@ -168,4 +168,94 @@ upgraded DB (generic description, empty `requiredDataElements`), so measure-deta
 / traceability differed by seed history. Hoisted the `spec` build above the existing-row check and
 set `spec_json` to the same authored spec in the promote `UPDATE` for both CMS125 and CMS122.
 
-**Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
+### 2026-06-15 — Batch 2 H1 design (worklist flood) — branch `fix/issue-150-worklist-h1`
+
+**Problem:** the nightly cron (`0 0 2 * * *` → `runScheduledAllPrograms` → `runAllPrograms(asOf=today)`)
+mints a new `evaluation_period` (= the run date) every night. Cases key on
+`(employee, measure_version, evaluation_period)`, so each night creates a fresh cohort and old
+cohorts never close → 4,703 perpetually-open cases, all "SLA Breached."
+
+**Root fix (chosen — per-measure cadence, decoupled from the as-of date):**
+- A recurring run still **computes compliance as of today** (CQL + outcome numbers UNCHANGED —
+  the ~78% must not move; asserted in tests). Only the `evaluation_period` that *buckets*
+  outcomes/cases changes: it's anchored to the measure's **current compliance cycle**, so every
+  night's run updates the *same* cases (restores the idempotency contract, DATA_MODEL §4).
+- Cycle (`CompliancePeriod`): seasonal (flu) → flu-season (Jul–Jun); window ≤ 200d (HbA1c 180)
+  → half-year; else (365 / 820 / value-based) → calendar year. Anchor returned as a **LocalDate**
+  so the stored `evaluation_period` stays date-shaped (existing parsers keep working).
+
+**Phases:**
+1. `CompliancePeriod` helper + unit tests (pure; no blast radius). ← this commit
+2. Wire it into the run→persist seam (outcomes + cases `evaluation_period`) keeping as-of=today;
+   update affected integration tests (they assert run-date periods). Idempotency test: a second
+   nightly run creates **0** new cases.
+3. **A** — default `/cases` to the current cycle + a period selector (backend `listCases` default +
+   frontend + backend-ts parity).
+4. **backend-ts parity** for the period derivation + case bucketing.
+5. **D** — one-time Flyway migration to resolve/archive pre-fix stale-period cases (live cleanup).
+6. **M6** — `why_flagged` day-math derives from the same as-of date as the CQL (kills 439-vs-60).
+
+**Safeguard:** compliance compute path untouched → demo numbers stable; only case bucketing + the
+worklist default change.
+
+**Phase 2 DONE** (verified): `CqlEvaluationService.evaluate` + the two `AllProgramsRunService` fallback
+payloads bucket `evaluation_period` via the new public `bucketPeriod` (window from `MeasureDefinition`,
+seasonal = flu-by-name); the CASE rerun (`CaseFlowService`) now evaluates **as-of today** keeping the
+case's cycle period as its upsert key (the **M6** date-decoupling) and the dead
+`verificationEvaluationDate` parser is removed. Verified: 6 affected integration suites green + new
+`NightlyRunIdempotencyIntegrationTest` (2nd nightly ALL_PROGRAMS run → **0** new cases; cases bucket to
+first-of-month anchors, never the run date) + CsvExport + MeasureImpactPreview. The legacy
+single-measure `*DemoService` classes + `SeedHistoricalRunsService` keep date periods (not the recurring
+flood; the trend needs distinct dates) — the Phase-5 cleanup migration handles their old-period cases.
+Remaining: **A** (worklist default-to-current-cycle), **backend-ts parity**, **D** (Flyway cleanup), and
+the **M6** `why_flagged` day-math (the CASE eval-date half is done).
+
+**Phase A (worklist default) — backend DONE** (verified): `listCases` gains a `period` param — default
+→ each measure's latest cycle (per-measure-max `evaluation_period`), `"all"` → every cycle, specific →
+exact; `CaseController` exposes `?period=`; the 7/9-arg overloads + MCP `list_noncompliant` default to
+the current cycle too. The frontend auto-benefits (no period sent → current cycle); a period selector
+is optional polish. Verified: new `CaseWorklistPeriodIntegrationTest` + CaseController / CaseUpsert /
+CaseFlowRerun / Major1Population suites green. **Java side of H1 now complete** (Phase 1 + Phase 2 root
+fix + A). Remaining: **backend-ts parity** (run-pipeline bucket + case-rerun as-of-today + listCases
+default + a TS `CompliancePeriod`), **D** (Flyway cleanup migration), the **M6** `why_flagged` day-math,
+and the optional A period selector in the frontend.
+
+**backend-ts parity — DONE** (verified, 2026-06-16): `run/compliance-period.ts` ports `CompliancePeriod`
+(pure cadence/anchor + measure-aware `bucketPeriodForMeasure`); `run-pipeline.ts` buckets the persisted
+`evaluation_period` for both outcome + case while the engine evaluates as-of `evalDate` (Phase 2);
+`case-rerun.ts` evaluates as-of **today** keeping the case's cycle period as the key (M6 eval-date half);
+`CaseQuery` gains an optional `period` (omitted/`all` → no filter, `current` → per-measure-max correlated
+subquery, concrete → exact) in **both** SQLite-floor + Postgres-ceiling `listCases`, and only the worklist
+route defaults to `current`. **Intentional parity nuance:** Java made the *shared* `listCases` default
+current-cycle (7/9-arg overloads + MCP); the TS store primitive stays **backward-compatible** (default =
+no filter) and the current-cycle default is scoped to the worklist route — so exports / MCP / programs /
+analytics keep full-history behavior (no silent change). Verified: new `compliance-period.test.ts` +
+`case-store-period.test.ts` + a nightly-idempotency run-pipeline test; full suite 375 pass / 0 fail; typecheck clean.
+
+**M6 — DONE (Java-only, 2026-06-16).** `backend-ts` `deriveWhyFlagged` already used the measure's real
+window; the bug was Java `CqlEvaluationService#buildEvidenceJson` hardcoding `365` for `compliance_window_days`
++ `days_overdue` (wrong for CMS125's 820-day / diabetes' 180-day windows). Fixed via `complianceWindowFor()`
+(DRY'd with `bucketPeriod`); `last_exam_date` was already eval-date-anchored. Regression test: CMS125 carries
+`compliance_window_days = 820`. (M6's eval-date half — rerun as-of today — was already done in Phase 2/parity.)
+
+**D — DONE as `V022__close_stale_period_cases.sql`** (Taleef authorized the production-data migration).
+Single atomic CTE: `UPDATE cases … RETURNING` → status `CLOSED` (`closed_reason='STALE_PERIOD_CLEANUP'`) for
+OPEN/IN_PROGRESS cases on non-anchor periods (not `-01-01`/`-07-01`), feeding one `CASE_CLOSED_STALE_PERIOD`
+audit_event per case. No-op + idempotent on fresh DBs (CI/local seed → 0 rows). **Read-only validated vs live
+Neon:** 5,019 open / 5,019 stale / 0 anchored across 31 daily periods = **261** real cohorts duplicated by the
+cron; the next post-deploy run re-creates the 261 at the cycle anchor. Applies on merge → deploy (Flyway,
+transactional). Local Testcontainers apply-check blocked only by Docker-not-running; CI validates.
+
+**H1 COMPLETE** (Phase 1 + Phase 2 + A + M6 + D, Java ↔ backend-ts parity). **PR #152 opened.**
+Optional polish: an A period selector in the frontend.
+
+**Codex (PR #152) — 2 P1s resolved:** (1) worklist `current`-cycle `MAX` now over OPEN cases only
+(`closed_at IS NULL`) so a V022-closed stale row (period lexically later than the anchor) can't hide the
+current cycle (Java + both TS stores + regression test). (2) per-measure period — Phase 2 had bucketed in
+`evaluate()`, which also corrupted `started_at` + collapsed the seed trend (both keyed on the actual date,
+and seeds run through `evaluate()`); **re-layered** so `evaluate()` returns the actual date and
+`RunPersistenceService` buckets per-measure at persistence (window via `MeasureDefinitionProvider` + pure
+`CompliancePeriod`, mock-independent). `ScopedRunFailureIntegrationTest` (`@MockBean CqlEvaluationService`)
+fallout caught + fixed locally. All key integration tests + backend-ts green.
+
+**Remaining Batch 2:** H4, M1, M5, M8, M9, M10, M13.

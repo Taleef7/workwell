@@ -159,6 +159,13 @@ export class SqliteCaseStore implements CaseStore {
       where.push("LOWER(COALESCE(assignee, 'unassigned')) = LOWER(?)");
       binds.push(query.assignee);
     }
+    // The worklist's current-cycle default is computed per-measure from today's cadence in the route
+    // (date-driven, #150 H1 / Codex P2) and applied there; the store filters only by an explicit period.
+    const period = query.period?.trim();
+    if (period && !["all", "current"].includes(period.toLowerCase())) {
+      where.push("evaluation_period = ?");
+      binds.push(period);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
