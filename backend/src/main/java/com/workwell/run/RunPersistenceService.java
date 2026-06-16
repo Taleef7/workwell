@@ -3,8 +3,6 @@ package com.workwell.run;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.caseflow.CaseFlowService;
-import com.workwell.engine.model.MeasureDefinition;
-import com.workwell.engine.port.MeasureDefinitionProvider;
 import com.workwell.measure.AudiogramDemoService;
 import com.workwell.measure.SyntheticEmployeeCatalog;
 import com.workwell.security.SecurityActor;
@@ -36,34 +34,28 @@ import org.springframework.util.FileCopyUtils;
 public class RunPersistenceService {
     private static final Logger log = LoggerFactory.getLogger(RunPersistenceService.class);
     private static final String MEASURE_NAME = "Audiogram";
-    private static final String FLU_VACCINE_MEASURE_NAME = "Flu Vaccine";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final CaseFlowService caseFlowService;
-    private final MeasureDefinitionProvider measureDefinitionProvider;
+    private final CompliancePeriodResolver compliancePeriodResolver;
 
     public RunPersistenceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, CaseFlowService caseFlowService,
-            MeasureDefinitionProvider measureDefinitionProvider) {
+            CompliancePeriodResolver compliancePeriodResolver) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.caseFlowService = caseFlowService;
-        this.measureDefinitionProvider = measureDefinitionProvider;
+        this.compliancePeriodResolver = compliancePeriodResolver;
     }
 
     /**
      * The compliance-cycle period a measure's outcomes + cases bucket into (#150 H1): keyed off the
      * run's ACTUAL evaluation date but anchored to the measure's current cycle, so a nightly re-run
      * upserts the same case (one per employee × measure × cycle) instead of minting a daily cohort.
-     * Run metadata (started_at, the trend) keeps the actual date. Resolves the window from the
-     * measure-definition port (not the eval service) so it is independent of CQL mocking in tests,
-     * then defers to the pure {@link CompliancePeriod} helper.
+     * Run metadata (started_at, the trend) keeps the actual date.
      */
     private String bucketedPeriodFor(DemoRunPayload payload) {
-        MeasureDefinition spec = measureDefinitionProvider.forMeasure(payload.measureName());
-        int window = spec != null ? spec.complianceWindowDays() : 365;
-        boolean seasonal = FLU_VACCINE_MEASURE_NAME.equalsIgnoreCase(payload.measureName());
-        return CompliancePeriod.cycleKey(window, seasonal, LocalDate.parse(payload.evaluationDate()));
+        return compliancePeriodResolver.bucketPeriod(payload.measureName(), LocalDate.parse(payload.evaluationDate()));
     }
 
     @Transactional

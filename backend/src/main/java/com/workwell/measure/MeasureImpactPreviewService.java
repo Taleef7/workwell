@@ -3,6 +3,7 @@ package com.workwell.measure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workwell.compile.CqlEvaluationService;
+import com.workwell.run.CompliancePeriodResolver;
 import com.workwell.run.DemoRunModels.DemoOutcome;
 import com.workwell.run.DemoRunModels.DemoRunPayload;
 import com.workwell.security.SecurityActor;
@@ -24,15 +25,18 @@ public class MeasureImpactPreviewService {
 
     private final JdbcTemplate jdbcTemplate;
     private final CqlEvaluationService cqlEvaluationService;
+    private final CompliancePeriodResolver compliancePeriodResolver;
     private final ObjectMapper objectMapper;
 
     public MeasureImpactPreviewService(
             JdbcTemplate jdbcTemplate,
             CqlEvaluationService cqlEvaluationService,
+            CompliancePeriodResolver compliancePeriodResolver,
             ObjectMapper objectMapper
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.cqlEvaluationService = cqlEvaluationService;
+        this.compliancePeriodResolver = compliancePeriodResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -72,7 +76,7 @@ public class MeasureImpactPreviewService {
         Map<String, Integer> outcomeCounts = countOutcomes(outcomes);
 
         // Estimate case impact by comparing preview outcomes against existing open cases for this period
-        CaseImpact caseImpact = estimateCaseImpact(target.measureVersionId(), outcomes, evaluationDate);
+        CaseImpact caseImpact = estimateCaseImpact(target.measureVersionId(), target.measureName(), outcomes, evaluationDate);
 
         // Site and role breakdown
         List<Map<String, Object>> siteBreakdown = buildSiteBreakdown(outcomes);
@@ -167,9 +171,11 @@ public class MeasureImpactPreviewService {
         return counts;
     }
 
-    private CaseImpact estimateCaseImpact(UUID measureVersionId, List<DemoOutcome> outcomes, LocalDate evaluationDate) {
-        // Query existing open cases for this measure version and evaluation period
-        String evalPeriod = evaluationDate.toString();
+    private CaseImpact estimateCaseImpact(UUID measureVersionId, String measureName, List<DemoOutcome> outcomes, LocalDate evaluationDate) {
+        // Query existing cases for this measure version + the compliance CYCLE the date falls in
+        // (#150 H1) — cases are persisted under the bucketed period, so a raw-date lookup would miss
+        // them and mislabel every existing-cycle subject as wouldCreate (Codex P2).
+        String evalPeriod = compliancePeriodResolver.bucketPeriod(measureName, evaluationDate);
         List<String> openCaseSubjectIds;
         try {
             openCaseSubjectIds = jdbcTemplate.query(

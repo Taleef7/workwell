@@ -294,6 +294,11 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const search = q.get("search")?.trim().toLowerCase() || undefined;
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
+  // The current-cycle period default applies ONLY to the open/actionable worklist; the closed,
+  // excluded, and all tabs (also called without a period) must show full history, not be restricted
+  // to the cycle that has open cases — otherwise terminal history vanishes once work is resolved (Codex P2).
+  const statusParam = (q.get("status") ?? "").toLowerCase();
+  const periodDefault = statusParam === "" || statusParam === "open" ? "current" : "all";
 
   const store = await caseStore(env);
   // Fetch all rows matching the SQL-filterable predicates, then post-filter the
@@ -304,10 +309,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     measureId: q.get("measureId") ?? undefined,
     priority: q.get("priority") ?? undefined,
     assignee: q.get("assignee") ?? undefined,
-    // Worklist defaults to each measure's CURRENT compliance cycle (#150 H1) so a nightly
-    // rerun's new cycle doesn't pile prior cycles onto the open list; `?period=all` shows
-    // every cycle, `?period=YYYY-MM-DD` a specific one.
-    period: q.get("period") ?? "current",
+    // Open worklist defaults to each measure's CURRENT compliance cycle (#150 H1) so a nightly
+    // rerun's new cycle doesn't pile prior cycles onto the open list; terminal tabs default to full
+    // history (periodDefault). `?period=all` shows every cycle, `?period=YYYY-MM-DD` a specific one.
+    period: q.get("period") ?? periodDefault,
     limit: 100000,
     offset: 0,
   });

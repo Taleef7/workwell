@@ -408,3 +408,30 @@ test("RESOLVE action with an unparsable resolvedAt → 400 (a typo must not sile
   assert.equal(ok?.status, 200);
   assert.equal((await ok!.json() as { closedAt: string }).closedAt, "2026-06-14T12:00:00.000Z", "the supplied timestamp is honored");
 });
+
+// Runs last (seeds extra cases): the current-cycle default is scoped to the OPEN worklist, so the
+// closed/excluded tabs still show full history (Codex P2). Isolated on flu_vaccine + fresh employees.
+test("terminal tabs (excluded) show full history, not just the current cycle (Codex P2)", async () => {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "flu_vaccine",
+    triggeredBy: "test",
+    requestedScope: { measureId: "flu_vaccine" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const store = new SqliteCaseStore(db);
+  // An OPEN case at the current cycle anchor + an EXCLUDED case in a PRIOR cycle for the same measure.
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-013", measureId: "flu_vaccine", evaluationPeriod: "2026-01-01", outcomeStatus: "MISSING_DATA" });
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-014", measureId: "flu_vaccine", evaluationPeriod: "2025-07-01", outcomeStatus: "EXCLUDED" });
+
+  // Excluded tab (no period) → full history: the prior-cycle excluded case must show (the current-cycle
+  // default would hide it by restricting to 2026-01-01).
+  const excluded = (await get("?status=excluded&measureId=flu_vaccine").then((r) => r!.json())) as Array<{ evaluationPeriod: string }>;
+  assert.ok(excluded.some((c) => c.evaluationPeriod === "2025-07-01"), "prior-cycle excluded case is shown in the excluded tab");
+
+  // Open tab still defaults to the current cycle only.
+  const open = (await get("?status=open&measureId=flu_vaccine").then((r) => r!.json())) as Array<{ evaluationPeriod: string }>;
+  assert.deepEqual(open.map((c) => c.evaluationPeriod), ["2026-01-01"], "open tab stays on the current cycle");
+});
