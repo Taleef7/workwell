@@ -121,7 +121,11 @@ export default function ProgramDetailPage() {
           setDrivers({ bySite: [], byRole: [], byOutcomeReason: [] });
         }
         try {
-          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=30`);
+          // 90-day lookahead (#150 M8): a 30-day horizon is too narrow for annual measures (a 365-day
+          // window), so almost no compliant employee crosses into "due soon" within it and the predicted
+          // rate is always identical to the current rate. A quarter-ahead horizon surfaces real upcoming
+          // expirations, so the projection is meaningful instead of a passthrough.
+          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`);
           setRiskOutlook(outlook);
         } catch {
           setRiskOutlook(null);
@@ -211,7 +215,7 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 30 days)</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <div className="rounded border border-orange-200 bg-orange-50 p-3 dark:border-orange-900 dark:bg-orange-950/40">
                 <p className="text-xs text-orange-800 dark:text-orange-300">Upcoming due soon</p>
@@ -274,7 +278,7 @@ export default function ProgramDetailPage() {
                       <tr>
                         <th className="py-1 pr-3">Site</th>
                         <th className="py-1 pr-3">Current rate</th>
-                        <th className="py-1 pr-3">Predicted 30d</th>
+                        <th className="py-1 pr-3">Predicted 90d</th>
                         <th className="py-1 pr-3">Expiring</th>
                       </tr>
                     </thead>

@@ -239,19 +239,23 @@ export default function RunsPage() {
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
+    // Clear the prior run's detail first so a slow fetch can't leave another run's outcomes/logs
+    // showing under the newly-selected run (#150 M5). Then fetch summary + logs + outcomes together
+    // and set them atomically.
+    setRunOutcomes([]);
+    setRunLogs([]);
     try {
-      const [summary, logs] = await Promise.all([
+      const [summary, logs, outcomes] = await Promise.all([
         api.get<RunSummary>(`/api/runs/${selectedRunId}`),
-        api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`)
+        api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`),
+        api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`).catch(() => [] as RunOutcomeRow[])
       ]);
+      // If the user switched runs while this was in flight, drop the stale result — otherwise a slow
+      // response could overwrite the newer run's data (last-writer-wins across rapid switches).
+      if (selectedRunIdRef.current !== selectedRunId) return;
       setSelectedRun(summary);
       setRunLogs(logs);
-      try {
-        const outcomes = await api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`);
-        setRunOutcomes(outcomes);
-      } catch {
-        setRunOutcomes([]);
-      }
+      setRunOutcomes(outcomes);
       setInsightDismissed(false);
     } catch (err) {
       // A deep-linked runId (?runId=...) that no longer exists or is invalid

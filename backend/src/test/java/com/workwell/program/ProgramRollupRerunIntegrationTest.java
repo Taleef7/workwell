@@ -78,6 +78,42 @@ class ProgramRollupRerunIntegrationTest extends AbstractIntegrationTest {
                 .containsExactly(populationRun);
     }
 
+    /**
+     * #150 H4 (covered by the same C4 scope-type exclusion): a single-subject CASE rerun must not
+     * become the "latest run" the Top Sites / Top Roles drivers are computed from — otherwise a rerun
+     * that verified its subject COMPLIANT leaves the OVERDUE-only drivers empty ("—" on the overview).
+     */
+    @Test
+    void caseRerunDoesNotEmptyTheTopDrivers() {
+        UUID measureId = jdbcTemplate.queryForObject(
+                "SELECT id FROM measures WHERE name = ?", UUID.class, "Audiogram");
+        UUID measureVersionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM measure_versions WHERE measure_id = ? AND status = 'Active' "
+                        + "ORDER BY created_at DESC LIMIT 1",
+                UUID.class, measureId);
+        UUID empOverdue = insertEmployee("H4 Overdue");
+
+        // Population run (ALL_PROGRAMS): the overdue employee at Plant A / Welder is the driver.
+        UUID populationRun = insertRun("ALL_PROGRAMS", Instant.parse("2026-06-13T00:00:00Z"));
+        insertOutcome(populationRun, empOverdue, measureVersionId, "OVERDUE");
+
+        // A NEWER single-subject CASE rerun-to-verify that found the subject COMPLIANT (the case closed).
+        // If this were picked as the latest run, the OVERDUE-only drivers would be EMPTY (the H4 symptom).
+        UUID caseRerun = insertRun("case", Instant.parse("2026-06-14T00:00:00Z"));
+        insertOutcome(caseRerun, empOverdue, measureVersionId, "COMPLIANT");
+
+        ProgramService.TopDrivers drivers = programService.topDrivers(measureId, null, null, null);
+
+        assertThat(drivers.bySite())
+                .as("top sites come from the population run, not the compliant CASE rerun (H4)")
+                .extracting(ProgramService.DriverSite::site)
+                .containsExactly("Plant A");
+        assertThat(drivers.byRole())
+                .as("top roles come from the population run, not the compliant CASE rerun (H4)")
+                .extracting(ProgramService.DriverRole::role)
+                .containsExactly("Welder");
+    }
+
     private UUID insertRun(String scopeType, Instant startedAt) {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
