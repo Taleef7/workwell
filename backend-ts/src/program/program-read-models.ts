@@ -121,6 +121,11 @@ const siteMatcher = (filters: ProgramFilters) => {
 
 const round1 = (compliant: number, total: number) => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
 
+/** Single-subject rerun scopes excluded from program/measure rollups so a CASE/EMPLOYEE
+ *  rerun-to-verify can't skew the rate to 0%/100% (#150 C4 — Java ProgramService parity). */
+const RERUN_SCOPES = new Set(["CASE", "EMPLOYEE"]);
+const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType);
+
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;
   const to = filters.to?.trim() || null;
@@ -129,8 +134,8 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
 
   // ONE bounded query (measure/date filtering pushed into SQL) instead of fanning out a
   // listOutcomes per run across all history. Site filtering stays in the app (directory).
-  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter((r) =>
-    siteMatch(r.subjectId),
+  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
+    (r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -176,7 +181,7 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
     })
-  ).filter((r) => siteMatch(r.subjectId));
+  ).filter((r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType));
   return groupByRun(rows);
 }
 

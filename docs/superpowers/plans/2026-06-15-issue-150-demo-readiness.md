@@ -134,21 +134,23 @@ On branch `fix/issue-150-demo-readiness`.
   binding key). The promote branch keeps the catalog's lean `spec_json` rather than the authored
   one — eval is unaffected (CQL-driven); Studio Spec tab shows the catalog spec.
 
-**C4 — rerun corrupts the program dashboard (Java DONE, backend-ts parity pending):**
+**C4 — rerun corrupts the program dashboard (DONE, both stacks, verified):**
 - Root cause: all three rollups in `ProgramService` (`listPrograms` latest_run CTE, `trend`
   outcome_based, `topDrivers` latest-run pick) selected the latest run by `started_at` regardless
   of `scope_type`, so a single-subject CASE/EMPLOYEE rerun-to-verify became the measure's "latest
   run" and crashed the rate to 0%/100%. Added `AND r.scope_type NOT IN ('CASE','EMPLOYEE')` to all
-  three. Backend compiles; SQL is a literal predicate on an existing column (no new bind params).
-- **Testing gap noted:** `ProgramControllerTest` mocks `ProgramService` (no DB-backed Java test
-  exercises this SQL). backend-ts `programs.test.ts` IS DB-backed → the parity fix carries the real
-  C4 regression test there.
-- **backend-ts parity (pending):** `OutcomeWithRun` lacks `scopeType`; thread it through
-  `listOutcomesWithRun` (sqlite + pg stores) and filter in `program-read-models.ts`
-  (`programOverview`/`programTrend`/`programTopDrivers`) + regression test.
+  three (Java).
+- **backend-ts parity:** threaded `runScopeType` through `OutcomeWithRun` + both store
+  `listOutcomesWithRun` impls (sqlite/pg), and filter `isPopulationRun` in `program-read-models`
+  (`programOverview` rows + `runsWithOutcomes` → covers overview/trend/top-drivers). Added a
+  DB-backed regression test in `programs.test.ts`.
+- **Verified:** backend-ts typecheck + 404 tests green; Java compiles (no DB-test harness on the
+  Java side — `ProgramControllerTest` mocks the service, so the SQL guard rests on reasoning + the
+  backend-ts regression test + runtime).
 
-**Remaining Batch 2:** C4 backend-ts parity, H1, H4, M1, M5, M6, M8, M9, M10, M13.
+**Commits on `fix/issue-150-demo-readiness`:**
+- `45024bc` fix(web): #150 demo-readiness frontend papercuts + ELM-explorer doc (C1)
+- `b41d374` fix(measure): #150 C2 — promote CMS125/CMS122 to Active + reconcile CMS122 name
+- (this commit) fix(program): #150 C4 — exclude single-subject reruns from program rollups
 
-**Recommend committing now** (Batch 1 + C2 + C4-Java = verified, coherent chunk). Suggested commits:
-(1) frontend/docs Batch 1, (2) C2 promote+rename (Java+TS+docs), (3) C4 Java rollup guards.
-Branch `fix/issue-150-demo-readiness`. Not committed yet (commit when maintainer asks).
+**Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.

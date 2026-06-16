@@ -130,17 +130,19 @@ export class PgOutcomeStore implements OutcomeStore {
     const { rows } = await this.pool.query<{
       run_id: string;
       run_started_at: Date | string;
+      run_scope_type: string;
       subject_id: string;
       measure_id: string;
       status: string;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, o.subject_id, o.measure_id, o.status
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, o.subject_id, o.measure_id, o.status
          FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
       binds,
     );
     return rows.map((r) => ({
       runId: r.run_id,
       runStartedAt: r.run_started_at instanceof Date ? r.run_started_at.toISOString() : r.run_started_at,
+      runScopeType: r.run_scope_type,
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,
