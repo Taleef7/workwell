@@ -103,7 +103,7 @@ export default function LoginPage() {
             Compliance ops, fully in view.
           </h1>
           <p className="text-base leading-7 text-slate-400">
-            Four OSHA measures, deterministic CQL evaluation, and a complete audit trail — one reviewable workspace.
+            OSHA safety and clinical wellness measures, deterministic CQL evaluation, and a complete audit trail — one reviewable workspace.
           </p>
 
           {/* Feature list */}

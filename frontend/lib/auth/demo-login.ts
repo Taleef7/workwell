@@ -2,8 +2,13 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "")
   .trim()
   .replace(/\/+$/, "");
 
-export const DEMO_EMAIL = "cm@workwell.dev";
+export const DEMO_EMAIL = "admin@workwell.dev";
 export const DEMO_PASSWORD = "Workwell123!";
+
+// The public sandbox auto-signs in as a lower-privilege case manager,
+// kept distinct from the documented admin demo account used on the login form.
+export const SANDBOX_EMAIL = "cm@workwell.dev";
+export const SANDBOX_PASSWORD = DEMO_PASSWORD;
 
 export type LoginResponse = {
   token: string;

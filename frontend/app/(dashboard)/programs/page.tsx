@@ -156,7 +156,7 @@ export default function ProgramsPage() {
     }
   }
 
-  const totalEmployeesTracked = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
+  const totalEvaluations = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
   const totalCompliant = programs.reduce((sum, p) => sum + p.compliant, 0);
   const totalEvaluated = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
   const overallComplianceRate = totalEvaluated === 0 ? 0 : Math.round((totalCompliant * 1000) / totalEvaluated) / 10;
@@ -185,7 +185,7 @@ export default function ProgramsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <KpiCard label="Employees tracked" value={String(totalEmployeesTracked)} />
+        <KpiCard label="Evaluations (latest runs)" value={String(totalEvaluations)} />
         <KpiCard label="Overall compliance" value={`${overallComplianceRate.toFixed(1)}%`} />
         <KpiCard label="Open cases" value={String(openCases)} />
         <KpiCard label="Last run" value={lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
@@ -306,7 +306,7 @@ export default function ProgramsPage() {
       <ConfirmDialog
         open={showRunConfirm}
         title="Run all active programs?"
-        description="This evaluates every tracked employee across all 4 active measures. It cannot be undone, though results are recomputed on each run."
+        description={`This evaluates every tracked employee across all ${programs.length} active measures. It cannot be undone, though results are recomputed on each run.`}
         confirmLabel="Run all measures"
         cancelLabel="Cancel"
         onCancel={() => setShowRunConfirm(false)}
@@ -377,7 +377,7 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
           <YAxis
             tickFormatter={(v: number) => `${v}%`}
-            domain={["auto", 100]}
+            domain={[0, 100]}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             axisLine={false}
             tickLine={false}

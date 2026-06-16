@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Circle, Loader2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
-import { DEMO_EMAIL, DEMO_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
+import { SANDBOX_EMAIL, SANDBOX_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 
@@ -36,7 +36,7 @@ export default function SandboxPage() {
       setError(null);
 
       try {
-        const payload = await signInWithCredentials(DEMO_EMAIL, DEMO_PASSWORD);
+        const payload = await signInWithCredentials(SANDBOX_EMAIL, SANDBOX_PASSWORD);
         if (!active) return;
         login(payload.token, payload.email, payload.role);
         router.replace("/programs");

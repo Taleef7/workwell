@@ -195,7 +195,11 @@ export default function RunsPage() {
     try {
       const data = await api.get<MeasureOption[]>("/api/measures");
       setMeasures(data);
-      setRunMeasureId((current) => current || (data.length > 0 ? data[0].id : ""));
+      setRunMeasureId((current) => {
+        if (current) return current;
+        const firstRunnable = data.find((m) => normalizeEnumValue(m.status) === "ACTIVE");
+        return firstRunnable ? firstRunnable.id : "";
+      });
     } catch {
       setMeasures([]);
     }
@@ -559,10 +563,12 @@ export default function RunsPage() {
   const runMeasureOptions = useMemo(
     () => [
       { value: "", label: "Select a measure" },
-      ...measures.map((measure) => ({
-        value: measure.id,
-        label: `${measure.name} v${measure.version} (${labelFor(MEASURE_STATUS_LABELS, measure.status)})`,
-      })),
+      ...measures
+        .filter((measure) => normalizeEnumValue(measure.status) === "ACTIVE")
+        .map((measure) => ({
+          value: measure.id,
+          label: `${measure.name} ${measure.version} (${labelFor(MEASURE_STATUS_LABELS, measure.status)})`,
+        })),
     ],
     [measures],
   );
