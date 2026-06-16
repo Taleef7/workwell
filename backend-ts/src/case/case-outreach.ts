@@ -1,9 +1,10 @@
 /**
  * Case outreach (#107) — TS port of CaseFlowService.previewOutreach / sendOutreach /
- * updateOutreachDelivery. Templates resolve to the built-in default (the DB-backed
- * outreach_templates + admin CRUD live in the admin module, #108 — until then
- * templateId is honoured but always resolves to the default, matching Java's
- * resolveByIdOrDefault fallback).
+ * updateOutreachDelivery. Templates resolve to a built-in default chosen by the case's OUTCOME
+ * bucket (#150 M1 — parity with Java's resolveForOutcome): OVERDUE/MISSING_DATA/DUE_SOON each get a
+ * fitting message, falling back to the generic reminder. (The DB-backed outreach_templates + admin
+ * CRUD live in the admin module; an explicit templateId still resolves to the outcome default here,
+ * matching Java's resolveByIdOrDefault fallback when the id isn't found.)
  *
  * Send/delivery are state-changing, so they follow the same event-before-patch
  * ordering as the other actions (recordCaseEvent writes the case_action + audit_event
@@ -15,12 +16,48 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { simulatedEmailService, type EmailService } from "./email-service.ts";
 
-const DEFAULT_TEMPLATE = {
-  id: null as string | null,
-  name: "Default Template",
+interface OutreachTemplateContent {
+  id: string | null;
+  name: string;
+  subject: string;
+  bodyText: string;
+}
+
+const DEFAULT_TEMPLATE: OutreachTemplateContent = {
+  id: null,
+  name: "General Compliance Reminder",
   subject: "Outreach Reminder for {{measureName}}",
   bodyText: "Hello {{employeeName}}, please complete required follow-up for {{measureName}}.",
 };
+
+// Outcome-aware default templates (#150 M1): the auto-selected message matches the case's outcome
+// bucket instead of always sending one generic template — parity with Java's resolveForOutcome
+// (which picks the OUTREACH template whose name matches the outcome). Names mirror the Java seed.
+const OUTREACH_TEMPLATES: Record<string, OutreachTemplateContent> = {
+  OVERDUE: {
+    id: null,
+    name: "Overdue Outreach",
+    subject: "Action Needed: Overdue {{measureName}} Follow-up",
+    bodyText: "Hello {{employeeName}}, your {{measureName}} requirement is overdue. Please coordinate with occupational health to schedule it as soon as possible.",
+  },
+  MISSING_DATA: {
+    id: null,
+    name: "Missing Data Follow-Up",
+    subject: "Action Needed: Missing Documentation for {{measureName}}",
+    bodyText: "Hello {{employeeName}}, we could not complete your {{measureName}} review because documentation is missing. Please provide the required records or contact the clinic for assistance.",
+  },
+  DUE_SOON: {
+    id: null,
+    name: "General Compliance Reminder",
+    subject: "Reminder: {{measureName}} Due Soon",
+    bodyText: "Hello {{employeeName}}, your {{measureName}} requirement is due soon. Please complete the follow-up before {{dueDate}}.",
+  },
+};
+
+/** The default template matching the case's outcome bucket; falls back to the generic reminder. */
+function templateForOutcome(outcomeStatus: string | null | undefined): OutreachTemplateContent {
+  return OUTREACH_TEMPLATES[(outcomeStatus ?? "").trim().toUpperCase()] ?? DEFAULT_TEMPLATE;
+}
 
 export interface OutreachPreview {
   templateId: string | null;
@@ -107,7 +144,7 @@ export async function previewOutreach(
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
-  const t = DEFAULT_TEMPLATE;
+  const t = templateForOutcome(c.currentOutcomeStatus);
   return {
     templateId: t.id,
     templateName: t.name,
@@ -130,7 +167,7 @@ export async function sendOutreach(
   if (!existing) return null;
   const email = deps.email ?? simulatedEmailService;
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
-  const t = DEFAULT_TEMPLATE;
+  const t = templateForOutcome(existing.currentOutcomeStatus);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const toAddress = `${existing.employeeId}@workwell-demo.dev`; // deterministic, non-routable

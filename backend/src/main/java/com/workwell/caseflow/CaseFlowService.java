@@ -392,7 +392,7 @@ public class CaseFlowService {
             return Optional.empty();
         }
         CaseDetail c = detail.get();
-        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByIdOrDefault(templateId);
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveForOutcome(templateId, c.currentOutcomeStatus());
         String subjectTemplate = template == null ? "Outreach Reminder for {{measureName}}" : template.subject();
         String bodyTemplate = template == null
                 ? "Hello {{employeeName}}, please complete required follow-up for {{measureName}}."
@@ -419,7 +419,7 @@ public class CaseFlowService {
         }
 
         CaseContext existing = context.get();
-        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveByIdOrDefault(templateId);
+        OutreachTemplateService.OutreachTemplate template = outreachTemplateService.resolveForOutcome(templateId, existing.currentOutcomeStatus());
         String nextAction = "Wait for employee follow-up, then rerun to verify closure.";
         jdbcTemplate.update(
                 "UPDATE cases SET status = ?, next_action = ?, updated_at = NOW() WHERE id = ?",
