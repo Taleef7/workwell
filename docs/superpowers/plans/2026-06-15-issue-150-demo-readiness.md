@@ -238,8 +238,15 @@ window; the bug was Java `CqlEvaluationService#buildEvidenceJson` hardcoding `36
 (DRY'd with `bucketPeriod`); `last_exam_date` was already eval-date-anchored. Regression test: CMS125 carries
 `compliance_window_days = 820`. (M6's eval-date half — rerun as-of today — was already done in Phase 2/parity.)
 
-**H1 now at Java ↔ backend-ts parity, M6 included.** One item remains: **D** (Flyway cleanup migration —
-production data; **Taleef explicitly authorized it**, overriding the CLAUDE.md schema-ownership rule for this
-case), designed audited + idempotent and bundled into the H1 PR. Optional: A period selector in the frontend.
+**D — DONE as `V022__close_stale_period_cases.sql`** (Taleef authorized the production-data migration).
+Single atomic CTE: `UPDATE cases … RETURNING` → status `CLOSED` (`closed_reason='STALE_PERIOD_CLEANUP'`) for
+OPEN/IN_PROGRESS cases on non-anchor periods (not `-01-01`/`-07-01`), feeding one `CASE_CLOSED_STALE_PERIOD`
+audit_event per case. No-op + idempotent on fresh DBs (CI/local seed → 0 rows). **Read-only validated vs live
+Neon:** 5,019 open / 5,019 stale / 0 anchored across 31 daily periods = **261** real cohorts duplicated by the
+cron; the next post-deploy run re-creates the 261 at the cycle anchor. Applies on merge → deploy (Flyway,
+transactional). Local Testcontainers apply-check blocked only by Docker-not-running; CI validates.
 
-**Remaining Batch 2:** H1 (D only), H4, M1, M5, M8, M9, M10, M13.
+**H1 COMPLETE** (Phase 1 + Phase 2 + A + M6 + D, Java ↔ backend-ts parity). Next: open the H1 PR → Codex.
+Optional polish: an A period selector in the frontend.
+
+**Remaining Batch 2:** H4, M1, M5, M8, M9, M10, M13.
