@@ -1,5 +1,13 @@
 # Journal
 
+## 2026-06-16 — #150 H1 merged + deployed (V022 verified live); H4 verified + guarded
+
+**H1 (PR #152) merged to `main` and deployed.** The deploy applied `V022` to live Neon; **verified read-only afterward: `open` cases 5,019 → 0**, all 5,019 closed with `closed_reason='STALE_PERIOD_CLEANUP'` / `closed_by='system:migration-V022'`, and **5,019 `CASE_CLOSED_STALE_PERIOD` audit events** written (one per case — audit invariant held). The worklist flood is gone on production; the next run repopulates the ~261 genuine cohorts at correct cycle anchors. Branch deleted; `main` is clean.
+
+**H4 (Top Sites/Roles "—" on the overview) — verified already fixed by C4, now regression-guarded.** Root cause was the same single-subject CASE/EMPLOYEE rerun becoming a measure's "latest run": `ProgramService.topDrivers` already carried C4's `UPPER(r.scope_type) NOT IN ('CASE','EMPLOYEE')` exclusion (PR #151), but `ProgramRollupRerunIntegrationTest` only covered `listPrograms` + `trend`, not the drivers. Added `caseRerunDoesNotEmptyTheTopDrivers`: a population run with an OVERDUE subject + a newer CASE rerun that verified that subject COMPLIANT — if the rerun were picked as latest, the OVERDUE-only Top Sites/Roles would be empty (the exact "—" symptom). The test fails without the C4 exclusion and passes with it (green vs real Postgres). **Remaining #150: M1, M5, M8 (mediums), M9/M10/M13 (post-demo).**
+
+---
+
 ## 2026-06-16 — Issue #150 H1: `backend-ts` parity (cycle-bucketing + worklist current-cycle + M6 eval-as-of-today)
 
 Continued on `fix/issue-150-worklist-h1`. The Java side of H1 was already complete + tested (Phase 1 `CompliancePeriod` + Phase 2 root fix + Phase A worklist default — commits `c89de44`/`00788ee`/`9157c57`). This is the **`backend-ts` parity pass** so the TS stack stays idempotent across the #109 cutover — without it the H1 fix would silently regress the moment the JVM is retired.
