@@ -78,8 +78,35 @@ class CaseWorklistPeriodIntegrationTest extends AbstractIntegrationTest {
                 .containsExactly("2026-01-01");
     }
 
+    @Test
+    void terminalTabsShowFullHistoryNotJustTheCurrentCycle() {
+        UUID measureVersionId = jdbcTemplate.queryForObject(
+                "SELECT mv.id FROM measure_versions mv JOIN measures m ON mv.measure_id = m.id "
+                        + "WHERE m.name = 'Audiogram' AND mv.status = 'Active' ORDER BY mv.created_at DESC LIMIT 1",
+                UUID.class);
+        UUID runId = insertRun();
+        // OPEN at the current cycle anchor + an EXCLUDED case in a PRIOR cycle.
+        insertOpenCase(insertEmployee("Open Current"), measureVersionId, "2026-01-01", runId);
+        insertTerminalCase(insertEmployee("Excluded Prior"), measureVersionId, "2025-01-01", runId, "EXCLUDED", false);
+
+        // The excluded tab (no period) must show FULL history, not be restricted to the open cycle (Codex P2).
+        assertThat(listCases("excluded", null))
+                .as("excluded tab shows prior-cycle excluded cases (full history)")
+                .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
+                .contains("2025-01-01");
+        // The open tab still defaults to the current cycle only.
+        assertThat(listCases("open", null))
+                .as("open tab stays on the current cycle")
+                .extracting(CaseFlowService.CaseSummary::evaluationPeriod)
+                .containsExactly("2026-01-01");
+    }
+
     private List<CaseFlowService.CaseSummary> listCases(String period) {
-        return caseFlowService.listCases("open", null, null, null, null, null, null, null, period, 100, 0);
+        return listCases("open", period);
+    }
+
+    private List<CaseFlowService.CaseSummary> listCases(String status, String period) {
+        return caseFlowService.listCases(status, null, null, null, null, null, null, null, period, 100, 0);
     }
 
     private UUID insertRun() {

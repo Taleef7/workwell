@@ -18,6 +18,7 @@ import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewDeps } from "./impact-preview.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 const dbPath = join(tmpdir(), `workwell-impact-${crypto.randomUUID()}.sqlite`);
 let db: import("@mieweb/cloud").CloudDatabase;
@@ -82,21 +83,25 @@ test("previews the population without persisting; counts + breakdowns + audit", 
 });
 
 test("case impact: non-compliant with no existing case → wouldCreate; with an open case → wouldUpdate", async () => {
+  // A mid-cycle date: a real run persists cases under the CYCLE anchor, and the preview must look up
+  // existing cases at that bucket (not the raw date) — otherwise it mislabels them wouldCreate (Codex P2).
   const period = "2091-02-02";
+  const cyclePeriod = bucketPeriodForMeasure("audiogram", period); // → "2091-01-01"
+  assert.notEqual(cyclePeriod, period, "the test date is intentionally mid-cycle (raw ≠ bucket)");
   const first = await previewImpact(deps, audiogram(), { evaluationDate: period });
   const nonCompliant = (first.outcomeCounts.DUE_SOON ?? 0) + (first.outcomeCounts.OVERDUE ?? 0) + (first.outcomeCounts.MISSING_DATA ?? 0);
   assert.equal(first.caseImpact.wouldUpdate, 0, "no existing cases yet");
   assert.equal(first.caseImpact.wouldCreate, nonCompliant, "all non-compliant would create");
 
   if (nonCompliant > 0) {
-    // Seed an open case for a real run so one non-compliant subject already has a case.
+    // Seed open cases the way a real run persists them: at the CYCLE anchor, not the raw eval date.
     const run = await new SqliteRunStore(db).createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t", requestedScope: {}, measurementPeriodStart: period, measurementPeriodEnd: period });
-    // find a non-compliant subject from a fresh preview's breakdown is hard; seed cases for all 4 at this period
     for (const e of population) {
-      await new SqliteCaseStore(db).upsertFromOutcome({ runId: run.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+      await new SqliteCaseStore(db).upsertFromOutcome({ runId: run.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: cyclePeriod, outcomeStatus: "OVERDUE" });
     }
+    // Previewing the mid-cycle date must find those bucketed cases → wouldUpdate, not wouldCreate.
     const second = await previewImpact(deps, audiogram(), { evaluationDate: period });
-    assert.equal(second.caseImpact.wouldCreate, 0, "all non-compliant now have open cases");
+    assert.equal(second.caseImpact.wouldCreate, 0, "all non-compliant now have open cases (matched at the cycle bucket)");
     assert.equal(second.caseImpact.wouldUpdate, nonCompliant, "non-compliant now update existing cases");
   }
 });

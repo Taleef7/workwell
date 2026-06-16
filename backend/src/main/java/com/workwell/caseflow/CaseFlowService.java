@@ -195,15 +195,20 @@ public class CaseFlowService {
             params.add(pattern);
         }
         if (period == null || period.isBlank()) {
-            // #150 H1 (A): default the worklist to each measure's CURRENT compliance cycle (its
+            // #150 H1 (A): default the OPEN worklist to each measure's CURRENT compliance cycle (its
             // latest evaluation_period) so it isn't flooded by prior cycles' cases. The MAX is taken
             // over ACTIONABLE cases only (status OPEN/IN_PROGRESS) — not closed_at, because EXCLUDED
             // cases keep closed_at = NULL (upsertExcludedCase) and V022 only closes OPEN/IN_PROGRESS
             // stale rows. A stale EXCLUDED/closed row at a raw daily period (lexically later than the
             // cycle anchor) must not win the MAX and hide the current cycle's open cases (Codex P1).
-            sql.append(" AND c.evaluation_period = (SELECT MAX(c2.evaluation_period) "
-                    + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id "
-                    + "AND c2.status IN ('OPEN', 'IN_PROGRESS'))");
+            // The default applies ONLY to the open/actionable tab — the closed/excluded/all tabs (which
+            // the frontend also calls without a period) must show full history, not be restricted to a
+            // cycle that has open cases (else terminal history vanishes once work is resolved; Codex P2).
+            if ("open".equals(normalizedStatusFilter)) {
+                sql.append(" AND c.evaluation_period = (SELECT MAX(c2.evaluation_period) "
+                        + "FROM cases c2 WHERE c2.measure_version_id = c.measure_version_id "
+                        + "AND c2.status IN ('OPEN', 'IN_PROGRESS'))");
+            }
         } else if (!"all".equalsIgnoreCase(period.trim())) {
             sql.append(" AND c.evaluation_period = ?");
             params.add(period.trim());
