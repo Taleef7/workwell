@@ -453,7 +453,9 @@ public class CaseFlowService {
                     existing.employeeId()
             );
             VerificationMeasure verificationMeasure = loadVerificationMeasure(existing.measureVersionId());
-            LocalDate evaluationDate = verificationEvaluationDate(existing.evaluationPeriod());
+            // #150 H1/M6: re-evaluate as of TODAY (current compliance), not the case's
+            // cycle-anchored evaluation_period; the period is kept as the case's upsert key.
+            LocalDate evaluationDate = LocalDate.now();
             verificationRunId = createVerificationRun(
                     caseId,
                     existing.measureVersionId(),
@@ -1379,14 +1381,6 @@ public class CaseFlowService {
             );
         } catch (EmptyResultDataAccessException ex) {
             throw new IllegalStateException("Unable to load verification measure for " + measureVersionId, ex);
-        }
-    }
-
-    private LocalDate verificationEvaluationDate(String evaluationPeriod) {
-        try {
-            return LocalDate.parse(evaluationPeriod);
-        } catch (Exception ex) {
-            return LocalDate.now();
         }
     }
 

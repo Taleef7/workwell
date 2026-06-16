@@ -325,7 +325,7 @@ public class AllProgramsRunService {
                     runId.toString(),
                     target.measureName(),
                     target.measureVersion(),
-                    evaluationDate.toString(),
+                    cqlEvaluationService.bucketPeriod(target.measureName(), evaluationDate),
                     List.of()
             );
         }
@@ -586,7 +586,7 @@ public class AllProgramsRunService {
                 runId.toString(),
                 measureName,
                 measureVersion == null ? "v1.0" : measureVersion,
-                evaluationDate.toString(),
+                cqlEvaluationService.bucketPeriod(measureName, evaluationDate),
                 outcomes
         );
     }
