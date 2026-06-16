@@ -168,4 +168,34 @@ upgraded DB (generic description, empty `requiredDataElements`), so measure-deta
 / traceability differed by seed history. Hoisted the `spec` build above the existing-row check and
 set `spec_json` to the same authored spec in the promote `UPDATE` for both CMS125 and CMS122.
 
+### 2026-06-15 — Batch 2 H1 design (worklist flood) — branch `fix/issue-150-worklist-h1`
+
+**Problem:** the nightly cron (`0 0 2 * * *` → `runScheduledAllPrograms` → `runAllPrograms(asOf=today)`)
+mints a new `evaluation_period` (= the run date) every night. Cases key on
+`(employee, measure_version, evaluation_period)`, so each night creates a fresh cohort and old
+cohorts never close → 4,703 perpetually-open cases, all "SLA Breached."
+
+**Root fix (chosen — per-measure cadence, decoupled from the as-of date):**
+- A recurring run still **computes compliance as of today** (CQL + outcome numbers UNCHANGED —
+  the ~78% must not move; asserted in tests). Only the `evaluation_period` that *buckets*
+  outcomes/cases changes: it's anchored to the measure's **current compliance cycle**, so every
+  night's run updates the *same* cases (restores the idempotency contract, DATA_MODEL §4).
+- Cycle (`CompliancePeriod`): seasonal (flu) → flu-season (Jul–Jun); window ≤ 200d (HbA1c 180)
+  → half-year; else (365 / 820 / value-based) → calendar year. Anchor returned as a **LocalDate**
+  so the stored `evaluation_period` stays date-shaped (existing parsers keep working).
+
+**Phases:**
+1. `CompliancePeriod` helper + unit tests (pure; no blast radius). ← this commit
+2. Wire it into the run→persist seam (outcomes + cases `evaluation_period`) keeping as-of=today;
+   update affected integration tests (they assert run-date periods). Idempotency test: a second
+   nightly run creates **0** new cases.
+3. **A** — default `/cases` to the current cycle + a period selector (backend `listCases` default +
+   frontend + backend-ts parity).
+4. **backend-ts parity** for the period derivation + case bucketing.
+5. **D** — one-time Flyway migration to resolve/archive pre-fix stale-period cases (live cleanup).
+6. **M6** — `why_flagged` day-math derives from the same as-of date as the CQL (kills 439-vs-60).
+
+**Safeguard:** compliance compute path untouched → demo numbers stable; only case bucketing + the
+worklist default change.
+
 **Remaining Batch 2:** H1, H4, M1, M5, M6, M8, M9, M10, M13.
