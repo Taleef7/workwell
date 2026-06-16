@@ -23,40 +23,54 @@ interface OutreachTemplateContent {
   bodyText: string;
 }
 
-const DEFAULT_TEMPLATE: OutreachTemplateContent = {
-  id: null,
-  name: "General Compliance Reminder",
-  subject: "Outreach Reminder for {{measureName}}",
-  bodyText: "Hello {{employeeName}}, please complete required follow-up for {{measureName}}.",
-};
-
-// Outcome-aware default templates (#150 M1): the auto-selected message matches the case's outcome
-// bucket instead of always sending one generic template — parity with Java's resolveForOutcome
-// (which picks the OUTREACH template whose name matches the outcome). Names mirror the Java seed.
-const OUTREACH_TEMPLATES: Record<string, OutreachTemplateContent> = {
-  OVERDUE: {
-    id: null,
-    name: "Overdue Outreach",
-    subject: "Action Needed: Overdue {{measureName}} Follow-up",
-    bodyText: "Hello {{employeeName}}, your {{measureName}} requirement is overdue. Please coordinate with occupational health to schedule it as soon as possible.",
+// Outreach templates keyed by NAME/id to mirror the Java seeds (V007/V008), so both stacks select the
+// SAME template per (outcome, measure) — see templateForOutcome (#150 M1). Bodies use {{...}} placeholders
+// (rendered per case) so the message stays measure-specific.
+const TEMPLATES = {
+  general: {
+    id: "11111111-0000-0000-0000-000000000003",
+    name: "General Compliance Reminder",
+    subject: "Outreach Reminder for {{measureName}}",
+    bodyText: "Hello {{employeeName}}, please review your pending {{measureName}} requirement and complete the required follow-up as soon as possible.",
   },
-  MISSING_DATA: {
-    id: null,
+  hearing: {
+    id: "11111111-0000-0000-0000-000000000001",
+    name: "Hearing Conservation Overdue Outreach",
+    subject: "Action Needed: {{measureName}} Follow-up",
+    bodyText: "Hello {{employeeName}}, your {{measureName}} requirement needs attention. Please coordinate with occupational health to schedule it.",
+  },
+  tb: {
+    id: "11111111-0000-0000-0000-000000000002",
+    name: "TB Surveillance Follow-Up",
+    subject: "Upcoming {{measureName}} Due Date",
+    bodyText: "Hello {{employeeName}}, your {{measureName}} screening is due soon. Please book your screening within the compliance window.",
+  },
+  missing: {
+    id: "11111111-0000-0000-0000-000000000005",
     name: "Missing Data Follow-Up",
     subject: "Action Needed: Missing Documentation for {{measureName}}",
     bodyText: "Hello {{employeeName}}, we could not complete your {{measureName}} review because documentation is missing. Please provide the required records or contact the clinic for assistance.",
   },
-  DUE_SOON: {
-    id: null,
-    name: "General Compliance Reminder",
-    subject: "Reminder: {{measureName}} Due Soon",
-    bodyText: "Hello {{employeeName}}, your {{measureName}} requirement is due soon. Please complete the follow-up before {{dueDate}}.",
-  },
-};
+} satisfies Record<string, OutreachTemplateContent>;
 
-/** The default template matching the case's outcome bucket; falls back to the generic reminder. */
-function templateForOutcome(outcomeStatus: string | null | undefined): OutreachTemplateContent {
-  return OUTREACH_TEMPLATES[(outcomeStatus ?? "").trim().toUpperCase()] ?? DEFAULT_TEMPLATE;
+const DEFAULT_TEMPLATE: OutreachTemplateContent = TEMPLATES.general;
+
+/**
+ * Outcome-aware default template (#150 M1) — mirrors Java `OutreachTemplateService.templateNameForOutcome`
+ * so the two stacks (and the manual + auto-notification paths) pick the SAME template:
+ *   MISSING_DATA → missing-data; DUE_SOON → the measure's reminder (hearing/TB, else general);
+ *   OVERDUE/other → the generic General Compliance Reminder (never a measure-specific body).
+ */
+function templateForOutcome(outcomeStatus: string | null | undefined, measureName: string | null | undefined): OutreachTemplateContent {
+  const outcome = (outcomeStatus ?? "").trim().toUpperCase();
+  const measure = (measureName ?? "").toLowerCase();
+  if (outcome === "MISSING_DATA") return TEMPLATES.missing;
+  if (outcome === "DUE_SOON") {
+    if (measure.includes("audiogram") || measure.includes("hearing")) return TEMPLATES.hearing;
+    if (measure.includes("tb")) return TEMPLATES.tb;
+    return TEMPLATES.general;
+  }
+  return TEMPLATES.general; // OVERDUE + everything else → generic
 }
 
 export interface OutreachPreview {
@@ -144,7 +158,7 @@ export async function previewOutreach(
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
-  const t = templateForOutcome(c.currentOutcomeStatus);
+  const t = templateForOutcome(c.currentOutcomeStatus, measureName);
   return {
     templateId: t.id,
     templateName: t.name,
@@ -167,7 +181,7 @@ export async function sendOutreach(
   if (!existing) return null;
   const email = deps.email ?? simulatedEmailService;
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
-  const t = templateForOutcome(existing.currentOutcomeStatus);
+  const t = templateForOutcome(existing.currentOutcomeStatus, measureName);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const toAddress = `${existing.employeeId}@workwell-demo.dev`; // deterministic, non-routable

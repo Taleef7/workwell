@@ -52,44 +52,40 @@ public class OutreachTemplateService {
     }
 
     /**
-     * Outcome-aware default selection (#150 M1): when the operator hasn't picked a template, choose
-     * the OUTREACH template whose name matches the case's outcome bucket (OVERDUE → "overdue",
-     * MISSING_DATA → "missing", DUE_SOON → "reminder") so the message fits the situation, instead of
-     * always sending the newest/first template. Falls back to the first OUTREACH template, then the
-     * first template. An explicit {@code templateId} always wins (the operator's choice is respected).
+     * The canonical template NAME for a (outcome, measure) (#150 M1). Shared by the auto-notification
+     * path and the manual preview/send default so both pick the SAME template:
+     *   MISSING_DATA → the missing-data template; DUE_SOON → the measure's reminder (hearing/TB, else
+     *   general); OVERDUE/other → the General Compliance Reminder — a generic, measure-AGNOSTIC body,
+     *   not a measure-specific one (which would render the wrong measure's copy for, e.g., a TB case).
      */
-    public OutreachTemplate resolveForOutcome(UUID templateId, String outcomeStatus) {
+    public String templateNameForOutcome(String outcomeStatus, String measureName) {
+        String normalizedMeasure = measureName == null ? "" : measureName.toLowerCase(Locale.ROOT);
+        return switch (outcomeStatus == null ? "" : outcomeStatus.trim().toUpperCase(Locale.ROOT)) {
+            case "MISSING_DATA" -> "Missing Data Follow-Up";
+            case "DUE_SOON" -> {
+                if (normalizedMeasure.contains("audiogram") || normalizedMeasure.contains("hearing")) {
+                    yield "Hearing Conservation Overdue Outreach";
+                }
+                if (normalizedMeasure.contains("tb")) {
+                    yield "TB Surveillance Follow-Up";
+                }
+                yield "General Compliance Reminder";
+            }
+            default -> "General Compliance Reminder"; // OVERDUE + everything else → generic
+        };
+    }
+
+    /**
+     * Outcome-aware default selection (#150 M1): an explicit {@code templateId} wins; otherwise pick the
+     * template matching the case's outcome bucket + measure ({@link #templateNameForOutcome}) — the same
+     * mapping the auto-notification path uses, so the operator's manual default agrees with what was
+     * auto-queued instead of always sending the newest/first template.
+     */
+    public OutreachTemplate resolveForOutcome(UUID templateId, String outcomeStatus, String measureName) {
         if (templateId != null) {
             return resolveByIdOrDefault(templateId);
         }
-        List<OutreachTemplate> templates = listTemplates();
-        if (templates.isEmpty()) {
-            return null;
-        }
-        String keyword = switch (outcomeStatus == null ? "" : outcomeStatus.trim().toUpperCase(Locale.ROOT)) {
-            case "MISSING_DATA" -> "missing";
-            case "OVERDUE" -> "overdue";
-            case "DUE_SOON" -> "reminder";
-            default -> null;
-        };
-        if (keyword != null) {
-            for (OutreachTemplate t : templates) {
-                if (isOutreachType(t) && t.name() != null && t.name().toLowerCase(Locale.ROOT).contains(keyword)) {
-                    return t;
-                }
-            }
-        }
-        for (OutreachTemplate t : templates) {
-            if (isOutreachType(t)) {
-                return t;
-            }
-        }
-        return templates.get(0);
-    }
-
-    /** OUTREACH-type templates are the auto-selectable ones (APPOINTMENT_REMINDER/ESCALATION are not). */
-    private static boolean isOutreachType(OutreachTemplate t) {
-        return t.type() == null || "OUTREACH".equalsIgnoreCase(t.type());
+        return resolveByNameOrDefault(templateNameForOutcome(outcomeStatus, measureName));
     }
 
     public OutreachTemplate resolveByNameOrDefault(String templateName) {

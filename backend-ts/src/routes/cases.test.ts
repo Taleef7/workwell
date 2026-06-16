@@ -224,9 +224,9 @@ test("GET outreach/preview renders the default template with the case's employee
   const p = (await res!.json()) as { templateName: string; subject: string; bodyText: string; employeeName: string; measureName: string };
   assert.equal(p.employeeName, "Omar Siddiq");
   assert.equal(p.measureName, "Audiogram");
-  // Omar's case is OVERDUE → the outcome-aware default picks the overdue template (#150 M1).
-  assert.equal(p.templateName, "Overdue Outreach");
-  assert.match(p.subject, /[Oo]verdue/);
+  // Omar's case is OVERDUE → the outcome-aware default picks the generic compliance reminder (Java
+  // parity: OVERDUE never uses a measure-specific body), still rendered with the case's measure/employee.
+  assert.equal(p.templateName, "General Compliance Reminder");
   assert.match(p.subject, /Audiogram/);
   assert.match(p.bodyText, /Omar Siddiq/);
 });
