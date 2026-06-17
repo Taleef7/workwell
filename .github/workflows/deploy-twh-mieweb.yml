@@ -21,8 +21,11 @@ on:
           - "false"
           - "true"
 
+# Shared with reconcile-twh-mieweb.yml: a constant group (NOT keyed on github.ref) so a deploy and a
+# self-heal never run a delete+recreate against the same container at the same time. cancel-in-progress:
+# false → the later run queues behind the in-flight one rather than racing or being dropped.
 concurrency:
-  group: deploy-twh-mieweb-${{ github.ref }}
+  group: twh-mieweb-container-ops
   cancel-in-progress: false
 
 env:
