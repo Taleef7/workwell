@@ -15,15 +15,14 @@
 The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 **One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
 
-| Service | Hostname | Image | Role |
-|---------|----------|-------|------|
-| Frontend | `twh.os.mieweb.org` | `ghcr.io/taleef7/workwell-twh-frontend` | points at the TS backend |
-| Backend API (primary) | `twh-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` | **live** — the de-Java TypeScript backend (`backend-ts/`) |
-| Backend API (rollback) | `twh-api.os.mieweb.org` | `ghcr.io/taleef7/workwell-api` | Java/Spring — still deployed, **instant rollback target** (retired in #109 PR4) |
+| Service | Hostname | Image |
+|---------|----------|-------|
+| Frontend | `twh.os.mieweb.org` | `ghcr.io/taleef7/workwell-twh-frontend` |
+| Backend API | `twh-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` — the de-Java TypeScript backend (`backend-ts/`), the sole backend |
 
-> **#109 blue-green flip (PR3):** the frontend now points at the **TypeScript** backend
-> (`twh-api-ts`). The Java backend (`twh-api`) keeps deploying unchanged as the rollback target.
-> The TS backend runs the `local` mieweb target (`MIEWEB_TARGET=local` — in-process bindings, no
+> **#109 — JVM retired (PR4):** the frontend is served by the **TypeScript** backend (`twh-api-ts`);
+> the Java backend (`twh-api`) has been retired (`backend/` deleted). The TS backend runs the `local`
+> mieweb target (`MIEWEB_TARGET=local` — in-process bindings, no
 > companion services, internal port **8080**) and overrides the DB to Neon via `DATABASE_URL` (the
 > store factory then uses the Pg ceiling, isolated to the `workwell_spike` schema; Java's `public`
 > tables are untouched). The `DATABASE_URL_TWH` secret is a **JDBC** URL (`jdbc:postgresql://…`); the
@@ -226,23 +225,20 @@ Post-deploy smoke checklist (MVP complete surface):
 
 ## Rollback
 
-### Blue-green: roll back to Java (full revert of the flip)
-The Java backend (`twh-api`) is still deployed and current, so rollback is a **full revert of the
-#109 PR3 flip commit** — `git revert <flip-merge-sha>` then push (or "Revert" the PR on GitHub). That
-restores the Java-only deploy: the frontend rebuilds pointing at `${BACKEND_URL}`
-(`https://twh-api.os.mieweb.org`) via `deploy-backend`, and the TS jobs are gone — so the rollback
-**never depends on the (possibly broken) TS deploy**.
+### Roll back to a known-good TS image (Java is retired)
+The Java backend was retired in #109 PR4, so rollback is **redeploying an earlier known-good
+`twh-api-ts` image** (each build is tagged `sha-<SHA>` in GHCR):
+- **Workflow dispatch:** run `deploy-twh-mieweb.yml` via `workflow_dispatch` from the Actions UI at the
+  earlier good SHA with `replace_existing: true` — it rebuilds + redeploys that SHA's images.
+- **Or revert + push:** `git revert <bad-merge-sha>` on `main` re-triggers `deploy-twh-mieweb.yml` with
+  the reverted code.
+- **Or pin a prior image fast (no rebuild):** the self-heal reconciler (`reconcile-twh-mieweb.yml`)
+  and `deploy-mieweb-container.sh` recreate from `:latest`; to pin an *older* image, re-run the deploy
+  at that SHA.
 
-> Do **not** roll back by only repointing the frontend URL while leaving the TS jobs in place:
-> `deploy-frontend` is gated on the TS backend deploy succeeding (so a failed TS deploy preserves the
-> last-working frontend instead of aiming it at a deleted/old `twh-api-ts`). A partial URL edit would
-> therefore be skipped whenever the TS deploy is failing — which is exactly when you need the rollback.
-> Use the full commit revert.
-
-### MIE containers (general)
-- Revert the offending commit on `main` (re-triggers `deploy-twh-mieweb.yml`), or
-- Re-run the deploy workflow via `workflow_dispatch` at an earlier SHA with `replace_existing: true`.
-  Each backend image is also tagged `sha-<SHA>` in GHCR for pinning a known-good build.
+### Neon
+Each schema change is additive (`workwell_spike` self-creates via `CREATE … IF NOT EXISTS` on boot;
+no Flyway). Neon branches can still be promoted from the dashboard if a data rollback is needed.
 
 ### Neon
 Each schema migration creates a branch. Promote the previous branch to main from the Neon dashboard.

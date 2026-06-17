@@ -1,7 +1,7 @@
 # CLAUDE.md — WorkWell Measure Studio
 
 ## What this is
-- Single-developer Spring Boot + Next.js monorepo
+- Single-developer TypeScript + Next.js monorepo (backend re-platformed off Java/Spring — #96 / ADR-008; JVM retired in #109 PR4)
 - Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
 - Historical sprint window: May 2-17, 2026; active work is now post-merge closeout and polish
 
@@ -11,20 +11,19 @@
 `docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contains the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
-- Backend: Java 21 + Spring Boot 3.x + Gradle Kotlin DSL + PostgreSQL 16 + Flyway
-- CQL/FHIR: HAPI FHIR JPA + `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (see CQF_FHIR_CR_REFERENCE.md)
+- Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local). The Java/Spring backend was retired in #109 PR4 (ADR-008). CQL→ELM history: `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (CQF_FHIR_CR_REFERENCE.md) was the Java path.
 - Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher; see ADR-004) + Monaco
-- AI: Spring AI (OpenAI starter, `spring-ai-openai-spring-boot-starter`); MCP via `io.modelcontextprotocol/java-sdk`
-- Infra: Docker Compose locally; MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI; pnpm
+- AI: OpenAI via the backend-ts AI surfaces (deterministic fallbacks); MCP read-only tools served from the worker
+- Infra: MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI + a self-heal reconciler; pnpm
 
 ## Build & verify
-- Backend: `cd backend; .\gradlew.bat test` — 239 tests; CI shards 8-way. **Never run two backend `gradlew test` concurrently** (shared temp binary-results race).
+- Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` — ~430 tests (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
 - Frontend: `cd frontend; npm run lint; npm run build`
-- Run the app: backend `.\gradlew.bat bootRun`; frontend `npm run dev`
+- Run the app: backend `cd backend-ts; pnpm dev`; frontend `npm run dev`
 
 ## Hard rules
 - Avoid new dependencies unless they are explicitly approved and documented
-- One Spring Boot app, modular packages — no microservices
+- One backend-ts worker, modular `src/` packages — no microservices
 - Spring Application Events + DB audit log — no Kafka or external streaming
 - Auth: user accounts remain hardcoded (no SSO, no real user directory). JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and implemented in Sprint 4 — this replaces the prior "stub auth only" constraint.
 - Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stack. SendGrid wiring exists in the code (Sprint 6) but must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is explicitly set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
@@ -34,9 +33,9 @@
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 
 ## Branch + ownership
-- Backend agent owns `backend/` only
+- Backend agent owns `backend-ts/` only
 - Frontend agent owns `frontend/` only
-- Schema migrations (`backend/src/main/resources/db/migration/`) are mine, never delegated
+- Schema/DDL is mine, never delegated — now the self-creating `workwell_spike` schema (`backend-ts/src/stores/postgres/schema-pg.ts` + the SQLite floor `schema.ts`); the old Java Flyway migrations were deleted with `backend/` in PR4
 - Use a feature branch for follow-up work
 - Merge after my review — no auto-merge
 
@@ -56,7 +55,7 @@
 - Many small commits over few large ones
 
 ## File conventions
-- Java packages: `com.workwell.<module>` (measure, valueset, compile, run, caseflow, audit, fhir, integrations, ai, mcp, notification, config, security, web)
+- backend-ts modules: `backend-ts/src/<area>/` (measure, run, case, audit, fhir, engine, mcp, ai, admin, program, export, auth, config, stores, routes)
 - Frontend routes under `app/(dashboard)/`
 - Daily log: `docs/JOURNAL.md` (newest entry on top, dated YYYY-MM-DD)
 - Decisions: `docs/DECISIONS.md` (numbered ADRs, dated)
@@ -86,9 +85,9 @@
 
 ## Current Focus (as of 2026-06-17)
 
-**The #109 deploy cutover is LIVE. The blue-green flip merged + deployed (PR #159, 2026-06-17), so `https://twh.os.mieweb.org` is now served by the de-Java TypeScript backend (`twh-api-ts`, `backend-ts/`) running on the existing Neon Postgres via the `Pg*Store` ceiling (isolated `workwell_spike` schema). The Java backend (`twh-api`) is still built + deployed as the instant rollback target — nothing destroyed it. Verified live: frontend 200 + its JS bundle wired only to `twh-api-ts`; the §6 smoke ran 19 pass / 0 fail / 2 warn against the live primary; Java's `public` data untouched. The path here: PR1 container entrypoint + image (#155) → store-selection seam (#156) → shadow deploy + the Neon-pooler `options` fix (#157/#158) → blue-green flip (#159). #150 demo-readiness is fully closed (all 21 items). Remaining: a soak, then PR4 — JVM retirement (drop the Java build/deploy jobs + the now-redundant `deploy-twh-ts-shadow.yml`, wire `backend-ts` typecheck/tests into `ci.yml`, finish the Node/TS docs rewrite). Known limitation: evidence upload is ephemeral (in-container `fs` BUCKET) until a managed S3/R2 bucket is wired. Plan + resume guide: `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md`.** (Strategic roadmap epics #71–#78 — E1 merged, E2 (#72) deferred behind the cutover.)
+**The #109 deploy cutover is COMPLETE and the JVM is retired (PR4).** `https://twh.os.mieweb.org` is served by the de-Java TypeScript backend (`twh-api-ts`, `backend-ts/`) on the existing Neon Postgres via the `Pg*Store` ceiling (isolated `workwell_spike` schema). **The Java/Spring backend is gone — `backend/` is deleted, the Java build/deploy jobs and the `deploy-twh-ts-shadow.yml` workflow are removed, and `backend-ts` is the CI-gated (`ci.yml`, floor + Pg ceiling) sole backend.** Path: PR1 image (#155) → store-selection seam (#156) → shadow deploy + Neon-pooler `options` fix (#157/#158) → blue-green flip (#159) → pre-retirement hardening: CI gate (#161), observability + orphaned-run recovery (#162), self-heal reconciler (#163) → JVM retirement (PR4). #150 demo-readiness is fully closed (all 21 items). Reboot/crash recovery is handled by the self-heal reconciler (`reconcile-twh-mieweb.yml`), independent of Proxmox `onboot`. Known limitation: evidence upload is ephemeral (in-container `fs` BUCKET) until a managed S3/R2 bucket is wired. Plan/resume guide: `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md`.** (Strategic roadmap epics #71–#78 — E1 merged; E2 (#72, declarative YAML measures + headless evaluator) is next now the cutover is done.)
 
-> Rollback: revert the flip commit (`c443fc7`) → restores the Java-only deploy (frontend → `twh-api`); do **not** roll back by only repointing the frontend URL (the frontend deploy is gated on the TS deploy succeeding). See `docs/DEPLOY.md` → Rollback.
+> Rollback (Java retired): redeploy an earlier known-good `twh-api-ts` image — `workflow_dispatch` on `deploy-twh-mieweb.yml` with `replace_existing=true` at an earlier `sha-<SHA>` (each build is tagged in GHCR). See `docs/DEPLOY.md` → Rollback.
 
 History (all on `main`):
 - Sprints 0–6 → PRs #16–#22; eCQM + TWH instance support → PR #46
@@ -103,10 +102,10 @@ History (all on `main`):
 
 Current posture:
 - **Live URL:** `https://twh.os.mieweb.org` — login: `admin@workwell.dev` / `Workwell123!`
-- **Live backend:** `https://twh-api-ts.os.mieweb.org` — the **TypeScript** backend (`backend-ts/`), primary as of the #109 flip. `https://twh-api.os.mieweb.org` (Java/Spring) is still deployed as the rollback target until PR4.
-- **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`. It now builds + deploys the TS backend (primary), the Java backend (rollback), and the frontend (pointed at `twh-api-ts`). The earlier Fly.io + Vercel public-preview stack is decommissioned; MIE TWH is the sole live stack.
+- **Live backend:** `https://twh-api-ts.os.mieweb.org` — the **TypeScript** backend (`backend-ts/`), the **sole** backend (Java retired in PR4).
+- **Deployment:** MIE Create-a-Container only (`deploy-twh-mieweb.yml`); triggers on every push to `main`. Builds + deploys the TS backend and the frontend (pointed at `twh-api-ts`). A self-heal reconciler (`reconcile-twh-mieweb.yml`, every 15 min) recreates a down container from `:latest`. The earlier Fly.io + Vercel public-preview stack is decommissioned; MIE TWH is the sole live stack.
 - **Measure catalog:** 60 total — 4 OSHA active (CQL), 3 OSHA catalog, 4 HEDIS wellness active (CQL), 2 CMS eCQM active (CMS125v14 breast cancer, CMS122v14 diabetes HbA1c), 47 CMS eCQM Draft entries; **10 runnable measures total**
 - **Supported run scopes:** `ALL_PROGRAMS`, `MEASURE`, `SITE`, `EMPLOYEE`, `CASE`
-- **Next up:** **#109 PR4 — JVM retirement** (after a soak on the live TS backend): delete `backend/` + the Java `Dockerfile`, drop the Java build/deploy jobs from `deploy-twh-mieweb.yml` + the now-redundant `deploy-twh-ts-shadow.yml`, wire `backend-ts` typecheck/tests into `ci.yml`, and finish the ARCHITECTURE/README Node-TS topology rewrite. Optional follow-up: a managed S3/R2 `BUCKET` so evidence upload persists (currently ephemeral). Resume guide: `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md` (STATUS UPDATE section at the top). E2 — declarative YAML measures + headless evaluator (#72) — is deferred behind the cutover. `docs/JOURNAL.md` carries the running narrative. (A fuller strategy roadmap and the open strategic questions for Doug are kept as local-only working files on the maintainer's machine, not committed to the repo.) NITRO data-grid is now **unblocked** — vendored `@mieweb/datavis` source under `frontend/vendor/datavis` + `datavis-ace` from npm; live on `/measures`, `/runs`, `/admin` (ADR-007). Remaining `@mieweb/ui` form-control swap split out as issue #99. (Asking Doug to publish a built `@mieweb/datavis` to npm so `vendor/` can be dropped is still pending.)
+- **Next up:** **#109 is done (JVM retired).** Open follow-ups: a managed S3/R2 `BUCKET` so evidence upload persists (currently ephemeral); confirming Proxmox `onboot` with MIE (nice-to-have — the self-heal reconciler already covers reboot/crash recovery). Then **E2 — declarative YAML measures + headless evaluator (#72)** is the next roadmap epic. Resume guide: `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md`. `docs/JOURNAL.md` carries the running narrative. (A fuller strategy roadmap and the open strategic questions for Doug are kept as local-only working files on the maintainer's machine, not committed to the repo.) NITRO data-grid is now **unblocked** — vendored `@mieweb/datavis` source under `frontend/vendor/datavis` + `datavis-ace` from npm; live on `/measures`, `/runs`, `/admin` (ADR-007). Remaining `@mieweb/ui` form-control swap split out as issue #99. (Asking Doug to publish a built `@mieweb/datavis` to npm so `vendor/` can be dropped is still pending.)
 - Schema migrations are owned by Taleef — stop and ask before writing any `V0xx__*.sql` file
 - Treat `docs/archive/SPIKE_PLAN.md` as historical context only
