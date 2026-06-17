@@ -9,9 +9,12 @@
  * tool) and is gated to non-production: the route returns 403 when SPRING_PROFILES_ACTIVE
  * includes `prod` (this function is never called there).
  */
-import type { CloudDatabase } from "@mieweb/cloud";
+import type { ActiveBackend } from "../stores/factory.ts";
+import { SPIKE_SCHEMA } from "../stores/postgres/schema-pg.ts";
 
-// Child-before-parent order (the floor has no CASCADE; explicit DELETEs keep it deliberate).
+// Child-before-parent order (the floor has no CASCADE; explicit DELETEs keep it deliberate). This
+// order also satisfies the Postgres ceiling's FKs — only run_logs/outcomes → runs are enforced, and
+// both are deleted before runs.
 const VOLATILE_TABLES = [
   "scheduled_appointments",
   "evidence_attachments",
@@ -23,8 +26,20 @@ const VOLATILE_TABLES = [
   "audit_events",
 ];
 
-export async function resetDemoData(db: CloudDatabase): Promise<void> {
+/**
+ * Reset the volatile demo tables on the ACTIVE backend (the SQLite floor or the Postgres ceiling).
+ * Routing through the selected backend — not the always-present `env.DB` floor binding — is what
+ * makes the reset actually clear data when a `DATABASE_URL` ceiling is configured (otherwise it is a
+ * silent no-op against the unused floor, leaving `workwell_spike` data in place). Non-prod use only.
+ */
+export async function resetDemoData(backend: ActiveBackend): Promise<void> {
+  if (backend.kind === "postgres") {
+    for (const table of VOLATILE_TABLES) {
+      await backend.pool.query(`DELETE FROM ${SPIKE_SCHEMA}.${table}`);
+    }
+    return;
+  }
   for (const table of VOLATILE_TABLES) {
-    await db.exec(`DELETE FROM ${table}`);
+    await backend.db.exec(`DELETE FROM ${table}`);
   }
 }

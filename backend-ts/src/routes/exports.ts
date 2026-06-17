@@ -10,24 +10,12 @@
  * `text/csv` with `Content-Disposition: attachment`. Reads from the existing stores — no new data.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import { runsCsv, outcomesCsv, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 
 interface ExportsEnv {
   DB: CloudDatabase;
-}
-
-const ready = new WeakSet<object>();
-async function ensure(env: ExportsEnv): Promise<void> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
+  DATABASE_URL?: string;
 }
 
 const csvResponse = (filename: string, csv: string): Response =>
@@ -64,24 +52,24 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/runs") {
     if (!isCsv) return badFormat();
-    await ensure(env);
-    return csvResponse("runs.csv", await runsCsv(new SqliteRunStore(env.DB), new SqliteOutcomeStore(env.DB)));
+    const s = await getStores(env);
+    return csvResponse("runs.csv", await runsCsv(s.runs, s.outcomes));
   }
 
   if (pathname === "/api/exports/outcomes") {
     if (!isCsv) return badFormat();
-    await ensure(env);
+    const s = await getStores(env);
     return csvResponse(
       "outcomes.csv",
-      await outcomesCsv(new SqliteOutcomeStore(env.DB), new SqliteRunStore(env.DB), q.get("runId") ?? undefined),
+      await outcomesCsv(s.outcomes, s.runs, q.get("runId") ?? undefined),
     );
   }
 
   if (pathname === "/api/exports/cases") {
     if (!isCsv) return badFormat();
-    await ensure(env);
-    const caseIds = q.get("caseIds")?.split(",").map((s) => s.trim()).filter(Boolean);
-    const csv = await casesCsv(new SqliteCaseStore(env.DB), new SqliteCaseEventStore(env.DB), {
+    const s = await getStores(env);
+    const caseIds = q.get("caseIds")?.split(",").map((c) => c.trim()).filter(Boolean);
+    const csv = await casesCsv(s.cases, s.events, {
       statuses: caseStatuses(q.get("status")),
       measureId: q.get("measureId") ?? undefined,
       priority: q.get("priority") ?? undefined,
@@ -94,10 +82,10 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/audit-events/export") {
     if (!isCsv) return badFormat();
-    await ensure(env);
+    const s = await getStores(env);
     // #150 M9: stream the ledger in pages instead of building the whole CSV string first — bounded
     // memory regardless of audit-trail size (parity with the Java StreamingResponseBody export).
-    const stream = auditCsvStream(new SqliteCaseEventStore(env.DB), new SqliteCaseStore(env.DB));
+    const stream = auditCsvStream(s.events, s.cases);
     return new Response(stream, {
       status: 200,
       headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="audit-events.csv"` },

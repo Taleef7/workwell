@@ -11,10 +11,7 @@
  * Overview/trend/top-drivers honor the page's ?site=&from=&to= filters.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import {
   programOverview,
   programTrend,
@@ -26,19 +23,15 @@ import {
 
 interface ProgramsEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
-const ready = new WeakSet<object>();
 async function deps(env: ProgramsEnv): Promise<ProgramDeps> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
+  const s = await getStores(env);
   return {
-    runStore: new SqliteRunStore(env.DB),
-    outcomeStore: new SqliteOutcomeStore(env.DB),
-    caseStore: new SqliteCaseStore(env.DB),
+    runStore: s.runs,
+    outcomeStore: s.outcomes,
+    caseStore: s.cases,
   };
 }
 

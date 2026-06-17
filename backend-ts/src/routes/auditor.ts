@@ -9,13 +9,7 @@
  * ported yet (depends on evidence/appointments/outreach_records).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { SqliteEvidenceStore } from "../stores/sqlite/evidence-store-sqlite.ts";
-import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import {
   buildRunPacket,
@@ -28,16 +22,15 @@ import {
 
 interface AuditorEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/** Ensure the floor schema (DDL + column backfill + catalog seed) is present once per DB. */
+/** Ensure schema (via the store factory) + the catalog seed (needed by the measure-version packet). */
 async function ensure(env: AuditorEnv): Promise<void> {
-  await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  await migrateFloorSchema(env.DB);
-  await ensureMeasureStore(env); // race-safe DDL + migrate + catalog seed (measure-version packet)
+  await ensureMeasureStore(env); // factory schema init + race-safe catalog seed
 }
 
 function parseFormat(raw: string | null): PacketFormat | null {
@@ -69,30 +62,31 @@ export async function handleAuditor(req: Request, env: AuditorEnv, actor = "syst
   if (!format) return json({ error: "invalid_format", message: "Unsupported format. Use format=json or format=html." }, 400);
 
   await ensure(env);
+  const s = await getStores(env);
   try {
     if (runId) {
       const deps = {
-        runStore: new SqliteRunStore(env.DB),
-        outcomeStore: new SqliteOutcomeStore(env.DB),
-        caseStore: new SqliteCaseStore(env.DB),
-        events: new SqliteCaseEventStore(env.DB),
+        runStore: s.runs,
+        outcomeStore: s.outcomes,
+        caseStore: s.cases,
+        events: s.events,
       };
       return packetResponse(await buildRunPacket(deps, runId, actor, format));
     }
     if (caseId) {
       const deps = {
-        cases: new SqliteCaseStore(env.DB),
-        outcomes: new SqliteOutcomeStore(env.DB),
-        events: new SqliteCaseEventStore(env.DB),
-        evidence: new SqliteEvidenceStore(env.DB),
-        appointments: new SqliteAppointmentStore(env.DB),
+        cases: s.cases,
+        outcomes: s.outcomes,
+        events: s.events,
+        evidence: s.evidence,
+        appointments: s.appointments,
       };
       return packetResponse(await buildCasePacket(deps, caseId, actor, format));
     }
     const deps = {
       measures: await ensureMeasureStore(env),
-      outcomes: new SqliteOutcomeStore(env.DB),
-      events: new SqliteCaseEventStore(env.DB),
+      outcomes: s.outcomes,
+      events: s.events,
     };
     return packetResponse(await buildMeasureVersionPacket(deps, mvId!, actor, format));
   } catch (err) {

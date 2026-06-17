@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-16 — #109 store-selection seam: backend-ts runs on Postgres (the Neon fallback path)
+
+With the §4 MIE/Doug prerequisites for the libSQL/cloud-os path unanswered, pivoted the cutover to the **fallback I'd recommended**: run the TS backend as a **single container against the existing Neon Postgres** via the already-built `Pg*Store` ceiling adapters — no companion services, no new MIE capability, Neon stays persistent. This removes all four blocking questions (Q1 companion services / Q2 libSQL persistence → not needed; Q3 host harness → proven in PR1; Q4 Neon-vs-libSQL → keep Neon). Everything below was validated **on my machine, zero risk to the live stack**.
+
+**First, de-risked the assumption** — ran the Postgres store-contract suite (skipped in every CI/local run for lack of Docker) against a real `postgres:16`: **42/42 pass**. Every store (run/outcome/case/case-event/measure/evidence/appointment/value-set/outreach-template/waiver) holds the same contract as the SQLite floor, including the `FOR UPDATE SKIP LOCKED` run-job queue and the #150-M9 audit paging. So the ceiling is real, not theoretical.
+
+**Then built the seam** — `stores/factory.ts` is the single place that selects floor vs ceiling: a non-blank `DATABASE_URL` → the `Pg*Store` adapters over one pooled `pg` connection (schema `workwell_spike`); otherwise the SQLite floor over `env.DB`. App/route code only ever sees the shared store **interfaces**, so the cutover flips with one env var and no route logic changes. Schema init + pool run once per env (cached); seeding stays in the routes (interface-based, so it runs unchanged on either backend). `createCloudEnv` already merges `process.env`, so a container `-e DATABASE_URL=<neon>` lands on `env.DATABASE_URL` — verified.
+
+**Converted all 10 route modules** (`employees`, `programs`, `runs`, `exports`, `mcp`, `ai`, `measures`, `cases`, `admin`, `auditor`) from `new Sqlite*Store(env.DB)` (~74 sites) to `getStores(env)`. Because `DATABASE_URL` is optional on `StoresEnv`, no per-route env-type churn; the default (no URL) stays the SQLite floor, so the change is **behavior-preserving**.
+
+**Validation:** typecheck clean; **422 backend-ts tests pass** on the SQLite default (unchanged). End-to-end on Postgres (container with `-e DATABASE_URL=…@host.docker.internal:5433`, DB→PG while cache/queue stay in-proc — the production fallback shape): health 200, login 200, **`GET /api/measures` = 60** (catalog seeded into `workwell_spike.measures`), a MEASURE run evaluated **100 employees → COMPLETED**, Postgres then holding **1 run / 100 outcomes / 22 cases**, and the open worklist returning cases. The whole stack — seed, auth, JVM-free CQL evaluation, run pipeline, outcome/case writes, worklist — runs on the Postgres ceiling.
+
+**What's left for the cutover:** evidence `BUCKET` is the one remaining external binding (a managed S3/R2, or defer evidence-upload as a known limitation); then the shadow deploy (`twh-api-ts` on its own hostname against Neon, Java untouched) and the fallback-first blue-green flip. Plan: `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md` (the Neon/Postgres fallback variant).
+
 ## 2026-06-16 — #109 PR1: backend-ts container entrypoint + image (no production impact)
 
 Started the #109 deploy-cutover prep with the safe, non-outward-facing first PR. Goal: de-risk the biggest unknown — *does the ported TS backend run as a long-lived container at all* — without touching the live `twh-api` (Java) stack. The flip itself stays gated on the §4 prerequisites; this PR is build-only.
