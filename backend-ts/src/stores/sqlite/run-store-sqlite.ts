@@ -9,6 +9,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
+import { STUCK_RUN_THRESHOLD_MS } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -144,5 +145,23 @@ export class SqliteRunStore implements RunStore {
       .bind(status, new Date().toISOString(), runId)
       .run();
     return this.getRun(runId);
+  }
+
+  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    // Only UNCLAIMED RUNNING runs — see the Postgres adapter: markRunning (the async ctx.waitUntil
+    // path) leaves claimed_by NULL; claimNextQueuedRun stamps claimed_by, so a CLAIMED worker job is
+    // never recovered. QUEUED is excluded too (claim-path "waiting for a worker", not an orphan).
+    const { results } = await this.db
+      .prepare(`SELECT id FROM runs WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
+      .bind(cutoff)
+      .all<{ id: string }>();
+    const stuck = results ?? [];
+    if (stuck.length === 0) return [];
+    await this.db
+      .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
+      .bind(new Date().toISOString(), cutoff)
+      .run();
+    return stuck.map((r) => r.id);
   }
 }

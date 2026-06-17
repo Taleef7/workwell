@@ -139,6 +139,33 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(done?.status, "COMPLETED");
     assert.ok(done?.completedAt, "completed_at is stamped");
   });
+
+  test(`[${label}] failStuckRuns recovers only UNCLAIMED stuck RUNNING runs (ctx.waitUntil orphans)`, async () => {
+    const store = await freshStore();
+    // A CLAIMED worker run: claimNextQueuedRun stamps claimed_by → not an orphan, never recovered.
+    const claimed = await store.createRun(sampleRun("claimed"));
+    await store.claimNextQueuedRun("worker-1"); // the only QUEUED row → RUNNING + claimed_by
+    // An async (ctx.waitUntil) run: markRunning leaves claimed_by NULL → the orphan case.
+    const orphan = await store.createRun(sampleRun("orphan"));
+    await store.markRunning(orphan.id);
+    const queued = await store.createRun(sampleRun("q")); // stays QUEUED — claim-path pending work
+    const done = await store.createRun(sampleRun("d"));
+    await store.finalizeRun(done.id, "COMPLETED"); // terminal
+
+    // The default threshold (30 min) is far beyond these just-created runs → nothing recovered.
+    assert.equal((await store.failStuckRuns()).length, 0, "recent runs are not failed");
+
+    await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
+    // Threshold 0 → every currently UNCLAIMED RUNNING run is treated as stuck (orphaned by a restart).
+    const recoveredIds = await store.failStuckRuns(0);
+    assert.deepEqual(recoveredIds, [orphan.id], "only the UNCLAIMED RUNNING run (the ctx.waitUntil orphan) is recovered");
+    const recovered = await store.getRun(orphan.id);
+    assert.equal(recovered?.status, "FAILED");
+    assert.ok(recovered?.completedAt, "completed_at is stamped on recovery");
+    assert.equal((await store.getRun(claimed.id))?.status, "RUNNING", "a CLAIMED worker run is left alone (not an orphan)");
+    assert.equal((await store.getRun(queued.id))?.status, "QUEUED", "QUEUED runs are left for the claim path, never failed");
+    assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
+  });
 }
 
 /** Registers the OutcomeStore contract. `fresh` → isolated, empty {run, outcome} pair. */

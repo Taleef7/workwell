@@ -22,6 +22,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import {
   executeManualRun,
   executeRerun,
@@ -47,8 +48,24 @@ const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
 // The store factory selects the SQLite floor or the Postgres ceiling (when DATABASE_URL is set) and
 // runs schema init once per env. CANONICAL schema/migrations stay Taleef-owned (CLAUDE.md).
+//
+// Boot recovery: an ALL_PROGRAMS/SITE run is advanced by an in-process `ctx.waitUntil` task that does
+// NOT survive a container restart, so a run interrupted by a restart is stuck RUNNING forever. The
+// first runs access in a process fires a best-effort sweep that fails such stuck runs. It is
+// fire-and-forget (never blocks or fails the request) and time-thresholded (never touches a live run).
+const sweptForOrphans = new WeakSet<object>();
 async function store(env: RunsEnv): Promise<RunStore> {
-  return (await getStores(env)).runs;
+  const stores = await getStores(env);
+  if (!sweptForOrphans.has(env)) {
+    sweptForOrphans.add(env);
+    void recoverStuckRuns({ runs: stores.runs, events: stores.events })
+      .then((ids) => {
+        if (ids.length > 0)
+          console.warn(`[workwell] recovered ${ids.length} stuck run(s) (RUNNING/QUEUED → FAILED, audited) on boot`);
+      })
+      .catch((err) => console.error("[workwell] stuck-run recovery failed:", err));
+  }
+  return stores.runs;
 }
 async function outcomes(env: RunsEnv): Promise<OutcomeStore> {
   return (await getStores(env)).outcomes;
