@@ -1,0 +1,13 @@
+id: diabetes_hba1c
+name: Diabetes HbA1c Monitoring
+version: 1.0.0
+title: Diabetes HbA1c Monitoring
+policyRef: HEDIS HBD / JPMC Wellness Rewards
+tags: [wellness, diabetes, hba1c]
+cql: diabetes_hba1c.cql
+bindings:
+  rateKey: diabetes_hba1c
+  enrollment: { code: diabetes-enrolled, valueSet: "urn:workwell:vs:diabetes-program" }
+  waiver:     { code: diabetes-exempt, valueSet: "urn:workwell:vs:diabetes-exemption" }
+  event:      { code: hba1c-lab, valueSet: "urn:workwell:vs:hba1c-labs", type: procedure }
+  complianceWindowDays: 180
