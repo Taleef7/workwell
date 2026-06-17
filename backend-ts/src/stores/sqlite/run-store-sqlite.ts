@@ -147,18 +147,18 @@ export class SqliteRunStore implements RunStore {
     return this.getRun(runId);
   }
 
-  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<number> {
+  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
     const { results } = await this.db
       .prepare(`SELECT id FROM runs WHERE status IN ('RUNNING', 'QUEUED') AND started_at < ?`)
       .bind(cutoff)
       .all<{ id: string }>();
     const stuck = results ?? [];
-    if (stuck.length === 0) return 0;
+    if (stuck.length === 0) return [];
     await this.db
       .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status IN ('RUNNING', 'QUEUED') AND started_at < ?`)
       .bind(new Date().toISOString(), cutoff)
       .run();
-    return stuck.length;
+    return stuck.map((r) => r.id);
   }
 }

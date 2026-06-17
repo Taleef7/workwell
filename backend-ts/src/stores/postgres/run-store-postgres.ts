@@ -174,17 +174,17 @@ export class PgRunStore implements RunStore {
     return this.getRun(runId);
   }
 
-  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<number> {
+  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
     const stuck = await this.pool.query<{ id: string }>(
       `SELECT id FROM ${T} WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $1`,
       [cutoff],
     );
-    if (stuck.rows.length === 0) return 0;
+    if (stuck.rows.length === 0) return [];
     await this.pool.query(
       `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $2`,
       [new Date().toISOString(), cutoff],
     );
-    return stuck.rows.length;
+    return stuck.rows.map((r) => r.id);
   }
 }

@@ -149,11 +149,16 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     await store.finalizeRun(done.id, "COMPLETED"); // terminal
 
     // The default threshold (30 min) is far beyond these just-created runs → nothing recovered.
-    assert.equal(await store.failStuckRuns(), 0, "recent in-flight runs are not failed");
+    assert.equal((await store.failStuckRuns()).length, 0, "recent in-flight runs are not failed");
 
     await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
     // Threshold 0 → every currently RUNNING/QUEUED run is treated as stuck (orphaned by a restart).
-    assert.equal(await store.failStuckRuns(0), 2, "the QUEUED + RUNNING runs are recovered");
+    const recoveredIds = await store.failStuckRuns(0);
+    assert.deepEqual(
+      [...recoveredIds].sort(),
+      [queued.id, running.id].sort(),
+      "returns the recovered run ids (the QUEUED + RUNNING runs) for the caller to audit",
+    );
     assert.equal((await store.getRun(queued.id))?.status, "FAILED");
     const recovered = await store.getRun(running.id);
     assert.equal(recovered?.status, "FAILED");
