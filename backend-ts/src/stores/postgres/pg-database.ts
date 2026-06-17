@@ -6,7 +6,6 @@
  * for now it is a direct `pg` pool scoped to the `workwell_spike` schema.
  */
 import pg from "pg";
-import { SPIKE_SCHEMA } from "./schema-pg.ts";
 
 export type PgPool = pg.Pool;
 
@@ -22,15 +21,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const isUuid = (id: string): boolean => UUID_RE.test(id);
 
 /**
- * Create a pool whose connections resolve unqualified names against the isolated
- * spike schema first (`search_path`). The adapters fully-qualify every table
- * (`workwell_spike.*`) so this is belt-and-suspenders — but it guarantees we can
- * never accidentally hit the canonical `public` tables. Set server-side at
- * connection start via libpq `options` (no per-connect query, no pg deprecation).
+ * Create a `pg` pool for the isolated spike schema.
+ *
+ * The pool sets NO search_path: the adapters fully-qualify every table (`workwell_spike.*`), so it
+ * is unnecessary, and it MUST NOT be set via the libpq `options` startup parameter — Neon's pooled
+ * endpoint (PgBouncer) rejects `options=-c search_path=...` with `08P01 unsupported startup parameter
+ * in options: search_path`, which fails every connection (this is why the first shadow deploy 500'd
+ * on every DB route; direct/unpooled Postgres accepts it, so the store-contract tests didn't catch
+ * it). A per-connection `SET search_path` wouldn't survive PgBouncer transaction pooling either — so
+ * full qualification in the adapters is the mechanism that keeps us off the canonical `public`
+ * tables. See pg-database.test.ts (the regression guard).
  */
 export function createPgPool(connectionString: string): PgPool {
-  return new pg.Pool({
-    connectionString,
-    options: `-c search_path=${SPIKE_SCHEMA},public`,
-  });
+  return new pg.Pool({ connectionString });
 }
