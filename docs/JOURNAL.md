@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-16 — #109 PR1: backend-ts container entrypoint + image (no production impact)
+
+Started the #109 deploy-cutover prep with the safe, non-outward-facing first PR. Goal: de-risk the biggest unknown — *does the ported TS backend run as a long-lived container at all* — without touching the live `twh-api` (Java) stack. The flip itself stays gated on the §4 prerequisites; this PR is build-only.
+
+- **`backend-ts/src/server.ts` (Decision E3)** — explicit long-running entrypoint. Dynamic-imports the CLI's `loadConfig` + `@mieweb/cloud-local/host`'s `startLocalHost`, registers the target's drivers (`@mieweb/cloud-os` for the `mieweb` target), serves the **unchanged** `worker.fetch` over HTTP, graceful SIGINT/SIGTERM. `MIEWEB_TARGET` selects the binding set (default `mieweb`; `local` = sqlite/fs/memory/inproc for the smoke test). Shipping this is cleaner than shipping the CLI's `dev` command to prod.
+- **`backend-ts/Dockerfile`** — Node 24-bookworm-slim + a toolchain for native better-sqlite3, corepack pnpm@10.17.1, builds from the **repo root** so the `external/mieweb-cloud` submodule (the `workspace:*` source for `@mieweb/cloud*`) is in context; `pnpm install --frozen-lockfile`; `EXPOSE 8082`; `CMD pnpm start`. Root `.dockerignore` trims the context (it only affects this root-context build — the Java/frontend images build from their own subdir contexts and are unaffected).
+- **`backend-ts/package.json`** — `start` script + `@mieweb/cloud-os` as a direct dep (the `mieweb` target imports it at runtime; pnpm's strict resolution needs it declared). Lockfile updated.
+
+**Local validation (Docker, on this machine):** image built (better-sqlite3 compiled, frozen lockfile honored, 706 MB). `docker run -e MIEWEB_TARGET=local` → host up on :8080; `GET /api/version` + `/actuator/health` → 200; with a JWT secret set, `POST /api/auth/login` (demo admin) → 200 + JWT (role `ROLE_ADMIN`), and an authenticated `GET /api/measures` → 200 with **60** measures. So the container runs the full stack — HTTP host, self-seeding SQLite floor DB, auth, and a real data path — with zero external services. Typecheck clean.
+
+**No production impact:** the deploy workflow still builds the Java `backend/Dockerfile`; nothing references `backend-ts/Dockerfile` yet. Next is **PR2 (shadow deploy on a separate `twh-api-ts` hostname, Java left untouched)** — gated on confirming with MIE/Doug: companion services on Create-a-Container, libSQL persistence across recreate, `startLocalHost` as a blessed prod host, and the Neon-vs-libSQL decision. Cutover strategy is fallback-first (blue-green; the live Java backend is never destroyed by an unproven image) per `docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md`.
+
 ## 2026-06-16 — #150 post-demo trio (M9 + M10 + M13), Java↔backend-ts parity
 
 After #153 (H4/M5/M1/M8) merged, picked up the last of #150 — the three "post-demo" mediums — on `fix/issue-150-post-demo-trio`. All three were scoped **backend — parity** in the demo-readiness matrix, so each is fixed once on **both** stacks (no behavior drift across the #109 cutover). No schema change.

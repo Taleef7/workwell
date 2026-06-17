@@ -1,0 +1,14 @@
+# Root-context .dockerignore for the backend-ts image build (#109 PR1).
+#
+# Only ./backend-ts and ./external/mieweb-cloud are COPYed into that image; this trims the build
+# context the daemon receives from the repo root. The Java backend (./backend) and the frontend
+# (./frontend) images build from their OWN subdirectory contexts, so this file does not affect them.
+.git
+**/node_modules
+**/.data
+backend
+frontend
+e2e
+docs
+*.pdf
+*.md
