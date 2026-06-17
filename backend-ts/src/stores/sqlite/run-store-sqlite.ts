@@ -9,6 +9,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
+import { STUCK_RUN_THRESHOLD_MS } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -144,5 +145,20 @@ export class SqliteRunStore implements RunStore {
       .bind(status, new Date().toISOString(), runId)
       .run();
     return this.getRun(runId);
+  }
+
+  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const { results } = await this.db
+      .prepare(`SELECT id FROM runs WHERE status IN ('RUNNING', 'QUEUED') AND started_at < ?`)
+      .bind(cutoff)
+      .all<{ id: string }>();
+    const stuck = results ?? [];
+    if (stuck.length === 0) return 0;
+    await this.db
+      .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status IN ('RUNNING', 'QUEUED') AND started_at < ?`)
+      .bind(new Date().toISOString(), cutoff)
+      .run();
+    return stuck.length;
   }
 }

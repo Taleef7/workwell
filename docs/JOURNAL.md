@@ -1,5 +1,14 @@
 # Journal
 
+## 2026-06-17 — #109 pre-retirement hardening (2/3): backend-ts resilience (observability + orphaned-run recovery)
+
+Two more pre-JVM-retirement gaps from the readiness audit:
+
+- **Observability.** The worker's `fetch` called `route()` with no top-level try/catch, so an unhandled error (e.g. the Neon-pooler throw) escaped to the host harness as a **bare, empty-body 500** — invisible and undiagnosable (exactly what made that bug hard to find). Now wrapped: log the error with request context (`method path`) to stdout (→ container logs) and return a structured `{ "error": "internal_error" }` 500 (no internals leaked to clients).
+- **Async-run durability.** ALL_PROGRAMS/SITE runs are advanced by an in-process `ctx.waitUntil` task that does **not** survive a container restart (every push redeploys), leaving the run stuck `RUNNING` forever. Added `RunStore.failStuckRuns(olderThanMs = 30 min)` on both the SQLite floor and the Postgres ceiling — a **time-thresholded** sweep (30 min ≫ the ~5.5 min real ALL_PROGRAMS max, so it can never fail a live run) that flips stuck `RUNNING`/`QUEUED` runs to `FAILED` + stamps `completed_at`. It fires **fire-and-forget once per process** on the first runs access (never blocks or cache-poisons the request).
+
+Shared store-contract test covers **both** backends; 429 backend-ts tests green (floor + ceiling), typecheck clean. (The matching cause of the slowness — per-outcome Neon round-trips making ALL_PROGRAMS ~5.5 min — is noted for a possible batched-write follow-up; the durability fix here stops runs from getting *stuck*, which is the correctness issue.)
+
 ## 2026-06-17 — #109 cutover is LIVE: the flip merged, deployed, and verified in production
 
 Merged PR #159 (CI green: all 8 backend shards + frontend) — the merge to `main` ran `deploy-twh-mieweb.yml`, whose **6 jobs all succeeded**: built the TS backend (primary) + Java backend (rollback) + frontend, and deployed all three. `https://twh.os.mieweb.org` is now served by the **de-Java TypeScript backend** (`twh-api-ts`).

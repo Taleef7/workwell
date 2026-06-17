@@ -55,6 +55,13 @@ export interface RunLogRow {
   message: string;
 }
 
+/**
+ * Runs left RUNNING/QUEUED longer than this are treated as orphaned by a restart (see
+ * {@link RunStore.failStuckRuns}). Far beyond the longest real run (~5-6 min for ALL_PROGRAMS on
+ * the Postgres ceiling), so the boot-time sweep can never fail a legitimately in-flight run.
+ */
+export const STUCK_RUN_THRESHOLD_MS = 30 * 60 * 1000;
+
 export interface RunStore {
   createRun(input: CreateRunInput): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | null>;
@@ -69,4 +76,12 @@ export interface RunStore {
   markRunning(runId: string): Promise<RunRecord | null>;
   /** Set a terminal status (COMPLETED/PARTIAL_FAILURE/FAILED) + completed_at. */
   finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null>;
+  /**
+   * Recover runs stuck RUNNING/QUEUED for longer than `olderThanMs`
+   * (default {@link STUCK_RUN_THRESHOLD_MS}) by marking them FAILED + setting completed_at; returns
+   * the count recovered. In the in-process job model an ALL_PROGRAMS/SITE run is advanced by a
+   * `ctx.waitUntil` task that does NOT survive a container restart, leaving the run RUNNING forever.
+   * Run once per process on the first runs access. The threshold guards against failing a live run.
+   */
+  failStuckRuns(olderThanMs?: number): Promise<number>;
 }
