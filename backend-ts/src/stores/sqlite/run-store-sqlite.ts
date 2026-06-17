@@ -149,16 +149,17 @@ export class SqliteRunStore implements RunStore {
 
   async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // RUNNING only — see the Postgres adapter: a QUEUED run is the claim path's legitimate "waiting
-    // for a worker" state, not an orphan; async runs are marked RUNNING synchronously.
+    // Only UNCLAIMED RUNNING runs — see the Postgres adapter: markRunning (the async ctx.waitUntil
+    // path) leaves claimed_by NULL; claimNextQueuedRun stamps claimed_by, so a CLAIMED worker job is
+    // never recovered. QUEUED is excluded too (claim-path "waiting for a worker", not an orphan).
     const { results } = await this.db
-      .prepare(`SELECT id FROM runs WHERE status = 'RUNNING' AND started_at < ?`)
+      .prepare(`SELECT id FROM runs WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
       .bind(cutoff)
       .all<{ id: string }>();
     const stuck = results ?? [];
     if (stuck.length === 0) return [];
     await this.db
-      .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status = 'RUNNING' AND started_at < ?`)
+      .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
       .bind(new Date().toISOString(), cutoff)
       .run();
     return stuck.map((r) => r.id);
