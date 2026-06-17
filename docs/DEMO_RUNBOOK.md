@@ -8,7 +8,7 @@
 
 ## Production Surfaces
 - Frontend: `https://twh.os.mieweb.org`
-- Backend API: `https://twh-api.os.mieweb.org`
+- Backend API: `https://twh-api-ts.os.mieweb.org`
 
 ## Capture current IDs (run at demo time)
 
@@ -17,12 +17,12 @@ than relying on pinned values. All `/api/**` calls require a bearer token.
 
 ```bash
 # 1) Mint an access token (admin or case-manager account)
-TOKEN=$(curl -fsS -X POST https://twh-api.os.mieweb.org/api/auth/login \
+TOKEN=$(curl -fsS -X POST https://twh-api-ts.os.mieweb.org/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@workwell.dev","password":"Workwell123!"}' | jq -r .token)
 
 # 2) Measure IDs (names are stable across reseeds; UUIDs differ per instance)
-curl -fsS https://twh-api.os.mieweb.org/api/measures \
+curl -fsS https://twh-api-ts.os.mieweb.org/api/measures \
   -H "Authorization: Bearer $TOKEN" | jq -r '.[] | "\(.name): \(.id)"'
 
 # 3) Latest Audiogram-scoped run ID. /api/runs has no measureId filter — it only
@@ -30,12 +30,12 @@ curl -fsS https://twh-api.os.mieweb.org/api/measures \
 #    returned JSON by measure name. If no measure-scoped Audiogram run exists, drop
 #    the map(...) and take .[0].id: the latest ALL_PROGRAMS run also covers Audiogram.
 MEASURE_ID=<audiogram-measure-id>   # from step 2; reused by the case filter below
-curl -fsS "https://twh-api.os.mieweb.org/api/runs?limit=50" \
+curl -fsS "https://twh-api-ts.os.mieweb.org/api/runs?limit=50" \
   -H "Authorization: Bearer $TOKEN" | jq -r 'map(select(.measureName | test("Audiogram"))) | .[0].id'
 
 # 4) An open Audiogram case ID (for MCP explain_outcome). /api/cases filters by
 #    measureId (the logical measure UUID), not measureName — reuse $MEASURE_ID.
-curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" \
+curl -fsS "https://twh-api-ts.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" \
   -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id'
 ```
 
@@ -46,10 +46,10 @@ reseeds, the case UUID does not.
 ## Pre-flight Smoke Check (curl)
 
 ```bash
-curl -fsS https://twh-api.os.mieweb.org/actuator/health
-curl -fsS https://twh-api.os.mieweb.org/api/measures -H "Authorization: Bearer $TOKEN"
-curl -fsS "https://twh-api.os.mieweb.org/api/runs?limit=50" -H "Authorization: Bearer $TOKEN" | jq 'map(select(.measureName | test("Audiogram")))'
-curl -fsS "https://twh-api.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" -H "Authorization: Bearer $TOKEN"
+curl -fsS https://twh-api-ts.os.mieweb.org/actuator/health
+curl -fsS https://twh-api-ts.os.mieweb.org/api/measures -H "Authorization: Bearer $TOKEN"
+curl -fsS "https://twh-api-ts.os.mieweb.org/api/runs?limit=50" -H "Authorization: Bearer $TOKEN" | jq 'map(select(.measureName | test("Audiogram")))'
+curl -fsS "https://twh-api-ts.os.mieweb.org/api/cases?status=open&measureId=$MEASURE_ID" -H "Authorization: Bearer $TOKEN"
 ```
 
 Expected:

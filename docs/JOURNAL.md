@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-17 — #109 cutover is LIVE: the flip merged, deployed, and verified in production
+
+Merged PR #159 (CI green: all 8 backend shards + frontend) — the merge to `main` ran `deploy-twh-mieweb.yml`, whose **6 jobs all succeeded**: built the TS backend (primary) + Java backend (rollback) + frontend, and deployed all three. `https://twh.os.mieweb.org` is now served by the **de-Java TypeScript backend** (`twh-api-ts`).
+
+Addressed two Codex P1 rounds on the flip workflow first: (1) the frontend deploy mustn't block the rollback, then (2) — the sharper re-review catch — don't ship a frontend onto a *deleted/failed* `twh-api-ts` when the TS deploy fails. Final shape: `deploy-frontend` keeps the **strict success gate** on `deploy-backend-ts` (a failed TS deploy skips the frontend, preserving the last-working one), and **rollback is a full revert of the flip commit** (restores the Java-only deploy, independent of the TS path).
+
+**Verified live (not just "deployed"):**
+- `twh.os.mieweb.org` → 200; its JS bundle is wired to **only** `twh-api-ts.os.mieweb.org` (scanned the chunks).
+- §6 smoke against the live primary `twh-api-ts`: **19 pass / 0 fail / 2 warn** (warns = ephemeral evidence BUCKET + the pre-existing MCP-SSE nginx caveat).
+- Neon: `workwell_spike` holds the live data; `public` (Java's Flyway tables) untouched — Java is a clean, current rollback.
+
+Docs synced to reality in this pass: CLAUDE.md (Current Focus → cutover live; live backend = `twh-api-ts`), README (status + production surfaces + tech stack), DEPLOY/ARCHITECTURE, DECISIONS (ADR-008 status), CHANGELOG, and the usage guides (DEMO_RUNBOOK/WALKTHROUGH/MCP → `twh-api-ts`). **Next: a soak, then PR4 — JVM retirement** (drop the Java jobs + the redundant `deploy-twh-ts-shadow.yml`, wire `backend-ts` into `ci.yml`, finish the Node/TS topology rewrite).
+
 ## 2026-06-17 — #109 blue-green flip (PR3): frontend → the TS backend, Java kept as rollback
 
 With the shadow proven green on Neon, wrote the production flip. `deploy-twh-mieweb.yml` now, on every push to `main`: builds + deploys the **TS backend** (`workwell-api-ts` → `twh-api-ts`, port 8080, `MIEWEB_TARGET=local`, jdbc-normalized `DATABASE_URL` → Neon `workwell_spike`), and builds the frontend with `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_API_BASE_URL` → `https://twh-api-ts.os.mieweb.org`. The **Java backend (`twh-api`) is still built + deployed unchanged as the instant rollback target** — nothing destroys it. Rollback = a **full revert of the flip commit** (restores the Java-only deploy: frontend → `twh-api` via `deploy-backend`, no TS jobs), so it never depends on the TS deploy. (`deploy-frontend` is gated on the TS deploy succeeding so a failed TS deploy preserves the last-working frontend rather than aiming it at a deleted `twh-api-ts` — a Codex re-review P1; hence rollback is a full revert, not a partial URL edit.) The Java container is already running + current. CORS + the cross-site refresh cookie already work (the TS env allows the `twh.os.mieweb.org` origin with `SameSite=None; Secure`). On merge, the next push runs production on TypeScript — watch the post-deploy smoke (`scripts/smoke-shadow.sh https://twh-api-ts.os.mieweb.org`). JVM retirement (drop the Java jobs + the now-redundant shadow workflow + the Node/TS docs rewrite) is PR4.
