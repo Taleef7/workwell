@@ -15,7 +15,7 @@
  * dashboard renders. Create/PUT/DELETE + demo-reset are a follow-up (need persistence).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { getStores } from "../stores/factory.ts";
+import { getStores, getBackend } from "../stores/factory.ts";
 import {
   listIntegrations,
   syncIntegration,
@@ -221,7 +221,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   if (pathname === "/api/admin/demo-reset" && req.method === "POST") {
     if (isProductionLike(env)) return json({ error: "Demo reset is not available in production" }, 403);
     await ensure(env);
-    await resetDemoData(env.DB);
+    await resetDemoData(await getBackend(env));
     return json({ status: "reset_complete", message: "Demo data has been reset" });
   }
 

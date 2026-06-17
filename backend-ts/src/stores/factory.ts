@@ -84,11 +84,15 @@ const cache = new WeakMap<object, Promise<Stores>>();
 /** Resolve the store bundle for this env (cached). Schema init runs once on first call. */
 export function getStores(env: StoresEnv): Promise<Stores> {
   const key = env as object;
-  let pending = cache.get(key);
-  if (!pending) {
-    pending = build(env);
-    cache.set(key, pending);
-  }
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const pending = build(env);
+  cache.set(key, pending);
+  // If init fails (e.g. a transient Neon/D1 error while running the startup DDL), evict the rejected
+  // promise so the NEXT request retries a fresh build instead of replaying the failure until restart.
+  void pending.catch(() => {
+    if (cache.get(key) === pending) cache.delete(key);
+  });
   return pending;
 }
 
@@ -119,6 +123,23 @@ async function buildPostgres(url: string): Promise<Stores> {
     outreachTemplates: new PgOutreachTemplateStore(pool),
     waivers: new PgWaiverStore(pool),
   };
+}
+
+/**
+ * The resolved low-level handle for the ACTIVE backend (floor or ceiling). Used by ops that must
+ * hit the real data on the SELECTED backend — e.g. demo reset — rather than the always-present
+ * `env.DB` SQLite floor binding, which would be a silent no-op when a Postgres ceiling is configured.
+ */
+export type ActiveBackend =
+  | { kind: "sqlite"; db: CloudDatabase }
+  | { kind: "postgres"; pool: PgPool };
+
+/** Resolve the active backend handle (ensures schema init / the pg pool has run, exactly once). */
+export async function getBackend(env: StoresEnv): Promise<ActiveBackend> {
+  await getStores(env); // ensure the floor DDL / pg pool + ceiling DDL have been initialized
+  const url = (env.DATABASE_URL ?? "").trim();
+  if (url) return { kind: "postgres", pool: (sharedPool ??= createPgPool(url)) };
+  return { kind: "sqlite", db: env.DB };
 }
 
 async function buildSqlite(db: CloudDatabase): Promise<Stores> {
