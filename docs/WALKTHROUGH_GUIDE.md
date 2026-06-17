@@ -760,7 +760,7 @@ Add (or merge into) an `mcpServers` block pointing at the SSE endpoint with the 
 }
 ```
 
-Save the file and fully restart Claude Desktop (Quit / `Cmd+Q`, not just close the window). On launch Claude reads the config and connects to the MCP server. If the JWT is missing or expired, every tool call returns `403` and the audit log records the failed access attempt.
+Save the file and fully restart Claude Desktop (Quit / `Cmd+Q`, not just close the window). On launch Claude reads the config and connects to the MCP server. If the JWT is missing or expired, the connection is rejected with `401 Unauthorized` (unauthenticated). A `403` instead means the token is valid but the account lacks the required MCP role.
 
 > The Fly machine should have `min_machines_running = 1` (see `docs/DEPLOY.md`) so the SSE transport stays warm for remote MCP clients.
 
@@ -792,7 +792,7 @@ Save the file and fully restart Claude Desktop (Quit / `Cmd+Q`, not just close t
 
 > **Audit trail:** Every MCP tool call writes an `MCP_TOOL_CALLED` audit event with the tool name, parameters, calling user, and timestamp. MCP is not an anonymous interface — every call is traceable.
 
-> **Role check:** MCP routes are protected by Spring Security. An unauthenticated MCP connection attempt returns 403. The JWT in the Claude Desktop config must belong to a user with at least ROLE_CASE_MANAGER.
+> **Role check:** MCP routes are protected by the backend's auth/role gate. An unauthenticated MCP connection attempt returns `401`; an authenticated caller lacking the required role gets `403`. The JWT in the Claude Desktop config must belong to a user with at least ROLE_CASE_MANAGER.
 
 ---
 
@@ -833,7 +833,7 @@ WorkWell enforces role-based access control throughout the application. This sec
 **Test 2 — Anonymous access rejected:**
 5. Open an incognito window.
 6. Try to access: `https://twh-api-ts.os.mieweb.org/api/measures`
-7. Expected: `403 Forbidden` (no cookie, no JWT).
+7. Expected: `401 Unauthorized` (no cookie, no JWT). The TS backend returns `401` for unauthenticated requests; `403` is reserved for an *authenticated* caller lacking the required role (e.g. Test 1).
 
 **Test 3 — Case Manager cannot access Admin:**
 8. Log in as `cm@workwell.dev`
@@ -845,7 +845,7 @@ WorkWell enforces role-based access control throughout the application. This sec
     ```
     curl https://twh-api-ts.os.mieweb.org/sse
     ```
-12. Expected: `403 Forbidden`.
+12. Expected: `401 Unauthorized` (unauthenticated — same auth gate as Test 2).
 
 > **Note on the `/login` redirect you may see during testing:** If during one of these RBAC tests the app forwards you to `/login` instead of showing the access-denied panel, that redirect is *session expiry* (the access token in memory was lost on a hard navigation or refresh) rather than an explicit RBAC denial. This is tracked separately as **Bug 4 — session persistence** in UAT issue #23; it is not a Section 13 / role-enforcement defect.
 
