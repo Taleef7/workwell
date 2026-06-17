@@ -127,9 +127,9 @@ Public API actions derive audit identity from the authenticated security context
 - Worklist pagination: `GET /api/cases` returns a plain array plus an `X-Total-Count` header (full filtered match count, exposed via CORS) so clients can page past the result cap.
 
 ## 8) Current Infra Split
-- MIE Create-a-Container hosts both frontend (`twh`) and backend (`twh-api`) processes.
-- Neon (`workwell-twh` project) hosts all relational persistence used by backend.
-- GHCR (`ghcr.io/taleef7/workwell-api`, `ghcr.io/taleef7/workwell-twh-frontend`) stores Docker images.
+- MIE Create-a-Container hosts both frontend (`twh`) and the TypeScript backend (`twh-api-ts`) processes.
+- Neon (`workwell-twh` project) hosts all relational persistence used by backend (the `workwell_spike` schema).
+- GHCR (`ghcr.io/taleef7/workwell-api-ts`, `ghcr.io/taleef7/workwell-twh-frontend`) stores Docker images.
 
 No microservice decomposition is used in MVP; package boundaries are the future extraction seam.
 
