@@ -24,7 +24,7 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 ### 1.1 Annual Audiogram Completed
 - Policy reference: OSHA 29 CFR 1910.95
   URL: https://www.ecfr.gov/current/title-29/section-1910.95
-- CQL file: `backend/src/main/resources/measures/audiogram.cql`
+- CQL file: `backend-ts/measures/audiogram.cql`
 - Tags: `surveillance`, `hearing`, `osha`
 
 #### Define logic
@@ -43,7 +43,7 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 ### 1.2 HAZWOPER Annual Medical Surveillance
 - Policy reference: OSHA 29 CFR 1910.120
   URL: https://www.ecfr.gov/current/title-29/section-1910.120
-- CQL file: `backend/src/main/resources/measures/hazwoper.cql`
+- CQL file: `backend-ts/measures/hazwoper.cql`
 - Tags: `surveillance`, `hazmat`, `osha`
 
 #### Define logic
@@ -62,7 +62,7 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 ### 1.3 Annual TB Screening
 - Policy reference: CDC TB screening guidance + organizational policy
   URL: https://www.cdc.gov/tb/topic/testing/healthcareworkers.htm
-- CQL file: `backend/src/main/resources/measures/tb_surveillance.cql`
+- CQL file: `backend-ts/measures/tb_surveillance.cql`
 - Tags: `surveillance`, `infection-control`, `cdc`
 
 #### Define logic
@@ -81,7 +81,7 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 ### 1.4 Flu Vaccine This Season
 - Policy reference: Organizational seasonal policy informed by CDC guidance
   URL: https://www.cdc.gov/flu/professionals/vaccination/
-- CQL file: `backend/src/main/resources/measures/flu_vaccine.cql`
+- CQL file: `backend-ts/measures/flu_vaccine.cql`
 - Tags: `vaccine`, `seasonal`, `immunization`
 
 #### Define logic
@@ -115,25 +115,25 @@ Four employer wellness / HEDIS-style measures with complete CQL and active evalu
 
 ### 3.1 Hypertension BP Screening
 - Policy reference: HEDIS BPC / JPMC Wellness Rewards
-- CQL file: `backend/src/main/resources/measures/hypertension.cql`
+- CQL file: `backend-ts/measures/hypertension.cql`
 - Tags: `wellness`, `hypertension`, `cardiovascular`
 - Compliance window: 365 days (DueSoon 336–365)
 
 ### 3.2 Diabetes HbA1c Monitoring
 - Policy reference: HEDIS HBD / JPMC Wellness Rewards
-- CQL file: `backend/src/main/resources/measures/diabetes_hba1c.cql`
+- CQL file: `backend-ts/measures/diabetes_hba1c.cql`
 - Tags: `wellness`, `diabetes`, `hba1c`
 - Compliance window: 180 days biannual (DueSoon 161–180)
 
 ### 3.3 BMI Screening & Counseling
 - Policy reference: HEDIS WCC / Cigna Healthcare Wellness
-- CQL file: `backend/src/main/resources/measures/obesity_bmi.cql`
+- CQL file: `backend-ts/measures/obesity_bmi.cql`
 - Tags: `wellness`, `bmi`, `obesity`
 - Compliance window: 365 days annual
 
 ### 3.4 Cholesterol LDL Screening
 - Policy reference: HEDIS CBP / JPMC Wellness Rewards
-- CQL file: `backend/src/main/resources/measures/cholesterol_ldl.cql`
+- CQL file: `backend-ts/measures/cholesterol_ldl.cql`
 - Tags: `wellness`, `cholesterol`, `cardiovascular`
 - Compliance window: 365 days annual
 
@@ -152,7 +152,7 @@ Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evalua
 
 ### 3b.1 Breast Cancer Screening (CMS125v14 / MIPS 112)
 - Policy reference: CMS125v14
-- CQL file: `backend/src/main/resources/measures/cms125.cql`
+- CQL file: `backend-ts/measures/cms125.cql`
 - Tags: `ecqm`, `cms`, `cancer-screening`, `preventive`
 - Compliance window: 27 months (820 days — mammogram within the measurement period or 26 months prior)
 
@@ -165,7 +165,7 @@ Outcome mapping:
 
 ### 3b.2 Diabetes: Glycemic Status Assessment Greater Than 9% (CMS122v14 / MIPS 1)
 - Policy reference: CMS122v14
-- CQL file: `backend/src/main/resources/measures/cms122.cql`
+- CQL file: `backend-ts/measures/cms122.cql`
 - Tags: `ecqm`, `cms`, `diabetes`
 - Value-based (numeric): outcome is driven by HbA1c lab value, not recency
 - Catalog/display name follows the current CMS122v14 title ("Glycemic Status Assessment Greater Than 9%"); the CQL define is still named `HbA1c Poor Control`. This name is the exact key the evaluator binds CQL by (`forMeasure`), so it must match across the DB seed, `measures/cms122.yaml`, and `backend-ts`.

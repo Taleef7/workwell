@@ -12,7 +12,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
-ARG NEXT_PUBLIC_API_URL=https://workwell-api.os.mieweb.org
+ARG NEXT_PUBLIC_API_URL=https://twh-api-ts.os.mieweb.org
 ARG NEXT_PUBLIC_APP_NAME="WorkWell Measure Studio"
 ARG NEXT_PUBLIC_APP_TAGLINE="occupational-health compliance."
 ARG NEXT_PUBLIC_APP_DESCRIPTION="Four measures, complete case management, and a full audit trail — one reviewable dashboard."

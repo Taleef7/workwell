@@ -53,16 +53,17 @@ WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker H
 
 ### Prerequisites
 
-- Java 21
 - Node.js 20+
-- npm (or pnpm if installed locally)
+- pnpm (via Corepack) for the backend; npm for the frontend
 
 ### Backend
 
 ```bash
-cd backend
-./gradlew.bat test
-./gradlew.bat bootRun
+cd backend-ts
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm dev
 ```
 
 ### Frontend
@@ -77,14 +78,11 @@ npm run dev
 
 ## Headless evaluation (patient + YAML → compliant?)
 
-Measure bindings are declarative YAML files (`backend/src/main/resources/measures/*.yaml`, one per
-runnable measure, sibling to its CQL). The engine can answer compliance for an arbitrary FHIR R4
-patient bundle with no server and no database:
-
-```bash
-cd backend
-./gradlew.bat evaluateMeasure --args="path/to/patient-bundle.json src/main/resources/measures/audiogram.yaml"
-```
+Measure bindings are declarative YAML files (`backend-ts/measures/*.yaml`, one per runnable measure,
+sibling to its CQL). The engine answers compliance for an arbitrary FHIR R4 patient bundle with no
+server and no database — see the `evaluateMeasure` entry in `backend-ts/src/engine/evaluate-measure.ts`.
+A packaged headless CLI is tracked under **E2** (#72 — declarative YAML measures + headless evaluator);
+the shape of its result is:
 
 ```json
 {
@@ -99,8 +97,9 @@ cd backend
 
 ```bash
 # backend
-cd backend
-./gradlew.bat test
+cd backend-ts
+pnpm typecheck
+pnpm test
 
 # frontend
 cd ../frontend

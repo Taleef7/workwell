@@ -13,9 +13,11 @@ Thanks for contributing. This repository values small, verifiable, and well-docu
 ### Backend
 
 ```bash
-cd backend
-./gradlew.bat test
-./gradlew.bat bootRun
+cd backend-ts
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm dev
 ```
 
 ### Frontend
