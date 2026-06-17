@@ -24,9 +24,17 @@ Browser
 
 Production endpoints:
 - Frontend: `https://twh.os.mieweb.org`
-- Backend API: `https://twh-api.os.mieweb.org`
+- Backend API (primary): `https://twh-api-ts.os.mieweb.org` — the de-Java TypeScript backend (`backend-ts/`)
+- Backend API (rollback): `https://twh-api.os.mieweb.org` — Java/Spring, still deployed as the instant rollback target
 
-Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds backend + TWH-branded frontend Docker images, pushes to GHCR, deploys both containers via MIE Create-a-Container API.
+> **#109 blue-green flip (PR3):** the frontend points at the **TypeScript** backend; the diagram
+> above (Spring Boot + in-process cqf-fhir-cr) describes the Java rollback path, which still runs. The
+> TS backend serves the same unchanged `/api/*` contract over a Cloudflare-style worker on a long-lived
+> Node host, evaluates CQL via the JVM-free build-time CQL→ELM path, and persists to the Neon
+> `workwell_spike` schema (the Pg ceiling). The full topology rewrite to Node/TS lands with JVM
+> retirement (#109 PR4).
+
+Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds the TypeScript backend (primary), the Java backend (rollback), and the TWH-branded frontend (pointed at `twh-api-ts`) as Docker images, pushes to GHCR, and deploys all three containers via MIE Create-a-Container API.
 
 Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on startup (OSHA safety, HEDIS wellness, CMS eCQM catalog). A single TWH deployment is the canonical demo environment.
 
