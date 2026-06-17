@@ -30,13 +30,18 @@
   run → 100 outcomes / 22 cases, worklist working).
 
 **Remaining (in order)**
-1. **Evidence `BUCKET`** — the one external binding left. Either a managed S3/R2 bucket (env creds),
-   or ship the first cutover with evidence-upload as a documented known limitation. (`CACHE`/`JOBS`
-   stay in-process — fine for a single-replica container.)
-2. **Shadow deploy (PR):** a new `deploy-twh-ts-shadow.yml` (`workflow_dispatch`) builds
-   `backend-ts/Dockerfile` and creates a **separate** `twh-api-ts` container against Neon
-   (`DATABASE_URL` = the existing `DATABASE_URL_TWH` secret) + the §7 env. The live Java `twh-api`
-   stays untouched. Run the §6 smoke checklist against `twh-api-ts.os.mieweb.org`.
+1. **Evidence `BUCKET`** — **DECIDED (2026-06-17): defer as a documented known limitation** for the
+   first cutover. The shadow/flip run the `local` target, so `BUCKET` is the in-container `fs` driver —
+   evidence upload works but is ephemeral (lost on container recreate). A managed S3/R2 binding is a
+   later follow-up. (`CACHE`/`JOBS` stay in-process — fine for a single-replica container.)
+2. **Shadow deploy (PR):** ✅ **WRITTEN (2026-06-17)** — `.github/workflows/deploy-twh-ts-shadow.yml`
+   on `feat/issue-109-shadow-deploy`. `workflow_dispatch`-only; builds `backend-ts/Dockerfile`
+   (`submodules: recursive`) → `ghcr.io/taleef7/workwell-api-ts`; creates a **separate** `twh-api-ts`
+   container (internal port **8080**, `MIEWEB_TARGET=local`) against Neon (`DATABASE_URL` = the
+   existing `DATABASE_URL_TWH` secret) + the §7 env, via `deploy-mieweb-container.sh`. The live Java
+   `twh-api` stays untouched. **Next action: merge, then manually trigger it and run the §6 smoke
+   checklist against `twh-api-ts.os.mieweb.org`.** First-run op note: set the new `workwell-api-ts`
+   GHCR package's visibility/pull access to match `workwell-api` so the MIE manager can pull it.
 3. **Blue-green flip (PR):** point the frontend at the proven TS backend (rebuild with
    `NEXT_PUBLIC_API_BASE_URL` → `twh-api-ts`). The Java backend stays alive → instant rollback =
    repoint the frontend back. **Never** destroy the live backend with an unproven image.

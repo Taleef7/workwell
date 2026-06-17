@@ -1,0 +1,151 @@
+name: Deploy TWH backend-ts shadow (manual)
+
+# Issue #109 — Phase 5, PR 2: SHADOW deploy of the de-Java TypeScript backend.
+#
+# Stands up a SEPARATE container, twh-api-ts.os.mieweb.org, against the existing Neon (the TS app
+# writes only to the isolated `workwell_spike` schema — the live Java `public` tables are untouched),
+# so the ported backend can be validated end-to-end BEFORE flipping production. The live Java
+# `twh-api` container and the `deploy-twh-mieweb.yml` workflow are never touched by this one.
+#
+# A2 (Neon/Postgres) path: the container runs the `local` mieweb target (in-process DB/BUCKET/CACHE/
+# JOBS — no companion services) and overrides the DB to Neon via DATABASE_URL, which the store-
+# selection factory (#156) picks up to use the Pg ceiling. Evidence upload uses the in-container `fs`
+# BUCKET and is therefore EPHEMERAL — a documented known limitation for the first cutover.
+#
+# Manual only (workflow_dispatch — never on push). After a green run, work the smoke checklist in
+# docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md §6 against https://twh-api-ts.os.mieweb.org.
+
+on:
+  workflow_dispatch:
+    inputs:
+      replace_existing:
+        description: Delete and recreate the twh-api-ts container if it already exists.
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: deploy-twh-ts-shadow
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/taleef7/workwell-api-ts
+  FRONTEND_URL: https://twh.os.mieweb.org
+  BACKEND_URL: https://twh-api-ts.os.mieweb.org
+  API_HOSTNAME: twh-api-ts
+  SITE_ID: 1
+
+jobs:
+  build-backend-ts:
+    name: Build backend-ts image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # The image COPYs both backend-ts/ and the external/mieweb-cloud submodule, so the build context
+      # is the repo ROOT and the checkout MUST include the submodule (it is the public mieweb/cloud).
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./backend-ts/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+
+  deploy-backend-ts:
+    name: Deploy twh-api-ts shadow container
+    runs-on: ubuntu-latest
+    needs: build-backend-ts
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_TWH }}
+      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
+          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_TWH")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare backend-ts environment variables
+        id: backend-env
+        # The TS production env block (cutover plan §7). MIEWEB_TARGET=local overrides the image's
+        # `mieweb` default → in-process bindings (no libSQL/MinIO/Valkey companions); DATABASE_URL
+        # then routes the store factory to the Neon Pg ceiling. WORKWELL_ENVIRONMENT=production keeps
+        # the startup-safety fail-fast ACTIVE (it requires the JWT secret + exact non-localhost CORS +
+        # SameSite=None/Secure that follow). No JAVA_OPTS (this is Node).
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg database_url "$DATABASE_URL" \
+              --arg openai_api_key "$OPENAI_API_KEY" \
+              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontend_url "$FRONTEND_URL" \
+              '[
+                {key: "MIEWEB_TARGET", value: "local"},
+                {key: "WORKWELL_ENVIRONMENT", value: "production"},
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
+                {key: "WORKWELL_INSTANCE", value: "twh"}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy backend-ts through Create-a-Container API
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+          INTERNAL_PORT: 8080
+          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## TWH backend-ts shadow deploy"
+            echo ""
+            echo "- Image: \`${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}\`"
+            echo "- Shadow API: ${{ env.BACKEND_URL }}"
+            echo "- Live Java \`twh-api\` was NOT touched."
+            echo ""
+            echo "Next: run the smoke checklist (cutover plan §6) against ${{ env.BACKEND_URL }}."
+            echo "Evidence upload is an expected known limitation (ephemeral in-container \`fs\` BUCKET)."
+          } >> "$GITHUB_STEP_SUMMARY"
