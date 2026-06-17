@@ -221,13 +221,18 @@ Post-deploy smoke checklist (MVP complete surface):
 
 ## Rollback
 
-### Blue-green: revert the TS backend to Java (fastest)
-Because the Java backend (`twh-api`) is still deployed and current, rolling back off the TypeScript
-backend is just **repointing the frontend** — no backend redeploy:
-- In `deploy-twh-mieweb.yml`, change the frontend's `NEXT_PUBLIC_API_URL` (build-arg) and
-  `NEXT_PUBLIC_API_BASE_URL` (deploy env) from `${BACKEND_TS_URL}` back to `${BACKEND_URL}`
-  (`https://twh-api.os.mieweb.org`), then push / re-run the workflow. The frontend rebuilds against
-  the live Java backend; `twh-api-ts` stays up but unused.
+### Blue-green: roll back to Java (full revert of the flip)
+The Java backend (`twh-api`) is still deployed and current, so rollback is a **full revert of the
+#109 PR3 flip commit** — `git revert <flip-merge-sha>` then push (or "Revert" the PR on GitHub). That
+restores the Java-only deploy: the frontend rebuilds pointing at `${BACKEND_URL}`
+(`https://twh-api.os.mieweb.org`) via `deploy-backend`, and the TS jobs are gone — so the rollback
+**never depends on the (possibly broken) TS deploy**.
+
+> Do **not** roll back by only repointing the frontend URL while leaving the TS jobs in place:
+> `deploy-frontend` is gated on the TS backend deploy succeeding (so a failed TS deploy preserves the
+> last-working frontend instead of aiming it at a deleted/old `twh-api-ts`). A partial URL edit would
+> therefore be skipped whenever the TS deploy is failing — which is exactly when you need the rollback.
+> Use the full commit revert.
 
 ### MIE containers (general)
 - Revert the offending commit on `main` (re-triggers `deploy-twh-mieweb.yml`), or
