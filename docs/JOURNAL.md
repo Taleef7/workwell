@@ -1,5 +1,15 @@
 # Journal
 
+## 2026-06-17 — #109 shadow deploy is live; fixed a Neon-pooler connection bug
+
+Ran the shadow deploy (`deploy-twh-ts-shadow.yml`, manual): build + MIE deploy both went green and `twh-api-ts.os.mieweb.org` came up — and the GHCR-private concern didn't bite (the manager pulled `workwell-api-ts`). Then ran the new §6 smoke script (`scripts/smoke-shadow.sh`) against it.
+
+**Smoke found a real bug.** Every DB-backed route 500'd (measures/runs/cases/exports) while everything that doesn't touch Postgres passed (version/health, auth login+refresh, static admin, the prod-gated demo-reset 403). Debugged it systematically instead of guessing:
+- **Connection-level, confirmed:** queried Neon directly (MCP) — `workwell_spike` **did not exist** (0 tables), while `public` still had its 26 Java/Flyway tables (isolation held, Java untouched). So the TS app never completed a connection + DDL.
+- **Reproduced against the real Neon *pooled* endpoint** with `pg`: the exact `createPgPool` config (`options: '-c search_path=workwell_spike,public'`) → **`08P01 unsupported startup parameter in options: search_path`**; the same pool **without** `options` → connects. Neon's pooler (PgBouncer) rejects the libpq `options` startup param. The 42/42 store-contract tests passed only because they run against a **direct/unpooled** `postgres:16`, which accepts it.
+
+**Fix:** dropped the `options` startup param from `createPgPool`. Safe because every ceiling adapter fully-qualifies `workwell_spike.*` (verified), so search_path is unused — and a per-connection `SET search_path` wouldn't survive PgBouncer transaction pooling anyway. Added `pg-database.test.ts` as a regression guard (asserts no `options` startup param — fails against the old code, passes after). 427 backend-ts tests green, typecheck clean. Also committed the reusable `scripts/smoke-shadow.sh` (the §6 checklist runner). Re-deploying the shadow to verify end-to-end.
+
 ## 2026-06-17 — #109 store-seam review pass merged; PR2 shadow-deploy workflow written
 
 **Closed out the store-selection seam (#156, merged).** Two Codex P2s on the seam, both verified against the code and fixed (commit `5c7f178`; **426 backend-ts tests green**, typecheck clean): (1) `factory.getStores` cached the in-flight `build(env)` promise *before* it resolved, so a transient Neon/D1 error during the startup DDL poisoned the cache until a process restart — now a rejected build is evicted (guarded delete) so the next request retries; (2) non-prod `demo-reset` always deleted from the SQLite floor binding (`env.DB`), a silent no-op when a `DATABASE_URL` ceiling holds the real data — now it routes the volatile-table DELETEs through the *selected* backend via a new `factory.getBackend` / `ActiveBackend` handle, schema-qualified (`workwell_spike.*`) for Postgres. Regression tests for both (`factory.test.ts` cache eviction + `getBackend`; `demo-reset.test.ts` per-backend DELETE sequence); the FK-safe order (`run_logs`/`outcomes` before `runs`) was checked against the Pg schema.
