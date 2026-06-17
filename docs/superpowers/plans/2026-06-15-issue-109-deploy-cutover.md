@@ -251,6 +251,12 @@ Decision A), and `docs/CQF_FHIR_CR_REFERENCE.md` (note the JVM CQL path is retir
 build-time CQL→ELM). Remove Java-specific guidance.
 
 ## 9. Risks
+- **Neon pooler rejects the `options` startup param** (FOUND + FIXED 2026-06-17): the first shadow run
+  500'd on every DB route because `createPgPool` set `options=-c search_path=workwell_spike,public`,
+  which Neon's pooled (PgBouncer) endpoint rejects (`08P01`). Dropped it — the adapters fully-qualify
+  `workwell_spike.*`, so search_path is unneeded (a `SET` wouldn't survive transaction pooling). The
+  42/42 store-contract tests missed it because they run against a *direct/unpooled* `postgres:16`. New
+  guard: `pg-database.test.ts`. Lesson: validate the ceiling against a *pooled* endpoint, not just direct PG.
 - **Companion-service availability** (§4.1) is the critical unknown; it can force Decision A/B to change.
 - **libSQL persistence across recreate** (§4.2): a `main` push recreates the container — verify the
   data volume survives, or accept re-seed-on-boot (demo-acceptable).
