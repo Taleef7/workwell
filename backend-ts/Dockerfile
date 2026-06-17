@@ -30,9 +30,17 @@ RUN pnpm install --frozen-lockfile
 
 # Long-running Node host (src/server.ts). MIEWEB_TARGET selects the binding set:
 #   mieweb → libSQL + S3/MinIO + Valkey companion services (production)
-#   local  → sqlite/fs/memory/inproc, no external services (smoke test: -e MIEWEB_TARGET=local)
+#   local  → sqlite/fs/memory/inproc, no external services
 # The mieweb target listens on :8082 (it co-locates with libSQL which owns :8080); the local
 # target listens on :8080. EXPOSE documents the production port.
 ENV MIEWEB_TARGET=mieweb
+
+# Default the image to production mode so the startup safety guard (config/startup-safety.ts) is
+# ACTIVE out of the box: a container started without a strong JWT secret + exact CORS origins +
+# SameSite=None/Secure cookies fails CLOSED (503) instead of serving the API unauthenticated. The
+# deploy workflow supplies those real secrets (cutover plan §7). Local smoke runs opt out explicitly:
+#   docker run -e MIEWEB_TARGET=local -e WORKWELL_ENVIRONMENT=development ...
+ENV WORKWELL_ENVIRONMENT=production
+
 EXPOSE 8082
 CMD ["pnpm", "start"]
