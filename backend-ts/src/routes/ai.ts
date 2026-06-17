@@ -15,11 +15,7 @@
  * OPENAI_API_KEY is unset every call falls back — matching the demo posture.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { toRunSummary } from "../run/read-models.ts";
@@ -37,6 +33,7 @@ import {
 
 interface AiEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
   WORKWELL_AI_OPENAI_MODEL?: string;
   WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
@@ -47,15 +44,6 @@ const DEFAULT_FALLBACK_MODEL = "gpt-4o-mini";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
-
-const ready = new WeakSet<object>();
-async function ensure(env: AiEnv): Promise<void> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
-}
 
 function model(env: AiEnv): string {
   return env.WORKWELL_AI_OPENAI_MODEL?.trim() || DEFAULT_MODEL;
@@ -68,8 +56,7 @@ function chatFor(env: AiEnv): ChatFn {
   });
 }
 async function aiDeps(env: AiEnv): Promise<AiDeps> {
-  await ensure(env);
-  return { chat: chatFor(env), model: model(env), events: new SqliteCaseEventStore(env.DB) };
+  return { chat: chatFor(env), model: model(env), events: (await getStores(env)).events };
 }
 
 /**
@@ -136,10 +123,10 @@ export async function handleAi(req: Request, env: AiEnv, actor = "system"): Prom
   const explainId =
     pathname.match(/^\/api\/cases\/([^/]+)\/explain$/)?.[1] ?? pathname.match(/^\/api\/cases\/([^/]+)\/ai\/explain$/)?.[1];
   if (explainId) {
-    await ensure(env);
-    const c = await new SqliteCaseStore(env.DB).getCase(explainId);
+    const s = await getStores(env);
+    const c = await s.cases.getCase(explainId);
     if (!c) return json({ error: "not_found", id: explainId }, 404);
-    const outcomes = await new SqliteOutcomeStore(env.DB).listOutcomes(c.lastRunId);
+    const outcomes = await s.outcomes.listOutcomes(c.lastRunId);
     const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
     const detail = toCaseDetail(c, outcome);
 
@@ -167,11 +154,11 @@ export async function handleAi(req: Request, env: AiEnv, actor = "system"): Prom
   // ---- Run Summary Insight ---------------------------------------------------
   const insightId = pathname.match(/^\/api\/runs\/([^/]+)\/ai\/insight$/)?.[1];
   if (insightId) {
-    await ensure(env);
-    const run = await new SqliteRunStore(env.DB).getRun(insightId);
+    const s = await getStores(env);
+    const run = await s.runs.getRun(insightId);
     if (!run) return json({ error: "not_found", id: insightId }, 404);
-    const outcomes = await new SqliteOutcomeStore(env.DB).listOutcomes(insightId);
-    const totalCases = await new SqliteCaseStore(env.DB).countByLastRun(insightId);
+    const outcomes = await s.outcomes.listOutcomes(insightId);
+    const totalCases = await s.cases.countByLastRun(insightId);
     const summary = toRunSummary(run, outcomes, totalCases);
     const res = await runInsight(
       await aiDeps(env),

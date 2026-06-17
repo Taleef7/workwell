@@ -14,11 +14,7 @@
  * nginx (proxy_read_timeout/buffering); that is an MIE-ops fix, not a backend-language issue.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { MCP_TOOLS } from "../mcp/tools.ts";
 import { callTool, type DispatchCtx } from "../mcp/dispatch.ts";
@@ -26,6 +22,7 @@ import type { JsonRecord } from "../mcp/tool-audit.ts";
 
 interface McpEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
 /** Auth context resolved by the worker (role null + enforce=false when auth is disabled). */
@@ -59,16 +56,18 @@ const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
 async function dispatchCtx(env: McpEnv, auth: McpAuth): Promise<DispatchCtx> {
-  // ensureMeasureStore runs DDL + migrate + catalog seed; the other stores share env.DB.
+  // ensureMeasureStore runs schema init + catalog seed; the other stores share the same backend
+  // (the factory caches per env, so the measure store and these resolve to one floor/ceiling).
   const measureStore = await ensureMeasureStore(env);
+  const s = await getStores(env);
   return {
     deps: {
-      caseStore: new SqliteCaseStore(env.DB),
-      outcomeStore: new SqliteOutcomeStore(env.DB),
-      runStore: new SqliteRunStore(env.DB),
+      caseStore: s.cases,
+      outcomeStore: s.outcomes,
+      runStore: s.runs,
       measureStore,
     },
-    events: new SqliteCaseEventStore(env.DB),
+    events: s.events,
     actor: auth.actor,
     role: auth.role,
     enforce: auth.enforce,

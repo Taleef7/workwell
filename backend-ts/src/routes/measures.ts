@@ -18,9 +18,9 @@
  * endpoints (/elm, /evaluate, /compile) stay on the compiled-ELM path — no JVM, no DB.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
+import type { MeasureStore } from "../stores/measure-store.ts";
+import type { ValueSetStore } from "../stores/value-set-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -42,9 +42,6 @@ import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { exportMatBundle } from "../fhir/mat-export.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
 import { seedValueSets } from "../measure/value-set-seed.ts";
 import {
@@ -62,6 +59,7 @@ import {
 
 interface MeasuresEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
 /** Reconstruct the measure's CQL from its compiled ELM (runnable measures); "" otherwise. */
@@ -75,42 +73,43 @@ function measureCql(measureId: string): string {
 const MAX_CQL_BYTES = 64 * 1024;
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
-// One-shot per-DB init (DDL + migrate + catalog seed). The seed uses non-idempotent INSERTs
-// with fixed catalog ids, so concurrent cold-start requests must NOT each run it — an in-flight
-// promise keyed by the DB lets every caller await the same single initialization.
-const initializing = new WeakMap<object, Promise<void>>();
-async function store(env: MeasuresEnv): Promise<SqliteMeasureStore> {
-  let init = initializing.get(env.DB);
-  if (!init) {
-    init = (async () => {
-      await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-      await migrateFloorSchema(env.DB);
-      const measureStore = new SqliteMeasureStore(env.DB);
-      await seedMeasureStore(measureStore, measureCql);
+// One-shot catalog + value-set demo seed, run once per env over the factory's stores (SQLite floor
+// or Postgres ceiling — the factory has already run schema init). The seed uses non-idempotent
+// INSERTs with fixed catalog ids, so concurrent cold-start requests must NOT each run it — an
+// in-flight promise keyed by env lets every caller await the single initialization.
+const seeding = new WeakMap<object, Promise<void>>();
+async function store(env: MeasuresEnv): Promise<MeasureStore> {
+  const stores = await getStores(env);
+  let seed = seeding.get(env);
+  if (!seed) {
+    seed = (async () => {
+      await seedMeasureStore(stores.measures, measureCql);
       // Value-set governance demo seed — after measures (links target version ids). Idempotent.
-      const valueSetStore = new SqliteValueSetStore(env.DB);
-      if (await valueSetStore.isEmpty()) {
-        const records = await measureStore.listLatest();
+      if (await stores.valueSets.isEmpty()) {
+        const records = await stores.measures.listLatest();
         const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
-        await seedValueSets(valueSetStore, (slug) => versionBySlug.get(slug));
+        await seedValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
       }
     })();
-    initializing.set(env.DB, init);
+    seeding.set(env, seed);
   }
-  await init;
-  return new SqliteMeasureStore(env.DB);
+  await seed;
+  return stores.measures;
 }
 async function lifecycleDeps(env: MeasuresEnv): Promise<MeasureLifecycleDeps> {
-  return { measures: await store(env), events: new SqliteCaseEventStore(env.DB) };
+  const measures = await store(env);
+  return { measures, events: (await getStores(env)).events };
 }
 /** Governance deps (measure store + value-set store + audit) for the value-set surfaces. */
 async function governanceDeps(env: MeasuresEnv): Promise<ValueSetGovernanceDeps> {
-  return { measures: await store(env), valueSets: new SqliteValueSetStore(env.DB), events: new SqliteCaseEventStore(env.DB) };
+  const measures = await store(env);
+  const s = await getStores(env);
+  return { measures, valueSets: s.valueSets, events: s.events };
 }
-/** Value-set store with the shared one-shot init (DDL + measure + value-set demo seed) guaranteed. */
-async function valueSetStore(env: MeasuresEnv): Promise<SqliteValueSetStore> {
+/** Value-set store with the shared one-shot init (schema + measure + value-set demo seed) guaranteed. */
+async function valueSetStore(env: MeasuresEnv): Promise<ValueSetStore> {
   await store(env);
-  return new SqliteValueSetStore(env.DB);
+  return (await getStores(env)).valueSets;
 }
 
 /**
@@ -118,7 +117,7 @@ async function valueSetStore(env: MeasuresEnv): Promise<SqliteValueSetStore> {
  * per-DB in-flight promise). Exported so sibling modules (e.g. the AI route's draft-cql /
  * generate-test-fixtures, #108) read the catalog without re-running the non-idempotent seed.
  */
-export async function ensureMeasureStore(env: MeasuresEnv): Promise<SqliteMeasureStore> {
+export async function ensureMeasureStore(env: MeasuresEnv): Promise<MeasureStore> {
   return store(env);
 }
 
@@ -235,7 +234,8 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       if (!measure) return json({ error: "not_found", measureId: impactId }, 404);
       const body = (await req.json().catch(() => ({}))) as ImpactPreviewRequest;
       try {
-        const deps = { cases: new SqliteCaseStore(env.DB), events: new SqliteCaseEventStore(env.DB), engine };
+        const s = await getStores(env);
+        const deps = { cases: s.cases, events: s.events, engine };
         return json(await previewImpact(deps, measure, body, actor));
       } catch (err) {
         if (err instanceof ImpactPreviewError) return json({ error: "invalid_request", message: err.message }, 400);
@@ -351,7 +351,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const record = await (await store(env)).getByVersionId(versionId!);
     // 404 unless the version exists AND belongs to the measure in the path (Java WHERE m.id=? AND mv.id=?).
     if (!record || record.measureId !== measureId) return json({ error: "not_found", measureId, versionId }, 404);
-    const attached = await (new SqliteValueSetStore(env.DB)).listByVersion(record.versionId);
+    const attached = await (await valueSetStore(env)).listByVersion(record.versionId);
     const exportValueSets = attached.map((vs) => ({
       id: vs.id,
       oid: vs.oid,
@@ -389,7 +389,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (traceId && req.method === "GET") {
     const r = await (await store(env)).getLatest(traceId);
     if (!r) return json({ error: "not_found", measureId: traceId }, 404);
-    const attached = await (new SqliteValueSetStore(env.DB)).listByVersion(r.versionId);
+    const attached = await (await valueSetStore(env)).listByVersion(r.versionId);
     return json(generateTraceability(r, attached.map((vs) => ({ name: vs.name, oid: vs.oid, version: vs.version ?? "" }))));
   }
 
@@ -398,14 +398,14 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (readyId && req.method === "GET") {
     const r = await (await store(env)).getLatest(readyId);
     if (!r) return json({ error: "not_found", measureId: readyId }, 404);
-    return json(await computeDataReadiness({ outcomes: new SqliteOutcomeStore(env.DB) }, r));
+    return json(await computeDataReadiness({ outcomes: (await getStores(env)).outcomes }, r));
   }
 
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
   if (detailId && detailId !== "compile" && req.method === "GET") {
     const r = await (await store(env)).getLatest(detailId);
     if (!r) return json({ error: "not_found", measureId: detailId }, 404);
-    const valueSets = await listValueSetsByVersion(new SqliteValueSetStore(env.DB), r.versionId);
+    const valueSets = await listValueSetsByVersion(await valueSetStore(env), r.versionId);
     return json(toMeasureDetail(r, valueSets));
   }
 
