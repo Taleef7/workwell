@@ -15,12 +15,10 @@
  *                                   body {measureId, patientBundle, evaluationDate?}
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import type { CreateRunInput } from "../stores/run-store.ts";
+import { getStores } from "../stores/factory.ts";
+import type { CreateRunInput, RunStore } from "../stores/run-store.ts";
+import type { OutcomeStore } from "../stores/outcome-store.ts";
+import type { CaseStore } from "../stores/case-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
@@ -42,31 +40,21 @@ import { rerunToVerify } from "../case/case-rerun.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
-// Spike bootstrap: ensure the floor schema once per DB. CANONICAL schema/migrations
-// stay Taleef-owned (CLAUDE.md) — this only touches the local SQLite dev DB.
-const ready = new WeakSet<object>();
-async function ensure(env: RunsEnv): Promise<void> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
+// The store factory selects the SQLite floor or the Postgres ceiling (when DATABASE_URL is set) and
+// runs schema init once per env. CANONICAL schema/migrations stay Taleef-owned (CLAUDE.md).
+async function store(env: RunsEnv): Promise<RunStore> {
+  return (await getStores(env)).runs;
 }
-async function store(env: RunsEnv): Promise<SqliteRunStore> {
-  await ensure(env);
-  return new SqliteRunStore(env.DB);
+async function outcomes(env: RunsEnv): Promise<OutcomeStore> {
+  return (await getStores(env)).outcomes;
 }
-async function outcomes(env: RunsEnv): Promise<SqliteOutcomeStore> {
-  await ensure(env);
-  return new SqliteOutcomeStore(env.DB);
-}
-async function cases(env: RunsEnv): Promise<SqliteCaseStore> {
-  await ensure(env);
-  return new SqliteCaseStore(env.DB);
+async function cases(env: RunsEnv): Promise<CaseStore> {
+  return (await getStores(env)).cases;
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -189,7 +177,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       const caseId = prior.requestedScope.caseId as string | undefined;
       if (!caseId) return json({ error: "invalid_request", message: "CASE run has no caseId to rerun" }, 400);
       const detail = await rerunToVerify(
-        { cases: await cases(env), events: new SqliteCaseEventStore(env.DB), outcomes: await outcomes(env), runStore, engine },
+        { cases: await cases(env), events: (await getStores(env)).events, outcomes: await outcomes(env), runStore, engine },
         caseId,
         actor,
       );

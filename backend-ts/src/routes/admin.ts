@@ -15,9 +15,7 @@
  * dashboard renders. Create/PUT/DELETE + demo-reset are a follow-up (need persistence).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { getStores, getBackend } from "../stores/factory.ts";
 import {
   listIntegrations,
   syncIntegration,
@@ -27,8 +25,6 @@ import {
   validateDataMappings,
   toAdminAuditRows,
 } from "../admin/admin-data.ts";
-import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
-import { SqliteOutreachTemplateStore } from "../stores/sqlite/outreach-template-store-sqlite.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
 import {
@@ -40,32 +36,36 @@ import {
   OutreachTemplateError,
 } from "../admin/outreach-templates.ts";
 import { resetDemoData } from "../admin/demo-reset.ts";
-import { SqliteWaiverStore } from "../stores/sqlite/waiver-store-sqlite.ts";
 import { listWaivers, grantWaiver, WaiverError, type WaiverDeps } from "../admin/waivers.ts";
 import { isProductionLike } from "../config/startup-safety.ts";
 
 interface AdminEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
   /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
   SPRING_PROFILES_ACTIVE?: string;
   WORKWELL_ENVIRONMENT?: string;
   NODE_ENV?: string;
 }
 
-const ready = new WeakSet<object>();
+// Seed the outreach templates (V007/V008) once per env over the factory's store — the factory has
+// already run schema init (SQLite floor or Postgres ceiling). Idempotent seed.
+const seeding = new WeakMap<object, Promise<void>>();
 async function ensure(env: AdminEnv): Promise<void> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    await seedOutreachTemplates(new SqliteOutreachTemplateStore(env.DB));
-    ready.add(env.DB);
+  const stores = await getStores(env);
+  let seed = seeding.get(env);
+  if (!seed) {
+    seed = seedOutreachTemplates(stores.outreachTemplates);
+    seeding.set(env, seed);
   }
+  await seed;
 }
 
 /** Waiver deps: the waiver store + the measure store (display resolution) + audit. */
 async function waiverDeps(env: AdminEnv): Promise<WaiverDeps> {
-  const measures = await ensureMeasureStore(env); // ensures DDL + catalog seed
-  return { waivers: new SqliteWaiverStore(env.DB), measures, events: new SqliteCaseEventStore(env.DB) };
+  const measures = await ensureMeasureStore(env); // ensures schema + catalog seed
+  const s = await getStores(env);
+  return { waivers: s.waivers, measures, events: s.events };
 }
 
 /**
@@ -111,9 +111,9 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
 
   // ---- audit viewer (over the persisted ledger) ----------------------------
   if (pathname === "/api/admin/audit-events" && req.method === "GET") {
-    await ensure(env);
-    const events = await new SqliteCaseEventStore(env.DB).listAuditEvents();
-    const caseStore = new SqliteCaseStore(env.DB);
+    const s = await getStores(env);
+    const events = await s.events.listAuditEvents();
+    const caseStore = s.cases;
     const caseEmployee = new Map<string, string>();
     for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
       const c = await caseStore.getCase(id);
@@ -126,13 +126,14 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- terminology mappings (persisted; demo rows seeded with the value sets) ----
   if (pathname === "/api/admin/terminology-mappings" && req.method === "GET") {
     await ensureMeasureStore(env); // runs the value-set + terminology demo seed
-    return json(await listTerminologyMappings(new SqliteValueSetStore(env.DB)));
+    return json(await listTerminologyMappings((await getStores(env)).valueSets));
   }
   if (pathname === "/api/admin/terminology-mappings" && req.method === "POST") {
     await ensureMeasureStore(env);
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
-      const deps = { valueSets: new SqliteValueSetStore(env.DB), events: new SqliteCaseEventStore(env.DB) };
+      const sx = await getStores(env);
+      const deps = { valueSets: sx.valueSets, events: sx.events };
       const created = await createTerminologyMapping(
         deps,
         {
@@ -161,15 +162,16 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- outreach templates (persisted; V007 demo seed + create/update) ------
   if (pathname === "/api/admin/outreach-templates" && req.method === "GET") {
     await ensure(env);
-    return json(await listTemplates(new SqliteOutreachTemplateStore(env.DB)));
+    return json(await listTemplates((await getStores(env)).outreachTemplates));
   }
   if (pathname === "/api/admin/outreach-templates" && req.method === "POST") {
     await ensure(env);
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
+      const sx = await getStores(env);
       const created = await createTemplate(
-        new SqliteOutreachTemplateStore(env.DB),
-        new SqliteCaseEventStore(env.DB),
+        sx.outreachTemplates,
+        sx.events,
         { name: String(b.name ?? ""), subject: String(b.subject ?? ""), bodyText: String(b.bodyText ?? ""), type: b.type == null ? null : String(b.type) },
         actor,
       );
@@ -184,9 +186,10 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     await ensure(env);
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
+      const sx = await getStores(env);
       const updated = await updateTemplate(
-        new SqliteOutreachTemplateStore(env.DB),
-        new SqliteCaseEventStore(env.DB),
+        sx.outreachTemplates,
+        sx.events,
         updateId,
         {
           name: String(b.name ?? ""),
@@ -207,7 +210,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   if (previewId && req.method === "GET") {
     await ensure(env);
     try {
-      return json(await previewTemplate(new SqliteOutreachTemplateStore(env.DB), previewId));
+      return json(await previewTemplate((await getStores(env)).outreachTemplates, previewId));
     } catch (err) {
       if (err instanceof OutreachTemplateError) return json({ error: "not_found", id: previewId }, 404);
       throw err;
@@ -218,7 +221,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   if (pathname === "/api/admin/demo-reset" && req.method === "POST") {
     if (isProductionLike(env)) return json({ error: "Demo reset is not available in production" }, 403);
     await ensure(env);
-    await resetDemoData(env.DB);
+    await resetDemoData(await getBackend(env));
     return json({ status: "reset_complete", message: "Demo data has been reset" });
   }
 

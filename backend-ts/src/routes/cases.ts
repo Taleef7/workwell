@@ -17,13 +17,9 @@
  * the merged ledger. evidence/appointments/ai are later slices.
  */
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { SqliteEvidenceStore } from "../stores/sqlite/evidence-store-sqlite.ts";
-import { SqliteAppointmentStore } from "../stores/sqlite/appointment-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
+import type { CaseStore } from "../stores/case-store.ts";
+import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
@@ -46,62 +42,33 @@ import { scheduleAppointment, listAppointments, AppointmentError, type Appointme
 
 interface CasesEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
   BUCKET: CloudBucket;
 }
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
-const ready = new WeakSet<object>();
-async function ensure(env: CasesEnv): Promise<void> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
+async function caseStore(env: CasesEnv): Promise<CaseStore> {
+  return (await getStores(env)).cases;
 }
-async function caseStore(env: CasesEnv): Promise<SqliteCaseStore> {
-  await ensure(env);
-  return new SqliteCaseStore(env.DB);
-}
-async function outcomeStore(env: CasesEnv): Promise<SqliteOutcomeStore> {
-  await ensure(env);
-  return new SqliteOutcomeStore(env.DB);
+async function outcomeStore(env: CasesEnv): Promise<OutcomeStore> {
+  return (await getStores(env)).outcomes;
 }
 async function actionDeps(env: CasesEnv): Promise<CaseActionDeps> {
-  await ensure(env);
-  return {
-    cases: new SqliteCaseStore(env.DB),
-    events: new SqliteCaseEventStore(env.DB),
-    outcomes: new SqliteOutcomeStore(env.DB),
-  };
+  const s = await getStores(env);
+  return { cases: s.cases, events: s.events, outcomes: s.outcomes };
 }
 async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
-  await ensure(env);
-  return {
-    cases: new SqliteCaseStore(env.DB),
-    events: new SqliteCaseEventStore(env.DB),
-    outcomes: new SqliteOutcomeStore(env.DB),
-    runStore: new SqliteRunStore(env.DB),
-    engine,
-  };
+  const s = await getStores(env);
+  return { cases: s.cases, events: s.events, outcomes: s.outcomes, runStore: s.runs, engine };
 }
 async function evidenceDeps(env: CasesEnv): Promise<EvidenceDeps> {
-  await ensure(env);
-  return {
-    evidence: new SqliteEvidenceStore(env.DB),
-    cases: new SqliteCaseStore(env.DB),
-    bucket: env.BUCKET,
-    events: new SqliteCaseEventStore(env.DB),
-  };
+  const s = await getStores(env);
+  return { evidence: s.evidence, cases: s.cases, bucket: env.BUCKET, events: s.events };
 }
 async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
-  await ensure(env);
-  return {
-    appointments: new SqliteAppointmentStore(env.DB),
-    cases: new SqliteCaseStore(env.DB),
-    events: new SqliteCaseEventStore(env.DB),
-    outcomes: new SqliteOutcomeStore(env.DB),
-  };
+  const s = await getStores(env);
+  return { appointments: s.appointments, cases: s.cases, events: s.events, outcomes: s.outcomes };
 }
 
 const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
@@ -280,7 +247,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
     const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
-    const events = new SqliteCaseEventStore(env.DB);
+    const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);
     return json(toCaseDetail(c, outcome, timeline, latest));
@@ -330,7 +297,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
 
   // outreachRecordCount per case (derived from OUTREACH_SENT actions) — drives the
   // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.
-  const counts = await new SqliteCaseEventStore(env.DB).outreachSentCounts(rows.map((c) => c.id));
+  const counts = await (await getStores(env)).events.outreachSentCounts(rows.map((c) => c.id));
   let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0));
   if (wantCurrentCycle) {
     // Keep only each measure's CURRENT cycle, by today + the measure's cadence (Codex P2): exact and
