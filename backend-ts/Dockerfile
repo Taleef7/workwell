@@ -13,7 +13,7 @@ FROM node:24-bookworm-slim
 # `local` smoke-test target compiles it, so the image needs a toolchain. The production `mieweb`
 # target uses libSQL/S3/Valkey instead, but the dependency is still installed.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates curl \
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # pnpm via corepack, pinned to the version CI uses.
@@ -38,9 +38,12 @@ ENV MIEWEB_TARGET=mieweb
 # Default the image to production mode so the startup safety guard (config/startup-safety.ts) is
 # ACTIVE out of the box: a container started without a strong JWT secret + exact CORS origins +
 # SameSite=None/Secure cookies fails CLOSED (503) instead of serving the API unauthenticated. The
-# deploy workflow supplies those real secrets (cutover plan §7). Local smoke runs opt out explicitly:
-#   docker run -e MIEWEB_TARGET=local -e WORKWELL_ENVIRONMENT=development ...
+# deploy workflow supplies those real secrets (cutover plan §7). Local smoke runs opt out explicitly
+# (the `local` target listens on :8080, not the production :8082 EXPOSEd below):
+#   docker run -e MIEWEB_TARGET=local -e WORKWELL_ENVIRONMENT=development -p 8080:8080 ...
 ENV WORKWELL_ENVIRONMENT=production
 
 EXPOSE 8082
-CMD ["pnpm", "start"]
+# Run node directly as PID 1 (not `pnpm start`) so SIGTERM/SIGINT reach the process and the graceful
+# shutdown in src/server.ts actually runs — a package-manager wrapper as PID 1 swallows the signal.
+CMD ["node", "--import", "tsx", "src/server.ts"]
