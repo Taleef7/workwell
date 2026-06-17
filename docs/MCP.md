@@ -31,7 +31,7 @@ Use a JWT minted from `/api/auth/login` for a `ROLE_ADMIN` or `ROLE_CASE_MANAGER
       "args": [
         "-y",
         "mcp-remote",
-        "https://twh-api.os.mieweb.org/sse",
+        "https://twh-api-ts.os.mieweb.org/sse",
         "--transport",
         "sse-only",
         "--header",

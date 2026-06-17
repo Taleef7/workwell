@@ -12,6 +12,7 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 - Scoped-run parity (Sprint 8): `SITE` and `EMPLOYEE` manual runs and same-scope reruns now route through the async run-job path, matching `ALL_PROGRAMS`/`MEASURE`; the `/runs` UI exposes the new scopes.
 
 ### Changed
+- **De-Java cutover is live (#109, PR #159):** `https://twh.os.mieweb.org` is now served by the TypeScript backend (`backend-ts/` → `https://twh-api-ts.os.mieweb.org`) on Neon Postgres via the `Pg*Store` ceiling (isolated `workwell_spike` schema), behind the unchanged Next.js fetch contract. The Java/Spring backend (`https://twh-api.os.mieweb.org`) stays deployed as the instant rollback target (retired in #109 PR4). `deploy-twh-mieweb.yml` now builds + deploys both backends and points the frontend at the TS one. Cutover path: container/image (#155) → store-selection seam (#156) → shadow deploy + Neon-pooler `options` fix (#157/#158) → blue-green flip (#159). Known limitation: evidence upload is ephemeral (in-container `fs` BUCKET) pending a managed S3/R2 bucket.
 - CI backend test suite ~3.8× faster (44m → 11m30s) via 8-way test sharding plus a per-class population-run fix (PR #57).
 - Deployment consolidated onto MIE Create-a-Container; the Vercel + Fly.io public-preview stack is decommissioned. Living docs (README, DEPLOY, ARCHITECTURE, CLAUDE, AGENTS, sprint index) reconciled to the single live MIE TWH stack.
 - Repository standards polish: badges, contribution/security/support docs, community templates, and metadata alignment.
