@@ -273,9 +273,13 @@ jobs:
   deploy-frontend:
     name: Deploy twh frontend container
     runs-on: ubuntu-latest
-    # The frontend points at the TS backend, so it deploys after twh-api-ts is up. The Java
-    # deploy-backend job runs in parallel (rollback target) and is not a dependency of the frontend.
+    # Ordering only — wait for the TS backend deploy to FINISH, but do NOT require it to succeed. The
+    # frontend is the rollback lever: reverting NEXT_PUBLIC_API_* → ${BACKEND_URL} and redeploying must
+    # work even when a broken TS deploy is the very thing being rolled back (Java stays live + current).
+    # So gate solely on the frontend image build; `!cancelled()` lets this run after a failed
+    # deploy-backend-ts. The Java deploy-backend job runs in parallel as the rollback target.
     needs: [build-frontend, deploy-backend-ts]
+    if: ${{ !cancelled() && needs.build-frontend.result == 'success' }}
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
