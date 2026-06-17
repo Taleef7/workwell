@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-06-17 — #109 pre-retirement hardening (1/3): CI gate for backend-ts
+
+Before retiring the JVM (the point of no return), ran a critical readiness audit of the live TS deployment. Biggest gap found: **backend-ts had no CI gate** — `ci.yml`'s pnpm steps were the frontend's, so the live TS backend deployed on every push to `main` with zero automated verification (the 427 tests only ran locally; after JVM retirement there's no Java to fall back to either). Added a `backend-ts` job to `ci.yml`: submodule-recursive checkout (the public `mieweb/cloud`), node 24 + pnpm 10.17.1, `pnpm install --frozen-lockfile` → `pnpm typecheck` → `pnpm test`, with a `postgres:16` **service** so the run exercises BOTH the SQLite floor (default) and the **Postgres ceiling** (the store-contract suite) — CI now tests what prod actually runs on. The Pg contract previously *skipped* when unreachable, so a miswired CI service could leave the gate silently floor-only (Codex re-review P2); now the suite **fails** (not skips) whenever `WORKWELL_TEST_PG_URL` is set but Postgres is unreachable, guaranteeing the ceiling actually runs in CI (local dev with no PG + no env still skips).
+
+Audit's other pre-retirement items (next PRs): observability (worker error-logging; 500s currently return empty bodies), async-run durability (ALL_PROGRAMS completes but ~5.5 min for 1000 outcomes via per-outcome Neon round-trips, and the in-proc job is orphaned if the container restarts mid-run), and two that need the maintainer (confirm Proxmox `onboot` crash-recovery; a managed S3/R2 evidence `BUCKET` — currently ephemeral). Everything else probed clean: full endpoint parity (all my initial "501s" were wrong-path/method probes), evidence upload→download round-trips, data durability across redeploys (Neon persists; seed is `isEmpty`-guarded), and additive Pg schema migration.
+
 ## 2026-06-17 — #109 cutover is LIVE: the flip merged, deployed, and verified in production
 
 Merged PR #159 (CI green: all 8 backend shards + frontend) — the merge to `main` ran `deploy-twh-mieweb.yml`, whose **6 jobs all succeeded**: built the TS backend (primary) + Java backend (rollback) + frontend, and deployed all three. `https://twh.os.mieweb.org` is now served by the **de-Java TypeScript backend** (`twh-api-ts`).
