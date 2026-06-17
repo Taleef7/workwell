@@ -70,7 +70,7 @@ rt="$(jq -r '.token // empty' "$BODY")"
 # 3. measures: catalog count + a detail with value sets
 echo "[measures]"
 st=$(req GET /api/measures); n=$(jq 'length' "$BODY" 2>/dev/null || echo "?")
-{ [ "$st" = "200" ] && [ "$n" = "60" ] && pass "GET /api/measures → 60"; } || warn "GET /api/measures → $st, count=$n (expected 60)"
+{ [ "$st" = "200" ] && [ "$n" = "60" ] && pass "GET /api/measures → 60"; } || fail "GET /api/measures → $st, count=$n (expected 60 — catalog seed regression)"
 st=$(req GET /api/measures/audiogram); vs=$(jq '([.valueSets // .value_sets // []] | flatten | length)' "$BODY" 2>/dev/null || echo 0)
 { [ "$st" = "200" ] && pass "GET /api/measures/audiogram → 200 (value sets: $vs)"; } || fail "GET /api/measures/audiogram → $st"
 
