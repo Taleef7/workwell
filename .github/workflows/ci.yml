@@ -95,6 +95,52 @@ jobs:
           NEXT_PUBLIC_DEMO_MODE: "false"
         run: pnpm build
 
+  backend-ts:
+    name: Backend-TS — Typecheck & Test
+    runs-on: ubuntu-latest
+    # Production runs on the TypeScript backend (backend-ts/), so it must be gated like any other
+    # code path. Exercises BOTH the SQLite floor (default) and the Postgres ceiling — the postgres
+    # service + WORKWELL_TEST_PG_URL light up the store-contract suite, which otherwise self-skips.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workwell
+          POSTGRES_PASSWORD: workwell
+          POSTGRES_DB: workwell
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workwell"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      # backend-ts consumes @mieweb/cloud from the external/mieweb-cloud submodule (public mieweb/cloud).
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test (SQLite floor + Postgres ceiling)
+        env:
+          WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
+        run: pnpm test
+
   e2e:
     name: Playwright E2E (manual)
     runs-on: ubuntu-latest
