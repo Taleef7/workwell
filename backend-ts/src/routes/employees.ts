@@ -7,27 +7,20 @@
  *   GET /api/employees/:externalId/profile  → EmployeeProfileResponse | 404
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
-import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
-import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { getStores } from "../stores/factory.ts";
 import { getEmployeeProfile, searchEmployees, type EmployeeProfileDeps } from "../run/employee-profile.ts";
 
 interface EmployeesEnv {
   DB: CloudDatabase;
+  DATABASE_URL?: string;
 }
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-const ready = new WeakSet<object>();
 async function deps(env: EmployeesEnv): Promise<EmployeeProfileDeps> {
-  if (!ready.has(env.DB)) {
-    await env.DB.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-    await migrateFloorSchema(env.DB);
-    ready.add(env.DB);
-  }
-  return { outcomes: new SqliteOutcomeStore(env.DB), cases: new SqliteCaseStore(env.DB), events: new SqliteCaseEventStore(env.DB) };
+  const s = await getStores(env);
+  return { outcomes: s.outcomes, cases: s.cases, events: s.events };
 }
 
 export async function handleEmployees(req: Request, env: EmployeesEnv): Promise<Response | null> {

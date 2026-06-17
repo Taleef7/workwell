@@ -47,6 +47,11 @@ export interface Env {
   JOBS: CloudQueue;
 
   // ---- plain runtime config (not @mieweb/cloud bindings) ------------------
+  /**
+   * Postgres connection string (the ceiling). When set, the store factory uses the Pg* adapters
+   * instead of the `DB` SQLite floor (#109 cutover, Neon/Postgres path) — see stores/factory.ts.
+   */
+  DATABASE_URL?: string;
   WORKWELL_AUTH_JWT_SECRET?: string;
   WORKWELL_AUTH_ENABLED?: string;
   WORKWELL_AUTH_COOKIE_SAME_SITE?: string;
