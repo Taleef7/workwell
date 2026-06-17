@@ -109,11 +109,22 @@ What was verified directly against the manager API (`GET /api/v1/sites/1/contain
   fails unless the final container `status` is `running`. So the containers reliably return to
   `running` after being recreated.
 
-> **Only open item (one-line question for the Container Manager maintainer, not an ops ticket):**
-> are provisioned containers created with Proxmox **`onboot=1`** (auto-start when the node reboots)?
-> This is the single thing not verifiable from our side — a manual container restart does **not**
-> test it (restart ≠ node reboot), and rebooting a shared Proxmox node is not an option. Everything
-> else about reboot recovery is settled above.
+> **Open question (nice-to-know, not a blocker — see the reconciler below):** are provisioned
+> containers created with Proxmox **`onboot=1`** (auto-start when the node reboots)? This is the one
+> thing not verifiable from our side — a manual container restart does **not** test it (restart ≠ node
+> reboot), and rebooting a shared Proxmox node is not an option.
+
+**Self-healing reconciler (covers reboot recovery regardless of `onboot`).**
+`.github/workflows/reconcile-twh-mieweb.yml` runs every 15 minutes (+ `workflow_dispatch`): it
+health-checks the live surfaces (`twh` → 200; `twh-api-ts` → `/actuator/health` `UP`, with a 3×
+retry to ignore transient blips) and, if any is down, **recreates that container from its last-good
+GHCR `:latest` image** via `deploy-mieweb-container.sh` (`REPLACE_EXISTING=true`). This recovers the
+stack from a node reboot, a container crash/OOM, or accidental deletion — **independent of `onboot`**
+— so the `onboot` question above is no longer a blocker. Worst-case recovery latency ≈ the 15-min
+interval; a recreate is ~30–120s of that container's downtime; no data loss (Neon persists). Scope is
+the live path only (the Java rollback `twh-api` is not auto-healed — rollback is a full revert that
+redeploys it). The env blocks are duplicated from `deploy-twh-mieweb.yml` and marked **keep-in-sync**
+in both.
 
 **2. Self-hosted / VM / local — Docker Compose + systemd.**
 For any host we *do* control, reboot recovery is fully handled and is the reference Doug asked for:
