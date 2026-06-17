@@ -55,7 +55,16 @@ let reachable = false;
   }
 }
 
-if (!reachable) {
+if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
+  // CI sets WORKWELL_TEST_PG_URL, so an unreachable Postgres there is a real FAILURE, not a skip —
+  // otherwise the backend-ts gate silently degrades to floor-only and misses Postgres-ceiling
+  // regressions (Codex #161 P2). Local dev with no Postgres and no env var still skips (below).
+  test("[postgres] store contract — Postgres UNREACHABLE despite WORKWELL_TEST_PG_URL", () => {
+    throw new Error(
+      `WORKWELL_TEST_PG_URL is set (${url}) but Postgres is unreachable — the ceiling contract must run in CI; check the postgres service.`,
+    );
+  });
+} else if (!reachable) {
   test(
     "[postgres] store contract — SKIPPED (no Postgres reachable)",
     { skip: `start it with: docker compose -f infra/docker-compose.yml up -d postgres (tried ${url})` },
