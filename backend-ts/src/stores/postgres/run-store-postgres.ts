@@ -176,16 +176,17 @@ export class PgRunStore implements RunStore {
 
   async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // RUNNING only: a QUEUED run is the claim path's legitimate "waiting for a worker" state
-    // (claimNextQueuedRun), not an orphan — failing it would kill pending work. Async runs are
-    // marked RUNNING synchronously (run-pipeline scheduleAsyncRun), so every real orphan is RUNNING.
+    // Target only UNCLAIMED RUNNING runs — i.e. the in-process ctx.waitUntil orphans. `markRunning`
+    // (the async-run path) leaves claimed_by NULL, whereas claimNextQueuedRun stamps claimed_by, so
+    // a legitimately CLAIMED worker job (even one processing past the threshold) is NOT recovered.
+    // QUEUED is also excluded — that is the claim path's "waiting for a worker" state, not an orphan.
     const stuck = await this.pool.query<{ id: string }>(
-      `SELECT id FROM ${T} WHERE status = 'RUNNING' AND started_at < $1`,
+      `SELECT id FROM ${T} WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $1`,
       [cutoff],
     );
     if (stuck.rows.length === 0) return [];
     await this.pool.query(
-      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status = 'RUNNING' AND started_at < $2`,
+      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $2`,
       [new Date().toISOString(), cutoff],
     );
     return stuck.rows.map((r) => r.id);
