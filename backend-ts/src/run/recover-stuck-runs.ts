@@ -17,8 +17,9 @@ export interface RecoverStuckRunsDeps {
 }
 
 /**
- * Fail + audit any runs stuck RUNNING/QUEUED beyond the threshold (see {@link RunStore.failStuckRuns}).
- * Returns the recovered run ids. Best-effort: callers run it fire-and-forget on boot.
+ * Fail + audit any runs stuck RUNNING beyond the threshold (see {@link RunStore.failStuckRuns};
+ * QUEUED runs are left for the claim path). Returns the recovered run ids. Best-effort: callers run
+ * it fire-and-forget on boot.
  */
 export async function recoverStuckRuns(deps: RecoverStuckRunsDeps, olderThanMs?: number): Promise<string[]> {
   const recovered = await deps.runs.failStuckRuns(olderThanMs);

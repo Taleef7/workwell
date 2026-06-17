@@ -24,7 +24,7 @@ const sampleRun = (): CreateRunInput => ({
   measurementPeriodEnd: "2026-06-17T00:00:00.000Z",
 });
 
-test("recoverStuckRuns fails stuck RUNNING/QUEUED runs AND writes a RUN_RECOVERED audit per run", async () => {
+test("recoverStuckRuns fails stuck RUNNING runs (not QUEUED) AND writes a RUN_RECOVERED audit per run", async () => {
   const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
   const db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
@@ -32,32 +32,31 @@ test("recoverStuckRuns fails stuck RUNNING/QUEUED runs AND writes a RUN_RECOVERE
   const events = new SqliteCaseEventStore(db);
   try {
     const running = await runs.createRun(sampleRun());
-    await runs.markRunning(running.id); // QUEUED → RUNNING
-    const queued = await runs.createRun(sampleRun()); // stays QUEUED
+    await runs.markRunning(running.id); // QUEUED → RUNNING (the orphaned-async-run case)
+    const queued = await runs.createRun(sampleRun()); // stays QUEUED — claim-path pending work
     const done = await runs.createRun(sampleRun());
-    await runs.finalizeRun(done.id, "COMPLETED"); // terminal — must be left alone + not audited
+    await runs.finalizeRun(done.id, "COMPLETED"); // terminal
 
     await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
     const recovered = await recoverStuckRuns({ runs, events }, 0);
 
-    assert.equal(recovered.length, 2, "the RUNNING + QUEUED runs are recovered");
+    assert.deepEqual(recovered, [running.id], "only the RUNNING run is recovered");
     assert.equal((await runs.getRun(running.id))?.status, "FAILED");
-    assert.equal((await runs.getRun(queued.id))?.status, "FAILED");
+    assert.equal((await runs.getRun(queued.id))?.status, "QUEUED", "QUEUED is left for the claim path");
     assert.equal((await runs.getRun(done.id))?.status, "COMPLETED", "terminal run untouched");
 
-    // Every recovery is audited (the hard rule). The terminal run gets no recovery audit.
-    for (const id of [running.id, queued.id]) {
-      const audits = await events.auditEventsByRun(id);
-      assert.ok(
-        audits.some((a) => a.eventType === "RUN_RECOVERED"),
-        `run ${id} has a RUN_RECOVERED audit event`,
+    // The recovery is audited (the hard rule). QUEUED + terminal runs get no recovery audit.
+    assert.ok(
+      (await events.auditEventsByRun(running.id)).some((a) => a.eventType === "RUN_RECOVERED"),
+      "the recovered RUNNING run has a RUN_RECOVERED audit event",
+    );
+    for (const id of [queued.id, done.id]) {
+      assert.equal(
+        (await events.auditEventsByRun(id)).filter((a) => a.eventType === "RUN_RECOVERED").length,
+        0,
+        `run ${id} is not audited as recovered`,
       );
     }
-    assert.equal(
-      (await events.auditEventsByRun(done.id)).filter((a) => a.eventType === "RUN_RECOVERED").length,
-      0,
-      "the COMPLETED run is not audited as recovered",
-    );
   } finally {
     try {
       rmSync(dbPath, { force: true });
