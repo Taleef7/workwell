@@ -202,9 +202,14 @@ Postgres 17 and is not compliant with the locked stack.
 
 ## Health checks
 
-- Backend: `GET https://twh-api.os.mieweb.org/actuator/health` → `{"status":"UP"}`
+- Backend (primary, TS): `GET https://twh-api-ts.os.mieweb.org/api/version` → `{"api":"v1",...}` (also serves `/actuator/health` → 200)
+- Backend (rollback, Java): `GET https://twh-api.os.mieweb.org/actuator/health` → `{"status":"UP"}`
 - Frontend: `GET https://twh.os.mieweb.org/` → 200 OK
 - DB: `psql "$DATABASE_URL_DIRECT" -c "SELECT 1"` from any host with the Neon direct string
+
+> Quick end-to-end check of the live primary: `scripts/smoke-shadow.sh https://twh-api-ts.os.mieweb.org`
+> runs the post-deploy smoke checklist below (expects all-pass except the two documented WARN
+> limitations — ephemeral evidence BUCKET + the MCP-SSE nginx caveat).
 
 Post-deploy smoke checklist (MVP complete surface):
 - `GET /actuator/health` -> `200`

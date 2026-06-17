@@ -3,7 +3,7 @@
 ## ADR-008: De-Java the backend — re-platform onto TypeScript / `@mieweb/cloud` (strangler-fig)
 
 - **Date:** 2026-06-12
-- **Status:** Accepted — Phase-1 parity spike cleared (**GO**); zero-Java end state validated (see 2026-06-12 update below)
+- **Status:** Accepted — Phase-1 parity spike cleared (**GO**); zero-Java end state validated (see 2026-06-12 update below). **LIVE in production as of 2026-06-17 (#109 blue-green flip, PR #159):** `twh.os.mieweb.org` is served by the TS backend (`twh-api-ts`) on Neon (Pg ceiling, `workwell_spike` schema); Java (`twh-api`) remains the instant rollback target. JVM removal is the final step (#109 PR4).
 - **Stakeholder:** Doug Horner (`horner`) — issue [#96](https://github.com/Taleef7/workwell/issues/96)
 - **Plan:** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`
 - **Context:** Doug's #96 changes the repo direction: the backend must **not require Java/Spring Boot,

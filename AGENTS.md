@@ -3,9 +3,9 @@
 Operating manual for any AI coding agent (Claude Code, Codex, Cursor, etc.) working in this repo. CLAUDE.md mirrors this with Claude-specific notes.
 
 ## What this project is
-- Single-developer Spring Boot + Next.js monorepo
+- Single-developer Next.js + (TypeScript backend) monorepo. It still also contains the original Java/Spring Boot backend, retained as the rollback target pending JVM retirement (#109 PR4).
 - Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
-- Phase (as of 2026-06-08): all planned sprints (0–7) are merged to `main`; active work is post-merge closeout and polish. `docs/sprints/` is historical context now, not an active queue.
+- Phase (as of 2026-06-17): all planned sprints (0–7) are merged. **The #109 de-Java cutover is LIVE** — `twh.os.mieweb.org` is served by the TypeScript backend (`backend-ts/` → `twh-api-ts.os.mieweb.org`); Java (`twh-api`) stays deployed as the instant rollback until PR4. See `CLAUDE.md` → Current Focus and `docs/JOURNAL.md` for the running status. `docs/sprints/` is historical context now, not an active queue.
 
 ## Read before any task
 1. `docs/JOURNAL.md` — latest state of the project (newest entry on top). This is the current source of truth.
