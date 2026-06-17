@@ -105,10 +105,25 @@ jobs:
         # the startup-safety fail-fast ACTIVE (it requires the JWT secret + exact non-localhost CORS +
         # SameSite=None/Secure that follow). No JAVA_OPTS (this is Node).
         run: |
+          # DATABASE_URL_TWH is the JDBC URL the Java backend consumes as spring.datasource.url
+          # (jdbc:postgresql://...). node-postgres' pg.Pool needs a postgres:// URI, so strip a leading
+          # `jdbc:` (no-op if the secret is already a pg URI). Embedded credentials and Neon's
+          # `?sslmode=require` (→ TLS on) are carried through unchanged. Fail legibly on any other scheme.
+          db_url="${DATABASE_URL#jdbc:}"
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_TWH must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$db_url" != "$DATABASE_URL" ]; then
+            echo "Normalized DATABASE_URL: stripped 'jdbc:' prefix for node-postgres (value not logged)."
+          fi
           {
             echo 'json<<EOF'
             jq -nc \
-              --arg database_url "$DATABASE_URL" \
+              --arg database_url "$db_url" \
               --arg openai_api_key "$OPENAI_API_KEY" \
               --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
               --arg frontend_url "$FRONTEND_URL" \
