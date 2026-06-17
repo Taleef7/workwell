@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-06-17 — #109 blue-green flip (PR3): frontend → the TS backend, Java kept as rollback
+
+With the shadow proven green on Neon, wrote the production flip. `deploy-twh-mieweb.yml` now, on every push to `main`: builds + deploys the **TS backend** (`workwell-api-ts` → `twh-api-ts`, port 8080, `MIEWEB_TARGET=local`, jdbc-normalized `DATABASE_URL` → Neon `workwell_spike`), and builds the frontend with `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_API_BASE_URL` → `https://twh-api-ts.os.mieweb.org`. The **Java backend (`twh-api`) is still built + deployed unchanged as the instant rollback target** — nothing destroys it. Rollback = a **full revert of the flip commit** (restores the Java-only deploy: frontend → `twh-api` via `deploy-backend`, no TS jobs), so it never depends on the TS deploy. (`deploy-frontend` is gated on the TS deploy succeeding so a failed TS deploy preserves the last-working frontend rather than aiming it at a deleted `twh-api-ts` — a Codex re-review P1; hence rollback is a full revert, not a partial URL edit.) The Java container is already running + current. CORS + the cross-site refresh cookie already work (the TS env allows the `twh.os.mieweb.org` origin with `SameSite=None; Secure`). On merge, the next push runs production on TypeScript — watch the post-deploy smoke (`scripts/smoke-shadow.sh https://twh-api-ts.os.mieweb.org`). JVM retirement (drop the Java jobs + the now-redundant shadow workflow + the Node/TS docs rewrite) is PR4.
+
+**Data note:** the frontend now reads the TS backend's `workwell_spike` schema (separate from Java's `public`), so the visible runs/cases are the TS dataset (synthetic demo data, freshly seeded + the shadow/smoke runs) — not Java's. Both are valid demo states.
+
 ## 2026-06-17 — #109 shadow deploy is live; fixed a Neon-pooler connection bug
 
 Ran the shadow deploy (`deploy-twh-ts-shadow.yml`, manual): build + MIE deploy both went green and `twh-api-ts.os.mieweb.org` came up — and the GHCR-private concern didn't bite (the manager pulled `workwell-api-ts`). Then ran the new §6 smoke script (`scripts/smoke-shadow.sh`) against it.

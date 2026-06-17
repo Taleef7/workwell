@@ -34,20 +34,24 @@
    first cutover. The shadow/flip run the `local` target, so `BUCKET` is the in-container `fs` driver —
    evidence upload works but is ephemeral (lost on container recreate). A managed S3/R2 binding is a
    later follow-up. (`CACHE`/`JOBS` stay in-process — fine for a single-replica container.)
-2. **Shadow deploy (PR):** ✅ **WRITTEN (2026-06-17)** — `.github/workflows/deploy-twh-ts-shadow.yml`
-   on `feat/issue-109-shadow-deploy`. `workflow_dispatch`-only; builds `backend-ts/Dockerfile`
-   (`submodules: recursive`) → `ghcr.io/taleef7/workwell-api-ts`; creates a **separate** `twh-api-ts`
-   container (internal port **8080**, `MIEWEB_TARGET=local`) against Neon (`DATABASE_URL` = the
-   existing `DATABASE_URL_TWH` secret) + the §7 env, via `deploy-mieweb-container.sh`. The live Java
-   `twh-api` stays untouched. **Next action: merge, then manually trigger it and run the §6 smoke
-   checklist against `twh-api-ts.os.mieweb.org`.** First-run op note: set the new `workwell-api-ts`
-   GHCR package's visibility/pull access to match `workwell-api` so the MIE manager can pull it.
-3. **Blue-green flip (PR):** point the frontend at the proven TS backend (rebuild with
-   `NEXT_PUBLIC_API_BASE_URL` → `twh-api-ts`). The Java backend stays alive → instant rollback =
-   repoint the frontend back. **Never** destroy the live backend with an unproven image.
-4. **Retire the JVM (PR):** after a soak, delete `backend/` + the Java Dockerfile + Java CI jobs; wire
-   the backend-ts typecheck/tests into `ci.yml`. Then update `ARCHITECTURE.md`/`DEPLOY.md` (topology →
-   Node/TS) + `README.md`.
+2. **Shadow deploy (PR):** ✅ **DONE + VALIDATED (2026-06-17, PR #157 merged).** `deploy-twh-ts-shadow.yml`
+   stood up `twh-api-ts` against Neon; the §6 smoke ran **19 pass / 0 fail / 2 warn** (warns = the
+   ephemeral-BUCKET + MCP-SSE known limitations). The first run surfaced the **Neon-pooler `options`
+   bug** (PR #158, merged): `createPgPool` set `options=-c search_path` which the pooled endpoint
+   rejects (`08P01`) — dropped it (adapters fully-qualify `workwell_spike.*`). Neon now holds
+   `workwell_spike` (16 tables, 60 measures, runs/outcomes/cases); `public` (Java) untouched. GHCR pull
+   worked (no visibility change needed). `scripts/smoke-shadow.sh` is the reusable §6 runner.
+3. **Blue-green flip (PR):** ✅ **WRITTEN (2026-06-17)** — `feat/issue-109-blue-green-flip` edits
+   `deploy-twh-mieweb.yml` so on every push to `main` it builds+deploys the **TS** backend
+   (`workwell-api-ts` → `twh-api-ts`, port 8080, `MIEWEB_TARGET=local`, jdbc-normalized `DATABASE_URL`)
+   and points the frontend (`NEXT_PUBLIC_API_URL`/`_BASE_URL`) at it. The Java `twh-api` is **still
+   built + deployed unchanged** as the instant rollback target (Option A — TS primary, Java rollback).
+   Rollback = revert the frontend's two `BACKEND_TS_URL` lines → `BACKEND_URL` + redeploy frontend.
+   **Next action: merge → the next push runs production on TS; watch the post-deploy smoke.**
+4. **Retire the JVM (PR):** after a soak, delete `backend/` + the Java Dockerfile + the Java jobs in
+   `deploy-twh-mieweb.yml` + the now-redundant `deploy-twh-ts-shadow.yml`; wire the backend-ts
+   typecheck/tests into `ci.yml`. Then finish the `ARCHITECTURE.md`/`DEPLOY.md` topology rewrite →
+   Node/TS + `README.md`.
 
 Running narrative: `docs/JOURNAL.md` (newest on top).
 
