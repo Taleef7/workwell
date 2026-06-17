@@ -11,16 +11,32 @@ name: Reconcile TWH stack (self-heal)
 # the flip, which redeploys it fresh).
 #
 # Heal cost: a recreate is delete+create (~30-120s of downtime for that container). The health probe
-# retries 3× over ~30s before declaring a surface down, so a transient blip never triggers a heal.
+# retries up to 6× over ~3min before declaring a surface down, so neither a transient blip nor a normal
+# cold start (a fresh container booting) ever trips a heal.
+#
+# Deploy-race safety: this workflow shares the `twh-mieweb-container-ops` concurrency group with
+# deploy-twh-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
+# the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
+#
+# Rollback interaction: a heal recreates from GHCR `:latest`. If you have done a FAST rollback by
+# redeploying an older `sha-<SHA>` via workflow_dispatch, a later heal will re-pull `:latest` (the newer
+# build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
+# `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
 
 on:
   schedule:
     - cron: "*/15 * * * *" # every 15 minutes
   workflow_dispatch:
 
+# Shared with deploy-twh-mieweb.yml: a constant group (NOT keyed on github.ref) so heals and deploys
+# never touch the same container concurrently. cancel-in-progress: false → the later run queues.
 concurrency:
-  group: reconcile-twh-mieweb
+  group: twh-mieweb-container-ops
   cancel-in-progress: false
+
+# Least privilege: the jobs only checkout + call the MIE API (its own key, not GITHUB_TOKEN).
+permissions:
+  contents: read
 
 env:
   BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
@@ -42,14 +58,15 @@ jobs:
       - id: probe
         run: |
           # alive URL [expect-substring] — true if the URL is reachable (2xx) and, when given,
-          # the body contains the substring. Retries 3× over ~30s to ignore transient blips.
+          # the body contains the substring. Retries up to 6× over ~3min (worst case ~215s) so a
+          # transient blip OR a normal cold start (a booting container) never registers as down.
           alive() {
-            local url="$1" expect="${2:-}" body
-            for _ in 1 2 3; do
+            local url="$1" expect="${2:-}" body attempt
+            for attempt in 1 2 3 4 5 6; do
               if body=$(curl -fsS --max-time 15 "$url" 2>/dev/null); then
                 if [ -z "$expect" ] || printf '%s' "$body" | grep -q "$expect"; then return 0; fi
               fi
-              sleep 12
+              [ "$attempt" -lt 6 ] && sleep 25
             done
             return 1
           }
