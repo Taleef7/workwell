@@ -176,13 +176,16 @@ export class PgRunStore implements RunStore {
 
   async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    // RUNNING only: a QUEUED run is the claim path's legitimate "waiting for a worker" state
+    // (claimNextQueuedRun), not an orphan — failing it would kill pending work. Async runs are
+    // marked RUNNING synchronously (run-pipeline scheduleAsyncRun), so every real orphan is RUNNING.
     const stuck = await this.pool.query<{ id: string }>(
-      `SELECT id FROM ${T} WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $1`,
+      `SELECT id FROM ${T} WHERE status = 'RUNNING' AND started_at < $1`,
       [cutoff],
     );
     if (stuck.rows.length === 0) return [];
     await this.pool.query(
-      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $2`,
+      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status = 'RUNNING' AND started_at < $2`,
       [new Date().toISOString(), cutoff],
     );
     return stuck.rows.map((r) => r.id);

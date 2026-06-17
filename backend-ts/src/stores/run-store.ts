@@ -77,13 +77,15 @@ export interface RunStore {
   /** Set a terminal status (COMPLETED/PARTIAL_FAILURE/FAILED) + completed_at. */
   finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null>;
   /**
-   * Recover runs stuck RUNNING/QUEUED for longer than `olderThanMs`
-   * (default {@link STUCK_RUN_THRESHOLD_MS}) by marking them FAILED + setting completed_at; returns
-   * the count recovered. In the in-process job model an ALL_PROGRAMS/SITE run is advanced by a
-   * `ctx.waitUntil` task that does NOT survive a container restart, leaving the run RUNNING forever.
-   * Run once per process on the first runs access. The threshold guards against failing a live run.
-   * Returns the recovered run ids so the caller can write an `audit_event` per run (the "every state
-   * change is audited" hard rule lives above the store, which has no events binding).
+   * Recover runs stuck **RUNNING** for longer than `olderThanMs` (default
+   * {@link STUCK_RUN_THRESHOLD_MS}) by marking them FAILED + setting completed_at. In the in-process
+   * job model an ALL_PROGRAMS/SITE run is advanced by a `ctx.waitUntil` task that does NOT survive a
+   * container restart, leaving the run RUNNING forever (async runs are marked RUNNING synchronously,
+   * so every orphan is RUNNING). QUEUED runs are deliberately left alone — that is the claim path's
+   * legitimate "waiting for a worker" state, not an orphan. Run once per process on the first runs
+   * access; the threshold guards against failing a live run. Returns the recovered run ids so the
+   * caller can write an `audit_event` per run (the "every state change is audited" hard rule lives
+   * above the store, which has no events binding).
    */
   failStuckRuns(olderThanMs?: number): Promise<string[]>;
 }

@@ -140,29 +140,25 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.ok(done?.completedAt, "completed_at is stamped");
   });
 
-  test(`[${label}] failStuckRuns recovers old RUNNING/QUEUED runs, leaving recent + terminal runs alone`, async () => {
+  test(`[${label}] failStuckRuns recovers old RUNNING runs, leaving QUEUED (claim path) + recent + terminal alone`, async () => {
     const store = await freshStore();
-    const queued = await store.createRun(sampleRun("q")); // stays QUEUED
+    const queued = await store.createRun(sampleRun("q")); // stays QUEUED — claim-path pending work
     const running = await store.createRun(sampleRun("r"));
     await store.markRunning(running.id); // QUEUED → RUNNING
     const done = await store.createRun(sampleRun("d"));
     await store.finalizeRun(done.id, "COMPLETED"); // terminal
 
     // The default threshold (30 min) is far beyond these just-created runs → nothing recovered.
-    assert.equal((await store.failStuckRuns()).length, 0, "recent in-flight runs are not failed");
+    assert.equal((await store.failStuckRuns()).length, 0, "recent RUNNING runs are not failed");
 
     await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
-    // Threshold 0 → every currently RUNNING/QUEUED run is treated as stuck (orphaned by a restart).
+    // Threshold 0 → every currently RUNNING run is treated as stuck (orphaned by a restart).
     const recoveredIds = await store.failStuckRuns(0);
-    assert.deepEqual(
-      [...recoveredIds].sort(),
-      [queued.id, running.id].sort(),
-      "returns the recovered run ids (the QUEUED + RUNNING runs) for the caller to audit",
-    );
-    assert.equal((await store.getRun(queued.id))?.status, "FAILED");
+    assert.deepEqual(recoveredIds, [running.id], "only the RUNNING run is recovered, returned for the caller to audit");
     const recovered = await store.getRun(running.id);
     assert.equal(recovered?.status, "FAILED");
     assert.ok(recovered?.completedAt, "completed_at is stamped on recovery");
+    assert.equal((await store.getRun(queued.id))?.status, "QUEUED", "QUEUED runs are left for the claim path, never failed");
     assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
   });
 }
