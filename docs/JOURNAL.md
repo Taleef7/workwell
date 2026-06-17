@@ -1,5 +1,13 @@
 # Journal
 
+## 2026-06-17 — #109 self-healing reconciler (the holistic answer to "what if the node reboots?")
+
+The pre-retirement audit flagged crash/reboot recovery (Proxmox `onboot`) as the one resilience item not closeable from our side — the MIE Container Manager API exposes no restart/`onboot` field, and a shared Proxmox node can't be reboot-tested. Rather than *wait* on that one answer (which only covers a node reboot anyway), added a **self-healing watchdog** that recovers the live stack from **any** cause — node reboot, container crash, OOM, accidental deletion — independent of `onboot`.
+
+`.github/workflows/reconcile-twh-mieweb.yml`: scheduled every 15 min (+ `workflow_dispatch`). A `check` job health-probes the **live** surfaces (`twh` frontend → 200; `twh-api-ts` → `/actuator/health` `"status":"UP"`), with **3× retry over ~30s** so a transient blip never triggers a heal. If a surface is down, a heal job **recreates that container from its last-good GHCR `:latest` image** (no rebuild) via the existing `deploy-mieweb-container.sh` + the same §7 env the deploy uses (`REPLACE_EXISTING=true` → delete+create). Scope is the **live path only** — the Java rollback `twh-api` is intentionally not auto-healed (rollback is a full revert that redeploys it fresh). It's the GitHub-side equivalent of the `restart: unless-stopped` / systemd recovery documented for self-hosted hosts.
+
+Verified locally: the probe logic correctly no-ops against the healthy live stack; the env jq matches the deploy (11 keys, `jdbc:` stripped for node-postgres). Net: `onboot` drops from "open blocker" to "nice to know" — worst-case recovery latency ≈ the 15-min cron interval, and a recreate is ~30–120s of that container's downtime; no data loss (Neon persists). The one wart is the env block duplicated from `deploy-twh-mieweb.yml` (marked **keep-in-sync** in both) — chosen over refactoring the just-merged prod deploy.
+
 ## 2026-06-17 — #109 pre-retirement hardening (2/3): backend-ts resilience (observability + orphaned-run recovery)
 
 Two more pre-JVM-retirement gaps from the readiness audit:
