@@ -22,6 +22,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import {
   executeManualRun,
   executeRerun,
@@ -54,17 +55,17 @@ const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 // fire-and-forget (never blocks or fails the request) and time-thresholded (never touches a live run).
 const sweptForOrphans = new WeakSet<object>();
 async function store(env: RunsEnv): Promise<RunStore> {
-  const runs = (await getStores(env)).runs;
+  const stores = await getStores(env);
   if (!sweptForOrphans.has(env)) {
     sweptForOrphans.add(env);
-    void runs
-      .failStuckRuns()
-      .then((n) => {
-        if (n > 0) console.warn(`[workwell] recovered ${n} stuck run(s) (RUNNING/QUEUED → FAILED) on boot`);
+    void recoverStuckRuns({ runs: stores.runs, events: stores.events })
+      .then((ids) => {
+        if (ids.length > 0)
+          console.warn(`[workwell] recovered ${ids.length} stuck run(s) (RUNNING/QUEUED → FAILED, audited) on boot`);
       })
       .catch((err) => console.error("[workwell] stuck-run recovery failed:", err));
   }
-  return runs;
+  return stores.runs;
 }
 async function outcomes(env: RunsEnv): Promise<OutcomeStore> {
   return (await getStores(env)).outcomes;

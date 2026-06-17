@@ -82,6 +82,8 @@ export interface RunStore {
    * the count recovered. In the in-process job model an ALL_PROGRAMS/SITE run is advanced by a
    * `ctx.waitUntil` task that does NOT survive a container restart, leaving the run RUNNING forever.
    * Run once per process on the first runs access. The threshold guards against failing a live run.
+   * Returns the recovered run ids so the caller can write an `audit_event` per run (the "every state
+   * change is audited" hard rule lives above the store, which has no events binding).
    */
-  failStuckRuns(olderThanMs?: number): Promise<number>;
+  failStuckRuns(olderThanMs?: number): Promise<string[]>;
 }
