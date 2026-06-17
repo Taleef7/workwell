@@ -116,15 +116,23 @@ What was verified directly against the manager API (`GET /api/v1/sites/1/contain
 
 **Self-healing reconciler (covers reboot recovery regardless of `onboot`).**
 `.github/workflows/reconcile-twh-mieweb.yml` runs every 15 minutes (+ `workflow_dispatch`): it
-health-checks the live surfaces (`twh` → 200; `twh-api-ts` → `/actuator/health` `UP`, with a 3×
-retry to ignore transient blips) and, if any is down, **recreates that container from its last-good
-GHCR `:latest` image** via `deploy-mieweb-container.sh` (`REPLACE_EXISTING=true`). This recovers the
-stack from a node reboot, a container crash/OOM, or accidental deletion — **independent of `onboot`**
-— so the `onboot` question above is no longer a blocker. Worst-case recovery latency ≈ the 15-min
-interval; a recreate is ~30–120s of that container's downtime; no data loss (Neon persists). Scope is
-the live path only (the Java rollback `twh-api` is not auto-healed — rollback is a full revert that
-redeploys it). The env blocks are duplicated from `deploy-twh-mieweb.yml` and marked **keep-in-sync**
-in both.
+health-checks the live surfaces (`twh` → 200; `twh-api-ts` → `/actuator/health` `UP`, retrying up to
+6× over ~3 min so a transient blip or a normal cold start never registers as down) and, if any is
+down, **recreates that container from its last-good GHCR `:latest` image** via
+`deploy-mieweb-container.sh` (`REPLACE_EXISTING=true`). This recovers the stack from a node reboot, a
+container crash/OOM, or accidental deletion — **independent of `onboot`** — so the `onboot` question
+above is no longer a blocker. Worst-case recovery latency ≈ the 15-min interval; a recreate is
+~30–120s of that container's downtime; no data loss (Neon persists). Scope is the live path only (the
+Java rollback `twh-api` is not auto-healed — rollback is a full revert that redeploys it). The env
+blocks are duplicated from `deploy-twh-mieweb.yml` and marked **keep-in-sync** in both.
+
+**Two safety properties to know.** (1) The reconciler shares the `twh-mieweb-container-ops` concurrency
+group with `deploy-twh-mieweb.yml`, so a heal never runs while a push-to-main deploy is mid
+delete+recreate of the same container — the later run queues behind the in-flight one. (2) A heal
+recreates from `:latest`. After a **fast rollback** (redeploying an older `sha-<SHA>` via
+`workflow_dispatch`), the next heal would re-pull `:latest` and silently undo it — so follow a fast
+rollback with a **durable** one (revert the bad commit on `main` so `:latest` rebuilds to the good
+image), or temporarily disable the reconcile workflow, before relying on the rollback.
 
 **2. Self-hosted / VM / local — Docker Compose + systemd.**
 For any host we *do* control, reboot recovery is fully handled and is the reference Doug asked for:
