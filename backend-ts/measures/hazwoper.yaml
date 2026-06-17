@@ -1,0 +1,12 @@
+id: hazwoper
+name: HAZWOPER Surveillance
+version: 1.0.0
+title: HAZWOPER Annual Medical Surveillance
+policyRef: OSHA 29 CFR 1910.120
+tags: [surveillance, hazmat, osha]
+cql: hazwoper.cql
+bindings:
+  rateKey: hazwoper
+  enrollment: { code: hazwoper-program, valueSet: "urn:workwell:vs:hazwoper-enrollment" }
+  waiver:     { code: hazwoper-exemption, valueSet: "urn:workwell:vs:hazwoper-exemption" }
+  event:      { code: hazwoper-exam, valueSet: "urn:workwell:vs:hazwoper-exams", type: procedure }
