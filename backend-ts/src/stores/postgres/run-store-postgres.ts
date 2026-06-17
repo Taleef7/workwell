@@ -13,6 +13,7 @@
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
+import { STUCK_RUN_THRESHOLD_MS } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -171,5 +172,19 @@ export class PgRunStore implements RunStore {
       new Date().toISOString(),
     ]);
     return this.getRun(runId);
+  }
+
+  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const stuck = await this.pool.query<{ id: string }>(
+      `SELECT id FROM ${T} WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $1`,
+      [cutoff],
+    );
+    if (stuck.rows.length === 0) return 0;
+    await this.pool.query(
+      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status IN ('RUNNING', 'QUEUED') AND started_at < $2`,
+      [new Date().toISOString(), cutoff],
+    );
+    return stuck.rows.length;
   }
 }

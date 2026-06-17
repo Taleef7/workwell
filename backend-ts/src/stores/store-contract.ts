@@ -139,6 +139,27 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(done?.status, "COMPLETED");
     assert.ok(done?.completedAt, "completed_at is stamped");
   });
+
+  test(`[${label}] failStuckRuns recovers old RUNNING/QUEUED runs, leaving recent + terminal runs alone`, async () => {
+    const store = await freshStore();
+    const queued = await store.createRun(sampleRun("q")); // stays QUEUED
+    const running = await store.createRun(sampleRun("r"));
+    await store.markRunning(running.id); // QUEUED → RUNNING
+    const done = await store.createRun(sampleRun("d"));
+    await store.finalizeRun(done.id, "COMPLETED"); // terminal
+
+    // The default threshold (30 min) is far beyond these just-created runs → nothing recovered.
+    assert.equal(await store.failStuckRuns(), 0, "recent in-flight runs are not failed");
+
+    await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
+    // Threshold 0 → every currently RUNNING/QUEUED run is treated as stuck (orphaned by a restart).
+    assert.equal(await store.failStuckRuns(0), 2, "the QUEUED + RUNNING runs are recovered");
+    assert.equal((await store.getRun(queued.id))?.status, "FAILED");
+    const recovered = await store.getRun(running.id);
+    assert.equal(recovered?.status, "FAILED");
+    assert.ok(recovered?.completedAt, "completed_at is stamped on recovery");
+    assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
+  });
 }
 
 /** Registers the OutcomeStore contract. `fresh` → isolated, empty {run, outcome} pair. */

@@ -219,6 +219,16 @@ export default {
     // CORS preflight must be answered before auth — browsers send OPTIONS without
     // credentials, so the real cross-site login/API call is blocked otherwise.
     if (req.method === "OPTIONS") return preflightResponse(req, origins);
-    return withCors(await route(req, env, _ctx), req, origins);
+    let response: Response;
+    try {
+      response = await route(req, env, _ctx);
+    } catch (err) {
+      // An unhandled error would otherwise surface as the host harness's bare, empty-body 500
+      // (which made the Neon-pooler bug hard to diagnose). Log it with request context to the
+      // container's stdout, and return a non-empty structured 500 (no internals leaked to clients).
+      console.error(`[workwell] unhandled error: ${req.method} ${new URL(req.url).pathname} —`, err);
+      response = json({ error: "internal_error" }, 500);
+    }
+    return withCors(response, req, origins);
   },
 };
