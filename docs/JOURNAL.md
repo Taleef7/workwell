@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-17 — #109 PR4: JVM retired — TypeScript is the sole backend
+
+The de-Java re-platform (#96 / ADR-008) reaches its end state. With the cutover live and hardened (CI gate #161, observability + orphaned-run recovery #162, self-heal reconciler #163), retired the Java/Spring backend:
+
+- **Deleted `backend/`** — the entire Java app (210 files: Spring Boot, Gradle, Flyway migrations, the Java `Dockerfile`).
+- **Deleted `deploy-twh-ts-shadow.yml`** — the shadow workflow is redundant now that `deploy-twh-mieweb.yml` deploys the TS backend on every push.
+- **`deploy-twh-mieweb.yml`** — dropped the Java `build-backend` + `deploy-backend` jobs and the Java env vars (`BACKEND_IMAGE`/`BACKEND_URL`/`API_HOSTNAME`); it now builds + deploys only `workwell-api-ts` + the frontend. Rollback comment updated (redeploy an earlier `twh-api-ts` `sha-<SHA>`, since there's no Java to revert to).
+- **`ci.yml`** — dropped the 8-shard Java `backend` (Gradle) job; `backend-ts` (added in #161, floor + Pg ceiling) is the backend gate.
+- **Rollback model:** Java was the warm rollback for a *bad deploy*; with it gone, rollback is redeploying an earlier known-good `twh-api-ts` image (each tagged `sha-<SHA>` in GHCR). Reboot/crash recovery is the reconciler's job (#163), independent of `onboot`. These are different failure modes, both covered.
+
+Docs swept de-Java: CLAUDE.md (tech stack, build/verify, rules, module list, Current Focus), README (status, surfaces, stack, badge, layout), DEPLOY (service table, rollback), DECISIONS (ADR-008 → done), CHANGELOG. Verified: both workflows + `ci.yml` parse clean with no Java refs; `backend-ts` is unaffected (its tests + typecheck are unchanged and gated in CI). The stale Java `public` schema on Neon is now orphaned (harmless; a separate cleanup if desired).
+
 ## 2026-06-17 — #109 pre-retirement hardening (2/3): backend-ts resilience (observability + orphaned-run recovery)
 
 Two more pre-JVM-retirement gaps from the readiness audit:

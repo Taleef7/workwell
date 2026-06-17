@@ -1,7 +1,0 @@
-# Ignore local and generated files in Docker build contexts.
-.gradle
-build
-bin
-*.log
-Dockerfile
-.dockerignore
