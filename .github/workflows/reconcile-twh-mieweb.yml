@@ -1,0 +1,201 @@
+name: Reconcile TWH stack (self-heal)
+
+# Self-healing watchdog (#109). Periodically health-checks the LIVE surfaces and, if any is down,
+# recreates that container from its last-good GHCR `:latest` image (no rebuild). This is independent
+# of Proxmox `onboot` — it recovers the stack from a node reboot, a container crash/OOM, or an
+# accidental deletion, regardless of cause. It is the GitHub-side equivalent of the
+# `restart: unless-stopped` / systemd recovery documented for self-hosted stacks (docs/DEPLOY.md).
+#
+# Scope: the live path only — the frontend (`twh`) and the TypeScript backend (`twh-api-ts`). The
+# Java rollback container (`twh-api`) is intentionally NOT auto-healed (rollback is a full revert of
+# the flip, which redeploys it fresh).
+#
+# Heal cost: a recreate is delete+create (~30-120s of downtime for that container). The health probe
+# retries up to 6× over ~3min before declaring a surface down, so neither a transient blip nor a normal
+# cold start (a fresh container booting) ever trips a heal.
+#
+# Deploy-race safety: this workflow shares the `twh-mieweb-container-ops` concurrency group with
+# deploy-twh-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
+# the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
+#
+# Rollback interaction: a heal recreates from GHCR `:latest`. If you have done a FAST rollback by
+# redeploying an older `sha-<SHA>` via workflow_dispatch, a later heal will re-pull `:latest` (the newer
+# build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
+# `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 minutes
+  workflow_dispatch:
+
+# Shared with deploy-twh-mieweb.yml: a constant group (NOT keyed on github.ref) so heals and deploys
+# never touch the same container concurrently. cancel-in-progress: false → the later run queues.
+concurrency:
+  group: twh-mieweb-container-ops
+  cancel-in-progress: false
+
+# Least privilege: the jobs only checkout + call the MIE API (its own key, not GITHUB_TOKEN).
+permissions:
+  contents: read
+
+env:
+  BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
+  BACKEND_TS_URL: https://twh-api-ts.os.mieweb.org
+  API_TS_HOSTNAME: twh-api-ts
+  FRONTEND_IMAGE: ghcr.io/taleef7/workwell-twh-frontend
+  FRONTEND_URL: https://twh.os.mieweb.org
+  FRONTEND_HOSTNAME: twh
+  SITE_ID: 1
+
+jobs:
+  check:
+    name: Health-check the live stack
+    runs-on: ubuntu-latest
+    outputs:
+      backend_down: ${{ steps.probe.outputs.backend_down }}
+      frontend_down: ${{ steps.probe.outputs.frontend_down }}
+    steps:
+      - id: probe
+        run: |
+          # alive URL [expect-substring] — true if the URL is reachable (2xx) and, when given,
+          # the body contains the substring. Retries up to 6× over ~3min (worst case ~215s) so a
+          # transient blip OR a normal cold start (a booting container) never registers as down.
+          alive() {
+            local url="$1" expect="${2:-}" body attempt
+            for attempt in 1 2 3 4 5 6; do
+              if body=$(curl -fsS --max-time 15 "$url" 2>/dev/null); then
+                if [ -z "$expect" ] || printf '%s' "$body" | grep -q "$expect"; then return 0; fi
+              fi
+              [ "$attempt" -lt 6 ] && sleep 25
+            done
+            return 1
+          }
+          backend_down=false
+          frontend_down=false
+          alive "${BACKEND_TS_URL}/actuator/health" '"status":"UP"' || backend_down=true
+          alive "${FRONTEND_URL}/" || frontend_down=true
+          echo "backend_down=$backend_down" >> "$GITHUB_OUTPUT"
+          echo "frontend_down=$frontend_down" >> "$GITHUB_OUTPUT"
+          if [ "$backend_down" = false ] && [ "$frontend_down" = false ]; then
+            echo "✓ stack healthy — nothing to do"
+          else
+            echo "::warning::Unhealthy surface(s) — backend_down=$backend_down frontend_down=$frontend_down → recreating from :latest"
+          fi
+
+  heal-backend-ts:
+    name: Heal twh-api-ts (recreate from :latest)
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.backend_down == 'true'
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_TWH }}
+      REPLACE_EXISTING: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
+          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_TWH")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare backend-ts environment variables
+        id: backend-ts-env
+        # KEEP IN SYNC with deploy-twh-mieweb.yml → "Prepare backend-ts environment variables".
+        # A recreate must produce the exact same container env, so this mirrors the §7 TS env block.
+        run: |
+          db_url="${DATABASE_URL#jdbc:}" # node-postgres needs a postgres:// URI (strip jdbc:)
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_TWH must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg database_url "$db_url" \
+              --arg openai_api_key "$OPENAI_API_KEY" \
+              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontend_url "$FRONTEND_URL" \
+              '[
+                {key: "MIEWEB_TARGET", value: "local"},
+                {key: "WORKWELL_ENVIRONMENT", value: "production"},
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
+                {key: "WORKWELL_INSTANCE", value: "twh"}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Recreate twh-api-ts from :latest
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.BACKEND_TS_IMAGE }}:latest
+          INTERNAL_PORT: 8080
+          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
+
+  heal-frontend:
+    name: Heal twh frontend (recreate from :latest)
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.frontend_down == 'true'
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      REPLACE_EXISTING: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare frontend environment variables
+        id: frontend-env
+        # KEEP IN SYNC with deploy-twh-mieweb.yml → "Prepare frontend environment variables".
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg backend_url "$BACKEND_TS_URL" \
+              '[
+                {key: "NODE_ENV", value: "production"},
+                {key: "NEXT_PUBLIC_API_URL", value: $backend_url},
+                {key: "NEXT_PUBLIC_API_BASE_URL", value: $backend_url}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Recreate twh frontend from :latest
+        env:
+          CONTAINER_HOSTNAME: ${{ env.FRONTEND_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.FRONTEND_IMAGE }}:latest
+          INTERNAL_PORT: 3000
+          CONTAINER_ENV_VARS_JSON: ${{ steps.frontend-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
