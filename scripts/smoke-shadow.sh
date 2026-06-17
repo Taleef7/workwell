@@ -78,7 +78,7 @@ st=$(req GET /api/measures/audiogram); vs=$(jq '([.valueSets // .value_sets // [
 echo "[runs]"
 RUN_ID=""
 st=$(req POST /api/runs/manual '{"scopeType":"MEASURE","measureId":"audiogram"}')
-RUN_ID="$(jq -r '.id // empty' "$BODY")"; rstatus="$(jq -r '.status // "?"' "$BODY")"
+RUN_ID="$(jq -r '.runId // .id // empty' "$BODY")"; rstatus="$(jq -r '.status // "?"' "$BODY")"
 if { [ "$st" = "201" ] || [ "$st" = "200" ]; } && [ -n "$RUN_ID" ]; then
   pass "POST /api/runs/manual (MEASURE) → run $RUN_ID ($rstatus)"
   # poll if not terminal yet
@@ -94,7 +94,7 @@ else fail "POST /api/runs/manual → $st $(head -c 160 "$BODY")"; fi
 # 5. cases: worklist + detail + outreach send + delivery flip
 echo "[cases]"
 st=$(req GET "/api/cases?status=open"); cn=$(jq 'length' "$BODY" 2>/dev/null || echo 0)
-CASE_ID="$(jq -r '.[0].id // empty' "$BODY")"
+CASE_ID="$(jq -r '.[0].caseId // .[0].id // empty' "$BODY")"
 { [ "$st" = "200" ] && pass "GET /api/cases?status=open → $cn open (X-Total-Count header also exposed)"; } || fail "GET /api/cases?status=open → $st"
 if [ -n "$CASE_ID" ]; then
   st=$(req GET "/api/cases/$CASE_ID"); { [ "$st" = "200" ] && pass "GET /api/cases/$CASE_ID → 200"; } || fail "GET /api/cases/:id → $st"
@@ -126,7 +126,7 @@ echo "[known limitations]"
 if [ -n "${CASE_ID:-}" ]; then
   st=$(req GET "/api/cases/$CASE_ID/evidence"); { [ "$st" = "200" ] && warn "evidence list → 200, but uploads are EPHEMERAL (in-container fs BUCKET) — expected for this cutover"; } || warn "evidence list → $st (BUCKET is the deferred binding)"
 fi
-st=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 -H "Authorization: Bearer $TOKEN" "$BASE_URL/sse" 2>/dev/null || echo "000")
+st=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 6 -H "Authorization: Bearer $TOKEN" "$BASE_URL/sse" 2>/dev/null); st=${st:-000}
 warn "GET /sse → $st (MCP SSE subject to the MIE nginx proxy_read_timeout caveat — not a cutover regression)"
 
 echo "================================================================"
