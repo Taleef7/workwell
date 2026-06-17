@@ -23,6 +23,9 @@ importers:
       '@mieweb/cloud-local':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-local
+      '@mieweb/cloud-os':
+        specifier: workspace:*
+        version: link:../external/mieweb-cloud/packages/cloud-os
       '@mieweb/cloud-types':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-types
