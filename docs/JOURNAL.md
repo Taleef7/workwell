@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-06-18 — E3.3 (#91): QRDA III stub + standards-conformance matrix
+
+A completed single-measure run is now exportable as a well-formed HL7 QRDA Category III (aggregate)
+CDA document — `GET /api/runs/{runId}/qrda?format=xml` (`application/xml`). `buildQrda3Document`
+(`backend-ts/src/fhir/qrda3-export.ts`) hand-builds the CDA (balanced by construction, no new dep),
+reusing the E3.1 `countPopulations` so the aggregate IPP/DENOM/DENEX/NUMER + performance rate reconcile
+with the run's outcomes. It is a **stub**: well-formed + structurally representative of QRDA III, not
+IG/Schematron-validated. Committed `docs/STANDARDS_CONFORMANCE.md` mapping every emitted artifact (CQL /
+ELM / ValueSet / FHIR MeasureReport / MAT / QRDA III) to its standard + conformance level. E3 remaining:
+QI-Core profile alignment (#92, stretch).
+
 ## 2026-06-18 — E3.2 (#90): real value-set expansion (ValueSetResolver port)
 
 Replaced the inline-code workaround with a real expansion seam: a `ValueSetResolver` port +
