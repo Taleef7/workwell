@@ -1,5 +1,15 @@
 # Journal
 
+## 2026-06-18 — de-Java doc-accuracy sweep (from the #166 retro code-review)
+
+The retroactive whole-PR review of #166 surfaced one contradiction it introduced + several now-stale
+"Spring" references the JVM retirement left behind. Fixed: CLAUDE.md "Next up" reconciled (E2 #72 + the
+full E3 epic #73 are done; E4 #74 is next, with the #93 schema stop-and-ask noted); CLAUDE.md hard-rule
+"Spring Application Events" → "direct DB audit log"; ARCHITECTURE §6/§7 "Spring Security" → the
+TypeScript auth middleware (`backend-ts/src/auth/authorize.ts`); the "Java `StreamingResponseBody`"
+qualifier dropped; ADR-006's Gradle `evaluateMeasure` example annotated with the current `pnpm evaluate`
+form. (The ARCHITECTURE §3/§5 `com.workwell.*` module-name rewrite stays a deliberate later pass.)
+
 ## 2026-06-18 — E3.4 (#92): QI-Core profile alignment (structural)
 
 The synthetic FHIR bundles now declare QI-Core conformance: every emitted resource (Patient, the
