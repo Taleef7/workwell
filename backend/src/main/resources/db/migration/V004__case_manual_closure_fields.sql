@@ -1,3 +1,0 @@
-ALTER TABLE cases
-    ADD COLUMN IF NOT EXISTS closed_reason TEXT,
-    ADD COLUMN IF NOT EXISTS closed_by TEXT;

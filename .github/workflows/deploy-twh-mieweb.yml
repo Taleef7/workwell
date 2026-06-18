@@ -1,11 +1,11 @@
 name: Deploy TWH OS MIEWeb
 
-# Issue #109 — blue-green flip (PR3). The frontend (twh.os.mieweb.org) now points at the de-Java
-# TypeScript backend twh-api-ts.os.mieweb.org, which is built + deployed on every push to main from
-# backend-ts/ (the same image proven by the shadow workflow). The Java backend (twh-api) is STILL
-# built + deployed here as the instant rollback target — nothing destroys it. Rollback = repoint the
-# frontend back to ${BACKEND_URL} (revert the two NEXT_PUBLIC_API_* lines) and redeploy the frontend;
-# the Java container is already running and current. JVM retirement (drop the Java jobs) is PR4.
+# Issue #109 — sole live stack (post-JVM-retirement, PR4). On every push to main this builds + deploys
+# the de-Java TypeScript backend (backend-ts/ → twh-api-ts.os.mieweb.org) and the TWH-branded frontend
+# (pointed at it). The Java/Spring backend is retired (backend/ deleted in PR4). Rollback = redeploy an
+# earlier known-good twh-api-ts image (workflow_dispatch with replace_existing=true at an earlier SHA;
+# each build is tagged sha-<SHA> in GHCR). The self-heal reconciler (reconcile-twh-mieweb.yml) recreates
+# a down container from :latest independently of this workflow.
 
 on:
   push:
@@ -30,11 +30,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # Java backend (rollback target — still built + deployed; retired in PR4).
-  BACKEND_IMAGE: ghcr.io/taleef7/workwell-api
-  BACKEND_URL: https://twh-api.os.mieweb.org
-  API_HOSTNAME: twh-api
-  # TypeScript backend (the live primary the frontend points at).
+  # TypeScript backend — the sole live backend (the frontend points at it).
   BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
   BACKEND_TS_URL: https://twh-api-ts.os.mieweb.org
   API_TS_HOSTNAME: twh-api-ts
@@ -47,32 +43,6 @@ env:
   APP_DESCRIPTION: "Eight measures (OSHA safety + wellness), complete case management, and a full audit trail — one reviewable dashboard."
 
 jobs:
-  build-backend:
-    name: Build backend image (Java — rollback)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.BACKEND_IMAGE }}:latest
-            ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
-
   build-backend-ts:
     name: Build backend-ts image (TypeScript — primary)
     runs-on: ubuntu-latest
@@ -133,67 +103,6 @@ jobs:
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
             ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
-
-  deploy-backend:
-    name: Deploy twh backend container (Java — rollback)
-    runs-on: ubuntu-latest
-    needs: build-backend
-    env:
-      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
-      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_TWH }}
-      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate required secrets
-        run: |
-          missing=()
-          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
-          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
-          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
-          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
-          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_TWH")
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Missing required secret(s): ${missing[*]}"
-            exit 1
-          fi
-
-      - name: Prepare backend environment variables
-        id: backend-env
-        run: |
-          {
-            echo 'json<<EOF'
-            jq -nc \
-              --arg database_url "$DATABASE_URL" \
-              --arg openai_api_key "$OPENAI_API_KEY" \
-              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
-              --arg frontend_url "$FRONTEND_URL" \
-              '[
-                {key: "DATABASE_URL", value: $database_url},
-                {key: "OPENAI_API_KEY", value: $openai_api_key},
-                {key: "JAVA_OPTS", value: "-Xmx768m -Xms256m -Xss256k"},
-                {key: "SPRING_PROFILES_ACTIVE", value: "prod,production"},
-                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
-                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
-                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
-                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
-                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
-                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
-                {key: "WORKWELL_INSTANCE", value: "twh"}
-              ]'
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Deploy backend through Create-a-Container API
-        env:
-          CONTAINER_HOSTNAME: ${{ env.API_HOSTNAME }}
-          CONTAINER_IMAGE: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
-          INTERNAL_PORT: 8080
-          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-env.outputs.json }}
-        run: bash .github/scripts/deploy-mieweb-container.sh
 
   deploy-backend-ts:
     name: Deploy twh-api-ts backend container (TypeScript — primary)
@@ -280,9 +189,8 @@ jobs:
     # ${BACKEND_TS_URL}, and the deploy script deletes-then-recreates the twh-api-ts container — so if
     # that deploy fails, shipping a frontend aimed at a now-dead/old TS backend would only worsen the
     # outage. Skipping here preserves the last-working frontend.
-    # Rollback to Java is a FULL revert of the #109 PR3 flip commit: that restores the Java-only deploy
-    # (frontend → ${BACKEND_URL} via deploy-backend, no TS job), so rollback never depends on the TS
-    # deploy. See docs/DEPLOY.md → Rollback. The Java deploy-backend job runs in parallel.
+    # Rollback (Java is retired): redeploy an earlier known-good twh-api-ts image — workflow_dispatch
+    # with replace_existing=true at an earlier sha-<SHA>. See docs/DEPLOY.md → Rollback.
     needs: [build-frontend, deploy-backend-ts]
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}

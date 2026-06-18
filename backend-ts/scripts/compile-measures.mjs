@@ -25,7 +25,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const resDir = path.join(root, "src/engine/cql/resources");
 // Measures are authored as .cql/.yaml text resources (language-agnostic, not Java).
-const measuresDir = process.argv[2] ?? path.resolve(root, "../backend/src/main/resources/measures");
+// Source corpus lives in backend-ts/measures/ (relocated from the retired backend/ in #109 PR4).
+const measuresDir = process.argv[2] ?? path.join(root, "measures");
 const outDir = process.argv[3] ?? path.join(root, "src/engine/cql/elm");
 mkdirSync(outDir, { recursive: true });
 

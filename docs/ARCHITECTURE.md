@@ -15,26 +15,24 @@ Compliance outcomes are determined only by CQL evaluation + structured evidence 
 ```text
 Browser
   -> twh.os.mieweb.org  (Next.js frontend — MIE container)
-      -> twh-api.os.mieweb.org  (Spring Boot API — MIE container)
-          -> Neon Postgres / workwell-twh  (primary app DB)
-          -> CQL engine in-process (cqf-fhir-cr + HAPI FHIR model)
+      -> twh-api-ts.os.mieweb.org  (TypeScript worker on a long-lived Node host — MIE container)
+          -> Neon Postgres / workwell-twh  (Pg ceiling, workwell_spike schema)
+          -> JVM-free CQL engine (build-time CQL→ELM, in-process)
           -> OpenAI API (assistive text only)
           -> MCP read interface (/sse + tools)
 ```
 
 Production endpoints:
 - Frontend: `https://twh.os.mieweb.org`
-- Backend API (primary): `https://twh-api-ts.os.mieweb.org` — the de-Java TypeScript backend (`backend-ts/`)
-- Backend API (rollback): `https://twh-api.os.mieweb.org` — Java/Spring, still deployed as the instant rollback target
+- Backend API: `https://twh-api-ts.os.mieweb.org` — the de-Java TypeScript backend (`backend-ts/`), the **sole** backend (Java retired in #109 PR4)
 
-> **#109 blue-green flip (PR3):** the frontend points at the **TypeScript** backend; the diagram
-> above (Spring Boot + in-process cqf-fhir-cr) describes the Java rollback path, which still runs. The
-> TS backend serves the same unchanged `/api/*` contract over a Cloudflare-style worker on a long-lived
+> **#109 — JVM retired (PR4):** the Java/Spring backend is gone (`backend/` deleted). The TypeScript
+> backend serves the same unchanged `/api/*` contract over a Cloudflare-style worker on a long-lived
 > Node host, evaluates CQL via the JVM-free build-time CQL→ELM path, and persists to the Neon
-> `workwell_spike` schema (the Pg ceiling). The full topology rewrite to Node/TS lands with JVM
-> retirement (#109 PR4).
+> `workwell_spike` schema (the Pg ceiling). The module boundaries in §3 below are named against the
+> original Java packages (`com.workwell.*`); `backend-ts/src/<area>/` mirrors the same boundaries.
 
-Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds the TypeScript backend (primary), the Java backend (rollback), and the TWH-branded frontend (pointed at `twh-api-ts`) as Docker images, pushes to GHCR, and deploys all three containers via MIE Create-a-Container API.
+Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds the TypeScript backend and the TWH-branded frontend (pointed at `twh-api-ts`) as Docker images, pushes to GHCR, and deploys both containers via MIE Create-a-Container API. A self-heal reconciler (`reconcile-twh-mieweb.yml`) recreates a down container from `:latest` every 15 min.
 
 Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on startup (OSHA safety, HEDIS wellness, CMS eCQM catalog). A single TWH deployment is the canonical demo environment.
 
@@ -129,9 +127,9 @@ Public API actions derive audit identity from the authenticated security context
 - Worklist pagination: `GET /api/cases` returns a plain array plus an `X-Total-Count` header (full filtered match count, exposed via CORS) so clients can page past the result cap.
 
 ## 8) Current Infra Split
-- MIE Create-a-Container hosts both frontend (`twh`) and backend (`twh-api`) processes.
-- Neon (`workwell-twh` project) hosts all relational persistence used by backend.
-- GHCR (`ghcr.io/taleef7/workwell-api`, `ghcr.io/taleef7/workwell-twh-frontend`) stores Docker images.
+- MIE Create-a-Container hosts both frontend (`twh`) and the TypeScript backend (`twh-api-ts`) processes.
+- Neon (`workwell-twh` project) hosts all relational persistence used by backend (the `workwell_spike` schema).
+- GHCR (`ghcr.io/taleef7/workwell-api-ts`, `ghcr.io/taleef7/workwell-twh-frontend`) stores Docker images.
 
 No microservice decomposition is used in MVP; package boundaries are the future extraction seam.
 

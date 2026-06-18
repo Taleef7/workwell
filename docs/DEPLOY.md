@@ -15,15 +15,14 @@
 The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 **One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
 
-| Service | Hostname | Image | Role |
-|---------|----------|-------|------|
-| Frontend | `twh.os.mieweb.org` | `ghcr.io/taleef7/workwell-twh-frontend` | points at the TS backend |
-| Backend API (primary) | `twh-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` | **live** — the de-Java TypeScript backend (`backend-ts/`) |
-| Backend API (rollback) | `twh-api.os.mieweb.org` | `ghcr.io/taleef7/workwell-api` | Java/Spring — still deployed, **instant rollback target** (retired in #109 PR4) |
+| Service | Hostname | Image |
+|---------|----------|-------|
+| Frontend | `twh.os.mieweb.org` | `ghcr.io/taleef7/workwell-twh-frontend` |
+| Backend API | `twh-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` — the de-Java TypeScript backend (`backend-ts/`), the sole backend |
 
-> **#109 blue-green flip (PR3):** the frontend now points at the **TypeScript** backend
-> (`twh-api-ts`). The Java backend (`twh-api`) keeps deploying unchanged as the rollback target.
-> The TS backend runs the `local` mieweb target (`MIEWEB_TARGET=local` — in-process bindings, no
+> **#109 — JVM retired (PR4):** the frontend is served by the **TypeScript** backend (`twh-api-ts`);
+> the Java backend (`twh-api`) has been retired (`backend/` deleted). The TS backend runs the `local`
+> mieweb target (`MIEWEB_TARGET=local` — in-process bindings, no
 > companion services, internal port **8080**) and overrides the DB to Neon via `DATABASE_URL` (the
 > store factory then uses the Pg ceiling, isolated to the `workwell_spike` schema; Java's `public`
 > tables are untouched). The `DATABASE_URL_TWH` secret is a **JDBC** URL (`jdbc:postgresql://…`); the
@@ -35,9 +34,8 @@ The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
 1. Builds the **TypeScript** backend image (`workwell-api-ts`, from `backend-ts/Dockerfile`, repo-root
    context + `submodules: recursive`) tagged `latest` + `sha-<SHA>`
-2. Builds the Java backend image (`workwell-api`) — still built/deployed as the rollback target
-3. Builds the frontend image (TWH branding via build-args) pointed at `twh-api-ts.os.mieweb.org`
-4. Deploys all three containers to MIE via `.github/scripts/deploy-mieweb-container.sh`
+2. Builds the frontend image (TWH branding via build-args) pointed at `twh-api-ts.os.mieweb.org`
+3. Deploys both containers to MIE via `.github/scripts/deploy-mieweb-container.sh`
 
 The deploy script talks to the MIE Container Manager **v1 API** (`<manager-origin>/api/v1`):
 responses are wrapped in a `{"data": ...}` envelope, the create body uses `template` with
@@ -70,7 +68,7 @@ environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
 > **Refresh-cookie config:** the refresh-token cookie is set `SameSite=None; Secure`, and
 > production startup **fails fast** if `WORKWELL_AUTH_COOKIE_SAME_SITE` is not `None` or
 > `WORKWELL_AUTH_COOKIE_SECURE` is not `true`. With the frontend (`twh.os.mieweb.org`) and
-> API (`twh-api.os.mieweb.org`) on split origins, this is what lets the browser send the
+> API (`twh-api-ts.os.mieweb.org`) on split origins, this is what lets the browser send the
 > cookie on the `POST /api/auth/refresh` fetch — otherwise silent token refresh fails and
 > users are logged out on every reload.
 
@@ -94,7 +92,7 @@ Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI
 There are two runtime contexts, and the answer differs:
 
 **1. Live stack (`os.mieweb.org`) — MIE Create-a-Container.**
-The `twh` and `twh-api` containers run on **MIE's Container Manager**, which is a **Proxmox
+The `twh` and `twh-api-ts` containers run on **MIE's Container Manager**, which is a **Proxmox
 abstraction** (the manager talks to each node's Proxmox API via a stored token; nodes are named
 `opensource-phxdc-pve*`). Restart-on-reboot therefore lives at the Proxmox **`onboot`** layer.
 
@@ -122,9 +120,10 @@ down, **recreates that container from its last-good GHCR `:latest` image** via
 `deploy-mieweb-container.sh` (`REPLACE_EXISTING=true`). This recovers the stack from a node reboot, a
 container crash/OOM, or accidental deletion — **independent of `onboot`** — so the `onboot` question
 above is no longer a blocker. Worst-case recovery latency ≈ the 15-min interval; a recreate is
-~30–120s of that container's downtime; no data loss (Neon persists). Scope is the live path only (the
-Java rollback `twh-api` is not auto-healed — rollback is a full revert that redeploys it). The env
-blocks are duplicated from `deploy-twh-mieweb.yml` and marked **keep-in-sync** in both.
+~30–120s of that container's downtime; no data loss (Neon persists). It heals both live containers
+(`twh` + `twh-api-ts`); since the JVM was retired (#109 PR4) there is no separate Java rollback
+container to exclude. The env blocks are duplicated from `deploy-twh-mieweb.yml` and marked
+**keep-in-sync** in both.
 
 **Two safety properties to know.** (1) The reconciler shares the `twh-mieweb-container-ops` concurrency
 group with `deploy-twh-mieweb.yml`, so a heal never runs while a push-to-main deploy is mid
@@ -221,8 +220,7 @@ Postgres 17 and is not compliant with the locked stack.
 
 ## Health checks
 
-- Backend (primary, TS): `GET https://twh-api-ts.os.mieweb.org/api/version` → `{"api":"v1",...}` (also serves `/actuator/health` → 200)
-- Backend (rollback, Java): `GET https://twh-api.os.mieweb.org/actuator/health` → `{"status":"UP"}`
+- Backend (TS): `GET https://twh-api-ts.os.mieweb.org/api/version` → `{"api":"v1",...}` (also serves `/actuator/health` → 200)
 - Frontend: `GET https://twh.os.mieweb.org/` → 200 OK
 - DB: `psql "$DATABASE_URL_DIRECT" -c "SELECT 1"` from any host with the Neon direct string
 
@@ -245,26 +243,20 @@ Post-deploy smoke checklist (MVP complete surface):
 
 ## Rollback
 
-### Blue-green: roll back to Java (full revert of the flip)
-The Java backend (`twh-api`) is still deployed and current, so rollback is a **full revert of the
-#109 PR3 flip commit** — `git revert <flip-merge-sha>` then push (or "Revert" the PR on GitHub). That
-restores the Java-only deploy: the frontend rebuilds pointing at `${BACKEND_URL}`
-(`https://twh-api.os.mieweb.org`) via `deploy-backend`, and the TS jobs are gone — so the rollback
-**never depends on the (possibly broken) TS deploy**.
-
-> Do **not** roll back by only repointing the frontend URL while leaving the TS jobs in place:
-> `deploy-frontend` is gated on the TS backend deploy succeeding (so a failed TS deploy preserves the
-> last-working frontend instead of aiming it at a deleted/old `twh-api-ts`). A partial URL edit would
-> therefore be skipped whenever the TS deploy is failing — which is exactly when you need the rollback.
-> Use the full commit revert.
-
-### MIE containers (general)
-- Revert the offending commit on `main` (re-triggers `deploy-twh-mieweb.yml`), or
-- Re-run the deploy workflow via `workflow_dispatch` at an earlier SHA with `replace_existing: true`.
-  Each backend image is also tagged `sha-<SHA>` in GHCR for pinning a known-good build.
+### Roll back to a known-good TS image (Java is retired)
+The Java backend was retired in #109 PR4, so rollback is **redeploying an earlier known-good
+`twh-api-ts` image** (each build is tagged `sha-<SHA>` in GHCR):
+- **Workflow dispatch:** run `deploy-twh-mieweb.yml` via `workflow_dispatch` from the Actions UI at the
+  earlier good SHA with `replace_existing: true` — it rebuilds + redeploys that SHA's images.
+- **Or revert + push:** `git revert <bad-merge-sha>` on `main` re-triggers `deploy-twh-mieweb.yml` with
+  the reverted code.
+- **Or pin a prior image fast (no rebuild):** the self-heal reconciler (`reconcile-twh-mieweb.yml`)
+  and `deploy-mieweb-container.sh` recreate from `:latest`; to pin an *older* image, re-run the deploy
+  at that SHA.
 
 ### Neon
-Each schema migration creates a branch. Promote the previous branch to main from the Neon dashboard.
+Each schema change is additive (`workwell_spike` self-creates via `CREATE … IF NOT EXISTS` on boot;
+no Flyway). Neon branches can still be promoted from the dashboard if a data rollback is needed.
 
 ## Cost monitoring
 

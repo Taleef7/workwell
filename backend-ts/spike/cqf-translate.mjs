@@ -26,7 +26,7 @@ const modelInfoXml = readFileSync(path.join(res, "fhir-modelinfo-4.0.1.xml"), "u
 const systemModelInfoXml = readFileSync(path.join(res, "system-modelinfo.xml"), "utf8");
 const fhirHelpersCql = readFileSync(path.join(res, "FHIRHelpers-4.0.1.cql"), "utf8");
 
-const cqlPath = process.argv[2] ?? path.resolve(here, "../../backend/src/main/resources/measures/audiogram.cql");
+const cqlPath = process.argv[2] ?? path.resolve(here, "../measures/audiogram.cql");
 const outDir = process.argv[3] ?? path.join(here, "elm-js");
 mkdirSync(outDir, { recursive: true });
 
