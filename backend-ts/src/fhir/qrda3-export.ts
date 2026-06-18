@@ -18,6 +18,7 @@ const esc = (s: string): string =>
 
 const hl7Ts = (iso: string): string => {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) throw new Error(`invalid ISO date for QRDA effectiveTime: ${iso}`);
   const p = (x: number) => String(x).padStart(2, "0");
   return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
 };
