@@ -83,11 +83,14 @@ for (const measureId of Object.keys(MEASURES)) {
 
 const BIN = fileURLToPath(new URL("./bin.ts", import.meta.url));
 // Run the bin with the same node + tsx loader the repo's test script uses (no reliance on a tsx on PATH).
-const runCli = (args: string[]) =>
-  spawnSync(process.execPath, ["--import", "tsx", BIN, ...args], { encoding: "utf8" });
+const runCli = (args: string[]) => {
+  const r = spawnSync(process.execPath, ["--import", "tsx", BIN, ...args], { encoding: "utf8", timeout: 15_000 });
+  if (r.error) throw r.error; // surface ENOENT / spawn failure / timeout directly, not as null !== 0
+  return r;
+};
 
 test("bin: success → exit 0 + clean JSON on stdout", () => {
-  const r = runCli(["--patient", fixture("audiogram", "present_recent"), "--measure", "audiogram", "--date", "2026-06-12"]);
+  const r = runCli(["--patient", fixture("audiogram", "present_recent"), "--measure", "audiogram", "--date", EVAL]);
   assert.equal(r.status, 0, r.stderr);
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.outcome, "COMPLIANT");
