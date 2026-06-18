@@ -23,6 +23,7 @@ import type {
 } from "../evaluate-measure.ts";
 import { MEASURES } from "./measure-registry.ts";
 import { ELM_LIBRARIES } from "./elm/index.ts";
+import { buildCodeService, type ValueSetResolver } from "./value-set-resolver.ts";
 
 const OUTCOMES: ReadonlySet<string> = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
@@ -49,7 +50,7 @@ const renderDefine = (v: unknown): unknown => {
 export class CqlExecutionEngine implements EvaluateMeasureBinding {
   private readonly fhirHelpers: unknown;
 
-  constructor() {
+  constructor(private readonly opts: { valueSetResolver?: ValueSetResolver } = {}) {
     this.fhirHelpers = this.loadElm("FHIRHelpers-4.0.1");
   }
 
@@ -64,7 +65,9 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
     if (!meta) throw new Error(`unknown measure '${input.measureId}'`);
     const evalDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
 
-    const library = new cql.Library(this.loadElm(meta.library), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
+    const expand = this.opts.valueSetResolver != null && meta.expansionLibrary != null && meta.valueSets != null;
+    const libraryName = expand ? meta.expansionLibrary! : meta.library;
+    const library = new cql.Library(this.loadElm(libraryName), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
     const startDate = meta.periodMonths > 0 ? subtractMonths(evalDate, meta.periodMonths) : evalDate;
     const measurementPeriod = new cql.Interval(
       cql.DateTime.parse(`${startDate}T00:00:00.0`),
@@ -72,7 +75,10 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
       true,
       true,
     );
-    const executor = new cql.Executor(library, new cql.CodeService({}), { "Measurement Period": measurementPeriod });
+    const codeService = expand
+      ? await buildCodeService(this.opts.valueSetResolver!, meta.valueSets!)
+      : new cql.CodeService({});
+    const executor = new cql.Executor(library, codeService, { "Measurement Period": measurementPeriod });
 
     const patientSource = cqlfhir.PatientSource.FHIRv401();
     patientSource.loadBundles([input.patientBundle]);
