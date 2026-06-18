@@ -237,3 +237,7 @@ Each outcome evidence payload includes:
   evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
   `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`
   asserts outcomes for all 10 measures × 4 scenarios (#72 / E2).
+- A completed single-measure run can be exported as a FHIR R4 `MeasureReport` (summary + per-subject
+  individual + a collection Bundle) via `GET /api/runs/{runId}/measure-report` — built from persisted
+  `outcomes` with a proportion population model whose counts reconcile 1:1 with the run's outcomes
+  (#89 / E3.1). Value-set expansion + QRDA are separate E3 items (#90/#91).
