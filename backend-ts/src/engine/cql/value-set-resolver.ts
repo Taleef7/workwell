@@ -35,8 +35,9 @@ export async function buildCodeService(resolver: ValueSetResolver, valueSetUrls:
   // An unknown/unresolved URL expands to [] → an empty ValueSet (findValueSet returns it, not null),
   // so a retrieve against it matches nothing (correct CQL semantics) rather than erroring.
   const json: Record<string, Record<string, CqlCode[]>> = {};
-  for (const url of valueSetUrls) {
-    json[url] = { "1": await resolver.expand(url) };
+  const expanded = await Promise.all(valueSetUrls.map(async (url) => [url, await resolver.expand(url)] as const));
+  for (const [url, codes] of expanded) {
+    json[url] = { "1": codes };
   }
   return new cql.CodeService(json);
 }
