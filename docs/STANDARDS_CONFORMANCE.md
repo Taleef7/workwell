@@ -11,6 +11,8 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Measure definition export | MAT (Measure/Library/ValueSet) | `GET /api/measures/{id}/versions/{vid}/export/mat` (FHIR R4 XML) | MAT-compatible | Hand-built FHIR R4 bundle |
 | Aggregate report | HL7 QRDA Category III | `GET /api/runs/{id}/qrda` (CDA XML) (E3.3) | **Stub** | Well-formed + structurally representative; **not** IG/Schematron-validated |
 
-**Notes:** All emitted artifacts are produced JVM-free with no external runtime dependency. The QRDA III
-stub uses the well-known QRDA III IG template OIDs and carries the aggregate population counts +
-performance rate; full IG/Schematron validation and multi-measure aggregation are future work.
+**Notes:** All emitted artifacts are produced JVM-free with no external runtime dependency (see ADR-009).
+The QRDA III stub uses the well-known QRDA III IG template OIDs and carries the aggregate population counts +
+performance rate; **its internal observation `code` values (e.g. on the performance-rate observation) are
+placeholders pending QRDA III IG alignment** — the document is structurally representative, not IG-code-exact.
+Full IG/Schematron validation, IG-exact codes, and multi-measure aggregation are future work.
