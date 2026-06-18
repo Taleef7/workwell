@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-18 — E3.2 (#90): real value-set expansion (ValueSetResolver port)
+
+Replaced the inline-code workaround with a real expansion seam: a `ValueSetResolver` port +
+store-backed adapter (`backend-ts/src/engine/cql/value-set-resolver.ts`) + `buildCodeService` feed a
+populated `cql.CodeService`, so a CQL value-set retrieve filters by real membership.
+`CqlExecutionEngine` gained an optional `valueSetResolver` (default off → today's inline path, demo
+unaffected). Audiogram ships a value-set-retrieve ELM variant (`AnnualAudiogramCompletedVS`) selected
+in expansion mode and proven **byte-equal to the inline path** via cross-mode golden parity across all
+4 scenarios. The `Audiogram Procedures` value set was already seeded; no schema change, no new
+dependency. A live VSAC resolver is a clean future drop-in behind the same port; the live-runtime env
+toggle is deferred (the deployed run path stays inline). Next E3 items: QRDA III (#91), QI-Core (#92).
+
 ## 2026-06-18 — E3.1 (#89): FHIR MeasureReport
 
 First E3 (eCQM artifact completeness) deliverable: a completed single-measure run is now exportable
