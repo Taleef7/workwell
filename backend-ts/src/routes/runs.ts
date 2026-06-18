@@ -298,7 +298,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       );
     }
     const measureId = measureIds[0]!;
-    const type = new URL(req.url).searchParams.get("type") ?? "summary";
+    const type = url.searchParams.get("type") ?? "summary";
     const fhir = (data: unknown) =>
       new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/fhir+json" } });
     if (type === "summary") return fhir(buildSummaryMeasureReport(run, measureId, rows));
