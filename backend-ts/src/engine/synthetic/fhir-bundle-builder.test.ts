@@ -21,6 +21,18 @@ import { employeeById } from "./employee-catalog.ts";
 
 const QICORE_BASE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 
+/** Every resource in a synthetic bundle must declare a QI-Core profile (#92 / E3.4). */
+function assertAllQiCore(bundle: { entry: Array<{ resource: unknown }> }): void {
+  for (const entry of bundle.entry) {
+    const resource = entry.resource as Record<string, unknown>;
+    const meta = resource["meta"] as { profile?: string[] } | undefined;
+    assert.ok(meta && Array.isArray(meta.profile) && meta.profile.length > 0,
+      `resource ${String(resource["resourceType"])} is missing meta.profile`);
+    assert.ok(meta.profile[0]!.startsWith(QICORE_BASE),
+      `resource ${String(resource["resourceType"])} profile "${meta.profile[0]}" does not start with "${QICORE_BASE}"`);
+  }
+}
+
 const engine = new CqlExecutionEngine();
 const EVAL_DATE = "2026-06-13";
 const emp = employeeById("emp-006")!; // Omar Siddiq, Welder, Plant A
@@ -69,16 +81,7 @@ test("QI-Core profiles: audiogram COMPLIANT bundle (Procedure) — Patient + Con
   const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
 
   // Universal invariant: every resource in the bundle must carry a QI-Core profile.
-  for (const entry of bundle.entry) {
-    const resource = entry.resource as Record<string, unknown>;
-    const meta = resource["meta"] as { profile: string[] } | undefined;
-    assert.ok(meta && Array.isArray(meta.profile) && meta.profile.length > 0,
-      `resource ${resource["resourceType"]} is missing meta.profile`);
-    assert.ok(
-      (meta.profile[0] as string).startsWith(QICORE_BASE),
-      `resource ${resource["resourceType"]} profile "${meta.profile[0]}" does not start with "${QICORE_BASE}"`,
-    );
-  }
+  assertAllQiCore(bundle);
 
   // Patient: required fields + correct profile
   const patientEntry = bundle.entry.find(
@@ -119,16 +122,7 @@ test("QI-Core profiles: flu_vaccine COMPLIANT bundle (Immunization) — Immuniza
   const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
 
   // Universal invariant
-  for (const entry of bundle.entry) {
-    const resource = entry.resource as Record<string, unknown>;
-    const meta = resource["meta"] as { profile: string[] } | undefined;
-    assert.ok(meta && Array.isArray(meta.profile) && meta.profile.length > 0,
-      `resource ${resource["resourceType"]} is missing meta.profile`);
-    assert.ok(
-      (meta.profile[0] as string).startsWith(QICORE_BASE),
-      `resource ${resource["resourceType"]} profile "${meta.profile[0]}" does not start with "${QICORE_BASE}"`,
-    );
-  }
+  assertAllQiCore(bundle);
 
   // Immunization: required fields + correct profile
   const immunizationEntry = bundle.entry.find(
@@ -147,16 +141,7 @@ test("QI-Core profiles: cms122 COMPLIANT bundle (Observation) — Observation ca
   const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
 
   // Universal invariant
-  for (const entry of bundle.entry) {
-    const resource = entry.resource as Record<string, unknown>;
-    const meta = resource["meta"] as { profile: string[] } | undefined;
-    assert.ok(meta && Array.isArray(meta.profile) && meta.profile.length > 0,
-      `resource ${resource["resourceType"]} is missing meta.profile`);
-    assert.ok(
-      (meta.profile[0] as string).startsWith(QICORE_BASE),
-      `resource ${resource["resourceType"]} profile "${meta.profile[0]}" does not start with "${QICORE_BASE}"`,
-    );
-  }
+  assertAllQiCore(bundle);
 
   // Observation: required fields + correct profile
   const observationEntry = bundle.entry.find(
