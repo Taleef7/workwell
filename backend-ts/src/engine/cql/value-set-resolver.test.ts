@@ -56,9 +56,13 @@ test("StoreValueSetResolver.expand returns [] for an unknown value set", async (
 test("buildCodeService produces a CodeService that resolves the value set by url", async () => {
   const resolver = new StoreValueSetResolver(store);
   const cs = (await buildCodeService(resolver, [VS])) as {
-    findValueSet: (oid: string) => { codes: Array<{ code: string; system: string }> } | null;
+    findValueSet: (oid: string, version?: string) => { codes: Array<{ code: string; system: string }> } | null;
   };
   const found = cs.findValueSet(VS);
-  assert.ok(found, "value set should resolve");
+  assert.ok(found, "value set should resolve (no version)");
   assert.ok(found.codes.some((c) => c.code === "audiogram-procedure" && c.system === VS));
+  // The ELM retrieve binds via findValueSet(url, version) — lock the "1" version-key shape too.
+  const versioned = cs.findValueSet(VS, "1");
+  assert.ok(versioned, "value set should resolve by version key");
+  assert.ok(versioned.codes.some((c) => c.code === "audiogram-procedure" && c.system === VS));
 });
