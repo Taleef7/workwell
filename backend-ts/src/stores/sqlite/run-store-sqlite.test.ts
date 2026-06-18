@@ -6,7 +6,8 @@
  * assertions run against the Postgres ceiling in `../postgres/store-postgres.test.ts`.
  *   node --import tsx --test src/stores/sqlite/run-store-sqlite.test.ts
  */
-import { after } from "node:test";
+import { after, test } from "node:test";
+import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
@@ -81,3 +82,19 @@ valueSetStoreContract("sqlite", async () => new SqliteValueSetStore(await freshD
 outreachTemplateStoreContract("sqlite", async () => new SqliteOutreachTemplateStore(await freshDb()));
 
 waiverStoreContract("sqlite", async () => new SqliteWaiverStore(await freshDb()));
+
+test("getRun surfaces the measurement period", async () => {
+  const db = await freshDb();
+  const store = new SqliteRunStore(db);
+  const created = await store.createRun({
+    scopeType: "MEASURE",
+    scopeId: crypto.randomUUID(),
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2025-06-12T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
+  });
+  const got = await store.getRun(created.id);
+  assert.equal(got?.measurementPeriodStart, "2025-06-12T00:00:00.000Z");
+  assert.equal(got?.measurementPeriodEnd, "2026-06-12T00:00:00.000Z");
+});
