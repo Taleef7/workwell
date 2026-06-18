@@ -7,7 +7,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
 [![Open Issues](https://img.shields.io/github/issues/Taleef7/workwell)](https://github.com/Taleef7/workwell/issues)
 
-WorkWell Measure Studio is a Spring Boot + Next.js monorepo for **Total Worker Health (TWH)** compliance operations. It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one operational platform.
+WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker Health (TWH)** compliance operations (backend re-platformed off Java/Spring — #96 / ADR-008; JVM retired in #109 PR4). It combines measure authoring, deterministic CQL evaluation, case management, audit trails, admin tooling, and exportable evidence in one operational platform.
 
 ## At a glance
 

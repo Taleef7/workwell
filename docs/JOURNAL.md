@@ -10,6 +10,18 @@ logic, no runtime YAML loader (de-scoped), no new dependency. Golden regression 
 the `spike/synthetic` corpus (10 measures × 4 scenarios) asserting outcomes, plus a subprocess smoke
 for exit codes + clean stdout. Closes the last open acceptance item of E2.
 
+## 2026-06-18 — #109 PR4 merged + deployed + verified; JVM retirement is closed
+
+PRs **#163 (self-heal reconciler)** and **#164 (JVM retirement)** both merged to `main` (in that order; #164 already contained #163's commits, so the merge-base was clean and conflict-free). Before merge, ran code-reviewer subagents over both branches — no blockers; the only follow-up was a last sweep of three dangling `backend/` references the PR4 sweep missed (`spike/cqf-translate.mjs` + `spike/README.md` default-arg repointed to the relocated `backend-ts/measures`; the now-orphaned `scripts/gen-measure-catalog.mjs` deleted since its source `MeasureService.java` is gone and its output `measure-catalog.ts` is now hand-maintained). Committed as `56d6a08`; typecheck green.
+
+**Post-merge production deploy verified end-to-end.** The merge ran `deploy-twh-mieweb.yml` (both #163 + #164 pushes); the #164 build briefly showed the expected 404→502 during the frontend container recreate window, then settled to **200 OK** — exactly the transient the reconciler's cold-start tolerance is designed for. Comprehensive E2E:
+- **API smoke (`scripts/smoke-shadow.sh` against the live `twh-api-ts`): 19 pass / 0 fail / 2 warn.** Auth (login `ROLE_ADMIN` + refresh-cookie rotation), 60-measure catalog, a live MEASURE run → COMPLETED with 100 outcomes, 50 open cases + detail + outreach send + delivery flip to SENT + auditor packet, all CSV exports, admin integrations, and the `demo-reset` prod-gate correctly 403. The 2 WARNs are the documented known limitations (ephemeral evidence `fs` BUCKET; MCP-SSE nginx caveat).
+- **Browser path (Playwright MCP):** the `/programs` dashboard renders fully through nginx → Next.js → the TS backend → Neon — 1000 evaluations, 77.8% overall compliance, 192 open cases, all 10 runnable measures with outcome breakdowns and NITRO trend charts.
+
+**Cleanup:** deleted both merged local feature branches, pruned the deleted remotes; reclaimed **366 MB** by removing the leftover untracked `backend/` tree (0 tracked files; recoverable via `git checkout 91182dd -- backend/`) plus stray debug/log files. `main` is the only local branch.
+
+**#109 is fully closed.** Open follow-ups remain a managed S3/R2 evidence `BUCKET` (currently ephemeral) and confirming Proxmox `onboot` with MIE (nice-to-have — the reconciler already covers reboot/crash recovery). Next roadmap epic: **E2 — declarative YAML measures + headless evaluator (#72)**.
+
 ## 2026-06-17 — #109 PR4: JVM retired — TypeScript is the sole backend
 
 The de-Java re-platform (#96 / ADR-008) reaches its end state. With the cutover live and hardened (CI gate #161, observability + orphaned-run recovery #162, self-heal reconciler #163), retired the Java/Spring backend:
