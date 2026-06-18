@@ -113,7 +113,7 @@ Public API actions derive audit identity from the authenticated security context
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
 - Scoped runs use the same structured CQL path as rerun-to-verify for CASE verification.
-- Public API actor identity always comes from Spring Security; caller-supplied actor fields are ignored or removed.
+- Public API actor identity always comes from the TypeScript auth middleware (`backend-ts/src/auth/authorize.ts`); caller-supplied actor fields are ignored or removed.
 - Production startup is fail-fast: the backend refuses auth-disabled, weak-secret, wildcard-CORS, localhost-CORS-in-production, or backend-demo configurations when a production-like profile is active.
 - Production CORS uses exact allowed origins from `workwell.cors.allowed-origins`; wildcard Vercel patterns are not used.
 - Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
@@ -121,9 +121,9 @@ Public API actions derive audit identity from the authenticated security context
 ## 7) External Interfaces
 - REST API: measure, run, case, admin, export, and auditor packet endpoints.
 - REST API: evidence upload/download on case detail, role-gated to case manager/admin.
-- MCP: read-only tools with per-call audit events and Spring Security role gates on `/sse` and `/mcp/**`.
+- MCP: read-only tools with per-call audit events and auth-middleware role gates (`backend-ts/src/auth/authorize.ts`) on `/sse` and `/mcp/**`.
 - MCP tool audit actors come from the authenticated security context, not a hardcoded transport identity.
-- CSV exports: runs/outcomes/cases + audit export. The audit export streams the ledger from a DB cursor (Java `StreamingResponseBody`; backend-ts paged `ReadableStream`) so memory stays bounded regardless of ledger size.
+- CSV exports: runs/outcomes/cases + audit export. The audit export streams the ledger from a DB cursor (a paged `ReadableStream`) so memory stays bounded regardless of ledger size.
 - Worklist pagination: `GET /api/cases` returns a plain array plus an `X-Total-Count` header (full filtered match count, exposed via CORS) so clients can page past the result cap.
 - Headless evaluator CLI (`backend-ts/src/engine/cli/`): `pnpm evaluate --patient <bundle.json> --measure <id>` → `MeasureOutcome` JSON on stdout, no server/DB. A thin shell over `CqlExecutionEngine` (#72 / E2).
 - FHIR R4 `MeasureReport` (#89 / E3.1): `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle` → `application/fhir+json`. Built from persisted `outcomes` (proportion model: IPP=all, DENEX=EXCLUDED, DENOM=IPP−DENEX, NUMER=COMPLIANT, score=NUMER/DENOM); single-measure runs only (422 otherwise). No FHIR runtime dependency.
