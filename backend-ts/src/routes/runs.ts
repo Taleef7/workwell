@@ -7,7 +7,9 @@
  *
  *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
  *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
- *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport (?type=summary|individual|bundle) → 200 | 404 | 422
+ *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport → 200 | 404 (unknown run) | 422 (multi-measure)
+ *                                   ?type=summary (default) → summary report; individual|bundle → the
+ *                                   collection Bundle (summary + per-subject individuals; the two are synonyms)
  *   GET  /api/runs/:id/logs         run log timeline                 → 200 RunLogEntry[]
  *   GET  /api/runs/:id/outcomes     persisted outcomes for a run     → 200 OutcomeRecord[]
  *   POST /api/runs                  create a QUEUED run              → 201 RunRecord
