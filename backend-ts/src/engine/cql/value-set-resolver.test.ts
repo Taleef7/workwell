@@ -66,3 +66,32 @@ test("buildCodeService produces a CodeService that resolves the value set by url
   assert.ok(versioned, "value set should resolve by version key");
   assert.ok(versioned.codes.some((c) => c.code === "audiogram-procedure" && c.system === VS));
 });
+
+// ---------------------------------------------------------------------------
+// Cross-mode parity: expansion mode must yield the same outcome as inline mode
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { CqlExecutionEngine } from "./cql-execution-engine.ts";
+
+const SYNTH = fileURLToPath(new URL("../../../spike/synthetic/audiogram", import.meta.url));
+const EVAL = "2026-06-12";
+const EXPECTED: Record<string, string> = {
+  present_recent: "COMPLIANT",
+  present_old: "OVERDUE",
+  missing: "MISSING_DATA",
+  excluded: "EXCLUDED",
+};
+
+test("audiogram: expansion mode == inline mode == expected, across all scenarios", async () => {
+  const inline = new CqlExecutionEngine();
+  const expansion = new CqlExecutionEngine({ valueSetResolver: new StoreValueSetResolver(store) });
+  for (const [scenario, expected] of Object.entries(EXPECTED)) {
+    const bundle = JSON.parse(readFileSync(join(SYNTH, `${scenario}.json`), "utf8"));
+    const inlineOut = await inline.evaluate({ measureId: "audiogram", patientBundle: bundle, evaluationDate: EVAL });
+    const expandOut = await expansion.evaluate({ measureId: "audiogram", patientBundle: bundle, evaluationDate: EVAL });
+    assert.equal(inlineOut.outcome, expected, `inline ${scenario}`);
+    assert.equal(expandOut.outcome, expected, `expansion ${scenario}`);
+    assert.equal(expandOut.outcome, inlineOut.outcome, `cross-mode ${scenario}`);
+  }
+});
