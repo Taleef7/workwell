@@ -248,3 +248,36 @@ test("evaluate with a missing body → 400", async () => {
   const res = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram" });
   assert.equal(res?.status, 400);
 });
+
+test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404/bundle", async () => {
+  const created = (await (await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "audiogram" }))!.json()) as { runId?: string; id?: string };
+  const runId = created.runId ?? created.id;
+
+  const sumRes = (await get(`/api/runs/${runId}/measure-report`))!; // default type=summary
+  assert.equal(sumRes.status, 200);
+  assert.equal(sumRes.headers.get("content-type"), "application/fhir+json");
+  const mr = (await sumRes.json()) as { resourceType: string; type: string; group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> };
+  assert.equal(mr.resourceType, "MeasureReport");
+  assert.equal(mr.type, "summary");
+
+  const rows = (await (await get(`/api/runs/${runId}/outcomes`))!.json()) as Array<{ outcomeStatus: string }>;
+  const total = rows.length;
+  // /api/runs/:id/outcomes returns RunOutcomeRow (outcomeStatus field, not status)
+  const excluded = rows.filter((r) => r.outcomeStatus === "EXCLUDED").length;
+  const compliant = rows.filter((r) => r.outcomeStatus === "COMPLIANT").length;
+  const popCount = (code: string): number => {
+    const p = mr.group[0]!.population.find((x) => x.code.coding[0]?.code === code);
+    assert.ok(p, `population ${code} not found`);
+    return p!.count;
+  };
+  assert.equal(popCount("initial-population"), total);
+  assert.equal(popCount("denominator-exclusion"), excluded);
+  assert.equal(popCount("denominator"), total - excluded);
+  assert.equal(popCount("numerator"), compliant);
+
+  const bundle = (await (await get(`/api/runs/${runId}/measure-report?type=bundle`))!.json()) as { resourceType: string; entry: unknown[] };
+  assert.equal(bundle.resourceType, "Bundle");
+  assert.equal(bundle.entry.length, 1 + total);
+
+  assert.equal((await get(`/api/runs/${crypto.randomUUID()}/measure-report`))!.status, 404);
+});
