@@ -46,6 +46,6 @@ test("buildQrda3Document: aggregate counts reconcile with countPopulations", () 
 
 test("buildQrda3Document: all-excluded → performance rate 0, no divide-by-zero", () => {
   const xml = buildQrda3Document(run, "audiogram", [oc("EXCLUDED"), oc("EXCLUDED")]);
-  assert.ok(xml.includes('value="0"'), "perf rate 0 when DENOM 0");
+  assert.ok(xml.includes('xsi:type="REAL" value="0"'), "perf rate 0 when DENOM 0");
   assert.ok(!xml.includes("NaN") && !xml.includes("Infinity"));
 });
