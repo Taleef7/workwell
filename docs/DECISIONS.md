@@ -141,8 +141,9 @@
     FHIR `Bundle` and returns `BundleOutcome` (normalized bucket + define-level expression results);
     the synthetic path delegates to the same core. `HeadlessEvaluatorCli` (plain `main`, no Spring,
     no DB) + the Gradle `evaluateMeasure` task expose it:
-    `./gradlew.bat evaluateMeasure --args="patient.json measures/audiogram.yaml"`. A REST endpoint
-    was deferred (trivial later atop `evaluateBundle`).
+    `./gradlew.bat evaluateMeasure --args="patient.json measures/audiogram.yaml"` (Java-era form; post-#109
+    this is realized JVM-free in `backend-ts` as `pnpm evaluate --patient <bundle.json> --measure <id>`, #72/E2).
+    A REST endpoint was deferred (trivial later atop `evaluateBundle`).
   - **No new dependencies:** SnakeYAML (Boot), HAPI JSON parser, Jackson — all already shipped.
 - **Consequences:**
   - Authoring a new runnable measure = a `.cql` + a `.yaml` file; no Java changes for bindings.
