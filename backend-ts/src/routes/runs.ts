@@ -8,6 +8,7 @@
  *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
  *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
  *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport → 200 | 404 (unknown run) | 422 (multi-measure)
+ *   GET  /api/runs/:id/qrda           QRDA Category III aggregate stub (XML) → 200 | 404 | 422
  *                                   ?type=summary (default) → summary report; individual|bundle → the
  *                                   collection Bundle (summary + per-subject individuals; the two are synonyms)
  *   GET  /api/runs/:id/logs         run log timeline                 → 200 RunLogEntry[]
@@ -42,6 +43,7 @@ import {
 } from "../run/run-pipeline.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
 import { buildSummaryMeasureReport, buildMeasureReportBundle } from "../fhir/measure-report.ts";
+import { buildQrda3Document } from "../fhir/qrda3-export.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -284,6 +286,27 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
     return json(toRunOutcomeRows(await (await outcomes(env)).listOutcomes(outcomesId)));
+  }
+
+  // QRDA Category III aggregate export (stub) for a completed single-measure run (#91 / E3.3).
+  const qrdaId = pathname.match(/^\/api\/runs\/([^/]+)\/qrda$/)?.[1];
+  if (qrdaId && req.method === "GET") {
+    const run = await (await store(env)).getRun(qrdaId);
+    if (!run) return json({ error: "not_found", id: qrdaId }, 404);
+    const rows = await (await outcomes(env)).listOutcomes(qrdaId);
+    const measureIds = [...new Set(rows.map((o) => o.measureId))];
+    if (measureIds.length !== 1) {
+      return json(
+        { error: "unsupported_run_scope", message: "QRDA III requires a completed single-measure run", measures: measureIds.length },
+        422,
+      );
+    }
+    const fmt = url.searchParams.get("format") ?? "xml";
+    if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
+    return new Response(buildQrda3Document(run, measureIds[0]!, rows), {
+      status: 200,
+      headers: { "content-type": "application/xml" },
+    });
   }
 
   // FHIR MeasureReport for a completed single-measure run (#89 / E3.1).
