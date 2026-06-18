@@ -4,9 +4,9 @@
 WorkWell Measure Studio is a **Total Worker Health (TWH)** compliance platform — a two-tier web application that unifies OSHA occupational safety compliance and CMS/HEDIS clinical quality measures in a single system. TWH is the NIOSH framework recognising that worker health is shaped by both workplace hazards and general health promotion.
 
 - Frontend: Next.js App Router dashboard on MIE Create-a-Container, built on MIE's `@mieweb/ui` component library (Tailwind 4) with dark mode + Enterprise Health brand and a runtime brand switcher (semantic-token theming via `useTheme`/`useBrand`; see ADR-004). `@mieweb/ui` is imported only from client components (`components/client-providers.tsx` boundary). The DataVis **NITRO** data grid (`@mieweb/ui/datavis` + vendored `datavis` source under `frontend/vendor/datavis`; see ADR-007) drives the large operational/audit tables (`/measures`, `/runs` Outcomes, `/admin`) via the client-only `features/datavis/NitroGrid` seam.
-- Backend: Spring Boot API on MIE Create-a-Container.
-- Data: PostgreSQL 16 (Neon) with Flyway migrations.
-- Optional assistive surfaces: OpenAI-backed Spring AI calls for drafting/explanations (never compliance decisions).
+- Backend: TypeScript worker (`@mieweb/cloud`, `backend-ts/`) on a long-lived Node host — MIE Create-a-Container (the Java/Spring backend was retired in #109 PR4; ADR-008).
+- Data: PostgreSQL 16 (Neon) via the `Pg*Store` ceiling, isolated `workwell_spike` schema (self-creating `CREATE … IF NOT EXISTS` on boot — the old Java Flyway migrations were deleted with `backend/` in PR4); SQLite floor for tests/local.
+- Optional assistive surfaces: OpenAI-backed AI calls (backend-ts AI surfaces) for drafting/explanations (never compliance decisions).
 
 Compliance outcomes are determined only by CQL evaluation + structured evidence persistence.
 
