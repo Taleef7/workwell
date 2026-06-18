@@ -15,7 +15,9 @@ export const USAGE =
   "Usage: pnpm evaluate --patient <bundle.json> --measure <id> [--date YYYY-MM-DD] [--pretty]";
 
 /** Bad invocation (missing/unknown flags, unreadable bundle) — exit code 2. */
-export class CliUsageError extends Error {}
+export class CliUsageError extends Error {
+  override readonly name = "CliUsageError";
+}
 
 export interface CliArgs {
   patient: string;
@@ -47,13 +49,13 @@ export async function evaluate(parsed: CliArgs): Promise<MeasureOutcome> {
   try {
     bundle = JSON.parse(readFileSync(parsed.patient, "utf8"));
   } catch (e) {
-    throw new CliUsageError(`cannot read patient bundle '${parsed.patient}': ${(e as Error).message}`);
+    throw new CliUsageError(`cannot read patient bundle '${parsed.patient}': ${e instanceof Error ? e.message : String(e)}`);
   }
   const engine = new CqlExecutionEngine();
   return engine.evaluate({ measureId: parsed.measure, patientBundle: bundle, evaluationDate: parsed.date });
 }
 
-/** Convenience for tests: parse + evaluate in one call. */
+/** Parse args and evaluate in one call — the same path as the CLI entry point. */
 export async function run(args: string[]): Promise<MeasureOutcome> {
   return evaluate(parseArgs(args));
 }
@@ -68,7 +70,7 @@ export async function main(args: string[]): Promise<number> {
   try {
     parsed = parseArgs(args);
   } catch (e) {
-    process.stderr.write(`${(e as Error).message}\n`);
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
     return 2;
   }
   try {
@@ -77,7 +79,7 @@ export async function main(args: string[]): Promise<number> {
     return 0;
   } catch (e) {
     const code = e instanceof CliUsageError ? 2 : 1;
-    process.stderr.write(`error: ${(e as Error).message}\n`);
+    process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
     return code;
   }
 }
