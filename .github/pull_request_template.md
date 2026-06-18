@@ -16,7 +16,7 @@ List exact commands run and key results.
 
 ```bash
 # Example
-cd backend && ./gradlew.bat test
+cd backend-ts && pnpm typecheck && pnpm test
 cd frontend && npm run lint && npm run test && npm run build
 ```
 

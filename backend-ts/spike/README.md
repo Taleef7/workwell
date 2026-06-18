@@ -68,7 +68,7 @@ node spike/compare.mjs spike/elm-js           # evaluate that ELM vs the Java go
 **Validated across ALL 10 measures, not just Audiogram:**
 
 ```
-node spike/cqf-translate.mjs ../backend/src/main/resources/measures spike/elm-js   # 10 measures, errors=0
+node spike/cqf-translate.mjs measures spike/elm-js   # 10 measures, errors=0
 node spike/compare-all.mjs spike/elm-js                                            # Node-translated ELM vs Java golden
 ✅ 40/40 scenarios match Java exactly (452 define comparisons, 10 measures × 4 scenarios)
 ```

@@ -1,7 +1,7 @@
 /**
  * Generate src/engine/synthetic/measure-bindings.ts from the YAML measure definitions
- * (../backend/src/main/resources/measures/*.yaml, ADR-006). The synthetic FHIR bundle
- * builder stamps these codes/value sets per employee. Re-run on measure re-seed:
+ * (measures/*.yaml, ADR-006). The synthetic FHIR bundle builder stamps these codes/value
+ * sets per employee. Re-run on measure re-seed:
  *   node scripts/gen-measure-bindings.mjs
  */
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
@@ -9,7 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dir = path.resolve(here, "../../backend/src/main/resources/measures");
+// Source corpus lives in backend-ts/measures/ (relocated from the retired backend/ in #109 PR4).
+const dir = path.resolve(here, "../measures");
 const outFile = path.resolve(here, "../src/engine/synthetic/measure-bindings.ts");
 
 const line = (s, key) => s.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, "m"))?.[1].trim();
