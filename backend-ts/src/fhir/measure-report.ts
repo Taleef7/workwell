@@ -24,6 +24,7 @@ export interface MeasureReport {
   improvementNotation?: { coding: Array<{ system: string; code: string }> };
   group: Array<{ population: Population[]; measureScore?: { value: number } }>;
 }
+/** A `collection` Bundle: entry[0] is the summary report; the rest are per-subject individuals. */
 export interface MeasureReportBundle {
   resourceType: "Bundle";
   type: "collection";
@@ -82,6 +83,7 @@ export function buildIndividualMeasureReport(outcome: OutcomeRecord, run: RunRec
     status: "complete",
     type: "individual",
     measure: measureCanonical(measureId),
+    // subjectId is the employee external id (used as the Patient ref); fhir_patient_id linkage is deferred (spec §7).
     subject: { reference: `Patient/${outcome.subjectId}` },
     period: { start: run.measurementPeriodStart, end: run.measurementPeriodEnd },
     group: [{ population: populations(c) }],

@@ -29,8 +29,11 @@ const outcomes: OutcomeRecord[] = [
   ...Array.from({ length: 6 }, () => oc("COMPLIANT")),
   oc("DUE_SOON"), oc("OVERDUE"), oc("MISSING_DATA"), oc("EXCLUDED"),
 ];
-const countOf = (mr: { group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> }, code: string) =>
-  mr.group[0]!.population.find((p) => p.code.coding[0]!.code === code)!.count;
+const countOf = (mr: { group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> }, code: string): number => {
+  const found = mr.group[0]!.population.find((p) => p.code.coding[0]?.code === code);
+  assert.ok(found, `population ${code} not found`);
+  return found.count;
+};
 
 test("countPopulations: IPP/DENEX/DENOM/NUMER from buckets", () => {
   assert.deepEqual(countPopulations(outcomes), { ipp: 10, denex: 1, denom: 9, numer: 6 });
