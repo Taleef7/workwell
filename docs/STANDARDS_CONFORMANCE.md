@@ -10,6 +10,7 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Measure result (patient + summary) | FHIR R4 MeasureReport | `GET /api/runs/{id}/measure-report` (summary + individual + Bundle) (E3.1) | Structurally conformant | Counts reconcile 1:1 with outcomes; structural (not HL7-validator) |
 | Measure definition export | MAT (Measure/Library/ValueSet) | `GET /api/measures/{id}/versions/{vid}/export/mat` (FHIR R4 XML) | MAT-compatible | Hand-built FHIR R4 bundle |
 | Aggregate report | HL7 QRDA Category III | `GET /api/runs/{id}/qrda` (CDA XML) (E3.3) | **Stub** | Well-formed + structurally representative; **not** IG/Schematron-validated |
+| Evaluated resources | HL7 QI-Core (US Realm) | Synthetic FHIR bundles stamped with QI-Core `meta.profile` + required elements (E3.4) | Structural alignment | `meta.profile` declared + required elements present; **not** IG/validator-validated (ADR-009) |
 
 **Notes:** All emitted artifacts are produced JVM-free with no external runtime dependency (see ADR-009).
 The QRDA III stub uses the well-known QRDA III IG template OIDs and carries the aggregate population counts +
