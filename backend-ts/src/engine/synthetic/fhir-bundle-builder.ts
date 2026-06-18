@@ -12,6 +12,15 @@
 import type { EmployeeProfile } from "./employee-catalog.ts";
 import type { ExamConfig } from "./exam-config.ts";
 
+const QICORE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
+const QICORE_PROFILES = {
+  Patient: `${QICORE}qicore-patient`,
+  Condition: `${QICORE}qicore-condition`,
+  Procedure: `${QICORE}qicore-procedure`,
+  Immunization: `${QICORE}qicore-immunization`,
+  Observation: `${QICORE}qicore-observation-clinical-result`,
+} as const;
+
 /** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it. */
 function dateMinusDays(evaluationDate: string, daysAgo: number): string {
   const d = new Date(`${evaluationDate}T00:00:00Z`);
@@ -29,6 +38,7 @@ function birthDate(externalId: string): string {
 function condition(externalId: string, code: string, valueSet: string): unknown {
   return {
     resourceType: "Condition",
+    meta: { profile: [QICORE_PROFILES.Condition] },
     id: `${externalId}-${code}`,
     subject: { reference: `Patient/${externalId}` },
     clinicalStatus: { coding: [{ code: "active" }] },
@@ -52,6 +62,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
     {
       resource: {
         resourceType: "Patient",
+        meta: { profile: [QICORE_PROFILES.Patient] },
         id: externalId,
         name: [{ text: employee.name }],
         birthDate: birthDate(externalId),
@@ -72,6 +83,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
     entries.push({
       resource: {
         resourceType: "Observation",
+        meta: { profile: [QICORE_PROFILES.Observation] },
         id: `${externalId}-observation`,
         status: "final",
         subject: { reference: `Patient/${externalId}` },
@@ -86,6 +98,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
       entries.push({
         resource: {
           resourceType: "Immunization",
+          meta: { profile: [QICORE_PROFILES.Immunization] },
           id: `${externalId}-immunization`,
           status: "completed",
           patient: { reference: `Patient/${externalId}` },
@@ -97,6 +110,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
       entries.push({
         resource: {
           resourceType: "Procedure",
+          meta: { profile: [QICORE_PROFILES.Procedure] },
           id: `${externalId}-procedure`,
           status: "completed",
           subject: { reference: `Patient/${externalId}` },
