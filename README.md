@@ -158,6 +158,7 @@ For full API surface and behavioral notes, see docs linked below.
 - Public API audit actor is always security-context derived.
 - Evidence download/upload operations are role-gated and audited.
 - Production startup enforces auth, JWT, and CORS safety checks.
+- Value-set expansion is pluggable: a `ValueSetResolver` port feeds the CQL `CodeService` (store-backed today, VSAC-ready), with the inline-code path as the config-selectable default (E3.2 / #90).
 
 ## Community and contribution
 
