@@ -297,3 +297,16 @@ test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS
   const body = (await r.json()) as { error: string };
   assert.equal(body.error, "unsupported_run_scope");
 });
+
+test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", async () => {
+  const created = await (await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "audiogram" }))!.json();
+  const runId = (created as { runId?: string; id?: string }).runId ?? (created as { runId?: string; id?: string }).id;
+  const res = (await get(`/api/runs/${runId}/qrda?format=xml`))!;
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/xml");
+  const xml = await res.text();
+  assert.ok(xml.startsWith("<?xml"));
+  assert.ok(xml.includes('root="2.16.840.1.113883.10.20.27.1.1"'), "QRDA III templateId");
+  assert.ok(xml.includes('extension="audiogram"'), "measure reference");
+  assert.equal((await get(`/api/runs/${crypto.randomUUID()}/qrda`))!.status, 404);
+});

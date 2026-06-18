@@ -138,6 +138,7 @@ npm run build
 - `GET /api/exports/runs?format=csv`
 - `GET /api/auditor/cases/{caseId}/packet?format=json|html`
 - `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle`
+- `GET /api/runs/{runId}/qrda?format=xml`
 
 For full API surface and behavioral notes, see docs linked below.
 
@@ -148,6 +149,7 @@ For full API surface and behavioral notes, see docs linked below.
 - [Measures](docs/MEASURES.md)
 - [Deploy Guide](docs/DEPLOY.md)
 - [Exports](docs/EXPORTS.md)
+- [Standards Conformance](docs/STANDARDS_CONFORMANCE.md)
 - [Sprint Index](docs/sprints/README.md)
 - [Journal](docs/JOURNAL.md)
 - [Changelog](CHANGELOG.md)
