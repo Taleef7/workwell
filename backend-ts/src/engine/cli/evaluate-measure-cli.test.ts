@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { CliUsageError, parseArgs, run, evaluate } from "./evaluate-measure-cli.ts";
 import { MEASURES } from "../cql/measure-registry.ts";
 
@@ -79,3 +80,23 @@ for (const measureId of Object.keys(MEASURES)) {
     }
   });
 }
+
+const BIN = fileURLToPath(new URL("./bin.ts", import.meta.url));
+// Run the bin with the same node + tsx loader the repo's test script uses (no reliance on a tsx on PATH).
+const runCli = (args: string[]) =>
+  spawnSync(process.execPath, ["--import", "tsx", BIN, ...args], { encoding: "utf8" });
+
+test("bin: success → exit 0 + clean JSON on stdout", () => {
+  const r = runCli(["--patient", fixture("audiogram", "present_recent"), "--measure", "audiogram", "--date", "2026-06-12"]);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.outcome, "COMPLIANT");
+  assert.equal(parsed.subjectId, "audiogram-present_recent");
+});
+
+test("bin: usage error → exit 2 + stderr message + empty stdout", () => {
+  const r = runCli(["--measure", "audiogram"]);
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /--patient .* is required/);
+});
