@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-06-18 — E3.4 (#92): QI-Core profile alignment (structural)
+
+The synthetic FHIR bundles now declare QI-Core conformance: every emitted resource (Patient, the
+enrollment/waiver Conditions, and the Observation/Immunization/Procedure event) carries a QI-Core
+`meta.profile` canonical (`backend-ts/src/engine/synthetic/fhir-bundle-builder.ts`, `QICORE_PROFILES`)
+and the QI-Core-required structural elements. This is **structural alignment** (JVM-free, no validator
+dependency — ADR-009 posture), not official QI-Core IG/Schematron validation. `meta.profile` is
+metadata the CQL retrieves don't read, so the 10-measure golden parity is byte-identical (the engine
+contract test is the guard). Conformance recorded in `docs/STANDARDS_CONFORMANCE.md`. **E3 epic (#73)
+is now complete** (E3.1 MeasureReport, E3.2 value-set expansion, E3.3 QRDA III, E3.4 QI-Core).
+
 ## 2026-06-18 — E3.3 (#91): QRDA III stub + standards-conformance matrix
 
 A completed single-measure run is now exportable as a well-formed HL7 QRDA Category III (aggregate)
