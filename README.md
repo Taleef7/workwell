@@ -79,10 +79,17 @@ npm run dev
 ## Headless evaluation (patient + YAML → compliant?)
 
 Measure bindings are declarative YAML files (`backend-ts/measures/*.yaml`, one per runnable measure,
-sibling to its CQL). The engine answers compliance for an arbitrary FHIR R4 patient bundle with no
-server and no database — see the `evaluateMeasure` entry in `backend-ts/src/engine/evaluate-measure.ts`.
-A packaged headless CLI is tracked under **E2** (#72 — declarative YAML measures + headless evaluator);
-the shape of its result is:
+sibling to its CQL). A packaged headless CLI answers compliance for an arbitrary FHIR R4 patient
+bundle with **no server and no database** — run it from `backend-ts/`:
+
+```bash
+pnpm evaluate --patient ./patient-bundle.json --measure audiogram --date 2026-06-12 --pretty
+```
+
+`--measure` is a registry id (`audiogram`, `hazwoper`, `tb_surveillance`, `flu_vaccine`, `hypertension`,
+`diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `cms125`, `cms122`); `--date` defaults to today.
+It's a thin shell (`backend-ts/src/engine/cli/`) over the same `CqlExecutionEngine` the run pipeline uses.
+Output is the `MeasureOutcome` JSON:
 
 ```json
 {

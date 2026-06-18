@@ -1,5 +1,15 @@
 # Journal
 
+## 2026-06-18 — E2 (#72): headless evaluator CLI
+
+Shipped the packaged headless evaluator Doug asked for: `pnpm evaluate --patient <bundle.json>
+--measure <id>` prints a measure's `MeasureOutcome` (bucket + define-level evidence) for one FHIR
+R4 bundle, no server and no DB. It's a thin shell (`backend-ts/src/engine/cli/`: a side-effect-free
+lib + a 2-line `bin.ts`) over the existing parity-proven `CqlExecutionEngine` — no new evaluation
+logic, no runtime YAML loader (de-scoped), no new dependency. Golden regression drives the CLI over
+the `spike/synthetic` corpus (10 measures × 4 scenarios) asserting outcomes, plus a subprocess smoke
+for exit codes + clean stdout. Closes the last open acceptance item of E2.
+
 ## 2026-06-17 — #109 PR4: JVM retired — TypeScript is the sole backend
 
 The de-Java re-platform (#96 / ADR-008) reaches its end state. With the cutover live and hardened (CI gate #161, observability + orphaned-run recovery #162, self-heal reconciler #163), retired the Java/Spring backend:

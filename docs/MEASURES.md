@@ -233,3 +233,7 @@ Each outcome evidence payload includes:
 - All 8 active CQL measures now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
 - All four HEDIS wellness measures are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
+- A headless CLI (`pnpm evaluate --patient <bundle.json> --measure <id>`, `backend-ts/src/engine/cli/`)
+  evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
+  `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`
+  asserts outcomes for all 10 measures × 4 scenarios (#72 / E2).
