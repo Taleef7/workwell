@@ -126,6 +126,7 @@ Public API actions derive audit identity from the authenticated security context
 - CSV exports: runs/outcomes/cases + audit export. The audit export streams the ledger from a DB cursor (Java `StreamingResponseBody`; backend-ts paged `ReadableStream`) so memory stays bounded regardless of ledger size.
 - Worklist pagination: `GET /api/cases` returns a plain array plus an `X-Total-Count` header (full filtered match count, exposed via CORS) so clients can page past the result cap.
 - Headless evaluator CLI (`backend-ts/src/engine/cli/`): `pnpm evaluate --patient <bundle.json> --measure <id>` → `MeasureOutcome` JSON on stdout, no server/DB. A thin shell over `CqlExecutionEngine` (#72 / E2).
+- FHIR R4 `MeasureReport` (#89 / E3.1): `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle` → `application/fhir+json`. Built from persisted `outcomes` (proportion model: IPP=all, DENEX=EXCLUDED, DENOM=IPP−DENEX, NUMER=COMPLIANT, score=NUMER/DENOM); single-measure runs only (422 otherwise). No FHIR runtime dependency.
 
 ## 8) Current Infra Split
 - MIE Create-a-Container hosts both frontend (`twh`) and the TypeScript backend (`twh-api-ts`) processes.

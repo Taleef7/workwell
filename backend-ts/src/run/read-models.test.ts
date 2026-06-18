@@ -17,6 +17,8 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   requestedScope: {},
   startedAt: "2026-06-13T10:00:00.000Z",
   completedAt: "2026-06-13T10:00:05.000Z",
+  measurementPeriodStart: "2025-06-13T00:00:00.000Z",
+  measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   ...over,
 });
 

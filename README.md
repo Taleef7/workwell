@@ -137,6 +137,7 @@ npm run build
 - `GET /api/cases?status=open`
 - `GET /api/exports/runs?format=csv`
 - `GET /api/auditor/cases/{caseId}/packet?format=json|html`
+- `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle`
 
 For full API surface and behavioral notes, see docs linked below.
 

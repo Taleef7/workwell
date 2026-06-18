@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-18 — E3.1 (#89): FHIR MeasureReport
+
+First E3 (eCQM artifact completeness) deliverable: a completed single-measure run is now exportable
+as a FHIR R4 `MeasureReport` — `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle`,
+`application/fhir+json`. Pure builders (`backend-ts/src/fhir/measure-report.ts`) turn persisted
+`outcomes` into summary + per-subject individual reports + a collection Bundle, with a proportion
+population model (IPP=all, DENEX=EXCLUDED, DENOM=IPP−DENEX, NUMER=COMPLIANT, score=NUMER/DENOM) whose
+counts reconcile 1:1 with the run's outcomes by construction. Structural FHIR-R4 conformance is
+asserted JVM-free (no FHIR runtime dependency); `RunRecord` now surfaces the measurement period
+(existing columns) for the report `period`. Multi-measure runs (e.g. ALL_PROGRAMS) return 422 —
+value-set expansion (#90) and QRDA III (#91) are the next E3 items.
+
 ## 2026-06-18 — E2 (#72): headless evaluator CLI
 
 Shipped the packaged headless evaluator Doug asked for: `pnpm evaluate --patient <bundle.json>
