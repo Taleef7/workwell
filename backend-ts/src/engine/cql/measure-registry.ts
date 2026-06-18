@@ -12,10 +12,14 @@ export interface MeasureMeta {
   library: string;
   /** Months before the eval date the Measurement Period starts (0 = single-day). */
   periodMonths: number;
+  /** ELM library used in value-set-expansion mode (E3.2); falls back to `library` when absent. */
+  expansionLibrary?: string;
+  /** Value-set URLs the expansion-mode library references (expanded into the CodeService). */
+  valueSets?: string[];
 }
 
 export const MEASURES: Record<string, MeasureMeta> = {
-  audiogram: { id: "audiogram", name: "Audiogram", library: "AnnualAudiogramCompleted-1.0.0", periodMonths: 0 },
+  audiogram: { id: "audiogram", name: "Audiogram", library: "AnnualAudiogramCompleted-1.0.0", periodMonths: 0, expansionLibrary: "AnnualAudiogramCompletedVS-1.0.0", valueSets: ["urn:workwell:vs:audiogram-procedures"] },
   hazwoper: { id: "hazwoper", name: "HAZWOPER Surveillance", library: "HazwoperSurveillance-1.0.0", periodMonths: 0 },
   tb_surveillance: { id: "tb_surveillance", name: "TB Surveillance", library: "TbSurveillance-1.3.0", periodMonths: 0 },
   flu_vaccine: { id: "flu_vaccine", name: "Flu Vaccine", library: "FluVaccineSeasonal-1.0.0", periodMonths: 12 },
