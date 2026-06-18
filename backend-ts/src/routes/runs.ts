@@ -305,7 +305,10 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
     return new Response(buildQrda3Document(run, measureIds[0]!, rows), {
       status: 200,
-      headers: { "content-type": "application/xml" },
+      headers: {
+        "content-type": "application/xml",
+        "content-disposition": `attachment; filename="qrda3-${qrdaId}.xml"`,
+      },
     });
   }
 
@@ -325,7 +328,13 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     const measureId = measureIds[0]!;
     const type = url.searchParams.get("type") ?? "summary";
     const fhir = (data: unknown) =>
-      new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/fhir+json" } });
+      new Response(JSON.stringify(data), {
+        status: 200,
+        headers: {
+          "content-type": "application/fhir+json",
+          "content-disposition": `attachment; filename="measure-report-${mrId}-${type}.json"`,
+        },
+      });
     if (type === "summary") return fhir(buildSummaryMeasureReport(run, measureId, rows));
     if (type === "individual" || type === "bundle") return fhir(buildMeasureReportBundle(run, measureId, rows));
     return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);

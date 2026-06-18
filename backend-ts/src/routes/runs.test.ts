@@ -304,6 +304,7 @@ test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", asy
   const res = (await get(`/api/runs/${runId}/qrda?format=xml`))!;
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "application/xml");
+  assert.match(res.headers.get("content-disposition") ?? "", /attachment; filename="qrda3-.*\.xml"/);
   const xml = await res.text();
   assert.ok(xml.startsWith("<?xml"));
   assert.ok(xml.includes('root="2.16.840.1.113883.10.20.27.1.1"'), "QRDA III templateId");
