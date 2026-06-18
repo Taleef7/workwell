@@ -246,3 +246,7 @@ Each outcome evidence payload includes:
   individual + a collection Bundle) via `GET /api/runs/{runId}/measure-report` — built from persisted
   `outcomes` with a proportion population model whose counts reconcile 1:1 with the run's outcomes
   (#89 / E3.1). Value-set expansion + QRDA are separate E3 items (#90/#91).
+- A completed single-measure run can be exported as an HL7 QRDA Category III aggregate stub via
+  `GET /api/runs/{runId}/qrda?format=xml` — well-formed CDA carrying the aggregate population counts +
+  performance rate (reuses the MeasureReport `countPopulations`); a stub, not IG-validated (#91 / E3.3).
+  See `docs/STANDARDS_CONFORMANCE.md`.
