@@ -279,5 +279,21 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   assert.equal(bundle.resourceType, "Bundle");
   assert.equal(bundle.entry.length, 1 + total);
 
+  // type=individual is a synonym for the collection bundle (it carries the per-subject individuals).
+  const indiv = (await (await get(`/api/runs/${runId}/measure-report?type=individual`))!.json()) as { resourceType: string };
+  assert.equal(indiv.resourceType, "Bundle");
+
+  assert.equal((await get(`/api/runs/${runId}/measure-report?type=bogus`))!.status, 400);
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/measure-report`))!.status, 404);
+});
+
+test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS) run", async () => {
+  const { res, drain } = await postAsync("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
+  await drain(); // let the async ctx.waitUntil task persist outcomes across all measures
+  const created = (await res!.json()) as { runId?: string; id?: string };
+  const runId = created.runId ?? created.id;
+  const r = (await get(`/api/runs/${runId}/measure-report`))!;
+  assert.equal(r.status, 422);
+  const body = (await r.json()) as { error: string };
+  assert.equal(body.error, "unsupported_run_scope");
 });
