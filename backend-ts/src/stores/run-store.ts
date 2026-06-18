@@ -47,6 +47,9 @@ export interface RunRecord {
   requestedScope: Record<string, unknown>;
   startedAt: string;
   completedAt: string | null;
+  /** Measurement period the run evaluated against (ISO-8601). */
+  measurementPeriodStart: string;
+  measurementPeriodEnd: string;
 }
 
 export interface RunLogRow {

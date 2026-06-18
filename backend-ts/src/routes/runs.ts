@@ -7,6 +7,9 @@
  *
  *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
  *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
+ *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport → 200 | 404 (unknown run) | 422 (multi-measure)
+ *                                   ?type=summary (default) → summary report; individual|bundle → the
+ *                                   collection Bundle (summary + per-subject individuals; the two are synonyms)
  *   GET  /api/runs/:id/logs         run log timeline                 → 200 RunLogEntry[]
  *   GET  /api/runs/:id/outcomes     persisted outcomes for a run     → 200 OutcomeRecord[]
  *   POST /api/runs                  create a QUEUED run              → 201 RunRecord
@@ -38,6 +41,7 @@ import {
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
+import { buildSummaryMeasureReport, buildMeasureReportBundle } from "../fhir/measure-report.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -280,6 +284,28 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
     return json(toRunOutcomeRows(await (await outcomes(env)).listOutcomes(outcomesId)));
+  }
+
+  // FHIR MeasureReport for a completed single-measure run (#89 / E3.1).
+  const mrId = pathname.match(/^\/api\/runs\/([^/]+)\/measure-report$/)?.[1];
+  if (mrId && req.method === "GET") {
+    const run = await (await store(env)).getRun(mrId);
+    if (!run) return json({ error: "not_found", id: mrId }, 404);
+    const rows = await (await outcomes(env)).listOutcomes(mrId);
+    const measureIds = [...new Set(rows.map((o) => o.measureId))];
+    if (measureIds.length !== 1) {
+      return json(
+        { error: "unsupported_run_scope", message: "MeasureReport requires a completed single-measure run", measures: measureIds.length },
+        422,
+      );
+    }
+    const measureId = measureIds[0]!;
+    const type = url.searchParams.get("type") ?? "summary";
+    const fhir = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/fhir+json" } });
+    if (type === "summary") return fhir(buildSummaryMeasureReport(run, measureId, rows));
+    if (type === "individual" || type === "bundle") return fhir(buildMeasureReportBundle(run, measureId, rows));
+    return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);
   }
 
   // Run detail/summary — the RunSummary contract (superset of RunListItem).

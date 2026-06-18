@@ -17,6 +17,8 @@ interface RunRow {
   scope_type: string;
   scope_id: string | null;
   requested_scope_json: string | null;
+  measurement_period_start: string;
+  measurement_period_end: string;
   started_at: string;
   completed_at: string | null;
 }
@@ -44,10 +46,12 @@ const toRecord = (r: RunRow): RunRecord => {
     requestedScope,
     startedAt: r.started_at,
     completedAt: r.completed_at,
+    measurementPeriodStart: r.measurement_period_start,
+    measurementPeriodEnd: r.measurement_period_end,
   };
 };
 
-const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, started_at, completed_at";
+const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, measurement_period_start, measurement_period_end, started_at, completed_at";
 
 export class SqliteRunStore implements RunStore {
   constructor(private readonly db: CloudDatabase) {}
