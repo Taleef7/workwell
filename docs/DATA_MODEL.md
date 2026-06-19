@@ -323,7 +323,7 @@ is computed read-time by the simulated forecaster over its own deterministic per
 immunization history; it is never persisted in `backend-ts` today.
 
 - **Refusal / contraindication** for the `adult_immunization` measure ride in `outcomes.evidence_json`
-  as CQL expression defines (`Refused Td/Tdap`, `Has Td/Tdap Contraindication`) — no new columns.
+  as CQL expression defines (`Refused`, `Has Contraindication`) — no new columns.
 - **Production drop-in (documented, not built):** an `immunization_forecasts` cache table (one row
   per subject + series: next-dose-due date, forecasting engine, computed-at timestamp) fed by a real
   ICE adapter behind `resolveForecaster`. This is the analogous pattern to §3.17 — when a real ICE
