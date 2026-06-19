@@ -1,15 +1,19 @@
 /**
  * Audit-backed CampaignStore (#75 E5) — the demo persistence adapter. A campaign is stored as a single
- * OUTREACH_CAMPAIGN_COMPLETED audit event whose payload carries the campaign + its recipients. Reads
- * scan the ENTIRE audit_events ledger (all event types, up to listAuditEvents' default cap) and filter
- * in JS on every list/get call — O(total-ledger-size), not O(campaigns). No DDL on floor or ceiling.
- * Demo-scale; the production PgCampaignStore (indexed campaign queries over outreach_campaigns +
- * outreach_delivery_log) is the drop-in.
+ * OUTREACH_CAMPAIGN_COMPLETED audit event whose payload carries the campaign + its recipients. Reads use
+ * a NEWEST-first, event-type-filtered, bounded query (recentAuditEventsByType) so a list/get only ever
+ * touches campaign events — O(campaigns up to the cap), not O(total-ledger-size), and with no oldest-first
+ * truncation cliff (the old listAuditEvents path is oldest-first capped at 100k across ALL event types, so
+ * once the shared ledger passed 100k events the newest campaigns silently fell out of the window). No DDL on
+ * floor or ceiling. Demo-scale; the production PgCampaignStore (indexed campaign queries over
+ * outreach_campaigns + outreach_delivery_log) is the drop-in.
  */
 import type { CaseEventStore } from "./case-event-store.ts";
 import type { CampaignRecord, CampaignRecipientRecord, CampaignStore } from "./campaign-store.ts";
 
 const CAMPAIGN_EVENT = "OUTREACH_CAMPAIGN_COMPLETED";
+/** Bounded scan cap — far more campaigns than the demo will ever record, but keeps the read bounded. */
+const CAMPAIGN_SCAN_CAP = 1000;
 
 export class AuditBackedCampaignStore implements CampaignStore {
   constructor(private readonly events: CaseEventStore) {}
@@ -23,20 +27,18 @@ export class AuditBackedCampaignStore implements CampaignStore {
   }
 
   /**
-   * All campaign payloads, newest-first (listAuditEvents is oldest-first → reverse).
-   * COST: the demo adapter scans the ENTIRE audit_events ledger (all event types, up to
-   * listAuditEvents' default cap) and filters in JS on every list/get call — i.e.
-   * O(total-ledger-size), not O(campaigns). The production PgCampaignStore replaces this with
-   * indexed campaign queries. The defensive `campaign.id` filter drops malformed/foreign payloads.
+   * All campaign payloads, newest-first. Reads only OUTREACH_CAMPAIGN_COMPLETED events via the
+   * NEWEST-first, type-filtered, bounded recentAuditEventsByType query — so it is bounded by the
+   * campaign-scan cap (not the whole ledger) and has no oldest-first truncation cliff. The query is
+   * already newest-first and type-filtered, so no JS event-type filter or reverse() is needed. The
+   * defensive `campaign.id` filter drops malformed/foreign payloads.
    */
   private async all(): Promise<Array<{ campaign: CampaignRecord; recipients: CampaignRecipientRecord[] }>> {
-    const rows = await this.events.listAuditEvents();
+    const rows = await this.events.recentAuditEventsByType(CAMPAIGN_EVENT, CAMPAIGN_SCAN_CAP);
     return rows
-      .filter((r) => r.eventType === CAMPAIGN_EVENT)
       .map((r) => r.payload as unknown as { campaign?: CampaignRecord; recipients?: CampaignRecipientRecord[] })
       .filter((p): p is { campaign: CampaignRecord; recipients: CampaignRecipientRecord[] } => !!p?.campaign?.id)
-      .map((p) => ({ campaign: p.campaign, recipients: p.recipients ?? [] }))
-      .reverse();
+      .map((p) => ({ campaign: p.campaign, recipients: p.recipients ?? [] }));
   }
 
   async listCampaigns(limit = 100): Promise<CampaignRecord[]> {
