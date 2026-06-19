@@ -21,6 +21,7 @@ import type {
 import { handleRuns } from "./routes/runs.ts";
 import { handleMeasures } from "./routes/measures.ts";
 import { handleCases } from "./routes/cases.ts";
+import { handleCampaigns } from "./routes/campaigns.ts";
 import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
@@ -170,6 +171,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
   const casesResponse = await handleCases(req, env, actor);
   if (casesResponse) return casesResponse;
+
+  // Campaigns — batch outreach over eligible OPEN cases (run/list/detail) (#75 E5).
+  const campaignsResponse = await handleCampaigns(req, env, actor);
+  if (campaignsResponse) return campaignsResponse;
 
   // Employees — directory profile + search over the synthetic directory + outcomes/cases (#107).
   const employeesResponse = await handleEmployees(req, env);
