@@ -12,6 +12,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { ENTERPRISE, employeeById, providerById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { day, isPopulationRun, round1 } from "./rollup-shared.ts";
 
 export type HierarchyLevel = "enterprise" | "location" | "provider" | "patient";
 
@@ -45,11 +46,6 @@ export interface HierarchyFilters {
   from?: string | null;
   to?: string | null;
 }
-
-const RERUN_SCOPES = new Set(["CASE", "EMPLOYEE"]);
-const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType.toUpperCase());
-const day = (s: string): string => s.slice(0, 10);
-const round1 = (compliant: number, total: number) => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
 
 interface MutableTotals {
   evaluated: number; compliant: number; dueSoon: number; overdue: number;
