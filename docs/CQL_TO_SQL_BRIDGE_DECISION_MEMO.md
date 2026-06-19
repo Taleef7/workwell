@@ -33,22 +33,32 @@ direction, and ends with the concrete questions Doug must answer before any code
 - A **FHIR-native, JVM-free CQL engine**: build-time CQL→ELM (`@cqframework/cql`, no JVM), executed
   by `cql-execution` + `cql-exec-fhir` over in-memory FHIR R4 bundles
   (`backend-ts/src/engine/cql/`).
-- A **ports/adapters seam from E1 (ADR-005):** `PatientDataProvider`, `EmployeeDirectory`,
-  `MeasureDefinitionProvider`, `EvaluationConfigProvider`. The engine already does **not** care where
-  patient data comes from — today it's synthetic adapters; a real adapter is a drop-in. **This is the
-  pre-built hook for any WebChart integration.**
+- A **ports/adapters seam from E1 (ADR-005).** ADR-005's port *names* (`PatientDataProvider`,
+  `EmployeeDirectory`, …) are Java-era; in the current TypeScript backend the concrete seam is the
+  **data-bundle builder + engine binding**: the run pipeline calls
+  `buildSyntheticBundle(employee, config, date)` (`backend-ts/src/engine/synthetic/fhir-bundle-builder.ts`,
+  invoked at `run-pipeline.ts:201`) to produce an in-memory FHIR R4 bundle, then hands it to
+  `engine.evaluate({ measureId, patientBundle, evaluationDate })` (the `EvaluateMeasureBinding`
+  contract, `backend-ts/src/engine/evaluate-measure.ts`). The engine does **not** care where the
+  bundle came from — today a synthetic builder; a **WebChart adapter that reads MariaDB and emits the
+  same FHIR bundle shape is a drop-in replacement for that one call.** This is the pre-built hook for
+  any WebChart integration.
 - Declarative measure bindings as YAML (ADR-006) + a value-set resolver seam (E3.2).
 
 **State of the art for CQL→SQL (researched, 2026-06):**
 - **SQL-on-FHIR v2 (`ViewDefinition`)** — an HL7 spec that projects FHIR resources into **flat
-  tabular SQL views** via FHIRPath. Mature: a 2025 *npj Digital Medicine* paper + **8 independent
-  implementations**. CQL/measure logic can be layered on top of these views. Deliberately constrained
-  (≈FHIRPath-level), which is *why* it's portable. It presupposes a FHIR representation of the data.
+  tabular SQL views** via FHIRPath. Mature: a 2025 *npj Digital Medicine* paper, and **multiple
+  independent implementations across different platforms** (e.g. Aidbox, Pathling, and others — see
+  the paper + the IG's implementer list). CQL/measure logic can be layered on top of these views.
+  Deliberately constrained (≈FHIRPath-level), which is *why* it's portable. It presupposes a FHIR
+  representation of the data.
 - **CQL→SQL transpilers exist but are research-grade.** The most concrete is the **VA `cql-transpiler`**
   (`department-of-veterans-affairs/cql-transpiler`): it lowers **ELM → DBT/Jinja macros → a SQL
-  dialect**. It currently supports **Azure Databricks SQL only, and only partially.** The common
-  transpiler targets in this space (HealtheDataLab/Cerner, Pathling) are **Spark/Hive/Databricks** —
-  analytics engines — **not transactional MariaDB.** No production-grade CQL→MariaDB transpiler exists.
+  dialect**. It currently supports **Azure Databricks SQL only, and only partially.** More broadly,
+  the analytics-engine ecosystem where CQL and SQL-adjacent FHIR tooling is most mature (Cerner
+  HealtheDataLab runs CQL on Spark clusters; Pathling is a Spark engine that *implements* SQL-on-FHIR
+  v2 ViewDefinitions) targets **Spark/Hive/Databricks** — the substrate that tooling was built for —
+  **not transactional MariaDB.** No production-grade CQL→MariaDB transpiler exists.
 
 Sources: SQL-on-FHIR v2 IG (https://build.fhir.org/ig/FHIR/sql-on-fhir-v2/), npj Digital Medicine 2025
 (https://www.nature.com/articles/s41746-025-01708-w), VA cql-transpiler
@@ -58,9 +68,9 @@ Sources: SQL-on-FHIR v2 IG (https://build.fhir.org/ig/FHIR/sql-on-fhir-v2/), npj
 ## 3. Option A — FHIR-native adapter (CQF engine as the report engine)
 
 Keep WorkWell's CQL/ELM engine as the execution engine. Integrate with WebChart by writing a **real
-`PatientDataProvider`/data adapter** that reads WebChart's MariaDB and shapes it into FHIR for the
-engine (the E1 seam is exactly this). Measures author once in CQL; WorkWell (not MariaDB) executes
-them; results flow back to WebChart.
+data adapter that replaces `buildSyntheticBundle`** (§2) — reading WebChart's MariaDB and emitting the
+same FHIR R4 bundle the engine already consumes via `engine.evaluate(...)`. Measures author once in
+CQL; WorkWell (not MariaDB) executes them; results flow back to WebChart.
 
 - **Pros:** Reuses everything already built (E1 ports, JVM-free engine, YAML bindings, value-set
   resolver). Full CQL semantic fidelity (the reference engine runs the real ELM). Lowest
@@ -108,9 +118,10 @@ Two executors coexist, selected per deployment/report:
 ## 6. Recommendation
 
 **Adopt Option C, FHIR-native-first.** Concretely:
-1. **Near-term integration = Option A:** implement a real WebChart `PatientDataProvider` adapter so
-   measures run on real data through the existing engine. This is the lowest-risk, highest-reuse step
-   and unblocks everything else. It is the path WorkWell's whole architecture (E1) was built for.
+1. **Near-term integration = Option A:** implement a real WebChart data adapter (the drop-in
+   replacement for `buildSyntheticBundle` feeding `engine.evaluate`, §2/§3) so measures run on real
+   data through the existing engine. This is the lowest-risk, highest-reuse step and unblocks
+   everything else. It is the path WorkWell's whole architecture (E1) was built for.
 2. **Treat "CQL→SQL" as a bounded, opt-in second executor — via SQL-on-FHIR v2, not a bespoke
    transpiler.** Only the specific high-volume reports that *must* execute inside MariaDB get a
    `ViewDefinition`-based SQL path, with the FHIR-native engine as the parity oracle. **Do not** commit
