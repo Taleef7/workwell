@@ -25,8 +25,9 @@
   inert-unless-configured.
 
 - **Decision:**
-  - **`ProposedOrder` domain type** (`backend-ts/src/order/proposed-order.ts`): `{measureId,
-    subjectId, orderCode, priority, rationale, suppressedBy?, generatedAt}`. `toServiceRequest()`
+  - **`ProposedOrder` domain type** (`backend-ts/src/order/proposed-order.ts`): `{subjectId,
+    measureId, order, reasonOutcome, priority, status, dedupeKey, authoredOn,
+    suppressedByStandingOrder?}` (`order` is `{code, system, display}`). `toServiceRequest()`
     emits a FHIR R4 `ServiceRequest` (`intent:"proposal"`, `status:"draft"`) hand-built as JSON (no
     FHIR runtime dependency — same pattern as `MeasureReport`/QRDA). `bundleOf()` wraps a set into a
     collection `Bundle`.
