@@ -37,7 +37,7 @@ define "Days Since Last Tdap":
 define "Up To Date":
   "Enrolled Adult" and not "Has Contraindication"
     and "Most Recent Tdap Date" is not null
-    and "Days Since Last Tdap" <= 3650
+    and "Days Since Last Tdap" <= 3590
 
 define "Due Soon":
   "Enrolled Adult" and not "Has Contraindication"
