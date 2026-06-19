@@ -5,10 +5,11 @@
  * Verifies:
  *  (a) toCaseDetail includes immunizationForecast in the output when the param is provided,
  *      OMITS the key when not provided, and case `status` is identical either way.
+ *  (b) deriveWhyFlagged — waiver_status reflects contraindication exclusions (#76 Codex P2).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toCaseDetail } from "./case-detail-read-model.ts";
+import { toCaseDetail, deriveWhyFlagged } from "./case-detail-read-model.ts";
 import { simulatedForecaster } from "../engine/immunization/immunization-forecast.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 
@@ -56,4 +57,31 @@ test("case status is identical with or without immunizationForecast (forecast is
 test("toCaseDetail spreads spread-omit pattern (undefined param → key absent, not null)", () => {
   const detail = toCaseDetail(CASE, null, [], null, undefined);
   assert.equal("immunizationForecast" in detail, false, "undefined param must not write the key at all");
+});
+
+// ---------------------------------------------------------------------------
+// Test B — deriveWhyFlagged: waiver_status reflects contraindication (#76 Codex P2)
+// ---------------------------------------------------------------------------
+test("deriveWhyFlagged — EXCLUDED immunization case with Has Contraindication=true → waiver_status 'active'", () => {
+  const evidence = {
+    expressionResults: [
+      { define: "Has Contraindication", result: true },
+      { define: "Outcome Status", result: "EXCLUDED" },
+    ],
+  };
+  const wf = deriveWhyFlagged(evidence, "adult_immunization", "2026-06-19", "EXCLUDED");
+  assert.equal(wf.waiver_status, "active", "contraindication true must produce waiver_status 'active'");
+  assert.equal(wf.outcome_status, "EXCLUDED");
+});
+
+test("deriveWhyFlagged — non-excluded immunization case with Has Contraindication=false → waiver_status 'none'", () => {
+  const evidence = {
+    expressionResults: [
+      { define: "Has Contraindication", result: false },
+      { define: "Outcome Status", result: "MISSING_DATA" },
+    ],
+  };
+  const wf = deriveWhyFlagged(evidence, "adult_immunization", "2026-06-19", "MISSING_DATA");
+  assert.equal(wf.waiver_status, "none", "contraindication false must produce waiver_status 'none'");
+  assert.equal(wf.outcome_status, "MISSING_DATA");
 });

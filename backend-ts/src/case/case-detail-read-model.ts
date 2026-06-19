@@ -83,7 +83,7 @@ function expressionResults(evidence: unknown): ExprResult[] {
 export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
-  const waiverDefine = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
+  const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
 
   // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
