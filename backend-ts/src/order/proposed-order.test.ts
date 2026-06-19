@@ -25,9 +25,11 @@ test("toServiceRequest emits a FHIR proposal ServiceRequest", () => {
   assert.equal(sr.status, "draft");
   assert.equal(sr.priority, "urgent");
   assert.deepEqual((sr.subject as Record<string, unknown>).reference, "Patient/emp-006");
-  const coding = ((sr.code as { coding?: Array<Record<string, unknown>> }).coding ?? [])[0];
+  const codeable = sr.code as { coding?: Array<Record<string, unknown>>; text?: string };
+  const coding = (codeable.coding ?? [])[0];
   assert.equal(coding?.code, "92557");
   assert.equal(coding?.system, "http://www.ama-assn.org/go/cpt");
+  assert.equal(codeable.text, "Comprehensive audiometry evaluation"); // CodeableConcept.text for strict validators
   assert.equal(sr.authoredOn, "2026-06-19");
   // reason carries the measure + outcome for traceability
   const reason = ((sr.reasonCode as Array<{ text?: string }>) ?? [])[0]?.text ?? "";

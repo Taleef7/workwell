@@ -63,7 +63,9 @@
     `Bundle` (proposed only). Read-time; **no schema change**.
   - **No schema change.** Proposals are derived read-time from `outcomes`; nothing is persisted. The
     production drop-in is an `OrderSubmitter` EH FHIR write + a `submitted_orders` audit table
-    (owner-gated, not built today).
+    (owner-gated, not built today). The emitted `ServiceRequest` carries no resource `id` today
+    (the collection `Bundle` is non-transactional, advisory read output); the `OrderSubmitter` will
+    assign a stable `id` (e.g. a UUID) per resource when it POSTs to EH so EH can dedupe on re-send.
 
 - **Consequences:**
   - Adding the real EH standing-order query and the real `OrderSubmitter` write are port adapter swaps

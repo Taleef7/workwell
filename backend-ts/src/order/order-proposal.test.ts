@@ -37,8 +37,12 @@ test("in-batch dedupe: same subject+order proposed once", () => {
     { subjectId: "e1", measureId: "cms122", status: "OVERDUE" },         // also 83036 → same dedupeKey
   ];
   const { proposed, suppressed } = proposeOrders(rows, noStanding);
+  // Both measures share CPT 83036 → ONE proposal (first-seen measure wins). The second is dropped,
+  // NOT moved to suppressed[] (suppressed[] is only for standing-order matches). This is the
+  // intended same-code collapse — see the comment in order-proposal.ts.
   assert.equal(proposed.filter((p) => p.subjectId === "e1").length, 1);
-  assert.equal(suppressed.length, 0); // dedupe-only path: nothing standing-order-suppressed
+  assert.equal(proposed[0]!.measureId, "diabetes_hba1c"); // first-seen wins
+  assert.equal(suppressed.length, 0);
 });
 
 test("standing-order suppression moves a proposal to suppressed[]", () => {

@@ -35,7 +35,7 @@ export function toServiceRequest(p: ProposedOrder): unknown {
     status: "draft",
     priority: p.priority,
     subject: { reference: `Patient/${p.subjectId}` },
-    code: { coding: [{ system: p.order.system, code: p.order.code, display: p.order.display }] },
+    code: { coding: [{ system: p.order.system, code: p.order.code, display: p.order.display }], text: p.order.display },
     reasonCode: [{ text: `${p.measureId} — ${p.reasonOutcome}` }],
     authoredOn: p.authoredOn,
   };
