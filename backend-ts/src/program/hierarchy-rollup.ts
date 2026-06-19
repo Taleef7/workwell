@@ -66,7 +66,6 @@ const accumulate = (acc: MutableTotals, t: MutableTotals): void => {
   acc.overdue += t.overdue; acc.missingData += t.missingData; acc.excluded += t.excluded; acc.openCases += t.openCases;
 };
 
-
 export async function buildHierarchyRollup(deps: HierarchyDeps, filters: HierarchyFilters): Promise<HierarchyNode> {
   const from = filters.from?.trim() || undefined;
   const to = filters.to?.trim() || undefined;
