@@ -31,8 +31,7 @@ map onto Total Worker Health. Two real adult alternatives were researched:
   meaningful; fits our 19+ workforce; contraindication/refusal handling is intrinsic; slots into the
   existing "HEDIS wellness" measure category.
 
-**Anchor: AIS-E**, implemented as an adult-immunization **composite** led by the three
-working-age-relevant indicators:
+**Anchor: AIS-E.** The three working-age-relevant indicators and their real criteria:
 
 | Indicator | Real AIS-E "up to date" criterion | Forecast (next due) |
 |-----------|-----------------------------------|---------------------|
@@ -40,8 +39,21 @@ working-age-relevant indicators:
 | Influenza | ≥1 dose Jul 1 (prior yr) → Jun 30 (measurement yr) | next flu season |
 | Hepatitis B | completed series, adults 19–59 | next dose in series |
 
-Zoster (50+) and pneumococcal (65+) are out of scope for the first cut (age bands barely present in
-the synthetic workforce); the composite is extensible to them later.
+**Split of measure vs. forecast (decided during planning — synthetic model is single-event):**
+the synthetic data path (`measure-bindings.ts` is auto-generated; `MeasureBinding`/`ExamConfig`/
+`buildSyntheticBundle` support exactly one enrollment + one waiver + one event per measure) cannot
+express a true multi-series *composite measure* without reworking shared infra used by all 10
+measures. So:
+
+- The **measure** `adult_immunization` is the **Td/Tdap single-series** indicator (a 10-year
+  immunization window) — fits the existing single-event model cleanly, plus contraindication +
+  refusal. This is the real AIS-E Td/Tdap indicator, not invented.
+- The **forecaster** (the new capability) still covers **all three series** (Td/Tdap + influenza +
+  Hep B) via its own deterministic per-subject immunization synthesis, independent of the run
+  pipeline — so the forecast endpoint/panel stay rich.
+
+The full multi-series **composite measure** and the zoster (50+) / pneumococcal (65+) indicators are
+documented follow-ups (would require the shared-infra rework above).
 
 Sources:
 - NCQA AIS-E: https://www.ncqa.org/report-cards/health-plans/state-of-health-care-quality-report/adult-immunization-status-ais-e/
@@ -96,10 +108,12 @@ export interface ImmunizationForecaster {
 
 Adapters (selection mirrors `resolveChannel` / SendGrid inert-unless-configured):
 
-- `simulatedForecaster` — **default**. Deterministic ACIP-style schedule math over the synthetic
-  immunization data (Td/Tdap `lastDose + 10y`, influenza `next season`, Hep B `next dose in
-  3-dose series`). Contraindication → `CONTRAINDICATED` (no next due); refusal → `REFUSED` (still
-  carries a next-due so the case manager knows what was declined).
+- `simulatedForecaster` — **default**. Deterministic ACIP-style schedule math over a **per-subject
+  synthetic immunization source it owns** (`syntheticImmunizationHistory(subjectId)` — deterministic
+  from the subjectId hash, like `birthDate`), covering all three series independent of the run
+  pipeline (Td/Tdap `lastDose + 10y`, influenza `next season`, Hep B `next dose in 3-dose series`).
+  Contraindication → `CONTRAINDICATED` (no next due); refusal → `REFUSED` (still carries a next-due
+  so the case manager knows what was declined).
 - `iceForecaster(config)` — **inert stub**. Returns a forecast whose entries carry a
   `"ICE not wired (Doug Q5)"` reason note; performs **no** HTTP. Selected **only** when both
   `WORKWELL_IMMZ_ICE_API_KEY` and `WORKWELL_IMMZ_ICE_BASE_URL` are set.
@@ -121,32 +135,36 @@ live in one place in the module so they are reviewable and testable.
 
 ### 4.3 W2 — AIS-E measure
 
-New runnable measure `adult_immunization`, sibling files in `backend-ts/measures/`:
+New runnable measure `adult_immunization` (**Td/Tdap single-series**, per the §2 split), sibling
+files in `backend-ts/measures/`:
 - `adult_immunization.yaml` — bindings (mirrors `flu_vaccine.yaml`): enrollment (adult 19+),
-  per-series event value sets (Td/Tdap, influenza, Hep B), contraindication + refusal value sets.
-- `adult_immunization.cql` — composite logic:
-  - Per-series "up to date" defines using the real windows in §2.
-  - `Contraindicated` (any series) → `EXCLUDED`.
-  - `Refused` (any series) → recorded, does **not** exclude.
-  - `Outcome Status`: `EXCLUDED` if contraindicated; else `COMPLIANT` if all three up to date; else
-    `OVERDUE` if any series overdue; else `DUE_SOON` if any series approaching; else `MISSING_DATA`
-    if no immunization records; default `MISSING_DATA`.
-  - Evidence defines expose per-series last-dose dates + the up-to-date booleans + a `refused_series`
-    marker for the `why_flagged` projection.
+  Td/Tdap `event` (`type: immunization`), Td/Tdap contraindication as the `waiver` slot,
+  `complianceWindowDays: 3650` (10 years). Refusal is handled by an additional define in the CQL
+  (see below), not the single-event binding.
+- `adult_immunization.cql`:
+  - "Td/Tdap Up To Date" using the real 10-year window (`Days Since Last Td/Tdap <= 3650`).
+  - `Contraindicated` (Td/Tdap) → `EXCLUDED` (uses the `waiver`-slot contraindication Condition).
+  - `Refused` (Td/Tdap) → recorded, does **not** exclude (a separate refusal Condition the CQL
+    detects).
+  - `Outcome Status`: `EXCLUDED` if contraindicated; else `COMPLIANT` if up to date; else `OVERDUE`
+    if last dose > 10y; else `DUE_SOON` if within the lead window of 10y; else `MISSING_DATA` if no
+    Td/Tdap record; default `MISSING_DATA`.
+  - Evidence defines expose last-dose date + up-to-date boolean + a `refused` marker for the
+    `why_flagged` projection.
 
 Seeding: add to the HEDIS wellness Active set in `ensureInstanceSeeds()` for `WORKWELL_INSTANCE`
 `twh`/`ecqm` (the same path that seeds the 4 wellness measures). Catalog total becomes 61.
 
-Synthetic data: extend `backend-ts/src/engine/synthetic/exam-config.ts` +
-`fhir-bundle-builder.ts` to emit, per employee scenario:
-- Td/Tdap and Hep B `Immunization` resources (influenza already emitted by the flu path; AIS-E reads
-  the same `Immunization` resource type independently).
-- Contraindication as a `Condition` (or `Observation`) coded to the contraindication value set.
-- Refusal as an `Observation`/`Immunization.status = not-done` coded to the refusal value set.
-Scenarios must cover all five outcome buckets **plus** a refused case and a contraindicated case.
+Synthetic data: the **measure** stays within the existing single-event path. Extend
+`backend-ts/src/engine/synthetic/exam-config.ts` only to emit the **refusal** Condition for a
+refused scenario (the Td/Tdap immunization event + contraindication waiver already fit
+`buildSyntheticBundle`'s immunization + waiver branches). The refusal Condition needs a small
+addition to `ExamConfig` + `buildSyntheticBundle` (`refused: boolean` + a refusal code on the
+binding). Scenarios cover all five buckets **plus** a refused case and a contraindicated case.
 
-The influenza indicator reads the same `Immunization` type as `flu_vaccine` but `adult_immunization`
-is a fully independent `measure_version` producing its own `outcomes`/`cases` — no collision.
+The forecaster's 3-series richness comes from its **own** `syntheticImmunizationHistory(subjectId)`
+(see §4.1), **not** from the measure's synthetic bundle — so the single-event measure model is
+untouched by the multi-series forecast.
 
 ### 4.4 W3 — Forecast surfacing on cases
 
@@ -202,6 +220,9 @@ and that Doug Q5's integration choice is deferred behind the single `iceForecast
 ## 9. Out of scope (YAGNI)
 
 - Real ICE / CDS-Hooks HTTP (deferred behind `iceForecaster` until Doug Q5).
+- The full multi-series **composite measure** (flu + Hep B as outcome-driving measure indicators) —
+  requires reworking the shared single-event synthetic infra; documented follow-up. The forecast
+  already covers all three series.
 - Zoster (50+) and pneumococcal (65+) indicators (extensible later).
 - A new `REFUSED` outcome bucket (refusal rides in evidence; keeps the case open).
 - Any `immunization_forecasts` persistence table (documented drop-in only).
