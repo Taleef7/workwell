@@ -14,6 +14,7 @@ import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -43,6 +44,7 @@ export interface CaseDetail {
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
   timeline: unknown[];
+  immunizationForecast?: ImmunizationForecast;
 }
 
 function outcomeSummaryFor(outcome: string): string {
@@ -122,6 +124,7 @@ export function toCaseDetail(
   outcome: OutcomeRecord | null,
   timeline: unknown[] = [],
   latestOutreachDeliveryStatus: string | null = null,
+  immunizationForecast?: ImmunizationForecast,
 ): CaseDetail {
   const emp = employeeById(c.employeeId);
   const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
@@ -156,5 +159,6 @@ export function toCaseDetail(
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
     latestOutreachDeliveryStatus,
     timeline,
+    ...(immunizationForecast ? { immunizationForecast } : {}),
   };
 }
