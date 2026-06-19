@@ -1,5 +1,80 @@
 # Architecture Decision Records
 
+## ADR-013: E7 order-proposal engine — `ProposedOrder`/`StandingOrderProvider` port (EH-ready, simulated by default)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+- **Epic:** #77 (E7 order generation)
+- **Context:** The TWH charter's "Action Evaluators → orders" layer calls for generating proposed
+  orders from non-compliant measure findings — audiogram overdue → propose audiogram; TB screening
+  overdue → propose TB screen. Three design questions had to be resolved up front.
+
+  **1. Advisory vs. auto-submit.** Orders in clinical systems (EHR, EH) are actionable: submitting
+  one can schedule an appointment, trigger a workflow, or notify a provider. Auto-submitting from a
+  compliance system without a human review step violates the spirit of the AI_GUARDRAILS rule and the
+  project's human-in-the-loop contract. Proposed orders must be advisory — generated for a human
+  reviewer who decides to submit or discard.
+
+  **2. Standing-order deduplication.** Duplicate orders are a patient-safety concern (and flagged in
+  the charter). The engine must detect when a qualifying standing order already exists for a subject
+  and suppress a new proposal for that subject rather than adding a redundant one.
+
+  **3. EH integration.** The real standing-order query and the real order-submission write are EH
+  FHIR API calls. Those require credentials and a live EH instance (Doug Q6), and are inert stubs
+  today. The `OutreachChannel`/`ImmunizationForecast` port pattern applies: simulated by default,
+  inert-unless-configured.
+
+- **Decision:**
+  - **`ProposedOrder` domain type** (`backend-ts/src/order/proposed-order.ts`): `{measureId,
+    subjectId, orderCode, priority, rationale, suppressedBy?, generatedAt}`. `toServiceRequest()`
+    emits a FHIR R4 `ServiceRequest` (`intent:"proposal"`, `status:"draft"`) hand-built as JSON (no
+    FHIR runtime dependency — same pattern as `MeasureReport`/QRDA). `bundleOf()` wraps a set into a
+    collection `Bundle`.
+  - **`order-catalog.ts` — action-evaluator map:** runnable measure → `OrderCode` (system + code +
+    display). Reuses the `terminology_mappings` seed standard codes where present (audiogram → CPT
+    92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in
+    `urn:workwell:vs:hazwoper-exams`). LOCAL codes (`urn:workwell:orders`) for measures without a
+    seed mapping (e.g., BMI screening). No new DB dependency.
+  - **Panel=Risk selection:** `proposeOrders(outcomes, provider)` in `order-proposal.ts` classifies
+    the Denominator − Numerator subset: OVERDUE/DUE_SOON/MISSING_DATA outcomes propose; COMPLIANT and
+    EXCLUDED do not. Risk maps to `priority`: OVERDUE → `urgent`; DUE_SOON or MISSING_DATA →
+    `routine`. The engine is pure and trigger-agnostic — read-time today, callable from the run
+    pipeline later without changes.
+  - **Dedupe contract:** in-batch per-subject deduplication (one proposal per subject per measure);
+    standing-order suppression (subjects with a qualifying standing order are excluded from
+    `proposed`, returned separately in `suppressed`). Prevents the "duplicate orders" safety concern
+    from the charter.
+  - **`StandingOrderProvider` port** (`backend-ts/src/order/standing-order-provider.ts`):
+    `simulatedStandingOrderProvider` (default — deterministic ~1/5 of subjects have a standing order,
+    no HTTP) + inert `ehStandingOrderProvider` stub (selected only when both
+    `WORKWELL_EH_FHIR_BASE_URL` + `WORKWELL_EH_FHIR_API_KEY` are set; performs no real HTTP; returns
+    empty). `resolveStandingOrderProvider(env)` selects between them. **Inert-unless-configured**,
+    mirroring ADR-011 (SendGrid/DataChaser) and ADR-012 (ICE).
+  - **Proposals are advisory — never auto-submitted.** A human reviews and submits. This is the
+    order-generation analog of "AI never decides compliance": the engine proposes, the operator acts.
+    The real EH write path (`OrderSubmitter`) is **named but deferred** (documented drop-in) — when
+    Doug Q6 is answered and EH credentials are available, it drops in without touching the proposal
+    engine.
+  - **`GET /api/orders/proposals?measureId=&subjectId=&from=&to=&format=domain|fhir`** — gated
+    CASE_MANAGER/ADMIN (`authorize.ts` `rx("/api/orders/**") → [CM, A]`). Selects the latest
+    population run per Active measure (reuses `rollup-shared.ts` `isPopulationRun` + `latestRunRows`).
+    `format=domain` → `{proposed, suppressed}` JSON; `format=fhir` → FHIR R4 ServiceRequest
+    `Bundle` (proposed only). Read-time; **no schema change**.
+  - **No schema change.** Proposals are derived read-time from `outcomes`; nothing is persisted. The
+    production drop-in is an `OrderSubmitter` EH FHIR write + a `submitted_orders` audit table
+    (owner-gated, not built today).
+
+- **Consequences:**
+  - Adding the real EH standing-order query and the real `OrderSubmitter` write are port adapter swaps
+    behind `resolveStandingOrderProvider` and a future `OrderSubmitter` port, env-gated; the demo
+    stays simulated by default with zero config (CLAUDE.md hard rule preserved).
+  - No schema migration today. No compliance-logic change — proposals never set or override
+    `Outcome Status`. CQL `Outcome Status` remains the sole source of truth.
+  - Proposals are advisory: human submits, system proposes. This invariant is documented in
+    `docs/ARCHITECTURE.md` §6 and enforced by the endpoint returning read-only data with no write
+    side-effects.
+  - Ships on `feat/issue-77-order-generation`; deploys on merge to `main`.
+
 ## ADR-012: E6 immunization & forecasting — `ImmunizationForecast` port (ICE-ready, simulated by default) + AIS-E Td/Tdap measure
 
 - **Date:** 2026-06-19
