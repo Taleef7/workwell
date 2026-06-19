@@ -16,10 +16,20 @@ const TIER: Record<MeasureStatus, string> = {
   Deprecated: "2025-06-01T00:00:00.000Z",
 };
 
-/** Idempotent: seeds the catalog only when the store is empty. `cqlOf` reconstructs CQL for runnable measures. */
+/**
+ * Seeds the measure store from MEASURE_CATALOG. On a fresh (empty) store every catalog entry
+ * is inserted. On an already-seeded store (e.g. the live stack) only catalog measures that are
+ * MISSING from the store are inserted — existing rows are never overwritten, preserving any
+ * create/lifecycle edits made since the initial seed (idempotent back-fill, #76).
+ * `cqlOf` reconstructs CQL text for runnable measures.
+ */
 export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string): Promise<void> {
-  if (!(await store.isEmpty())) return;
+  const empty = await store.isEmpty();
   for (const m of MEASURE_CATALOG) {
+    // Fast path on a fresh store: seed everything. On an already-seeded store, back-fill ONLY
+    // catalog measures missing from the store (e.g. adult_immunization, added after the initial
+    // seed — #76). Never overwrite an existing row: create/lifecycle edits are the source of truth.
+    if (!empty && (await store.getLatest(m.id)) !== null) continue;
     await store.seedMeasure({
       measureId: m.id,
       name: m.name,
