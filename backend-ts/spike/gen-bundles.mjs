@@ -29,6 +29,7 @@ const MEASURES = [
   { id: "cholesterol_ldl", lib: "CholesterolLDLScreeningCQL-1.0.0", enroll: ["urn:workwell:vs:cholesterol-program", "cholesterol-enrolled"], waiver: ["urn:workwell:vs:cholesterol-exemption", "cholesterol-exempt"], event: ["urn:workwell:vs:ldl-labs", "ldl-lab", "procedure"] },
   { id: "cms125", lib: "BreastCancerScreeningCQL-1.0.0", enroll: ["urn:workwell:vs:cms125-eligible", "cms125-eligible"], waiver: ["urn:workwell:vs:cms125-excluded", "cms125-excluded"], event: ["urn:workwell:vs:cms125-mammogram", "mammogram", "procedure"] },
   { id: "cms122", lib: "DiabetesHbA1cPoorControlCQL-1.0.0", enroll: ["urn:workwell:vs:cms122-diabetes", "cms122-diabetes"], waiver: ["urn:workwell:vs:cms122-excluded", "cms122-excluded"], event: ["urn:workwell:vs:cms122-hba1c", "hba1c-obs", "observation"] },
+  // oldDays override: Td/Tdap window is 10 years (3650 days); 3800 puts "present_old" clearly past it (default 900 would be COMPLIANT here).
   { id: "adult_immunization", lib: "AdultImmunizationTdap-1.0.0", enroll: ["urn:workwell:vs:adult-immz-enrollment", "adult-immz-enrolled"], waiver: ["urn:workwell:vs:tdap-contraindication", "tdap-contraindication"], event: ["urn:workwell:vs:tdap-vaccines", "tdap-vaccine", "immunization"], oldDays: 3800 },
 ];
 
