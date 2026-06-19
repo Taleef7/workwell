@@ -10,11 +10,11 @@
  * ordering as the other actions (recordCaseEvent writes the case_action + audit_event
  * atomically before the case row is patched) — upholding the hard audit invariant.
  */
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
-import { simulatedEmailService, type EmailService } from "./email-service.ts";
+import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -106,8 +106,12 @@ export interface OutreachDeps {
   cases: CaseStore;
   events: CaseEventStore;
   outcomes: OutcomeStore;
-  email?: EmailService;
+  channels?: (type: ChannelType) => OutreachChannel; // default: resolveChannel(type, {}) = all simulated
 }
+
+/** Channel picker: caller-provided factory, else all-simulated via resolveChannel (#75 E5). */
+const channelFor = (deps: OutreachDeps, type: ChannelType): OutreachChannel =>
+  (deps.channels ?? ((t: ChannelType) => resolveChannel(t, {} as ChannelEnv)))(type);
 
 const DELIVERY_STATUSES = ["QUEUED", "SENT", "FAILED", "SIMULATED"];
 
@@ -193,27 +197,58 @@ export async function previewOutreach(
   };
 }
 
-/** Send (simulated) outreach: record the action+audit, then set the case OPEN with a follow-up next action. */
-export async function sendOutreach(
+/** Options for a single channel-aware dispatch (#75 E5). */
+export interface DispatchOptions {
+  channel?: ChannelType; // default "EMAIL"
+  templateId?: string | null;
+  campaignId?: string | null;
+  actor: string;
+}
+
+/** Result of one dispatch — the shared shape single-send and campaigns both build from (#75 E5). */
+export interface DispatchResult {
+  caseId: string;
+  employeeId: string;
+  channel: ChannelType;
+  toAddress: string;
+  status: string;
+  messageId: string;
+  templateName: string;
+}
+
+/**
+ * Shared channel-aware dispatch core (#75 E5): render → send via the resolved channel →
+ * record action+audit (event-before-patch) → set the case OPEN with a follow-up next action.
+ * Powers both the single-case send and (later) campaign fan-out. EMAIL is the default channel;
+ * its behavior is unchanged from the pre-refactor send.
+ */
+export async function dispatchOutreach(
   deps: OutreachDeps,
-  caseId: string,
-  actor: string,
-  templateId?: string | null,
-): Promise<CaseDetail | null> {
-  const existing = await deps.cases.getCase(caseId);
-  if (!existing) return null;
-  const email = deps.email ?? simulatedEmailService;
+  existing: CaseRecord,
+  opts: DispatchOptions,
+): Promise<DispatchResult> {
+  const { actor } = opts;
+  const channelType: ChannelType = opts.channel ?? "EMAIL";
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
-  const t = resolveTemplate(templateId, existing.currentOutcomeStatus, measureName);
+  const t = resolveTemplate(opts.templateId, existing.currentOutcomeStatus, measureName);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
-  const toAddress = `${existing.employeeId}@workwell-demo.dev`; // deterministic, non-routable
-  const delivery = email.send(toAddress, subject, body);
+  const toAddress =
+    channelType === "EMAIL" ? `${existing.employeeId}@workwell-demo.dev`
+    : channelType === "SMS" ? `sms:${existing.employeeId}`
+    : `tel:${existing.employeeId}`; // PHONE
+  const channel = channelFor(deps, channelType);
+  const delivery = channel.send({
+    channel: channelType,
+    to: toAddress,
+    subject: channelType === "EMAIL" ? subject : undefined,
+    body,
+  });
 
   const nextAction = "Wait for employee follow-up, then rerun to verify closure.";
-  const actionPayload = {
+  const actionPayload: Record<string, unknown> = {
     autoTriggered: false,
-    channel: "SIMULATED_EMAIL",
+    channel: channelType,
     template: t.name,
     templateName: t.name,
     templateId: t.id,
@@ -223,18 +258,19 @@ export async function sendOutreach(
     emailMessageId: delivery.messageId,
     deliveryProvider: delivery.provider,
     emailDeliveryStatus: delivery.status,
-    toAddress: delivery.toAddress,
+    toAddress: delivery.to,
     sentAt: delivery.sentAt,
+    ...(opts.campaignId ? { campaignId: opts.campaignId } : {}),
   };
   await deps.events.recordCaseEvent({
-    action: { caseId, actionType: "OUTREACH_SENT", actor, payload: actionPayload },
+    action: { caseId: existing.id, actionType: "OUTREACH_SENT", actor, payload: actionPayload },
     audit: {
       eventType: "CASE_OUTREACH_SENT",
       entityType: "case",
-      entityId: caseId,
+      entityId: existing.id,
       actor,
       refRunId: existing.lastRunId,
-      refCaseId: caseId,
+      refCaseId: existing.id,
       refMeasureVersionId: existing.measureId,
       payload: {
         caseStatus: "OPEN",
@@ -244,7 +280,29 @@ export async function sendOutreach(
       },
     },
   });
-  await deps.cases.patchCase(caseId, { status: "OPEN", nextAction });
+  await deps.cases.patchCase(existing.id, { status: "OPEN", nextAction });
+  return {
+    caseId: existing.id,
+    employeeId: existing.employeeId,
+    channel: channelType,
+    toAddress: delivery.to,
+    status: delivery.status,
+    messageId: delivery.messageId,
+    templateName: t.name,
+  };
+}
+
+/** Send (simulated) outreach: record the action+audit, then set the case OPEN with a follow-up next action. */
+export async function sendOutreach(
+  deps: OutreachDeps,
+  caseId: string,
+  actor: string,
+  templateId?: string | null,
+  channel?: ChannelType,
+): Promise<CaseDetail | null> {
+  const existing = await deps.cases.getCase(caseId);
+  if (!existing) return null;
+  await dispatchOutreach(deps, existing, { channel, templateId, actor });
   return buildDetail(deps, caseId);
 }
 

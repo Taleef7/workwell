@@ -139,6 +139,17 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return (results ?? []).map(toAuditEventRow);
   }
 
+  async recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+           FROM audit_events WHERE event_type = ? ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+      )
+      .bind(eventType, limit)
+      .all<AuditRow>();
+    return (results ?? []).map(toAuditEventRow);
+  }
+
   async auditEventsByRun(runId: string): Promise<AuditEventRow[]> {
     const { results } = await this.db
       .prepare(

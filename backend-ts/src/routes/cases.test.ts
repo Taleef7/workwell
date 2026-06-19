@@ -299,6 +299,30 @@ test("delivery update before a send → 400; send then delivery flips latestOutr
   assert.match(dd.nextAction, /rerun to verify/i);
 });
 
+test("POST outreach?channel=SMS records the OUTREACH_SENT action with channel=SMS (#75 E5)", async () => {
+  const sent = await post(`/api/cases/${omarCaseId}/actions/outreach?channel=SMS`);
+  assert.equal(sent?.status, 200);
+  const sd = (await sent!.json()) as {
+    timeline: Array<{ eventType: string; payload: Record<string, unknown> }>;
+  };
+  // the case may have prior sends in earlier tests → inspect the most recent OUTREACH_SENT action
+  const outreachSent = sd.timeline.filter((t) => t.eventType === "OUTREACH_SENT").at(-1);
+  assert.ok(outreachSent, "timeline carries an OUTREACH_SENT action");
+  assert.equal(outreachSent!.payload.channel, "SMS");
+  assert.equal(outreachSent!.payload.deliveryProvider, "simulated");
+});
+
+test("POST outreach with an invalid channel falls back to EMAIL (#75 E5)", async () => {
+  const sent = await post(`/api/cases/${omarCaseId}/actions/outreach?channel=CARRIER_PIGEON`);
+  assert.equal(sent?.status, 200);
+  const sd = (await sent!.json()) as {
+    timeline: Array<{ eventType: string; payload: Record<string, unknown> }>;
+  };
+  const outreachSent = sd.timeline.filter((t) => t.eventType === "OUTREACH_SENT").at(-1);
+  assert.ok(outreachSent, "timeline carries an OUTREACH_SENT action");
+  assert.equal(outreachSent!.payload.channel, "EMAIL");
+});
+
 test("delivery update with an invalid status → 400", async () => {
   assert.equal((await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=NONSENSE`))?.status, 400);
 });

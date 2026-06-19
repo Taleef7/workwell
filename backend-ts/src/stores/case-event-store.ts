@@ -80,6 +80,10 @@ export interface CaseEventStore {
   listAuditEvents(limit?: number, offset?: number): Promise<AuditEventRow[]>;
   /** Audit events for one run (ref_run_id), oldest-first — the run auditor packet ledger. */
   auditEventsByRun(runId: string): Promise<AuditEventRow[]>;
+  /** The most recent audit_events of a given event_type, NEWEST-first, bounded by limit.
+   *  Lets event-type-scoped read models (e.g. campaigns) avoid scanning the whole ledger and
+   *  avoid the oldest-first truncation cliff of listAuditEvents. */
+  recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]>;
   /** Audit events for one measure version (ref_measure_version_id), oldest-first — the measure-version packet ledger. */
   auditEventsByMeasureVersion(measureVersionId: string): Promise<AuditEventRow[]>;
   /** Record a generated auditor packet in audit_packet_exports (#108). */

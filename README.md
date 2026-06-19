@@ -123,6 +123,7 @@ npm run build
 - `/runs` run history and detail
 - `/cases` case worklist and filters
 - `/cases/[id]` evidence, actions, timeline
+- `/campaigns` bulk outreach campaign launcher and history
 - `/measures` catalog
 - `/studio/[id]` measure authoring
 - `/admin` integration and scheduler controls
@@ -141,6 +142,7 @@ npm run build
 - `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle`
 - `GET /api/runs/{runId}/qrda?format=xml`
 - `GET /api/hierarchy/rollup?measureId=&from=&to=`
+- `POST /api/campaigns` (+ `?dryRun`) · `GET /api/campaigns` · `GET /api/campaigns/:id` (CASE_MANAGER/ADMIN)
 
 For full API surface and behavioral notes, see docs linked below.
 
