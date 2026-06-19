@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-06-19 — E5 (#75): outreach at scale (multi-channel + bulk campaigns)
+
+E5 shipped. Outreach went multi-channel and bulk, all simulated by default and with **no schema
+change**. The **`OutreachChannel` port** (`backend-ts/src/case/outreach-channel.ts`) introduces
+`ChannelType` EMAIL/SMS/PHONE — each with a simulated adapter (EMAIL delegates to the existing
+simulated email service; SMS/PHONE body-only) — plus an inert **DataChaser stub** (`dataChaserChannel`,
+returns QUEUED with a self-describing note, **no real HTTP**). `resolveChannel(type, env)` returns
+simulated by default and the DataChaser stub **only** when both
+`WORKWELL_OUTREACH_DATACHASER_API_KEY` + `WORKWELL_OUTREACH_DATACHASER_BASE_URL` are set
+(inert-unless-configured, mirroring SendGrid). Single-case send was refactored: `dispatchOutreach`
+(`case-outreach.ts`) is now the shared send core, and `POST /api/cases/:id/actions/outreach?channel=`
+honors a channel (default EMAIL; PHONE → `tel:`, SMS → `sms:`). The **campaign engine**
+(`outreach-campaign.ts`, `runCampaign`) resolves eligible OPEN cases (measure/site/outcome filters),
+previews recipients on `dryRun` with no sends, and on a real run dispatches per recipient with a
+per-recipient try/catch (→ FAILED, so a mid-loop failure never abandons the campaign and
+PARTIAL_FAILURE is reachable), tallying sent/failed/simulated. Campaigns persist behind a
+**`CampaignStore` port** (`stores/campaign-store.ts`) whose audit-backed demo adapter
+(`audit-campaign-store.ts`) writes one `OUTREACH_CAMPAIGN_COMPLETED` audit event per campaign and reads
+by scanning + filtering the ledger — **no new DDL** on floor or ceiling; the production drop-in is a
+documented `PgCampaignStore` over `outreach_campaigns` + `outreach_delivery_log` (ADR-011). Routes:
+`POST /api/campaigns` (+ `?dryRun`), `GET /api/campaigns`, `GET /api/campaigns/:id`, **gated to
+CASE_MANAGER/ADMIN** (`rx("/api/campaigns/**") → [CM, A]`) — this closed an authz gap found in review
+(campaigns must match the per-case outreach gate, not be more permissive). Frontend: a `/campaigns`
+launcher (filters → Dry-run preview → Send → result summary + recipients) + history list → detail, a
+"Campaigns" nav link, and a channel selector on the case-detail outreach action (semantic tables; NITRO
+deferred). Simulated by default; no schema. Closes #75 (E5). Deploys on merge to `main` (not yet live).
+
 ## 2026-06-18 — E4 (#74): multi-level dashboards (enterprise→location→provider→patient)
 
 E4 multi-level dashboards shipped. The workforce hierarchy — **enterprise → location → provider →
