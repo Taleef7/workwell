@@ -293,6 +293,29 @@ One row per outreach email send attempt, written by `CaseFlowService.sendOutreac
 Created by migration `V021__add_outreach_delivery_log.sql`. Surfaced read-only via `GET /api/admin/outreach/delivery-log` (`OutreachDeliveryLogService`, joined to measure name through cases→measure_versions→measures).
 Truncated by the non-prod `DemoResetService`.
 
+> **Note (#75 / E5 — channel-aware sends):** the per-case outreach action now carries a channel
+> (EMAIL/SMS/PHONE, default EMAIL) via the `OutreachChannel` port. On the demo stack sends remain
+> simulated, so this table is still **not persisted in `backend-ts`** — the `outreach_delivery_log`
+> rows above are the production drop-in target (see §3.17), not written today.
+
+### 3.17 Outreach campaigns — `CampaignStore` port (audit-backed today; no campaigns table)
+E5 (#75) adds bulk outreach **campaigns** behind a `CampaignStore` port
+(`backend-ts/src/stores/campaign-store.ts`). **There is no `outreach_campaigns` table in `backend-ts`
+today** (no new DDL on the SQLite floor or the Pg ceiling). The audit-backed demo adapter
+(`audit-campaign-store.ts`) persists each completed campaign as a single audit event:
+```text
+event_type = 'OUTREACH_CAMPAIGN_COMPLETED'
+payload_json = { campaign: {...filters, channel, counts: { sent, failed, simulated }}, recipients: [...] }
+```
+Reads scan `listAuditEvents` and filter by `event_type` (O(total-ledger-size) — acceptable at demo scale).
+Sends are simulated by default, so a campaign currently records simulated counts.
+
+**Production drop-in (documented, not built):** a `PgCampaignStore` over a dedicated
+`outreach_campaigns` table (one row per campaign: filters, channel, counts, status, owner, timestamps)
+joined to the `outreach_delivery_log` (§3.16) for per-recipient delivery rows. This is the same
+owner-gated schema work as §3.16 — when real sends are wired (SendGrid/DataChaser), both tables move
+from documented to created. Until then the port keeps the data model unchanged.
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 

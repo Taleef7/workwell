@@ -83,6 +83,12 @@ const RULES: Rule[] = [
   { method: "POST", pattern: rx("/api/measures/**"), access: [AUTHOR, A] },
   { method: "POST", pattern: rx("/api/runs/**"), access: [CM, A] },
   { method: "POST", pattern: rx("/api/cases/**"), access: [CM, A] },
+  // Batch outreach campaigns (#75 E5) multiply per-case outreach over up to 100k cases —
+  // they carry the same operational case/PII data, so ALL methods on /api/campaigns and
+  // /api/campaigns/:id are gated to CASE_MANAGER/ADMIN (matching per-case outreach), not
+  // left to the generic AUTHENTICATED /api/** fallback below. Any-method (no `method`),
+  // `/api/campaigns/**` matches both the bare collection and sub-paths (AntPathMatcher).
+  { pattern: rx("/api/campaigns/**"), access: [CM, A] },
 
   { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
