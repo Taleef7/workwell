@@ -119,6 +119,12 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   };
 }
 
+/**
+ * Build a `CaseDetail` response object from a case row, its latest outcome, and optional
+ * contextual extras. The optional `immunizationForecast` advisory is attached ONLY for
+ * `adult_immunization` cases (guard lives in the route); it is omitted (undefined) for all
+ * other measures so the response key is absent on non-immunization cases.
+ */
 export function toCaseDetail(
   c: CaseRecord,
   outcome: OutcomeRecord | null,
