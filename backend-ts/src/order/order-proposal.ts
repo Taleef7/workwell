@@ -41,7 +41,13 @@ export function proposeOrders(
       subjectId: o.subjectId, measureId: o.measureId, order, reasonOutcome: o.status,
       priority, status: "PROPOSED", dedupeKey, authoredOn,
     };
-    if (seen.has(dedupeKey)) continue; // in-batch duplicate
+    // In-batch duplicate: same subject + same order code (across ANY measures). By design two
+    // measures that map to the SAME order code (e.g. diabetes_hba1c + cms122 → CPT 83036) collapse to
+    // ONE proposal for a subject at-risk on both — one order is the correct clinical action, and a
+    // duplicate order is exactly what the charter forbids. The first-seen measure wins as the
+    // proposal's reasonOutcome/measureId; the second is dropped (not surfaced). If cross-measure
+    // traceability is later needed, accumulate the contributing measure ids here.
+    if (seen.has(dedupeKey)) continue;
     const covered = standingOrders
       .activeOrdersFor(o.subjectId)
       .some((s) => s.order.code === order.code && s.order.system === order.system);

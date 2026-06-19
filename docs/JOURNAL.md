@@ -38,7 +38,7 @@ when Doug Q6 / EH credentials are available). Same human-in-the-loop contract as
 **No schema change.** Proposals derived read-time from `outcomes`; nothing persisted. ADR-013 added
 to `docs/DECISIONS.md`.
 
-Backend suite: 516 pass / 0 fail. Frontend lint + build unaffected (no frontend code). Deploys on
+Backend suite: 517 pass / 0 fail / 1 skip. Frontend lint + build unaffected (no frontend code). Deploys on
 merge to `main`.
 
 ## 2026-06-19 — E6 (#76): immunization & forecasting
