@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-19 — E9 (#78): CQL→SQL bridge decision memo (spike, no code)
+
+E9 is a **spike / decision memo only** (charter Q2 — "CQL → SQL"; the biggest architectural fork).
+Wrote `docs/CQL_TO_SQL_BRIDGE_DECISION_MEMO.md` framing the three options grounded in the current
+reality on both sides: **(A) FHIR-native adapter** (reuse the E1 `PatientDataProvider` seam + the
+JVM-free CQF engine as the report engine), **(B) CQL→SQL transpile into MariaDB** (research-grade —
+the only concrete transpiler, the VA `cql-transpiler`, is ELM→DBT→**Databricks-only/partial**, and
+the field targets Spark/Hive analytics engines, **not** transactional MariaDB), and **(C) hybrid /
+pluggable executors** (CQL/ELM + FHIR-native engine as the single canonical semantics; a bounded,
+opt-in SQL path for must-be-in-DB reports via **SQL-on-FHIR v2 `ViewDefinition`s**, cross-checked
+against the FHIR-native oracle).
+
+**Recommendation:** Option C, FHIR-native-first — near-term integration is the WebChart
+`PatientDataProvider` adapter (Option A, lowest risk, full CQL fidelity, maximal reuse); treat
+"CQL→SQL" as a bounded SQL-on-FHIR-v2 second executor only for the reports that must run in MariaDB;
+do **not** commit to a wholesale CQL→MariaDB transpiler (Option B) unless Doug's answers establish a
+hard all-in-MariaDB requirement (then it's "fund a research project," not "ship a feature"). The memo
+ends with five questions for Doug that gate the fork. No code; the chosen path becomes a normal
+epic + ADR once Q2 is answered. Also bumped the CLAUDE.md focus block (E7 done → E9 next).
+
 ## 2026-06-19 — E7 (#77): advisory order-generation engine
 
 E7 shipped. A new `backend-ts/src/order/` module generates advisory proposed orders from non-compliant
