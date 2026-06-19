@@ -9,6 +9,7 @@ import {
   ClipboardList,
   FileClock,
   LogOut,
+  Send,
   Settings,
   Shield,
 } from "lucide-react";
@@ -41,6 +42,7 @@ const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
   { href: "/cases", label: "Cases", icon: Shield },
   { href: "/worklist", label: "Worklist", icon: ClipboardList },
+  { href: "/campaigns", label: "Campaigns", icon: Send },
   { href: "/measures", label: "Measures", icon: BookOpen },
   { href: "/studio", label: "Studio", icon: FileClock },
   { href: "/runs", label: "Test Runs", icon: Activity },

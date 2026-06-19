@@ -143,6 +143,8 @@ export default function CaseDetailPage() {
   const [explaining, setExplaining] = useState(false);
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  // Outreach channel: EMAIL is the default so existing behavior is unchanged (#75 E5).
+  const [outreachChannel, setOutreachChannel] = useState<string>("EMAIL");
   const [outreachPreview, setOutreachPreview] = useState<OutreachPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [showRawEvidence, setShowRawEvidence] = useState(false);
@@ -173,6 +175,14 @@ export default function CaseDetailPage() {
       ...templates.map((template) => ({ value: template.id, label: template.name })),
     ],
     [templates],
+  );
+  const channelOptions = useMemo(
+    () => [
+      { value: "EMAIL", label: "Email" },
+      { value: "SMS", label: "SMS" },
+      { value: "PHONE", label: "Phone" },
+    ],
+    [],
   );
   const appointmentTypeOptions = useMemo(
     () =>
@@ -247,7 +257,15 @@ export default function CaseDetailPage() {
     setActing(action);
     setError(null);
     const endpoint = action === "outreach" ? "actions/outreach" : "rerun-to-verify";
-    const templateQuery = action === "outreach" && selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
+    let templateQuery = "";
+    if (action === "outreach") {
+      const params = new URLSearchParams();
+      if (selectedTemplateId) params.set("templateId", selectedTemplateId);
+      // EMAIL is the default; forward channel so SMS/PHONE selections reach the backend (#75 E5).
+      params.set("channel", outreachChannel);
+      const qs = params.toString();
+      templateQuery = qs ? `?${qs}` : "";
+    }
     try {
       const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/${endpoint}${templateQuery}`);
       setCaseDetail(updated);
@@ -491,6 +509,12 @@ export default function CaseDetailPage() {
                 onValueChange={setSelectedTemplateId}
                 options={templateOptions}
               />
+              <Select
+                label="Channel"
+                value={outreachChannel}
+                onValueChange={setOutreachChannel}
+                options={channelOptions}
+              />
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
@@ -655,6 +679,12 @@ export default function CaseDetailPage() {
                     value={selectedTemplateId}
                     onValueChange={setSelectedTemplateId}
                     options={templateOptions}
+                  />
+                  <Select
+                    label="Channel"
+                    value={outreachChannel}
+                    onValueChange={setOutreachChannel}
+                    options={channelOptions}
                   />
                 </div>
                 <div className="mt-4 grid gap-2">
