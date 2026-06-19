@@ -50,6 +50,8 @@ import type { AppointmentStore } from "./appointment-store.ts";
 import type { ValueSetStore } from "./value-set-store.ts";
 import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
+import type { CampaignStore } from "./campaign-store.ts";
+import { AuditBackedCampaignStore } from "./audit-campaign-store.ts";
 
 /** The full set of persistence ports, resolved to one backend (floor or ceiling). */
 export interface Stores {
@@ -63,6 +65,8 @@ export interface Stores {
   valueSets: ValueSetStore;
   outreachTemplates: OutreachTemplateStore;
   waivers: WaiverStore;
+  /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
+  campaigns: CampaignStore;
 }
 
 /** Minimal env the factory needs: the SQLite floor binding + an optional Postgres URL (the ceiling). */
@@ -111,17 +115,19 @@ async function buildPostgres(url: string): Promise<Stores> {
   // — parity with the SQLite floor, which also self-creates its schema on first use.
   const pool = (sharedPool ??= createPgPool(url));
   await pool.query(RUN_STORE_PG_DDL);
+  const events = new PgCaseEventStore(pool);
   return {
     runs: new PgRunStore(pool),
     outcomes: new PgOutcomeStore(pool),
     cases: new PgCaseStore(pool),
-    events: new PgCaseEventStore(pool),
+    events,
     measures: new PgMeasureStore(pool),
     evidence: new PgEvidenceStore(pool),
     appointments: new PgAppointmentStore(pool),
     valueSets: new PgValueSetStore(pool),
     outreachTemplates: new PgOutreachTemplateStore(pool),
     waivers: new PgWaiverStore(pool),
+    campaigns: new AuditBackedCampaignStore(events),
   };
 }
 
@@ -145,16 +151,18 @@ export async function getBackend(env: StoresEnv): Promise<ActiveBackend> {
 async function buildSqlite(db: CloudDatabase): Promise<Stores> {
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   await migrateFloorSchema(db);
+  const events = new SqliteCaseEventStore(db);
   return {
     runs: new SqliteRunStore(db),
     outcomes: new SqliteOutcomeStore(db),
     cases: new SqliteCaseStore(db),
-    events: new SqliteCaseEventStore(db),
+    events,
     measures: new SqliteMeasureStore(db),
     evidence: new SqliteEvidenceStore(db),
     appointments: new SqliteAppointmentStore(db),
     valueSets: new SqliteValueSetStore(db),
     outreachTemplates: new SqliteOutreachTemplateStore(db),
     waivers: new SqliteWaiverStore(db),
+    campaigns: new AuditBackedCampaignStore(events),
   };
 }
