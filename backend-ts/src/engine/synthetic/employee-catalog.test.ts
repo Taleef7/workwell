@@ -36,7 +36,7 @@ test("PROVIDERS: unique ids, 2 per location, every employee site is covered", ()
   assert.equal(new Set(ids).size, ids.length, "provider ids unique");
   const sites = [...new Set(EMPLOYEES.map((e) => e.site))];
   for (const site of sites) {
-    assert.ok(providersForLocation(site).length >= 1, `location ${site} has >=1 provider`);
+    assert.equal(providersForLocation(site).length, 2, `location ${site} has exactly 2 providers`);
   }
 });
 
@@ -48,5 +48,5 @@ test("ENTERPRISE is the single tenant root", () => {
 test("provider attribution is deterministic (stable across imports)", () => {
   const first = EMPLOYEES.map((e) => `${e.externalId}:${e.providerId}`).join(",");
   for (const e of EMPLOYEES) assert.equal(providerById(e.providerId)!.location, e.site);
-  assert.ok(first.includes("emp-006:"));
+  assert.ok(first.includes("emp-006:prov-002"), "deterministic attribution: emp-006 → prov-002");
 });
