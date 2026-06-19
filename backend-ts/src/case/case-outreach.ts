@@ -14,7 +14,6 @@ import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
-import { type EmailService } from "./email-service.ts";
 import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
 
 interface OutreachTemplateContent {
@@ -107,7 +106,6 @@ export interface OutreachDeps {
   cases: CaseStore;
   events: CaseEventStore;
   outcomes: OutcomeStore;
-  email?: EmailService; // kept for back-compat
   channels?: (type: ChannelType) => OutreachChannel; // default: resolveChannel(type, {}) = all simulated
 }
 
@@ -236,7 +234,9 @@ export async function dispatchOutreach(
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
   const toAddress =
-    channelType === "EMAIL" ? `${existing.employeeId}@workwell-demo.dev` : `sms:${existing.employeeId}`;
+    channelType === "EMAIL" ? `${existing.employeeId}@workwell-demo.dev`
+    : channelType === "SMS" ? `sms:${existing.employeeId}`
+    : `tel:${existing.employeeId}`; // PHONE
   const channel = channelFor(deps, channelType);
   const delivery = channel.send({
     channel: channelType,
