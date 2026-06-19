@@ -8,6 +8,7 @@
  * WebChart-ICE bridge) is deferred behind iceForecaster.
  */
 export type VaccineSeries = "TDAP" | "INFLUENZA" | "HEPB";
+/** `CONTRAINDICATED` and `REFUSED` are measure-level states surfaced via case enrichment / the CQL path — not produced by `simulatedForecaster`'s own synthetic history. */
 export type ForecastStatus = "UP_TO_DATE" | "DUE" | "OVERDUE" | "CONTRAINDICATED" | "REFUSED";
 
 export const VACCINE_SERIES: readonly VaccineSeries[] = ["TDAP", "INFLUENZA", "HEPB"];
@@ -16,7 +17,7 @@ export interface SeriesForecast {
   series: VaccineSeries;
   status: ForecastStatus;
   lastDoseDate: string | null; // ISO date (YYYY-MM-DD) or null
-  nextDueDate: string | null;  // null when CONTRAINDICATED
+  nextDueDate: string | null;  // null when CONTRAINDICATED, when the primary series is complete, or when the forecaster cannot compute (ICE stub)
   dosesReceived: number;
   dosesRequired: number;
   reason: string | null;
@@ -95,6 +96,17 @@ export function syntheticImmunizationHistory(subjectId: string): SyntheticDose[]
 
 function forecastSeries(dose: SyntheticDose, asOf: string): SeriesForecast {
   const meta = SERIES_META[dose.series];
+  if (dose.series === "HEPB" && dose.dosesReceived >= meta.dosesRequired) {
+    return {
+      series: dose.series,
+      status: "UP_TO_DATE",
+      lastDoseDate: dose.lastDoseDate,
+      nextDueDate: null, // primary series complete — lifetime immunity, no booster modeled
+      dosesReceived: dose.dosesReceived,
+      dosesRequired: meta.dosesRequired,
+      reason: "primary series complete",
+    };
+  }
   if (dose.series === "HEPB" && dose.dosesReceived < meta.dosesRequired) {
     const nextDueDate = addDays(dose.lastDoseDate, meta.intervalDays);
     const overdue = daysBetween(nextDueDate, asOf) > 0;
