@@ -1,18 +1,23 @@
 /**
  * Action evaluators (#77 E7): runnable measure → the order to propose for an at-risk member.
- * Codes are representative (demo, not billing-certified) and REUSE the terminology_mappings seed
- * where present (value-set-seed.ts): audiogram→CPT 92557, tb_surveillance→CPT 86580, flu_vaccine→CVX 141.
- * A measure absent here yields no proposal (extension-safe).
+ * Codes are representative (demo, not billing-certified). Where a `terminology_mappings` seed entry
+ * exists (value-set-seed.ts) we REUSE its standard code + system so a future EH standing-order query
+ * deduplicates against the same code: audiogram→CPT 92557, tb_surveillance→CPT 86580, flu_vaccine→CVX
+ * 141 (APPROVED), and hazwoper→`hazwoper-exam` in `urn:workwell:vs:hazwoper-exams` (REVIEWED). Measures
+ * with no seed mapping use a LOCAL code (`urn:workwell:orders`). A measure absent here yields no
+ * proposal (extension-safe).
  *
  * System URI constants verified against backend-ts/src/measure/value-set-seed.ts:
  *   CPT = "http://www.ama-assn.org/go/cpt"  (matches seed const CPT)
  *   CVX = "http://hl7.org/fhir/sid/cvx"      (matches seed const CVX)
+ *   HAZWOPER_VS = "urn:workwell:vs:hazwoper-exams" (matches the seed mapping's standardSystem)
  */
 import type { OrderCode } from "./proposed-order.ts";
 
 const CPT = "http://www.ama-assn.org/go/cpt";
 const CVX = "http://hl7.org/fhir/sid/cvx";
-const LOCAL = "urn:workwell:orders";
+const HAZWOPER_VS = "urn:workwell:vs:hazwoper-exams";
+const LOCAL = "urn:workwell:orders"; // measures with no terminology_mappings seed entry (e.g. BMI)
 
 export const ORDER_CATALOG: Record<string, OrderCode> = {
   audiogram: { code: "92557", system: CPT, display: "Comprehensive audiometry evaluation" },
@@ -25,7 +30,7 @@ export const ORDER_CATALOG: Record<string, OrderCode> = {
   cms125: { code: "77067", system: CPT, display: "Screening mammography, bilateral" },
   hypertension: { code: "99473", system: CPT, display: "Self-measured blood pressure" },
   obesity_bmi: { code: "bmi-screening", system: LOCAL, display: "BMI screening & counseling" },
-  hazwoper: { code: "hazwoper-surveillance-exam", system: LOCAL, display: "HAZWOPER medical surveillance exam" },
+  hazwoper: { code: "hazwoper-exam", system: HAZWOPER_VS, display: "HAZWOPER medical surveillance exam" },
 };
 
 export function orderForMeasure(measureId: string): OrderCode | null {
