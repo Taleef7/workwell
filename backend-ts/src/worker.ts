@@ -23,6 +23,7 @@ import { handleMeasures } from "./routes/measures.ts";
 import { handleCases } from "./routes/cases.ts";
 import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
+import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
@@ -177,6 +178,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Programs — compliance KPI overview + site list over runs/outcomes/cases (#107).
   const programsResponse = await handlePrograms(req, env);
   if (programsResponse) return programsResponse;
+
+  // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4).
+  const hierarchyResponse = await handleHierarchy(req, env);
+  if (hierarchyResponse) return hierarchyResponse;
 
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
   const exportsResponse = await handleExports(req, env);

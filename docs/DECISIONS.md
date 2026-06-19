@@ -1,5 +1,40 @@
 # Architecture Decision Records
 
+## ADR-010: E4 multi-level hierarchy — provider = attributed clinician, modeled in the synthetic directory (no DB schema)
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+- **Epic:** #74 (E4 multi-level dashboards); sub-issues #93 (E4.1 hierarchy model) + #94 (E4.2 rollups + UI)
+- **Context:** E4 needs a multi-level compliance view above the per-measure programs overview —
+  enterprise → location → provider → patient. The roadmap flagged E4.1 (#93, "org/provider hierarchy
+  data model") as a likely **schema change = stop-and-ask**. The key finding on inspection: `backend-ts`
+  has **no `employees` DB table** — the workforce is the synthetic directory
+  (`engine/synthetic/employee-catalog.ts`), and `outcomes`/`cases` persist only `subjectId`. So the
+  hierarchy can be added entirely as read-time structure over the existing synthetic data with **no
+  migration**, which satisfies the #93 stop-and-ask gate without writing any SQL.
+- **Decision:**
+  - **Provider = the attributed occupational-health clinician** (eCQM/MIPS-authentic: quality measures
+    roll up by attributed provider), strictly **nested under location** (`site`). Each `EmployeeProfile`
+    gains a `providerId`; new exports `ENTERPRISE` (root), `PROVIDERS` (8 synthetic clinicians, 2 per
+    location across Plant A / Plant B / HQ / Clinic), `providerById`, `providersForLocation`. The
+    enterprise→location→provider→patient levels live **only in the synthetic directory** — **no DB
+    schema change, no `employees` table, no migration**.
+  - The rollup is a **read-time read model** (`backend-ts/src/program/hierarchy-rollup.ts`,
+    `buildHierarchyRollup`) over the same outcome rows the programs overview uses (latest population run
+    per Active measure; CASE/EMPLOYEE reruns excluded). Exposed via `GET /api/hierarchy/rollup`. Shared
+    helpers extracted to `rollup-shared.ts`; the date-param parser to `routes/query-dates.ts`.
+  - **UI:** a semantic nested expandable drill-down table at `/programs/hierarchy` (NITRO grid deferred
+    until `@mieweb/datavis` is published — ADR-007).
+- **Consequences:**
+  - **Reconciliation invariant is the testable backbone:** because providers are strictly nested under
+    locations (and locations under the enterprise), parent count totals = Σ children at **every** level.
+    This is the property the rollup tests assert.
+  - A future real `EmployeeDirectory`/org-hierarchy adapter (ADR-005 ports) can supply the same
+    enterprise→location→provider→patient shape behind the read model without touching the rollup or the
+    API. If a relational org-hierarchy table is ever introduced, that **would** be a schema change and a
+    fresh stop-and-ask.
+  - No AI/compliance-logic change; CQL `Outcome Status` remains the sole source of truth.
+
 ## ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub
 
 - **Date:** 2026-06-18

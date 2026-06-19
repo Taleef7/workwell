@@ -20,6 +20,7 @@ import {
   listSites,
   type ProgramDeps,
 } from "../program/program-read-models.ts";
+import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 
 interface ProgramsEnv {
   DB: CloudDatabase;
@@ -38,26 +39,6 @@ async function deps(env: ProgramsEnv): Promise<ProgramDeps> {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/**
- * Validate a `from`/`to` filter as a strict calendar date (YYYY-MM-DD), matching the Java
- * controller's parseFromDate/parseToDate (LocalDate.parse → 400 on a malformed value).
- * Blank/absent → undefined (no filter). Throws ProgramDateError on a bad value so the
- * route returns 400 instead of silently lexicographically filtering on garbage.
- */
-class ProgramDateError extends Error {}
-function parseDateParam(raw: string | null, field: "from" | "to"): string | undefined {
-  const v = raw?.trim();
-  if (!v) return undefined;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (m) {
-    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const dt = new Date(Date.UTC(y, mo - 1, d));
-    // Round-trip check rejects overflow dates (e.g. 2026-13-01, 2026-02-30) like LocalDate.parse.
-    if (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) return v;
-  }
-  throw new ProgramDateError(`${field} must use YYYY-MM-DD`);
-}
-
 export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
@@ -71,9 +52,9 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
   const q = url.searchParams;
   let filters: { site: string | null; from?: string; to?: string };
   try {
-    filters = { site: q.get("site"), from: parseDateParam(q.get("from"), "from"), to: parseDateParam(q.get("to"), "to") };
+    filters = { site: q.get("site"), from: parseQueryDate(q.get("from"), "from"), to: parseQueryDate(q.get("to"), "to") };
   } catch (err) {
-    if (err instanceof ProgramDateError) return json({ error: "invalid_request", message: err.message }, 400);
+    if (err instanceof QueryDateError) return json({ error: "invalid_request", message: err.message }, 400);
     throw err;
   }
 
