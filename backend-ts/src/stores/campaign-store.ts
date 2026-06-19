@@ -35,4 +35,6 @@ export interface CampaignStore {
   listCampaigns(limit?: number): Promise<CampaignRecord[]>; // newest-first
   getCampaign(id: string): Promise<CampaignRecord | null>;
   listRecipients(campaignId: string): Promise<CampaignRecipientRecord[]>;
+  /** Campaign + its recipients in a single scan (detail view) — null if not found. */
+  getCampaignWithRecipients(id: string): Promise<{ campaign: CampaignRecord; recipients: CampaignRecipientRecord[] } | null>;
 }
