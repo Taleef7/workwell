@@ -11,7 +11,7 @@ All tables below reflect active backend behavior as of 2026-05-10.
 - `value_sets`: value set catalog with code payloads and governance metadata (canonical URL, code systems, source, status, resolution status, expansion hash).
 - `terminology_mappings`: local-to-standard code mappings with review workflow status and confidence scores.
 - `measure_value_set_links`: many-to-many link between versions and value sets.
-- `employees`: seeded workforce entities used for evaluation/case operations.
+- `employees`: **Java-era only** — backend-ts has no `employees` table; the workforce is the synthetic directory (`employee-catalog.ts`) resolved at read-time. See §3.6.
 - `runs`: execution instances + aggregate metrics.
 - `run_logs`: per-run log timeline.
 - `outcomes`: per-employee evaluated result rows.
