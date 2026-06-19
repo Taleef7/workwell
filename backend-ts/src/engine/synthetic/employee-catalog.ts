@@ -9,10 +9,34 @@ export interface EmployeeProfile {
   externalId: string;
   name: string;
   role: string;
-  site: string;
+  site: string;        // = location level
+  providerId: string;  // attributed provider (an entry in PROVIDERS), at the same `site`
 }
 
-export const EMPLOYEES: readonly EmployeeProfile[] = [
+export interface Provider {
+  id: string;
+  name: string;
+  location: string; // one of the employee `site` values
+}
+
+/** Single-tenant enterprise root for the multi-level dashboard hierarchy (#74 E4). */
+export const ENTERPRISE = { id: "twh", name: "Total Worker Health" } as const;
+
+/** Synthetic occupational-health clinicians — 2 per location (provider level, #74 E4). */
+export const PROVIDERS: readonly Provider[] = [
+  { id: "prov-001", name: "Dr. Sara Mahmood", location: "Plant A" },
+  { id: "prov-002", name: "NP Kamran Sheikh", location: "Plant A" },
+  { id: "prov-003", name: "Dr. Lubna Aziz", location: "Plant B" },
+  { id: "prov-004", name: "NP Faisal Dar", location: "Plant B" },
+  { id: "prov-005", name: "Dr. Hina Qureshi", location: "HQ" },
+  { id: "prov-006", name: "NP Bilal Mansoor", location: "HQ" },
+  { id: "prov-007", name: "Dr. Ayesha Raza", location: "Clinic" },
+  { id: "prov-008", name: "NP Tariq Saleem", location: "Clinic" },
+];
+
+type EmployeeBase = Omit<EmployeeProfile, "providerId">;
+
+const EMPLOYEE_BASE: readonly EmployeeBase[] = [
   { externalId: "emp-001", name: "Demo Author", role: "Author", site: "HQ" },
   { externalId: "emp-002", name: "Demo Approver", role: "Approver", site: "HQ" },
   { externalId: "emp-003", name: "Demo Case Manager", role: "Case Manager", site: "HQ" },
@@ -115,9 +139,48 @@ export const EMPLOYEES: readonly EmployeeProfile[] = [
   { externalId: "emp-100", name: "Nihal Sadiq", role: "Clinic Staff", site: "Clinic" },
 ];
 
+const PROVIDERS_BY_LOCATION = new Map<string, Provider[]>();
+for (const p of PROVIDERS) {
+  (PROVIDERS_BY_LOCATION.get(p.location) ?? PROVIDERS_BY_LOCATION.set(p.location, []).get(p.location)!).push(p);
+}
+for (const list of PROVIDERS_BY_LOCATION.values()) list.sort((a, b) => a.id.localeCompare(b.id));
+
+/** Providers serving a location (sorted by id); [] for an unknown location. */
+export function providersForLocation(location: string): Provider[] {
+  return PROVIDERS_BY_LOCATION.get(location) ?? [];
+}
+
+/**
+ * Deterministic round-robin: within each site, employees sorted by externalId are spread
+ * across that site's providers in id order. Pure function of the inputs — no randomness —
+ * so attribution is stable across runs/imports (required by the reconciliation tests).
+ */
+function assignProviders(base: readonly EmployeeBase[]): EmployeeProfile[] {
+  const bySite = new Map<string, EmployeeBase[]>();
+  for (const e of base) (bySite.get(e.site) ?? bySite.set(e.site, []).get(e.site)!).push(e);
+  const out = new Map<string, string>(); // externalId -> providerId
+  for (const [site, emps] of bySite) {
+    const providers = providersForLocation(site);
+    const sorted = [...emps].sort((a, b) => a.externalId.localeCompare(b.externalId));
+    sorted.forEach((e, i) => {
+      const pid = providers.length ? providers[i % providers.length]!.id : `prov-${site}`;
+      out.set(e.externalId, pid);
+    });
+  }
+  return base.map((e) => ({ ...e, providerId: out.get(e.externalId)! }));
+}
+
+export const EMPLOYEES: readonly EmployeeProfile[] = assignProviders(EMPLOYEE_BASE);
+
 const BY_ID = new Map<string, EmployeeProfile>(EMPLOYEES.map((e) => [e.externalId, e]));
+const PROVIDER_BY_ID = new Map<string, Provider>(PROVIDERS.map((p) => [p.id, p]));
 
 /** Lookup by external id; null when unknown (callers degrade gracefully — no throw). */
 export function employeeById(externalId: string): EmployeeProfile | null {
   return BY_ID.get(externalId) ?? null;
+}
+
+/** Lookup a provider by id; null when unknown. */
+export function providerById(id: string): Provider | null {
+  return PROVIDER_BY_ID.get(id) ?? null;
 }
