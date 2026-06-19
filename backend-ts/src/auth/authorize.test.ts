@@ -74,6 +74,19 @@ test("batch outreach campaigns require CASE_MANAGER or ADMIN (all methods), not 
   assert.deepEqual(authorize("GET", "/api/campaigns/abc", approver), { ok: false, status: 403 });
 });
 
+test("order proposals require CASE_MANAGER or ADMIN (all methods), not the AUTHENTICATED /api/** fallback", () => {
+  // GET /api/orders/proposals is clinical decision support over at-risk case/PII data —
+  // must match [CM, A] before the generic AUTHENTICATED /api/** fallback (#77 E7).
+  assert.equal(authorize("GET", "/api/orders/proposals", cm).ok, true);
+  assert.equal(authorize("GET", "/api/orders/proposals", admin).ok, true);
+  assert.deepEqual(authorize("GET", "/api/orders/proposals", author), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/orders/proposals", approver), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/orders/proposals", null), { ok: false, status: 401 });
+  // All other methods on /api/orders/** are also gated (mirroring campaigns AnyMethod rule)
+  assert.equal(authorize("POST", "/api/orders/anything", cm).ok, true);
+  assert.deepEqual(authorize("POST", "/api/orders/anything", author), { ok: false, status: 403 });
+});
+
 test("auditor packets: run packets are CM/ADMIN, measure-version packets are APPROVER/ADMIN", () => {
   // run packets — CASE_MANAGER or ADMIN (operational), not AUTHOR/APPROVER
   assert.equal(authorize("GET", "/api/auditor/runs/abc/packet", cm).ok, true);
