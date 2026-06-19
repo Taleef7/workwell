@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-06-19 — E7 (#77): advisory order-generation engine
+
+E7 shipped. A new `backend-ts/src/order/` module generates advisory proposed orders from non-compliant
+measure findings — the charter's "Action Evaluators → orders" layer. Design-only/simulated seam: no
+EH dependency, no schema change, no frontend.
+
+**Four files:**
+- `order/proposed-order.ts` — `ProposedOrder` domain type + `toServiceRequest()` (FHIR R4
+  `ServiceRequest`, `intent:"proposal"`, `status:"draft"`, hand-built JSON — no FHIR runtime dep,
+  same pattern as MeasureReport/QRDA) + `bundleOf()` collection Bundle.
+- `order/order-catalog.ts` — action-evaluator map: runnable measure → `OrderCode`. Reuses
+  `terminology_mappings` seed standard codes (audiogram → CPT 92557; tb_surveillance → CPT 86580;
+  flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in `urn:workwell:vs:hazwoper-exams`); LOCAL
+  `urn:workwell:orders` codes for measures without a seed mapping.
+- `order/standing-order-provider.ts` — `StandingOrderProvider` port. `simulatedStandingOrderProvider`
+  (default, deterministic ~1/5 subjects have a standing order, no HTTP) + inert `ehStandingOrderProvider`
+  stub selected only when both `WORKWELL_EH_FHIR_BASE_URL` + `WORKWELL_EH_FHIR_API_KEY` are set
+  (inert-unless-configured, mirrors ADR-011/012). `resolveStandingOrderProvider(env)`.
+- `order/order-proposal.ts` — `proposeOrders(outcomes, provider)`: Panel=Risk selection
+  (OVERDUE/DUE_SOON/MISSING_DATA propose; COMPLIANT/EXCLUDED don't); risk→priority (OVERDUE=urgent,
+  DUE_SOON/MISSING_DATA=routine); in-batch dedupe + standing-order suppression (suppressed returned
+  separately, answering the charter's duplicate-orders concern). Pure and trigger-agnostic (read-time
+  now; callable from the run pipeline later without changes).
+
+**Endpoint:** `GET /api/orders/proposals?measureId=&subjectId=&from=&to=&format=domain|fhir`
+(`backend-ts/src/routes/orders.ts`, mounted under the authenticated `/api/**` block). Gated
+CASE_MANAGER/ADMIN (`authorize.ts` `rx("/api/orders/**") → [CM, A]`). Selects latest population run
+per Active measure (reuses `rollup-shared.ts` `isPopulationRun` + `latestRunRows` — `latestRunRows`
+was extracted from `hierarchy-rollup.ts` into `rollup-shared.ts` as part of this task). `format=domain`
+→ `{proposed, suppressed}`; `format=fhir` → ServiceRequest Bundle (proposed only).
+
+**Advisory / no-auto-submit:** proposals are never submitted automatically. A human reviews and
+submits. The real EH write path (`OrderSubmitter`) is named but deferred (documented drop-in for
+when Doug Q6 / EH credentials are available). Same human-in-the-loop contract as AI guardrails.
+
+**No schema change.** Proposals derived read-time from `outcomes`; nothing persisted. ADR-013 added
+to `docs/DECISIONS.md`.
+
+Backend suite: 517 pass / 0 fail / 1 skip. Frontend lint + build unaffected (no frontend code). Deploys on
+merge to `main`.
+
 ## 2026-06-19 — E6 (#76): immunization & forecasting
 
 E6 shipped. Two deliverables: the **`ImmunizationForecast` port** and a new runnable **AIS-E Td/Tdap

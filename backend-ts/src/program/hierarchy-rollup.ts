@@ -12,7 +12,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { ENTERPRISE, employeeById, providerById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { day, isPopulationRun, round1 } from "./rollup-shared.ts";
+import { day, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
 
 export type HierarchyLevel = "enterprise" | "location" | "provider" | "patient";
 
@@ -65,18 +65,6 @@ const accumulate = (acc: MutableTotals, t: MutableTotals): void => {
   acc.evaluated += t.evaluated; acc.compliant += t.compliant; acc.dueSoon += t.dueSoon;
   acc.overdue += t.overdue; acc.missingData += t.missingData; acc.excluded += t.excluded; acc.openCases += t.openCases;
 };
-
-/** Latest population run's rows for one measure (max runStartedAt group), [] if none. */
-function latestRunRows(rows: OutcomeWithRun[]): OutcomeWithRun[] {
-  const byRun = new Map<string, { startedAt: string; rows: OutcomeWithRun[] }>();
-  for (const r of rows) {
-    const g = byRun.get(r.runId) ?? byRun.set(r.runId, { startedAt: r.runStartedAt, rows: [] }).get(r.runId)!;
-    g.rows.push(r);
-  }
-  let best: { startedAt: string; rows: OutcomeWithRun[] } | null = null;
-  for (const g of byRun.values()) if (!best || g.startedAt > best.startedAt) best = g;
-  return best?.rows ?? [];
-}
 
 export async function buildHierarchyRollup(deps: HierarchyDeps, filters: HierarchyFilters): Promise<HierarchyNode> {
   const from = filters.from?.trim() || undefined;

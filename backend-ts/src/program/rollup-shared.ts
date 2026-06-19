@@ -8,3 +8,21 @@ export const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has
 export const round1 = (compliant: number, total: number): number => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
 /** Day-granular (YYYY-MM-DD) slice of an ISO timestamp. */
 export const day = (s: string): string => s.slice(0, 10);
+
+/** A run that finished a full pass (COMPLETED or PARTIAL_FAILURE) — proposals/exports should only
+ *  derive from terminal population runs, never an in-flight RUNNING run's partial outcomes. */
+export const isCompletedRun = (status: string): boolean =>
+  status.toUpperCase() === "COMPLETED" || status.toUpperCase() === "PARTIAL_FAILURE";
+
+/** The rows of the most-recent run (by runStartedAt) among the given rows; [] if none.
+ *  Shared by the hierarchy rollup and the order-proposal route so "latest population run" can't drift. */
+export function latestRunRows<T extends { runId: string; runStartedAt: string }>(rows: T[]): T[] {
+  const byRun = new Map<string, { startedAt: string; rows: T[] }>();
+  for (const r of rows) {
+    const g = byRun.get(r.runId) ?? byRun.set(r.runId, { startedAt: r.runStartedAt, rows: [] }).get(r.runId)!;
+    g.rows.push(r);
+  }
+  let best: { startedAt: string; rows: T[] } | null = null;
+  for (const g of byRun.values()) if (!best || g.startedAt > best.startedAt) best = g;
+  return best?.rows ?? [];
+}

@@ -89,6 +89,8 @@ const RULES: Rule[] = [
   // left to the generic AUTHENTICATED /api/** fallback below. Any-method (no `method`),
   // `/api/campaigns/**` matches both the bare collection and sub-paths (AntPathMatcher).
   { pattern: rx("/api/campaigns/**"), access: [CM, A] },
+  // Order proposals (#77 E7) — clinical decision support over case/PII data; gated like campaigns.
+  { pattern: rx("/api/orders/**"), access: [CM, A] },
 
   { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
