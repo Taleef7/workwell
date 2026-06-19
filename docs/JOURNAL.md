@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-18 — E4 (#74): multi-level dashboards (enterprise→location→provider→patient)
+
+E4 multi-level dashboards shipped. The workforce hierarchy — **enterprise → location → provider →
+patient** — is modeled entirely in the synthetic employee directory
+(`backend-ts/src/engine/synthetic/employee-catalog.ts`): every `EmployeeProfile` gains a `providerId`,
+plus new exports `ENTERPRISE`, `PROVIDERS` (8 synthetic occupational-health clinicians, 2 per location
+across Plant A / Plant B / HQ / Clinic), `providerById`, `providersForLocation`. **Key finding:**
+`backend-ts` has **no `employees` DB table** — the synthetic directory is the source of truth, resolved
+at read-time — so this is **not a schema migration** and the #93 stop-and-ask gate is satisfied with no
+SQL (ADR-010). On top of it, a reconciling rollup read model
+(`backend-ts/src/program/hierarchy-rollup.ts`, `buildHierarchyRollup`) returns a `HierarchyNode` tree
+whose parent counts = Σ children at every level, over the same outcome rows the programs overview uses
+(latest population run per Active measure; CASE/EMPLOYEE reruns excluded), surfaced as
+`GET /api/hierarchy/rollup?measureId=&from=&to=` (auth'd under `/api/**`, `YYYY-MM-DD` validation → 400
+on malformed). Frontend: a nested expandable drill-down table at `/programs/hierarchy` with a measure
+filter, linked from `/programs` (semantic table; NITRO deferred until `@mieweb/datavis` is published).
+Shared rollup helpers extracted to `rollup-shared.ts` and the date-param parser to
+`routes/query-dates.ts` (reused by `/api/programs` + `/api/hierarchy`). Closes #93 (E4.1) + #94 (E4.2)
+under epic #74. Deploys on merge to `main`.
+
 ## 2026-06-18 — de-Java doc-accuracy sweep (from the #166 retro code-review)
 
 The retroactive whole-PR review of #166 surfaced one contradiction it introduced + several now-stale
