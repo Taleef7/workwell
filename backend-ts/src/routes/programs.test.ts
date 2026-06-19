@@ -75,7 +75,7 @@ after(() => {
 
 test("GET /api/programs/overview returns one row per Active measure (the runnable set)", async () => {
   const rows = (await get("/overview").then((r) => r!.json())) as Summary[];
-  assert.equal(rows.length, 10, "10 Active/runnable measures");
+  assert.equal(rows.length, 11, "11 Active/runnable measures");
 });
 
 test("overview aggregates the LATEST run's outcomes + complianceRate + open case count", async () => {
@@ -107,7 +107,7 @@ test("site filter scopes the outcomes (Plant A keeps only emp-006 → overdue, 0
 
 test("GET /api/programs is an alias of /overview", async () => {
   const base = (await get("").then((r) => r!.json())) as Summary[];
-  assert.equal(base.length, 10);
+  assert.equal(base.length, 11);
 });
 
 test("GET /api/programs/sites lists distinct employee sites", async () => {

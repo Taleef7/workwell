@@ -488,6 +488,42 @@ test("RESOLVE action with an unparsable resolvedAt → 400 (a typo must not sile
   assert.equal((await ok!.json() as { closedAt: string }).closedAt, "2026-06-14T12:00:00.000Z", "the supplied timestamp is honored");
 });
 
+// ---- immunization forecast guard (#76 E6) ----------------------------------------
+
+test("GET /api/cases/:id for a non-immunization case (audiogram) does NOT include immunizationForecast", async () => {
+  // Omar's case is audiogram — the route guard (c.measureId === "adult_immunization") must be false.
+  const res = await getPath(`/api/cases/${omarCaseId}`);
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as Record<string, unknown>;
+  assert.equal("immunizationForecast" in body, false, "non-immunization case must not carry the forecast key");
+});
+
+test("GET /api/cases/:id for an adult_immunization case includes immunizationForecast with 3 series (#76 E6)", async () => {
+  // Seed a minimal adult_immunization case (no outcome evidence needed — the simulated forecaster
+  // draws from its own deterministic synthetic history, independent of the run pipeline).
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "adult_immunization",
+    triggeredBy: "test",
+    requestedScope: { measureId: "adult_immunization" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
+  });
+  const immzCase = await new SqliteCaseStore(db).upsertFromOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "adult_immunization",
+    evaluationPeriod: "2026-01-01",
+    outcomeStatus: "OVERDUE",
+  });
+  const res = await getPath(`/api/cases/${immzCase!.id}`);
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { immunizationForecast?: { series: unknown[] } };
+  assert.ok("immunizationForecast" in body, "adult_immunization case must carry the forecast key");
+  assert.equal(body.immunizationForecast!.series.length, 3, "simulated forecaster returns 3 series (TDAP, INFLUENZA, HEPB)");
+});
+
 // Runs last (seeds extra cases): the current-cycle default is scoped to the OPEN worklist, so the
 // closed/excluded tabs still show full history (Codex P2). Isolated on flu_vaccine + fresh employees.
 test("terminal tabs (excluded) show full history, not just the current cycle (Codex P2)", async () => {

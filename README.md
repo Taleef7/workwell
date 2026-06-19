@@ -87,7 +87,7 @@ pnpm evaluate --patient ./patient-bundle.json --measure audiogram --date 2026-06
 ```
 
 `--measure` is a registry id (`audiogram`, `hazwoper`, `tb_surveillance`, `flu_vaccine`, `hypertension`,
-`diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `cms125`, `cms122`); `--date` defaults to today.
+`diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `cms125`, `cms122`, `adult_immunization`); `--date` defaults to today.
 It's a thin shell (`backend-ts/src/engine/cli/`) over the same `CqlExecutionEngine` the run pipeline uses.
 Output is the `MeasureOutcome` JSON:
 
@@ -122,7 +122,7 @@ npm run build
 - `/programs/hierarchy` enterprise→location→provider→patient drill-down
 - `/runs` run history and detail
 - `/cases` case worklist and filters
-- `/cases/[id]` evidence, actions, timeline
+- `/cases/[id]` evidence, actions, timeline; advisory immunization-forecast panel for `adult_immunization` cases
 - `/campaigns` bulk outreach campaign launcher and history
 - `/measures` catalog
 - `/studio/[id]` measure authoring
@@ -143,6 +143,7 @@ npm run build
 - `GET /api/runs/{runId}/qrda?format=xml`
 - `GET /api/hierarchy/rollup?measureId=&from=&to=`
 - `POST /api/campaigns` (+ `?dryRun`) · `GET /api/campaigns` · `GET /api/campaigns/:id` (CASE_MANAGER/ADMIN)
+- `GET /api/immunization/forecast?subjectId=&asOf=` (advisory; authenticated; read-time; no schema)
 
 For full API surface and behavioral notes, see docs linked below.
 

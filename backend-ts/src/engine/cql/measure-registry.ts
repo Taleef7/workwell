@@ -23,6 +23,7 @@ export const MEASURES: Record<string, MeasureMeta> = {
   hazwoper: { id: "hazwoper", name: "HAZWOPER Surveillance", library: "HazwoperSurveillance-1.0.0", periodMonths: 0 },
   tb_surveillance: { id: "tb_surveillance", name: "TB Surveillance", library: "TbSurveillance-1.3.0", periodMonths: 0 },
   flu_vaccine: { id: "flu_vaccine", name: "Flu Vaccine", library: "FluVaccineSeasonal-1.0.0", periodMonths: 12 },
+  adult_immunization: { id: "adult_immunization", name: "Adult Immunization Status (Td/Tdap)", library: "AdultImmunizationTdap-1.0.0", periodMonths: 0 },
   hypertension: { id: "hypertension", name: "Hypertension BP Screening", library: "HypertensionBPScreeningCQL-1.0.0", periodMonths: 0 },
   diabetes_hba1c: { id: "diabetes_hba1c", name: "Diabetes HbA1c Monitoring", library: "DiabetesHbA1cMonitoringCQL-1.0.0", periodMonths: 0 },
   obesity_bmi: { id: "obesity_bmi", name: "BMI Screening & Counseling", library: "ObesityBMIScreeningCQL-1.0.0", periodMonths: 0 },

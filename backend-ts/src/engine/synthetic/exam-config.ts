@@ -20,6 +20,7 @@ export interface ExamConfig {
   programEnrolled: boolean;
   /** For observation-based measures: the numeric result (null = no observation). */
   observationValue: number | null;
+  refused: boolean;
 }
 
 /**
@@ -43,6 +44,7 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
       hasWaiver,
       programEnrolled: true,
       observationValue,
+      refused: false,
     };
   }
 
@@ -57,5 +59,10 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
           : target === "EXCLUDED"
             ? w + 150
             : null; // MISSING_DATA → no event
-  return { binding, daysSinceLastExam, hasWaiver, programEnrolled: true, observationValue: null };
+  return { binding, daysSinceLastExam, hasWaiver, programEnrolled: true, observationValue: null, refused: false };
+}
+
+/** Mark a config as a documented refusal (does not change the target bucket). */
+export function withRefusal(config: ExamConfig): ExamConfig {
+  return { ...config, refused: true };
 }

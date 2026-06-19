@@ -25,6 +25,7 @@ import { handleCampaigns } from "./routes/campaigns.ts";
 import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
+import { handleImmunizationForecast } from "./routes/immunization.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
@@ -65,6 +66,9 @@ export interface Env {
   OPENAI_API_KEY?: string;
   WORKWELL_AI_OPENAI_MODEL?: string;
   WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
+  /** Immunization forecasting (#76 E6) — ICE API config. Inert stub unless both are set. */
+  WORKWELL_IMMZ_ICE_API_KEY?: string;
+  WORKWELL_IMMZ_ICE_BASE_URL?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -187,6 +191,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4).
   const hierarchyResponse = await handleHierarchy(req, env);
   if (hierarchyResponse) return hierarchyResponse;
+
+  // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
+  const immunizationResponse = await handleImmunizationForecast(req, env);
+  if (immunizationResponse) return immunizationResponse;
 
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
   const exportsResponse = await handleExports(req, env);

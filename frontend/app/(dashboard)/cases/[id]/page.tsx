@@ -75,6 +75,19 @@ type CaseDetail = {
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
   timeline: AuditEvent[];
+  immunizationForecast?: {
+    subjectId: string;
+    asOf: string;
+    series: Array<{
+      series: "TDAP" | "INFLUENZA" | "HEPB";
+      status: "UP_TO_DATE" | "DUE" | "OVERDUE" | "CONTRAINDICATED" | "REFUSED";
+      lastDoseDate: string | null;
+      nextDueDate: string | null;
+      dosesReceived: number;
+      dosesRequired: number;
+      reason: string | null;
+    }>;
+  };
 };
 
 type CaseExplanationResponse = {
@@ -598,6 +611,24 @@ export default function CaseDetailPage() {
             </div>
           </details>
 
+          {caseDetail.immunizationForecast ? (
+            <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Immunization Forecast</summary>
+              <p className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">Advisory — as of {caseDetail.immunizationForecast.asOf}</p>
+              <div className="mt-2 space-y-2">
+                {caseDetail.immunizationForecast.series.map((s) => (
+                  <div key={s.series} className="flex items-center justify-between gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
+                    <div>
+                      <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{VACCINE_SERIES_LABELS[s.series] ?? s.series}</p>
+                      <p className="text-[11px] text-neutral-600 dark:text-neutral-400">{s.nextDueDate ? `Next due ${s.nextDueDate}` : (s.reason ?? "—")}</p>
+                    </div>
+                    <span className={`text-[11px] ${forecastStatusClass(s.status)}`}>{formatForecastStatus(s.status)}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
+
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Timeline</summary>
             <div className="mt-3 space-y-2">
@@ -1018,6 +1049,30 @@ export default function CaseDetailPage() {
               </dl>
             </div>
 
+            {caseDetail.immunizationForecast ? (
+              <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Immunization forecast</p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  Advisory only — not a compliance decision. As of {caseDetail.immunizationForecast.asOf}.
+                </p>
+                <div className="mt-4 space-y-2">
+                  {caseDetail.immunizationForecast.series.map((s) => (
+                    <div key={s.series} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{VACCINE_SERIES_LABELS[s.series] ?? s.series}</p>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                          {s.lastDoseDate ? `Last ${s.lastDoseDate}` : "No prior dose"}
+                          {s.nextDueDate ? ` • Next due ${s.nextDueDate}` : ""}
+                          {s.reason ? ` • ${s.reason}` : ""}
+                        </p>
+                      </div>
+                      <span className={`text-xs ${forecastStatusClass(s.status)}`}>{formatForecastStatus(s.status)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Appointments</p>
               {appointments.length === 0 ? <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">No appointments scheduled.</p> : null}
@@ -1209,6 +1264,29 @@ function Row({ label, value }: { label: string; value: string }) {
       <dd className="text-right font-medium text-neutral-900 dark:text-neutral-100">{value}</dd>
     </div>
   );
+}
+
+const VACCINE_SERIES_LABELS: Record<string, string> = {
+  TDAP: "Td/Tdap",
+  INFLUENZA: "Influenza",
+  HEPB: "Hepatitis B",
+};
+
+function forecastStatusClass(status: string) {
+  switch (status) {
+    case "UP_TO_DATE":
+      return "rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-900";
+    case "DUE":
+      return "rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900";
+    case "OVERDUE":
+      return "rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-semibold text-rose-900";
+    default: // CONTRAINDICATED, REFUSED
+      return "rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 font-semibold text-neutral-700 dark:text-neutral-300";
+  }
+}
+
+function formatForecastStatus(status: string) {
+  return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function deliveryBadgeClass(status: string | null) {

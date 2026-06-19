@@ -100,6 +100,16 @@
         "missing",
         "excluded"
       ]
+    },
+    {
+      "id": "adult_immunization",
+      "lib": "AdultImmunizationTdap-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
     }
   ]
 }

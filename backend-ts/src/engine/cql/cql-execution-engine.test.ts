@@ -34,3 +34,18 @@ for (const measureId of Object.keys(MEASURES)) {
     }
   });
 }
+
+test("adult_immunization refusal keeps the case open (OVERDUE) and flags Refused", async () => {
+  const bundle = JSON.parse(readFileSync(path.join(synthRoot, "adult_immunization", "present_old.json"), "utf8"));
+  bundle.entry.push({
+    resource: {
+      resourceType: "Condition",
+      id: "adult_immunization-present_old-rfs",
+      subject: { reference: "Patient/adult_immunization-present_old" },
+      code: { coding: [{ system: "urn:workwell:vs:tdap-refusal", code: "tdap-refusal" }] },
+    },
+  });
+  const outcome = await engine.evaluate({ measureId: "adult_immunization", patientBundle: bundle, evaluationDate: EVAL });
+  assert.equal(outcome.outcome, "OVERDUE");
+  assert.equal(outcome.evidence.expressionResults.find((r) => r.define === "Refused")?.result, true);
+});
