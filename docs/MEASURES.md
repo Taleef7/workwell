@@ -262,7 +262,7 @@ Each outcome evidence payload includes:
 
 ## Implementation Notes
 
-- All 8 active CQL measures now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
+- All active CQL measures (11) now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
   **(E3.2 / #90 update)** A `ValueSetResolver` seam now supports real value-set expansion: the engine
   can run in an expansion mode (an optional resolver → a populated `cql.CodeService`) where a CQL
   value-set retrieve (`[Procedure: "Audiogram Procedures"]`) filters by real membership. Audiogram
