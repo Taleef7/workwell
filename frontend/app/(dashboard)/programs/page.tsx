@@ -172,6 +172,12 @@ export default function ProgramsPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
         <div className="flex items-center gap-3">
+          <Link
+            href="/programs/hierarchy"
+            className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"
+          >
+            View hierarchy
+          </Link>
           {activeRunId ? (
             <span className="animate-pulse text-sm text-neutral-500 dark:text-neutral-400">
               {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})

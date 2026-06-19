@@ -119,6 +119,7 @@ npm run build
 
 - `/programs` compliance overview
 - `/programs/[measureId]` trend, drivers, risk outlook
+- `/programs/hierarchy` enterprise→location→provider→patient drill-down
 - `/runs` run history and detail
 - `/cases` case worklist and filters
 - `/cases/[id]` evidence, actions, timeline
@@ -139,6 +140,7 @@ npm run build
 - `GET /api/auditor/cases/{caseId}/packet?format=json|html`
 - `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle`
 - `GET /api/runs/{runId}/qrda?format=xml`
+- `GET /api/hierarchy/rollup?measureId=&from=&to=`
 
 For full API surface and behavioral notes, see docs linked below.
 

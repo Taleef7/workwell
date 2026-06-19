@@ -14,6 +14,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { day, isPopulationRun, round1 } from "./rollup-shared.ts";
 
 export interface ProgramSummary {
   measureId: string;
@@ -88,7 +89,6 @@ export interface RiskOutlook {
   }>;
 }
 
-const day = (s: string): string => s.slice(0, 10);
 const eq = (a: string | null | undefined, b: string) => (a ?? "").toLowerCase() === b.toLowerCase();
 
 /** Distinct employee sites, ascending — the global site filter's options. */
@@ -118,14 +118,6 @@ const siteMatcher = (filters: ProgramFilters) => {
   const site = filters.site?.trim() || null;
   return (subjectId: string) => !site || eq(employeeById(subjectId)?.site ?? null, site);
 };
-
-const round1 = (compliant: number, total: number) => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
-
-/** Single-subject rerun scopes excluded from program/measure rollups so a CASE/EMPLOYEE
- *  rerun-to-verify can't skew the rate to 0%/100% (#150 C4 — Java ProgramService parity).
- *  Compared case-insensitively: the Java backend persists these lowercase ("case"/"employee"). */
-const RERUN_SCOPES = new Set(["CASE", "EMPLOYEE"]);
-const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType.toUpperCase());
 
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;

@@ -11,7 +11,7 @@ All tables below reflect active backend behavior as of 2026-05-10.
 - `value_sets`: value set catalog with code payloads and governance metadata (canonical URL, code systems, source, status, resolution status, expansion hash).
 - `terminology_mappings`: local-to-standard code mappings with review workflow status and confidence scores.
 - `measure_value_set_links`: many-to-many link between versions and value sets.
-- `employees`: seeded workforce entities used for evaluation/case operations.
+- `employees`: **Java-era only** — backend-ts has no `employees` table; the workforce is the synthetic directory (`employee-catalog.ts`) resolved at read-time. See §3.6.
 - `runs`: execution instances + aggregate metrics.
 - `run_logs`: per-run log timeline.
 - `outcomes`: per-employee evaluated result rows.
@@ -110,8 +110,25 @@ value_set_id UUID NOT NULL REFERENCES value_sets(id)
 PRIMARY KEY(measure_version_id, value_set_id)
 ```
 
-### 3.6 `employees`
+### 3.6 Workforce / `employees`
+
+> **backend-ts has no `employees` DB table.** In the TypeScript backend the workforce is the
+> **synthetic employee directory** (`backend-ts/src/engine/synthetic/employee-catalog.ts`), resolved
+> at read-time — it is the source of truth, not a relational table. Each entry is
+> `{externalId, name, role, site, providerId}`, where `site` is the **location** level and
+> `providerId` attributes the employee to a clinician. The directory also exports `PROVIDERS` (8
+> synthetic occupational-health clinicians, 2 per location — the **provider** level) and a single
+> `ENTERPRISE` root, giving the **enterprise→location→provider→patient** hierarchy. `outcomes` and
+> `cases` persist only the `subjectId` (the employee/patient); the hierarchy above a subject is
+> resolved at read-time from the directory, so the multi-level rollup (`hierarchy-rollup.ts`, #74/E4)
+> requires **no SQL and no `employees` table** (the #93 schema stop-and-ask gate is satisfied with no
+> migration).
+
+The schema below is the **historical Java-era `employees` table** (retired with the JVM in #109 PR4),
+retained for reference only:
+
 ```sql
+-- Java-era only (no longer present in backend-ts)
 id UUID PK DEFAULT gen_random_uuid()
 external_id TEXT UNIQUE NOT NULL
 name TEXT NOT NULL
