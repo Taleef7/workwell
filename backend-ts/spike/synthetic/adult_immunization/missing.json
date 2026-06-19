@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "adult_immunization-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "adult_immunization-missing-enr",
+        "subject": {
+          "reference": "Patient/adult_immunization-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:adult-immz-enrollment",
+              "code": "adult-immz-enrolled"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
