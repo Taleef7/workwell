@@ -76,6 +76,9 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
   if (config.hasWaiver) {
     entries.push({ resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet) });
   }
+  if (config.refused && binding.refusal) {
+    entries.push({ resource: condition(externalId, binding.refusal.code, binding.refusal.valueSet) });
+  }
 
   const coding = { system: binding.event.valueSet, code: binding.event.code, display: binding.event.code };
 
