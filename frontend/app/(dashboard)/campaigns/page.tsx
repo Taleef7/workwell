@@ -151,6 +151,16 @@ export default function CampaignsPage() {
     return () => clearTimeout(timer);
   }, [loadHistory]);
 
+  // Clear any stale dry-run/send result (and error) whenever a launcher filter
+  // changes, so the rendered preview can never diverge from the current scope.
+  // Done in the change handlers (not an effect) to avoid a synchronous
+  // setState-in-effect cascade. This intentionally does NOT touch the history
+  // list or selected detail.
+  const clearStaleResult = useCallback(() => {
+    setResult(null);
+    setLaunchError(null);
+  }, []);
+
   function buildBody(dryRun: boolean): LaunchBody {
     const body: LaunchBody = { channel, dryRun };
     if (measureId) body.measureId = measureId;
@@ -227,7 +237,10 @@ export default function CampaignsPage() {
             <select
               id="campaign-measure"
               value={measureId}
-              onChange={(e) => setMeasureId(e.target.value)}
+              onChange={(e) => {
+                setMeasureId(e.target.value);
+                clearStaleResult();
+              }}
               className={selectClass}
             >
               <option value="">All measures</option>
@@ -243,7 +256,15 @@ export default function CampaignsPage() {
             <label htmlFor="campaign-site" className={labelClass}>
               Site
             </label>
-            <select id="campaign-site" value={site} onChange={(e) => setSite(e.target.value)} className={selectClass}>
+            <select
+              id="campaign-site"
+              value={site}
+              onChange={(e) => {
+                setSite(e.target.value);
+                clearStaleResult();
+              }}
+              className={selectClass}
+            >
               <option value="">All sites</option>
               {sites.map((s) => (
                 <option key={s} value={s}>
@@ -260,13 +281,16 @@ export default function CampaignsPage() {
             <select
               id="campaign-outcome"
               value={outcomeStatus}
-              onChange={(e) => setOutcomeStatus(e.target.value)}
+              onChange={(e) => {
+                setOutcomeStatus(e.target.value);
+                clearStaleResult();
+              }}
               className={selectClass}
             >
               <option value="">All</option>
               {OUTCOME_OPTIONS.map((o) => (
                 <option key={o} value={o}>
-                  {o.replace("_", " ")}
+                  {o.replaceAll("_", " ")}
                 </option>
               ))}
             </select>
@@ -279,7 +303,10 @@ export default function CampaignsPage() {
             <select
               id="campaign-channel"
               value={channel}
-              onChange={(e) => setChannel(e.target.value)}
+              onChange={(e) => {
+                setChannel(e.target.value);
+                clearStaleResult();
+              }}
               className={selectClass}
             >
               {CHANNEL_OPTIONS.map((c) => (
@@ -294,6 +321,8 @@ export default function CampaignsPage() {
             <label htmlFor="campaign-template" className={labelClass}>
               Template
             </label>
+            {/* Intentionally inert for this task: templateId is omitted from the
+                launch body, so the backend picks the outcome-based default template. */}
             <select id="campaign-template" value="" disabled className={`${selectClass} opacity-70`}>
               <option value="">Default (outcome-based)</option>
             </select>
@@ -402,7 +431,15 @@ export default function CampaignsPage() {
                 {history.map((c) => (
                   <tr
                     key={c.id}
+                    tabIndex={0}
+                    role="button"
                     onClick={() => void loadDetail(c.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void loadDetail(c.id);
+                      }
+                    }}
                     className={`cursor-pointer border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50 ${
                       selectedId === c.id ? "bg-neutral-50 dark:bg-neutral-800/50" : ""
                     }`}
@@ -460,7 +497,7 @@ function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
         <tbody>
           {recipients.map((r) => (
             <tr
-              key={r.caseId}
+              key={r.messageId ?? r.caseId}
               className="border-b border-neutral-100 last:border-b-0 dark:border-neutral-800"
             >
               <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">{r.employeeName}</td>
