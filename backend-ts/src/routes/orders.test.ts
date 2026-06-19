@@ -86,3 +86,17 @@ test("measureId filter: unknown Active measure returns empty lists", async () =>
   assert.equal(body.proposed.length, 0);
   assert.equal(body.suppressed.length, 0);
 });
+
+test("subjectId filter narrows to that subject", async () => {
+  // emp-006 (OVERDUE) → present in proposed or suppressed; emp-007 (COMPLIANT) → empty
+  const r6 = await get("?subjectId=emp-006");
+  const b6 = await r6!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }> };
+  const subjects6 = [...b6.proposed, ...b6.suppressed].map((p) => p.subjectId);
+  assert.ok(subjects6.includes("emp-006"));
+  assert.ok(subjects6.every((s) => s === "emp-006"), "only emp-006 should be present");
+
+  const r7 = await get("?subjectId=emp-007");
+  const b7 = await r7!.json() as { proposed: unknown[]; suppressed: unknown[] };
+  assert.equal(b7.proposed.length, 0); // COMPLIANT → no proposal
+  assert.equal(b7.suppressed.length, 0);
+});

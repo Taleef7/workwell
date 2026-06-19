@@ -56,5 +56,8 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     }
   }
   const { proposed, suppressed } = proposeOrders(atRisk, resolveStandingOrderProvider(env));
+  // FHIR output carries only `proposed` — a standing-order-suppressed item must NOT emit a duplicate
+  // ServiceRequest (the charter's "duplicate orders are bad"). The domain view returns both so callers
+  // can see why an at-risk member got no order.
   return fhir ? json(bundleOf(proposed)) : json({ proposed, suppressed });
 }
