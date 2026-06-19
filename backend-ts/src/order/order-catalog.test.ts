@@ -11,10 +11,13 @@ test("every runnable (registered) measure maps to an order", () => {
   }
 });
 
-test("reused terminology codes match the seed (audiogram/tb/flu)", () => {
+test("reused terminology codes + systems match the seed (audiogram/tb/flu)", () => {
   assert.equal(orderForMeasure("audiogram")!.code, "92557");
+  assert.equal(orderForMeasure("audiogram")!.system, "http://www.ama-assn.org/go/cpt");
   assert.equal(orderForMeasure("tb_surveillance")!.code, "86580");
+  assert.equal(orderForMeasure("tb_surveillance")!.system, "http://www.ama-assn.org/go/cpt");
   assert.equal(orderForMeasure("flu_vaccine")!.code, "141");
+  assert.equal(orderForMeasure("flu_vaccine")!.system, "http://hl7.org/fhir/sid/cvx");
 });
 
 test("unknown measure yields null (extension-safe)", () => {
