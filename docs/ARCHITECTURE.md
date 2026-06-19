@@ -45,14 +45,15 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `fhir`: measure library/resource assembly used by evaluation runtime and MAT-compatible FHIR bundle export.
 - `run`: run orchestration, run detail/summary read models, rerun scope support, and predictive risk-outlook analytics.
 - `program`: the programs-overview read model and the multi-level **hierarchy-rollup** read model (`backend-ts/src/program/hierarchy-rollup.ts`) — an enterprise→location→provider→patient `HierarchyNode` tree whose parent counts equal Σ children at every level (reconciling). It draws on the same outcome rows as the programs overview (latest population run per Active measure; CASE/EMPLOYEE reruns excluded) and resolves the hierarchy **at read-time from the synthetic employee directory** (`engine/synthetic/employee-catalog.ts` — `providerId`/`PROVIDERS`/`ENTERPRISE`), so there is **no schema/DB table** for it. Shared helpers (`isPopulationRun`/`round1`/day/`RERUN_SCOPES`) live in `backend-ts/src/program/rollup-shared.ts`; the date-param parser in `backend-ts/src/routes/query-dates.ts` (#74 / E4).
-- `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline.
+- `caseflow`: case upsert/resolution, outreach + delivery-state + rerun-to-verify, case detail timeline. Outreach is **channel-aware**: `dispatchOutreach` (`backend-ts/src/case/case-outreach.ts`) is the shared send core used by both single-case send and campaigns, dispatching through the `OutreachChannel` port. The bulk **campaign engine** (`backend-ts/src/case/outreach-campaign.ts`, `runCampaign`) resolves eligible OPEN cases (measure/site/outcome filters), supports a `dryRun` recipient preview with no sends, and on a real run dispatches per recipient (per-recipient try/catch → FAILED, so a mid-loop failure never abandons the campaign and PARTIAL_FAILURE is reachable), tallying sent/failed/simulated and persisting via the `CampaignStore` port (#75 / E5).
 - `audit`: append-only audit event publisher + export/query paths. `AuditPacketService` assembles structured audit export packets (case, run, measure version) as JSON or HTML bytes; writes `AUDIT_PACKET_GENERATED` audit events and records in `audit_packet_exports`.
 - `export`: runs/outcomes/cases CSV contracts.
 - `integrations`: integration service adapters/checks.
 - `admin`: scheduler settings, integration health, outreach template APIs.
 - `ai`: AI draft spec, explain-why-flagged, run insight surfaces with deterministic fallback.
 - `mcp`: read-only MCP tools and tool-call audit logging.
-- `notification`: outreach email delivery (`EmailService` — provider switch, default `simulated`; SendGrid wiring inert unless explicitly configured) + `EmailDeliveryRecord`.
+- `notification`: outreach email delivery (`EmailService` — provider switch, default `simulated`; SendGrid wiring inert unless explicitly configured) + `EmailDeliveryRecord`. The multi-channel **`OutreachChannel` port** (`backend-ts/src/case/outreach-channel.ts`) generalizes this: `ChannelType` EMAIL/SMS/PHONE each have a simulated adapter (EMAIL delegates to the existing simulated email service; SMS/PHONE are body-only), plus an inert **DataChaser stub** (`dataChaserChannel` — returns QUEUED with a self-describing note, no real HTTP). `resolveChannel(type, env)` returns the simulated adapter **by default** and the DataChaser stub **only** when both `WORKWELL_OUTREACH_DATACHASER_API_KEY` + `WORKWELL_OUTREACH_DATACHASER_BASE_URL` are set (inert-unless-configured, mirroring SendGrid). Simulated by default on the demo stack.
+- `stores` (campaign): the **`CampaignStore` port** (`backend-ts/src/stores/campaign-store.ts`) with an audit-backed demo adapter (`audit-campaign-store.ts`) — a campaign persists as a single `OUTREACH_CAMPAIGN_COMPLETED` audit event (payload `{campaign, recipients}`); reads scan `listAuditEvents` filtered by event type (O(ledger-size), demo-scale). **No new DDL** on the SQLite floor or the Pg ceiling. The production drop-in is a `PgCampaignStore` over `outreach_campaigns` + `outreach_delivery_log` (documented, not built). Wired in `factory.ts` for both floor + ceiling.
 - `config`: cross-cutting app/security/CORS/runtime configuration.
 - `security`: HTTP security policy and allowed origins.
 - `web`: REST controllers and request/response contracts.
@@ -63,7 +64,8 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `/programs/hierarchy`: enterprise→location→provider→patient drill-down (nested expandable rollup table with a measure filter; linked from `/programs`).
 - `/runs`: run history, run detail, outcomes table, rerun selected scope.
 - `/cases`: worklist with filters, search, bulk actions, exports.
-- `/cases/[id]`: case detail, timeline, evidence, outreach/escalate/assign/rerun actions.
+- `/cases/[id]`: case detail, timeline, evidence, outreach/escalate/assign/rerun actions (the outreach action has a channel selector — EMAIL/SMS/PHONE).
+- `/campaigns`: bulk outreach campaign launcher (measure/site/outcome/channel/template filters → Dry-run recipient preview → Send → result summary + recipients) + campaign history list → detail (#75 / E5).
 - `/measures`: measure list and create flow.
 - `/studio/[id]`: authoring tabs (Spec/CQL/Value Sets/Tests), compile + version cloning.
 - `/admin`: scheduler controls + integration health + manual sync.
@@ -131,6 +133,7 @@ Public API actions derive audit identity from the authenticated security context
 - FHIR R4 `MeasureReport` (#89 / E3.1): `GET /api/runs/{runId}/measure-report?type=summary|individual|bundle` → `application/fhir+json`. Built from persisted `outcomes` (proportion model: IPP=all, DENEX=EXCLUDED, DENOM=IPP−DENEX, NUMER=COMPLIANT, score=NUMER/DENOM); single-measure runs only (422 otherwise). No FHIR runtime dependency.
 - QRDA Category III aggregate stub (#91 / E3.3): `GET /api/runs/{runId}/qrda?format=xml` → `application/xml`. Hand-built CDA (well-formed, structurally representative; not IG-validated), aggregate counts via the shared `countPopulations`. See `docs/STANDARDS_CONFORMANCE.md`.
 - Hierarchy rollup (#74 / E4): `GET /api/hierarchy/rollup?measureId=&from=&to=` → a `HierarchyNode` (enterprise root) with reconciling counts at every level (parent totals = Σ children). Authenticated under `/api/**`; validates `from`/`to` as `YYYY-MM-DD` (400 on malformed). Read-time over the synthetic directory; no schema.
+- Outreach campaigns (#75 / E5): `POST /api/campaigns` (+ `?dryRun` for a recipient preview with no sends), `GET /api/campaigns`, `GET /api/campaigns/:id` — **gated to CASE_MANAGER/ADMIN** (matches per-case outreach; `authorize.ts` rule `rx("/api/campaigns/**") → [CM, A]`). The per-case outreach action `POST /api/cases/:id/actions/outreach` now accepts `?channel=EMAIL|SMS|PHONE` (default EMAIL). Sends are simulated by default; campaigns persist as `OUTREACH_CAMPAIGN_COMPLETED` audit events (no campaigns table — see DATA_MODEL §3.17).
 
 ## 8) Current Infra Split
 - MIE Create-a-Container hosts both frontend (`twh`) and the TypeScript backend (`twh-api-ts`) processes.

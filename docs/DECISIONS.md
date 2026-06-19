@@ -1,5 +1,53 @@
 # Architecture Decision Records
 
+## ADR-011: E5 outreach at scale — multi-channel `OutreachChannel` port + staged (audit-backed → Pg) campaign persistence
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+- **Epic:** #75 (E5 outreach at scale)
+- **Context:** E5 generalizes per-case outreach into (a) multiple delivery channels and (b) bulk
+  campaigns over many cases. Two design questions follow: how to add SMS/PHONE and a real outreach
+  vendor (DataChaser) without violating the CLAUDE.md "simulated by default on the demo stack" hard
+  rule, and how to persist a campaign given that schema is owner-gated (both the SQLite floor
+  `schema.ts` **and** the Pg ceiling `schema-pg.ts`) and the actual sends are still simulated. Contrast
+  with E4 (ADR-010), where the hierarchy was a **derived** read-time view — so adding no schema was
+  the *correct* model there. A campaign is different: it is **created state** (an operator launches it
+  with specific filters/channel and gets back a result), not derivable from existing rows.
+- **Decision:**
+  - **Multi-channel `OutreachChannel` port** (`backend-ts/src/case/outreach-channel.ts`):
+    `ChannelType` EMAIL/SMS/PHONE, each with a **simulated** adapter (EMAIL delegates to the existing
+    simulated email service; SMS/PHONE body-only), plus an inert **DataChaser stub** (`dataChaserChannel`
+    — returns QUEUED with a self-describing stub note, **no real HTTP**). `resolveChannel(type, env)`
+    returns the simulated adapter **by default** and the DataChaser stub **only** when both
+    `WORKWELL_OUTREACH_DATACHASER_API_KEY` + `WORKWELL_OUTREACH_DATACHASER_BASE_URL` are set
+    (inert-unless-configured, mirroring the SendGrid posture). `dispatchOutreach` (`case-outreach.ts`)
+    is the shared send core for both single-case send and campaigns; the per-case action and
+    `POST /api/cases/:id/actions/outreach?channel=` honor a channel (default EMAIL; PHONE → `tel:`,
+    SMS → `sms:`, EMAIL → `@workwell-demo.dev` synthetic addresses).
+  - **Staged campaign persistence behind a `CampaignStore` port — audit-backed NOW, Pg tables LATER.**
+    A campaign persists as a single `OUTREACH_CAMPAIGN_COMPLETED` audit event (payload =
+    `{campaign, recipients}`); the demo adapter (`audit-campaign-store.ts`) reads by scanning
+    `listAuditEvents` and filtering by event type (O(ledger-size), demo-scale). **No new DDL** on either
+    floor or ceiling. The documented production drop-in is a `PgCampaignStore` over `outreach_campaigns`
+    + `outreach_delivery_log` (+ an owner migration). **Why staged rather than just writing the tables:**
+    because the campaign *is* created state it cannot be derived (so ADR-010's no-schema rationale does
+    not transfer), **but** the sends are simulated, DataChaser is a stub, and the schema is owner-gated
+    on both stores — so writing real tables now would add DDL the simulated layer can't actually
+    exercise. A port stages the decision: the demo runs audit-backed today; the Pg store drops in when
+    real sends + owner-approved schema land together.
+  - **`POST /api/campaigns` gated to CASE_MANAGER/ADMIN** (`authorize.ts` rule
+    `rx("/api/campaigns/**") → [CM, A]`), matching per-case outreach — this also closed an authz gap
+    found in review (campaigns must not be more permissive than the single-case action they batch).
+- **Consequences:**
+  - Adding a real channel/vendor is a port adapter swap behind `resolveChannel`, env-gated; the demo
+    stays simulated by default with zero config (CLAUDE.md hard rule preserved). DataChaser is an inert
+    stub until configured — no live HTTP, no overclaim.
+  - Campaign reads are O(ledger-size) on the audit adapter — acceptable at demo scale, and the reason
+    the Pg drop-in exists for production.
+  - No schema migration today; no AI/compliance-logic change — campaigns send outreach, they never
+    decide compliance. CQL `Outcome Status` remains the sole source of truth.
+  - Ships on `feat/issue-75-outreach-at-scale`; deploys on merge to `main` (not yet live).
+
 ## ADR-010: E4 multi-level hierarchy — provider = attributed clinician, modeled in the synthetic directory (no DB schema)
 
 - **Date:** 2026-06-18
