@@ -1,5 +1,23 @@
 # Architecture Decision Records
 
+## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
+
+- **Date:** 2026-06-19
+- **Status:** **Deferred** (recommendation only). E9 (#78) is a spike / decision memo, not a build.
+- **Context:** The charter's "CQL → SQL" is the biggest architectural fork (Q2): run measures *inside*
+  WebChart's MariaDB report engine (transpile), keep the CQF/FHIR engine as the report engine
+  (adapter), or hybrid.
+- **Recommendation (not yet a committed decision):** **Hybrid, FHIR-native-first (Option C).**
+  Near-term integration is a real WebChart `PatientDataProvider` adapter (reuses the E1 seam + the
+  JVM-free CQF engine; full CQL fidelity, lowest risk). Treat "CQL→SQL" as a bounded, opt-in second
+  executor via **SQL-on-FHIR v2 `ViewDefinition`s** only for reports that must run in MariaDB,
+  cross-checked against the FHIR-native oracle. **Reject** a wholesale CQL→MariaDB transpiler — the
+  only concrete CQL→SQL transpiler (VA) is Databricks-only/partial and the field targets Spark/Hive,
+  not transactional MariaDB.
+- **Decision owner:** Doug (gated on the five Q2 questions in the memo).
+- **Full analysis:** `docs/CQL_TO_SQL_BRIDGE_DECISION_MEMO.md`. When Doug answers Q2, the chosen path
+  becomes a normal epic and this ADR is superseded by the decision record.
+
 ## ADR-013: E7 order-proposal engine — `ProposedOrder`/`StandingOrderProvider` port (EH-ready, simulated by default)
 
 - **Date:** 2026-06-19
