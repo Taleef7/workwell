@@ -28,6 +28,7 @@ import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
 import { rerunToVerify, type RerunDeps } from "../case/case-rerun.ts";
+import { isChannelType } from "../case/outreach-channel.ts";
 import {
   uploadEvidence,
   listEvidence,
@@ -129,7 +130,9 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     }
     const sendId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach$/)?.[1];
     if (sendId) {
-      const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"));
+      const channelParam = url.searchParams.get("channel");
+      const channel = isChannelType(channelParam) ? channelParam : undefined; // invalid/absent → undefined → EMAIL default
+      const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"), channel);
       return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
     }
     const rerunId = url.pathname.match(/^\/api\/cases\/([^/]+)\/rerun-to-verify$/)?.[1];
