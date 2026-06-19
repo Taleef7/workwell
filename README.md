@@ -144,6 +144,7 @@ npm run build
 - `GET /api/hierarchy/rollup?measureId=&from=&to=`
 - `POST /api/campaigns` (+ `?dryRun`) · `GET /api/campaigns` · `GET /api/campaigns/:id` (CASE_MANAGER/ADMIN)
 - `GET /api/immunization/forecast?subjectId=&asOf=` (advisory; authenticated; read-time; no schema)
+- `GET /api/orders/proposals?measureId=&subjectId=&from=&to=&format=domain|fhir` (CASE_MANAGER/ADMIN; advisory; read-time; no schema)
 
 For full API surface and behavioral notes, see docs linked below.
 

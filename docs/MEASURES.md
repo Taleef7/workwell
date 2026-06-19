@@ -292,3 +292,10 @@ Each outcome evidence payload includes:
   `GET /api/runs/{runId}/qrda?format=xml` — well-formed CDA carrying the aggregate population counts +
   performance rate (reuses the MeasureReport `countPopulations`); a stub, not IG-validated (#91 / E3.3).
   See `docs/STANDARDS_CONFORMANCE.md`.
+- **E7 action-evaluator order map (#77):** each runnable measure has a corresponding proposed order
+  code in `backend-ts/src/order/order-catalog.ts`. Codes reuse the `terminology_mappings` seed
+  standards where present: audiogram → CPT 92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141;
+  hazwoper → `hazwoper-exam` in `urn:workwell:vs:hazwoper-exams`. Measures without a seed mapping
+  (e.g., BMI screening, hypertension, cholesterol, CMS eCQMs) use LOCAL `urn:workwell:orders` codes
+  pending standard terminology alignment. `GET /api/orders/proposals` returns `ProposedOrder` records
+  (or FHIR R4 `ServiceRequest` bundles) for at-risk subjects; proposals are advisory only.

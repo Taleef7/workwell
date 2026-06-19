@@ -332,6 +332,28 @@ immunization history; it is never persisted in `backend-ts` today.
 - `adult_immunization` adds no new columns to `outcomes`, `cases`, or any other table. The advisory
   `immunizationForecast` block in `GET /api/cases/:id` is assembled at read-time.
 
+### 3.19 Order proposals — derived read-time; no `orders` table
+E7 (#77) adds an advisory proposed-order engine behind `GET /api/orders/proposals`. **There is no
+`orders` or `submitted_orders` table in `backend-ts` today** (no new DDL on the SQLite floor or the
+Pg ceiling). Proposals are derived read-time from `outcomes`:
+
+- `proposeOrders(outcomes, provider)` in `backend-ts/src/order/order-proposal.ts` selects the
+  at-risk subset (OVERDUE/DUE_SOON/MISSING_DATA), maps each to a `ProposedOrder` via the
+  action-evaluator catalog, deduplicates in-batch, and suppresses subjects with a qualifying standing
+  order (returned separately in `suppressed`).
+- The `StandingOrderProvider` port (`backend-ts/src/order/standing-order-provider.ts`) abstracts the
+  standing-order query: `simulatedStandingOrderProvider` (deterministic, no HTTP) is the default;
+  `ehStandingOrderProvider` is an inert stub until both `WORKWELL_EH_FHIR_BASE_URL` +
+  `WORKWELL_EH_FHIR_API_KEY` are set. The real EH query is a FHIR `ServiceRequest?subject=&status=active`
+  search — a drop-in behind the port when credentials are available.
+- Proposals are **advisory only** — a human reviews and submits; nothing is auto-submitted. Proposals
+  are not persisted.
+
+**Production drop-in (documented, not built):** when the real EH write path is wired, a future
+`OrderSubmitter` port posts `ServiceRequest` resources to EH and an owner-gated
+`submitted_orders` audit table records each submission (submittedAt, actor, measureId, subjectId,
+orderCode, ehOrderId). Until then the port keeps the data model unchanged.
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 
