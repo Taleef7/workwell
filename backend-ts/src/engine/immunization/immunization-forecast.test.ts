@@ -47,3 +47,23 @@ test("only one env var set still returns simulated (inert-unless-fully-configure
   assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_API_KEY: "k" }), simulatedForecaster);
   assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "https://x" }), simulatedForecaster);
 });
+
+// Regression: HepB completed series must be UP_TO_DATE with nextDueDate === null, not OVERDUE.
+// emp-001 has hash % 3 === 2, so dosesReceived === 3 (=== dosesRequired).
+test("HepB completed primary series is UP_TO_DATE with nextDueDate null (not OVERDUE)", () => {
+  const f = simulatedForecaster.forecast("emp-001", "2026-06-19");
+  const hepb = f.series.find((s) => s.series === "HEPB")!;
+  assert.equal(hepb.status, "UP_TO_DATE");
+  assert.equal(hepb.nextDueDate, null);
+  assert.equal(hepb.dosesReceived, 3);
+  assert.equal(hepb.reason, "primary series complete");
+});
+
+// Regression: TDAP nextDueDate for emp-006 must be exactly 3650 days after lastDoseDate.
+// lastDoseDate = "2021-06-25", nextDueDate = "2031-06-23" (computed and pinned).
+test("TDAP nextDueDate for emp-006 is exactly lastDoseDate + 3650 days (pinned to 2031-06-23)", () => {
+  const f = simulatedForecaster.forecast("emp-006", "2026-06-19");
+  const tdap = f.series.find((s) => s.series === "TDAP")!;
+  assert.equal(tdap.lastDoseDate, "2021-06-25");
+  assert.equal(tdap.nextDueDate, "2031-06-23");
+});
