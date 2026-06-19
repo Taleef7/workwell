@@ -1,5 +1,74 @@
 # Architecture Decision Records
 
+## ADR-012: E6 immunization & forecasting — `ImmunizationForecast` port (ICE-ready, simulated by default) + AIS-E Td/Tdap measure
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+- **Epic:** #76 (E6 immunization & forecasting)
+- **Context:** E6 adds immunization forecasting alongside a new runnable measure for adult immunization
+  status. Three design questions had to be resolved up front.
+
+  **1. Port shape and ICE integration.** Immunization forecasting in clinical quality uses the
+  Immunization Calculation Engine (ICE), a CDC-supported CDS service. The demo stack must stay
+  simulated by default (CLAUDE.md hard rule), and the exact ICE integration surface (CDS Hooks
+  vs. the REST API vs. a WebChart-ICE bridge) is an open question deferred to Doug (#76 Q5). The
+  `OutreachChannel` port pattern from ADR-011 applies directly: simulated adapter by default, inert
+  stub when real env vars are set.
+
+  **2. Measure vs. forecast split.** The synthetic data model is single-event per subject per
+  measure — one enrollment/waiver/event Condition. A true multi-series composite immunization measure
+  (Td/Tdap + Influenza + Hepatitis B) would require reworking the shared synthetic infra used by all
+  10+ existing measures. Forcing a composite on the existing infra would be a wide blast radius with
+  no correctness benefit.
+
+  **3. Measure choice.** NCQA HEDIS AIS-E (Adult Immunization Status) is the natural fit for a TWH
+  employer wellness platform. CMS117 (Pneumococcal Vaccination, pediatric) is a mismatch for an
+  adult workforce. CMS127 (Pneumococcal Vaccination for adults 65+) was explicitly considered and
+  rejected: it covers a narrow age cohort, measures ever-received not time-to-next, and forecasting
+  is ill-suited to a near-permanent binary outcome. AIS-E Td/Tdap single-series (10-year window) is
+  the correct real NCQA measure, implementable within the existing single-event model.
+
+- **Decision:**
+  - **`ImmunizationForecast` port** (`backend-ts/src/engine/immunization/immunization-forecast.ts`):
+    `ImmunizationForecast` interface + `simulatedForecaster` default (ACIP-style "next dose due" over
+    the port's OWN deterministic per-subject synthetic immunization history — `syntheticImmunizationHistory`,
+    epoch-anchored — covering 3 series: Td/Tdap 10y, Influenza annual, Hepatitis B 3-dose series) +
+    an inert `iceForecaster` stub (selected only when both `WORKWELL_IMMZ_ICE_API_KEY` +
+    `WORKWELL_IMMZ_ICE_BASE_URL` are set; returns a "ICE not wired (Doug Q5)" reason; **no real HTTP**).
+    `resolveForecaster(env)` selects between them. Mirroring ADR-011's SendGrid/DataChaser posture:
+    **simulated by default, inert-unless-configured**.
+  - **Forecasting is advisory only** — an analog to the AI_GUARDRAILS rule. `ImmunizationForecast`
+    output is labelled advisory on every surface; `CQL Outcome Status` remains the sole compliance
+    authority. The forecaster never sets or overrides a case status.
+  - **`adult_immunization` measure** — AIS-E Td/Tdap single-series: CQL `backend-ts/measures/adult_immunization.cql`
+    + YAML, seeded Active in the HEDIS wellness category. 10-year window (3650 days); Td/Tdap
+    contraindication → EXCLUDED; refusal (documented `tdap-refusal` Condition) stays open (a `Refused`
+    define flags it but does not exclude — refusals need case-manager intervention). Outcomes: COMPLIANT
+    ≤3590 days, DUE_SOON 3591–3650, OVERDUE >3650, MISSING_DATA no record. Catalog total: **61 measures,
+    11 runnable**.
+  - **Measure vs. forecast split** is the correct model: the measure covers the NCQA single-series
+    Td/Tdap obligation (answering "is this worker current?"); the forecaster covers all 3 series
+    advisory-only (answering "when is the next dose due?"). A composite multi-series measure and
+    age-gated indicators (zoster 50+, pneumococcal 65+) are documented follow-ups.
+  - **Case-detail enrichment:** `GET /api/cases/:id` attaches an advisory `immunizationForecast` (the
+    3-series forecast) for `adult_immunization` cases only; rendered as an advisory panel on `/cases/[id]`.
+  - **Endpoint:** `GET /api/immunization/forecast?subjectId=&asOf=` → `ImmunizationForecast` JSON;
+    `asOf` defaults to today, validated YYYY-MM-DD (400 on malformed); authenticated under `/api/**`.
+    Read-time; **no schema change**.
+  - **Doug Q5 deferred** behind `iceForecaster` stub. When Doug's answer arrives, the production ICE
+    adapter drops in behind `resolveForecaster` with zero impact on the measure or case logic.
+
+- **Consequences:**
+  - Adding a real ICE adapter is a port adapter swap behind `resolveForecaster`, env-gated; the demo
+    stays simulated by default with zero config (CLAUDE.md hard rule preserved). ICE is inert until
+    configured — no live HTTP, no overclaim.
+  - No schema migration today. The production drop-in is an `immunization_forecasts` cache table fed
+    by a real ICE adapter (analogous to the §3.17 E5 `PgCampaignStore` drop-in). `adult_immunization`
+    adds no new columns.
+  - Forecasting is advisory; the `ImmunizationForecast` port never influences `Outcome Status`. This
+    is the immunization analog of "AI never decides compliance."
+  - Ships on `feat/issue-76-immunization-forecasting`; deploys on merge to `main`.
+
 ## ADR-011: E5 outreach at scale — multi-channel `OutreachChannel` port + staged (audit-backed → Pg) campaign persistence
 
 - **Date:** 2026-06-19

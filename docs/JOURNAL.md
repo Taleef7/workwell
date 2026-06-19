@@ -1,5 +1,54 @@
 # Journal
 
+## 2026-06-19 — E6 (#76): immunization & forecasting
+
+E6 shipped. Two deliverables: the **`ImmunizationForecast` port** and a new runnable **AIS-E Td/Tdap
+measure** — 61 measures total, 11 runnable.
+
+**`ImmunizationForecast` port** (`backend-ts/src/engine/immunization/immunization-forecast.ts`):
+mirrors the ADR-011 `OutreachChannel` pattern. `simulatedForecaster` is the default — it computes
+ACIP-style next-dose-due over its own deterministic per-subject synthetic immunization history
+(epoch-anchored, 3 series: Td/Tdap 10y, Influenza annual, Hepatitis B 3-dose). `iceForecaster` is
+an inert stub activated only when both `WORKWELL_IMMZ_ICE_API_KEY` + `WORKWELL_IMMZ_ICE_BASE_URL`
+are set (inert-unless-configured; performs no HTTP; returns a "ICE not wired (Doug Q5)" reason).
+`resolveForecaster(env)` selects between them. Doug Q5 (CDS Hooks vs. ICE REST vs. WebChart-ICE
+bridge) stays deferred behind the stub. Forecasting is advisory only — the CQL `Outcome Status`
+remains the sole compliance authority. ADR-012 captures the full rationale.
+
+**Measure choice — real NCQA research:** NCQA HEDIS AIS-E (Adult Immunization Status — Employer) is
+the correct fit for a TWH employer wellness platform. CMS117 (Pneumococcal Vaccination) targets the
+pediatric population — a mismatch. CMS127 (Pneumococcal Vaccination, adults 65+) was explicitly
+considered and rejected: it covers a narrow age cohort (65+), measures ever-received not
+time-to-next, and yields a near-permanent binary outcome that is ill-suited to forecasting. AIS-E
+Td/Tdap single-series (10-year window) is the real NCQA measure and implementable within the
+existing single-event synthetic data model.
+
+**Measure vs. forecast split (design decision):** the existing single-event-per-subject synthetic
+model cannot cleanly host a true multi-series composite measure without reworking shared infra used
+by all 10+ existing measures. Decision: the MEASURE covers the AIS-E Td/Tdap single-series obligation
+("is this worker currently within the 10-year window?"); the FORECASTER covers all 3 series advisory-
+only ("when is each next dose due?"). A composite multi-series measure + zoster (50+)/pneumococcal
+(65+) age-gated indicators are documented follow-ups.
+
+**`adult_immunization` measure:** CQL `backend-ts/measures/adult_immunization.cql` + YAML, seeded
+Active in HEDIS wellness. 10-year window (3650 days). Td/Tdap contraindication → EXCLUDED; refusal
+(`tdap-refusal` Condition) → case stays OPEN with a `Refused` define flagged in evidence_json (case
+manager intervention needed; refusal never excludes). Outcomes: COMPLIANT ≤3590d, DUE_SOON
+3591–3650d, OVERDUE >3650d, MISSING_DATA no record.
+
+**Case-detail enrichment:** `GET /api/cases/:id` attaches an advisory `immunizationForecast` (the
+3-series forecast) for `adult_immunization` cases only; rendered as an advisory panel on `/cases/[id]`.
+
+**Endpoint:** `GET /api/immunization/forecast?subjectId=&asOf=` (`backend-ts/src/routes/immunization.ts`,
+mounted under the authenticated `/api/**` block). `asOf` defaults to today, validated YYYY-MM-DD
+(400 on malformed); subjectId required (400 if missing). Read-time; no schema change.
+
+**No schema change.** Refusal/contraindication ride in `evidence_json`. The production drop-in is an
+`immunization_forecasts` cache table fed by a real ICE adapter (analogous to the E5 `PgCampaignStore`
+drop-in — see DATA_MODEL §3.18). ADR-012 added to DECISIONS.md.
+
+Backend suite: 488 pass / 0 fail. Frontend lint + build clean. Deploys on merge to `main`.
+
 ## 2026-06-19 — E5 (#75): outreach at scale (multi-channel + bulk campaigns)
 
 E5 shipped. Outreach went multi-channel and bulk, all simulated by default and with **no schema
