@@ -63,6 +63,29 @@ test("getCampaignWithRecipients round-trips in one scan and returns null for an 
   assert.equal(await store.getCampaignWithRecipients("nope"), null);
 });
 
+test("listCampaigns returns multiple campaigns newest-first (recordCampaign order reversed)", async () => {
+  // Fresh store + db so ordering is independent of the other tests' state.
+  const isoPath = join(tmpdir(), `workwell-camp-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(isoPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const isoStore = new AuditBackedCampaignStore(new SqliteCaseEventStore(db));
+
+  // Record in call order c1, c2, c3 — id is monotonic, so the ORDER BY id DESC tiebreaker
+  // guarantees newest-first even if occurred_at granularity collides.
+  await isoStore.recordCampaign(mkCampaign("c1"), [mkRecipient("c1", "case-1")]);
+  await isoStore.recordCampaign(mkCampaign("c2"), [mkRecipient("c2", "case-2")]);
+  await isoStore.recordCampaign(mkCampaign("c3"), [mkRecipient("c3", "case-3")]);
+
+  const list = await isoStore.listCampaigns();
+  assert.deepEqual(
+    list.map((c) => c.id),
+    ["c3", "c2", "c1"],
+    "newest-first across multiple campaigns",
+  );
+
+  try { rmSync(isoPath, { force: true }); } catch { /* best effort */ }
+});
+
 test("non-campaign audit events are excluded (no undefined entries)", async () => {
   // Fresh store + db so this is independent of the other tests' ordering/state.
   const isoPath = join(tmpdir(), `workwell-camp-${crypto.randomUUID()}.sqlite`);

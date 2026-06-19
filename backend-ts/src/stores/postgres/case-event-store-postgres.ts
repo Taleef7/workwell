@@ -134,6 +134,15 @@ export class PgCaseEventStore implements CaseEventStore {
     return rows.map(toAuditEventRow);
   }
 
+  async recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]> {
+    const { rows } = await this.pool.query<AuditRow>(
+      `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+         FROM ${SPIKE_SCHEMA}.audit_events WHERE event_type = $1 ORDER BY occurred_at DESC, id DESC LIMIT $2`,
+      [eventType, limit],
+    );
+    return rows.map(toAuditEventRow);
+  }
+
   async auditEventsByRun(runId: string): Promise<AuditEventRow[]> {
     const { rows } = await this.pool.query<AuditRow>(
       `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
