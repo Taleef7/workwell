@@ -18,9 +18,11 @@ export interface MeasureBinding {
   enrollment: CodeBinding;
   waiver: CodeBinding;
   event: CodeBinding & { type: EventType };
+  refusal?: CodeBinding;
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {
+  "adult_immunization": { rateKey: "adult_immunization", complianceWindowDays: 3650, enrollment: {"code":"adult-immz-enrolled","valueSet":"urn:workwell:vs:adult-immz-enrollment"}, waiver: {"code":"tdap-contraindication","valueSet":"urn:workwell:vs:tdap-contraindication"}, event: {"code":"tdap-vaccine","valueSet":"urn:workwell:vs:tdap-vaccines","type":"immunization"}, refusal: {"code":"tdap-refusal","valueSet":"urn:workwell:vs:tdap-refusal"} },
   "audiogram": { rateKey: "audiogram", complianceWindowDays: 365, enrollment: {"code":"hearing-enrollment","valueSet":"urn:workwell:vs:hearing-enrollment"}, waiver: {"code":"audiogram-waiver","valueSet":"urn:workwell:vs:audiogram-waiver"}, event: {"code":"audiogram-procedure","valueSet":"urn:workwell:vs:audiogram-procedures","type":"procedure"} },
   "cholesterol_ldl": { rateKey: "cholesterol_ldl", complianceWindowDays: 365, enrollment: {"code":"cholesterol-enrolled","valueSet":"urn:workwell:vs:cholesterol-program"}, waiver: {"code":"cholesterol-exempt","valueSet":"urn:workwell:vs:cholesterol-exemption"}, event: {"code":"ldl-lab","valueSet":"urn:workwell:vs:ldl-labs","type":"procedure"} },
   "cms122": { rateKey: "cms122", complianceWindowDays: 365, enrollment: {"code":"cms122-diabetes","valueSet":"urn:workwell:vs:cms122-diabetes"}, waiver: {"code":"cms122-excluded","valueSet":"urn:workwell:vs:cms122-excluded"}, event: {"code":"hba1c-obs","valueSet":"urn:workwell:vs:cms122-hba1c","type":"observation"} },

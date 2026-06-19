@@ -40,11 +40,14 @@ import {
   type EvidenceDeps,
 } from "../case/evidence-service.ts";
 import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
+import { resolveForecaster } from "../engine/immunization/immunization-forecast.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
   BUCKET: CloudBucket;
+  WORKWELL_IMMZ_ICE_API_KEY?: string;
+  WORKWELL_IMMZ_ICE_BASE_URL?: string;
 }
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
@@ -253,7 +256,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);
-    return json(toCaseDetail(c, outcome, timeline, latest));
+    const today = new Date().toISOString().slice(0, 10);
+    const immunizationForecast =
+      c.measureId === "adult_immunization" ? resolveForecaster(env).forecast(c.employeeId, today) : undefined;
+    return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast));
   }
 
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;

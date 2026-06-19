@@ -8,10 +8,10 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 |----------|-------|--------|-----|
 | OSHA occupational safety — fully evaluated | 4 | Active | Full CQL, runnable |
 | OSHA occupational safety — catalog only | 3 | Draft / Approved / Deprecated | Partial or no CQL |
-| HEDIS wellness — fully evaluated | 4 | Active | Full CQL, runnable |
+| HEDIS wellness — fully evaluated | 5 | Active | Full CQL, runnable |
 | CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
 | CMS eCQM catalog (2026 performance period) | 47 | Draft | Catalog entry only — CQL authoring pending |
-| **Total** | **60** | | |
+| **Total** | **61** | | |
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 
@@ -111,7 +111,7 @@ These three measures are seeded for catalog richness and demonstrate the full me
 
 ## Category 3 — HEDIS Wellness (Full CQL)
 
-Four employer wellness / HEDIS-style measures with complete CQL and active evaluation. These represent the wellness side of TWH — chronic disease management and preventive health screening programs run by occupational health departments.
+Five employer wellness / HEDIS-style measures with complete CQL and active evaluation. These represent the wellness side of TWH — chronic disease management, preventive health screening, and adult immunization programs run by occupational health departments.
 
 ### 3.1 Hypertension BP Screening
 - Policy reference: HEDIS BPC / JPMC Wellness Rewards
@@ -137,12 +137,44 @@ Four employer wellness / HEDIS-style measures with complete CQL and active evalu
 - Tags: `wellness`, `cholesterol`, `cardiovascular`
 - Compliance window: 365 days annual
 
-All four wellness measures use the same outcome pattern:
+The four chronic-disease/screening measures above use the same outcome pattern:
 - `EXCLUDED` when `Has Medical Exemption = true`
 - `MISSING_DATA` when enrolled, not exempt, no qualifying lab/screening date
 - `OVERDUE` when enrolled, not exempt, days since last event > compliance window
 - `DUE_SOON` when enrolled, not exempt, days approaching window end
 - `COMPLIANT` when enrolled, not exempt, days within window
+
+### 3.5 Adult Immunization Status — Td/Tdap (AIS-E)
+- Policy reference: NCQA HEDIS AIS-E (Adult Immunization Status — Employer)
+  URL: https://www.ncqa.org/report-cards/health-plans/state-of-health-care-quality-report/adult-immunization-status-ais-e/
+  Clinical criteria: HEDIS MY2025 Adult Measures Clinical Guide (AIS-E), https://www.alliancehealthplan.org/document-library/Adult-Measures-Practitioner-Clinical-Guide-for-HEDIS-MY2025.pdf
+  (CMS127 v11 was considered and rejected — age 65+/ever-never design, not a good forecasting fit:
+   https://ecqi.healthit.gov/ecqm/ec/2023/cms0127v11)
+- CQL file: `backend-ts/measures/adult_immunization.cql`
+- Tags: `wellness`, `immunization`, `tdap`, `hedis`, `ais-e`
+- Compliance window: 10 years / 3650 days (DueSoon 3591–3650 days)
+
+#### Define logic
+- Program eligibility: `In Immunization Program`
+- Exemption: `Has Td/Tdap Contraindication` (clinical contraindication Condition)
+- Refusal: `Refused Td/Tdap` (documented `tdap-refusal` Condition — does NOT exclude; case stays open)
+- Recency: `Most Recent Td/Tdap Date`
+- Aging metric: `Days Since Last Td/Tdap`
+
+#### Outcome mapping
+- `EXCLUDED` when `Has Td/Tdap Contraindication = true`
+- `MISSING_DATA` when enrolled, not contraindicated, no Td/Tdap record on file
+- `OVERDUE` when enrolled, not contraindicated, days since last dose > 3650 (>10 years)
+- `DUE_SOON` when enrolled, not contraindicated, days in (3590..3650]
+- `COMPLIANT` when enrolled, not contraindicated, days <= 3590
+
+Refusal: a `Refused` define in evidence_json flags the refusal; the case stays OPEN and is routed
+to a case manager for intervention. Refusal does not trigger an EXCLUDED outcome.
+
+**Advisory immunization forecast:** for `adult_immunization` cases, `GET /api/cases/:id` attaches
+an advisory `immunizationForecast` covering all 3 ACIP series (Td/Tdap, Influenza annual, Hepatitis B
+3-dose). This is computed by the `ImmunizationForecast` port (simulated default; ICE-ready; ADR-012)
+and is **advisory only** — it never affects the CQL `Outcome Status`.
 
 ---
 
@@ -230,13 +262,13 @@ Each outcome evidence payload includes:
 
 ## Implementation Notes
 
-- All 8 active CQL measures now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
+- All active CQL measures (11) now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
   **(E3.2 / #90 update)** A `ValueSetResolver` seam now supports real value-set expansion: the engine
   can run in an expansion mode (an optional resolver → a populated `cql.CodeService`) where a CQL
   value-set retrieve (`[Procedure: "Audiogram Procedures"]`) filters by real membership. Audiogram
   ships a value-set-retrieve ELM variant proven byte-equal to the inline path (cross-mode golden
   parity); the inline path remains the default. Live VSAC resolution is a future drop-in behind the port.
-- All four HEDIS wellness measures are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
+- All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
   IG/validator-validated — `meta.profile` is metadata, so evaluation outcomes are unchanged. See
@@ -245,7 +277,13 @@ Each outcome evidence payload includes:
 - A headless CLI (`pnpm evaluate --patient <bundle.json> --measure <id>`, `backend-ts/src/engine/cli/`)
   evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
   `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`
-  asserts outcomes for all 10 measures × 4 scenarios (#72 / E2).
+  asserts outcomes for all 11 measures × 4 scenarios (#72 / E2, updated for E6).
+- **Immunization forecasting (E6 / #76):** `GET /api/immunization/forecast?subjectId=&asOf=` returns an
+  advisory `ImmunizationForecast` (Td/Tdap, Influenza, Hepatitis B next-dose-due) computed by the
+  `ImmunizationForecast` port (`backend-ts/src/engine/immunization/immunization-forecast.ts`). The
+  simulated forecaster is the default; an ICE adapter can be activated by setting
+  `WORKWELL_IMMZ_ICE_API_KEY` + `WORKWELL_IMMZ_ICE_BASE_URL` (inert stub until configured). The
+  forecast is **advisory only** — the CQL `Outcome Status` remains the sole compliance authority (ADR-012).
 - A completed single-measure run can be exported as a FHIR R4 `MeasureReport` (summary + per-subject
   individual + a collection Bundle) via `GET /api/runs/{runId}/measure-report` — built from persisted
   `outcomes` with a proportion population model whose counts reconcile 1:1 with the run's outcomes

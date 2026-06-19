@@ -14,6 +14,7 @@ import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -43,6 +44,7 @@ export interface CaseDetail {
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
   timeline: unknown[];
+  immunizationForecast?: ImmunizationForecast;
 }
 
 function outcomeSummaryFor(outcome: string): string {
@@ -81,7 +83,7 @@ function expressionResults(evidence: unknown): ExprResult[] {
 export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
-  const waiverDefine = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
+  const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
 
   // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
@@ -117,11 +119,18 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   };
 }
 
+/**
+ * Build a `CaseDetail` response object from a case row, its latest outcome, and optional
+ * contextual extras. The optional `immunizationForecast` advisory is attached ONLY for
+ * `adult_immunization` cases (guard lives in the route); it is omitted (undefined) for all
+ * other measures so the response key is absent on non-immunization cases.
+ */
 export function toCaseDetail(
   c: CaseRecord,
   outcome: OutcomeRecord | null,
   timeline: unknown[] = [],
   latestOutreachDeliveryStatus: string | null = null,
+  immunizationForecast?: ImmunizationForecast,
 ): CaseDetail {
   const emp = employeeById(c.employeeId);
   const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
@@ -156,5 +165,6 @@ export function toCaseDetail(
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
     latestOutreachDeliveryStatus,
     timeline,
+    ...(immunizationForecast ? { immunizationForecast } : {}),
   };
 }
