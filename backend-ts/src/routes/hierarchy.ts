@@ -7,6 +7,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildHierarchyRollup } from "../program/hierarchy-rollup.ts";
+import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 
 interface HierarchyEnv {
   DB: CloudDatabase;
@@ -21,11 +22,20 @@ export async function handleHierarchy(req: Request, env: HierarchyEnv): Promise<
   const url = new URL(req.url);
   if (url.pathname !== "/api/hierarchy/rollup") return null;
 
-  const s = await getStores(env);
   const q = url.searchParams;
+  let from: string | undefined;
+  let to: string | undefined;
+  try {
+    from = parseQueryDate(q.get("from"), "from");
+    to = parseQueryDate(q.get("to"), "to");
+  } catch (err) {
+    if (err instanceof QueryDateError) return json({ error: "invalid_request", message: err.message }, 400);
+    throw err;
+  }
+  const s = await getStores(env);
   const tree = await buildHierarchyRollup(
     { outcomeStore: s.outcomes, caseStore: s.cases },
-    { measureId: q.get("measureId"), from: q.get("from"), to: q.get("to") },
+    { measureId: q.get("measureId"), from, to },
   );
   return json(tree);
 }

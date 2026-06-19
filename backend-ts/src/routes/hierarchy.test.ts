@@ -62,3 +62,21 @@ test("unrelated path → null", async () => {
   const res = await handleHierarchy(new Request("http://x/api/other", { method: "GET" }), env as never);
   assert.equal(res, null);
 });
+
+test("malformed from date → 400 (parity with /api/programs)", async () => {
+  const res = await get("?from=not-a-date");
+  assert.equal(res?.status, 400);
+  const body = (await res!.json()) as { message: string };
+  assert.match(body.message, /from must use YYYY-MM-DD/);
+  assert.equal((await get("?to=2026-13-01"))?.status, 400, "overflow month rejected");
+  assert.equal((await get("?from=2026-01-01&to=2026-12-31"))?.status, 200, "valid dates still 200");
+});
+
+test("unknown measureId → 200 with an empty enterprise tree", async () => {
+  const res = await get("?measureId=does-not-exist");
+  assert.equal(res?.status, 200);
+  const root = (await res!.json()) as { level: string; totals: { evaluated: number }; children: unknown[] };
+  assert.equal(root.level, "enterprise");
+  assert.equal(root.totals.evaluated, 0);
+  assert.equal(root.children.length, 0);
+});
