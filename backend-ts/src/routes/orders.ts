@@ -6,7 +6,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { proposeOrders, type AtRiskOutcome } from "../order/order-proposal.ts";
 import { resolveStandingOrderProvider, type StandingOrderEnv } from "../order/standing-order-provider.ts";
@@ -45,7 +45,7 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
   const s = await getStores(env);
   const atRisk: AtRiskOutcome[] = [];
   if (scope.length > 0) {
-    const all = (await s.outcomes.listOutcomesWithRun({ from, to })).filter((r) => isPopulationRun(r.runScopeType));
+    const all = (await s.outcomes.listOutcomesWithRun({ from, to })).filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
     const byMeasure = new Map<string, typeof all>();
     for (const r of all) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scope) {

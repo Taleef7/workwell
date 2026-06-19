@@ -9,6 +9,11 @@ export const round1 = (compliant: number, total: number): number => (total === 0
 /** Day-granular (YYYY-MM-DD) slice of an ISO timestamp. */
 export const day = (s: string): string => s.slice(0, 10);
 
+/** A run that finished a full pass (COMPLETED or PARTIAL_FAILURE) — proposals/exports should only
+ *  derive from terminal population runs, never an in-flight RUNNING run's partial outcomes. */
+export const isCompletedRun = (status: string): boolean =>
+  status.toUpperCase() === "COMPLETED" || status.toUpperCase() === "PARTIAL_FAILURE";
+
 /** The rows of the most-recent run (by runStartedAt) among the given rows; [] if none.
  *  Shared by the hierarchy rollup and the order-proposal route so "latest population run" can't drift. */
 export function latestRunRows<T extends { runId: string; runStartedAt: string }>(rows: T[]): T[] {

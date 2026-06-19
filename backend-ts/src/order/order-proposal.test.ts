@@ -45,6 +45,32 @@ test("in-batch dedupe: same subject+order proposed once", () => {
   assert.equal(suppressed.length, 0);
 });
 
+test("in-batch dedupe priority upgrade: routine first then urgent → emits urgent", () => {
+  // diabetes_hba1c DUE_SOON (routine) then cms122 OVERDUE (urgent) → same CPT 83036 key
+  // The second row must UPGRADE the proposal to urgent, not be dropped silently.
+  const rows: AtRiskOutcome[] = [
+    { subjectId: "e1", measureId: "diabetes_hba1c", status: "DUE_SOON" },
+    { subjectId: "e1", measureId: "cms122", status: "OVERDUE" },
+  ];
+  const { proposed, suppressed } = proposeOrders(rows, noStanding);
+  assert.equal(proposed.length, 1);
+  assert.equal(proposed[0]!.priority, "urgent", "priority upgraded to urgent by the OVERDUE row");
+  assert.equal(proposed[0]!.reasonOutcome, "OVERDUE", "reasonOutcome reflects the upgrading outcome");
+  assert.equal(suppressed.length, 0);
+});
+
+test("in-batch dedupe priority upgrade: urgent first then routine → stays urgent (no downgrade)", () => {
+  // Reverse order: OVERDUE seen first (urgent), DUE_SOON second (routine) — must NOT downgrade.
+  const rows: AtRiskOutcome[] = [
+    { subjectId: "e1", measureId: "cms122", status: "OVERDUE" },
+    { subjectId: "e1", measureId: "diabetes_hba1c", status: "DUE_SOON" },
+  ];
+  const { proposed, suppressed } = proposeOrders(rows, noStanding);
+  assert.equal(proposed.length, 1);
+  assert.equal(proposed[0]!.priority, "urgent", "urgent proposal is not downgraded by subsequent routine row");
+  assert.equal(suppressed.length, 0);
+});
+
 test("standing-order suppression moves a proposal to suppressed[]", () => {
   const standing: StandingOrderProvider = {
     activeOrdersFor: (id) => (id === "e1" ? [{ subjectId: "e1", order: { code: "92557", system: "http://www.ama-assn.org/go/cpt", display: "x" } }] : []),
