@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "adult_immunization-present_recent"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "adult_immunization-present_recent-enr",
+        "subject": {
+          "reference": "Patient/adult_immunization-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:adult-immz-enrollment",
+              "code": "adult-immz-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "adult_immunization-present_recent-evt",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/adult_immunization-present_recent"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:tdap-vaccines",
+              "code": "tdap-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}
