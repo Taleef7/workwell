@@ -55,6 +55,8 @@ export interface OutcomeWithRun {
   runStartedAt: string;
   /** The run's scope_type — lets rollups exclude single-subject CASE/EMPLOYEE reruns (#150 C4). */
   runScopeType: string;
+  /** The run's terminal status — lets order proposals exclude in-flight RUNNING runs (#77 C1). */
+  runStatus: string;
   subjectId: string;
   measureId: string;
   status: string;

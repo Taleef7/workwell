@@ -27,7 +27,8 @@ before(async () => {
   env = { DB: db };
   const runStore = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
-  // Seed a population (ALL_PROGRAMS) run with one at-risk and one compliant subject
+  // Seed a population (ALL_PROGRAMS) run with one at-risk and one compliant subject.
+  // Finalize to COMPLETED so the terminal-run filter includes it.
   const run = await runStore.createRun({
     scopeType: "ALL_PROGRAMS",
     scopeId: undefined,
@@ -38,6 +39,7 @@ before(async () => {
   });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+  await runStore.finalizeRun(run.id, "COMPLETED");
 });
 
 after(() => {
@@ -99,4 +101,36 @@ test("subjectId filter narrows to that subject", async () => {
   const b7 = await r7!.json() as { proposed: unknown[]; suppressed: unknown[] };
   assert.equal(b7.proposed.length, 0); // COMPLIANT → no proposal
   assert.equal(b7.suppressed.length, 0);
+});
+
+test("RUNNING run is excluded from proposals (only terminal runs contribute)", async () => {
+  // Seed a second ALL_PROGRAMS run left RUNNING (not finalized) with a newer started_at.
+  // Its outcomes must NOT appear in proposals — only the COMPLETED run's outcomes should.
+  const db = (env as { DB: unknown }).DB;
+  const runStore = new SqliteRunStore(db as never);
+  const outcomes = new SqliteOutcomeStore(db as never);
+  // Ensure this run has a later started_at than the COMPLETED run seeded in before().
+  await new Promise((r) => setTimeout(r, 5));
+  const runningRun = await runStore.createRun({
+    scopeType: "ALL_PROGRAMS",
+    scopeId: undefined,
+    triggeredBy: "test-running",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-19T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-19T00:00:00.000Z",
+  });
+  // Mark it RUNNING (in-flight — never finalized)
+  await runStore.markRunning(runningRun.id);
+  // Give this RUNNING run an OVERDUE outcome for a unique new subject
+  await outcomes.recordOutcome({ runId: runningRun.id, subjectId: "emp-running-only", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+
+  const res = await get("");
+  const body = await res!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }> };
+  const allSubjects = [...body.proposed, ...body.suppressed].map((p) => p.subjectId);
+  assert.ok(
+    !allSubjects.includes("emp-running-only"),
+    "subject from RUNNING run must not appear in proposals (in-flight run excluded)",
+  );
+  // emp-006 from the COMPLETED run must still appear
+  assert.ok(allSubjects.includes("emp-006"), "subject from COMPLETED run still appears");
 });

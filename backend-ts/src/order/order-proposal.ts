@@ -27,9 +27,11 @@ export function proposeOrders(
   standingOrders: StandingOrderProvider,
   authoredOn: string = new Date().toISOString().slice(0, 10),
 ): { proposed: ProposedOrder[]; suppressed: ProposedOrder[] } {
-  const proposed: ProposedOrder[] = [];
+  // byKey: proposed orders keyed by dedupeKey (allows priority upgrade on same-code collision)
+  const byKey = new Map<string, ProposedOrder>();
   const suppressed: ProposedOrder[] = [];
-  const seen = new Set<string>(); // in-batch dedupe keys already proposed
+  // suppressedKeys: dedupeKeys covered by a standing order (never upgrade these back to proposed)
+  const suppressedKeys = new Set<string>();
 
   for (const o of outcomes) {
     const priority = AT_RISK[o.status];
@@ -37,27 +39,39 @@ export function proposeOrders(
     const order = orderForMeasure(o.measureId);
     if (!order) continue; // no action evaluator for this measure
     const dedupeKey = dedupeKeyFor(o.subjectId, order);
+
+    // Standing-order-covered keys stay suppressed regardless of priority.
+    if (suppressedKeys.has(dedupeKey)) continue;
+
     const proposal: ProposedOrder = {
       subjectId: o.subjectId, measureId: o.measureId, order, reasonOutcome: o.status,
       priority, status: "PROPOSED", dedupeKey, authoredOn,
     };
+
     // In-batch duplicate: same subject + same order code (across ANY measures). By design two
     // measures that map to the SAME order code (e.g. diabetes_hba1c + cms122 → CPT 83036) collapse to
     // ONE proposal for a subject at-risk on both — one order is the correct clinical action, and a
-    // duplicate order is exactly what the charter forbids. The first-seen measure wins as the
-    // proposal's reasonOutcome/measureId; the second is dropped (not surfaced). If cross-measure
-    // traceability is later needed, accumulate the contributing measure ids here.
-    if (seen.has(dedupeKey)) continue;
+    // duplicate order is exactly what the charter forbids.
+    // Priority upgrade: if the incoming row is "urgent" and the existing proposal is "routine",
+    // upgrade the existing proposal rather than dropping the higher-severity row.
+    const existing = byKey.get(dedupeKey);
+    if (existing) {
+      if (priority === "urgent" && existing.priority !== "urgent") {
+        existing.priority = "urgent";
+        existing.reasonOutcome = o.status; // the OVERDUE that drove the upgrade
+      }
+      continue;
+    }
+
     const covered = standingOrders
       .activeOrdersFor(o.subjectId)
       .some((s) => s.order.code === order.code && s.order.system === order.system);
     if (covered) {
       suppressed.push({ ...proposal, suppressedByStandingOrder: true });
-      seen.add(dedupeKey);
+      suppressedKeys.add(dedupeKey);
       continue;
     }
-    proposed.push(proposal);
-    seen.add(dedupeKey);
+    byKey.set(dedupeKey, proposal);
   }
-  return { proposed, suppressed };
+  return { proposed: [...byKey.values()], suppressed };
 }
