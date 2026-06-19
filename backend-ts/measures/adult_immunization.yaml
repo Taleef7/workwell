@@ -1,0 +1,14 @@
+id: adult_immunization
+name: Adult Immunization Status (Td/Tdap)
+version: 1.0.0
+title: Adult Immunization Status — Td/Tdap (AIS-E)
+policyRef: NCQA HEDIS Adult Immunization Status (AIS-E)
+tags: [wellness, immunization, adult, hedis]
+cql: adult_immunization.cql
+bindings:
+  rateKey: adult_immunization
+  complianceWindowDays: 3650
+  enrollment: { code: adult-immz-enrolled, valueSet: "urn:workwell:vs:adult-immz-enrollment" }
+  waiver:     { code: tdap-contraindication, valueSet: "urn:workwell:vs:tdap-contraindication" }
+  event:      { code: tdap-vaccine, valueSet: "urn:workwell:vs:tdap-vaccines", type: immunization }
+  refusal:    { code: tdap-refusal, valueSet: "urn:workwell:vs:tdap-refusal" }
