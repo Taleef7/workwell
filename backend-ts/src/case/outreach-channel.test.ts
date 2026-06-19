@@ -5,7 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveChannel, simulatedEmailChannel, simulatedSmsChannel, simulatedPhoneChannel, type ChannelType } from "./outreach-channel.ts";
+import { resolveChannel, simulatedEmailChannel, simulatedSmsChannel, simulatedPhoneChannel, dataChaserChannel, type ChannelType } from "./outreach-channel.ts";
 
 test("simulated email channel returns a SIMULATED record carrying the subject", () => {
   const r = simulatedEmailChannel.send({ channel: "EMAIL", to: "x@workwell-demo.dev", subject: "Hi", body: "Body" });
@@ -43,4 +43,13 @@ test("resolveChannel returns the DataChaser stub only when both env vars are set
   const r = ch.send({ channel: "SMS", to: "+15550000000", body: "b" });
   assert.equal(r.provider, "datachaser");
   assert.equal(resolveChannel("SMS", { WORKWELL_OUTREACH_DATACHASER_API_KEY: "k" }).send({ channel: "SMS", to: "x", body: "b" }).provider, "simulated");
+});
+
+test("dataChaserChannel stub is inert and self-describing (QUEUED, dc- id, stub note)", () => {
+  const ch = dataChaserChannel("PHONE", { apiKey: "k", baseUrl: "https://dc.example" });
+  const r = ch.send({ channel: "PHONE", to: "+15550000000", body: "b" });
+  assert.equal(r.provider, "datachaser");
+  assert.equal(r.status, "QUEUED");
+  assert.match(r.messageId, /^dc-/);
+  assert.match(r.errorDetail ?? "", /stub/i);
 });

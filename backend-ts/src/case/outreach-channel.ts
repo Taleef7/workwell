@@ -74,7 +74,7 @@ export function dataChaserChannel(type: ChannelType, _config: { apiKey: string; 
     type,
     send(msg) {
       // STUB: a real implementation would POST to `${_config.baseUrl}` with `_config.apiKey`.
-      return { channel: type, provider: "datachaser", status: "QUEUED", messageId: `dc-${crypto.randomUUID()}`, to: msg.to, sentAt: new Date().toISOString(), errorDetail: null };
+      return { channel: type, provider: "datachaser", status: "QUEUED", messageId: `dc-${crypto.randomUUID()}`, to: msg.to, sentAt: new Date().toISOString(), errorDetail: "datachaser stub — not yet wired (Doug Q4)" };
     },
   };
 }
