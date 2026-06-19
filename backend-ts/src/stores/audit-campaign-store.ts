@@ -48,4 +48,8 @@ export class AuditBackedCampaignStore implements CampaignStore {
   async listRecipients(campaignId: string): Promise<CampaignRecipientRecord[]> {
     return (await this.all()).find((p) => p.campaign.id === campaignId)?.recipients ?? [];
   }
+  /** Single-scan detail: one all() pass yields both the campaign and its recipients (or null). */
+  async getCampaignWithRecipients(id: string): Promise<{ campaign: CampaignRecord; recipients: CampaignRecipientRecord[] } | null> {
+    return (await this.all()).find((p) => p.campaign.id === id) ?? null;
+  }
 }

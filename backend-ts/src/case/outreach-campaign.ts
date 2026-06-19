@@ -40,6 +40,10 @@ export class CampaignError extends Error {}
 
 const eq = (a: string | null | undefined, b: string) => (a ?? "").toLowerCase() === b.toLowerCase();
 
+/** Channel-appropriate synthetic to-address for a recipient (shared by dryRun preview + failure path). */
+const toAddressFor = (channel: ChannelType, employeeId: string): string =>
+  channel === "EMAIL" ? `${employeeId}@workwell-demo.dev` : channel === "SMS" ? `sms:${employeeId}` : `tel:${employeeId}`;
+
 export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, actor: string): Promise<CampaignResult> {
   if (!isChannelType(req.channel)) throw new CampaignError("channel must be EMAIL, SMS, or PHONE");
   const measureId = req.measureId?.trim() || undefined;
@@ -54,7 +58,7 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   if (req.dryRun) {
     const recipients: CampaignRecipientRecord[] = eligible.map((c) => ({
       campaignId: "", caseId: c.id, employeeId: c.employeeId, employeeName: employeeById(c.employeeId)?.name ?? c.employeeId,
-      channel: req.channel, toAddress: req.channel === "EMAIL" ? `${c.employeeId}@workwell-demo.dev` : req.channel === "SMS" ? `sms:${c.employeeId}` : `tel:${c.employeeId}`,
+      channel: req.channel, toAddress: toAddressFor(req.channel, c.employeeId),
       status: "PREVIEW", messageId: null, sentAt: "",
     }));
     return { campaignId: null, channel: req.channel, dryRun: true, total: recipients.length, sent: 0, failed: 0, simulated: 0, recipients };
@@ -65,13 +69,27 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   const recipients: CampaignRecipientRecord[] = [];
   let sent = 0, failed = 0, simulated = 0;
   for (const c of eligible) {
-    const d = await dispatchOutreach(outreachDeps, c, { channel: req.channel, templateId: req.templateId, campaignId, actor });
-    if (d.status === "FAILED") failed++; else sent++;
-    if (d.status === "SIMULATED") simulated++;
-    recipients.push({
-      campaignId, caseId: d.caseId, employeeId: d.employeeId, employeeName: employeeById(d.employeeId)?.name ?? d.employeeId,
-      channel: d.channel, toAddress: d.toAddress, status: d.status, messageId: d.messageId, sentAt: new Date().toISOString(),
-    });
+    try {
+      // A campaign blasts ONE template (req.templateId) to every recipient — intentionally NOT the
+      // outcome-aware per-case default that the single-case send uses (resolveTemplate falls back to
+      // that only when templateId is null/unknown).
+      const d = await dispatchOutreach(outreachDeps, c, { channel: req.channel, templateId: req.templateId, campaignId, actor });
+      if (d.status === "FAILED") failed++; else sent++;
+      if (d.status === "SIMULATED") simulated++;
+      recipients.push({
+        campaignId, caseId: d.caseId, employeeId: d.employeeId, employeeName: employeeById(d.employeeId)?.name ?? d.employeeId,
+        channel: d.channel, toAddress: d.toAddress, status: d.status, messageId: d.messageId, sentAt: new Date().toISOString(),
+      });
+    } catch {
+      // A mid-loop dispatch throw must never abandon the campaign: record this recipient FAILED and
+      // continue so the loop always completes and recordCampaign is always reached (makes the
+      // PARTIAL_FAILURE status reachable).
+      failed++;
+      recipients.push({
+        campaignId, caseId: c.id, employeeId: c.employeeId, employeeName: employeeById(c.employeeId)?.name ?? c.employeeId,
+        channel: req.channel, toAddress: toAddressFor(req.channel, c.employeeId), status: "FAILED", messageId: null, sentAt: new Date().toISOString(),
+      });
+    }
   }
   const campaign: CampaignRecord = {
     id: campaignId, channel: req.channel, measureId: measureId ?? null, site, outcomeStatus: outcome,
@@ -86,7 +104,5 @@ export async function listCampaigns(deps: CampaignDeps): Promise<CampaignRecord[
   return deps.campaigns.listCampaigns();
 }
 export async function getCampaignDetail(deps: CampaignDeps, id: string): Promise<{ campaign: CampaignRecord; recipients: CampaignRecipientRecord[] } | null> {
-  const campaign = await deps.campaigns.getCampaign(id);
-  if (!campaign) return null;
-  return { campaign, recipients: await deps.campaigns.listRecipients(id) };
+  return deps.campaigns.getCampaignWithRecipients(id); // single ledger scan (vs getCampaign + listRecipients = two)
 }

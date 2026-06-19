@@ -55,6 +55,14 @@ test("listCampaigns is newest-first and getCampaign returns null for unknown id"
   assert.deepEqual(await store.listRecipients("nope"), []);
 });
 
+test("getCampaignWithRecipients round-trips in one scan and returns null for an unknown id", async () => {
+  await store.recordCampaign(mkCampaign("c4"), [mkRecipient("c4", "case-4"), mkRecipient("c4", "case-5")]);
+  const detail = await store.getCampaignWithRecipients("c4");
+  assert.equal(detail?.campaign.id, "c4");
+  assert.equal(detail?.recipients.length, 2);
+  assert.equal(await store.getCampaignWithRecipients("nope"), null);
+});
+
 test("non-campaign audit events are excluded (no undefined entries)", async () => {
   // Fresh store + db so this is independent of the other tests' ordering/state.
   const isoPath = join(tmpdir(), `workwell-camp-${crypto.randomUUID()}.sqlite`);

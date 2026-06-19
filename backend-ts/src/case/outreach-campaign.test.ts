@@ -17,6 +17,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { AuditBackedCampaignStore } from "../stores/audit-campaign-store.ts";
 import { runCampaign, listCampaigns, getCampaignDetail, type CampaignDeps } from "./outreach-campaign.ts";
+import type { ChannelType, OutreachChannel } from "./outreach-channel.ts";
 
 const dbPath = join(tmpdir(), `workwell-campeng-${crypto.randomUUID()}.sqlite`);
 let deps: CampaignDeps;
@@ -69,4 +70,28 @@ test("a real run dispatches per recipient, tallies counts, and persists", async 
   const detail = await getCampaignDetail(deps, res.campaignId!);
   assert.equal(detail?.recipients.length, 3);
   assert.equal(detail?.campaign.channel, "SMS");
+});
+
+test("a mid-loop dispatch failure → that recipient FAILED, others SIMULATED, status PARTIAL_FAILURE, still persisted", async () => {
+  const before = (await listCampaigns(deps)).length;
+  // Inject a channels factory whose send THROWS for emp-006 and succeeds (SIMULATED) for everyone else.
+  // dispatchOutreach calls channel.send, so the throw propagates → Fix 1's try/catch records it FAILED.
+  const channels = (type: ChannelType): OutreachChannel => ({
+    type,
+    send(msg) {
+      if (msg.to.includes("emp-006")) throw new Error("simulated provider outage");
+      return { channel: type, provider: "simulated", status: "SIMULATED", messageId: `sim-${crypto.randomUUID()}`, to: msg.to, sentAt: new Date().toISOString(), errorDetail: null };
+    },
+  });
+  const res = await runCampaign({ ...deps, channels }, { measureId: "audiogram", outcomeStatus: "OVERDUE", channel: "SMS" }, "admin");
+  assert.equal(res.total, 3);
+  assert.equal(res.failed, 1);
+  assert.equal(res.sent, res.total - 1);
+  assert.equal(res.sent + res.failed, res.total);
+  const failedRecip = res.recipients.find((r) => r.employeeId === "emp-006");
+  assert.equal(failedRecip?.status, "FAILED");
+  assert.equal(failedRecip?.messageId, null);
+  const detail = await getCampaignDetail(deps, res.campaignId!);
+  assert.equal(detail?.campaign.status, "PARTIAL_FAILURE");
+  assert.equal((await listCampaigns(deps)).length, before + 1, "campaign persisted despite the failure");
 });
