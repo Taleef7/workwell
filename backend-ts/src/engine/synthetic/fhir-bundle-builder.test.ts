@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
 import { MEASURE_BINDINGS } from "./measure-bindings.ts";
-import { deriveExamConfig, type TargetOutcome } from "./exam-config.ts";
+import { deriveExamConfig, withRefusal, type TargetOutcome } from "./exam-config.ts";
 import { buildSyntheticBundle } from "./fhir-bundle-builder.ts";
 import { employeeById } from "./employee-catalog.ts";
 
@@ -156,4 +156,31 @@ test("QI-Core profiles: cms122 COMPLIANT bundle (Observation) — Observation ca
   assert.ok(observation["status"], "Observation must have status");
   assert.ok(observation["code"], "Observation must have code");
   assert.ok(observation["subject"], "Observation must have subject");
+});
+
+test("emits a refusal Condition when config.refused and binding.refusal present", () => {
+  const binding = MEASURE_BINDINGS["adult_immunization"];
+  const base = deriveExamConfig(binding!, "OVERDUE");
+  const bundle = buildSyntheticBundle(
+    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001" },
+    withRefusal(base),
+    "2026-06-19",
+  );
+  const codes = bundle.entry
+    .map((e) => (e.resource as { code?: { coding?: { code?: string }[] } }).code?.coding?.[0]?.code)
+    .filter(Boolean);
+  assert.ok(codes.includes("tdap-refusal"), `expected tdap-refusal in ${JSON.stringify(codes)}`);
+});
+
+test("does NOT emit a refusal Condition when config.refused is false", () => {
+  const binding = MEASURE_BINDINGS["adult_immunization"];
+  const bundle = buildSyntheticBundle(
+    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001" },
+    deriveExamConfig(binding!, "OVERDUE"),
+    "2026-06-19",
+  );
+  const codes = bundle.entry
+    .map((e) => (e.resource as { code?: { coding?: { code?: string }[] } }).code?.coding?.[0]?.code)
+    .filter(Boolean);
+  assert.ok(!codes.includes("tdap-refusal"));
 });
