@@ -26,6 +26,7 @@ import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
+import { handleOrders } from "./routes/orders.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
@@ -69,6 +70,9 @@ export interface Env {
   /** Immunization forecasting (#76 E6) — ICE API config. Inert stub unless both are set. */
   WORKWELL_IMMZ_ICE_API_KEY?: string;
   WORKWELL_IMMZ_ICE_BASE_URL?: string;
+  /** Order generation EH FHIR seam (#77 E7) — standing-order dedupe. Inert stub unless both are set. */
+  WORKWELL_EH_FHIR_BASE_URL?: string;
+  WORKWELL_EH_FHIR_API_KEY?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -195,6 +199,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
   const immunizationResponse = await handleImmunizationForecast(req, env);
   if (immunizationResponse) return immunizationResponse;
+
+  // Order proposals — advisory "Action Evaluators → orders" over latest population runs (#77 E7).
+  const ordersResponse = await handleOrders(req, env);
+  if (ordersResponse) return ordersResponse;
 
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
   const exportsResponse = await handleExports(req, env);
