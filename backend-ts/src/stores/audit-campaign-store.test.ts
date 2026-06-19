@@ -54,3 +54,27 @@ test("listCampaigns is newest-first and getCampaign returns null for unknown id"
   assert.equal(await store.getCampaign("nope"), null);
   assert.deepEqual(await store.listRecipients("nope"), []);
 });
+
+test("non-campaign audit events are excluded (no undefined entries)", async () => {
+  // Fresh store + db so this is independent of the other tests' ordering/state.
+  const isoPath = join(tmpdir(), `workwell-camp-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(isoPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const events = new SqliteCaseEventStore(db);
+  const isoStore = new AuditBackedCampaignStore(events);
+
+  // A foreign (non-campaign) audit event with a different payload shape.
+  await events.appendAudit({
+    eventType: "CASE_ASSIGNED", entityType: "case", entityId: "case-x", actor: "admin",
+    refRunId: null, refCaseId: "case-x", refMeasureVersionId: null, payload: { foo: "bar" },
+  });
+  // One real campaign alongside it.
+  await isoStore.recordCampaign(mkCampaign("c3"), [mkRecipient("c3", "case-9")]);
+
+  const list = await isoStore.listCampaigns();
+  assert.equal(list.length, 1, "foreign event excluded");
+  assert.ok(list.every((c) => !!c?.id), "no undefined campaign entries");
+  assert.equal(list[0]!.id, "c3");
+
+  try { rmSync(isoPath, { force: true }); } catch { /* best effort */ }
+});

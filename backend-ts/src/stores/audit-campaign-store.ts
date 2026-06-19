@@ -1,8 +1,10 @@
 /**
  * Audit-backed CampaignStore (#75 E5) — the demo persistence adapter. A campaign is stored as a single
  * OUTREACH_CAMPAIGN_COMPLETED audit event whose payload carries the campaign + its recipients. Reads
- * scan listAuditEvents (oldest-first) and filter by eventType. No DDL on floor or ceiling. Demo-scale;
- * the production PgCampaignStore over outreach_campaigns + outreach_delivery_log is the drop-in.
+ * scan the ENTIRE audit_events ledger (all event types, up to listAuditEvents' default cap) and filter
+ * in JS on every list/get call — O(total-ledger-size), not O(campaigns). No DDL on floor or ceiling.
+ * Demo-scale; the production PgCampaignStore (indexed campaign queries over outreach_campaigns +
+ * outreach_delivery_log) is the drop-in.
  */
 import type { CaseEventStore } from "./case-event-store.ts";
 import type { CampaignRecord, CampaignRecipientRecord, CampaignStore } from "./campaign-store.ts";
@@ -20,12 +22,20 @@ export class AuditBackedCampaignStore implements CampaignStore {
     });
   }
 
-  /** All campaign payloads, newest-first (listAuditEvents is oldest-first → reverse). */
+  /**
+   * All campaign payloads, newest-first (listAuditEvents is oldest-first → reverse).
+   * COST: the demo adapter scans the ENTIRE audit_events ledger (all event types, up to
+   * listAuditEvents' default cap) and filters in JS on every list/get call — i.e.
+   * O(total-ledger-size), not O(campaigns). The production PgCampaignStore replaces this with
+   * indexed campaign queries. The defensive `campaign.id` filter drops malformed/foreign payloads.
+   */
   private async all(): Promise<Array<{ campaign: CampaignRecord; recipients: CampaignRecipientRecord[] }>> {
     const rows = await this.events.listAuditEvents();
     return rows
       .filter((r) => r.eventType === CAMPAIGN_EVENT)
-      .map((r) => r.payload as unknown as { campaign: CampaignRecord; recipients: CampaignRecipientRecord[] })
+      .map((r) => r.payload as unknown as { campaign?: CampaignRecord; recipients?: CampaignRecipientRecord[] })
+      .filter((p): p is { campaign: CampaignRecord; recipients: CampaignRecipientRecord[] } => !!p?.campaign?.id)
+      .map((p) => ({ campaign: p.campaign, recipients: p.recipients ?? [] }))
       .reverse();
   }
 
