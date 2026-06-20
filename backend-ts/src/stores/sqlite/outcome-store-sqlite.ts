@@ -41,7 +41,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
 
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.db
       .prepare(
@@ -81,7 +81,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
           input.evaluationPeriod ?? "",
           input.status,
           JSON.stringify(input.evidence ?? {}),
-          new Date().toISOString(),
+          input.evaluatedAt ?? new Date().toISOString(),
         ),
     );
     await this.db.batch(stmts);

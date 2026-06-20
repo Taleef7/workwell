@@ -10,11 +10,14 @@
  * selects the Postgres ceiling; otherwise the SQLite floor over a local file). It is idempotent —
  * a second run is a no-op.
  *
- * ROLLBACK (one statement, reversible):
+ * ROLLBACK (reversible) — delete tagged OUTCOMES first, then the runs. The `outcomes.run_id` FK is
+ * NOT ON DELETE CASCADE, and the Pg ceiling lives in the `workwell_spike` schema, so schema-qualify
+ * there (cases are never written by the backfill):
  *
- *   DELETE FROM runs WHERE triggered_by = 'seed:trend-history';
- *
- * (the seeded outcomes FK-cascade off the deleted runs; cases are never written by the backfill).
+ *   -- Postgres ceiling (workwell_spike schema):
+ *   DELETE FROM workwell_spike.outcomes
+ *     WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history');
+ *   DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
  *
  * This module is side-effect-free + importable by tests; `bin.ts` is the runnable entry.
  */
@@ -86,7 +89,10 @@ export async function main(argv: string[]): Promise<number> {
     );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";
     if (summary.skipped) {
-      process.stdout.write(`[seed:trend-history] already seeded (${backend}) — no-op. ` + `Rollback: DELETE FROM runs WHERE triggered_by='${"seed:trend-history"}';\n`);
+      process.stdout.write(
+        `[seed:trend-history] already seeded (${backend}) — no-op. ` +
+          `Rollback (delete tagged outcomes THEN runs; schema-qualify on Postgres) — see this CLI's header for the exact SQL.\n`,
+      );
     } else {
       process.stdout.write(
         `[seed:trend-history] ${backend}: created ${summary.runsCreated} backdated runs ` +

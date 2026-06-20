@@ -6,11 +6,16 @@
  *
  * Approach (controlled, idempotent, reversible):
  *   - Each backdated run carries `triggered_by = 'seed:trend-history'` and outcomes tagged
- *     `evidence.seedTrendHistory = true`, so the whole feature is removable with ONE statement:
+ *     `evidence.seedTrendHistory = true`, so the whole feature is removable. Delete the tagged
+ *     OUTCOMES first, then the runs (the `outcomes.run_id` FK is NOT declared ON DELETE CASCADE,
+ *     and the Pg ceiling lives in the `workwell_spike` schema — so schema-qualify there):
  *
- *         DELETE FROM runs WHERE triggered_by = 'seed:trend-history';
+ *         -- Postgres ceiling (workwell_spike schema):
+ *         DELETE FROM workwell_spike.outcomes
+ *           WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history');
+ *         DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
  *
- *     (outcomes FK-cascade off the run; cases are never written — see below).
+ *     (cases are never written by the backfill — see below.)
  *   - Idempotent: if any seeded trend-history run already exists, the backfill is a no-op.
  *   - Efficiency: `deriveExamConfig(binding, target)` + `buildSyntheticBundle` depend only on
  *     (measure, target), NOT on employee identity, so the engine outcome for a given (measure,
@@ -161,6 +166,10 @@ export async function backfillTrendHistory(
           measureId,
           evaluationPeriod,
           status,
+          // Backdate evaluated_at to the run's completion (NOT now), or these synthetic historical
+          // rows would out-sort the real latest outcome in `evaluated_at DESC` reads
+          // (listOutcomesForEmployee / check_compliance) and mask current compliance (Codex P1).
+          evaluatedAt: completedAt,
           evidence: { seedTrendHistory: true, target: a.target, rate },
         };
       });

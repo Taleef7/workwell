@@ -45,7 +45,7 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.pool.query(
       `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
@@ -70,7 +70,7 @@ export class PgOutcomeStore implements OutcomeStore {
     // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
     // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
     const CHUNK = 500;
-    const evaluatedAt = new Date().toISOString();
+    const defaultEvaluatedAt = new Date().toISOString();
     for (let start = 0; start < inputs.length; start += CHUNK) {
       const chunk = inputs.slice(start, start + CHUNK);
       const binds: unknown[] = [];
@@ -84,7 +84,7 @@ export class PgOutcomeStore implements OutcomeStore {
           input.evaluationPeriod ?? "",
           input.status,
           JSON.stringify(input.evidence ?? {}),
-          evaluatedAt,
+          input.evaluatedAt ?? defaultEvaluatedAt,
         );
         return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
       });
