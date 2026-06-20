@@ -110,6 +110,30 @@ test("each backfilled run records ~100 outcomes (one per employee)", async () =>
   }
 });
 
+test("backfilled outcomes are stamped with the run's BACKDATED evaluatedAt, not now (Codex P1)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+
+  const runs = await d.runStore.listRuns(100000);
+  // The oldest run is (WEEKS-1) weeks before asOf — unambiguously historical.
+  const oldest = runs.reduce((a, b) => (a.startedAt < b.startedAt ? a : b));
+  const outcomes = await d.outcomeStore.listOutcomes(oldest.id);
+  assert.ok(outcomes.length > 0, "oldest run has outcomes");
+  assert.ok(
+    outcomes.every((o) => o.evaluatedAt === oldest.completedAt),
+    "each seeded outcome's evaluatedAt equals the run's backdated completedAt (not now)",
+  );
+  assert.ok(oldest.completedAt! < `${ASOF}T00:05:00.000Z`, "oldest run is backdated weeks before asOf");
+
+  // listOutcomesForEmployee orders by evaluated_at DESC — the employee's 'latest' seeded row must be
+  // backdated (≤ asOf), so it can never out-sort a real current run's outcome stamped at run time.
+  const emp = EMPLOYEES[0]!.externalId;
+  const latest = await d.outcomeStore.listOutcomesForEmployee(emp, 1);
+  assert.equal(latest.length, 1);
+  assert.ok(latest[0]!.evaluatedAt <= `${ASOF}T23:59:59.999Z`, "employee's latest seeded outcome is backdated, not now");
+});
+
 test("backfillTrendHistory is idempotent — a second call creates no new runs", async () => {
   const db = await freshDb();
   const d = deps(db);

@@ -14,6 +14,12 @@ export interface RecordOutcomeInput {
   status: string;
   /** Define-level evidence (`evidence_json` contract, ADR-002). */
   evidence: unknown;
+  /**
+   * When the outcome was evaluated (ISO-8601). Defaults to now. Pass an explicit value ONLY for
+   * backdated synthetic seeding (the trend-history backfill) so historical rows don't out-sort the
+   * real latest outcome in `evaluated_at DESC` reads (`listOutcomesForEmployee`, check_compliance).
+   */
+  evaluatedAt?: string;
 }
 
 export interface OutcomeRecord {

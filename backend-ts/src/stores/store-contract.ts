@@ -244,6 +244,34 @@ export function outcomeStoreContract(
     assert.equal(one.evaluationPeriod, "2026-03-01", "evaluation_period persisted");
   });
 
+  test(`[${label}] recordOutcome(s) honor an explicit backdated evaluatedAt; default is ~now`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    const backdated = "2025-12-01T00:01:00.000Z";
+
+    // Explicit evaluatedAt (single) round-trips exactly.
+    const single = await outcomeStore.recordOutcome({
+      runId: run.id,
+      subjectId: "emp-006",
+      measureId: "audiogram",
+      status: "OVERDUE",
+      evidence: {},
+      evaluatedAt: backdated,
+    });
+    assert.equal(single.evaluatedAt, backdated, "single recordOutcome honors explicit evaluatedAt");
+
+    // Explicit evaluatedAt (batch) round-trips; absent → defaults to ~now.
+    await outcomeStore.recordOutcomes([
+      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {}, evaluatedAt: backdated },
+      { runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    ]);
+    const rows = await outcomeStore.listOutcomes(run.id);
+    const emp001 = rows.find((o) => o.subjectId === "emp-001")!;
+    const emp002 = rows.find((o) => o.subjectId === "emp-002")!;
+    assert.equal(emp001.evaluatedAt, backdated, "batch honors explicit evaluatedAt");
+    assert.ok(emp002.evaluatedAt > "2026-01-01T00:00:00.000Z", "batch without evaluatedAt defaults to ~now");
+  });
+
   test(`[${label}] listOutcomes returns [] for a run with no outcomes`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun());
