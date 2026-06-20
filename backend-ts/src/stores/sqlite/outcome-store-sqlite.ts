@@ -62,6 +62,31 @@ export class SqliteOutcomeStore implements OutcomeStore {
     };
   }
 
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // D1 runs a batch atomically (single transaction). `RETURNING id` is required for the batch
+    // path (cloud-local executes batched statements via `.all()`, which throws on a non-returning
+    // statement — same reason the case-event store appends `RETURNING id`).
+    const stmts = inputs.map((input) =>
+      this.db
+        .prepare(
+          `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          input.runId,
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod ?? "",
+          input.status,
+          JSON.stringify(input.evidence ?? {}),
+          new Date().toISOString(),
+        ),
+    );
+    await this.db.batch(stmts);
+  }
+
   async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
     const { results } = await this.db
       .prepare(

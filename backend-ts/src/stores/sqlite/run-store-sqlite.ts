@@ -58,16 +58,21 @@ export class SqliteRunStore implements RunStore {
 
   async createRun(input: CreateRunInput): Promise<RunRecord> {
     const id = crypto.randomUUID();
-    const startedAt = new Date().toISOString();
+    // Optional backdating (synthetic trend history): honor explicit status/started_at/completed_at,
+    // else the original defaults (QUEUED, now, null) — existing callers are unchanged.
+    const status = input.status ?? "QUEUED";
+    const startedAt = input.startedAt ?? new Date().toISOString();
+    const completedAt = input.completedAt ?? null;
     await this.db
       .prepare(
         `INSERT INTO runs
            (id, status, scope_type, scope_id, triggered_by, requested_scope_json,
-            measurement_period_start, measurement_period_end, started_at)
-         VALUES (?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?)`,
+            measurement_period_start, measurement_period_end, started_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
+        status,
         input.scopeType,
         input.scopeId ?? null,
         input.triggeredBy,
@@ -75,6 +80,7 @@ export class SqliteRunStore implements RunStore {
         input.measurementPeriodStart,
         input.measurementPeriodEnd,
         startedAt,
+        completedAt,
       )
       .run();
     const created = await this.getRun(id);

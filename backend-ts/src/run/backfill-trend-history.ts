@@ -1,0 +1,173 @@
+/**
+ * Synthetic TREND HISTORY backfill — writes ~12 weekly BACKDATED `COMPLETED` MEASURE runs per
+ * runnable measure so the `/programs` + `/programs/[measureId]` trend charts show a believable,
+ * varied compliance line instead of a flat line / "Not enough run history" (design:
+ * docs/superpowers/specs/2026-06-20-synthetic-trend-history-design.md).
+ *
+ * Approach (controlled, idempotent, reversible):
+ *   - Each backdated run carries `triggered_by = 'seed:trend-history'` and outcomes tagged
+ *     `evidence.seedTrendHistory = true`, so the whole feature is removable with ONE statement:
+ *
+ *         DELETE FROM runs WHERE triggered_by = 'seed:trend-history';
+ *
+ *     (outcomes FK-cascade off the run; cases are never written — see below).
+ *   - Idempotent: if any seeded trend-history run already exists, the backfill is a no-op.
+ *   - Efficiency: `deriveExamConfig(binding, target)` + `buildSyntheticBundle` depend only on
+ *     (measure, target), NOT on employee identity, so the engine outcome for a given (measure,
+ *     target) is identical across employees. We precompute the (measure, target) → outcome map with
+ *     11 measures × 5 targets = 55 engine evaluations, then assign all ~13.2k historical outcomes
+ *     from the seeded distribution — not one engine call per employee.
+ *
+ * Invariants preserved: outcomes still come from the CQL engine (the (measure,target)→outcome map);
+ * NO schema change (only the optional backdating params over existing columns); the worklist/cases
+ * are untouched (this NEVER calls a case-store upsert); the programs OVERVIEW is unaffected (it uses
+ * the latest run per measure, and every backdated run is older than the current real run).
+ */
+import type { RunStore } from "../stores/run-store.ts";
+import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
+import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { EMPLOYEES, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
+import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { seededDistributionAtRate } from "./distribution.ts";
+import { historicalComplianceRate } from "./compliance-rates.ts";
+
+/** Trigger marker stamped on every backdated run — the single-statement rollback key. */
+export const TREND_HISTORY_TRIGGER = "seed:trend-history";
+
+const DEFAULT_WEEKS = 12;
+const DAY_MS = 86_400_000;
+const RUNNABLE_MEASURE_IDS = Object.keys(MEASURES);
+const TARGETS: TargetOutcome[] = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
+
+export interface BackfillTrendHistoryDeps {
+  runStore: RunStore;
+  outcomeStore: OutcomeStore;
+  engine: EvaluateMeasureBinding;
+  /** Injectable for tests; defaults to the full synthetic directory (~100 employees). */
+  employees?: readonly EmployeeProfile[];
+}
+
+export interface BackfillTrendHistoryOptions {
+  /** Number of weekly points per measure (default 12). */
+  weeks?: number;
+  /** The newest historical week's anchor date `YYYY-MM-DD` (default today). */
+  asOf?: string;
+}
+
+export interface BackfillTrendHistorySummary {
+  skipped: boolean;
+  weeks: number;
+  measures: number;
+  runsCreated: number;
+  outcomesCreated: number;
+}
+
+const dayOnly = (iso: string): string => iso.slice(0, 10);
+
+/** Precompute the (measure, target) → outcome status map with one engine eval per pair (55 total). */
+async function precomputeOutcomes(
+  engine: EvaluateMeasureBinding,
+  sample: EmployeeProfile,
+  asOf: string,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const measureId of RUNNABLE_MEASURE_IDS) {
+    const binding = MEASURE_BINDINGS[measureId]!;
+    for (const target of TARGETS) {
+      const config = deriveExamConfig(binding, target);
+      const bundle = buildSyntheticBundle(sample, config, asOf);
+      const result = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOf });
+      map.set(`${measureId}|${target}`, result.outcome);
+    }
+  }
+  return map;
+}
+
+/**
+ * Idempotency probe: has the trend-history backfill already run? We look for a backdated MEASURE
+ * run whose outcomes carry the `seedTrendHistory` marker, using only existing store reads (the
+ * RunRecord contract doesn't expose triggered_by). One bounded `listOutcomesForMeasure` scan over
+ * the first runnable measure is enough — the backfill writes all measures together or not at all.
+ */
+async function alreadySeeded(outcomeStore: OutcomeStore): Promise<boolean> {
+  const probe = RUNNABLE_MEASURE_IDS[0]!;
+  const rows = await outcomeStore.listOutcomesForMeasure(probe);
+  return rows.some((r) => (r.evidence as { seedTrendHistory?: boolean } | null)?.seedTrendHistory === true);
+}
+
+/**
+ * Backfill weekly backdated COMPLETED runs (oldest→newest) for every runnable measure. Idempotent:
+ * a no-op if a prior trend-history backfill is detected. Never touches the case store.
+ */
+export async function backfillTrendHistory(
+  deps: BackfillTrendHistoryDeps,
+  opts: BackfillTrendHistoryOptions = {},
+): Promise<BackfillTrendHistorySummary> {
+  const employees = deps.employees ?? EMPLOYEES;
+  const weeks = Math.max(1, Math.trunc(opts.weeks ?? DEFAULT_WEEKS));
+  const asOf = (opts.asOf ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+  if (await alreadySeeded(deps.outcomeStore)) {
+    return { skipped: true, weeks, measures: RUNNABLE_MEASURE_IDS.length, runsCreated: 0, outcomesCreated: 0 };
+  }
+
+  const sample = employees[0];
+  if (!sample) {
+    return { skipped: false, weeks, measures: RUNNABLE_MEASURE_IDS.length, runsCreated: 0, outcomesCreated: 0 };
+  }
+  const outcomeByPair = await precomputeOutcomes(deps.engine, sample, asOf);
+
+  const asOfMs = Date.parse(`${asOf}T00:00:00.000Z`);
+  let runsCreated = 0;
+  let outcomesCreated = 0;
+
+  for (const measureId of RUNNABLE_MEASURE_IDS) {
+    const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
+    // Oldest → newest so started_at strictly increases (week 0 = oldest, weeks-1 = newest ≈ today).
+    for (let w = 0; w < weeks; w++) {
+      const weeksBack = weeks - 1 - w; // weeks-1 back for the oldest, 0 for the newest
+      const startedMs = asOfMs - weeksBack * 7 * DAY_MS;
+      const startedAt = new Date(startedMs).toISOString();
+      // Completed a minute later — keeps the COMPLETED run's window self-consistent.
+      const completedAt = new Date(startedMs + 60_000).toISOString();
+      // 365-day measurement window ending at the run's date (mirrors the live run pipeline).
+      const periodEnd = new Date(startedMs).toISOString();
+      const periodStart = new Date(startedMs - 365 * DAY_MS).toISOString();
+
+      const run = await deps.runStore.createRun({
+        scopeType: "MEASURE",
+        scopeId: measureId,
+        triggeredBy: TREND_HISTORY_TRIGGER,
+        status: "COMPLETED",
+        startedAt,
+        completedAt,
+        requestedScope: { measureId, evaluationDate: dayOnly(startedAt), seedTrendHistory: true },
+        measurementPeriodStart: periodStart,
+        measurementPeriodEnd: periodEnd,
+      });
+      runsCreated++;
+
+      const rate = historicalComplianceRate(rateKey, w, weeks);
+      const assignments = seededDistributionAtRate(employees, rateKey, rate);
+      const evaluationPeriod = dayOnly(startedAt);
+      const inputs: RecordOutcomeInput[] = assignments.map((a) => {
+        const status = outcomeByPair.get(`${measureId}|${a.target}`) ?? "MISSING_DATA";
+        return {
+          runId: run.id,
+          subjectId: a.employee.externalId,
+          measureId,
+          evaluationPeriod,
+          status,
+          evidence: { seedTrendHistory: true, target: a.target, rate },
+        };
+      });
+      await deps.outcomeStore.recordOutcomes(inputs);
+      outcomesCreated += inputs.length;
+    }
+  }
+
+  return { skipped: false, weeks, measures: RUNNABLE_MEASURE_IDS.length, runsCreated, outcomesCreated };
+}

@@ -34,6 +34,15 @@ export interface CreateRunInput {
   requestedScope: Record<string, unknown>;
   measurementPeriodStart: string;
   measurementPeriodEnd: string;
+  /**
+   * Optional BACKDATING (synthetic trend-history backfill). When present the adapter persists these
+   * instead of the defaults (`started_at = now`, `status = QUEUED`, `completed_at = null`). Columns
+   * already exist — no schema change. Used to write COMPLETED runs dated weeks in the past so the
+   * programs trend chart has real, varied history.
+   */
+  startedAt?: string;
+  completedAt?: string;
+  status?: RunStatus;
 }
 
 export interface RunRecord {

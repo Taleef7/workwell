@@ -64,6 +64,38 @@ export class PgOutcomeStore implements OutcomeStore {
     };
   }
 
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
+    // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
+    // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
+    const CHUNK = 500;
+    const evaluatedAt = new Date().toISOString();
+    for (let start = 0; start < inputs.length; start += CHUNK) {
+      const chunk = inputs.slice(start, start + CHUNK);
+      const binds: unknown[] = [];
+      const tuples = chunk.map((input) => {
+        const o = binds.length;
+        binds.push(
+          crypto.randomUUID(),
+          input.runId,
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod ?? "",
+          input.status,
+          JSON.stringify(input.evidence ?? {}),
+          evaluatedAt,
+        );
+        return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
+      });
+      await this.pool.query(
+        `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+         VALUES ${tuples.join(", ")}`,
+        binds,
+      );
+    }
+  }
+
   async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
