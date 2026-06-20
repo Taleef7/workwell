@@ -43,6 +43,13 @@ test("historicalComplianceRate differs by measure (per-measure phase)", () => {
   assert.ok(new Set(week0).size > 1, `all measures shared the same week-0 rate: ${week0.join(",")}`);
 });
 
+test("historicalComplianceRate gives same-base measures distinct curves (L1 guard)", () => {
+  // cms125 and adult_immunization share the 0.80 default base; their 12-week series must differ.
+  const a = Array.from({ length: WEEKS }, (_, w) => historicalComplianceRate("cms125", w, WEEKS));
+  const b = Array.from({ length: WEEKS }, (_, w) => historicalComplianceRate("adult_immunization", w, WEEKS));
+  assert.notDeepEqual(a, b, `same-base measures produced identical curves: ${a.join(",")}`);
+});
+
 test("historicalComplianceRate newest week ≈ base rate (continuous with the current real run)", () => {
   for (const key of KEYS) {
     const base = complianceRate(key);
