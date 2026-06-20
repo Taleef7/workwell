@@ -14,6 +14,7 @@
     "start:local": "tsx node_modules/@mieweb/cli/src/index.mjs --target local dev",
     "migrate:local": "node node_modules/@mieweb/cli/src/index.mjs --target local d1 migrations apply",
     "evaluate": "tsx src/engine/cli/bin.ts",
+    "seed:trend-history": "tsx src/run/cli/seed-trend-history-bin.ts",
     "compile-measures": "node scripts/compile-measures.mjs",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },

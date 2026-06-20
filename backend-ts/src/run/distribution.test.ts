@@ -4,8 +4,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { javaHashCode, orderedEmployees, seededDistribution, seededTargetFor } from "./distribution.ts";
+import { javaHashCode, orderedEmployees, seededDistribution, seededDistributionAtRate, seededTargetFor } from "./distribution.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { complianceRate } from "./compliance-rates.ts";
 
 test("javaHashCode matches Java String.hashCode for known values", () => {
   assert.equal(javaHashCode(""), 0);
@@ -40,4 +41,34 @@ test("seededTargetFor returns the bucket a specific employee lands in (employee-
   const t = seededTargetFor(EMPLOYEES, "audiogram", "emp-006");
   assert.ok(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"].includes(t!));
   assert.equal(seededTargetFor(EMPLOYEES, "audiogram", "nobody"), null);
+});
+
+// ---- synthetic trend history: seededDistributionAtRate (rate-parameterized) ----------------
+
+test("seededDistributionAtRate compliant count matches round(N * rate)", () => {
+  const n = EMPLOYEES.length;
+  for (const rate of [0.4, 0.55, 0.7, 0.85, 0.99]) {
+    const assigned = seededDistributionAtRate(EMPLOYEES, "audiogram", rate);
+    const compliant = assigned.filter((a) => a.target === "COMPLIANT").length;
+    assert.equal(compliant, Math.round(n * rate), `rate ${rate}`);
+    assert.equal(assigned.length, n, "every employee is assigned a bucket");
+  }
+});
+
+test("seededDistributionAtRate at a higher rate yields more compliant", () => {
+  const low = seededDistributionAtRate(EMPLOYEES, "audiogram", 0.5).filter((a) => a.target === "COMPLIANT").length;
+  const high = seededDistributionAtRate(EMPLOYEES, "audiogram", 0.9).filter((a) => a.target === "COMPLIANT").length;
+  assert.ok(high > low, `expected higher rate to produce more compliant: ${low} vs ${high}`);
+});
+
+test("seededDistribution default == seededDistributionAtRate at the base rate (no behavior change)", () => {
+  for (const key of ["audiogram", "hazwoper", "tb_surveillance"]) {
+    const viaDefault = seededDistribution(EMPLOYEES, key);
+    const viaRate = seededDistributionAtRate(EMPLOYEES, key, complianceRate(key));
+    assert.deepEqual(
+      viaDefault.map((a) => ({ id: a.employee.externalId, target: a.target })),
+      viaRate.map((a) => ({ id: a.employee.externalId, target: a.target })),
+      `${key} default distribution drifted from the base-rate distribution`,
+    );
+  }
 });

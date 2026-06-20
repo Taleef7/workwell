@@ -71,6 +71,13 @@ export interface OutcomeMeasureFilter {
 
 export interface OutcomeStore {
   recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord>;
+  /**
+   * Batch insert (synthetic trend-history backfill): persist many outcomes for a run in one call.
+   * Makes ~100 inserts/run × weeks × measures practical on Neon (the Postgres adapter chunks a
+   * multi-row INSERT; the SQLite floor loops inside a single transaction). Equivalent to calling
+   * `recordOutcome` per input. A no-op for an empty array.
+   */
+  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
   listOutcomes(runId: string): Promise<OutcomeRecord[]>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —
