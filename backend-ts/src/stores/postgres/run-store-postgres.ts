@@ -20,6 +20,7 @@ interface RunRow {
   status: string;
   scope_type: string;
   scope_id: string | null;
+  triggered_by: string | null;
   requested_scope_json: unknown; // JSONB → already parsed by pg
   measurement_period_start: Date | string;
   measurement_period_end: Date | string;
@@ -42,6 +43,7 @@ const toRecord = (r: RunRow): RunRecord => {
     status: r.status as RunStatus,
     scopeType: r.scope_type as CreateRunInput["scopeType"],
     scopeId: r.scope_id,
+    triggeredBy: r.triggered_by ?? "manual",
     site: siteOf(requestedScope),
     requestedScope,
     startedAt: iso(r.started_at)!,
@@ -52,7 +54,7 @@ const toRecord = (r: RunRow): RunRecord => {
 };
 
 const T = `${SPIKE_SCHEMA}.runs`;
-const RUN_COLS = "id, status, scope_type, scope_id, requested_scope_json, measurement_period_start, measurement_period_end, started_at, completed_at";
+const RUN_COLS = "id, status, scope_type, scope_id, triggered_by, requested_scope_json, measurement_period_start, measurement_period_end, started_at, completed_at";
 
 export class PgRunStore implements RunStore {
   constructor(private readonly pool: PgPool) {}

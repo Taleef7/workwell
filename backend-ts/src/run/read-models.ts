@@ -87,6 +87,12 @@ function durationMs(run: RunRecord): number {
   return Math.max(0, new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime());
 }
 
+/** Map a run's `triggered_by` to the list/filter `triggerType`. Real operator runs stay MANUAL;
+ *  synthetic trend-history seed runs surface as SEED so they aren't shown/filtered as operator runs. */
+export function triggerTypeOf(run: RunRecord): string {
+  return run.triggeredBy === "seed:trend-history" ? "SEED" : "MANUAL";
+}
+
 export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunListItem {
   const t = tally(outcomes);
   return {
@@ -94,7 +100,7 @@ export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunLis
     measureName: measureLabel(run.scopeId).name,
     status: run.status,
     scopeType: run.scopeType,
-    triggerType: "MANUAL",
+    triggerType: triggerTypeOf(run),
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     durationMs: durationMs(run),
@@ -187,8 +193,7 @@ const day = (s: string): string => s.slice(0, 10);
 export function matchesRunFilters(run: RunRecord, f: RunFilters): boolean {
   if (f.status && run.status !== f.status) return false;
   if (f.scopeType && run.scopeType !== f.scopeType) return false;
-  // triggerType is "MANUAL" for every floor run until the scheduler pipeline lands.
-  if (f.triggerType && f.triggerType !== "MANUAL") return false;
+  if (f.triggerType && f.triggerType !== triggerTypeOf(run)) return false;
   if (f.site && run.site !== f.site) return false;
   if (f.from && day(run.startedAt) < day(f.from)) return false;
   if (f.to && day(run.startedAt) > day(f.to)) return false;
