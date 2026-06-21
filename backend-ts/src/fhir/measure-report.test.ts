@@ -15,7 +15,7 @@ import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 
 const run: RunRecord = {
-  id: "run-1", status: "COMPLETED", scopeType: "MEASURE", scopeId: "mv-1", site: null,
+  id: "run-1", status: "COMPLETED", scopeType: "MEASURE", scopeId: "mv-1", triggeredBy: "manual", site: null,
   requestedScope: { measureId: "audiogram" }, startedAt: "2026-06-12T00:00:00.000Z", completedAt: "2026-06-12T00:05:00.000Z",
   measurementPeriodStart: "2025-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
 };

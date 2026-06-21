@@ -37,6 +37,7 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(created.status, "QUEUED");
     assert.equal(created.scopeType, "MEASURE");
     assert.equal(created.scopeId, "audiogram");
+    assert.equal(created.triggeredBy, "spike@workwell.dev", "triggered_by round-trips into RunRecord");
     assert.ok(created.id);
     assert.equal(created.completedAt, null);
 

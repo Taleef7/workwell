@@ -50,6 +50,9 @@ export interface RunRecord {
   status: RunStatus;
   scopeType: CreateRunInput["scopeType"];
   scopeId: string | null;
+  /** What triggered the run (`manual` | `rerun` | `seed:trend-history` | …) — drives the run
+   *  list's triggerType so synthetic seed runs aren't shown/filtered as MANUAL operator runs. */
+  triggeredBy: string;
   /** Site the run targeted, if any (from the requested scope) — drives the `site` list filter. */
   site: string | null;
   /** The original requested scope (measureId / employeeExternalId / site / …) — used to rerun. */
