@@ -45,7 +45,7 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.pool.query(
       `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
@@ -62,6 +62,38 @@ export class PgOutcomeStore implements OutcomeStore {
       evidence: input.evidence ?? {},
       evaluatedAt,
     };
+  }
+
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
+    // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
+    // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
+    const CHUNK = 500;
+    const defaultEvaluatedAt = new Date().toISOString();
+    for (let start = 0; start < inputs.length; start += CHUNK) {
+      const chunk = inputs.slice(start, start + CHUNK);
+      const binds: unknown[] = [];
+      const tuples = chunk.map((input) => {
+        const o = binds.length;
+        binds.push(
+          crypto.randomUUID(),
+          input.runId,
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod ?? "",
+          input.status,
+          JSON.stringify(input.evidence ?? {}),
+          input.evaluatedAt ?? defaultEvaluatedAt,
+        );
+        return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
+      });
+      await this.pool.query(
+        `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+         VALUES ${tuples.join(", ")}`,
+        binds,
+      );
+    }
   }
 
   async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
@@ -132,11 +164,12 @@ export class PgOutcomeStore implements OutcomeStore {
       run_started_at: Date | string;
       run_scope_type: string;
       run_status: string;
+      run_triggered_by: string | null;
       subject_id: string;
       measure_id: string;
       status: string;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, o.subject_id, o.measure_id, o.status
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
          FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
       binds,
     );
@@ -145,6 +178,7 @@ export class PgOutcomeStore implements OutcomeStore {
       runStartedAt: r.run_started_at instanceof Date ? r.run_started_at.toISOString() : r.run_started_at,
       runScopeType: r.run_scope_type,
       runStatus: r.run_status,
+      runTriggeredBy: r.run_triggered_by ?? "manual",
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,

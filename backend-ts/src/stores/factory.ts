@@ -71,7 +71,12 @@ export interface Stores {
 
 /** Minimal env the factory needs: the SQLite floor binding + an optional Postgres URL (the ceiling). */
 export interface StoresEnv {
-  DB: CloudDatabase;
+  /**
+   * SQLite floor binding. Required for the floor, but OPTIONAL when a non-blank `DATABASE_URL`
+   * selects the Postgres ceiling — the ceiling path never touches `DB`, so Postgres-only callers
+   * (e.g. the seed CLI against Neon) need not open a local SQLite file.
+   */
+  DB?: CloudDatabase;
   /** Postgres connection string; when set + non-blank, the ceiling adapters are used instead of `DB`. */
   DATABASE_URL?: string;
 }
@@ -105,6 +110,7 @@ async function build(env: StoresEnv): Promise<Stores> {
   if (url) {
     return buildPostgres(url);
   }
+  if (!env.DB) throw new Error("StoresEnv.DB is required for the SQLite floor when DATABASE_URL is not set");
   return buildSqlite(env.DB);
 }
 
@@ -145,6 +151,7 @@ export async function getBackend(env: StoresEnv): Promise<ActiveBackend> {
   await getStores(env); // ensure the floor DDL / pg pool + ceiling DDL have been initialized
   const url = (env.DATABASE_URL ?? "").trim();
   if (url) return { kind: "postgres", pool: (sharedPool ??= createPgPool(url)) };
+  if (!env.DB) throw new Error("StoresEnv.DB is required for the SQLite floor when DATABASE_URL is not set");
   return { kind: "sqlite", db: env.DB };
 }
 

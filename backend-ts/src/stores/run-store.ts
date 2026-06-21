@@ -34,6 +34,15 @@ export interface CreateRunInput {
   requestedScope: Record<string, unknown>;
   measurementPeriodStart: string;
   measurementPeriodEnd: string;
+  /**
+   * Optional BACKDATING (synthetic trend-history backfill). When present the adapter persists these
+   * instead of the defaults (`started_at = now`, `status = QUEUED`, `completed_at = null`). Columns
+   * already exist — no schema change. Used to write COMPLETED runs dated weeks in the past so the
+   * programs trend chart has real, varied history.
+   */
+  startedAt?: string;
+  completedAt?: string;
+  status?: RunStatus;
 }
 
 export interface RunRecord {
@@ -41,6 +50,9 @@ export interface RunRecord {
   status: RunStatus;
   scopeType: CreateRunInput["scopeType"];
   scopeId: string | null;
+  /** What triggered the run (`manual` | `rerun` | `seed:trend-history` | …) — drives the run
+   *  list's triggerType so synthetic seed runs aren't shown/filtered as MANUAL operator runs. */
+  triggeredBy: string;
   /** Site the run targeted, if any (from the requested scope) — drives the `site` list filter. */
   site: string | null;
   /** The original requested scope (measureId / employeeExternalId / site / …) — used to rerun. */
