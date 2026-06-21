@@ -82,11 +82,11 @@ export default function EmployeeProfilePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
-                <th className="pb-2 font-medium">Measure</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium">Priority</th>
-                <th className="pb-2 font-medium">Assignee</th>
-                {hasSla ? <th className="pb-2 font-medium">SLA</th> : null}
+                <th scope="col" className="pb-2 font-medium">Measure</th>
+                <th scope="col" className="pb-2 font-medium">Status</th>
+                <th scope="col" className="pb-2 font-medium">Priority</th>
+                <th scope="col" className="pb-2 font-medium">Assignee</th>
+                {hasSla ? <th scope="col" className="pb-2 font-medium">SLA</th> : null}
               </tr>
             </thead>
             <tbody>

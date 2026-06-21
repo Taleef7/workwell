@@ -468,13 +468,13 @@ export default function CampaignsPage() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                  <th className="px-4 py-2 font-semibold">Created</th>
-                  <th className="px-4 py-2 font-semibold">Channel</th>
-                  <th className="px-4 py-2 font-semibold">Measure</th>
-                  <th className="px-4 py-2 text-right font-semibold">Total</th>
-                  <th className="px-4 py-2 text-right font-semibold">Sent</th>
-                  <th className="px-4 py-2 text-right font-semibold">Failed</th>
-                  <th className="px-4 py-2 font-semibold">Status</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Created</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Measure</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Total</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Sent</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Failed</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -551,10 +551,10 @@ function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-            <th className="px-4 py-2 font-semibold">Employee</th>
-            <th className="px-4 py-2 font-semibold">Channel</th>
-            <th className="px-4 py-2 font-semibold">To</th>
-            <th className="px-4 py-2 font-semibold">Status</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Employee</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
+            <th scope="col" className="px-4 py-2 font-semibold">To</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Status</th>
           </tr>
         </thead>
         <tbody>

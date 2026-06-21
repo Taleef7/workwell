@@ -86,6 +86,7 @@ export function GlobalSearch() {
         </svg>
         <input
           type="text"
+          aria-label="Search employees"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
