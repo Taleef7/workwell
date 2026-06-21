@@ -23,6 +23,7 @@ import {
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
@@ -158,6 +159,7 @@ export default function RunsPage() {
   const router = useRouter();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  const { startTracking } = useRunStatus();
   const [showRunConfirm, setShowRunConfirm] = useState(false);
   const searchParams = useSearchParams();
   const urlRunId = searchParams.get("runId");
@@ -410,6 +412,7 @@ export default function RunsPage() {
       setSelectedRunId(data.runId);
       setActiveRunId(data.runId);
       setActiveRunStartedAt(new Date());
+      startTracking(data.runId, data.status); // surface in the global header indicator too
       await loadRuns();
       // Detail will reload via useEffect([selectedRunId, ...]) — no duplicate call needed.
     } catch (err) {
@@ -428,6 +431,7 @@ export default function RunsPage() {
       setSelectedRunId(data.runId);
       setActiveRunId(data.runId);
       setActiveRunStartedAt(new Date());
+      startTracking(data.runId, data.status); // surface in the global header indicator too
       await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
