@@ -26,8 +26,8 @@
  *     from the seeded distribution — not one engine call per employee.
  *
  * Invariants preserved: outcomes still come from the CQL engine (the (measure,target)→outcome map);
- * the synthetic write is audited (a `TREND_HISTORY_SEEDED` audit_event per seeded measure when an
- * auditStore is wired); NO schema change (only the optional backdating params over existing columns);
+ * the synthetic write is audited (a required auditStore writes a `TREND_HISTORY_SEEDED` audit_event
+ * per seeded measure); NO schema change (only the optional backdating params over existing columns);
  * the worklist/cases are untouched (this NEVER calls a case-store upsert); the programs OVERVIEW is unaffected — each
  * measure's newest synthetic week is anchored strictly BEFORE that measure's latest real run, and
  * the overview selects max(runStartedAt) per measure, so a seeded point can never become "current".
@@ -60,11 +60,12 @@ export interface BackfillTrendHistoryDeps {
   outcomeStore: OutcomeStore;
   engine: EvaluateMeasureBinding;
   /**
-   * Optional audit ledger. When provided, the backfill appends a `TREND_HISTORY_SEEDED`
-   * audit_event per seeded measure (the CLI wires `stores.events`) so the synthetic-history
-   * mutation is recorded — the "every state change writes audit_event" hard rule (CLAUDE.md).
+   * Audit ledger — REQUIRED. The backfill appends a `TREND_HISTORY_SEEDED` audit_event per seeded
+   * measure (the CLI wires `stores.events`). Mandatory (not optional) so no caller can mutate
+   * persisted state without an audit row — the "every state change writes audit_event" hard rule
+   * (CLAUDE.md). The CQL engine is still the outcome source; this only records the mutation.
    */
-  auditStore?: CaseEventStore;
+  auditStore: CaseEventStore;
   /** Injectable for tests; defaults to the full synthetic directory (~100 employees). */
   employees?: readonly EmployeeProfile[];
 }
@@ -148,8 +149,8 @@ async function latestRealRunMs(outcomeStore: OutcomeStore, measureId: string, se
  * seeded are created, so an interrupted run (or a later run with a larger `--weeks`) fills the gaps
  * without duplicating weeks; `skipped:true` only when every measure already has all `weeks` days.
  * Each measure's newest week is anchored strictly before its latest real run, so the programs
- * OVERVIEW is never hijacked. Appends a `TREND_HISTORY_SEEDED` audit event per seeded measure when
- * an `auditStore` is given (the CLI wires it). Never touches the case store.
+ * OVERVIEW is never hijacked. Appends a `TREND_HISTORY_SEEDED` audit event per seeded measure (the
+ * auditStore is required). Never touches the case store.
  */
 export async function backfillTrendHistory(
   deps: BackfillTrendHistoryDeps,
@@ -242,7 +243,7 @@ export async function backfillTrendHistory(
     outcomesCreated += measureOutcomes;
     // Audit the synthetic write — "every state change writes audit_event" (CLAUDE.md). One ledger
     // row per seeded measure, tagged with the seed trigger as actor so it's filterable/reversible.
-    if (measureRuns > 0 && deps.auditStore) {
+    if (measureRuns > 0) {
       await deps.auditStore.appendAudit({
         eventType: TREND_HISTORY_SEEDED_EVENT,
         entityType: "run",

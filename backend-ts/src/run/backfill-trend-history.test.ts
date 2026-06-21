@@ -46,6 +46,7 @@ function deps(db: Awaited<ReturnType<typeof freshDb>>) {
   return {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
+    auditStore: new SqliteCaseEventStore(db), // required — the backfill must audit its writes
     engine: new CqlExecutionEngine(),
   };
 }
@@ -207,10 +208,9 @@ test("backfillTrendHistory resumes at week level — a larger --weeks adds only 
 test("backfillTrendHistory writes a TREND_HISTORY_SEEDED audit event per seeded measure (Codex P2 / audit rule)", async () => {
   const db = await freshDb();
   const d = deps(db);
-  const auditStore = new SqliteCaseEventStore(db);
-  await backfillTrendHistory({ ...d, auditStore }, { weeks: WEEKS, asOf: ASOF });
+  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
 
-  const events = await auditStore.recentAuditEventsByType("TREND_HISTORY_SEEDED", 1000);
+  const events = await d.auditStore.recentAuditEventsByType("TREND_HISTORY_SEEDED", 1000);
   assert.equal(events.length, RUNNABLE.length, "one audit event per seeded measure");
   assert.ok(
     events.every((e) => e.actor === "seed:trend-history" && typeof e.payload.measureId === "string"),
