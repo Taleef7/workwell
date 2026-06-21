@@ -17,6 +17,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -180,32 +181,41 @@ test("seeded history is anchored before a measure's latest real run — overview
   assert.equal(audio.latestRunId, realRun.id, "overview latest = real run, not a seeded point");
 });
 
-test("backfillTrendHistory resumes — already-seeded measures skipped, missing ones seeded (Codex P2)", async () => {
+test("backfillTrendHistory resumes at week level — a larger --weeks adds only missing weeks, no dupes (Codex P2)", async () => {
   const db = await freshDb();
   const d = deps(db);
-  const seededMeasure = RUNNABLE[0]!;
-  // Simulate a backfill interrupted after the first measure: pre-seed ONE measure only.
-  const pre = await d.runStore.createRun({
-    scopeType: "MEASURE",
-    scopeId: seededMeasure,
-    triggeredBy: "seed:trend-history",
-    status: "COMPLETED",
-    startedAt: "2026-05-01T00:00:00.000Z",
-    completedAt: "2026-05-01T00:01:00.000Z",
-    requestedScope: { measureId: seededMeasure, seedTrendHistory: true },
-    measurementPeriodStart: "2025-05-01T00:00:00.000Z",
-    measurementPeriodEnd: "2026-05-01T00:00:00.000Z",
-  });
-  await d.outcomeStore.recordOutcomes([
-    { runId: pre.id, subjectId: "emp-001", measureId: seededMeasure, evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: { seedTrendHistory: true, target: "COMPLIANT", rate: 0.8 }, evaluatedAt: "2026-05-01T00:01:00.000Z" },
-  ]);
+  // First seed 2 weeks, then re-run with 4 weeks: the 2 newest weeks already exist (same anchor =
+  // asOf, no real runs), so only the 2 older weeks should be added — 4 runs/measure total, no dupes.
+  await backfillTrendHistory(d, { weeks: 2, asOf: ASOF });
+  const afterFirst = (await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram").length;
+  assert.equal(afterFirst, 2, "first call seeds 2 weeks");
 
-  const summary = await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
-  assert.equal(summary.skipped, false, "not a full no-op — other measures still needed seeding");
+  const second = await backfillTrendHistory(d, { weeks: 4, asOf: ASOF });
+  assert.equal(second.skipped, false, "larger --weeks is not a no-op");
 
-  const runs = await d.runStore.listRuns(100000);
-  assert.equal(runs.filter((r) => r.scopeId === seededMeasure).length, 1, "already-seeded measure is NOT re-seeded");
-  assert.equal(runs.filter((r) => r.scopeId === RUNNABLE[1]).length, WEEKS, "a missing measure IS seeded");
+  const audioRuns = (await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram");
+  assert.equal(audioRuns.length, 4, "now 4 weeks total (2 reused + 2 added)");
+  const days = new Set(audioRuns.map((r) => r.startedAt.slice(0, 10)));
+  assert.equal(days.size, 4, "4 distinct week days — no duplicate weeks");
+
+  // Re-running 4 weeks again is a full no-op.
+  const third = await backfillTrendHistory(d, { weeks: 4, asOf: ASOF });
+  assert.equal(third.skipped, true, "re-running the same weeks is a no-op");
+  assert.equal((await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram").length, 4, "no new runs");
+});
+
+test("backfillTrendHistory writes a TREND_HISTORY_SEEDED audit event per seeded measure (Codex P2 / audit rule)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  const auditStore = new SqliteCaseEventStore(db);
+  await backfillTrendHistory({ ...d, auditStore }, { weeks: WEEKS, asOf: ASOF });
+
+  const events = await auditStore.recentAuditEventsByType("TREND_HISTORY_SEEDED", 1000);
+  assert.equal(events.length, RUNNABLE.length, "one audit event per seeded measure");
+  assert.ok(
+    events.every((e) => e.actor === "seed:trend-history" && typeof e.payload.measureId === "string"),
+    "audit events tagged with the seed trigger + carry the measureId",
+  );
 });
 
 test("the case store is never touched by the backfill", async () => {

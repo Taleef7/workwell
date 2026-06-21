@@ -84,7 +84,7 @@ export async function main(argv: string[]): Promise<number> {
     const env = await buildEnv();
     const stores = await getStores(env);
     const summary = await backfillTrendHistory(
-      { runStore: stores.runs, outcomeStore: stores.outcomes, engine: new CqlExecutionEngine() },
+      { runStore: stores.runs, outcomeStore: stores.outcomes, auditStore: stores.events, engine: new CqlExecutionEngine() },
       parsed,
     );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";
