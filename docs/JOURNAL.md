@@ -40,10 +40,24 @@ What shipped on the branch (by theme):
 - **Trend realism:** bumped the synthetic generator amplitude + added a texture harmonic (needs a
   re-seed to surface; the live chart auto-scale already reveals the existing ±6%).
 
-Open follow-ups (not done this pass, recommended next): admin IA tabs (8-section scroll), employee-
-detail IA redesign, M4 live integration-health probing, client-side request caching (SWR; `cache:
-"no-store"` everywhere today), and the systemic a11y debt (table `scope`, labels). Audit digest +
-roadmap saved under the run's workflow journal.
+Follow-up wave (also completed this pass, after the items above): **Admin IA → 4 tabs**
+(Operations/Governance/Outreach/Audit, so only the active section + its NitroGrid mounts) + dark
+badges + server-side audit-payload pretty-print; **Employee detail redesign** (2-column layout +
+sticky rail, colored outcome pills, dropped the always-null SLA column, and the backend profile now
+does one cases fetch instead of two); a **global, durable run-progress indicator** (`RunStatusProvider`
+in the layout — a header pill that survives navigation + reload via localStorage, fires
+`ww:run-complete`, and is consumed by /programs, /runs, /programs/[id]); **M4** the AI integration
+tile now reflects whether `OPENAI_API_KEY` is set (live), not a hardcoded "healthy"; an **a11y pass**
+(`scope="col"` on every hand-written table + aria-labels on raw inputs, attribute-only across 15
+files); **measure-detail empty states** + the "Measures in this Program"→"Outcome breakdown by
+version" rename + a clearer all-simulated campaign result line; and a **conservative API GET cache**
+(`frontend/lib/api/client.ts`: in-flight dedup + 1.5s TTL, busted on every write — replaces the
+blanket `cache:"no-store"`, no SWR dependency). Whole-branch code-review: clean (the GET cache was
+scrutinized hardest — cache entry is inserted at call-time and every mutation busts the map, so a
+read never serves post-write-stale data). Verification: backend full suite + frontend
+tsc/lint/build/vitest all green. Remaining genuinely-open (larger, not attempted): a full WCAG audit
+beyond table/label basics, and the documented production drop-ins (managed S3/R2 evidence bucket,
+real ICE/DataChaser/SendGrid adapters). Audit digest + roadmap saved under the run's workflow journal.
 
 ## 2026-06-21 — Synthetic trend-history backfill (#180) + full QA smoke test + H1 fix
 
