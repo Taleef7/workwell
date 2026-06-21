@@ -32,6 +32,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
+import { RunStatusProvider, useRunStatus } from "@/components/run-status-provider";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
@@ -62,6 +63,28 @@ const DATE_PRESETS = [
   { value: "90d", label: "Last 90 days" },
   { value: "all", label: "All time" },
 ] as const;
+
+/** Global "a measure run is in progress" pill — visible on every dashboard screen, persists across
+ *  navigation and reloads via RunStatusProvider, and links to /runs. */
+function RunStatusIndicator() {
+  const { isActive, status, evaluated } = useRunStatus();
+  const router = useRouter();
+  if (!isActive) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => router.push("/runs")}
+      title="A measure run is in progress — click to view"
+      className="hidden items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:flex dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+    >
+      <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+      <span>
+        Run {status.toLowerCase()}
+        {evaluated > 0 ? ` · ${evaluated} evaluated` : ""}
+      </span>
+    </button>
+  );
+}
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -229,6 +252,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   className="w-36"
                 />
               </div>
+              <RunStatusIndicator />
               <ThemeBrandSwitcher />
             </AppHeaderSection>
           </AppHeader>
@@ -264,7 +288,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <Suspense fallback={<div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />}>
       <GlobalFilterProvider>
-        <DashboardShell>{children}</DashboardShell>
+        <RunStatusProvider>
+          <DashboardShell>{children}</DashboardShell>
+        </RunStatusProvider>
       </GlobalFilterProvider>
     </Suspense>
   );

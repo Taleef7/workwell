@@ -11,6 +11,7 @@ import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { niceDomain } from "@/lib/charts";
@@ -100,6 +101,7 @@ export default function ProgramDetailPage() {
   const api = useApi();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  const { startTracking } = useRunStatus();
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -412,7 +414,11 @@ export default function ProgramDetailPage() {
                   void (async () => {
                     try {
                       setError(null);
-                      await api.post("/api/runs/manual", { scopeType: "MEASURE", measureId });
+                      const res = await api.post<{ scopeType: string; measureId: string }, { runId: string; status?: string }>(
+                        "/api/runs/manual",
+                        { scopeType: "MEASURE", measureId },
+                      );
+                      startTracking(res.runId, res.status ?? "REQUESTED");
                       emitToast(`${program.measureName} run started`);
                     } catch (err) {
                       setError(err instanceof Error ? err.message : "Unknown error");

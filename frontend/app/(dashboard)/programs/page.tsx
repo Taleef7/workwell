@@ -7,6 +7,7 @@ import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
@@ -51,6 +52,7 @@ export default function ProgramsPage() {
   const api = useApi();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
@@ -59,8 +61,6 @@ export default function ProgramsPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [activeRunStatus, setActiveRunStatus] = useState<string>("IDLE");
   const [showRunConfirm, setShowRunConfirm] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -123,30 +123,13 @@ export default function ProgramsPage() {
     return () => clearTimeout(timer);
   }, [loadAll]);
 
+  // The global RunStatusProvider polls the active run; when it finishes it fires ww:run-complete and
+  // we reload the overview. (This survives navigation/reload — the run state lives in the provider.)
   useEffect(() => {
-    if (!activeRunId) return;
-    const terminal = ["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"];
-    if (terminal.includes(activeRunStatus)) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const run = await api.get<{ status: string }>(`/api/runs/${activeRunId}`);
-        setActiveRunStatus(run.status);
-        if (run.status === "COMPLETED" || run.status === "PARTIAL_FAILURE") {
-          setActiveRunId(null);
-          void loadAll();
-          emitToast("Run completed — Programs refreshed");
-        } else if (run.status === "FAILED" || run.status === "CANCELLED") {
-          setActiveRunId(null);
-          setRunError("Run failed. Check the Runs page for details.");
-        }
-      } catch {
-        // ignore transient polling errors
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [activeRunId, activeRunStatus, api, loadAll]);
+    const onComplete = () => void loadAll();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [loadAll]);
 
   async function runAllMeasuresNow() {
     setRunError(null);
@@ -154,8 +137,7 @@ export default function ProgramsPage() {
       const result = await api.post<{ scopeType: string }, { runId: string; status: string }>(
         "/api/runs/manual", { scopeType: "ALL_PROGRAMS" }
       );
-      setActiveRunId(result.runId);
-      setActiveRunStatus("REQUESTED");
+      startTracking(result.runId, result.status ?? "REQUESTED");
       emitToast("Run started — will refresh when complete");
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Run failed. Please try again.");
@@ -185,9 +167,10 @@ export default function ProgramsPage() {
             View hierarchy
           </Link>
           {mayRun ? (
-            activeRunId ? (
-              <span className="animate-pulse text-sm text-neutral-500 dark:text-neutral-400">
-                {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
+            runActive ? (
+              <span className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                Run in progress…
               </span>
             ) : (
               <Button variant="primary" onClick={() => setShowRunConfirm(true)}>
