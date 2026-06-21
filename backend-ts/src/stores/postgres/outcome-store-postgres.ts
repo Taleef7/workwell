@@ -164,11 +164,12 @@ export class PgOutcomeStore implements OutcomeStore {
       run_started_at: Date | string;
       run_scope_type: string;
       run_status: string;
+      run_triggered_by: string | null;
       subject_id: string;
       measure_id: string;
       status: string;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, o.subject_id, o.measure_id, o.status
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
          FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
       binds,
     );
@@ -177,6 +178,7 @@ export class PgOutcomeStore implements OutcomeStore {
       runStartedAt: r.run_started_at instanceof Date ? r.run_started_at.toISOString() : r.run_started_at,
       runScopeType: r.run_scope_type,
       runStatus: r.run_status,
+      runTriggeredBy: r.run_triggered_by ?? "manual",
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,

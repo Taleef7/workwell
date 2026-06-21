@@ -128,15 +128,16 @@ async function seededDaysForMeasure(outcomeStore: OutcomeStore, measureId: strin
  * synthetic week is anchored strictly BEFORE this so seeded history never becomes the measure's
  * "current" run — `programOverview` selects `max(runStartedAt)` per measure, so a synthetic point
  * newer than the last real run would hijack the overview KPI (Codex P2). Prior seeded runs are
- * EXCLUDED (by their day, via `seededDays`) so the anchor stays stable across reruns — otherwise a
- * resume would key off its own newest seeded run and drift the target days, duplicating weeks.
+ * EXCLUDED BY IDENTITY (their `triggered_by` marker, not their calendar day) so a real run that
+ * happens to share a day with a seeded week is still counted, and the anchor stays stable across
+ * reruns (excluding by day could drop a same-day real run and let a resume anchor at asOf).
  */
-async function latestRealRunMs(outcomeStore: OutcomeStore, measureId: string, seededDays: Set<string>): Promise<number | null> {
+async function latestRealRunMs(outcomeStore: OutcomeStore, measureId: string): Promise<number | null> {
   const rows = await outcomeStore.listOutcomesWithRun({ measureId });
   let max: number | null = null;
   for (const r of rows) {
     if (!isPopulationRun(r.runScopeType)) continue; // exclude CASE/EMPLOYEE reruns (overview parity)
-    if (seededDays.has(dayOnly(r.runStartedAt))) continue; // exclude this feature's own seeded runs
+    if (r.runTriggeredBy === TREND_HISTORY_TRIGGER) continue; // exclude this feature's own seeded runs (by marker)
     const t = Date.parse(r.runStartedAt);
     if (!Number.isNaN(t) && (max === null || t > max)) max = t;
   }
@@ -186,7 +187,7 @@ export async function backfillTrendHistory(
     // Anchor the newest synthetic week strictly BEFORE this measure's latest real run (≥ 1 day),
     // capped at asOf, so seeded history never out-ranks the real current run on the overview. If the
     // measure has no real run yet, anchor at asOf (the seed legitimately populates an empty card).
-    const latestReal = await latestRealRunMs(deps.outcomeStore, measureId, existingDays);
+    const latestReal = await latestRealRunMs(deps.outcomeStore, measureId);
     const anchorMs = latestReal != null ? Math.min(asOfMs, latestReal - DAY_MS) : asOfMs;
     let measureRuns = 0;
     let measureOutcomes = 0;

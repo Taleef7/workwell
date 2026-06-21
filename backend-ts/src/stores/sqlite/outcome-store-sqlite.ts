@@ -144,16 +144,17 @@ export class SqliteOutcomeStore implements OutcomeStore {
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
-        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, o.subject_id, o.measure_id, o.status
+        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
            FROM outcomes o JOIN runs r ON r.id = o.run_id${clause}`,
       )
       .bind(...binds)
-      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; subject_id: string; measure_id: string; status: string }>();
+      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string }>();
     return (results ?? []).map((r) => ({
       runId: r.run_id,
       runStartedAt: r.run_started_at,
       runScopeType: r.run_scope_type,
       runStatus: r.run_status,
+      runTriggeredBy: r.run_triggered_by ?? "manual",
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,

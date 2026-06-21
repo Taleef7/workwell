@@ -182,6 +182,41 @@ test("seeded history is anchored before a measure's latest real run — overview
   assert.equal(audio.latestRunId, realRun.id, "overview latest = real run, not a seeded point");
 });
 
+test("a real run on the same day as a seeded week is still the overview latest (identity exclusion, Codex P2)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  const caseStore = new SqliteCaseStore(db);
+  // A REAL manual run for audiogram on the ASOF day.
+  const real = await d.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "manual",
+    status: "COMPLETED",
+    startedAt: `${ASOF}T18:00:00.000Z`,
+    completedAt: `${ASOF}T18:05:00.000Z`,
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2025-06-20T00:00:00.000Z",
+    measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
+  });
+  await d.outcomeStore.recordOutcomes(
+    EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+  );
+
+  // Seed, then resume with more weeks. latestRealRunMs must recognize the real run by its marker
+  // (not exclude it because a seeded week shares its day), so every seeded run stays before it.
+  await backfillTrendHistory(d, { weeks: 2, asOf: ASOF });
+  await backfillTrendHistory(d, { weeks: 4, asOf: ASOF });
+
+  const audioRuns = (await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram");
+  const seeded = audioRuns.filter((r) => r.triggeredBy === "seed:trend-history");
+  assert.ok(seeded.length >= 4, "audiogram seeded across the requested weeks");
+  assert.ok(seeded.every((r) => r.startedAt < real.startedAt), "every seeded run is strictly before the real run");
+
+  const overview = await programOverview({ runStore: d.runStore, outcomeStore: d.outcomeStore, caseStore }, {});
+  const audio = overview.find((p) => p.measureId === "audiogram")!;
+  assert.equal(audio.latestRunId, real.id, "the real run stays the overview's latest, not a seeded point");
+});
+
 test("backfillTrendHistory resumes at week level — a larger --weeks adds only missing weeks, no dupes (Codex P2)", async () => {
   const db = await freshDb();
   const d = deps(db);
