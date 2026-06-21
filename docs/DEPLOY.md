@@ -81,6 +81,33 @@ The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
 
 Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
 
+### Seeding synthetic trend history (on-demand, NOT auto-run on deploy)
+
+The `/programs` + `/programs/[measureId]` trend charts can read as flat lines on a stack with only a
+few real runs per measure. `pnpm seed:trend-history` backfills **synthetic demo data** — backdated
+weekly COMPLETED runs per runnable measure — so the trends show realistic variation. It is a
+controlled, on-demand tool and is **not run automatically on deploy**. Run it once against Neon from
+`backend-ts/` (it honors `DATABASE_URL` for the Pg ceiling and opens no local SQLite file when set):
+
+```bash
+cd backend-ts
+DATABASE_URL=<neon-pooled> pnpm seed:trend-history --weeks 12 --as-of 2026-06-21
+```
+
+It is idempotent and resumable at the week level — a rerun or a larger `--weeks` fills only missing
+weeks, no duplicates. Seeded runs carry `triggered_by='seed:trend-history'` (labeled `SEED` on
+`/api/runs`; real operator runs stay `MANUAL`) and are anchored strictly before each measure's latest
+real run, so the programs overview is never affected.
+
+**Rollback (reversible, synthetic data only) — delete tagged outcomes first, then runs**
+(`outcomes.run_id` is not `ON DELETE CASCADE`; schema-qualify on the Pg ceiling):
+
+```sql
+DELETE FROM workwell_spike.outcomes
+  WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history');
+DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
+```
+
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.

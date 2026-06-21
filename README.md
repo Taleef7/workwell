@@ -91,6 +91,20 @@ pnpm evaluate --patient ./patient-bundle.json --measure audiogram --date 2026-06
 It's a thin shell (`backend-ts/src/engine/cli/`) over the same `CqlExecutionEngine` the run pipeline uses.
 Output is the `MeasureOutcome` JSON:
 
+## Seed synthetic trend history (so `/programs` charts vary)
+
+`pnpm seed:trend-history` backfills backdated weekly COMPLETED runs per runnable measure so the
+`/programs` + `/programs/[measureId]` trend charts show realistic variation instead of flat lines —
+on-demand, idempotent, **not** auto-run on deploy (`backend-ts/src/run/cli/`):
+
+```bash
+pnpm seed:trend-history --weeks 12 --as-of 2026-06-21
+```
+
+Seeded runs are labeled `SEED` (real operator runs stay `MANUAL`), are anchored strictly before each
+measure's latest real run so the programs overview is never affected, and add no schema. See
+[Deploy Guide](docs/DEPLOY.md) for the reversible rollback SQL.
+
 ```json
 {
   "subjectId" : "demo-patient-1",
