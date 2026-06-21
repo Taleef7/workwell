@@ -27,7 +27,26 @@ const INTEGRATIONS: IntegrationHealth[] = [
 ];
 const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));
 
-export const listIntegrations = (): IntegrationHealth[] => INTEGRATIONS.map((i) => ({ ...i }));
+/**
+ * Integration health (M4). fhir/mcp are in-process (always healthy) and hris is the synthetic
+ * directory (simulated); the one genuinely-live signal is whether the AI surfaces are configured —
+ * `ai` is "healthy" only when OPENAI_API_KEY is set, otherwise "degraded" (deterministic fallbacks).
+ */
+export const listIntegrations = (env?: { OPENAI_API_KEY?: string }): IntegrationHealth[] => {
+  const aiConfigured = !!env?.OPENAI_API_KEY?.trim();
+  return INTEGRATIONS.map((i) => {
+    if (i.integration === "ai") {
+      return {
+        ...i,
+        status: aiConfigured ? "healthy" : "degraded",
+        detail: aiConfigured
+          ? "OpenAI-backed draft/explain surfaces with deterministic fallback."
+          : "OPENAI_API_KEY not set — AI surfaces serve deterministic fallbacks only.",
+      };
+    }
+    return { ...i };
+  });
+};
 
 /**
  * Manual sync — whitelisted to {fhir,mcp,ai,hris}; null when unknown (→404). The update is
