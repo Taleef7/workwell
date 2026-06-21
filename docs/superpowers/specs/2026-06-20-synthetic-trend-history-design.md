@@ -50,8 +50,14 @@ A controlled, idempotent **backfill** that writes ~12 weekly **backdated** `COMP
 - CQL remains the outcome source (outcomes come from the engine-derived `(measure,target)→outcome` map; the existing real seed uses the same target→outcome path).
 - No schema/DDL change (only optional params over existing columns).
 - Cases/worklist untouched (no case upsert in the backfill).
-- Idempotent + reversible (all seeded runs carry `triggered_by = 'seed:trend-history'`; a single `DELETE FROM runs WHERE triggered_by='seed:trend-history'` cascades to remove them — documented in the script header).
-- Programs **overview** unaffected (it uses the latest run per measure; backdated runs are all older than the current real run).
+- Idempotent (week-level) + reversible. All seeded runs carry `triggered_by = 'seed:trend-history'` and outcomes are tagged `evidence.seedTrendHistory = true`. The `outcomes.run_id` FK is **not** `ON DELETE CASCADE`, so rollback deletes the tagged outcomes **first**, then the runs (schema-qualify on the Postgres ceiling):
+  ```sql
+  DELETE FROM workwell_spike.outcomes
+    WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history');
+  DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
+  ```
+- Programs **overview** unaffected: each measure's newest synthetic week is anchored strictly **before that measure's latest real run** (excluding the feature's own seeded runs), and the overview selects `max(runStartedAt)` per measure — so a seeded point can never become "current".
+- Every synthetic write is audited: a `TREND_HISTORY_SEEDED` audit event per seeded measure (CLAUDE.md "every state change writes audit_event").
 
 ## Testing
 - `historicalComplianceRate`: deterministic, bounded `[0.40,0.99]`, varies across weeks, differs by measure, newest week ≈ base rate.
