@@ -203,10 +203,11 @@ export interface DeliveryLogEntry {
 
 export function toDeliveryLog(events: AuditEventRow[], limit: number): DeliveryLogEntry[] {
   const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
-  return events.slice(0, limit).map((e) => {
+  return events.slice(0, limit).map((e, i) => {
     const action = (e.payload.action ?? {}) as Record<string, unknown>;
     return {
-      id: `${e.refCaseId ?? "outreach"}-${e.occurredAt}`,
+      // index-suffixed so two sends on the same case at the same instant don't collide on the React key
+      id: `${e.refCaseId ?? "outreach"}-${e.occurredAt}-${i}`,
       caseId: e.refCaseId,
       toAddress: String(action.toAddress ?? "—"),
       subject: String(action.subject ?? action.templateName ?? "Outreach"),

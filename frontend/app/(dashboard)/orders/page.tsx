@@ -73,10 +73,8 @@ export default function OrdersPage() {
   }, [api, mayView]);
 
   const load = useCallback(async () => {
-    if (!mayView) {
-      setLoading(false);
-      return;
-    }
+    // Non-viewers render the access-denied guard regardless of `loading`, so just bail (no setState).
+    if (!mayView) return;
     setLoading(true);
     setError(null);
     try {
@@ -93,7 +91,10 @@ export default function OrdersPage() {
   }, [api, mayView, measureFilter]);
 
   useEffect(() => {
-    void load();
+    // Defer a tick so the synchronous setLoading() inside load() doesn't run in the effect body
+    // (matches the loader pattern used by /cases and /programs).
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   async function copyFhirBundle() {
