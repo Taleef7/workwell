@@ -240,7 +240,8 @@ export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<stri
         (e.payload.employeeId as string | undefined) ??
         (e.refCaseId ? caseEmployee.get(e.refCaseId) ?? null : null),
       actor: e.actor,
-      detail: JSON.stringify(e.payload),
+      // Pretty-printed so the admin audit viewer's <pre> renders a readable tree, not a single-line blob.
+      detail: JSON.stringify(e.payload, null, 2),
     }))
     .filter((r) => !wanted || r.scope === wanted)
     .slice(0, limit);

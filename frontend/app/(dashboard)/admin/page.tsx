@@ -119,6 +119,14 @@ type DeliveryLogEntry = {
 
 const demoResetVisible = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
+const ADMIN_TABS = [
+  { id: "operations", label: "Operations" },
+  { id: "governance", label: "Governance" },
+  { id: "outreach", label: "Outreach" },
+  { id: "audit", label: "Audit" },
+] as const;
+type AdminTab = (typeof ADMIN_TABS)[number]["id"];
+
 export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ROLE_ADMIN";
@@ -153,6 +161,7 @@ export default function AdminPage() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null);
   const [deliveryLog, setDeliveryLog] = useState<DeliveryLogEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<AdminTab>("operations");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDisableSchedulerConfirm, setShowDisableSchedulerConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -667,6 +676,26 @@ export default function AdminPage() {
 
       {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
 
+      <div className="flex gap-1 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Admin sections">
+        {ADMIN_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === t.id
+                ? "border-primary-600 text-primary-700 dark:text-primary-400"
+                : "border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "operations" && (
       <div className="grid gap-6 xl:grid-cols-2">
         <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">scheduler</p>
@@ -763,7 +792,9 @@ export default function AdminPage() {
           </div>
         </article>
       </div>
+      )}
 
+      {activeTab === "governance" && (<>
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -956,7 +987,9 @@ export default function AdminPage() {
           </div>
         )}
       </article>
+      </>)}
 
+      {activeTab === "outreach" && (<>
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -1238,7 +1271,9 @@ export default function AdminPage() {
           </div>
         )}
       </article>
+      </>)}
 
+      {activeTab === "audit" && (<>
       {demoResetVisible ? (
       <article className="rounded-3xl border border-red-200 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
@@ -1341,7 +1376,7 @@ export default function AdminPage() {
                     {event.scope === "access" ? "Access event" : "Mutation"} • {event.actor ?? "system"} • {new Date(event.occurredAt).toLocaleString()}
                   </p>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${event.scope === "access" ? "bg-indigo-100 text-indigo-800" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}>
+                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${event.scope === "access" ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}>
                   {event.scope}
                 </span>
               </div>
@@ -1356,48 +1391,49 @@ export default function AdminPage() {
           ))}
         </div>
       </article>
+      </>)}
     </section>
   );
 }
 
 function terminologyStatusBadgeClass(status: string) {
   const s = (status ?? "").toUpperCase();
-  if (s === "APPROVED") return "bg-emerald-100 text-emerald-800";
-  if (s === "REVIEWED") return "bg-blue-100 text-blue-800";
-  if (s === "PROPOSED") return "bg-amber-100 text-amber-800";
-  if (s === "REJECTED") return "bg-red-100 text-red-800";
+  if (s === "APPROVED") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "REVIEWED") return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+  if (s === "PROPOSED") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (s === "REJECTED") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function mappingStatusBadgeClass(status: string) {
   const s = (status ?? "").toUpperCase();
-  if (s === "MAPPED") return "bg-emerald-100 text-emerald-800";
-  if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800";
-  if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800";
+  if (s === "MAPPED") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function deliveryStatusBadgeClass(status: string) {
   const s = (status ?? "").toUpperCase();
-  if (s === "SENT") return "bg-emerald-100 text-emerald-800";
-  if (s === "SIMULATED") return "bg-sky-100 text-sky-800";
-  if (s === "FAILED") return "bg-red-100 text-red-800";
+  if (s === "SENT") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "SIMULATED") return "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300";
+  if (s === "FAILED") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
 function statusBadgeClass(status: string) {
   const normalized = (status ?? "").toLowerCase();
   if (normalized === "healthy") {
-    return "rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-900";
+    return "rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200";
   }
   if (normalized === "simulated") {
-    return "rounded-full border border-sky-300 bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-900";
+    return "rounded-full border border-sky-300 bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-900 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-200";
   }
   if (normalized === "degraded" || normalized === "stale") {
-    return "rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900";
+    return "rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200";
   }
   if (normalized === "unhealthy") {
-    return "rounded-full border border-red-300 bg-red-100 px-3 py-1 text-sm font-semibold text-red-900";
+    return "rounded-full border border-red-300 bg-red-100 px-3 py-1 text-sm font-semibold text-red-900 dark:border-red-800 dark:bg-red-900/30 dark:text-red-200";
   }
   // unknown / anything else
   return "rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-3 py-1 text-sm font-semibold text-neutral-700 dark:text-neutral-300";
