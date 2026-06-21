@@ -790,7 +790,7 @@ export default function AdminPage() {
         {dataMappings.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No mappings loaded.</p>
         ) : (
-          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+          <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
             <NitroGrid
               rows={dataMappingRows}
               columns={dataMappingColumns}
@@ -945,7 +945,7 @@ export default function AdminPage() {
         {terminologyMappings.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No terminology mappings loaded.</p>
         ) : (
-          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+          <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
             <NitroGrid
               rows={terminologyRows}
               columns={terminologyColumns}
@@ -1227,7 +1227,7 @@ export default function AdminPage() {
         {deliveryLog.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 px-4 py-4 text-sm text-neutral-500 dark:text-neutral-400">No outreach emails sent yet.</p>
         ) : (
-          <div className="mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+          <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
             <NitroGrid
               rows={deliveryRows}
               columns={deliveryColumns}

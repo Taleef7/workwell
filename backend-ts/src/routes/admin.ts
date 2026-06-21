@@ -24,6 +24,7 @@ import {
   listDataMappings,
   validateDataMappings,
   toAdminAuditRows,
+  toDeliveryLog,
 } from "../admin/admin-data.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
@@ -267,8 +268,13 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     }
   }
 
-  // ---- deferred subsystems (honest empty so the dashboard renders) ---------
-  if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") return json([]);
+  // Outreach delivery log (M3): derived from CASE_OUTREACH_SENT audit events (no dedicated table on
+  // the demo stack — see admin-data.toDeliveryLog). Was previously a hardcoded empty array.
+  if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") {
+    const limit = Math.min(100, Math.max(1, Number(q.get("limit") ?? "20") || 20));
+    const events = await (await getStores(env)).events.recentAuditEventsByType("CASE_OUTREACH_SENT", limit);
+    return json(toDeliveryLog(events, limit));
+  }
 
   return null;
 }

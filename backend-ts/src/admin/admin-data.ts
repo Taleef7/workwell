@@ -185,6 +185,40 @@ export interface AdminAuditRow {
  */
 export const auditScopeOf = (eventType: string): "access" | "mutation" => (eventType === "CASE_VIEWED" ? "access" : "mutation");
 
+// ---- outreach delivery log (M3) ---------------------------------------------
+// No dedicated outreach_delivery_log table on the demo stack; every per-case send writes a
+// CASE_OUTREACH_SENT audit event whose payload.action carries recipient/subject/provider/status.
+// We derive the admin "Recent outreach" view from those events (newest-first, already bounded).
+export interface DeliveryLogEntry {
+  id: string;
+  caseId: string | null;
+  toAddress: string;
+  subject: string;
+  provider: string;
+  status: string;
+  sentAt: string | null;
+  errorDetail: string | null;
+  measureName: string | null;
+}
+
+export function toDeliveryLog(events: AuditEventRow[], limit: number): DeliveryLogEntry[] {
+  const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
+  return events.slice(0, limit).map((e) => {
+    const action = (e.payload.action ?? {}) as Record<string, unknown>;
+    return {
+      id: `${e.refCaseId ?? "outreach"}-${e.occurredAt}`,
+      caseId: e.refCaseId,
+      toAddress: String(action.toAddress ?? "—"),
+      subject: String(action.subject ?? action.templateName ?? "Outreach"),
+      provider: String(action.deliveryProvider ?? "simulated"),
+      status: String(action.emailDeliveryStatus ?? action.deliveryStatus ?? "SIMULATED"),
+      sentAt: typeof action.sentAt === "string" ? action.sentAt : e.occurredAt,
+      errorDetail: typeof action.errorDetail === "string" ? action.errorDetail : null,
+      measureName: e.refMeasureVersionId ? measureName(e.refMeasureVersionId) : null,
+    };
+  });
+}
+
 export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<string, string>, scope: string, limit: number): AdminAuditRow[] {
   // scope: "access" → CASE_VIEWED; "mutation"/"mutations" → everything else; "all"/blank → no filter.
   const raw = scope?.trim().toLowerCase();
