@@ -1272,17 +1272,20 @@ function timelineSource(eventType: string) {
 function timelineNotificationBadge(event: AuditEvent) {
   const payload = event.payload as Record<string, unknown>;
   const eventType = event.eventType.toUpperCase();
-  const autoTriggered = payload.autoTriggered ?? payload.auto_triggered;
-  const timelineSourceValue = payload.timelineSource;
+  // The timeline is now single-source (audit_events), and the outreach action detail rides under
+  // payload.action — so read autoTriggered from either the top level or the nested action payload.
+  const action = (payload.action ?? {}) as Record<string, unknown>;
+  const autoTriggered = payload.autoTriggered ?? payload.auto_triggered ?? action.autoTriggered ?? action.auto_triggered;
 
   if (eventType === "NOTIFICATION_AUTO_QUEUED" || autoTriggered === true) {
     return {
       label: "Auto",
-      className: "border-indigo-200 bg-indigo-50 text-indigo-800"
+      className: "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300"
     };
   }
 
-  if (eventType.includes("OUTREACH") && timelineSourceValue === "case_action") {
+  // An outreach send that wasn't auto-triggered is a manual send.
+  if (eventType.includes("OUTREACH") && autoTriggered !== true) {
     return {
       label: "Manual",
       className: "border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"

@@ -587,7 +587,7 @@ export default function CasesPage() {
         </div>
       ) : null}
 
-      {filteredCases.length > 0 ? (
+      {canManage && filteredCases.length > 0 ? (
         <label className="hidden items-center gap-2 text-sm text-neutral-600 md:flex dark:text-neutral-400">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
@@ -619,7 +619,7 @@ export default function CasesPage() {
       </div>
 
       {viewMode === "table" ? (
-        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} />
+        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canManage} />
       ) : (
       <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
         {filteredCases.map((item) => {
@@ -630,14 +630,18 @@ export default function CasesPage() {
           return (
             <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  <input
-                    type="checkbox"
-                    checked={selectedCaseIds.includes(item.caseId)}
-                    onChange={() => toggleCase(item.caseId)}
-                  />
-                  Select
-                </label>
+                {canManage ? (
+                  <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+                    <input
+                      type="checkbox"
+                      checked={selectedCaseIds.includes(item.caseId)}
+                      onChange={() => toggleCase(item.caseId)}
+                    />
+                    Select
+                  </label>
+                ) : (
+                  <span />
+                )}
                 <div className="flex flex-wrap justify-end gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{caseStatusLabel}</span>
                   <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>{priorityLabel}</Badge>
@@ -727,10 +731,12 @@ function CasesTable({
   items,
   selectedCaseIds,
   onToggle,
+  canManage,
 }: {
   items: CaseSummary[];
   selectedCaseIds: string[];
   onToggle: (caseId: string) => void;
+  canManage: boolean;
 }) {
   if (items.length === 0) return null;
   return (
@@ -738,7 +744,7 @@ function CasesTable({
       <table className="min-w-full text-sm">
         <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
           <tr>
-            <th className="w-10 px-3 py-2" aria-label="Select" />
+            {canManage ? <th className="w-10 px-3 py-2" aria-label="Select" /> : null}
             <th className="px-3 py-2">Employee</th>
             <th className="px-3 py-2">Measure</th>
             <th className="px-3 py-2">Site</th>
@@ -755,14 +761,16 @@ function CasesTable({
               key={item.caseId}
               className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50 dark:border-neutral-800/60 dark:hover:bg-neutral-800/40"
             >
-              <td className="px-3 py-2">
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${item.employeeName}`}
-                  checked={selectedCaseIds.includes(item.caseId)}
-                  onChange={() => onToggle(item.caseId)}
-                />
-              </td>
+              {canManage ? (
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.employeeName}`}
+                    checked={selectedCaseIds.includes(item.caseId)}
+                    onChange={() => onToggle(item.caseId)}
+                  />
+                </td>
+              ) : null}
               <td className="px-3 py-2">
                 <Link
                   href={`/cases/${item.caseId}`}
