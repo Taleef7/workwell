@@ -59,16 +59,19 @@ export function parseArgs(args: string[]): SeedCliArgs {
 }
 
 /**
- * Build the store env from `process.env`: a local SQLite file binding for the floor, plus an
- * optional `DATABASE_URL` for the Postgres ceiling — the same selection the worker factory makes.
+ * Build the store env from `process.env` — the same selection the worker factory makes:
+ *   - `DATABASE_URL` set → Postgres ceiling; the factory uses the pool and NEVER the `DB` binding,
+ *     so we do NOT open a local SQLite file (it can fail in read-only / no-SQLite deploy dirs).
+ *   - otherwise → SQLite floor: a local file binding (`WORKWELL_SQLITE_PATH`, default ./.workwell-local.sqlite).
  */
 async function buildEnv(): Promise<StoresEnv> {
   const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
+  if (databaseUrl) return { DATABASE_URL: databaseUrl }; // Postgres ceiling — no SQLite binding needed
   // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
   const { createSqliteD1 } = await import("@mieweb/cloud-local");
   const dbPath = process.env.WORKWELL_SQLITE_PATH ?? "./.workwell-local.sqlite";
   const DB = await createSqliteD1(dbPath);
-  return { DB, DATABASE_URL: databaseUrl || undefined };
+  return { DB };
 }
 
 /** Parse → build stores → backfill → print a summary line. Returns the process exit code. */
