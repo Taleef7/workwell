@@ -299,16 +299,16 @@ export default function ProgramDetailPage() {
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top sites</p>
-              {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
+              {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-400">No site concentration in the latest run.</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
             </div>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top roles</p>
-              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-400">No role concentration in the latest run.</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
             </div>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reason mix</p>
               {drivers.byOutcomeReason.length === 0 ? (
-                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">-</p>
+                <p className="mt-2 text-xs text-neutral-400">No flagged reasons in the latest run.</p>
               ) : (
                 <div className="mt-2 space-y-2">
                   {drivers.byOutcomeReason.map((r) => (
@@ -377,7 +377,7 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Measures in this Program</p>
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Outcome breakdown by version</p>
             <table className="mt-2 min-w-full text-xs">
               <thead className="text-left text-neutral-600 dark:text-neutral-400">
                 <tr>

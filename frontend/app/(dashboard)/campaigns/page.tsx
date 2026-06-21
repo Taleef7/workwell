@@ -416,6 +416,14 @@ export default function CampaignsPage() {
                 Dry run preview — {result.total} recipient{result.total === 1 ? "" : "s"} ({result.channel}). No messages
                 sent.
               </p>
+            ) : result.simulated === result.total ? (
+              // All-simulated (demo stack): one accurate line instead of peer Sent/Simulated counters
+              // that read as double the recipients.
+              <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Campaign dispatched via {result.channel} to {result.total} recipient{result.total === 1 ? "" : "s"} —{" "}
+                <span className="font-semibold">simulated</span> (no real messages sent on the demo stack)
+                {result.failed > 0 ? ` · ${result.failed} failed` : ""}.
+              </p>
             ) : (
               <div className="flex flex-wrap gap-4 text-sm">
                 <span className="text-neutral-700 dark:text-neutral-300">
