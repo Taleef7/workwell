@@ -10,7 +10,10 @@ import {
 import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import { niceDomain } from "@/lib/charts";
 
 type ProgramSummary = {
   measureId: string;
@@ -95,6 +98,8 @@ export default function ProgramDetailPage() {
   const params = useParams<{ measureId: string }>();
   const measureId = params.measureId;
   const api = useApi();
+  const { user } = useAuth();
+  const mayRun = canRunMeasures(user?.role);
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -105,34 +110,25 @@ export default function ProgramDetailPage() {
   useEffect(() => {
     if (!measureId) return;
     async function load() {
-      try {
-        const programs = await api.get<ProgramSummary[]>("/api/programs");
-        setProgram(programs.find((p) => p.measureId === measureId) ?? null);
-        try {
-          const t = await api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`);
-          setTrend(t);
-        } catch {
-          setTrend([]);
-        }
-        try {
-          const d = await api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`);
-          setDrivers(d);
-        } catch {
-          setDrivers({ bySite: [], byRole: [], byOutcomeReason: [] });
-        }
-        try {
-          // 90-day lookahead (#150 M8): a 30-day horizon is too narrow for annual measures (a 365-day
-          // window), so almost no compliant employee crosses into "due soon" within it and the predicted
-          // rate is always identical to the current rate. A quarter-ahead horizon surfaces real upcoming
-          // expirations, so the projection is meaningful instead of a passthrough.
-          const outlook = await api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`);
-          setRiskOutlook(outlook);
-        } catch {
-          setRiskOutlook(null);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+      // The four reads are independent of each other — fire them concurrently instead of
+      // as a 4-step waterfall (the previous serial chain was the main "view detail is slow"
+      // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
+      // measures, so the predicted rate just echoed the current rate; a quarter-ahead horizon
+      // surfaces real upcoming expirations.
+      const [programsRes, trendRes, driversRes, outlookRes] = await Promise.allSettled([
+        api.get<ProgramSummary[]>("/api/programs"),
+        api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`),
+        api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
+        api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
+      ]);
+      if (programsRes.status === "fulfilled") {
+        setProgram(programsRes.value.find((p) => p.measureId === measureId) ?? null);
+      } else {
+        setError(programsRes.reason instanceof Error ? programsRes.reason.message : "Unknown error");
       }
+      setTrend(trendRes.status === "fulfilled" ? trendRes.value : []);
+      setDrivers(driversRes.status === "fulfilled" ? driversRes.value : { bySite: [], byRole: [], byOutcomeReason: [] });
+      setRiskOutlook(outlookRes.status === "fulfilled" ? outlookRes.value : null);
     }
     void load();
   }, [api, measureId]);
@@ -408,23 +404,25 @@ export default function ProgramDetailPage() {
             <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Open Worklist (Filtered)
             </Link>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                void (async () => {
-                  try {
-                    setError(null);
-                    await api.post("/api/runs/manual", { scopeType: "MEASURE", measureId });
-                    emitToast(`${program.measureName} run completed`);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Unknown error");
-                  }
-                })();
-              }}
-            >
-              Run This Measure
-            </Button>
+            {mayRun ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      setError(null);
+                      await api.post("/api/runs/manual", { scopeType: "MEASURE", measureId });
+                      emitToast(`${program.measureName} run started`);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Unknown error");
+                    }
+                  })();
+                }}
+              >
+                Run This Measure
+              </Button>
+            ) : null}
           </div>
         </>
       ) : (
@@ -443,52 +441,42 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
     );
   }
 
-  const data = points.map((p) => {
-    const total = p.totalEvaluated || 1;
-    return {
-      label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      rate: p.complianceRate,
-      compliant: Math.round((p.compliant / total) * 100),
-      dueSoon: Math.round((p.dueSoon / total) * 100),
-      overdue: Math.round((p.overdue / total) * 100),
-      missingData: Math.round((p.missingData / total) * 100),
-      excluded: Math.round((p.excluded / total) * 100),
-    };
-  });
+  // Focus the compliance-rate line (the per-bucket dashed overlays forced a 0–100 domain
+  // and read as noise — the pie + reason-mix below already break down the buckets). A
+  // dynamic, padded domain makes real week-to-week variation visible.
+  const data = points.map((p) => ({
+    label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    rate: Math.round(p.complianceRate * 10) / 10,
+  }));
+  const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
   return (
-    <ResponsiveContainer width="100%" height={180}>
-      <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+    <ResponsiveContainer width="100%" height={200}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
         <defs>
           <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
             <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-        <YAxis domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
+        <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
         <Tooltip
-          formatter={(value, name) => [`${Number(value).toFixed(1)}%`, String(name)]}
+          formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
           contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
           labelStyle={{ fontSize: 11, color: "#475569" }}
         />
         <Area
           type="monotone"
           dataKey="rate"
-          name="Compliance rate"
+          name="Compliance"
           stroke="#059669"
-          strokeWidth={2}
+          strokeWidth={2.5}
           fill="url(#complianceGrad)"
           dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
           activeDot={{ r: 5 }}
         />
-        <Area type="monotone" dataKey="compliant"   name="Compliant"     stroke="#059669" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-        <Area type="monotone" dataKey="dueSoon"     name="Due Soon"      stroke="#f59e0b" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-        <Area type="monotone" dataKey="overdue"     name="Overdue"       stroke="#ef4444" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-        <Area type="monotone" dataKey="missingData" name="Missing Data"  stroke="#94a3b8" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-        <Area type="monotone" dataKey="excluded"    name="Excluded"      stroke="#64748b" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
