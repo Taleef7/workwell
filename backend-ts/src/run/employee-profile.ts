@@ -122,9 +122,12 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const emp = employeeById(externalId);
   if (!emp) return null;
 
-  // Open cases for this employee (the case row carries employeeId = externalId on the TS floor).
-  const allOpen = await deps.cases.listCases({ statuses: OPEN_STATUSES, limit: 100000, offset: 0 });
-  const openCases = allOpen.filter((c) => c.employeeId === externalId);
+  // One cases fetch for this employee: derive the open subset AND the full case-id set used by the
+  // recent-activity timeline below (this previously called listCases twice — open, then all).
+  const employeeCases = (await deps.cases.listCases({ limit: 100000, offset: 0 })).filter(
+    (c) => c.employeeId === externalId,
+  );
+  const openCases = employeeCases.filter((c) => OPEN_STATUSES.includes((c.status ?? "").toUpperCase()));
   const openCaseByMeasure = new Map<string, string>();
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 
@@ -164,13 +167,11 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       slaBreached: false,
     }));
 
-  // Recent audit events for this employee's cases (last 20, newest-first).
-  const caseIds = new Set(allOpen.filter((c) => c.employeeId === externalId).map((c) => c.id));
-  // include closed cases too, so the timeline isn't limited to currently-open cases
-  const allCases = await deps.cases.listCases({ limit: 100000, offset: 0 });
-  for (const c of allCases) if (c.employeeId === externalId) caseIds.add(c.id);
+  // Recent audit events for this employee's cases (last 20, newest-first) — reuse the single fetch
+  // above (open + closed), so the timeline isn't limited to currently-open cases.
+  const caseIds = new Set(employeeCases.map((c) => c.id));
   const caseMeasure = new Map<string, string>();
-  for (const c of allCases) if (c.employeeId === externalId) caseMeasure.set(c.id, c.measureId);
+  for (const c of employeeCases) caseMeasure.set(c.id, c.measureId);
 
   const ledger = await deps.events.listAuditEvents();
   const recentAuditEvents: AuditEventSummary[] = ledger
