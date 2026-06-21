@@ -61,14 +61,14 @@ test("historicalComplianceRate newest week ≈ base rate (continuous with the cu
   }
 });
 
-test("historicalComplianceRate amplitude stays near ±0.06 of the base rate", () => {
+test("historicalComplianceRate amplitude stays within the ±0.12 budget of the base rate", () => {
   for (const key of KEYS) {
     const base = complianceRate(key);
     for (let w = 0; w < WEEKS; w++) {
       const r = historicalComplianceRate(key, w, WEEKS);
-      // before clamping the oscillation is ~±0.06; clamping only narrows it, so the
-      // deviation from base can never exceed the amplitude budget (+ a tiny epsilon).
-      assert.ok(Math.abs(r - base) <= 0.061, `${key} week ${w} deviates ${Math.abs(r - base)} from base`);
+      // before clamping the oscillation is ~±(0.09 primary + 0.03 secondary harmonic); clamping only
+      // narrows it, so the deviation from base can never exceed the amplitude budget (+ a tiny epsilon).
+      assert.ok(Math.abs(r - base) <= 0.121, `${key} week ${w} deviates ${Math.abs(r - base)} from base`);
     }
   }
 });
