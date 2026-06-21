@@ -14,6 +14,12 @@ export interface RecordOutcomeInput {
   status: string;
   /** Define-level evidence (`evidence_json` contract, ADR-002). */
   evidence: unknown;
+  /**
+   * When the outcome was evaluated (ISO-8601). Defaults to now. Pass an explicit value ONLY for
+   * backdated synthetic seeding (the trend-history backfill) so historical rows don't out-sort the
+   * real latest outcome in `evaluated_at DESC` reads (`listOutcomesForEmployee`, check_compliance).
+   */
+  evaluatedAt?: string;
 }
 
 export interface OutcomeRecord {
@@ -57,6 +63,8 @@ export interface OutcomeWithRun {
   runScopeType: string;
   /** The run's terminal status — lets order proposals exclude in-flight RUNNING runs (#77 C1). */
   runStatus: string;
+  /** The run's `triggered_by` — lets read models exclude synthetic seed runs by identity (not by day). */
+  runTriggeredBy: string;
   subjectId: string;
   measureId: string;
   status: string;
@@ -71,6 +79,13 @@ export interface OutcomeMeasureFilter {
 
 export interface OutcomeStore {
   recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord>;
+  /**
+   * Batch insert (synthetic trend-history backfill): persist many outcomes for a run in one call.
+   * Makes ~100 inserts/run × weeks × measures practical on Neon (the Postgres adapter chunks a
+   * multi-row INSERT; the SQLite floor loops inside a single transaction). Equivalent to calling
+   * `recordOutcome` per input. A no-op for an empty array.
+   */
+  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
   listOutcomes(runId: string): Promise<OutcomeRecord[]>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —

@@ -37,6 +37,7 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(created.status, "QUEUED");
     assert.equal(created.scopeType, "MEASURE");
     assert.equal(created.scopeId, "audiogram");
+    assert.equal(created.triggeredBy, "spike@workwell.dev", "triggered_by round-trips into RunRecord");
     assert.ok(created.id);
     assert.equal(created.completedAt, null);
 
@@ -130,6 +131,32 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal((await store.markRunning(run.id))?.status, "RUNNING", "idempotent");
   });
 
+  test(`[${label}] createRun honors optional backdating (startedAt/completedAt/status) — synthetic trend history`, async () => {
+    const store = await freshStore();
+    const startedAt = "2026-03-01T00:00:00.000Z";
+    const completedAt = "2026-03-01T00:01:00.000Z";
+    const created = await store.createRun({
+      ...sampleRun("audiogram"),
+      triggeredBy: "seed:trend-history",
+      status: "COMPLETED",
+      startedAt,
+      completedAt,
+    });
+    assert.equal(created.status, "COMPLETED", "explicit status persisted (not the QUEUED default)");
+    assert.equal(created.startedAt, startedAt, "backdated started_at persisted");
+    assert.equal(created.completedAt, completedAt, "completed_at persisted");
+    const fetched = await store.getRun(created.id);
+    assert.deepEqual(fetched, created, "backdated run round-trips through getRun");
+  });
+
+  test(`[${label}] createRun without backdating keeps the QUEUED/now defaults (existing behavior unchanged)`, async () => {
+    const store = await freshStore();
+    const created = await store.createRun(sampleRun("audiogram"));
+    assert.equal(created.status, "QUEUED");
+    assert.equal(created.completedAt, null);
+    assert.ok(created.startedAt, "started_at defaulted to now");
+  });
+
   test(`[${label}] finalizeRun sets a terminal status + completed_at, and createRun preserves requestedScope`, async () => {
     const store = await freshStore();
     const run = await store.createRun(sampleRun("audiogram"));
@@ -195,6 +222,57 @@ export function outcomeStoreContract(
     assert.deepEqual(listed[0]!.evidence, evidence, "JSON evidence round-trips identically");
   });
 
+  test(`[${label}] recordOutcomes batch-persists every input (synthetic trend history); [] is a no-op`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    await outcomeStore.recordOutcomes([]); // no-op, must not throw
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id), [], "empty batch writes nothing");
+
+    const inputs = Array.from({ length: 25 }, (_, i) => ({
+      runId: run.id,
+      subjectId: `emp-${String(i + 1).padStart(3, "0")}`,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-03-01",
+      status: i % 2 === 0 ? "COMPLIANT" : "OVERDUE",
+      evidence: { seedTrendHistory: true, idx: i },
+    }));
+    await outcomeStore.recordOutcomes(inputs);
+    const listed = await outcomeStore.listOutcomes(run.id);
+    assert.equal(listed.length, 25, "all batch rows persisted");
+    assert.equal(listed.filter((o) => o.status === "COMPLIANT").length, 13);
+    const one = listed.find((o) => o.subjectId === "emp-001")!;
+    assert.deepEqual(one.evidence, { seedTrendHistory: true, idx: 0 }, "evidence round-trips per row");
+    assert.equal(one.evaluationPeriod, "2026-03-01", "evaluation_period persisted");
+  });
+
+  test(`[${label}] recordOutcome(s) honor an explicit backdated evaluatedAt; default is ~now`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    const backdated = "2025-12-01T00:01:00.000Z";
+
+    // Explicit evaluatedAt (single) round-trips exactly.
+    const single = await outcomeStore.recordOutcome({
+      runId: run.id,
+      subjectId: "emp-006",
+      measureId: "audiogram",
+      status: "OVERDUE",
+      evidence: {},
+      evaluatedAt: backdated,
+    });
+    assert.equal(single.evaluatedAt, backdated, "single recordOutcome honors explicit evaluatedAt");
+
+    // Explicit evaluatedAt (batch) round-trips; absent → defaults to ~now.
+    await outcomeStore.recordOutcomes([
+      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {}, evaluatedAt: backdated },
+      { runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    ]);
+    const rows = await outcomeStore.listOutcomes(run.id);
+    const emp001 = rows.find((o) => o.subjectId === "emp-001")!;
+    const emp002 = rows.find((o) => o.subjectId === "emp-002")!;
+    assert.equal(emp001.evaluatedAt, backdated, "batch honors explicit evaluatedAt");
+    assert.ok(emp002.evaluatedAt > "2026-01-01T00:00:00.000Z", "batch without evaluatedAt defaults to ~now");
+  });
+
   test(`[${label}] listOutcomes returns [] for a run with no outcomes`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun());
@@ -215,6 +293,7 @@ export function outcomeStoreContract(
     const all = await outcomeStore.listOutcomesWithRun({});
     assert.equal(all.length, 2);
     assert.ok(all.every((r) => r.runStartedAt && r.runId === run.id), "each row carries the run's started_at");
+    assert.ok(all.every((r) => r.runTriggeredBy === "spike@workwell.dev"), "each row carries the run's triggered_by (seed-exclusion by identity)");
 
     const justAudiogram = await outcomeStore.listOutcomesWithRun({ measureId: "audiogram" });
     assert.deepEqual(justAudiogram.map((r) => r.measureId), ["audiogram"], "measure filter applied in SQL");

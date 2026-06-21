@@ -41,11 +41,26 @@ export interface SeededAssignment {
   target: TargetOutcome;
 }
 
-/** Assign each employee a target bucket for `rateKey`, in the Java order + proportions. */
+/** Assign each employee a target bucket for `rateKey` at the measure's BASE rate (the default path). */
 export function seededDistribution(employees: readonly EmployeeProfile[], rateKey: string): SeededAssignment[] {
+  return seededDistributionAtRate(employees, rateKey, complianceRate(rateKey));
+}
+
+/**
+ * Assign each employee a target bucket for `rateKey` at an EXPLICIT compliance `rate`, in the
+ * Java order + proportions. This is the rate-parameterized body extracted from `seededDistribution`
+ * (which now calls it with `complianceRate(rateKey)`, so existing callers are unchanged). The
+ * synthetic trend-history backfill passes a per-week rate (`historicalComplianceRate(...)`) so each
+ * backdated run varies its compliant fraction around the base rate.
+ */
+export function seededDistributionAtRate(
+  employees: readonly EmployeeProfile[],
+  rateKey: string,
+  rate: number,
+): SeededAssignment[] {
   const ordered = orderedEmployees(employees, rateKey);
   const n = ordered.length;
-  const compliant = Math.max(0, Math.min(n, Math.round(n * complianceRate(rateKey))));
+  const compliant = Math.max(0, Math.min(n, Math.round(n * rate)));
   const excluded = Math.min(EXCLUDED_COUNT, Math.max(0, n - compliant));
   const missing = Math.min(MISSING_DATA_COUNT, Math.max(0, n - compliant - excluded));
   const remaining = Math.max(0, n - compliant - excluded - missing);

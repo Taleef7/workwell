@@ -13,6 +13,7 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   status: "COMPLETED",
   scopeType: "MEASURE",
   scopeId: "audiogram",
+  triggeredBy: "manual",
   site: null,
   requestedScope: {},
   startedAt: "2026-06-13T10:00:00.000Z",
@@ -49,6 +50,16 @@ test("toRunListItem resolves measure name + counts (EXCLUDED is neither complian
   assert.equal(item.nonCompliantCount, 2); // OVERDUE + MISSING_DATA, not EXCLUDED
   assert.equal(item.durationMs, 5000);
   assert.equal(item.triggerType, "MANUAL");
+});
+
+test("triggerType reflects triggered_by — seed runs surface as SEED, not MANUAL (Codex P2)", () => {
+  assert.equal(toRunListItem(run({ triggeredBy: "manual" }), sample).triggerType, "MANUAL");
+  assert.equal(toRunListItem(run({ triggeredBy: "rerun" }), sample).triggerType, "MANUAL");
+  assert.equal(toRunListItem(run({ triggeredBy: "seed:trend-history" }), sample).triggerType, "SEED");
+  // …and the run-list filter matches on the derived triggerType.
+  assert.equal(matchesRunFilters(run({ triggeredBy: "seed:trend-history" }), { triggerType: "MANUAL" }), false);
+  assert.equal(matchesRunFilters(run({ triggeredBy: "seed:trend-history" }), { triggerType: "SEED" }), true);
+  assert.equal(matchesRunFilters(run({ triggeredBy: "manual" }), { triggerType: "MANUAL" }), true);
 });
 
 test("toRunSummary computes passRate as a percentage + outcomeCounts + freshness + version", () => {
