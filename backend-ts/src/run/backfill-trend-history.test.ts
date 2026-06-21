@@ -217,6 +217,37 @@ test("a real run on the same day as a seeded week is still the overview latest (
   assert.equal(audio.latestRunId, real.id, "the real run stays the overview's latest, not a seeded point");
 });
 
+test("idempotency keys on the seeded START day, not evaluated_at — no dupes when the anchor is near midnight (Codex P2)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  // A real run in the FINAL minute of the ASOF UTC day → seeded weeks anchor at 23:59 on prior
+  // weeks, so each completedAt/evaluated_at rolls into the NEXT day (started day ≠ evaluated day).
+  const real = await d.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "manual",
+    status: "COMPLETED",
+    startedAt: `${ASOF}T23:59:30.000Z`,
+    completedAt: `${ASOF}T23:59:59.000Z`,
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2025-06-20T00:00:00.000Z",
+    measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
+  });
+  await d.outcomeStore.recordOutcomes(
+    EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+  );
+
+  const seededCount = async () =>
+    (await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram" && r.triggeredBy === "seed:trend-history").length;
+
+  await backfillTrendHistory(d, { weeks: 3, asOf: ASOF });
+  assert.equal(await seededCount(), 3, "first backfill seeds 3 weeks");
+  // Resume with the same weeks: must be a full no-op — the existing weeks are recognized by their
+  // STARTED day even though evaluated_at rolled to the next day. (Old evaluated_at key → 6 dupes.)
+  await backfillTrendHistory(d, { weeks: 3, asOf: ASOF });
+  assert.equal(await seededCount(), 3, "resume creates no duplicate weeks");
+});
+
 test("backfillTrendHistory resumes at week level — a larger --weeks adds only missing weeks, no dupes (Codex P2)", async () => {
   const db = await freshDb();
   const d = deps(db);

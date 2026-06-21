@@ -107,18 +107,20 @@ async function precomputeOutcomes(
 }
 
 /**
- * The set of seeded DAYS (YYYY-MM-DD) already present for a measure — the day of each
- * `seedTrendHistory` outcome's evaluated_at (= that run's completion day). Drives WEEK-LEVEL
- * idempotency: a rerun (or a later run with a larger `--weeks`) seeds only the weeks whose day is
- * missing, so it resumes a partially-seeded measure WITHOUT duplicating weeks (Codex P2 — a single
- * marker row must NOT mark a measure "complete"). Resume assumes the same `--as-of` + stable
- * real-run state (a different anchor shifts the target days).
+ * The set of seeded DAYS (YYYY-MM-DD) already present for a measure — each `seedTrendHistory`
+ * outcome's `evaluationPeriod`, which the backfill sets to the run's STARTED day (`dayOnly(startedAt)`).
+ * Keyed on the started day (NOT evaluated_at) so it matches the creation loop's `dayOnly(startedAt)`
+ * check exactly — otherwise an anchor in the final minute of a UTC day rolls `evaluated_at`
+ * (= started + 60s) to the next day and a resume wouldn't recognize the existing week (Codex P2).
+ * Drives WEEK-LEVEL idempotency: a rerun (or a larger `--weeks`) seeds only the missing weeks,
+ * resuming a partially-seeded measure WITHOUT duplicating weeks. Resume assumes the same `--as-of`
+ * + stable real-run state (a different anchor shifts the target days).
  */
 async function seededDaysForMeasure(outcomeStore: OutcomeStore, measureId: string): Promise<Set<string>> {
   const rows = await outcomeStore.listOutcomesForMeasure(measureId);
   const days = new Set<string>();
   for (const r of rows) {
-    if ((r.evidence as { seedTrendHistory?: boolean } | null)?.seedTrendHistory === true) days.add(dayOnly(r.evaluatedAt));
+    if ((r.evidence as { seedTrendHistory?: boolean } | null)?.seedTrendHistory === true) days.add(r.evaluationPeriod);
   }
   return days;
 }
