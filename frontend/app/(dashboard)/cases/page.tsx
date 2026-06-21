@@ -18,6 +18,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
+import { canManageCases } from "@/lib/rbac";
 import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 
@@ -79,6 +80,7 @@ export default function CasesPage() {
   const urlSearch = searchParams.get("search") ?? "";
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
+  const canManage = canManageCases(user?.role);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -536,7 +538,7 @@ export default function CasesPage() {
         </div>
       </div>
 
-      {selectedCaseIds.length > 0 ? (
+      {canManage && selectedCaseIds.length > 0 ? (
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>

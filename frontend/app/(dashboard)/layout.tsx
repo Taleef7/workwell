@@ -28,7 +28,7 @@ import {
   SidebarToggle,
 } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
-import { ROLES, hasAnyRole } from "@/lib/rbac";
+import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
@@ -89,7 +89,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [api, token]);
 
   useEffect(() => {
-    if (!token) return;
+    // The Worklist gap badge only exists for case-managing roles (the Worklist nav item is gated to
+    // them), so don't pull the full open-cases list on every navigation/filter change for everyone.
+    if (!token || !canManageCases(user?.role)) {
+      setWorklistGapCount(0);
+      return;
+    }
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
@@ -109,7 +114,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api, siteId, from, to, token]);
+  }, [api, siteId, from, to, token, user]);
 
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
