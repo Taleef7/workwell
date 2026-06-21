@@ -4,7 +4,9 @@
  * lines so the lib (seed-trend-history.ts) stays side-effect-free and importable by tests.
  *   pnpm seed:trend-history [--weeks 12] [--as-of YYYY-MM-DD]
  *
- * Rollback (one statement): DELETE FROM runs WHERE triggered_by='seed:trend-history';
+ * Rollback: delete the tagged OUTCOMES first, THEN the runs (the outcomes.run_id FK is not
+ * ON DELETE CASCADE; schema-qualify on the Postgres ceiling) — see the full SQL in the header of
+ * ./seed-trend-history.ts.
  */
 import { main } from "./seed-trend-history.ts";
 
