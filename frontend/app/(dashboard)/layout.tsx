@@ -91,10 +91,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // The Worklist gap badge only exists for case-managing roles (the Worklist nav item is gated to
     // them), so don't pull the full open-cases list on every navigation/filter change for everyone.
-    if (!token || !canManageCases(user?.role)) {
-      setWorklistGapCount(0);
-      return;
-    }
+    // (No setState here: non-managers never render the badge and the initial count is already 0.)
+    if (!token || !canManageCases(user?.role)) return;
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
