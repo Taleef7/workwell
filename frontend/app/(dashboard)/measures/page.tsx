@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, labelFor, measureStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canAuthorMeasures } from "@/lib/rbac";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn, TableRow } from "datavis/src/components/table/types";
 
@@ -27,6 +29,8 @@ type StatusFilter = (typeof statusFilters)[number];
 export default function MeasuresPage() {
   const router = useRouter();
   const api = useApi();
+  const { user } = useAuth();
+  const mayAuthor = canAuthorMeasures(user?.role);
 
   const [items, setItems] = useState<Measure[]>([]);
   const [loading, setLoading] = useState(false);
@@ -175,9 +179,11 @@ export default function MeasuresPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Measures</h2>
-        <Button variant="primary" onClick={() => setShowCreate((value) => !value)}>
-          Create Measure
-        </Button>
+        {mayAuthor ? (
+          <Button variant="primary" onClick={() => setShowCreate((value) => !value)}>
+            Create Measure
+          </Button>
+        ) : null}
       </div>
 
       <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
