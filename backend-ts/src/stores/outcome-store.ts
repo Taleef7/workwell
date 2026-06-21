@@ -63,6 +63,8 @@ export interface OutcomeWithRun {
   runScopeType: string;
   /** The run's terminal status — lets order proposals exclude in-flight RUNNING runs (#77 C1). */
   runStatus: string;
+  /** The run's `triggered_by` — lets read models exclude synthetic seed runs by identity (not by day). */
+  runTriggeredBy: string;
   subjectId: string;
   measureId: string;
   status: string;

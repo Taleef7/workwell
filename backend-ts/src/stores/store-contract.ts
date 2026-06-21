@@ -293,6 +293,7 @@ export function outcomeStoreContract(
     const all = await outcomeStore.listOutcomesWithRun({});
     assert.equal(all.length, 2);
     assert.ok(all.every((r) => r.runStartedAt && r.runId === run.id), "each row carries the run's started_at");
+    assert.ok(all.every((r) => r.runTriggeredBy === "spike@workwell.dev"), "each row carries the run's triggered_by (seed-exclusion by identity)");
 
     const justAudiogram = await outcomeStore.listOutcomesWithRun({ measureId: "audiogram" });
     assert.deepEqual(justAudiogram.map((r) => r.measureId), ["audiogram"], "measure filter applied in SQL");
