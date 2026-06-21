@@ -1,5 +1,58 @@
 # Journal
 
+## 2026-06-21 — Synthetic trend-history backfill (#180) + full QA smoke test + H1 fix
+
+**Two threads today: a full adversarial QA pass of the live app, and a new feature to fix flat trend charts.**
+
+### QA smoke test (live app)
+Ran an end-to-end adversarial QA pass against `https://twh.os.mieweb.org` (all 4 roles) — three
+parallel code-audit agents + hands-on Playwright + a live API/RBAC sweep. Report:
+`docs/QA_SMOKE_TEST_2026-06-20.md`. Verdict: a real, working, API-backed app (not a Potemkin demo) —
+server-side RBAC correct, AI provably isolated from compliance, MCP read-only, audit trail live,
+backend tests + build green. Findings are polish/data-coverage/doc-integrity/accessibility, none
+data-loss or security-critical. Headline finds: **H1** the flagship `adult_immunization` measure read
+0% / 0 cases on `/programs`; **M1** `nextActionFor` defaults non-OSHA measures to the "audiogram"
+label (7/11 measures); **M2** `/campaigns` renders for AUTHOR/APPROVER then silently 403s; **M3/M4**
+admin outreach-delivery-log hardcoded `[]` + integration health static; **H2** SendGrid documented but
+absent in `backend-ts`; plus systemic accessibility debt (tables without `scope`, clickable non-buttons,
+unlabeled inputs). (These remain open follow-ups; not fixed in #180.)
+
+**H1 fixed live:** root cause was that the last `ALL_PROGRAMS` run (6/17) predated the E6 merge, so
+`adult_immunization` had never been in a population run. Triggered an `ALL_PROGRAMS` run (1100 evals,
+11 measures) — confirmed the scope *does* include it; the card now reads 80% / 17 cases, and the
+advisory immunization-forecast panel renders on a real case.
+
+### Synthetic trend-history backfill (#180, merged 45cba6a, deployed)
+The `/programs` trend charts read as flat lines: `run/compliance-rates.ts` has one fixed rate per
+measure (deterministic runs → identical %), and most measures had a single run. Added a controlled,
+on-demand backfill that writes weekly **backdated** COMPLETED `MEASURE` runs per runnable measure
+(default 12 weeks) with compliance varying ~±0.06 around each measure's base rate
+(`historicalComplianceRate`), so trends show realistic curves. New `pnpm seed:trend-history` CLI
+(`run/cli/`) over `backfillTrendHistory` (`run/backfill-trend-history.ts`); outcomes come from a
+precomputed `(measure,target)→outcome` map (55 engine evals — outcome depends only on the pair, not
+the employee), assigned via `seededDistributionAtRate`.
+
+Design (ADR-style, no ADR — additive, no schema, no new dep): `docs/superpowers/specs/2026-06-20-synthetic-trend-history-design.md`.
+
+**Hardened across 9 Codex review rounds + a code-reviewer pass** (every finding a real fix):
+backdate outcome `evaluated_at` so seeds don't mask the real latest (P1); anchor each measure's
+newest week strictly **before that measure's latest real run** so the overview is never hijacked;
+**week-level** idempotent + resumable (keyed on the seeded started day = `evaluationPeriod`);
+exclude the feature's own seed runs **by marker, not by day**; audit each seeded measure
+(`TREND_HISTORY_SEEDED`, audit store required); safe two-step schema-qualified rollback; skip the
+SQLite binding when seeding Postgres. Store-contract changes are additive (NO schema/DDL):
+`RunRecord.triggeredBy` surfaced (drives `triggerType` → seed runs labeled **SEED**, filterable via
+`GET /api/runs?triggerType=SEED`), optional `CreateRunInput` `startedAt`/`completedAt`/`status`,
+`OutcomeStore.recordOutcomes` batch, optional `RecordOutcomeInput.evaluatedAt`,
+`OutcomeWithRun.runTriggeredBy`, optional `StoresEnv.DB`.
+
+**Seeded live against Neon (`workwell_spike`):** 132 runs + 13,200 outcomes + 11 audit events.
+**10 of 11 measures now show varied trend lines** (verified via API); the overview still shows the
+real 06-20 run per measure (not hijacked); `/api/runs` shows `MANUAL=9, SEED=132`. Audiogram is the
+one still-flat measure — it has ~8 pre-existing real runs filling the 10-point trend cap (left as-is).
+Reversible via the documented two-step rollback. Tests: 553 / 552 pass / 1 Pg-contract self-skip;
+typecheck + CI green.
+
 ## 2026-06-19 — E9 (#78): CQL→SQL bridge decision memo (spike, no code)
 
 E9 is a **spike / decision memo only** (charter Q2 — "CQL → SQL"; the biggest architectural fork).

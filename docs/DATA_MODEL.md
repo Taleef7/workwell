@@ -165,6 +165,7 @@ dry_run BOOLEAN NOT NULL DEFAULT FALSE
 
 Runtime status values observed in the current implementation include `REQUESTED`, `QUEUED`, `RUNNING`, `PARTIAL_FAILURE`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 For measure/case runs, `scope_id` stores the resolved measure version UUID; for all-programs runs it remains null.
+`triggered_by` is surfaced in the run read model and drives the derived `triggerType`: `triggered_by='seed:trend-history'` → `"SEED"`, otherwise `"MANUAL"`. See §3.20.
 
 ### 3.8 `run_logs`
 ```sql
@@ -353,6 +354,38 @@ Pg ceiling). Proposals are derived read-time from `outcomes`:
 `OrderSubmitter` port posts `ServiceRequest` resources to EH and an owner-gated
 `submitted_orders` audit table records each submission (submittedAt, actor, measureId, subjectId,
 orderCode, ehOrderId). Until then the port keeps the data model unchanged.
+
+### 3.20 Synthetic trend history (seeded runs) — no schema change
+PR #180 backfills backdated synthetic run history so the `/programs` + `/programs/[measureId]` trend
+charts show realistic variation. It reuses the existing `runs`/`outcomes` tables and adds **no
+schema/DDL change** (existing columns only):
+
+- **Seeded runs** are written into `runs` with `triggered_by = 'seed:trend-history'`, backdated
+  `started_at`/`completed_at`, and `status = 'COMPLETED'`. The run read model derives
+  `triggerType="SEED"` for these (real operator runs → `"MANUAL"`); they are filterable via
+  `GET /api/runs?triggerType=SEED`. Each measure's newest synthetic week is anchored strictly **before**
+  that measure's latest real run, so the programs overview (latest-run-per-measure) is never hijacked.
+- **Seeded outcomes** are written into `outcomes` tagged `evidence_json.seedTrendHistory = true` with a
+  backdated `evaluated_at` (so seeded history does not out-sort the real latest outcome in
+  `evaluated_at DESC` reads). `OutcomeWithRun` joins `runs.triggered_by` as `runTriggeredBy`, letting
+  read models exclude seed runs by identity.
+- **Audited:** one `TREND_HISTORY_SEEDED` audit event per seeded measure (every state change writes an
+  audit event).
+- **Idempotent + resumable** at the week level (keyed on the seeded started day =
+  `outcomes.evaluation_period`): a rerun or larger `--weeks` fills only missing weeks, no duplicates.
+
+Additive store-contract changes (no DDL): `CreateRunInput` gained optional `startedAt`/`completedAt`/
+`status` (backdating; defaults now/null/`QUEUED`); `OutcomeStore` gained a `recordOutcomes(inputs[])`
+batch insert (chunked multi-row on the Pg ceiling, atomic batch on the SQLite floor); and
+`RecordOutcomeInput` gained an optional `evaluatedAt` (backdated; default now).
+
+**Reversible rollback (synthetic demo data only) — delete tagged outcomes first, then runs**
+(`outcomes.run_id` is not `ON DELETE CASCADE`; schema-qualify on the Pg ceiling):
+```sql
+DELETE FROM workwell_spike.outcomes
+  WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history');
+DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
+```
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
