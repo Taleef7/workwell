@@ -43,6 +43,8 @@ import { isProductionLike } from "../config/startup-safety.ts";
 interface AdminEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
+  /** Live AI-integration signal (M4): the `ai` tile is "healthy" only when this is set. */
+  OPENAI_API_KEY?: string;
   /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
   SPRING_PROFILES_ACTIVE?: string;
   WORKWELL_ENVIRONMENT?: string;
@@ -97,7 +99,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   const q = url.searchParams;
 
   // ---- integrations --------------------------------------------------------
-  if (pathname === "/api/admin/integrations" && req.method === "GET") return json(listIntegrations());
+  if (pathname === "/api/admin/integrations" && req.method === "GET") return json(listIntegrations(env));
   const syncId = pathname.match(/^\/api\/admin\/integrations\/([^/]+)\/sync$/)?.[1];
   if (syncId && req.method === "POST") {
     const h = syncIntegration(syncId);
