@@ -186,8 +186,8 @@ test("POST /api/cases/:id/assign sets the assignee and records ASSIGNED on the t
   const d = (await res!.json()) as { assignee: string; timeline: Array<{ eventType: string; actor: string }> };
   assert.equal(d.assignee, "cm@workwell.dev");
   const types = d.timeline.map((t) => t.eventType);
-  assert.ok(types.includes("ASSIGNED"), "case_action recorded");
-  assert.ok(types.includes("CASE_ASSIGNED"), "audit_event recorded");
+  assert.ok(types.includes("CASE_ASSIGNED"), "audit_event recorded on the timeline");
+  assert.ok(!types.includes("ASSIGNED"), "case_action twin not double-listed (single-source timeline)");
   // blank assignee clears it back to unassigned
   const cleared = (await post(`/api/cases/${omarCaseId}/assign`).then((r) => r!.json())) as { assignee: string | null };
   assert.equal(cleared.assignee, null);
@@ -200,7 +200,7 @@ test("POST /api/cases/:id/escalate forces HIGH/OPEN and records ESCALATED", asyn
   assert.equal(d.priority, "HIGH");
   assert.equal(d.status, "OPEN");
   assert.match(d.nextAction, /supervisor/i);
-  assert.ok(d.timeline.map((t) => t.eventType).includes("ESCALATED"));
+  assert.ok(d.timeline.map((t) => t.eventType).includes("CASE_ESCALATED"));
 });
 
 test("the detail timeline is oldest-first and excludes nothing we wrote", async () => {
@@ -289,7 +289,7 @@ test("delivery update before a send → 400; send then delivery flips latestOutr
   assert.match(sd.nextAction, /rerun to verify/i);
   assert.equal(sd.latestOutreachDeliveryStatus, "SIMULATED");
   const types = sd.timeline.map((t) => t.eventType);
-  assert.ok(types.includes("OUTREACH_SENT") && types.includes("CASE_OUTREACH_SENT"));
+  assert.ok(types.includes("CASE_OUTREACH_SENT") && !types.includes("OUTREACH_SENT"), "audit event present; case_action not double-listed");
 
   // now a delivery update is allowed and updates the latest status
   const del = await post(`/api/cases/${omarCaseId}/actions/outreach/delivery?deliveryStatus=SENT`);
@@ -305,11 +305,13 @@ test("POST outreach?channel=SMS records the OUTREACH_SENT action with channel=SM
   const sd = (await sent!.json()) as {
     timeline: Array<{ eventType: string; payload: Record<string, unknown> }>;
   };
-  // the case may have prior sends in earlier tests → inspect the most recent OUTREACH_SENT action
-  const outreachSent = sd.timeline.filter((t) => t.eventType === "OUTREACH_SENT").at(-1);
-  assert.ok(outreachSent, "timeline carries an OUTREACH_SENT action");
-  assert.equal(outreachSent!.payload.channel, "SMS");
-  assert.equal(outreachSent!.payload.deliveryProvider, "simulated");
+  // the case may have prior sends in earlier tests → inspect the most recent outreach audit event.
+  // The case_action payload is nested under the audit event's `payload.action` (case-outreach.ts).
+  const outreachSent = sd.timeline.filter((t) => t.eventType === "CASE_OUTREACH_SENT").at(-1);
+  assert.ok(outreachSent, "timeline carries a CASE_OUTREACH_SENT audit event");
+  const sms = outreachSent!.payload.action as Record<string, unknown>;
+  assert.equal(sms.channel, "SMS");
+  assert.equal(sms.deliveryProvider, "simulated");
 });
 
 test("POST outreach with an invalid channel falls back to EMAIL (#75 E5)", async () => {
@@ -318,9 +320,9 @@ test("POST outreach with an invalid channel falls back to EMAIL (#75 E5)", async
   const sd = (await sent!.json()) as {
     timeline: Array<{ eventType: string; payload: Record<string, unknown> }>;
   };
-  const outreachSent = sd.timeline.filter((t) => t.eventType === "OUTREACH_SENT").at(-1);
-  assert.ok(outreachSent, "timeline carries an OUTREACH_SENT action");
-  assert.equal(outreachSent!.payload.channel, "EMAIL");
+  const outreachSent = sd.timeline.filter((t) => t.eventType === "CASE_OUTREACH_SENT").at(-1);
+  assert.ok(outreachSent, "timeline carries a CASE_OUTREACH_SENT audit event");
+  assert.equal((outreachSent!.payload.action as Record<string, unknown>).channel, "EMAIL");
 });
 
 test("delivery update with an invalid status → 400", async () => {
@@ -358,8 +360,8 @@ test("POST /api/cases/:id/rerun-to-verify re-evaluates and records the verificat
   const buckets = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
   assert.ok(buckets.includes(d.currentOutcomeStatus), "verified to a known outcome bucket");
   const types = d.timeline.map((t) => t.eventType);
-  assert.ok(types.includes("RERUN_TO_VERIFY"), "case_action recorded");
-  assert.ok(types.includes("CASE_RERUN_VERIFIED"), "audit_event recorded");
+  assert.ok(types.includes("CASE_RERUN_VERIFIED"), "audit_event recorded on the timeline");
+  assert.ok(!types.includes("RERUN_TO_VERIFY"), "case_action twin not double-listed (single-source timeline)");
   // closing outcomes set the closed_reason/closed_by columns (else they stay null)
   if (d.currentOutcomeStatus === "COMPLIANT") {
     assert.equal(d.status, "RESOLVED");

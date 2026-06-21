@@ -193,20 +193,16 @@ export class SqliteCaseEventStore implements CaseEventStore {
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
+    // Single-source (audit_events only) — see the Postgres adapter note. The twin case_action is
+    // still written by recordCaseEvent's atomic dual-write, just no longer double-listed here.
     const { results } = await this.db
       .prepare(
-        `SELECT event_type, actor, occurred_at, payload_json, timeline_source FROM (
-            SELECT event_type, actor, occurred_at, payload_json, 'audit_event' AS timeline_source, id AS sort_key
-              FROM audit_events
-             WHERE ref_case_id = ? AND event_type <> 'CASE_VIEWED'
-            UNION ALL
-            SELECT action_type AS event_type, performed_by AS actor, performed_at AS occurred_at,
-                   payload_json, 'case_action' AS timeline_source, id AS sort_key
-              FROM case_actions
-             WHERE case_id = ?
-         ) ORDER BY occurred_at ASC, sort_key ASC`,
+        `SELECT event_type, actor, occurred_at, payload_json, 'audit_event' AS timeline_source
+           FROM audit_events
+          WHERE ref_case_id = ? AND event_type <> 'CASE_VIEWED'
+          ORDER BY occurred_at ASC, id ASC`,
       )
-      .bind(caseId, caseId)
+      .bind(caseId)
       .all<TimelineRow>();
     return (results ?? []).map((r) => ({
       eventType: r.event_type,

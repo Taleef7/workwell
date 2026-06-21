@@ -58,14 +58,13 @@ async function freshCase(subjectId: string): Promise<string> {
   return c!.id;
 }
 
-/** The latest OUTREACH_SENT case_action payload from the timeline. */
+/** The latest outreach action payload from the (audit-sourced) timeline. The case_action payload
+ *  rides under the CASE_OUTREACH_SENT audit event's `payload.action` (case-outreach.ts). */
 async function latestOutreachAction(caseId: string): Promise<Record<string, unknown>> {
   const timeline = await deps.events.caseTimeline(caseId);
-  const sent = timeline
-    .filter((t) => t.eventType === "OUTREACH_SENT" && t.payload.timelineSource === "case_action")
-    .at(-1);
-  assert.ok(sent, "an OUTREACH_SENT case_action exists");
-  return sent!.payload;
+  const sent = timeline.filter((t) => t.eventType === "CASE_OUTREACH_SENT").at(-1);
+  assert.ok(sent, "a CASE_OUTREACH_SENT audit event exists");
+  return (sent!.payload.action as Record<string, unknown>) ?? {};
 }
 
 before(async () => {

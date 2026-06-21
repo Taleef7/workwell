@@ -47,6 +47,9 @@ before(async () => {
       scopeType: "MEASURE",
       scopeId: "audiogram",
       triggeredBy: "test",
+      // A run that has outcomes is a finished run — the overview/trend only count terminal
+      // (COMPLETED/PARTIAL_FAILURE) runs, never an in-flight QUEUED/RUNNING one.
+      status: "COMPLETED",
       requestedScope: { measureId: "audiogram" },
       measurementPeriodStart: "2026-06-13T00:00:00.000Z",
       measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
@@ -222,6 +225,7 @@ test("C4: a single-subject CASE rerun does not become a measure's latest run or 
       scopeType,
       scopeId: "tb_surveillance",
       triggeredBy: "test",
+      status: "COMPLETED", // finished runs; the CASE rerun is excluded by scope, not status
       requestedScope: { measureId: "tb_surveillance" },
       measurementPeriodStart: "2026-06-13T00:00:00.000Z",
       measurementPeriodEnd: "2026-06-13T00:00:00.000Z",

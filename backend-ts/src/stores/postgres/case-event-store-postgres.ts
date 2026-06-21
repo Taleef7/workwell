@@ -180,21 +180,16 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async caseTimeline(caseId: string): Promise<TimelineEntry[]> {
-    // Two separate bind params (not a reused $1): audit_events.ref_case_id is TEXT while
-    // case_actions.case_id is UUID, so a single placeholder forces Postgres to deduce one
-    // type for both comparisons and fails at bind time. $2 carries an explicit ::uuid cast.
+    // Single-source: the timeline reads ONLY audit_events. Every action also writes a twin
+    // case_action (recordCaseEvent's atomic dual-write), but UNION-ing both arms double-listed
+    // every assign/outreach/escalate on the case-detail timeline. audit_events is the canonical
+    // ledger (CLAUDE.md: every state change writes an audit_event), so it is complete on its own.
     const { rows } = await this.pool.query<TimelineRow>(
-      `SELECT event_type, actor, occurred_at, payload_json, timeline_source FROM (
-          SELECT event_type, actor, occurred_at, payload_json, 'audit_event' AS timeline_source, id AS sort_key
-            FROM ${SPIKE_SCHEMA}.audit_events
-           WHERE ref_case_id = $1 AND event_type <> 'CASE_VIEWED'
-          UNION ALL
-          SELECT action_type AS event_type, performed_by AS actor, performed_at AS occurred_at,
-                 payload_json, 'case_action' AS timeline_source, id AS sort_key
-            FROM ${SPIKE_SCHEMA}.case_actions
-           WHERE case_id = $2::uuid
-       ) t ORDER BY occurred_at ASC, sort_key ASC`,
-      [caseId, caseId],
+      `SELECT event_type, actor, occurred_at, payload_json, 'audit_event' AS timeline_source
+         FROM ${SPIKE_SCHEMA}.audit_events
+        WHERE ref_case_id = $1 AND event_type <> 'CASE_VIEWED'
+        ORDER BY occurred_at ASC, id ASC`,
+      [caseId],
     );
     return rows.map((r) => ({
       eventType: r.event_type,

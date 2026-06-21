@@ -71,7 +71,9 @@ export interface CaseEventStore {
    * partial failure can never leave a state change without its ledger entry.
    */
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
-  /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
+  /** Oldest-first case timeline, sourced solely from audit_events (CASE_VIEWED excluded). The
+   *  twin case_action of each action is intentionally not listed — audit_events is the canonical
+   *  ledger and UNION-ing both arms double-counted every action on the case-detail timeline. */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
   /**
    * All audit events, oldest-first (the audit CSV export); capped at `limit` from `offset`.
