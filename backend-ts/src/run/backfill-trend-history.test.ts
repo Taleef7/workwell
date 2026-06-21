@@ -20,7 +20,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { programTrend } from "../program/program-read-models.ts";
+import { programTrend, programOverview } from "../program/program-read-models.ts";
 import { backfillTrendHistory } from "./backfill-trend-history.ts";
 
 const created: string[] = [];
@@ -145,6 +145,67 @@ test("backfillTrendHistory is idempotent — a second call creates no new runs",
   assert.equal(after, before, "no duplicate runs on re-run");
   assert.equal(second.skipped, true, "second call reports skipped");
   assert.equal(second.runsCreated, 0);
+});
+
+test("seeded history is anchored before a measure's latest real run — overview not hijacked (Codex P2)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  const caseStore = new SqliteCaseStore(db);
+  // A REAL population run for audiogram at asOf midday — newer than any backdated seed point.
+  const realRun = await d.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "manual",
+    status: "COMPLETED",
+    startedAt: `${ASOF}T12:00:00.000Z`,
+    completedAt: `${ASOF}T12:01:00.000Z`,
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2025-06-20T00:00:00.000Z",
+    measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
+  });
+  await d.outcomeStore.recordOutcomes(
+    EMPLOYEES.map((e) => ({ runId: realRun.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+  );
+
+  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+
+  // Every audiogram run: the real run stays the newest (all seeded points are strictly before it).
+  const audioRuns = (await d.runStore.listRuns(100000)).filter((r) => r.scopeId === "audiogram");
+  const newest = audioRuns.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
+  assert.equal(newest.id, realRun.id, "real run remains the newest audiogram run after seeding");
+
+  // …and the programs overview's latest-run-per-measure is the REAL run, not a synthetic one.
+  const overview = await programOverview({ runStore: d.runStore, outcomeStore: d.outcomeStore, caseStore }, {});
+  const audio = overview.find((p) => p.measureId === "audiogram")!;
+  assert.equal(audio.latestRunId, realRun.id, "overview latest = real run, not a seeded point");
+});
+
+test("backfillTrendHistory resumes — already-seeded measures skipped, missing ones seeded (Codex P2)", async () => {
+  const db = await freshDb();
+  const d = deps(db);
+  const seededMeasure = RUNNABLE[0]!;
+  // Simulate a backfill interrupted after the first measure: pre-seed ONE measure only.
+  const pre = await d.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: seededMeasure,
+    triggeredBy: "seed:trend-history",
+    status: "COMPLETED",
+    startedAt: "2026-05-01T00:00:00.000Z",
+    completedAt: "2026-05-01T00:01:00.000Z",
+    requestedScope: { measureId: seededMeasure, seedTrendHistory: true },
+    measurementPeriodStart: "2025-05-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-05-01T00:00:00.000Z",
+  });
+  await d.outcomeStore.recordOutcomes([
+    { runId: pre.id, subjectId: "emp-001", measureId: seededMeasure, evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: { seedTrendHistory: true, target: "COMPLIANT", rate: 0.8 }, evaluatedAt: "2026-05-01T00:01:00.000Z" },
+  ]);
+
+  const summary = await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  assert.equal(summary.skipped, false, "not a full no-op — other measures still needed seeding");
+
+  const runs = await d.runStore.listRuns(100000);
+  assert.equal(runs.filter((r) => r.scopeId === seededMeasure).length, 1, "already-seeded measure is NOT re-seeded");
+  assert.equal(runs.filter((r) => r.scopeId === RUNNABLE[1]).length, WEEKS, "a missing measure IS seeded");
 });
 
 test("the case store is never touched by the backfill", async () => {
