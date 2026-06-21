@@ -188,12 +188,12 @@ export default function OrdersPage() {
                 <table className="min-w-full text-sm">
                   <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
                     <tr>
-                      <th className="px-3 py-2">Subject</th>
-                      <th className="px-3 py-2">Measure</th>
-                      <th className="px-3 py-2">Order</th>
-                      <th className="px-3 py-2">Code</th>
-                      <th className="px-3 py-2">Reason</th>
-                      <th className="px-3 py-2">Priority</th>
+                      <th scope="col" className="px-3 py-2">Subject</th>
+                      <th scope="col" className="px-3 py-2">Measure</th>
+                      <th scope="col" className="px-3 py-2">Order</th>
+                      <th scope="col" className="px-3 py-2">Code</th>
+                      <th scope="col" className="px-3 py-2">Reason</th>
+                      <th scope="col" className="px-3 py-2">Priority</th>
                     </tr>
                   </thead>
                   <tbody>

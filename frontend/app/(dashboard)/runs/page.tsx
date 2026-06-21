@@ -772,12 +772,12 @@ export default function RunsPage() {
             </colgroup>
             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
               <tr>
-                <th className="px-3 py-2">Run</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Scope</th>
-                <th className="px-3 py-2">Trigger</th>
-                <th className="px-3 py-2">Duration</th>
-                <th className="px-3 py-2">Started</th>
+                <th scope="col" className="px-3 py-2">Run</th>
+                <th scope="col" className="px-3 py-2">Status</th>
+                <th scope="col" className="px-3 py-2">Scope</th>
+                <th scope="col" className="px-3 py-2">Trigger</th>
+                <th scope="col" className="px-3 py-2">Duration</th>
+                <th scope="col" className="px-3 py-2">Started</th>
               </tr>
             </thead>
             <tbody>

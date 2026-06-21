@@ -242,9 +242,9 @@ export default function ProgramDetailPage() {
                   <table className="min-w-full text-xs">
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
-                        <th className="py-1 pr-3">Employee</th>
-                        <th className="py-1 pr-3">Site</th>
-                        <th className="py-1 pr-3">Streak</th>
+                        <th scope="col" className="py-1 pr-3">Employee</th>
+                        <th scope="col" className="py-1 pr-3">Site</th>
+                        <th scope="col" className="py-1 pr-3">Streak</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -274,10 +274,10 @@ export default function ProgramDetailPage() {
                   <table className="min-w-full text-xs">
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
-                        <th className="py-1 pr-3">Site</th>
-                        <th className="py-1 pr-3">Current rate</th>
-                        <th className="py-1 pr-3">Predicted 90d</th>
-                        <th className="py-1 pr-3">Expiring</th>
+                        <th scope="col" className="py-1 pr-3">Site</th>
+                        <th scope="col" className="py-1 pr-3">Current rate</th>
+                        <th scope="col" className="py-1 pr-3">Predicted 90d</th>
+                        <th scope="col" className="py-1 pr-3">Expiring</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -347,10 +347,10 @@ export default function ProgramDetailPage() {
                 <table className="min-w-full text-xs">
                   <thead className="text-left text-neutral-600 dark:text-neutral-400">
                     <tr>
-                      <th className="py-1 pr-3">Run</th>
-                      <th className="py-1 pr-3">Started</th>
-                      <th className="py-1 pr-3">Compliance</th>
-                      <th className="py-1 pr-3">Evaluated</th>
+                      <th scope="col" className="py-1 pr-3">Run</th>
+                      <th scope="col" className="py-1 pr-3">Started</th>
+                      <th scope="col" className="py-1 pr-3">Compliance</th>
+                      <th scope="col" className="py-1 pr-3">Evaluated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -381,12 +381,12 @@ export default function ProgramDetailPage() {
             <table className="mt-2 min-w-full text-xs">
               <thead className="text-left text-neutral-600 dark:text-neutral-400">
                 <tr>
-                  <th className="py-1">Version</th>
-                  <th className="py-1">Compliant</th>
-                  <th className="py-1">Due Soon</th>
-                  <th className="py-1">Overdue</th>
-                  <th className="py-1">Missing</th>
-                  <th className="py-1">Excluded</th>
+                  <th scope="col" className="py-1">Version</th>
+                  <th scope="col" className="py-1">Compliant</th>
+                  <th scope="col" className="py-1">Due Soon</th>
+                  <th scope="col" className="py-1">Overdue</th>
+                  <th scope="col" className="py-1">Missing</th>
+                  <th scope="col" className="py-1">Excluded</th>
                 </tr>
               </thead>
               <tbody>

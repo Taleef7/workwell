@@ -117,11 +117,11 @@ export function DataReadinessPanel({ measureId, api }: Props) {
               <table className="min-w-full text-left text-xs">
                 <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
                   <tr>
-                    <th className="px-3 py-2 font-medium">Required Element</th>
-                    <th className="px-3 py-2 font-medium">Source</th>
-                    <th className="px-3 py-2 font-medium">Mapping</th>
-                    <th className="px-3 py-2 font-medium">Freshness</th>
-                    <th className="px-3 py-2 font-medium">Missingness</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Required Element</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Source</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Mapping</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Freshness</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Missingness</th>
                   </tr>
                 </thead>
                 <tbody>

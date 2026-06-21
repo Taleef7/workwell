@@ -744,15 +744,15 @@ function CasesTable({
       <table className="min-w-full text-sm">
         <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
           <tr>
-            {canManage ? <th className="w-10 px-3 py-2" aria-label="Select" /> : null}
-            <th className="px-3 py-2">Employee</th>
-            <th className="px-3 py-2">Measure</th>
-            <th className="px-3 py-2">Site</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Why flagged</th>
-            <th className="px-3 py-2">Priority</th>
-            <th className="px-3 py-2">Updated</th>
-            <th className="px-3 py-2" />
+            {canManage ? <th scope="col" className="w-10 px-3 py-2" aria-label="Select" /> : null}
+            <th scope="col" className="px-3 py-2">Employee</th>
+            <th scope="col" className="px-3 py-2">Measure</th>
+            <th scope="col" className="px-3 py-2">Site</th>
+            <th scope="col" className="px-3 py-2">Status</th>
+            <th scope="col" className="px-3 py-2">Why flagged</th>
+            <th scope="col" className="px-3 py-2">Priority</th>
+            <th scope="col" className="px-3 py-2">Updated</th>
+            <th scope="col" className="px-3 py-2" aria-label="Actions" />
           </tr>
         </thead>
         <tbody>

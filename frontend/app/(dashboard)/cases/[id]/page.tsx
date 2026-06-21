@@ -1132,7 +1132,7 @@ export default function CaseDetailPage() {
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
-                <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
+                <input type="file" aria-label="Evidence file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
                 <Input
                   label="Evidence description"
                   hideLabel
