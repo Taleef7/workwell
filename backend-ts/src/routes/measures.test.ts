@@ -61,8 +61,8 @@ test("GET /api/measures returns the full 63-measure catalog (Measure shape), Act
   assert.equal(audiogram.policyRef, "OSHA 29 CFR 1910.95");
   assert.equal(audiogram.status, "Active");
   assert.ok(audiogram.tags.includes("hearing"));
-  // exactly the 13 runnable measures are Active
-  assert.equal(rows.filter((m) => m.status === "Active").length, 13);
+  // exactly the 14 runnable measures are Active
+  assert.equal(rows.filter((m) => m.status === "Active").length, 14);
 });
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
@@ -130,13 +130,17 @@ test("GET /api/measures/:id/versions returns the version history; unknown measur
   assert.equal((await get("/api/measures/does-not-exist/versions"))?.status, 404);
 });
 
-test("GET /api/measures/:id preserves the Hepatitis B 'Documented Immunity' exclusion (V017 parity)", async () => {
+test("GET /api/measures/:id preserves the Hepatitis B 'Clinical Contraindication' exclusion (E10.6 promotion)", async () => {
   const d = (await get("/api/measures/hepatitis_b_vaccination_series").then((r) => r!.json())) as {
     exclusions: Array<{ label: string; criteriaText: string }>;
+    status: string;
   };
+  // Promoted to Active in E10.6 — exclusion changed from 'Documented Immunity' (V017 catalog)
+  // to 'Clinical Contraindication' (implemented CQL: hepb-contraindication condition).
+  assert.equal(d.status, "Active", "Hep B is now Active (promoted from Approved)");
   assert.ok(
-    d.exclusions.some((e) => e.label === "Documented Immunity" && /anti-HBs titer/i.test(e.criteriaText)),
-    "the V017 exclusion is carried through",
+    d.exclusions.some((e) => e.label === "Clinical Contraindication" && /contraindication/i.test(e.criteriaText)),
+    "the E10.6 exclusion is carried through",
   );
 });
 

@@ -70,6 +70,11 @@ const CASES: Array<[string, TargetOutcome, string]> = [
   ["varicella", "OVERDUE", "MISSING_DATA"],
   ["varicella", "MISSING_DATA", "MISSING_DATA"],
   ["varicella", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (Hepatitis B): same pattern as MMR/Varicella
+  ["hepatitis_b_vaccination_series", "COMPLIANT", "COMPLIANT"],
+  ["hepatitis_b_vaccination_series", "OVERDUE", "MISSING_DATA"],
+  ["hepatitis_b_vaccination_series", "MISSING_DATA", "MISSING_DATA"],
+  ["hepatitis_b_vaccination_series", "EXCLUDED", "EXCLUDED"],
 ];
 
 for (const [measureId, target, expected] of CASES) {

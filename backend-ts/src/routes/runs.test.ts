@@ -170,7 +170,7 @@ test("POST /api/runs/manual SITE runs async: 201 RUNNING immediately, then compl
   await drain(); // run the ctx.waitUntil background work to completion
   const summary = (await get(`/api/runs/${body.runId}`).then((r) => r!.json())) as { status: string; totalEvaluated: number };
   assert.equal(summary.status, "COMPLETED");
-  assert.equal(summary.totalEvaluated, 13 * 4, "13 runnable measures × 4 HQ employees evaluated in the background");
+  assert.equal(summary.totalEvaluated, 14 * 4, "14 runnable measures × 4 HQ employees evaluated in the background");
 });
 
 test("POST /api/runs/:id/rerun on a SITE run also goes async (RUNNING immediately, completes in background)", async () => {
