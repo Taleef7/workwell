@@ -1,0 +1,8 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "hepb-missing" } },
+    { "resource": { "resourceType": "Condition", "id": "hepb-missing-enr", "subject": { "reference": "Patient/hepb-missing" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } }
+  ]
+}

@@ -102,6 +102,15 @@ const VALUE_SETS: SeedVs[] = [
   ] },
   { id: "c0000001-0000-0000-0000-000000000006", oid: "urn:workwell:vs:varicella-contraindication", name: "Varicella Contraindication", codes: [c("varicella-contraindication", "Varicella Contraindication", "urn:workwell:vs:varicella-contraindication")] },
   { id: "c0000001-0000-0000-0000-000000000007", oid: "urn:workwell:vs:varicella-refusal", name: "Varicella Refusal", codes: [c("varicella-refusal", "Varicella Refusal", "urn:workwell:vs:varicella-refusal")] },
+  // Hepatitis B sets (E10.6 Task 5)
+  { id: "c0000001-0000-0000-0000-000000000008", oid: "urn:workwell:vs:hepb-vaccines", name: "Hep B Vaccines", codes: [
+    c("hepb-vaccine", "Hepatitis B Vaccines", "urn:workwell:vs:hepb-vaccines"),
+    c("08", "Hep B adolescent or pediatric", CVX),
+    c("43", "Hep B adult", CVX),
+    c("189", "Hep B Heplisav-B", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000009", oid: "urn:workwell:vs:hepb-contraindication", name: "Hep B Contraindication", codes: [c("hepb-contraindication", "Hepatitis B Contraindication", "urn:workwell:vs:hepb-contraindication")] },
+  { id: "c0000001-0000-0000-0000-00000000000a", oid: "urn:workwell:vs:hepb-refusal", name: "Hep B Refusal", codes: [c("hepb-refusal", "Hepatitis B Refusal", "urn:workwell:vs:hepb-refusal")] },
 ];
 
 /** measure slug → the value-set ids attached to it (Java's ensureLink table, keyed by slug). */
@@ -116,6 +125,7 @@ const LINKS: Record<string, string[]> = {
   cholesterol_ldl: ["b0000001-0000-0000-0000-000000000010", "b0000001-0000-0000-0000-000000000008", "b0000001-0000-0000-0000-000000000009"],
   mmr: ["c0000001-0000-0000-0000-000000000002", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000003", "c0000001-0000-0000-0000-000000000004"],
   varicella: ["c0000001-0000-0000-0000-000000000005", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000006", "c0000001-0000-0000-0000-000000000007"],
+  hepatitis_b_vaccination_series: ["c0000001-0000-0000-0000-000000000008", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000009", "c0000001-0000-0000-0000-00000000000a"],
 };
 
 /** The 5 demo terminology mappings from V013 (fixed ids so re-seed is idempotent by UNIQUE key). */
