@@ -84,12 +84,13 @@ async function store(env: MeasuresEnv): Promise<MeasureStore> {
   if (!seed) {
     seed = (async () => {
       await seedMeasureStore(stores.measures, measureCql);
-      // Value-set governance demo seed — after measures (links target version ids). Idempotent.
-      if (await stores.valueSets.isEmpty()) {
-        const records = await stores.measures.listLatest();
-        const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
-        await seedValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
-      }
+      // Value-set governance demo seed — after measures (links target version ids). Run on EVERY cold
+      // start (not just an empty store): seedValueSets is idempotent (seedValueSet upserts by id; link
+      // is ON CONFLICT DO NOTHING), so this back-fills value sets + links added after the initial seed
+      // (e.g. the E10.6 immunization sets) on already-seeded stores, not only on a fresh DB.
+      const records = await stores.measures.listLatest();
+      const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
+      await seedValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
     })();
     seeding.set(env, seed);
   }

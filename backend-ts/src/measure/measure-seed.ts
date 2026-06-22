@@ -46,4 +46,20 @@ export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: s
       changeSummary: "Seeded measure version",
     });
   }
+
+  // Idempotent promotion backfill (E10.6): `hepatitis_b_vaccination_series` existed as an Approved,
+  // catalog-only row before it became a runnable Active measure. seedMeasure() above skips existing
+  // rows, so on an already-seeded store the persisted row must be promoted explicitly (status + CQL +
+  // spec). Gated on the original "Approved" state so create/lifecycle edits (Draft/Deprecated/already
+  // -Active) are never clobbered — and so this is a no-op on a fresh store (seeded Active above) and on
+  // every subsequent boot.
+  const hepb = MEASURE_CATALOG.find((m) => m.id === "hepatitis_b_vaccination_series");
+  if (hepb && hepb.status === "Active") {
+    const stored = await store.getLatest(hepb.id);
+    if (stored && stored.status === "Approved") {
+      await store.updateCql(hepb.id, cqlOf(hepb.id), hepb.compileStatus);
+      await store.updateSpec(hepb.id, hepb.spec, hepb.policyRef);
+      await store.setVersionStatus(hepb.id, stored.versionId, { status: "Active", activate: true });
+    }
+  }
 }
