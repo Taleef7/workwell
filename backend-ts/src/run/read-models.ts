@@ -147,7 +147,7 @@ function expressionResults(evidence: unknown): ExprResult[] {
  * "Has Active Waiver" (OSHA audiogram), "Has Medical Exemption" (HAZWOPER/TB/HEDIS),
  * "Has Valid Exemption" (flu), "Has Exclusion" (CMS eCQM 125/122).
  */
-const EXEMPTION_DEFINE = /waiver|exemption|exclusion/i;
+const EXEMPTION_DEFINE = /waiver|exemption|exclusion|contraindication/i;
 
 function daysSinceExam(evidence: unknown): string | null {
   const e = expressionResults(evidence).find((r) => /^days since/i.test(r.define));

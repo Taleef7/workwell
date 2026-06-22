@@ -201,11 +201,11 @@ Outcome mapping (all three):
 - `EXCLUDED` when a documented contraindication Condition is present
 - `COMPLIANT` when enrolled, not contraindicated, and `Dose Count >= 2` (regardless of dose age)
 - `MISSING_DATA` otherwise — including a **partial** series (`0 < Dose Count < 2`), which the roster read
-  model surfaces as **IN_PROGRESS** (E10.5)
+  model **will surface** as **IN_PROGRESS** (planned in E10.5; not in this change)
 - `DUE_SOON` / `OVERDUE` are **not applicable** to PERMANENT measures
 
-A documented **refusal** (declination) Condition does not change the canonical bucket; it is surfaced as
-**DECLINED** by the roster read model and keeps the case open (same pattern as `adult_immunization`). The
+A documented **refusal** (declination) Condition does not change the canonical bucket; it **will be surfaced**
+as **DECLINED** by the roster read model (planned in E10.5) and keeps the case open (same pattern as `adult_immunization`). The
 Heplisav-vs-traditional-3-dose distinction and **titer-proves-immunity** ("Allow positive titer") are
 deferred to E11.
 

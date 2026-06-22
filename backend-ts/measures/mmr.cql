@@ -22,11 +22,9 @@ define "Refused":
   exists([Condition] C
     where exists(C.code.coding x where x.system = 'urn:workwell:vs:mmr-refusal' and x.code = 'mmr-refusal'))
 
-define "Valid Doses":
-  [Immunization] I
-    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:mmr-vaccines' and C.code = 'mmr-vaccine')
-
-define "Dose Count": Count("Valid Doses")
+define "Dose Count":
+  Count([Immunization] I
+    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:mmr-vaccines' and C.code = 'mmr-vaccine'))
 
 define "Series Complete":
   "Enrolled" and not "Has Contraindication" and "Dose Count" >= 2

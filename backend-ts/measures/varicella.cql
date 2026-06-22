@@ -22,11 +22,9 @@ define "Refused":
   exists([Condition] C
     where exists(C.code.coding x where x.system = 'urn:workwell:vs:varicella-refusal' and x.code = 'varicella-refusal'))
 
-define "Valid Doses":
-  [Immunization] I
-    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:varicella-vaccines' and C.code = 'varicella-vaccine')
-
-define "Dose Count": Count("Valid Doses")
+define "Dose Count":
+  Count([Immunization] I
+    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:varicella-vaccines' and C.code = 'varicella-vaccine'))
 
 define "Series Complete":
   "Enrolled" and not "Has Contraindication" and "Dose Count" >= 2

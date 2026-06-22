@@ -2,8 +2,83 @@
   "resourceType": "Bundle",
   "type": "collection",
   "entry": [
-    { "resource": { "resourceType": "Patient", "id": "hepb-excluded" } },
-    { "resource": { "resourceType": "Condition", "id": "hepb-excluded-enr", "subject": { "reference": "Patient/hepb-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } },
-    { "resource": { "resourceType": "Condition", "id": "hepb-excluded-contra", "subject": { "reference": "Patient/hepb-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:hepb-contraindication", "code": "hepb-contraindication" } ] } } }
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hepatitis_b_vaccination_series-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hepatitis_b_vaccination_series-excluded-enr",
+        "subject": {
+          "reference": "Patient/hepatitis_b_vaccination_series-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hepatitis_b_vaccination_series-excluded-wvr",
+        "subject": {
+          "reference": "Patient/hepatitis_b_vaccination_series-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-contraindication",
+              "code": "hepb-contraindication"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "hepatitis_b_vaccination_series-excluded-evt-0",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/hepatitis_b_vaccination_series-excluded"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-vaccines",
+              "code": "hepb-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "hepatitis_b_vaccination_series-excluded-evt-1",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/hepatitis_b_vaccination_series-excluded"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-vaccines",
+              "code": "hepb-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-03-24T00:00:00.000Z"
+      }
+    }
   ]
 }
