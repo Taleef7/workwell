@@ -25,6 +25,7 @@ export const MEASURES: Record<string, MeasureMeta> = {
   flu_vaccine: { id: "flu_vaccine", name: "Flu Vaccine", library: "FluVaccineSeasonal-1.0.0", periodMonths: 12 },
   adult_immunization: { id: "adult_immunization", name: "Adult Immunization Status (Td/Tdap)", library: "AdultImmunizationTdap-1.0.0", periodMonths: 0 },
   mmr: { id: "mmr", name: "MMR Immunity (2-dose series)", library: "MmrSeries-1.0.0", periodMonths: 0 },
+  varicella: { id: "varicella", name: "Varicella Immunity (2-dose series)", library: "VaricellaSeries-1.0.0", periodMonths: 0 },
   hypertension: { id: "hypertension", name: "Hypertension BP Screening", library: "HypertensionBPScreeningCQL-1.0.0", periodMonths: 0 },
   diabetes_hba1c: { id: "diabetes_hba1c", name: "Diabetes HbA1c Monitoring", library: "DiabetesHbA1cMonitoringCQL-1.0.0", periodMonths: 0 },
   obesity_bmi: { id: "obesity_bmi", name: "BMI Screening & Counseling", library: "ObesityBMIScreeningCQL-1.0.0", periodMonths: 0 },

@@ -1,0 +1,8 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "varicella-missing" } },
+    { "resource": { "resourceType": "Condition", "id": "varicella-missing-enr", "subject": { "reference": "Patient/varicella-missing" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } }
+  ]
+}

@@ -26,6 +26,7 @@ export const ORDER_CATALOG: Record<string, OrderCode> = {
   flu_vaccine: { code: "141", system: CVX, display: "Influenza seasonal injectable" },
   adult_immunization: { code: "115", system: CVX, display: "Tdap vaccine" },
   mmr: { code: "03", system: CVX, display: "MMR vaccine" },
+  varicella: { code: "21", system: CVX, display: "Varicella vaccine" },
   diabetes_hba1c: { code: "83036", system: CPT, display: "Hemoglobin A1c" },
   cms122: { code: "83036", system: CPT, display: "Hemoglobin A1c" },
   cholesterol_ldl: { code: "80061", system: CPT, display: "Lipid panel" },
