@@ -4,6 +4,7 @@ version: 1.0.0
 title: Flu Vaccine This Season
 policyRef: CDC seasonal influenza guidance
 tags: [vaccine, seasonal, immunization]
+complianceClass: RECURRING
 cql: flu_vaccine.cql
 bindings:
   rateKey: flu_vaccine

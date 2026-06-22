@@ -4,6 +4,7 @@ version: 1.0.0
 title: Cholesterol LDL Screening
 policyRef: HEDIS CBP / JPMC Wellness Rewards
 tags: [wellness, cholesterol, cardiovascular]
+complianceClass: RECURRING
 cql: cholesterol_ldl.cql
 bindings:
   rateKey: cholesterol_ldl

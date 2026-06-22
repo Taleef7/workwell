@@ -4,6 +4,7 @@ version: 1.0.0
 title: Breast Cancer Screening (CMS125v14 / MIPS 112)
 policyRef: CMS125v14
 tags: [ecqm, cms, cancer-screening, preventive]
+complianceClass: RECURRING
 cql: cms125.cql
 bindings:
   rateKey: cms125

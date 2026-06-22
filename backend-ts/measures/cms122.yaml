@@ -4,6 +4,7 @@ version: 1.0.0
 title: Diabetes HbA1c Poor Control (CMS122v14 / MIPS 1)
 policyRef: CMS122v14
 tags: [ecqm, cms, diabetes]
+complianceClass: RECURRING
 cql: cms122.cql
 bindings:
   rateKey: cms122

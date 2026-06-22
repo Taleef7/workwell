@@ -4,6 +4,7 @@ version: 1.0.0
 title: Diabetes HbA1c Monitoring
 policyRef: HEDIS HBD / JPMC Wellness Rewards
 tags: [wellness, diabetes, hba1c]
+complianceClass: RECURRING
 cql: diabetes_hba1c.cql
 bindings:
   rateKey: diabetes_hba1c
