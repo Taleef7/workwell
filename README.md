@@ -22,6 +22,7 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **QA/UX hardening pass 2 (PR #181) — merged + deployed.** Role-aware nav + action gating, programs/case-detail/runs/admin UX + perf fixes, a new `/orders` page (E7 UI), a global run-progress indicator, a conservative API GET cache, an accessibility pass, and bounded audit-ledger queries — no schema change, no new deps. See `docs/JOURNAL.md`.
 - All planned sprints (**0–7**) are implemented and merged to `main`; Sprint 7 issues `#47`–`#51` are closed.
 - Sprint 8 scoped-run parity, the 8-way CI test-sharding speedup (~3.8×), the MIE Container Manager v1 API deploy migration, and the `@mieweb/ui` frontend migration (PR #68) are all merged.
 - **Strategic roadmap underway** (tracked as GitHub issues `#71`–`#78`): the engine is being decomposed into reusable ports/adapters so real EHR/FHIR data can plug in later. **E1 — reusable measure engine ports/adapters (PR #95, epic #71) is merged.**
