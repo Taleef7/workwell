@@ -2,9 +2,66 @@
   "resourceType": "Bundle",
   "type": "collection",
   "entry": [
-    { "resource": { "resourceType": "Patient", "id": "hepb-present_recent" } },
-    { "resource": { "resourceType": "Condition", "id": "hepb-present_recent-enr", "subject": { "reference": "Patient/hepb-present_recent" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } },
-    { "resource": { "resourceType": "Immunization", "id": "hepb-present_recent-d1", "status": "completed", "patient": { "reference": "Patient/hepb-present_recent" }, "vaccineCode": { "coding": [ { "system": "urn:workwell:vs:hepb-vaccines", "code": "hepb-vaccine" } ] }, "occurrenceDateTime": "2024-01-10T00:00:00" } },
-    { "resource": { "resourceType": "Immunization", "id": "hepb-present_recent-d2", "status": "completed", "patient": { "reference": "Patient/hepb-present_recent" }, "vaccineCode": { "coding": [ { "system": "urn:workwell:vs:hepb-vaccines", "code": "hepb-vaccine" } ] }, "occurrenceDateTime": "2024-02-10T00:00:00" } }
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hepatitis_b_vaccination_series-present_recent"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hepatitis_b_vaccination_series-present_recent-enr",
+        "subject": {
+          "reference": "Patient/hepatitis_b_vaccination_series-present_recent"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "hepatitis_b_vaccination_series-present_recent-evt-0",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/hepatitis_b_vaccination_series-present_recent"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-vaccines",
+              "code": "hepb-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "hepatitis_b_vaccination_series-present_recent-evt-1",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/hepatitis_b_vaccination_series-present_recent"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-vaccines",
+              "code": "hepb-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-03-24T00:00:00.000Z"
+      }
+    }
   ]
 }
