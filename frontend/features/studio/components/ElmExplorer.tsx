@@ -235,6 +235,7 @@ export function ElmExplorer({
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">CQL source — edit to recompile</p>
           <textarea
             ref={taRef}
+            aria-label="CQL source"
             value={cql}
             onChange={(e) => setCql(e.target.value)}
             spellCheck={false}

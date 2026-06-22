@@ -101,10 +101,10 @@ export function ValueSetGovernancePanel({ measureId, api }: Props) {
               <table className="min-w-full text-left text-xs">
                 <thead className="text-[10px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                   <tr>
-                    <th className="px-2 py-1">Name</th>
-                    <th className="px-2 py-1">Version</th>
-                    <th className="px-2 py-1">Resolution</th>
-                    <th className="px-2 py-1">Codes</th>
+                    <th scope="col" className="px-2 py-1">Name</th>
+                    <th scope="col" className="px-2 py-1">Version</th>
+                    <th scope="col" className="px-2 py-1">Resolution</th>
+                    <th scope="col" className="px-2 py-1">Codes</th>
                   </tr>
                 </thead>
                 <tbody>

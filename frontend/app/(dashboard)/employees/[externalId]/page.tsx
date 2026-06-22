@@ -6,6 +6,7 @@ import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile
 import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceSummaryBar';
 import { SkeletonCard } from '@/components/skeleton-loader';
 import { SlaChip } from '@/components/SlaChip';
+import { OUTCOME_LABELS, labelFor, outcomeStatusClass } from '@/lib/status';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
@@ -39,9 +40,11 @@ export default function EmployeeProfilePage() {
   const startDate = profile.startDate
     ? new Date(profile.startDate).toLocaleDateString()
     : null;
+  // SLA fields are null on the synthetic directory — only show the column if any case has a value.
+  const hasSla = profile.openCases.some((c) => c.slaRemainingDays != null);
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -70,6 +73,8 @@ export default function EmployeeProfilePage() {
         <ComplianceSummaryBar outcomes={profile.measureOutcomes} />
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="space-y-6 lg:col-span-2">
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -77,11 +82,11 @@ export default function EmployeeProfilePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
-                <th className="pb-2 font-medium">Measure</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium">Priority</th>
-                <th className="pb-2 font-medium">Assignee</th>
-                <th className="pb-2 font-medium">SLA</th>
+                <th scope="col" className="pb-2 font-medium">Measure</th>
+                <th scope="col" className="pb-2 font-medium">Status</th>
+                <th scope="col" className="pb-2 font-medium">Priority</th>
+                <th scope="col" className="pb-2 font-medium">Assignee</th>
+                {hasSla ? <th scope="col" className="pb-2 font-medium">SLA</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -95,8 +100,10 @@ export default function EmployeeProfilePage() {
                       {c.measureName}
                     </Link>
                   </td>
-                  <td className="py-2 text-neutral-600 dark:text-neutral-400">
-                    {c.outcomeStatus.replace(/_/g, ' ')}
+                  <td className="py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(c.outcomeStatus)}`}>
+                      {labelFor(OUTCOME_LABELS, c.outcomeStatus)}
+                    </span>
                   </td>
                   <td className="py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[c.priority] ?? ''}`}>
@@ -104,9 +111,11 @@ export default function EmployeeProfilePage() {
                     </span>
                   </td>
                   <td className="py-2 text-neutral-500 dark:text-neutral-400">{c.assignee ?? '—'}</td>
-                  <td className="py-2">
-                    <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} /> {c.slaRemainingDays == null && <span className="text-neutral-400">—</span>}
-                  </td>
+                  {hasSla ? (
+                    <td className="py-2">
+                      <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} />
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -132,8 +141,8 @@ export default function EmployeeProfilePage() {
                   {o.measureName}{' '}
                   <span className="text-xs font-normal text-neutral-400">{o.measureVersion}</span>
                 </span>
-                <span className="rounded-full border border-neutral-300 dark:border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                  {o.outcomeStatus.replace(/_/g, ' ')}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(o.outcomeStatus)}`}>
+                  {labelFor(OUTCOME_LABELS, o.outcomeStatus)}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-4 text-xs text-neutral-500 dark:text-neutral-400">
@@ -144,7 +153,7 @@ export default function EmployeeProfilePage() {
                   <span>Days since exam: {o.daysSinceLastExam}</span>
                 )}
                 {o.daysUntilDue != null && (
-                  <span>
+                  <span className={o.daysUntilDue >= 0 ? 'font-medium text-amber-700 dark:text-amber-400' : 'font-semibold text-rose-700 dark:text-rose-400'}>
                     {o.daysUntilDue >= 0
                       ? `Due in ${o.daysUntilDue}d`
                       : `Overdue by ${Math.abs(o.daysUntilDue)}d`}
@@ -164,6 +173,9 @@ export default function EmployeeProfilePage() {
         </div>
       </div>
 
+      </div>
+
+      <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
       {/* Recent activity timeline */}
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Recent Activity</h2>
@@ -190,6 +202,8 @@ export default function EmployeeProfilePage() {
         >
           ← Back to Cases
         </Link>
+      </div>
+      </aside>
       </div>
     </div>
   );

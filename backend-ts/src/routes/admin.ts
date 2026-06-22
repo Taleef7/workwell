@@ -24,6 +24,7 @@ import {
   listDataMappings,
   validateDataMappings,
   toAdminAuditRows,
+  toDeliveryLog,
 } from "../admin/admin-data.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
@@ -42,6 +43,8 @@ import { isProductionLike } from "../config/startup-safety.ts";
 interface AdminEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
+  /** Live AI-integration signal (M4): the `ai` tile is "healthy" only when this is set. */
+  OPENAI_API_KEY?: string;
   /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
   SPRING_PROFILES_ACTIVE?: string;
   WORKWELL_ENVIRONMENT?: string;
@@ -96,7 +99,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   const q = url.searchParams;
 
   // ---- integrations --------------------------------------------------------
-  if (pathname === "/api/admin/integrations" && req.method === "GET") return json(listIntegrations());
+  if (pathname === "/api/admin/integrations" && req.method === "GET") return json(listIntegrations(env));
   const syncId = pathname.match(/^\/api\/admin\/integrations\/([^/]+)\/sync$/)?.[1];
   if (syncId && req.method === "POST") {
     const h = syncIntegration(syncId);
@@ -112,14 +115,16 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- audit viewer (over the persisted ledger) ----------------------------
   if (pathname === "/api/admin/audit-events" && req.method === "GET") {
     const s = await getStores(env);
-    const events = await s.events.listAuditEvents();
+    const limit = clampInt(q.get("limit"), 100, 1, 250);
+    // Newest-first, bounded window (not the whole ledger) — this also caps the per-distinct-case
+    // getCase loop below. Over-fetch ~4x the page so scope filtering still yields up to `limit`.
+    const events = await s.events.recentAuditEvents(Math.min(limit * 4, 1000));
     const caseStore = s.cases;
     const caseEmployee = new Map<string, string>();
     for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
       const c = await caseStore.getCase(id);
       if (c) caseEmployee.set(id, c.employeeId);
     }
-    const limit = clampInt(q.get("limit"), 100, 1, 250);
     return json(toAdminAuditRows(events, caseEmployee, q.get("scope") ?? "all", limit));
   }
 
@@ -267,8 +272,13 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     }
   }
 
-  // ---- deferred subsystems (honest empty so the dashboard renders) ---------
-  if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") return json([]);
+  // Outreach delivery log (M3): derived from CASE_OUTREACH_SENT audit events (no dedicated table on
+  // the demo stack — see admin-data.toDeliveryLog). Was previously a hardcoded empty array.
+  if (pathname === "/api/admin/outreach/delivery-log" && req.method === "GET") {
+    const limit = Math.min(100, Math.max(1, Number(q.get("limit") ?? "20") || 20));
+    const events = await (await getStores(env)).events.recentAuditEventsByType("CASE_OUTREACH_SENT", limit);
+    return json(toDeliveryLog(events, limit));
+  }
 
   return null;
 }

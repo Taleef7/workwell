@@ -163,11 +163,11 @@ export default function HierarchyPage() {
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                <th className="px-4 py-2 font-semibold">Name</th>
-                <th className="px-4 py-2 text-right font-semibold">Evaluated</th>
-                <th className="px-4 py-2 text-right font-semibold">Compliant</th>
-                <th className="px-4 py-2 text-right font-semibold">Compliance</th>
-                <th className="px-4 py-2 text-right font-semibold">Open Cases</th>
+                <th scope="col" className="px-4 py-2 font-semibold">Name</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">Evaluated</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">Compliant</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">Compliance</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">Open Cases</th>
               </tr>
             </thead>
             <tbody>

@@ -18,6 +18,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
+import { canManageCases } from "@/lib/rbac";
 import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 
@@ -79,6 +80,7 @@ export default function CasesPage() {
   const urlSearch = searchParams.get("search") ?? "";
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
+  const canManage = canManageCases(user?.role);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -97,7 +99,9 @@ export default function CasesPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
   const api = useApi();
-  const PAGE_SIZE = 25;
+  const [pageSize, setPageSize] = useState(25);
+  const [outcomeFilter, setOutcomeFilter] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
 
   // Track the most recent search value we ourselves wrote to the URL so we can
   // distinguish state-driven URL writes from external URL changes (browser
@@ -161,8 +165,9 @@ export default function CasesPage() {
       }
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      if (outcomeFilter) params.set("outcome", outcomeFilter);
       if (urlSearch.trim()) params.set("search", urlSearch.trim());
-      params.set("limit", String(PAGE_SIZE));
+      params.set("limit", String(pageSize));
       params.set("offset", "0");
       // #150 M10: X-Total-Count carries the full filtered match count, so paging is driven by the real
       // total (not the brittle "page was full" heuristic, which mis-signals when total is an exact multiple).
@@ -177,7 +182,7 @@ export default function CasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
+  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, outcomeFilter, pageSize, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -228,6 +233,22 @@ export default function CasesPage() {
     ],
     [cases]
   );
+  // Outcome bucket ("why flagged") — distinct from case status. Drives the new ?outcome= filter.
+  const outcomeOptions = useMemo(
+    () => [
+      { value: "", label: "All Outcomes" },
+      { value: "OVERDUE", label: labelFor(OUTCOME_LABELS, "OVERDUE") },
+      { value: "DUE_SOON", label: labelFor(OUTCOME_LABELS, "DUE_SOON") },
+      { value: "MISSING_DATA", label: labelFor(OUTCOME_LABELS, "MISSING_DATA") },
+      { value: "COMPLIANT", label: labelFor(OUTCOME_LABELS, "COMPLIANT") },
+      { value: "EXCLUDED", label: labelFor(OUTCOME_LABELS, "EXCLUDED") }
+    ],
+    []
+  );
+  const pageSizeOptions = useMemo(
+    () => [25, 50, 100, 200, 500].map((n) => ({ value: String(n), label: `${n} / page` })),
+    []
+  );
 
   const setStatusAndUrl = useCallback((nextStatus: CaseStatusFilter) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -269,8 +290,9 @@ export default function CasesPage() {
       else if (siteId) params.set("site", siteId);
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      if (outcomeFilter) params.set("outcome", outcomeFilter);
       if (urlSearch.trim()) params.set("search", urlSearch.trim());
-      params.set("limit", String(PAGE_SIZE));
+      params.set("limit", String(pageSize));
       params.set("offset", String(cases.length));
       const { data: next, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
       const matchTotal = Number(headers.get("X-Total-Count") ?? 0);
@@ -470,6 +492,14 @@ export default function CasesPage() {
           onValueChange={setSiteFilter}
           options={siteOptions}
         />
+        <Select
+          label="Outcome"
+          size="sm"
+          className="w-44"
+          value={outcomeFilter}
+          onValueChange={setOutcomeFilter}
+          options={outcomeOptions}
+        />
         <Input
           label="Search"
           size="sm"
@@ -478,9 +508,37 @@ export default function CasesPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
+        <Select
+          label="Per page"
+          size="sm"
+          className="w-32"
+          value={String(pageSize)}
+          onValueChange={(v) => setPageSize(Number(v))}
+          options={pageSizeOptions}
+        />
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400">View</span>
+          <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300 dark:border-neutral-700" role="group" aria-label="Result view">
+            {(["cards", "table"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={viewMode === mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+                  viewMode === mode
+                    ? "bg-primary-600 text-white"
+                    : "bg-white text-neutral-600 hover:bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {selectedCaseIds.length > 0 ? (
+      {canManage && selectedCaseIds.length > 0 ? (
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
@@ -529,7 +587,7 @@ export default function CasesPage() {
         </div>
       ) : null}
 
-      {filteredCases.length > 0 ? (
+      {canManage && filteredCases.length > 0 ? (
         <label className="hidden items-center gap-2 text-sm text-neutral-600 md:flex dark:text-neutral-400">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
@@ -560,6 +618,9 @@ export default function CasesPage() {
         })}
       </div>
 
+      {viewMode === "table" ? (
+        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canManage} />
+      ) : (
       <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
         {filteredCases.map((item) => {
           const caseStatus = normalizeEnumValue(item.status);
@@ -569,14 +630,18 @@ export default function CasesPage() {
           return (
             <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  <input
-                    type="checkbox"
-                    checked={selectedCaseIds.includes(item.caseId)}
-                    onChange={() => toggleCase(item.caseId)}
-                  />
-                  Select
-                </label>
+                {canManage ? (
+                  <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+                    <input
+                      type="checkbox"
+                      checked={selectedCaseIds.includes(item.caseId)}
+                      onChange={() => toggleCase(item.caseId)}
+                    />
+                    Select
+                  </label>
+                ) : (
+                  <span />
+                )}
                 <div className="flex flex-wrap justify-end gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{caseStatusLabel}</span>
                   <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>{priorityLabel}</Badge>
@@ -649,6 +714,7 @@ export default function CasesPage() {
           );
         })}
       </div>
+      )}
 
       {hasMore ? (
         <div className="flex justify-center">
@@ -658,5 +724,91 @@ export default function CasesPage() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function CasesTable({
+  items,
+  selectedCaseIds,
+  onToggle,
+  canManage,
+}: {
+  items: CaseSummary[];
+  selectedCaseIds: string[];
+  onToggle: (caseId: string) => void;
+  canManage: boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="hidden overflow-x-auto rounded-2xl border border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-900">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+          <tr>
+            {canManage ? <th scope="col" className="w-10 px-3 py-2" aria-label="Select" /> : null}
+            <th scope="col" className="px-3 py-2">Employee</th>
+            <th scope="col" className="px-3 py-2">Measure</th>
+            <th scope="col" className="px-3 py-2">Site</th>
+            <th scope="col" className="px-3 py-2">Status</th>
+            <th scope="col" className="px-3 py-2">Why flagged</th>
+            <th scope="col" className="px-3 py-2">Priority</th>
+            <th scope="col" className="px-3 py-2">Updated</th>
+            <th scope="col" className="px-3 py-2" aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr
+              key={item.caseId}
+              className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50 dark:border-neutral-800/60 dark:hover:bg-neutral-800/40"
+            >
+              {canManage ? (
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.employeeName}`}
+                    checked={selectedCaseIds.includes(item.caseId)}
+                    onChange={() => onToggle(item.caseId)}
+                  />
+                </td>
+              ) : null}
+              <td className="px-3 py-2">
+                <Link
+                  href={`/cases/${item.caseId}`}
+                  className="font-medium text-neutral-900 hover:text-primary-700 hover:underline dark:text-neutral-100 dark:hover:text-primary-400"
+                >
+                  {item.employeeName}
+                </Link>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">{item.employeeId}</p>
+              </td>
+              <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{item.measureName}</td>
+              <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{item.site}</td>
+              <td className="px-3 py-2">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(item.status)}`}>
+                  {labelFor(CASE_STATUS_LABELS, item.status)}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
+                  {labelFor(OUTCOME_LABELS, item.currentOutcomeStatus)}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>
+                  {labelFor(PRIORITY_LABELS, item.priority)}
+                </Badge>
+              </td>
+              <td className="px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+                {new Date(item.updatedAt).toLocaleDateString()}
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Link href={`/cases/${item.caseId}`} className="text-xs font-medium text-primary-700 hover:underline dark:text-primary-400">
+                  View →
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

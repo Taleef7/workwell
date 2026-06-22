@@ -7,6 +7,7 @@ import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
+import { canApproveMeasures, canAuthorMeasures, isAdmin } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { useMeasureDetail } from "@/features/studio/hooks/useMeasureDetail";
 import { useValueSets } from "@/features/studio/hooks/useValueSets";
@@ -75,10 +76,11 @@ export default function StudioMeasurePage() {
     }
   }
 
-  const canClone = user?.role === "ROLE_AUTHOR";
-  const canApprove = user?.role === "ROLE_APPROVER" || user?.role === "ROLE_ADMIN";
+  // Use the shared rbac helpers (mirror authorize.ts) instead of inline role string checks.
+  const canClone = canAuthorMeasures(user?.role);
+  const canApprove = canApproveMeasures(user?.role);
   const canActivate = activationReadiness?.ready ?? false;
-  const canAdminDeprecate = user?.role === "ROLE_ADMIN";
+  const canAdminDeprecate = isAdmin(user?.role);
   const currentMeasureVersionId =
     versionHistory.find((item) => item.version === measure?.version && normalizeEnumValue(item.status) === normalizeEnumValue(measure?.status ?? ""))?.id
     ?? versionHistory.find((item) => item.version === measure?.version)?.id

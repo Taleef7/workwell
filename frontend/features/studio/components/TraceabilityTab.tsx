@@ -100,13 +100,13 @@ export function TraceabilityTab({ measureId, api }: Props) {
           <table className="min-w-full text-left text-xs">
             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
               <tr>
-                <th className="px-3 py-2 font-medium">Policy Requirement</th>
-                <th className="px-3 py-2 font-medium">Spec Field</th>
-                <th className="px-3 py-2 font-medium">CQL Define</th>
-                <th className="px-3 py-2 font-medium">Value Sets</th>
-                <th className="px-3 py-2 font-medium">Required Data</th>
-                <th className="px-3 py-2 font-medium">Test Fixtures</th>
-                <th className="px-3 py-2 font-medium">Evidence Keys</th>
+                <th scope="col" className="px-3 py-2 font-medium">Policy Requirement</th>
+                <th scope="col" className="px-3 py-2 font-medium">Spec Field</th>
+                <th scope="col" className="px-3 py-2 font-medium">CQL Define</th>
+                <th scope="col" className="px-3 py-2 font-medium">Value Sets</th>
+                <th scope="col" className="px-3 py-2 font-medium">Required Data</th>
+                <th scope="col" className="px-3 py-2 font-medium">Test Fixtures</th>
+                <th scope="col" className="px-3 py-2 font-medium">Evidence Keys</th>
               </tr>
             </thead>
             <tbody>

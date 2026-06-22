@@ -443,9 +443,10 @@ export function caseEventStoreContract(
       outcomeStatus: "OVERDUE",
     });
 
-  test(`[${label}] timeline merges audit_events + case_actions oldest-first; CASE_VIEWED excluded`, async () => {
+  test(`[${label}] timeline is audit-sourced (single-source); case_action twin not double-listed; CASE_VIEWED excluded`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;
+    // A standalone case_action (no audit twin) must NOT appear — the timeline reads audit_events only.
     await eventStore.insertAction({ caseId: c.id, actionType: "ASSIGNED", actor: "cm@x", payload: { assignee: "cm@x" } });
     await eventStore.appendAudit({
       eventType: "CASE_ASSIGNED",
@@ -471,11 +472,12 @@ export function caseEventStoreContract(
 
     const timeline = await eventStore.caseTimeline(c.id);
     const types = timeline.map((t) => t.eventType);
-    assert.ok(types.includes("ASSIGNED") && types.includes("CASE_ASSIGNED"), "both sources present");
+    assert.ok(types.includes("CASE_ASSIGNED"), "audit event present on the timeline");
+    assert.ok(!types.includes("ASSIGNED"), "case_action arm not merged (single-source audit timeline)");
     assert.ok(!types.includes("CASE_VIEWED"), "CASE_VIEWED excluded");
     assert.ok(
-      timeline.every((t) => t.payload.timelineSource === "audit_event" || t.payload.timelineSource === "case_action"),
-      "each entry carries a timelineSource discriminator",
+      timeline.every((t) => t.payload.timelineSource === "audit_event"),
+      "every entry is audit-sourced",
     );
     // oldest-first
     for (let i = 1; i < timeline.length; i++) {
@@ -577,6 +579,39 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.auditEventsByMeasureVersion(crypto.randomUUID()), [], "unknown version → []");
   });
 
+  test(`[${label}] recentAuditEvents is newest-first + bounded; auditEventsForCases filters by case`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    const mk = (eventType: string, refCaseId: string | null) =>
+      eventStore.appendAudit({
+        eventType,
+        entityType: "case",
+        entityId: c.id,
+        actor: "cm@x",
+        refRunId: null,
+        refCaseId,
+        refMeasureVersionId: null,
+        payload: { e: eventType },
+      });
+    await mk("CASE_ASSIGNED", c.id);
+    await mk("CASE_ESCALATED", c.id);
+    await mk("RUN_COMPLETED", null); // not tied to the case
+    await mk("CASE_OUTREACH_SENT", c.id);
+
+    const recent = await eventStore.recentAuditEvents(2);
+    assert.equal(recent.length, 2, "bounded to the limit");
+    assert.equal(recent[0]!.eventType, "CASE_OUTREACH_SENT", "newest first");
+
+    const forCase = await eventStore.auditEventsForCases([c.id], 10);
+    assert.deepEqual(
+      forCase.map((e) => e.eventType),
+      ["CASE_OUTREACH_SENT", "CASE_ESCALATED", "CASE_ASSIGNED"],
+      "only this case's events, newest-first (RUN_COMPLETED excluded — null case)",
+    );
+    assert.ok(forCase.every((e) => e.refCaseId === c.id));
+    assert.deepEqual(await eventStore.auditEventsForCases([], 10), [], "no ids → []");
+  });
+
   test(`[${label}] insertPacketExport records an export row (idempotent inserts, distinct ids)`, async () => {
     const { eventStore } = await fresh();
     const input = {
@@ -592,25 +627,29 @@ export function caseEventStoreContract(
     await eventStore.insertPacketExport(input);
   });
 
-  test(`[${label}] recordCaseEvent writes the action + audit atomically (both on the timeline)`, async () => {
+  test(`[${label}] recordCaseEvent writes the action + audit atomically (timeline is single-source audit)`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;
     await eventStore.recordCaseEvent({
-      action: { caseId: c.id, actionType: "ESCALATED", actor: "cm@x", payload: { priority: "HIGH" } },
+      action: { caseId: c.id, actionType: "OUTREACH_SENT", actor: "cm@x", payload: { deliveryStatus: "SIMULATED" } },
       audit: {
-        eventType: "CASE_ESCALATED",
+        eventType: "CASE_OUTREACH_SENT",
         entityType: "case",
         entityId: c.id,
         actor: "cm@x",
         refRunId: c.lastRunId,
         refCaseId: c.id,
         refMeasureVersionId: c.measureId,
-        payload: { priority: "HIGH" },
+        payload: { deliveryStatus: "SIMULATED" },
       },
     });
     const types = (await eventStore.caseTimeline(c.id)).map((t) => t.eventType);
-    assert.ok(types.includes("ESCALATED"), "case_action committed");
-    assert.ok(types.includes("CASE_ESCALATED"), "audit_event committed in the same transaction");
+    // The timeline is sourced solely from audit_events: the audit row shows exactly once and the
+    // twin case_action is NOT double-listed (the prior UNION ALL double-counted every action).
+    assert.equal(types.filter((t) => t === "CASE_OUTREACH_SENT").length, 1, "audit event on the timeline, exactly once");
+    assert.ok(!types.includes("OUTREACH_SENT"), "case_action twin is not double-shown on the timeline");
+    // The case_action row is still committed in the same transaction (read via the outreach path).
+    assert.equal(await eventStore.hasOutreachSent(c.id), true, "case_action committed atomically with the audit event");
   });
 
   test(`[${label}] hasOutreachSent + latestOutreachDeliveryStatus track the OUTREACH_* actions`, async () => {

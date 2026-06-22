@@ -16,12 +16,19 @@ import {
   formatStatusLabel,
   labelFor,
   normalizeEnumValue,
-  outcomeStatusClass
+  outcomeStatusClass,
+  runStatusClass,
+  triggerBadgeClass
 } from "@/lib/status";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
+import { TERMINAL_RUN_STATUSES } from "@/lib/run-status";
+import { canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 type RunListItem = {
   runId: string;
@@ -103,7 +110,6 @@ type RunInsightResponse = {
 
 const RUN_PAGE_SIZE = 20;
 const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
-const TERMINAL_RUN_STATUSES = new Set(["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"]);
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";
@@ -151,6 +157,10 @@ function formatRunDuration(durationMs: number, status?: string): string {
 export default function RunsPage() {
   const api = useApi();
   const router = useRouter();
+  const { user } = useAuth();
+  const mayRun = canRunMeasures(user?.role);
+  const { startTracking } = useRunStatus();
+  const [showRunConfirm, setShowRunConfirm] = useState(false);
   const searchParams = useSearchParams();
   const urlRunId = searchParams.get("runId");
   const urlRunIdRef = useRef<string | null>(urlRunId);
@@ -402,6 +412,7 @@ export default function RunsPage() {
       setSelectedRunId(data.runId);
       setActiveRunId(data.runId);
       setActiveRunStartedAt(new Date());
+      startTracking(data.runId, data.status); // surface in the global header indicator too
       await loadRuns();
       // Detail will reload via useEffect([selectedRunId, ...]) — no duplicate call needed.
     } catch (err) {
@@ -420,6 +431,7 @@ export default function RunsPage() {
       setSelectedRunId(data.runId);
       setActiveRunId(data.runId);
       setActiveRunStartedAt(new Date());
+      startTracking(data.runId, data.status); // surface in the global header indicator too
       await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -427,16 +439,23 @@ export default function RunsPage() {
     }
   }
 
-  async function downloadCsv(path: string, filename: string) {
-    const blob = await api.downloadBlob(path);
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
+  // Download any blob endpoint (CSV / FHIR JSON / QRDA XML). api.downloadBlob throws an ApiError on
+  // a non-2xx (e.g. a 422 MeasureReport on a multi-measure run); surface it as a toast instead of
+  // failing silently.
+  async function downloadFile(path: string, filename: string) {
+    try {
+      const blob = await api.downloadBlob(path);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      emitToast(err instanceof Error ? err.message : "Download failed");
+    }
   }
 
   // NITRO grid for the run Outcomes table (employee/role/site/outcome/days/waiver/case).
@@ -527,32 +546,35 @@ export default function RunsPage() {
   );
 
   // Option lists for the @mieweb/ui Select filters + run-control dropdowns.
+  // Values are the canonical UPPERCASE enums the backend stores + compares against (a SEED run is
+  // triggerType=SEED; PARTIAL maps to PARTIAL_FAILURE). The options previously sent lowercase, so the
+  // backend's case-sensitive filter matched nothing and the lists silently returned every run.
   const statusFilterOptions = useMemo(
     () => [
       { value: "", label: "All Statuses" },
-      { value: "completed", label: labelFor(RUN_STATUS_LABELS, "COMPLETED") },
-      { value: "running", label: labelFor(RUN_STATUS_LABELS, "RUNNING") },
-      { value: "failed", label: labelFor(RUN_STATUS_LABELS, "FAILED") },
-      { value: "partial", label: labelFor(RUN_STATUS_LABELS, "PARTIAL") },
+      { value: "COMPLETED", label: labelFor(RUN_STATUS_LABELS, "COMPLETED") },
+      { value: "RUNNING", label: labelFor(RUN_STATUS_LABELS, "RUNNING") },
+      { value: "FAILED", label: labelFor(RUN_STATUS_LABELS, "FAILED") },
+      { value: "PARTIAL_FAILURE", label: labelFor(RUN_STATUS_LABELS, "PARTIAL_FAILURE") },
     ],
     [],
   );
   const scopeFilterOptions = useMemo(
     () => [
       { value: "", label: "All Scope Types" },
-      { value: "all_programs", label: labelFor(SCOPE_LABELS, "ALL_PROGRAMS") },
-      { value: "measure", label: labelFor(SCOPE_LABELS, "MEASURE") },
-      { value: "site", label: labelFor(SCOPE_LABELS, "SITE") },
-      { value: "employee", label: labelFor(SCOPE_LABELS, "EMPLOYEE") },
-      { value: "case", label: labelFor(SCOPE_LABELS, "CASE") },
+      { value: "ALL_PROGRAMS", label: labelFor(SCOPE_LABELS, "ALL_PROGRAMS") },
+      { value: "MEASURE", label: labelFor(SCOPE_LABELS, "MEASURE") },
+      { value: "SITE", label: labelFor(SCOPE_LABELS, "SITE") },
+      { value: "EMPLOYEE", label: labelFor(SCOPE_LABELS, "EMPLOYEE") },
+      { value: "CASE", label: labelFor(SCOPE_LABELS, "CASE") },
     ],
     [],
   );
   const triggerFilterOptions = useMemo(
     () => [
       { value: "", label: "All Trigger Types" },
-      { value: "manual", label: labelFor(TRIGGER_LABELS, "MANUAL") },
-      { value: "scheduler", label: labelFor(TRIGGER_LABELS, "SCHEDULER") },
+      { value: "MANUAL", label: labelFor(TRIGGER_LABELS, "MANUAL") },
+      { value: "SEED", label: labelFor(TRIGGER_LABELS, "SEED") },
     ],
     [],
   );
@@ -585,7 +607,7 @@ export default function RunsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void downloadCsv("/api/exports/runs?format=csv", "runs-export.csv")}
+            onClick={() => void downloadFile("/api/exports/runs?format=csv", "runs-export.csv")}
           >
             Export runs CSV
           </Button>
@@ -593,7 +615,7 @@ export default function RunsPage() {
             variant="outline"
             size="sm"
             onClick={() =>
-              void downloadCsv(
+              void downloadFile(
                 `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}`,
                 "outcomes.csv"
               )
@@ -601,15 +623,17 @@ export default function RunsPage() {
           >
             Export outcomes CSV
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => void rerunSameScope()}
-            disabled={!selectedRunId || !rerunSupported || isRunTriggering}
-            isLoading={isRunTriggering}
-            loadingText="Running…"
-          >
-            Rerun Selected Scope
-          </Button>
+          {mayRun ? (
+            <Button
+              variant="outline"
+              onClick={() => void rerunSameScope()}
+              disabled={!selectedRunId || !rerunSupported || isRunTriggering}
+              isLoading={isRunTriggering}
+              loadingText="Running…"
+            >
+              Rerun Selected Scope
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -646,6 +670,7 @@ export default function RunsPage() {
         </Button>
       </div>
 
+      {mayRun ? (
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
         <div className="grid items-end gap-3 md:grid-cols-4">
           <Select
@@ -706,7 +731,7 @@ export default function RunsPage() {
           <Button
             variant="primary"
             fullWidth
-            onClick={() => void runManualScope()}
+            onClick={() => setShowRunConfirm(true)}
             disabled={isRunTriggering}
             isLoading={isRunTriggering}
             loadingText="Running…"
@@ -719,6 +744,7 @@ export default function RunsPage() {
           CASE runs require a case UUID.
         </p>
       </div>
+      ) : null}
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
@@ -737,19 +763,21 @@ export default function RunsPage() {
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full table-fixed text-sm">
             <colgroup>
-              <col className="w-[40%]" />
+              <col className="w-[30%]" />
               <col className="w-[14%]" />
-              <col className="w-[16%]" />
+              <col className="w-[14%]" />
+              <col className="w-[15%]" />
               <col className="w-[10%]" />
-              <col className="w-[20%]" />
+              <col className="w-[17%]" />
             </colgroup>
             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-left text-neutral-600 dark:text-neutral-400">
               <tr>
-                <th className="px-3 py-2">Run</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Scope</th>
-                <th className="px-3 py-2">Duration</th>
-                <th className="px-3 py-2">Started</th>
+                <th scope="col" className="px-3 py-2">Run</th>
+                <th scope="col" className="px-3 py-2">Status</th>
+                <th scope="col" className="px-3 py-2">Scope</th>
+                <th scope="col" className="px-3 py-2">Trigger</th>
+                <th scope="col" className="px-3 py-2">Duration</th>
+                <th scope="col" className="px-3 py-2">Started</th>
               </tr>
             </thead>
             <tbody>
@@ -765,8 +793,17 @@ export default function RunsPage() {
                       {run.runId.slice(0, 8)}...
                     </p>
                   </td>
-                  <td className="px-3 py-2 align-top">{labelFor(RUN_STATUS_LABELS, run.status)}</td>
+                  <td className="px-3 py-2 align-top">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${runStatusClass(run.status)}`}>
+                      {labelFor(RUN_STATUS_LABELS, run.status)}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 align-top">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
+                  <td className="px-3 py-2 align-top">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${triggerBadgeClass(run.triggerType)}`}>
+                      {labelFor(TRIGGER_LABELS, run.triggerType)}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 align-top">
                     {run.runId === activeRunId ? (
                       <span className="tabular-nums">
@@ -817,8 +854,13 @@ export default function RunsPage() {
           ) : null}
           {selectedRun ? (
             <>
-              <p className="text-sm text-neutral-700 dark:text-neutral-300">
-                {selectedRun.measureName} ({labelFor(SCOPE_LABELS, selectedRun.scopeType)}) - {labelFor(RUN_STATUS_LABELS, selectedRun.status)}
+              <p className="flex flex-wrap items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+                <span>
+                  {selectedRun.measureName} ({labelFor(SCOPE_LABELS, selectedRun.scopeType)})
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${runStatusClass(selectedRun.status)}`}>
+                  {labelFor(RUN_STATUS_LABELS, selectedRun.status)}
+                </span>
               </p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
@@ -861,6 +903,28 @@ export default function RunsPage() {
                   onError={(message) => setError(message || null)}
                 />
               </div>
+              {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS) */}
+              {normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
+              TERMINAL_RUN_STATUSES.has(normalizeEnumValue(selectedRun.status)) ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      void downloadFile(`/api/runs/${selectedRunId}/measure-report?type=summary`, `measure-report-${selectedRunId}.json`)
+                    }
+                  >
+                    MeasureReport (FHIR)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void downloadFile(`/api/runs/${selectedRunId}/qrda?format=xml`, `qrda-${selectedRunId}.xml`)}
+                  >
+                    QRDA III (XML)
+                  </Button>
+                </div>
+              ) : null}
             </>
           ) : (
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Select a run to view details.</p>
@@ -902,6 +966,23 @@ export default function RunsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={showRunConfirm}
+        title="Start this run?"
+        description={
+          runScopeType === "ALL_PROGRAMS"
+            ? "This evaluates every tracked employee across all active measures (~1,000 evaluations) and can take a few minutes to complete."
+            : `This starts a ${labelFor(SCOPE_LABELS, runScopeType)}-scoped run.`
+        }
+        confirmLabel="Start run"
+        cancelLabel="Cancel"
+        onCancel={() => setShowRunConfirm(false)}
+        onConfirm={() => {
+          setShowRunConfirm(false);
+          void runManualScope();
+        }}
+      />
     </section>
   );
 }
