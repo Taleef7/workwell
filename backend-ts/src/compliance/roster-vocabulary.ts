@@ -23,6 +23,9 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   const refused = get(/refus/i) === true;
 
   if (canonicalStatus === "EXCLUDED") return { status: "EXCLUDED", method: "Contraindication / exemption on file" };
+  // Deliberately class-agnostic: a documented refusal displays DECLINED for PERMANENT (the vaccine
+  // panel) AND for RECURRING `adult_immunization` (which keeps the case open, never excludes — see
+  // MEASURES.md). The canonical bucket is unchanged; only the display is.
   if (refused) return { status: "DECLINED", method: "Declination on file" };
 
   if (binding?.complianceClass === "PERMANENT") {
@@ -31,7 +34,8 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
     const required = binding.series?.requiredDoses ?? 2;
     if (canonicalStatus === "COMPLIANT") return { status: "COMPLIANT", method: `${doseCount} valid dose(s)` };
     if (doseCount > 0 && doseCount < required) return { status: "IN_PROGRESS", method: `${doseCount} of ${required} doses on file` };
-    return { status: "MISSING_DATA", method: "No doses on file" };
+    // doseCount === 0 (no doses) — or, defensively, a count that isn't a passing series — report it honestly.
+    return { status: "MISSING_DATA", method: doseCount > 0 ? `${doseCount} dose(s) on file` : "No doses on file" };
   }
 
   // RECURRING (recency): reuse the case-detail why_flagged derivation for last-exam/days.
