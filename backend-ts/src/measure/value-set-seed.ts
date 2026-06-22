@@ -95,6 +95,13 @@ const VALUE_SETS: SeedVs[] = [
   ] },
   { id: "c0000001-0000-0000-0000-000000000003", oid: "urn:workwell:vs:mmr-contraindication", name: "MMR Contraindication", codes: [c("mmr-contraindication", "MMR Contraindication", "urn:workwell:vs:mmr-contraindication")] },
   { id: "c0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:mmr-refusal", name: "MMR Refusal", codes: [c("mmr-refusal", "MMR Refusal", "urn:workwell:vs:mmr-refusal")] },
+  // Varicella sets (E10.6 Task 4)
+  { id: "c0000001-0000-0000-0000-000000000005", oid: "urn:workwell:vs:varicella-vaccines", name: "Varicella Vaccines", codes: [
+    c("varicella-vaccine", "Varicella Vaccines", "urn:workwell:vs:varicella-vaccines"),
+    c("21", "Varicella", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000006", oid: "urn:workwell:vs:varicella-contraindication", name: "Varicella Contraindication", codes: [c("varicella-contraindication", "Varicella Contraindication", "urn:workwell:vs:varicella-contraindication")] },
+  { id: "c0000001-0000-0000-0000-000000000007", oid: "urn:workwell:vs:varicella-refusal", name: "Varicella Refusal", codes: [c("varicella-refusal", "Varicella Refusal", "urn:workwell:vs:varicella-refusal")] },
 ];
 
 /** measure slug → the value-set ids attached to it (Java's ensureLink table, keyed by slug). */
@@ -108,6 +115,7 @@ const LINKS: Record<string, string[]> = {
   obesity_bmi: ["b0000001-0000-0000-0000-000000000007", "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002"],
   cholesterol_ldl: ["b0000001-0000-0000-0000-000000000010", "b0000001-0000-0000-0000-000000000008", "b0000001-0000-0000-0000-000000000009"],
   mmr: ["c0000001-0000-0000-0000-000000000002", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000003", "c0000001-0000-0000-0000-000000000004"],
+  varicella: ["c0000001-0000-0000-0000-000000000005", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000006", "c0000001-0000-0000-0000-000000000007"],
 };
 
 /** The 5 demo terminology mappings from V013 (fixed ids so re-seed is idempotent by UNIQUE key). */

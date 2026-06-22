@@ -1,0 +1,9 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "varicella-excluded" } },
+    { "resource": { "resourceType": "Condition", "id": "varicella-excluded-enr", "subject": { "reference": "Patient/varicella-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } },
+    { "resource": { "resourceType": "Condition", "id": "varicella-excluded-contra", "subject": { "reference": "Patient/varicella-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:varicella-contraindication", "code": "varicella-contraindication" } ] } } }
+  ]
+}

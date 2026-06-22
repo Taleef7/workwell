@@ -58,8 +58,8 @@ test("MEASURE manual run evaluates the population, persists outcomes, and comple
 test("EMPLOYEE manual run evaluates all runnable measures for one employee", async () => {
   const res = await executeManualRun(deps, { scopeType: "EMPLOYEE", employeeExternalId: "emp-001" });
   assert.equal(res.scopeLabel, "Employee: emp-001");
-  assert.equal(res.totalEvaluated, 12); // the 12 runnable measures
-  assert.equal(res.activeMeasuresExecuted, 12);
+  assert.equal(res.totalEvaluated, 13); // the 13 runnable measures
+  assert.equal(res.activeMeasuresExecuted, 13);
 });
 
 test("rerun re-executes the prior run's scope as a NEW run", async () => {
@@ -111,20 +111,20 @@ test("ALL_PROGRAMS manual run evaluates every runnable measure × the whole popu
   const res = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
   assert.equal(res.scopeType, "ALL_PROGRAMS");
   assert.equal(res.scopeLabel, "All Programs");
-  assert.equal(res.activeMeasuresExecuted, 12);
-  assert.equal(res.totalEvaluated, 12 * 4, "12 runnable measures × 4 injected employees");
+  assert.equal(res.activeMeasuresExecuted, 13);
+  assert.equal(res.totalEvaluated, 13 * 4, "13 runnable measures × 4 injected employees");
   const run = await deps.runStore.getRun(res.runId);
   assert.equal(run?.scopeType, "ALL_PROGRAMS");
   assert.equal(run?.scopeId, null);
-  assert.equal((await deps.outcomeStore.listOutcomes(res.runId)).length, 48);
+  assert.equal((await deps.outcomeStore.listOutcomes(res.runId)).length, 52);
 });
 
 test("SITE manual run scopes to one site's employees, with full-population targets", async () => {
   // emp-001..004 are all site "HQ" in the injected slice.
   const res = await executeManualRun(deps, { scopeType: "SITE", site: "HQ" });
   assert.equal(res.scopeLabel, "Site: HQ");
-  assert.equal(res.activeMeasuresExecuted, 12);
-  assert.equal(res.totalEvaluated, 12 * 4, "all 4 HQ employees × 12 measures");
+  assert.equal(res.activeMeasuresExecuted, 13);
+  assert.equal(res.totalEvaluated, 13 * 4, "all 4 HQ employees × 13 measures");
   const run = await deps.runStore.getRun(res.runId);
   assert.equal(run?.scopeType, "SITE");
   assert.equal(run?.site, "HQ", "site derived from requestedScope drives the list filter");

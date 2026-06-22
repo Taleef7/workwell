@@ -49,11 +49,11 @@ interface CatalogRow {
   statusUpdatedBy: string;
 }
 
-test("GET /api/measures returns the full 62-measure catalog (Measure shape), Active-first", async () => {
+test("GET /api/measures returns the full 63-measure catalog (Measure shape), Active-first", async () => {
   const res = await get("/api/measures");
   assert.equal(res?.status, 200);
   const rows = (await res!.json()) as CatalogRow[];
-  assert.equal(rows.length, 62, "full TWH catalog");
+  assert.equal(rows.length, 63, "full TWH catalog");
   // The first row is Active so the runs/studio pickers default to a runnable measure.
   assert.equal(rows[0]!.status, "Active");
   const audiogram = rows.find((m) => m.id === "audiogram")!;
@@ -61,8 +61,8 @@ test("GET /api/measures returns the full 62-measure catalog (Measure shape), Act
   assert.equal(audiogram.policyRef, "OSHA 29 CFR 1910.95");
   assert.equal(audiogram.status, "Active");
   assert.ok(audiogram.tags.includes("hearing"));
-  // exactly the 12 runnable measures are Active
-  assert.equal(rows.filter((m) => m.status === "Active").length, 12);
+  // exactly the 13 runnable measures are Active
+  assert.equal(rows.filter((m) => m.status === "Active").length, 13);
 });
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
@@ -234,7 +234,7 @@ test("concurrent cold-start requests seed the store once (no duplicate-PK 500)",
   ]);
   for (const res of both) {
     assert.equal(res?.status, 200, "no 500 from a racing duplicate seed");
-    assert.equal(((await res!.json()) as unknown[]).length, 62, "seeded exactly once");
+    assert.equal(((await res!.json()) as unknown[]).length, 63, "seeded exactly once");
   }
 });
 

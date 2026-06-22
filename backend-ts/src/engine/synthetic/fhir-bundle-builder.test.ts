@@ -65,6 +65,11 @@ const CASES: Array<[string, TargetOutcome, string]> = [
   ["mmr", "OVERDUE", "MISSING_DATA"],
   ["mmr", "MISSING_DATA", "MISSING_DATA"],
   ["mmr", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (Varicella): same pattern as MMR
+  ["varicella", "COMPLIANT", "COMPLIANT"],
+  ["varicella", "OVERDUE", "MISSING_DATA"],
+  ["varicella", "MISSING_DATA", "MISSING_DATA"],
+  ["varicella", "EXCLUDED", "EXCLUDED"],
 ];
 
 for (const [measureId, target, expected] of CASES) {

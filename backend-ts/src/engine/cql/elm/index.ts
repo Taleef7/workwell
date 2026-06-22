@@ -12,7 +12,8 @@ import lib9 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "jso
 import lib10 from "./MmrSeries-1.0.0.elm.json" with { type: "json" };
 import lib11 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
 import lib12 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
-import lib13 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
+import lib13 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
+import lib14 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
 
 export const ELM_LIBRARIES: Record<string, unknown> = {
   "AdultImmunizationTdap-1.0.0": lib0,
@@ -28,5 +29,6 @@ export const ELM_LIBRARIES: Record<string, unknown> = {
   "MmrSeries-1.0.0": lib10,
   "ObesityBMIScreeningCQL-1.0.0": lib11,
   "TbSurveillance-1.3.0": lib12,
-  "FHIRHelpers-4.0.1": lib13,
+  "VaricellaSeries-1.0.0": lib13,
+  "FHIRHelpers-4.0.1": lib14,
 };
