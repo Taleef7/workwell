@@ -41,7 +41,7 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
     const doseCount =
       target === "COMPLIANT" ? required
       : target === "OVERDUE" ? Math.max(required - 1, 1) // partial series → IN_PROGRESS (read model)
-      : 0; // MISSING_DATA / EXCLUDED → no doses
+      : 0; // MISSING_DATA / EXCLUDED / DUE_SOON → no doses (DUE_SOON is N/A for PERMANENT; it converges to MISSING_DATA)
     return {
       binding,
       // COMPLIANT uses old dose dates so the golden also proves "compliant forever".

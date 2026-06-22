@@ -100,7 +100,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
     if (binding.event.type === "immunization") {
       const doses = config.doseCount ?? 1;
       for (let i = 0; i < doses; i++) {
-        // Stagger doses ~60 days apart, anchored at `when` (oldest dose first).
+        // Stagger doses ~60 days apart (synthetic spacing, not a clinical dose schedule), oldest first.
         const doseWhen = dateMinusDays(evaluationDate, config.daysSinceLastExam! + i * 60);
         entries.push({
           resource: {

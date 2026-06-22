@@ -214,4 +214,7 @@ test("permanent series: OVERDUE bucket emits a partial series (requiredDoses - 1
   };
   const config = deriveExamConfig(binding, "OVERDUE");
   assert.equal(config.doseCount, 1);
+  const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
+  const imms = bundle.entry.filter((e) => (e.resource as Record<string, unknown>)["resourceType"] === "Immunization");
+  assert.equal(imms.length, 1, "one dose expected for a partial 2-dose series");
 });
