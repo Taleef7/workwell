@@ -51,3 +51,15 @@ test("RECURRING COMPLIANT → COMPLIANT", () => {
   );
   assert.equal(cell.status, "COMPLIANT");
 });
+
+test("RECURRING measure with a documented refusal → DECLINED (class-agnostic refusal check)", () => {
+  // adult_immunization is RECURRING but has a Refused define; a refusal displays DECLINED regardless
+  // of class (the canonical bucket stays OVERDUE — refusal keeps the case open, never excludes).
+  const cell = deriveCell(
+    "OVERDUE",
+    ev([["Refused", true], ["Most Recent Tdap Date", "2010-01-01T00:00:00Z"], ["Days Since Last Tdap", 6000]]),
+    "adult_immunization",
+    PERIOD,
+  );
+  assert.equal(cell.status, "DECLINED");
+});

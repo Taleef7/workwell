@@ -44,3 +44,28 @@ test("buildRoster — status filter keeps only subjects with >=1 matching cell; 
   assert.equal(roster.rows.length, 0);
   assert.equal(roster.total, 0);
 });
+
+test("buildRoster — two panel measures sharing one run load it once (no N+1); unevaluated measure → NA method", async () => {
+  const withRun: OutcomeWithRun[] = [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "varicella", status: "COMPLIANT" },
+  ];
+  const byRun: Record<string, OutcomeRecord[]> = {
+    "run-1": [
+      { id: "o-1", runId: "run-1", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+      { id: "o-2", runId: "run-1", subjectId: EMP, measureId: "varicella", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+    ],
+  };
+  const store = fakeStore(withRun, byRun);
+  let calls = 0;
+  const orig = store.listOutcomes.bind(store);
+  store.listOutcomes = async (id: string) => { calls++; return orig(id); };
+
+  const roster = await buildRoster({ outcomeStore: store }, { panel: "immunizations" });
+  assert.equal(calls, 1, "one shared run → listOutcomes called exactly once (run-cache)");
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
+  assert.equal(row.cells["varicella"]!.status, "COMPLIANT");
+  assert.equal(row.cells["adult_immunization"]!.status, "NA");
+  assert.equal(row.cells["adult_immunization"]!.method, "Not evaluated");
+});
