@@ -1,5 +1,5 @@
 /**
- * Generate FHIR R4 bundles for all 11 runnable measures × 4 scenarios (#106).
+ * Generate FHIR R4 bundles for all 12 runnable measures × 4 scenarios (#106).
  * Each measure's inline-code bindings (system = valueSet URN, code = code) are
  * embedded below (from the measure YAMLs). Writes:
  *   spike/synthetic/<measureId>/<scenario>.json

@@ -1,8 +1,8 @@
 /**
- * Hand-maintained: the full 60-measure TWH catalog (summary + authoring spec). Originally
+ * Hand-maintained: the full 62-measure TWH catalog (summary + authoring spec). Originally
  * generated from the Java seed (MeasureService.CMS_ECQM_CATALOG + the OSHA/HEDIS seed + V017);
  * that generator (scripts/gen-measure-catalog.mjs) was retired with the JVM in #109 PR4, so this
- * file is now the canonical source — edit it directly. The 10 Active measures are
+ * file is now the canonical source — edit it directly. The 12 Active measures are
  * exactly the engine's runnable set; `cqlText`/`compileStatus` are derived at request time
  * (reconstructed ELM for runnable measures). Lifecycle mutations need a persisted store (later).
  */
