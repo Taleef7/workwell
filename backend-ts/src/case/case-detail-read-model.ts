@@ -70,11 +70,11 @@ function measureVersion(measureId: string): string {
   return dash >= 0 ? lib.slice(dash + 1) : "";
 }
 
-interface ExprResult {
+export interface ExprResult {
   define: string;
   result: unknown;
 }
-function expressionResults(evidence: unknown): ExprResult[] {
+export function expressionResults(evidence: unknown): ExprResult[] {
   const er = (evidence as { expressionResults?: unknown } | null)?.expressionResults;
   return Array.isArray(er) ? (er as ExprResult[]) : [];
 }
