@@ -151,3 +151,72 @@ test("seedMeasureStore — re-seed does not overwrite existing rows", async () =
   const afterCount = (await store.listLatest()).length;
   assert.equal(afterCount, MEASURE_CATALOG.length, "no duplicate rows after re-seed");
 });
+
+// ---------------------------------------------------------------------------
+// Test A4: Promotes a pre-existing Approved hepatitis_b_vaccination_series (E10.6)
+// ---------------------------------------------------------------------------
+test("seedMeasureStore — promotes a pre-existing Approved Hep B row to Active + CQL (idempotent)", async () => {
+  const store = new SqliteMeasureStore(await freshDb());
+  const TIER: Record<string, string> = {
+    Active: "2026-06-10T00:00:00.000Z",
+    Approved: "2026-04-01T00:00:00.000Z",
+    Draft: "2026-02-01T00:00:00.000Z",
+    Deprecated: "2025-06-01T00:00:00.000Z",
+  };
+  const HEPB = "hepatitis_b_vaccination_series";
+  const cqlOf = (id: string) => (id === HEPB ? "library HepatitisBSeries version '1.0.0'" : "");
+
+  // Simulate a store seeded BEFORE the promotion: every catalog entry present, but Hep B as the old
+  // Approved, catalog-only row (no CQL) — its current catalog status is Active.
+  for (const m of MEASURE_CATALOG) {
+    const pre = m.id === HEPB;
+    await store.seedMeasure({
+      measureId: m.id,
+      name: m.name,
+      policyRef: m.policyRef,
+      owner: m.owner,
+      tags: [...m.tags],
+      versionId: `${m.id}-${m.version}`,
+      version: m.version,
+      status: pre ? "Approved" : m.status,
+      spec: m.spec,
+      cqlText: "",
+      compileStatus: pre ? "NOT_COMPILED" : m.compileStatus,
+      createdAt: TIER[pre ? "Approved" : m.status] ?? "2026-02-01T00:00:00.000Z",
+      changeSummary: "Seeded measure version",
+    });
+  }
+  assert.equal((await store.getLatest(HEPB))?.status, "Approved", "Hep B starts as the pre-promotion Approved row");
+
+  // Run the seeder with real CQL for Hep B → must promote it to Active + back-fill CQL.
+  await seedMeasureStore(store, cqlOf);
+  const after = await store.getLatest(HEPB);
+  assert.equal(after?.status, "Active", "Hep B must be promoted to Active");
+  assert.ok(after?.cqlText.includes("HepatitisBSeries"), "Hep B must have its CQL back-filled");
+
+  // Idempotent: a second run leaves it Active and creates no duplicate rows.
+  await seedMeasureStore(store, cqlOf);
+  assert.equal((await store.getLatest(HEPB))?.status, "Active", "Hep B stays Active on re-seed (idempotent)");
+  assert.equal((await store.listLatest()).length, MEASURE_CATALOG.length, "no duplicate rows after promotion backfill");
+});
+
+// ---------------------------------------------------------------------------
+// Test A5: Does NOT clobber a user lifecycle edit to Hep B (e.g. Deprecated)
+// ---------------------------------------------------------------------------
+test("seedMeasureStore — promotion backfill leaves a non-Approved Hep B row untouched", async () => {
+  const store = new SqliteMeasureStore(await freshDb());
+  await seedMeasureStore(store, () => ""); // fresh seed: Hep B already Active (catalog status)
+
+  // A user deprecates Hep B after the promotion.
+  const hepb = await store.getLatest("hepatitis_b_vaccination_series");
+  await store.setVersionStatus("hepatitis_b_vaccination_series", hepb!.versionId, { status: "Deprecated" });
+  assert.equal((await store.getLatest("hepatitis_b_vaccination_series"))?.status, "Deprecated");
+
+  // Re-seed must NOT re-promote it (gate is on the original "Approved" state only).
+  await seedMeasureStore(store, () => "");
+  assert.equal(
+    (await store.getLatest("hepatitis_b_vaccination_series"))?.status,
+    "Deprecated",
+    "a deliberate Deprecated edit must survive re-seed (backfill only promotes the original Approved row)",
+  );
+});

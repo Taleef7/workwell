@@ -98,17 +98,22 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
   } else if (config.daysSinceLastExam !== null) {
     const when = dateMinusDays(evaluationDate, config.daysSinceLastExam);
     if (binding.event.type === "immunization") {
-      entries.push({
-        resource: {
-          resourceType: "Immunization",
-          meta: { profile: [QICORE_PROFILES.Immunization] },
-          id: `${externalId}-immunization`,
-          status: "completed",
-          patient: { reference: `Patient/${externalId}` },
-          vaccineCode: { coding: [coding] },
-          occurrenceDateTime: when,
-        },
-      });
+      const doses = config.doseCount ?? 1;
+      for (let i = 0; i < doses; i++) {
+        // Stagger doses ~60 days apart (synthetic spacing, not a clinical dose schedule), oldest first.
+        const doseWhen = dateMinusDays(evaluationDate, config.daysSinceLastExam! + i * 60);
+        entries.push({
+          resource: {
+            resourceType: "Immunization",
+            meta: { profile: [QICORE_PROFILES.Immunization] },
+            id: `${externalId}-immunization-${i}`,
+            status: "completed",
+            patient: { reference: `Patient/${externalId}` },
+            vaccineCode: { coding: [coding] },
+            occurrenceDateTime: doseWhen,
+          },
+        });
+      }
     } else {
       entries.push({
         resource: {

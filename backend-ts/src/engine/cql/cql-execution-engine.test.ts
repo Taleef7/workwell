@@ -21,11 +21,17 @@ const EXPECTED: Record<string, string> = {
   excluded: "EXCLUDED",
 };
 
+// PERMANENT measures have no recency window — old doses stay COMPLIANT (the "compliant forever" proof).
+const PERMANENT_MEASURES = new Set(["mmr", "varicella", "hepatitis_b_vaccination_series"]);
+const expectedFor = (measureId: string, scenario: string): string =>
+  PERMANENT_MEASURES.has(measureId) && scenario === "present_old" ? "COMPLIANT" : EXPECTED[scenario]!;
+
 const engine = new CqlExecutionEngine();
 
 for (const measureId of Object.keys(MEASURES)) {
   test(`evaluates ${measureId} across all scenarios (no JVM)`, async () => {
-    for (const [scenario, expected] of Object.entries(EXPECTED)) {
+    for (const scenario of Object.keys(EXPECTED)) {
+      const expected = expectedFor(measureId, scenario);
       const bundle = JSON.parse(readFileSync(path.join(synthRoot, measureId, `${scenario}.json`), "utf8"));
       const outcome = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: EVAL });
       assert.equal(outcome.outcome, expected, `${measureId}/${scenario}`);

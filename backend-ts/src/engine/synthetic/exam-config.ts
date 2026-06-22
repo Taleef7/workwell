@@ -21,6 +21,8 @@ export interface ExamConfig {
   /** For observation-based measures: the numeric result (null = no observation). */
   observationValue: number | null;
   refused: boolean;
+  /** For series/permanent measures: number of completed doses to emit (null = not a series). */
+  doseCount: number | null;
 }
 
 /**
@@ -34,6 +36,24 @@ export interface ExamConfig {
 export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome): ExamConfig {
   const hasWaiver = target === "EXCLUDED";
 
+  if (binding.complianceClass === "PERMANENT" && binding.series) {
+    const required = binding.series.requiredDoses;
+    const doseCount =
+      target === "COMPLIANT" ? required
+      : target === "OVERDUE" ? Math.max(required - 1, 1) // partial series → IN_PROGRESS (read model)
+      : 0; // MISSING_DATA / EXCLUDED / DUE_SOON → no doses (DUE_SOON is N/A for PERMANENT; it converges to MISSING_DATA)
+    return {
+      binding,
+      // COMPLIANT uses old dose dates so the golden also proves "compliant forever".
+      daysSinceLastExam: doseCount > 0 ? (target === "COMPLIANT" ? 3000 : 200) : null,
+      hasWaiver: target === "EXCLUDED",
+      programEnrolled: true,
+      observationValue: null,
+      refused: false,
+      doseCount,
+    };
+  }
+
   if (binding.event.type === "observation") {
     // HbA1c-style: outcome is driven by the value (>9% poor control), not recency.
     const observationValue =
@@ -45,6 +65,7 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
       programEnrolled: true,
       observationValue,
       refused: false,
+      doseCount: null,
     };
   }
 
@@ -59,7 +80,7 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
           : target === "EXCLUDED"
             ? w + 150
             : null; // MISSING_DATA → no event
-  return { binding, daysSinceLastExam, hasWaiver, programEnrolled: true, observationValue: null, refused: false };
+  return { binding, daysSinceLastExam, hasWaiver, programEnrolled: true, observationValue: null, refused: false, doseCount: null };
 }
 
 /** Mark a config as a documented refusal (does not change the target bucket). */

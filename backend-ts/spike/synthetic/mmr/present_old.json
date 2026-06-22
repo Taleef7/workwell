@@ -1,0 +1,67 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "mmr-present_old"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "mmr-present_old-enr",
+        "subject": {
+          "reference": "Patient/mmr-present_old"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "mmr-present_old-evt-0",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/mmr-present_old"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:mmr-vaccines",
+              "code": "mmr-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2023-12-25T00:00:00.000Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "mmr-present_old-evt-1",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/mmr-present_old"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:mmr-vaccines",
+              "code": "mmr-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2023-11-25T00:00:00.000Z"
+      }
+    }
+  ]
+}

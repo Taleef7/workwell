@@ -1,0 +1,84 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "mmr-excluded"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "mmr-excluded-enr",
+        "subject": {
+          "reference": "Patient/mmr-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "mmr-excluded-wvr",
+        "subject": {
+          "reference": "Patient/mmr-excluded"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:mmr-contraindication",
+              "code": "mmr-contraindication"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "mmr-excluded-evt-0",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/mmr-excluded"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:mmr-vaccines",
+              "code": "mmr-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "mmr-excluded-evt-1",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/mmr-excluded"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:mmr-vaccines",
+              "code": "mmr-vaccine"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2026-03-24T00:00:00.000Z"
+      }
+    }
+  ]
+}

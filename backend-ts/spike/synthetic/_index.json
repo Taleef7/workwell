@@ -110,6 +110,36 @@
         "missing",
         "excluded"
       ]
+    },
+    {
+      "id": "mmr",
+      "lib": "MmrSeries-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "varicella",
+      "lib": "VaricellaSeries-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
+    },
+    {
+      "id": "hepatitis_b_vaccination_series",
+      "lib": "HepatitisBSeries-1.0.0",
+      "scenarios": [
+        "present_recent",
+        "present_old",
+        "missing",
+        "excluded"
+      ]
     }
   ]
 }

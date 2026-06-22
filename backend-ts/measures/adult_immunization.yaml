@@ -4,6 +4,7 @@ version: 1.0.0
 title: Adult Immunization Status — Td/Tdap (AIS-E)
 policyRef: NCQA HEDIS Adult Immunization Status (AIS-E)
 tags: [wellness, immunization, adult, hedis]
+complianceClass: RECURRING
 cql: adult_immunization.cql
 bindings:
   rateKey: adult_immunization

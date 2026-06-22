@@ -4,6 +4,7 @@ version: 1.0.0
 title: Hypertension BP Screening
 policyRef: HEDIS BPC / JPMC Wellness Rewards
 tags: [wellness, hypertension, cardiovascular]
+complianceClass: RECURRING
 cql: hypertension.cql
 bindings:
   rateKey: hypertension

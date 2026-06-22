@@ -60,6 +60,21 @@ const CASES: Array<[string, TargetOutcome, string]> = [
   ["cms122", "OVERDUE", "OVERDUE"],
   ["cms122", "MISSING_DATA", "MISSING_DATA"],
   ["cms122", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (MMR): COMPLIANT (old doses still compliant), partial → MISSING_DATA, none → MISSING_DATA, excluded
+  ["mmr", "COMPLIANT", "COMPLIANT"],
+  ["mmr", "OVERDUE", "MISSING_DATA"],
+  ["mmr", "MISSING_DATA", "MISSING_DATA"],
+  ["mmr", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (Varicella): same pattern as MMR
+  ["varicella", "COMPLIANT", "COMPLIANT"],
+  ["varicella", "OVERDUE", "MISSING_DATA"],
+  ["varicella", "MISSING_DATA", "MISSING_DATA"],
+  ["varicella", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (Hepatitis B): same pattern as MMR/Varicella
+  ["hepatitis_b_vaccination_series", "COMPLIANT", "COMPLIANT"],
+  ["hepatitis_b_vaccination_series", "OVERDUE", "MISSING_DATA"],
+  ["hepatitis_b_vaccination_series", "MISSING_DATA", "MISSING_DATA"],
+  ["hepatitis_b_vaccination_series", "EXCLUDED", "EXCLUDED"],
 ];
 
 for (const [measureId, target, expected] of CASES) {
@@ -183,4 +198,38 @@ test("does NOT emit a refusal Condition when config.refused is false", () => {
     .map((e) => (e.resource as { code?: { coding?: { code?: string }[] } }).code?.coding?.[0]?.code)
     .filter(Boolean);
   assert.ok(!codes.includes("tdap-refusal"));
+});
+
+// ---------------------------------------------------------------------------
+// PERMANENT series (multi-dose) tests (E10 Task 2)
+// ---------------------------------------------------------------------------
+
+test("permanent series: COMPLIANT bucket emits requiredDoses Immunizations", () => {
+  const binding = {
+    rateKey: "test_series", complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
+    enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
+    waiver: { code: "x-contra", valueSet: "urn:workwell:vs:x-contra" },
+    event: { code: "x-vaccine", valueSet: "urn:workwell:vs:x-vaccines", type: "immunization" as const },
+    series: { requiredDoses: 2 },
+  };
+  const config = deriveExamConfig(binding, "COMPLIANT");
+  assert.equal(config.doseCount, 2);
+  const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
+  const imms = bundle.entry.filter((e) => (e.resource as Record<string, unknown>)["resourceType"] === "Immunization");
+  assert.equal(imms.length, 2, "two completed doses expected for a 2-dose series");
+});
+
+test("permanent series: OVERDUE bucket emits a partial series (requiredDoses - 1)", () => {
+  const binding = {
+    rateKey: "test_series", complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
+    enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
+    waiver: { code: "x-contra", valueSet: "urn:workwell:vs:x-contra" },
+    event: { code: "x-vaccine", valueSet: "urn:workwell:vs:x-vaccines", type: "immunization" as const },
+    series: { requiredDoses: 2 },
+  };
+  const config = deriveExamConfig(binding, "OVERDUE");
+  assert.equal(config.doseCount, 1);
+  const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
+  const imms = bundle.entry.filter((e) => (e.resource as Record<string, unknown>)["resourceType"] === "Immunization");
+  assert.equal(imms.length, 1, "one dose expected for a partial 2-dose series");
 });

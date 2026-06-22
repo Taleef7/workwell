@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "mmr-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "mmr-missing-enr",
+        "subject": {
+          "reference": "Patient/mmr-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

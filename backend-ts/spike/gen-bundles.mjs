@@ -1,5 +1,5 @@
 /**
- * Generate FHIR R4 bundles for all 11 runnable measures × 4 scenarios (#106).
+ * Generate FHIR R4 bundles for all 14 runnable measures × 4 scenarios (#106).
  * Each measure's inline-code bindings (system = valueSet URN, code = code) are
  * embedded below (from the measure YAMLs). Writes:
  *   spike/synthetic/<measureId>/<scenario>.json
@@ -7,7 +7,7 @@
  *
  *   node spike/gen-bundles.mjs
  */
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +31,10 @@ const MEASURES = [
   { id: "cms122", lib: "DiabetesHbA1cPoorControlCQL-1.0.0", enroll: ["urn:workwell:vs:cms122-diabetes", "cms122-diabetes"], waiver: ["urn:workwell:vs:cms122-excluded", "cms122-excluded"], event: ["urn:workwell:vs:cms122-hba1c", "hba1c-obs", "observation"] },
   // oldDays override: Td/Tdap window is 10 years (3650 days); 3800 puts "present_old" clearly past it (default 900 would be COMPLIANT here).
   { id: "adult_immunization", lib: "AdultImmunizationTdap-1.0.0", enroll: ["urn:workwell:vs:adult-immz-enrollment", "adult-immz-enrolled"], waiver: ["urn:workwell:vs:tdap-contraindication", "tdap-contraindication"], event: ["urn:workwell:vs:tdap-vaccines", "tdap-vaccine", "immunization"], oldDays: 3800 },
+  // Series-completion (PERMANENT) measures — 2 doses required; no recency window.
+  { id: "mmr", lib: "MmrSeries-1.0.0", enroll: ["urn:workwell:vs:immz-enrollment", "immz-enrolled"], waiver: ["urn:workwell:vs:mmr-contraindication", "mmr-contraindication"], event: ["urn:workwell:vs:mmr-vaccines", "mmr-vaccine", "immunization"], series: 2 },
+  { id: "varicella", lib: "VaricellaSeries-1.0.0", enroll: ["urn:workwell:vs:immz-enrollment", "immz-enrolled"], waiver: ["urn:workwell:vs:varicella-contraindication", "varicella-contraindication"], event: ["urn:workwell:vs:varicella-vaccines", "varicella-vaccine", "immunization"], series: 2 },
+  { id: "hepatitis_b_vaccination_series", lib: "HepatitisBSeries-1.0.0", enroll: ["urn:workwell:vs:immz-enrollment", "immz-enrolled"], waiver: ["urn:workwell:vs:hepb-contraindication", "hepb-contraindication"], event: ["urn:workwell:vs:hepb-vaccines", "hepb-vaccine", "immunization"], series: 2 },
 ];
 
 const SCENARIOS = ["present_recent", "present_old", "missing", "excluded"];
@@ -50,18 +54,39 @@ function eventResource(pid, m, whenIso, hba1cValue) {
   return { resourceType: "Procedure", id: `${pid}-evt`, status: "completed", subject: { reference: `Patient/${pid}` }, code: { coding: [{ system, code }] }, performedDateTime: whenIso };
 }
 
+/** Emit `m.series` Immunization entries staggered 30 days apart (for series-completion measures). */
+function seriesDoses(pid, m, baseDays) {
+  const [system, code] = m.event;
+  const out = [];
+  for (let i = 0; i < m.series; i++) {
+    out.push({ resource: { resourceType: "Immunization", id: `${pid}-evt-${i}`, status: "completed", patient: { reference: `Patient/${pid}` }, vaccineCode: { coding: [{ system, code }] }, occurrenceDateTime: daysAgo(baseDays + i * 30) } });
+  }
+  return out;
+}
+
 function bundle(m, scenario) {
   const pid = `${m.id}-${scenario}`;
   const entries = [{ resource: { resourceType: "Patient", id: pid } }];
   entries.push({ resource: condition(pid, m.enroll, "enr") });
   if (scenario === "excluded") entries.push({ resource: condition(pid, m.waiver, "wvr") });
-  if (scenario === "present_recent") entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
-  if (scenario === "present_old") entries.push({ resource: eventResource(pid, m, daysAgo(m.oldDays ?? 900), 10.5) });
-  if (scenario === "excluded") entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
+  if (scenario === "present_recent") {
+    if (m.series) entries.push(...seriesDoses(pid, m, 50));
+    else entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
+  }
+  if (scenario === "present_old") {
+    if (m.series) entries.push(...seriesDoses(pid, m, m.oldDays ?? 900));
+    else entries.push({ resource: eventResource(pid, m, daysAgo(m.oldDays ?? 900), 10.5) });
+  }
+  if (scenario === "excluded") {
+    if (m.series) entries.push(...seriesDoses(pid, m, 50));
+    else entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
+  }
   return { resourceType: "Bundle", type: "collection", entry: entries };
 }
 
-rmSync(root, { recursive: true, force: true });
+// Do NOT wipe `root`: it holds non-generated reference files (e.g. _java_golden.json, consumed by
+// compare-all.mjs and not regenerable since the JVM was retired). writeFileSync overwrites each
+// measure's scenarios in place, so a destructive pre-wipe is unnecessary and would lose them.
 const index = { evalDate: EVAL, measures: [] };
 for (const m of MEASURES) {
   const dir = path.join(root, m.id);
