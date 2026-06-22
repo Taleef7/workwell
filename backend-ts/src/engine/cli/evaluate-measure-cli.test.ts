@@ -22,6 +22,11 @@ const EXPECTED: Record<string, string> = {
   excluded: "EXCLUDED",
 };
 
+// PERMANENT measures have no recency window — old doses stay COMPLIANT (the "compliant forever" proof).
+const PERMANENT = new Set(["mmr", "varicella", "hepatitis_b_vaccination_series"]);
+const expectedFor = (measureId: string, scenario: string): string =>
+  PERMANENT.has(measureId) && scenario === "present_old" ? "COMPLIANT" : EXPECTED[scenario]!;
+
 test("parseArgs: parses required + optional flags", () => {
   const a = parseArgs(["--patient", "b.json", "--measure", "audiogram", "--date", "2026-06-12", "--pretty"]);
   assert.deepEqual(a, { patient: "b.json", measure: "audiogram", date: "2026-06-12", pretty: true });
@@ -73,7 +78,8 @@ test("evaluate: unknown measure → Error (not CliUsageError)", async () => {
 
 for (const measureId of Object.keys(MEASURES)) {
   test(`golden: CLI matches expected outcomes for ${measureId} (all scenarios)`, async () => {
-    for (const [scenario, expected] of Object.entries(EXPECTED)) {
+    for (const scenario of Object.keys(EXPECTED)) {
+      const expected = expectedFor(measureId, scenario);
       const outcome = await run(["--patient", fixture(measureId, scenario), "--measure", measureId, "--date", EVAL]);
       assert.equal(outcome.outcome, expected, `${measureId}/${scenario}`);
       assert.equal(outcome.measure, MEASURES[measureId]!.name);

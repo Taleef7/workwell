@@ -86,6 +86,15 @@ const VALUE_SETS: SeedVs[] = [
     c("ldl-lab", "LDL Cholesterol Lab", "urn:workwell:vs:ldl-labs"),
     c("83721", "LDL cholesterol direct measurement", CPT),
   ] },
+  // immunization shared enrollment + MMR sets (E10.6)
+  { id: "c0000001-0000-0000-0000-000000000001", oid: "urn:workwell:vs:immz-enrollment", name: "Immunization Program Enrollment", codes: [c("immz-enrolled", "Immunization Program Enrollment", "urn:workwell:vs:immz-enrollment")] },
+  { id: "c0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:mmr-vaccines", name: "MMR Vaccines", codes: [
+    c("mmr-vaccine", "MMR Vaccines", "urn:workwell:vs:mmr-vaccines"),
+    c("03", "MMR", CVX),
+    c("94", "MMRV", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000003", oid: "urn:workwell:vs:mmr-contraindication", name: "MMR Contraindication", codes: [c("mmr-contraindication", "MMR Contraindication", "urn:workwell:vs:mmr-contraindication")] },
+  { id: "c0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:mmr-refusal", name: "MMR Refusal", codes: [c("mmr-refusal", "MMR Refusal", "urn:workwell:vs:mmr-refusal")] },
 ];
 
 /** measure slug → the value-set ids attached to it (Java's ensureLink table, keyed by slug). */
@@ -98,6 +107,7 @@ const LINKS: Record<string, string[]> = {
   diabetes_hba1c: ["b0000001-0000-0000-0000-000000000006", "b0000001-0000-0000-0000-000000000004", "b0000001-0000-0000-0000-000000000005"],
   obesity_bmi: ["b0000001-0000-0000-0000-000000000007", "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002"],
   cholesterol_ldl: ["b0000001-0000-0000-0000-000000000010", "b0000001-0000-0000-0000-000000000008", "b0000001-0000-0000-0000-000000000009"],
+  mmr: ["c0000001-0000-0000-0000-000000000002", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000003"],
 };
 
 /** The 5 demo terminology mappings from V013 (fixed ids so re-seed is idempotent by UNIQUE key). */

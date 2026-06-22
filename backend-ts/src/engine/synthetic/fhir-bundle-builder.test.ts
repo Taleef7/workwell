@@ -60,6 +60,11 @@ const CASES: Array<[string, TargetOutcome, string]> = [
   ["cms122", "OVERDUE", "OVERDUE"],
   ["cms122", "MISSING_DATA", "MISSING_DATA"],
   ["cms122", "EXCLUDED", "EXCLUDED"],
+  // PERMANENT series (MMR): COMPLIANT (old doses still compliant), partial → MISSING_DATA, none → MISSING_DATA, excluded
+  ["mmr", "COMPLIANT", "COMPLIANT"],
+  ["mmr", "OVERDUE", "MISSING_DATA"],
+  ["mmr", "MISSING_DATA", "MISSING_DATA"],
+  ["mmr", "EXCLUDED", "EXCLUDED"],
 ];
 
 for (const [measureId, target, expected] of CASES) {

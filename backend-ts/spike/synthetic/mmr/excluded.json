@@ -1,0 +1,9 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "mmr-excluded" } },
+    { "resource": { "resourceType": "Condition", "id": "mmr-excluded-enr", "subject": { "reference": "Patient/mmr-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:immz-enrollment", "code": "immz-enrolled" } ] } } },
+    { "resource": { "resourceType": "Condition", "id": "mmr-excluded-contra", "subject": { "reference": "Patient/mmr-excluded" }, "code": { "coding": [ { "system": "urn:workwell:vs:mmr-contraindication", "code": "mmr-contraindication" } ] } } }
+  ]
+}
