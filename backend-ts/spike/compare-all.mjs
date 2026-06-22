@@ -77,6 +77,13 @@ let scenarioCount = 0;
 let defineCount = 0;
 let failures = 0;
 for (const measure of index.measures) {
+  // Measures added after the JVM was retired (adult_immunization + the E10 vaccine panel) have no
+  // entry in the frozen _java_golden.json — skip them rather than crash. compare-all only validates
+  // the measures whose Java outcomes were captured before the JVM was removed.
+  if (!golden[measure.id]) {
+    console.log(`  - ${measure.id}: skipped (no Java golden; added post-JVM)`);
+    continue;
+  }
   for (const scenario of measure.scenarios) {
     scenarioCount++;
     const java = javaDefines(measure.id, scenario);

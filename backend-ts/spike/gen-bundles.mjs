@@ -7,7 +7,7 @@
  *
  *   node spike/gen-bundles.mjs
  */
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,7 +84,9 @@ function bundle(m, scenario) {
   return { resourceType: "Bundle", type: "collection", entry: entries };
 }
 
-rmSync(root, { recursive: true, force: true });
+// Do NOT wipe `root`: it holds non-generated reference files (e.g. _java_golden.json, consumed by
+// compare-all.mjs and not regenerable since the JVM was retired). writeFileSync overwrites each
+// measure's scenarios in place, so a destructive pre-wipe is unnecessary and would lose them.
 const index = { evalDate: EVAL, measures: [] };
 for (const m of MEASURES) {
   const dir = path.join(root, m.id);
