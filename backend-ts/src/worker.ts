@@ -25,6 +25,7 @@ import { handleCampaigns } from "./routes/campaigns.ts";
 import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
+import { handleCompliance } from "./routes/compliance.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
 import { handleOrders } from "./routes/orders.ts";
 import { handleExports } from "./routes/exports.ts";
@@ -195,6 +196,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4).
   const hierarchyResponse = await handleHierarchy(req, env);
   if (hierarchyResponse) return hierarchyResponse;
+
+  // Compliance roster — individual compliance status grid by panel (#189 E10.2).
+  const complianceResponse = await handleCompliance(req, env);
+  if (complianceResponse) return complianceResponse;
 
   // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
   const immunizationResponse = await handleImmunizationForecast(req, env);
