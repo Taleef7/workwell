@@ -24,23 +24,28 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith(".yaml")).sort()) {
   const wv = line(s, "waiver") ?? "";
   const ev = line(s, "event") ?? "";
   const rf = line(s, "refusal");
+  const cc = line(s, "complianceClass") ?? "RECURRING";
+  const sr = line(s, "series");
   out.push({
     id,
     rateKey: line(s, "rateKey") ?? id,
+    complianceClass: cc.trim().toUpperCase() === "PERMANENT" ? "PERMANENT" : "RECURRING",
     complianceWindowDays: Number(line(s, "complianceWindowDays") ?? 365),
     enrollment: { code: inField(en, "code"), valueSet: inField(en, "valueSet") },
     waiver: { code: inField(wv, "code"), valueSet: inField(wv, "valueSet") },
     event: { code: inField(ev, "code"), valueSet: inField(ev, "valueSet"), type: inField(ev, "type") },
     refusal: rf ? { code: inField(rf, "code"), valueSet: inField(rf, "valueSet") } : undefined,
+    series: sr ? { requiredDoses: Number(inField(sr, "requiredDoses") ?? 2) } : undefined,
   });
 }
 
 const body = out
   .map((b) => {
     const refusal = b.refusal ? `, refusal: ${JSON.stringify(b.refusal)}` : "";
+    const series = b.series ? `, series: ${JSON.stringify(b.series)}` : "";
     return (
-      `  ${JSON.stringify(b.id)}: { rateKey: ${JSON.stringify(b.rateKey)}, complianceWindowDays: ${b.complianceWindowDays}, ` +
-      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal} },`
+      `  ${JSON.stringify(b.id)}: { rateKey: ${JSON.stringify(b.rateKey)}, complianceClass: ${JSON.stringify(b.complianceClass)}, complianceWindowDays: ${b.complianceWindowDays}, ` +
+      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal}${series} },`
     );
   })
   .join("\n");
@@ -59,13 +64,19 @@ export interface CodeBinding {
   valueSet: string;
 }
 
+export interface SeriesBinding {
+  requiredDoses: number;
+}
+
 export interface MeasureBinding {
   rateKey: string;
+  complianceClass: "PERMANENT" | "RECURRING";
   complianceWindowDays: number;
   enrollment: CodeBinding;
   waiver: CodeBinding;
   event: CodeBinding & { type: EventType };
   refusal?: CodeBinding;
+  series?: SeriesBinding;
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {

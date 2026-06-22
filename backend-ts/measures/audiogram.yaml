@@ -4,6 +4,7 @@ version: 1.0.0
 title: Annual Audiogram Completed
 policyRef: OSHA 29 CFR 1910.95
 tags: [surveillance, hearing, osha]
+complianceClass: RECURRING
 cql: audiogram.cql
 bindings:
   rateKey: audiogram

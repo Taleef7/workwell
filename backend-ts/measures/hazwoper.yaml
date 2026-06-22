@@ -4,6 +4,7 @@ version: 1.0.0
 title: HAZWOPER Annual Medical Surveillance
 policyRef: OSHA 29 CFR 1910.120
 tags: [surveillance, hazmat, osha]
+complianceClass: RECURRING
 cql: hazwoper.cql
 bindings:
   rateKey: hazwoper
