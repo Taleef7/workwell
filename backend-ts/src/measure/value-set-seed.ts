@@ -159,3 +159,38 @@ export async function seedValueSets(store: ValueSetStore, versionIdOf: (measureS
     }
   }
 }
+
+/** The E10.6 immunization measures whose value sets + links are back-filled onto already-seeded stores. */
+const IMMUNIZATION_MEASURES = ["mmr", "varicella", "hepatitis_b_vaccination_series"];
+
+/**
+ * Idempotent, **detach-safe** backfill of ONLY the E10.6 immunization value sets + their measure links,
+ * for stores that were seeded before E10.6. Unlike `seedValueSets` (the fresh-store full demo seed),
+ * this seeds + links a value set **only when it is absent** (`getById` is null), in a single
+ * first-introduction pass. So it never re-asserts a value set that already exists — and therefore never
+ * re-adds a link an operator deliberately detached, nor overwrites operator edits. Safe to run on every
+ * cold start; a no-op once the immunization sets are present.
+ */
+export async function backfillImmunizationValueSets(
+  store: ValueSetStore,
+  versionIdOf: (measureSlug: string) => string | undefined,
+): Promise<void> {
+  // value-set id → the immunization measure slugs that link it (from LINKS).
+  const linkedBy = new Map<string, string[]>();
+  for (const slug of IMMUNIZATION_MEASURES) {
+    for (const vsId of LINKS[slug] ?? []) {
+      const slugs = linkedBy.get(vsId) ?? [];
+      slugs.push(slug);
+      linkedBy.set(vsId, slugs);
+    }
+  }
+  for (const vs of VALUE_SETS) {
+    if (!linkedBy.has(vs.id)) continue; // not an immunization value set
+    if ((await store.getById(vs.id)) !== null) continue; // already present — leave edits/detaches intact
+    await store.seedValueSet({ id: vs.id, oid: vs.oid, name: vs.name, version: VER, codes: vs.codes });
+    for (const slug of linkedBy.get(vs.id) ?? []) {
+      const versionId = versionIdOf(slug);
+      if (versionId) await store.link(versionId, vs.id);
+    }
+  }
+}

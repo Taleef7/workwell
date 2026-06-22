@@ -24,7 +24,8 @@ define "Refused":
 
 define "Dose Count":
   Count([Immunization] I
-    where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:hepb-vaccines' and C.code = 'hepb-vaccine'))
+    where I.status = 'completed'
+      and exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:hepb-vaccines' and C.code = 'hepb-vaccine'))
 
 define "Series Complete":
   "Enrolled" and not "Has Contraindication" and "Dose Count" >= 2
