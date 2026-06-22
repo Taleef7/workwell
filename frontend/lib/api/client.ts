@@ -2,6 +2,19 @@ import { ApiError } from "./errors";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
+/**
+ * Tiny module-level GET dedup + short-TTL cache (shared across all ApiClient instances since the
+ * hook memoizes a client per component). Concurrent identical GETs are coalesced into one request,
+ * and a just-resolved response is reused for GET_TTL_MS so rapid re-navigation / re-render doesn't
+ * re-pay the network+DB cost. ANY mutation (POST/PUT/DELETE/form) busts the whole cache, so a read
+ * never serves data a write just changed. Keyed by token so users never share cached reads.
+ */
+const GET_TTL_MS = 1500;
+const getCache = new Map<string, { at: number; promise: Promise<unknown> }>();
+function bustGetCache(): void {
+  getCache.clear();
+}
+
 export type ApiClientOptions = {
   token?: string | null;
   onUnauthorized?: () => void;
@@ -106,7 +119,7 @@ export class ApiClient {
     return response.json() as Promise<T>;
   }
 
-  get<T>(path: string, init?: RequestInit): Promise<T> {
+  private rawGet<T>(path: string, init?: RequestInit): Promise<T> {
     return this.fetchWithAuth(`${API_BASE}${path}`, () => ({
       ...init,
       method: "GET",
@@ -114,6 +127,27 @@ export class ApiClient {
       cache: "no-store",
       credentials: "include"
     })).then((r) => this.handleResponse<T>(r));
+  }
+
+  get<T>(path: string, init?: RequestInit): Promise<T> {
+    // A custom RequestInit (abort signals etc.) bypasses the dedup cache.
+    if (init) return this.rawGet<T>(path, init);
+    const key = `${this.token ?? "anon"}|${path}`;
+    const now = Date.now();
+    const cached = getCache.get(key);
+    if (cached && now - cached.at < GET_TTL_MS) {
+      return cached.promise as Promise<T>;
+    }
+    const promise = this.rawGet<T>(path);
+    getCache.set(key, { at: now, promise: promise as Promise<unknown> });
+    // Never cache a failure; evict once the short TTL window elapses.
+    promise.catch(() => {
+      if (getCache.get(key)?.promise === promise) getCache.delete(key);
+    });
+    setTimeout(() => {
+      if (getCache.get(key)?.promise === promise) getCache.delete(key);
+    }, GET_TTL_MS);
+    return promise;
   }
 
   /**
@@ -147,7 +181,8 @@ export class ApiClient {
         body: hasBody ? JSON.stringify(body) : undefined,
         credentials: "include"
       };
-    }).then((r) => this.handleResponse<TResponse>(r));
+    }).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   postForm(path: string, formData: FormData, init?: RequestInit): Promise<unknown> {
@@ -157,7 +192,9 @@ export class ApiClient {
       headers: this.buildHeaders(init?.headers),
       body: formData,
       credentials: "include"
-    })).then((r) => this.handleResponse<unknown>(r));
+    }))
+      .then((r) => this.handleResponse<unknown>(r))
+      .finally(bustGetCache); // bust on success OR failure (a 5xx may have partially written)
   }
 
   put<TBody = unknown, TResponse = unknown>(path: string, body?: TBody, init?: RequestInit): Promise<TResponse> {
@@ -174,7 +211,8 @@ export class ApiClient {
         body: hasBody ? JSON.stringify(body) : undefined,
         credentials: "include"
       };
-    }).then((r) => this.handleResponse<TResponse>(r));
+    }).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   delete<TResponse = unknown>(path: string, init?: RequestInit): Promise<TResponse> {
@@ -183,7 +221,8 @@ export class ApiClient {
       method: "DELETE",
       headers: this.buildHeaders(init?.headers),
       credentials: "include"
-    })).then((r) => this.handleResponse<TResponse>(r));
+    })).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   async downloadBlob(path: string): Promise<Blob> {

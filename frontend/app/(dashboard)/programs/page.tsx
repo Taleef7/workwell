@@ -6,8 +6,12 @@ import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
+import { canRunMeasures } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import { niceDomain } from "@/lib/charts";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
@@ -46,6 +50,9 @@ type TopDrivers = {
 
 export default function ProgramsPage() {
   const api = useApi();
+  const { user } = useAuth();
+  const mayRun = canRunMeasures(user?.role);
+  const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
@@ -53,61 +60,60 @@ export default function ProgramsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [activeRunStatus, setActiveRunStatus] = useState<string>("IDLE");
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [showRunConfirm, setShowRunConfirm] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    const params = new URLSearchParams();
+    if (siteId) params.set("site", siteId);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+
+    let data: ProgramSummary[];
     try {
-      const params = new URLSearchParams();
-      if (siteId) params.set("site", siteId);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      const qs = params.toString();
-      const data = await api.get<ProgramSummary[]>(`/api/programs/overview${qs ? `?${qs}` : ""}`);
-      setPrograms(data);
-
-      const trendPairs = await Promise.all(
-        data.map(async (program) => {
-          const trendParams = new URLSearchParams();
-          if (siteId) trendParams.set("site", siteId);
-          if (from) trendParams.set("from", from);
-          if (to) trendParams.set("to", to);
-          const tqs = trendParams.toString();
-          try {
-            const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${tqs ? `?${tqs}` : ""}`);
-            return [program.measureId, trend] as const;
-          } catch {
-            return [program.measureId, []] as const;
-          }
-        })
-      );
-      setTrendByMeasure(Object.fromEntries(trendPairs));
-
-      const driverPairs = await Promise.all(
-        data.map(async (program) => {
-          const driverParams = new URLSearchParams();
-          if (siteId) driverParams.set("site", siteId);
-          if (from) driverParams.set("from", from);
-          if (to) driverParams.set("to", to);
-          const dqs = driverParams.toString();
-          const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
-          try {
-            const drivers = await api.get<TopDrivers>(`/api/programs/${program.measureId}/top-drivers${dqs ? `?${dqs}` : ""}`);
-            return [program.measureId, drivers] as const;
-          } catch {
-            return [program.measureId, empty] as const;
-          }
-        })
-      );
-      setDriversByMeasure(Object.fromEntries(driverPairs));
+      data = await api.get<ProgramSummary[]>(`/api/programs/overview${suffix}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
       setLoading(false);
+      return;
     }
+    // Render KPIs + measure cards as soon as the overview lands; the per-measure trend
+    // and driver detail then streams in below (previously the page blocked on ~23 serial
+    // requests — overview, then ALL trends, then ALL drivers — before showing anything).
+    setPrograms(data);
+    setLoading(false);
+
+    setDetailsLoading(true);
+    const loadTrends = Promise.all(
+      data.map(async (program) => {
+        try {
+          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}`);
+          return [program.measureId, trend] as const;
+        } catch {
+          return [program.measureId, [] as TrendPoint[]] as const;
+        }
+      }),
+    ).then((pairs) => setTrendByMeasure(Object.fromEntries(pairs)));
+
+    const emptyDrivers: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
+    const loadDrivers = Promise.all(
+      data.map(async (program) => {
+        try {
+          const drivers = await api.get<TopDrivers>(`/api/programs/${program.measureId}/top-drivers${suffix}`);
+          return [program.measureId, drivers] as const;
+        } catch {
+          return [program.measureId, emptyDrivers] as const;
+        }
+      }),
+    ).then((pairs) => setDriversByMeasure(Object.fromEntries(pairs)));
+
+    // Trend and driver fleets are independent — load them concurrently, not in series.
+    await Promise.allSettled([loadTrends, loadDrivers]);
+    setDetailsLoading(false);
   }, [api, siteId, from, to]);
 
   useEffect(() => {
@@ -117,30 +123,13 @@ export default function ProgramsPage() {
     return () => clearTimeout(timer);
   }, [loadAll]);
 
+  // The global RunStatusProvider polls the active run; when it finishes it fires ww:run-complete and
+  // we reload the overview. (This survives navigation/reload — the run state lives in the provider.)
   useEffect(() => {
-    if (!activeRunId) return;
-    const terminal = ["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"];
-    if (terminal.includes(activeRunStatus)) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const run = await api.get<{ status: string }>(`/api/runs/${activeRunId}`);
-        setActiveRunStatus(run.status);
-        if (run.status === "COMPLETED" || run.status === "PARTIAL_FAILURE") {
-          setActiveRunId(null);
-          void loadAll();
-          emitToast("Run completed — Programs refreshed");
-        } else if (run.status === "FAILED" || run.status === "CANCELLED") {
-          setActiveRunId(null);
-          setRunError("Run failed. Check the Runs page for details.");
-        }
-      } catch {
-        // ignore transient polling errors
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [activeRunId, activeRunStatus, api, loadAll]);
+    const onComplete = () => void loadAll();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [loadAll]);
 
   async function runAllMeasuresNow() {
     setRunError(null);
@@ -148,8 +137,7 @@ export default function ProgramsPage() {
       const result = await api.post<{ scopeType: string }, { runId: string; status: string }>(
         "/api/runs/manual", { scopeType: "ALL_PROGRAMS" }
       );
-      setActiveRunId(result.runId);
-      setActiveRunStatus("REQUESTED");
+      startTracking(result.runId, result.status ?? "REQUESTED");
       emitToast("Run started — will refresh when complete");
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Run failed. Please try again.");
@@ -178,15 +166,18 @@ export default function ProgramsPage() {
           >
             View hierarchy
           </Link>
-          {activeRunId ? (
-            <span className="animate-pulse text-sm text-neutral-500 dark:text-neutral-400">
-              {activeRunStatus === "REQUESTED" ? "Queued…" : "Running…"} ({activeRunStatus.toLowerCase()})
-            </span>
-          ) : (
-            <Button variant="primary" onClick={() => setShowRunConfirm(true)}>
-              Run All Measures Now
-            </Button>
-          )}
+          {mayRun ? (
+            runActive ? (
+              <span className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                Run in progress…
+              </span>
+            ) : (
+              <Button variant="primary" onClick={() => setShowRunConfirm(true)}>
+                Run All Measures Now
+              </Button>
+            )
+          ) : null}
         </div>
       </div>
 
@@ -223,7 +214,14 @@ export default function ProgramsPage() {
           const trend = trendByMeasure[program.measureId] ?? [];
           const drivers = driversByMeasure[program.measureId] ?? { bySite: [], byRole: [], byOutcomeReason: [] };
           return (
-            <div key={program.measureId} className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+            <div key={program.measureId} className="group relative rounded-md border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
+              {/* Stretched link makes the whole card open the measure detail; interactive
+                  children below carry `relative z-10` so they keep their own click targets. */}
+              <Link
+                href={`/programs/${program.measureId}`}
+                aria-label={`View ${program.measureName} detail`}
+                className="absolute inset-0 z-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+              />
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{program.measureName}</h3>
@@ -240,9 +238,9 @@ export default function ProgramsPage() {
                 <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${program.excluded}`} tone="slate" />
               </div>
 
-              <div className="mt-4">
+              <div className="relative z-10 mt-4">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
-                <TrendChart data={trend} />
+                <TrendChart data={trend} loading={detailsLoading} />
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
@@ -274,9 +272,14 @@ export default function ProgramsPage() {
                 </div>
               </div>
 
-              {drivers.byOutcomeReason && drivers.byOutcomeReason.length > 0 && (
-                <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">By Reason</p>
+              {/* Always render this block so card heights stay stable while driver detail
+                  streams in (previously the section vanished when empty, leaving a gap that
+                  filled in only after the next run — confusing). */}
+              <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">By Reason</p>
+                {detailsLoading && drivers.byOutcomeReason.length === 0 ? (
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
+                ) : drivers.byOutcomeReason.length > 0 ? (
                   <div className="space-y-1">
                     {drivers.byOutcomeReason.map((r) => (
                       <div key={r.reason} className="flex items-center justify-between text-xs">
@@ -293,15 +296,17 @@ export default function ProgramsPage() {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <p className="text-xs text-neutral-400">No non-compliance reasons for the latest run.</p>
+                )}
+              </div>
 
-              <div className="mt-4 flex items-center justify-between">
+              <div className="relative z-10 mt-4 flex items-center justify-between">
                 <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
                   Open Worklist ({program.openCaseCount})
                 </Link>
                 <Link href={`/programs/${program.measureId}`} className="text-sm font-medium text-neutral-700 hover:underline dark:text-neutral-300">
-                  View Program Detail
+                  View detail →
                 </Link>
               </div>
             </div>
@@ -347,10 +352,14 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
   return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
 }
 
-function TrendChart({ data }: { data: TrendPoint[] }) {
+function TrendChart({ data, loading }: { data: TrendPoint[]; loading?: boolean }) {
   const sorted = [...(data ?? [])]
     .filter((t) => t.totalEvaluated > 0)
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
+  if (loading && sorted.length === 0) {
+    return <div className="h-[90px] animate-pulse rounded border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800/50" />;
+  }
 
   if (sorted.length < 2) {
     return (
@@ -364,6 +373,7 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
     label: new Date(t.startedAt).toLocaleDateString("en", { month: "short", day: "numeric" }),
     rate: Math.round(t.complianceRate * 10) / 10,
   }));
+  const [domainLo, domainHi] = niceDomain(chartData.map((d) => d.rate));
 
   const last = chartData[chartData.length - 1].rate;
   const prev = chartData[chartData.length - 2].rate;
@@ -383,7 +393,8 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
           <YAxis
             tickFormatter={(v: number) => `${v}%`}
-            domain={[0, 100]}
+            domain={[domainLo, domainHi]}
+            allowDecimals={false}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             axisLine={false}
             tickLine={false}

@@ -271,6 +271,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const search = q.get("search")?.trim().toLowerCase() || undefined;
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
+  // Outcome-bucket filter (OVERDUE/DUE_SOON/MISSING_DATA/COMPLIANT/EXCLUDED) — the worklist's
+  // "why flagged" axis, distinct from case *status* (OPEN/CLOSED/…). Post-filtered in JS like
+  // site/search so X-Total-Count stays exact for paging.
+  const outcome = q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined;
   // The OPEN worklist defaults to each measure's CURRENT compliance cycle — derived from TODAY + the
   // measure's cadence (`bucketPeriodForMeasure`), so it's exact and cadence-correct (filtered in JS
   // below). A blank `?period=` (empty string, not just absent) is treated as the default — `??` alone
@@ -316,6 +320,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
   }
   if (site) summaries = summaries.filter((c) => c.site === site);
+  if (outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === outcome);
   if (search) {
     summaries = summaries.filter(
       (c) =>

@@ -28,6 +28,10 @@ function isInternalDefine(define: string): boolean {
   return INTERNAL_DEFINES.has(define.trim());
 }
 
+// Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
+// The input still accepts any free-text handle; this only offers quick picks.
+const ASSIGNEE_SUGGESTIONS = ["cm@workwell.dev", "admin@workwell.dev"] as const;
+
 type AuditEvent = {
   eventType: string;
   actor: string;
@@ -578,9 +582,10 @@ export default function CaseDetailPage() {
                 <Input
                   label="Assignee"
                   hideLabel
+                  list="case-assignees"
                   value={assigneeInput}
                   onChange={(e) => setAssigneeInput(e.target.value)}
-                  placeholder="Assignee email or handle"
+                  placeholder="Type or pick — e.g. cm@workwell.dev"
                 />
                 <Button
                   type="button"
@@ -679,18 +684,49 @@ export default function CaseDetailPage() {
                 <Info label="Last run" value={caseDetail.lastRunId} />
               </dl>
 
-              <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Next action</p>
-                <p className="mt-2 text-sm text-amber-950">{caseDetail.nextAction}</p>
-                <div className="mt-2 flex items-center gap-2 text-xs text-amber-800">
+              <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Next action</p>
+                <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{caseDetail.nextAction}</p>
+                <div className="mt-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
                   <span>Outreach delivery:</span>
                   <span className={deliveryBadgeClass(caseDetail.latestOutreachDeliveryStatus)}>
                     {formatStatusLabel(caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT")}
                   </span>
                 </div>
+                {/* Actionable CTA for the recommended next step (the action buttons below are generic;
+                    this makes the *recommended* one a single click from the next-action panel). */}
+                {caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
+                  <div className="mt-3">
+                    {caseDetail.latestOutreachDeliveryStatus ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => void runAction("rerun")}
+                        disabled={acting !== null}
+                        isLoading={acting === "rerun"}
+                        loadingText="Verifying..."
+                      >
+                        Rerun to verify →
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => void previewOutreach()}
+                        disabled={previewing}
+                        isLoading={previewing}
+                        loadingText="Preparing..."
+                      >
+                        Prepare outreach →
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
                 {caseStatus === "EXCLUDED" ? (
-                  <div className={`mt-4 rounded-2xl border p-4 ${caseDetail.waiverExpired ? "border-rose-200 bg-rose-50" : "border-indigo-200 bg-indigo-50"}`}>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700">Waiver status</p>
+                  <div className={`mt-4 rounded-2xl border p-4 ${caseDetail.waiverExpired ? "border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30" : "border-indigo-200 bg-indigo-50 dark:border-indigo-900 dark:bg-indigo-950/30"}`}>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">Waiver status</p>
                     <p className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                       {caseDetail.exclusionReason ?? "Excluded by documented waiver or exemption."}
                     </p>
@@ -699,7 +735,7 @@ export default function CaseDetailPage() {
                         ? `Expires ${new Date(caseDetail.waiverExpiresAt).toLocaleString()}`
                         : "No expiry on file."}
                     </p>
-                    <p className={`mt-2 text-sm font-semibold ${caseDetail.waiverExpired ? "text-rose-700" : "text-indigo-800"}`}>
+                    <p className={`mt-2 text-sm font-semibold ${caseDetail.waiverExpired ? "text-rose-700 dark:text-rose-300" : "text-indigo-800 dark:text-indigo-300"}`}>
                       {caseDetail.waiverExpired ? "Waiver Expired — Rerun Recommended" : "Active waiver on file"}
                     </p>
                   </div>
@@ -719,15 +755,21 @@ export default function CaseDetailPage() {
                   />
                 </div>
                 <div className="mt-4 grid gap-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">Assignee</label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</label>
+                  <datalist id="case-assignees">
+                    {ASSIGNEE_SUGGESTIONS.map((a) => (
+                      <option key={a} value={a} />
+                    ))}
+                  </datalist>
                   <div className="flex items-end gap-2">
                     <Input
                       label="Assignee"
                       hideLabel
+                      list="case-assignees"
                       className="w-full"
                       value={assigneeInput}
                       onChange={(e) => setAssigneeInput(e.target.value)}
-                      placeholder="e.g. supervisor-a"
+                      placeholder="Type or pick — e.g. cm@workwell.dev"
                     />
                     <Button
                       type="button"
@@ -848,7 +890,7 @@ export default function CaseDetailPage() {
                   </ModalFooter>
                 </Modal>
                 {resolveModalOpen ? (
-                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
                     <Textarea
                       label="Closure note (required)"
                       className="min-h-24"
@@ -880,7 +922,7 @@ export default function CaseDetailPage() {
                   </div>
                 ) : null}
                 {outreachPreview ? (
-                  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+                  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
                     <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">Outreach preview</p>
                     <p className="mt-2"><span className="font-semibold">Template:</span> {outreachPreview.templateName}</p>
                     <p className="mt-1"><span className="font-semibold">Subject:</span> {outreachPreview.subject}</p>
@@ -906,7 +948,7 @@ export default function CaseDetailPage() {
 
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
-              <h4 className="mt-2 text-xl font-semibold">Code evidence explorer</h4>
+              <h4 className="mt-2 text-xl font-semibold">CQL Evidence Explorer</h4>
               <div className="mt-4 space-y-2">
                 {(caseDetail.evidenceJson.expressionResults ?? [])
                   .filter((row) => !isInternalDefine(String(row.define ?? "")))
@@ -952,9 +994,9 @@ export default function CaseDetailPage() {
               </div>
 
               {linkedValueSets.length > 0 ? (
-                <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700">Declared value sets</p>
-                  <p className="mt-1 text-xs text-indigo-600">These are the code sets the CQL was evaluating against for this measure version.</p>
+                <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">Declared value sets</p>
+                  <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">These are the code sets the CQL was evaluating against for this measure version.</p>
                   <div className="mt-3 space-y-2">
                     {linkedValueSets.map((vs) => (
                       <div key={vs.id} className="flex items-center justify-between rounded-xl border border-indigo-200 bg-white dark:bg-neutral-900 px-3 py-2">
@@ -1017,7 +1059,7 @@ export default function CaseDetailPage() {
                   </Button>
                   {explaining ? <div className="mt-3 h-16 animate-pulse rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800" /> : null}
                   {aiExplanation ? (
-                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
                       <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">Plain-language explanation (AI-assisted)</p>
                       <p>{aiExplanation.explanation}</p>
                       <p className="mt-2 text-xs text-primary-700 dark:text-primary-400">{aiExplanation.disclaimer}</p>
@@ -1090,7 +1132,7 @@ export default function CaseDetailPage() {
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
-                <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
+                <input type="file" aria-label="Evidence file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
                 <Input
                   label="Evidence description"
                   hideLabel
@@ -1155,7 +1197,9 @@ export default function CaseDetailPage() {
                       <div
                         key={`${event.eventType}-${event.occurredAt}`}
                         className={`rounded-2xl border p-4 ${
-                          index === 0 ? "border-blue-300 bg-blue-50/50" : "border-neutral-200 dark:border-neutral-800"
+                          index === 0
+                            ? "border-blue-300 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/30"
+                            : "border-neutral-200 dark:border-neutral-800"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1228,17 +1272,20 @@ function timelineSource(eventType: string) {
 function timelineNotificationBadge(event: AuditEvent) {
   const payload = event.payload as Record<string, unknown>;
   const eventType = event.eventType.toUpperCase();
-  const autoTriggered = payload.autoTriggered ?? payload.auto_triggered;
-  const timelineSourceValue = payload.timelineSource;
+  // The timeline is now single-source (audit_events), and the outreach action detail rides under
+  // payload.action — so read autoTriggered from either the top level or the nested action payload.
+  const action = (payload.action ?? {}) as Record<string, unknown>;
+  const autoTriggered = payload.autoTriggered ?? payload.auto_triggered ?? action.autoTriggered ?? action.auto_triggered;
 
   if (eventType === "NOTIFICATION_AUTO_QUEUED" || autoTriggered === true) {
     return {
       label: "Auto",
-      className: "border-indigo-200 bg-indigo-50 text-indigo-800"
+      className: "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300"
     };
   }
 
-  if (eventType.includes("OUTREACH") && timelineSourceValue === "case_action") {
+  // An outreach send that wasn't auto-triggered is a manual send.
+  if (eventType.includes("OUTREACH") && autoTriggered !== true) {
     return {
       label: "Manual",
       className: "border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"

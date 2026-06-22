@@ -14,7 +14,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { day, isPopulationRun, round1 } from "./rollup-shared.ts";
+import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 
 export interface ProgramSummary {
   measureId: string;
@@ -127,8 +127,12 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
 
   // ONE bounded query (measure/date filtering pushed into SQL) instead of fanning out a
   // listOutcomes per run across all history. Site filtering stays in the app (directory).
+  // Only terminal (COMPLETED/PARTIAL_FAILURE) population runs are eligible as a measure's "latest
+  // run". An in-flight ALL_PROGRAMS run writes outcomes incrementally, so without this filter the
+  // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
+  // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
   const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
-    (r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType),
+    (r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -174,7 +178,7 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
     })
-  ).filter((r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType));
+  ).filter((r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
   return groupByRun(rows);
 }
 

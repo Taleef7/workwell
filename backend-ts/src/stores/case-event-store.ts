@@ -71,7 +71,9 @@ export interface CaseEventStore {
    * partial failure can never leave a state change without its ledger entry.
    */
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
-  /** Merged, oldest-first timeline for one case (CASE_VIEWED audit rows excluded). */
+  /** Oldest-first case timeline, sourced solely from audit_events (CASE_VIEWED excluded). The
+   *  twin case_action of each action is intentionally not listed — audit_events is the canonical
+   *  ledger and UNION-ing both arms double-counted every action on the case-detail timeline. */
   caseTimeline(caseId: string): Promise<TimelineEntry[]>;
   /**
    * All audit events, oldest-first (the audit CSV export); capped at `limit` from `offset`.
@@ -84,6 +86,11 @@ export interface CaseEventStore {
    *  Lets event-type-scoped read models (e.g. campaigns) avoid scanning the whole ledger and
    *  avoid the oldest-first truncation cliff of listAuditEvents. */
   recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]>;
+  /** Newest-first, bounded — the admin audit viewer's recent-activity window (no whole-ledger scan). */
+  recentAuditEvents(limit: number): Promise<AuditEventRow[]>;
+  /** Audit events for a set of case ids, newest-first, bounded — the employee-profile activity feed
+   *  (pushes the ref_case_id filter + LIMIT into SQL instead of materializing the whole ledger). */
+  auditEventsForCases(caseIds: string[], limit: number): Promise<AuditEventRow[]>;
   /** Audit events for one measure version (ref_measure_version_id), oldest-first — the measure-version packet ledger. */
   auditEventsByMeasureVersion(measureVersionId: string): Promise<AuditEventRow[]>;
   /** Record a generated auditor packet in audit_packet_exports (#108). */

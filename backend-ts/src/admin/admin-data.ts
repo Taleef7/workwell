@@ -27,7 +27,26 @@ const INTEGRATIONS: IntegrationHealth[] = [
 ];
 const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));
 
-export const listIntegrations = (): IntegrationHealth[] => INTEGRATIONS.map((i) => ({ ...i }));
+/**
+ * Integration health (M4). fhir/mcp are in-process (always healthy) and hris is the synthetic
+ * directory (simulated); the one genuinely-live signal is whether the AI surfaces are configured —
+ * `ai` is "healthy" only when OPENAI_API_KEY is set, otherwise "degraded" (deterministic fallbacks).
+ */
+export const listIntegrations = (env?: { OPENAI_API_KEY?: string }): IntegrationHealth[] => {
+  const aiConfigured = !!env?.OPENAI_API_KEY?.trim();
+  return INTEGRATIONS.map((i) => {
+    if (i.integration === "ai") {
+      return {
+        ...i,
+        status: aiConfigured ? "healthy" : "degraded",
+        detail: aiConfigured
+          ? "OpenAI-backed draft/explain surfaces with deterministic fallback."
+          : "OPENAI_API_KEY not set — AI surfaces serve deterministic fallbacks only.",
+      };
+    }
+    return { ...i };
+  });
+};
 
 /**
  * Manual sync — whitelisted to {fhir,mcp,ai,hris}; null when unknown (→404). The update is
@@ -185,14 +204,48 @@ export interface AdminAuditRow {
  */
 export const auditScopeOf = (eventType: string): "access" | "mutation" => (eventType === "CASE_VIEWED" ? "access" : "mutation");
 
+// ---- outreach delivery log (M3) ---------------------------------------------
+// No dedicated outreach_delivery_log table on the demo stack; every per-case send writes a
+// CASE_OUTREACH_SENT audit event whose payload.action carries recipient/subject/provider/status.
+// We derive the admin "Recent outreach" view from those events (newest-first, already bounded).
+export interface DeliveryLogEntry {
+  id: string;
+  caseId: string | null;
+  toAddress: string;
+  subject: string;
+  provider: string;
+  status: string;
+  sentAt: string | null;
+  errorDetail: string | null;
+  measureName: string | null;
+}
+
+export function toDeliveryLog(events: AuditEventRow[], limit: number): DeliveryLogEntry[] {
+  const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
+  return events.slice(0, limit).map((e, i) => {
+    const action = (e.payload.action ?? {}) as Record<string, unknown>;
+    return {
+      // index-suffixed so two sends on the same case at the same instant don't collide on the React key
+      id: `${e.refCaseId ?? "outreach"}-${e.occurredAt}-${i}`,
+      caseId: e.refCaseId,
+      toAddress: String(action.toAddress ?? "—"),
+      subject: String(action.subject ?? action.templateName ?? "Outreach"),
+      provider: String(action.deliveryProvider ?? "simulated"),
+      status: String(action.emailDeliveryStatus ?? action.deliveryStatus ?? "SIMULATED"),
+      sentAt: typeof action.sentAt === "string" ? action.sentAt : e.occurredAt,
+      errorDetail: typeof action.errorDetail === "string" ? action.errorDetail : null,
+      measureName: e.refMeasureVersionId ? measureName(e.refMeasureVersionId) : null,
+    };
+  });
+}
+
 export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<string, string>, scope: string, limit: number): AdminAuditRow[] {
   // scope: "access" → CASE_VIEWED; "mutation"/"mutations" → everything else; "all"/blank → no filter.
   const raw = scope?.trim().toLowerCase();
   const wanted = raw === "access" ? "access" : raw === "mutation" || raw === "mutations" ? "mutation" : null;
   const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
+  // `events` arrives newest-first (recentAuditEvents ORDER BY occurred_at DESC) — no reverse/copy needed.
   return events
-    .slice()
-    .reverse() // newest-first for the viewer
     .map((e) => ({
       occurredAt: e.occurredAt,
       eventType: e.eventType,
@@ -205,7 +258,8 @@ export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<stri
         (e.payload.employeeId as string | undefined) ??
         (e.refCaseId ? caseEmployee.get(e.refCaseId) ?? null : null),
       actor: e.actor,
-      detail: JSON.stringify(e.payload),
+      // Pretty-printed so the admin audit viewer's <pre> renders a readable tree, not a single-line blob.
+      detail: JSON.stringify(e.payload, null, 2),
     }))
     .filter((r) => !wanted || r.scope === wanted)
     .slice(0, limit);

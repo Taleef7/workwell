@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canRunCampaigns } from "@/lib/rbac";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 // ── Backend contract (issue #75 E5 — outreach at scale) ────────────────────────
 type ProgramSummary = {
@@ -73,6 +76,7 @@ function formatDateTime(value: string | null): string {
 
 export default function CampaignsPage() {
   const api = useApi();
+  const { user } = useAuth();
 
   // Filter sources (shared with /programs).
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
@@ -88,6 +92,8 @@ export default function CampaignsPage() {
   const [result, setResult] = useState<CampaignResult | null>(null);
   const [launching, setLaunching] = useState<"dry" | "send" | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [pendingSendCount, setPendingSendCount] = useState<number | null>(null);
+  const mayManage = canRunCampaigns(user?.role);
 
   // History state.
   const [history, setHistory] = useState<CampaignRecord[]>([]);
@@ -131,6 +137,12 @@ export default function CampaignsPage() {
   }, [api]);
 
   const loadHistory = useCallback(async () => {
+    // GET /api/campaigns is gated to CM/ADMIN — skip it for other roles so a deep-link never fires a
+    // guaranteed 403 (the page also renders an access-denied state below).
+    if (!mayManage) {
+      setHistoryLoading(false);
+      return;
+    }
     setHistoryLoading(true);
     setHistoryError(null);
     try {
@@ -142,7 +154,7 @@ export default function CampaignsPage() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [api]);
+  }, [api, mayManage]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -187,6 +199,31 @@ export default function CampaignsPage() {
     }
   }
 
+  // Send requires an explicit confirm. Resolve the recipient count first (reuse the latest dry-run, or
+  // run a fresh one) so the confirm states exactly how many people will be contacted.
+  async function requestSend() {
+    let count = result && result.dryRun ? result.total : null;
+    if (count == null) {
+      setLaunching("dry");
+      setLaunchError(null);
+      try {
+        const preview = await api.post<LaunchBody, CampaignResult>("/api/campaigns", buildBody(true));
+        setResult(preview);
+        count = preview.total;
+      } catch (err) {
+        setLaunchError(err instanceof Error ? err.message : "Unknown error");
+        setLaunching(null);
+        return;
+      }
+      setLaunching(null);
+    }
+    if (!count) {
+      setLaunchError("No recipients match this scope — adjust the filters and try again.");
+      return;
+    }
+    setPendingSendCount(count);
+  }
+
   const loadDetail = useCallback(
     async (id: string) => {
       setSelectedId(id);
@@ -213,6 +250,19 @@ export default function CampaignsPage() {
   function measureLabel(id: string | null): string {
     if (!id) return "All measures";
     return measureNameById.get(id) ?? id;
+  }
+
+  // Deep-link guard: the sidebar already hides Campaigns from non-CM roles, but a pasted URL would
+  // otherwise mount the launcher and fire a 403 history fetch. Render a clean access-denied state.
+  if (!mayManage) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Outreach Campaigns</h2>
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          Outreach campaigns are managed by Case Managers and Admins — your role doesn&apos;t have access to launch or view campaigns.
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -339,7 +389,7 @@ export default function CampaignsPage() {
             </button>
             <button
               type="button"
-              onClick={() => void launch(false)}
+              onClick={() => void requestSend()}
               disabled={launching !== null}
               className="rounded-md bg-primary-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -365,6 +415,14 @@ export default function CampaignsPage() {
               <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                 Dry run preview — {result.total} recipient{result.total === 1 ? "" : "s"} ({result.channel}). No messages
                 sent.
+              </p>
+            ) : result.simulated === result.total ? (
+              // All-simulated (demo stack): one accurate line instead of peer Sent/Simulated counters
+              // that read as double the recipients.
+              <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Campaign dispatched via {result.channel} to {result.total} recipient{result.total === 1 ? "" : "s"} —{" "}
+                <span className="font-semibold">simulated</span> (no real messages sent on the demo stack)
+                {result.failed > 0 ? ` · ${result.failed} failed` : ""}.
               </p>
             ) : (
               <div className="flex flex-wrap gap-4 text-sm">
@@ -418,13 +476,13 @@ export default function CampaignsPage() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                  <th className="px-4 py-2 font-semibold">Created</th>
-                  <th className="px-4 py-2 font-semibold">Channel</th>
-                  <th className="px-4 py-2 font-semibold">Measure</th>
-                  <th className="px-4 py-2 text-right font-semibold">Total</th>
-                  <th className="px-4 py-2 text-right font-semibold">Sent</th>
-                  <th className="px-4 py-2 text-right font-semibold">Failed</th>
-                  <th className="px-4 py-2 font-semibold">Status</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Created</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Measure</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Total</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Sent</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Failed</th>
+                  <th scope="col" className="px-4 py-2 font-semibold">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -478,6 +536,19 @@ export default function CampaignsPage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={pendingSendCount !== null}
+        title="Send this campaign?"
+        description={`This dispatches outreach to ${pendingSendCount ?? 0} recipient${pendingSendCount === 1 ? "" : "s"} via ${channel} (simulated on the demo stack). This cannot be undone.`}
+        confirmLabel="Send campaign"
+        cancelLabel="Cancel"
+        onCancel={() => setPendingSendCount(null)}
+        onConfirm={() => {
+          setPendingSendCount(null);
+          void launch(false);
+        }}
+      />
     </section>
   );
 }
@@ -488,10 +559,10 @@ function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-            <th className="px-4 py-2 font-semibold">Employee</th>
-            <th className="px-4 py-2 font-semibold">Channel</th>
-            <th className="px-4 py-2 font-semibold">To</th>
-            <th className="px-4 py-2 font-semibold">Status</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Employee</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
+            <th scope="col" className="px-4 py-2 font-semibold">To</th>
+            <th scope="col" className="px-4 py-2 font-semibold">Status</th>
           </tr>
         </thead>
         <tbody>

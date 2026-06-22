@@ -1,5 +1,64 @@
 # Journal
 
+## 2026-06-21 — QA/UX hardening pass 2 (branch `feat/qa-ux-pass2`, not yet merged)
+
+**Built on the 6/20 smoke test: continued the manual QA (blocks 4–11), ran a 13-surface
+multi-agent code+UX audit (80 findings), then implemented fixes across the whole app.** Blocks 4–11
+verified live against `twh-api-ts.os.mieweb.org`: Runs/SEED/QRDA/CSV (4), Immunization forecast (7,
+3 ACIP series), Order proposals (8, 187 proposed/5 suppressed, real CPT codes, author 403), Auditor
+packets (10) all pass; RBAC matrix re-confirmed (author 403s on campaigns/admin/orders, 200 on
+reads). Audit verified several smoke-test premises as already-fixed and surfaced the real remaining
+work. Verification: backend full suite + typecheck green; frontend tsc + lint + build green; whole-diff
+code-review pass (1 P1 + 2 P2 found and fixed). **13 commits, branch not merged/deployed — awaiting review.**
+
+What shipped on the branch (by theme):
+- **RBAC nav + action gating** (`frontend/lib/rbac.ts` mirrors `authorize.ts`): the sidebar only hid
+  Admin; now Cases/Worklist/Campaigns/Orders → CM/ADMIN, Studio → AUTHOR/APPROVER/ADMIN, Admin →
+  ADMIN, with the run/rerun/create/bulk/send buttons gated to match. Fixes the user's "every role
+  sees every option then 403s." Campaigns gains a deep-link access-denied guard. ("Test Runs"→"Runs".)
+- **Backend correctness:** `programOverview/Trend` now only count terminal (COMPLETED/PARTIAL_FAILURE)
+  runs — an in-flight ALL_PROGRAMS run was being picked as "latest", which is why the Evaluations
+  count bounced (1100→partial→1100). `caseTimeline()` (both stores) now reads `audit_events` only
+  (dropped the `case_actions` UNION arm that double-listed every assign/outreach/escalate); the atomic
+  dual-write invariant is unchanged. Store-contract + route + program test fixtures updated.
+- **Programs perf + charts:** render KPIs+cards immediately, then stream trend/driver detail
+  concurrently (was ~23 serial reqs); dynamic padded chart y-domain (`lib/charts.ts niceDomain`) so
+  variation is visible instead of flat against [0,100]; whole-card stretched-link; stable By-Reason
+  block. Measure detail: 4-read waterfall → one parallel round-trip; single focused trend line.
+- **Cases worklist:** add the missing OVERDUE/outcome filter (backend `?outcome=`), a page-size
+  selector (25/50/100/200/500), and a Cards/Table view toggle.
+- **Runs page:** add the missing MeasureReport (FHIR) + QRDA (XML) download buttons (endpoints
+  existed, no UI); fix the Status/Scope/Trigger filters (lowercase option values never matched the
+  backend's UPPERCASE enums); SEED trigger column + filter + status pills; confirm-before-run;
+  downloads toast on failure.
+- **Case detail:** "Code evidence explorer"→"CQL Evidence Explorer"; actionable Next-action CTA;
+  assignee type-ahead (datalist); dark-mode on the pastel light-only cards; restored Manual/Auto
+  outreach badge after the single-source timeline change.
+- **Admin:** wired the Outreach Delivery Log (M3) to `CASE_OUTREACH_SENT` audit events (was
+  `json([])`); `overflow-hidden` on the three NitroGrid wrappers (the "mappings obstructed by tables").
+- **Orders (E7):** new CM/ADMIN `/orders` page — the order-proposal API shipped with no UI at all.
+- **Trend realism:** bumped the synthetic generator amplitude + added a texture harmonic (needs a
+  re-seed to surface; the live chart auto-scale already reveals the existing ±6%).
+
+Follow-up wave (also completed this pass, after the items above): **Admin IA → 4 tabs**
+(Operations/Governance/Outreach/Audit, so only the active section + its NitroGrid mounts) + dark
+badges + server-side audit-payload pretty-print; **Employee detail redesign** (2-column layout +
+sticky rail, colored outcome pills, dropped the always-null SLA column, and the backend profile now
+does one cases fetch instead of two); a **global, durable run-progress indicator** (`RunStatusProvider`
+in the layout — a header pill that survives navigation + reload via localStorage, fires
+`ww:run-complete`, and is consumed by /programs, /runs, /programs/[id]); **M4** the AI integration
+tile now reflects whether `OPENAI_API_KEY` is set (live), not a hardcoded "healthy"; an **a11y pass**
+(`scope="col"` on every hand-written table + aria-labels on raw inputs, attribute-only across 15
+files); **measure-detail empty states** + the "Measures in this Program"→"Outcome breakdown by
+version" rename + a clearer all-simulated campaign result line; and a **conservative API GET cache**
+(`frontend/lib/api/client.ts`: in-flight dedup + 1.5s TTL, busted on every write — replaces the
+blanket `cache:"no-store"`, no SWR dependency). Whole-branch code-review: clean (the GET cache was
+scrutinized hardest — cache entry is inserted at call-time and every mutation busts the map, so a
+read never serves post-write-stale data). Verification: backend full suite + frontend
+tsc/lint/build/vitest all green. Remaining genuinely-open (larger, not attempted): a full WCAG audit
+beyond table/label basics, and the documented production drop-ins (managed S3/R2 evidence bucket,
+real ICE/DataChaser/SendGrid adapters). Audit digest + roadmap saved under the run's workflow journal.
+
 ## 2026-06-21 — Synthetic trend-history backfill (#180) + full QA smoke test + H1 fix
 
 **Two threads today: a full adversarial QA pass of the live app, and a new feature to fix flat trend charts.**

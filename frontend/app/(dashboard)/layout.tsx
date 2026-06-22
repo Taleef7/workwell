@@ -6,6 +6,7 @@ import {
   Activity,
   BarChart3,
   BookOpen,
+  ClipboardCheck,
   ClipboardList,
   FileClock,
   LogOut,
@@ -28,8 +29,10 @@ import {
   SidebarToggle,
 } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
+import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
+import { RunStatusProvider, useRunStatus } from "@/components/run-status-provider";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
@@ -38,15 +41,20 @@ const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
 const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 
+// `roles` gates visibility to the authorities that can actually *use* the surface
+// (mirrors backend-ts/src/auth/authorize.ts). Omit `roles` for read surfaces any
+// authenticated role may browse (Programs, Measures, Runs). Operational surfaces
+// (Cases, Worklist, Campaigns) are scoped to the roles whose API calls won't 403.
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
-  { href: "/cases", label: "Cases", icon: Shield },
-  { href: "/worklist", label: "Worklist", icon: ClipboardList },
-  { href: "/campaigns", label: "Campaigns", icon: Send },
+  { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/campaigns", label: "Campaigns", icon: Send, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/orders", label: "Orders", icon: ClipboardCheck, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/measures", label: "Measures", icon: BookOpen },
-  { href: "/studio", label: "Studio", icon: FileClock },
-  { href: "/runs", label: "Test Runs", icon: Activity },
-  { href: "/admin", label: "Admin", icon: Settings, adminOnly: true },
+  { href: "/studio", label: "Studio", icon: FileClock, roles: [ROLES.AUTHOR, ROLES.APPROVER, ROLES.ADMIN] },
+  { href: "/runs", label: "Runs", icon: Activity },
+  { href: "/admin", label: "Admin", icon: Settings, roles: [ROLES.ADMIN] },
 ] as const;
 
 const DATE_PRESETS = [
@@ -56,13 +64,34 @@ const DATE_PRESETS = [
   { value: "all", label: "All time" },
 ] as const;
 
+/** Global "a measure run is in progress" pill — visible on every dashboard screen, persists across
+ *  navigation and reloads via RunStatusProvider, and links to /runs. */
+function RunStatusIndicator() {
+  const { isActive, status, evaluated } = useRunStatus();
+  const router = useRouter();
+  if (!isActive) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => router.push("/runs")}
+      title="A measure run is in progress — click to view"
+      className="hidden items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:flex dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+    >
+      <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+      <span>
+        Run {status.toLowerCase()}
+        {evaluated > 0 ? ` · ${evaluated} evaluated` : ""}
+      </span>
+    </button>
+  );
+}
+
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { token, user, logout } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
-  const isAdmin = user?.role === "ROLE_ADMIN";
   const roleLabel = user ? labelFor(ROLE_LABELS, user.role) : null;
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
@@ -85,7 +114,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [api, token]);
 
   useEffect(() => {
-    if (!token) return;
+    // The Worklist gap badge only exists for case-managing roles (the Worklist nav item is gated to
+    // them), so don't pull the full open-cases list on every navigation/filter change for everyone.
+    // (No setState here: non-managers never render the badge and the initial count is already 0.)
+    if (!token || !canManageCases(user?.role)) return;
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
@@ -105,7 +137,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api, siteId, from, to, token]);
+  }, [api, siteId, from, to, token, user]);
 
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -124,7 +156,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
   }
 
-  const navItems = nav.filter((item) => !("adminOnly" in item && item.adminOnly && !isAdmin));
+  const navItems = nav.filter((item) => !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles));
 
   return (
     <SidebarProvider>
@@ -220,6 +252,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   className="w-36"
                 />
               </div>
+              <RunStatusIndicator />
               <ThemeBrandSwitcher />
             </AppHeaderSection>
           </AppHeader>
@@ -255,7 +288,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <Suspense fallback={<div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />}>
       <GlobalFilterProvider>
-        <DashboardShell>{children}</DashboardShell>
+        <RunStatusProvider>
+          <DashboardShell>{children}</DashboardShell>
+        </RunStatusProvider>
       </GlobalFilterProvider>
     </Suspense>
   );

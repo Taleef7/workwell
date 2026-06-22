@@ -163,11 +163,11 @@ export function ReleaseApprovalTab({
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 <tr>
-                  <th className="px-2 py-1">Version</th>
-                  <th className="px-2 py-1">Status</th>
-                  <th className="px-2 py-1">Author</th>
-                  <th className="px-2 py-1">Created</th>
-                  <th className="px-2 py-1">Change Summary</th>
+                  <th scope="col" className="px-2 py-1">Version</th>
+                  <th scope="col" className="px-2 py-1">Status</th>
+                  <th scope="col" className="px-2 py-1">Author</th>
+                  <th scope="col" className="px-2 py-1">Created</th>
+                  <th scope="col" className="px-2 py-1">Change Summary</th>
                 </tr>
               </thead>
               <tbody>
