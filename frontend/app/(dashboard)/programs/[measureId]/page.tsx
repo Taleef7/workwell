@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -109,31 +109,42 @@ export default function ProgramDetailPage() {
   const [riskOutlook, setRiskOutlook] = useState<RiskOutlook | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!measureId) return;
-    async function load() {
-      // The four reads are independent of each other — fire them concurrently instead of
-      // as a 4-step waterfall (the previous serial chain was the main "view detail is slow"
-      // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
-      // measures, so the predicted rate just echoed the current rate; a quarter-ahead horizon
-      // surfaces real upcoming expirations.
-      const [programsRes, trendRes, driversRes, outlookRes] = await Promise.allSettled([
-        api.get<ProgramSummary[]>("/api/programs"),
-        api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`),
-        api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
-        api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
-      ]);
-      if (programsRes.status === "fulfilled") {
-        setProgram(programsRes.value.find((p) => p.measureId === measureId) ?? null);
-      } else {
-        setError(programsRes.reason instanceof Error ? programsRes.reason.message : "Unknown error");
-      }
-      setTrend(trendRes.status === "fulfilled" ? trendRes.value : []);
-      setDrivers(driversRes.status === "fulfilled" ? driversRes.value : { bySite: [], byRole: [], byOutcomeReason: [] });
-      setRiskOutlook(outlookRes.status === "fulfilled" ? outlookRes.value : null);
+    // The four reads are independent of each other — fire them concurrently instead of
+    // as a 4-step waterfall (the previous serial chain was the main "view detail is slow"
+    // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
+    // measures, so the predicted rate just echoed the current rate; a quarter-ahead horizon
+    // surfaces real upcoming expirations.
+    const [programsRes, trendRes, driversRes, outlookRes] = await Promise.allSettled([
+      api.get<ProgramSummary[]>("/api/programs"),
+      api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`),
+      api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
+      api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
+    ]);
+    if (programsRes.status === "fulfilled") {
+      setProgram(programsRes.value.find((p) => p.measureId === measureId) ?? null);
+    } else {
+      setError(programsRes.reason instanceof Error ? programsRes.reason.message : "Unknown error");
     }
-    void load();
+    setTrend(trendRes.status === "fulfilled" ? trendRes.value : []);
+    setDrivers(driversRes.status === "fulfilled" ? driversRes.value : { bySite: [], byRole: [], byOutcomeReason: [] });
+    setRiskOutlook(outlookRes.status === "fulfilled" ? outlookRes.value : null);
   }, [api, measureId]);
+
+  useEffect(() => {
+    // Defer a tick so the loader's setState doesn't run in the effect body (matches /cases, /programs).
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [load]);
+
+  // Refresh the trend + drivers when a run triggered from this page (or anywhere) completes — the
+  // global RunStatusProvider fires ww:run-complete on the terminal transition.
+  useEffect(() => {
+    const onComplete = () => void load();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [load]);
 
   const prevRate = trend.length > 1 ? trend[1].complianceRate : program?.complianceRate ?? 0;
   const delta = (program?.complianceRate ?? 0) - prevRate;

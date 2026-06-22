@@ -150,6 +150,30 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return (results ?? []).map(toAuditEventRow);
   }
 
+  async recentAuditEvents(limit: number): Promise<AuditEventRow[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+           FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+      )
+      .bind(limit)
+      .all<AuditRow>();
+    return (results ?? []).map(toAuditEventRow);
+  }
+
+  async auditEventsForCases(caseIds: string[], limit: number): Promise<AuditEventRow[]> {
+    if (caseIds.length === 0) return [];
+    const placeholders = caseIds.map(() => "?").join(", ");
+    const { results } = await this.db
+      .prepare(
+        `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+           FROM audit_events WHERE ref_case_id IN (${placeholders}) ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+      )
+      .bind(...caseIds, limit)
+      .all<AuditRow>();
+    return (results ?? []).map(toAuditEventRow);
+  }
+
   async auditEventsByRun(runId: string): Promise<AuditEventRow[]> {
     const { results } = await this.db
       .prepare(

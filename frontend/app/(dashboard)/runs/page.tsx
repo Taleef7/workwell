@@ -24,6 +24,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
+import { TERMINAL_RUN_STATUSES } from "@/lib/run-status";
 import { canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
@@ -109,7 +110,6 @@ type RunInsightResponse = {
 
 const RUN_PAGE_SIZE = 20;
 const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
-const TERMINAL_RUN_STATUSES = new Set(["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"]);
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";

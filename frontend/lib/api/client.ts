@@ -181,10 +181,8 @@ export class ApiClient {
         body: hasBody ? JSON.stringify(body) : undefined,
         credentials: "include"
       };
-    }).then((r) => this.handleResponse<TResponse>(r)).then((d) => {
-      bustGetCache(); // a successful write invalidates cached reads
-      return d;
-    });
+    }).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   postForm(path: string, formData: FormData, init?: RequestInit): Promise<unknown> {
@@ -196,10 +194,7 @@ export class ApiClient {
       credentials: "include"
     }))
       .then((r) => this.handleResponse<unknown>(r))
-      .then((d) => {
-        bustGetCache(); // a successful upload invalidates cached reads
-        return d;
-      });
+      .finally(bustGetCache); // bust on success OR failure (a 5xx may have partially written)
   }
 
   put<TBody = unknown, TResponse = unknown>(path: string, body?: TBody, init?: RequestInit): Promise<TResponse> {
@@ -216,10 +211,8 @@ export class ApiClient {
         body: hasBody ? JSON.stringify(body) : undefined,
         credentials: "include"
       };
-    }).then((r) => this.handleResponse<TResponse>(r)).then((d) => {
-      bustGetCache(); // a successful write invalidates cached reads
-      return d;
-    });
+    }).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   delete<TResponse = unknown>(path: string, init?: RequestInit): Promise<TResponse> {
@@ -228,10 +221,8 @@ export class ApiClient {
       method: "DELETE",
       headers: this.buildHeaders(init?.headers),
       credentials: "include"
-    })).then((r) => this.handleResponse<TResponse>(r)).then((d) => {
-      bustGetCache(); // a successful write invalidates cached reads
-      return d;
-    });
+    })).then((r) => this.handleResponse<TResponse>(r))
+      .finally(bustGetCache); // bust on success OR failure — a clean 4xx didn't write, but a 5xx may have partially
   }
 
   async downloadBlob(path: string): Promise<Blob> {

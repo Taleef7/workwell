@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
+import { isTerminalRunStatus } from "@/lib/run-status";
 import { emitToast } from "@/lib/toast";
 
 /**
@@ -13,7 +14,6 @@ import { emitToast } from "@/lib/toast";
  * mount). On completion it fires a `ww:run-complete` window event so any page can refresh its data.
  */
 const STORAGE_KEY = "ww_active_run";
-const TERMINAL = new Set(["COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED"]);
 
 type RunStatusValue = {
   activeRunId: string | null;
@@ -25,6 +25,19 @@ type RunStatusValue = {
 
 const RunStatusContext = createContext<RunStatusValue | null>(null);
 
+function notifyComplete(runId: string, status: string): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  window.dispatchEvent(new CustomEvent("ww:run-complete", { detail: { runId, status } }));
+  const upper = (status ?? "").toUpperCase();
+  emitToast(
+    upper === "COMPLETED" || upper === "PARTIAL_FAILURE" ? "Measure run complete" : `Measure run ${upper.toLowerCase()}`,
+  );
+}
+
 export function RunStatusProvider({ children }: { children: React.ReactNode }) {
   const api = useApi();
   const { token, user } = useAuth();
@@ -32,7 +45,21 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState("IDLE");
   const [evaluated, setEvaluated] = useState(0);
 
+  // Read the latest api client without restarting the poll effect: useApi recreates the client on
+  // every token refresh, so depending on `api` in the poll effect would tear down + re-create the
+  // interval mid-run and could miss the terminal transition.
+  const apiRef = useRef(api);
+  useEffect(() => {
+    apiRef.current = api;
+  }, [api]);
+
   const startTracking = useCallback((runId: string, initialStatus = "REQUESTED") => {
+    // A synchronous MEASURE/EMPLOYEE/CASE run can come back already terminal — don't persist it as
+    // active (the poll would never run to clear it), just fire the completion event so pages refresh.
+    if (isTerminalRunStatus(initialStatus)) {
+      notifyComplete(runId, initialStatus);
+      return;
+    }
     setEvaluated(0);
     setStatus(initialStatus);
     setActiveRunId(runId);
@@ -56,8 +83,8 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
       }
       if (!runId && canRunMeasures(user?.role)) {
         try {
-          const runs = await api.get<Array<{ runId: string; status: string }>>("/api/runs?limit=5");
-          runId = runs.find((r) => !TERMINAL.has((r.status ?? "").toUpperCase()))?.runId ?? null;
+          const runs = await apiRef.current.get<Array<{ runId: string; status: string }>>("/api/runs?limit=5");
+          runId = runs.find((r) => !isTerminalRunStatus(r.status))?.runId ?? null;
         } catch {
           /* ignore */
         }
@@ -70,44 +97,44 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [api, token, user]);
+  }, [token, user]);
 
-  // Poll the active run until it reaches a terminal state.
+  // Poll the active run until terminal. Depends ONLY on activeRunId (api is read via apiRef, status
+  // is updated without restarting), so a status change or token refresh never tears down the timer.
+  // A `finished` latch + an imperative clearInterval guarantee the completion fires exactly once even
+  // if a tick is in flight when the run goes terminal.
   useEffect(() => {
-    if (!activeRunId || TERMINAL.has(status.toUpperCase())) return;
+    if (!activeRunId) return;
+    let finished = false;
     const interval = setInterval(async () => {
+      if (finished) return;
       try {
-        const run = await api.get<{ status: string; totalEvaluated?: number }>(`/api/runs/${activeRunId}`);
-        setStatus(run.status);
+        const run = await apiRef.current.get<{ status: string; totalEvaluated?: number }>(`/api/runs/${activeRunId}`);
+        if (finished) return;
         if (typeof run.totalEvaluated === "number") setEvaluated(run.totalEvaluated);
-        if (TERMINAL.has((run.status ?? "").toUpperCase())) {
-          const completedId = activeRunId;
-          try {
-            localStorage.removeItem(STORAGE_KEY);
-          } catch {
-            /* ignore */
-          }
+        if (isTerminalRunStatus(run.status)) {
+          finished = true;
+          clearInterval(interval);
           setActiveRunId(null);
-          window.dispatchEvent(new CustomEvent("ww:run-complete", { detail: { runId: completedId, status: run.status } }));
-          const upper = (run.status ?? "").toUpperCase();
-          emitToast(
-            upper === "COMPLETED" || upper === "PARTIAL_FAILURE"
-              ? "Measure run complete"
-              : `Measure run ${upper.toLowerCase()}`,
-          );
+          notifyComplete(activeRunId, run.status);
+        } else {
+          setStatus(run.status);
         }
       } catch {
         /* transient polling error — keep going */
       }
     }, 4000);
-    return () => clearInterval(interval);
-  }, [activeRunId, status, api]);
+    return () => {
+      finished = true;
+      clearInterval(interval);
+    };
+  }, [activeRunId]);
 
   const value = useMemo<RunStatusValue>(
     () => ({
       activeRunId,
       status,
-      isActive: !!activeRunId && !TERMINAL.has(status.toUpperCase()),
+      isActive: activeRunId !== null,
       evaluated,
       startTracking,
     }),

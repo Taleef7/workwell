@@ -173,11 +173,9 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const caseMeasure = new Map<string, string>();
   for (const c of employeeCases) caseMeasure.set(c.id, c.measureId);
 
-  const ledger = await deps.events.listAuditEvents();
+  // Bounded, case-scoped, newest-first SQL query (was: load the entire audit ledger and filter in JS).
+  const ledger = await deps.events.auditEventsForCases([...caseIds], 20);
   const recentAuditEvents: AuditEventSummary[] = ledger
-    .filter((e) => e.refCaseId && caseIds.has(e.refCaseId))
-    .reverse() // listAuditEvents is oldest-first; we want newest-first
-    .slice(0, 20)
     .map((e) => {
       const measureName = e.refCaseId && caseMeasure.has(e.refCaseId) ? measureNameOf(caseMeasure.get(e.refCaseId)!) : null;
       return {

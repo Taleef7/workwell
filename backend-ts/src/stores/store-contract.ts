@@ -579,6 +579,39 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.auditEventsByMeasureVersion(crypto.randomUUID()), [], "unknown version → []");
   });
 
+  test(`[${label}] recentAuditEvents is newest-first + bounded; auditEventsForCases filters by case`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    const mk = (eventType: string, refCaseId: string | null) =>
+      eventStore.appendAudit({
+        eventType,
+        entityType: "case",
+        entityId: c.id,
+        actor: "cm@x",
+        refRunId: null,
+        refCaseId,
+        refMeasureVersionId: null,
+        payload: { e: eventType },
+      });
+    await mk("CASE_ASSIGNED", c.id);
+    await mk("CASE_ESCALATED", c.id);
+    await mk("RUN_COMPLETED", null); // not tied to the case
+    await mk("CASE_OUTREACH_SENT", c.id);
+
+    const recent = await eventStore.recentAuditEvents(2);
+    assert.equal(recent.length, 2, "bounded to the limit");
+    assert.equal(recent[0]!.eventType, "CASE_OUTREACH_SENT", "newest first");
+
+    const forCase = await eventStore.auditEventsForCases([c.id], 10);
+    assert.deepEqual(
+      forCase.map((e) => e.eventType),
+      ["CASE_OUTREACH_SENT", "CASE_ESCALATED", "CASE_ASSIGNED"],
+      "only this case's events, newest-first (RUN_COMPLETED excluded — null case)",
+    );
+    assert.ok(forCase.every((e) => e.refCaseId === c.id));
+    assert.deepEqual(await eventStore.auditEventsForCases([], 10), [], "no ids → []");
+  });
+
   test(`[${label}] insertPacketExport records an export row (idempotent inserts, distinct ids)`, async () => {
     const { eventStore } = await fresh();
     const input = {

@@ -115,14 +115,16 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- audit viewer (over the persisted ledger) ----------------------------
   if (pathname === "/api/admin/audit-events" && req.method === "GET") {
     const s = await getStores(env);
-    const events = await s.events.listAuditEvents();
+    const limit = clampInt(q.get("limit"), 100, 1, 250);
+    // Newest-first, bounded window (not the whole ledger) — this also caps the per-distinct-case
+    // getCase loop below. Over-fetch ~4x the page so scope filtering still yields up to `limit`.
+    const events = await s.events.recentAuditEvents(Math.min(limit * 4, 1000));
     const caseStore = s.cases;
     const caseEmployee = new Map<string, string>();
     for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
       const c = await caseStore.getCase(id);
       if (c) caseEmployee.set(id, c.employeeId);
     }
-    const limit = clampInt(q.get("limit"), 100, 1, 250);
     return json(toAdminAuditRows(events, caseEmployee, q.get("scope") ?? "all", limit));
   }
 
