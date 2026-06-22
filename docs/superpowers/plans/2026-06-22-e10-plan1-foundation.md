@@ -59,19 +59,14 @@ test("existing recurring measures default to complianceClass RECURRING", () => {
   assert.equal(MEASURE_BINDINGS["audiogram"]!.complianceClass, "RECURRING");
   assert.equal(MEASURE_BINDINGS["adult_immunization"]!.complianceClass, "RECURRING");
 });
-
-test("a permanent vaccine measure carries complianceClass PERMANENT + series.requiredDoses", () => {
-  const mmr = MEASURE_BINDINGS["mmr"];
-  assert.ok(mmr, "mmr binding must exist after gen-measure-bindings");
-  assert.equal(mmr.complianceClass, "PERMANENT");
-  assert.equal(mmr.series?.requiredDoses, 2);
-});
 ```
+
+> The PERMANENT/`mmr` assertion is added in Task 3 (once the `mmr` binding exists), so this task ends with a green suite.
 
 - [ ] **Step 2: Run it — verify it fails**
 
 Run: `cd backend-ts && node --import tsx --test src/engine/synthetic/measure-bindings.taxonomy.test.ts`
-Expected: FAIL (`complianceClass` is `undefined`; `mmr` binding missing). The `mmr` assertion will fail until Task 3; that is expected and re-checked at the end of Task 3.
+Expected: FAIL — `complianceClass` is `undefined` on the existing bindings (the field isn't emitted yet).
 
 - [ ] **Step 3: Extend the generator's parser + emitted type**
 
@@ -131,15 +126,15 @@ complianceClass: RECURRING
 Run: `cd backend-ts && node scripts/gen-measure-bindings.mjs`
 Expected: `wrote measure-bindings.ts for 11 measures` (14 after Task 3–5). Confirm `src/engine/synthetic/measure-bindings.ts` now shows `complianceClass: "RECURRING"` on each entry.
 
-- [ ] **Step 6: Run the taxonomy test (first assertion only)**
+- [ ] **Step 6: Run the taxonomy test**
 
 Run: `cd backend-ts && node --import tsx --test src/engine/synthetic/measure-bindings.taxonomy.test.ts`
-Expected: the "RECURRING" test PASSES; the "PERMANENT mmr" test still FAILS (mmr added in Task 3).
+Expected: PASS.
 
 - [ ] **Step 7: Verify the whole suite + types still green (no behavior change)**
 
 Run: `cd backend-ts && pnpm typecheck && node --import tsx --test "src/**/*.test.ts"`
-Expected: typecheck clean; all pre-existing tests pass (the field is additive). The one known failure is the mmr taxonomy assertion (Task 3).
+Expected: typecheck clean; all tests pass (the field is additive — no behavior change).
 
 - [ ] **Step 8: Commit**
 
@@ -426,16 +421,27 @@ In `backend-ts/src/engine/synthetic/fhir-bundle-builder.test.ts`, add to the `CA
 Run: `cd backend-ts && node --import tsx --test src/engine/synthetic/fhir-bundle-builder.test.ts`
 Expected: PASS — `mmr: seeded COMPLIANT → engine COMPLIANT` etc. This proves: 2 doses (dated 3000 days ago) → COMPLIANT (permanence), 1 dose → MISSING_DATA, 0 doses → MISSING_DATA, contraindication → EXCLUDED.
 
-- [ ] **Step 10: Run the taxonomy test (now fully green)**
+- [ ] **Step 10: Add the PERMANENT assertion to the taxonomy test + run it**
+
+Append to `backend-ts/src/engine/synthetic/measure-bindings.taxonomy.test.ts`:
+
+```ts
+test("a permanent vaccine measure carries complianceClass PERMANENT + series.requiredDoses", () => {
+  const mmr = MEASURE_BINDINGS["mmr"];
+  assert.ok(mmr, "mmr binding must exist after gen-measure-bindings");
+  assert.equal(mmr.complianceClass, "PERMANENT");
+  assert.equal(mmr.series?.requiredDoses, 2);
+});
+```
 
 Run: `cd backend-ts && node --import tsx --test src/engine/synthetic/measure-bindings.taxonomy.test.ts`
-Expected: PASS (both assertions).
+Expected: PASS (both tests).
 
 - [ ] **Step 11: Commit**
 
 ```bash
 cd backend-ts
-git add measures/mmr.cql measures/mmr.yaml src/measure/value-set-seed.ts src/engine/cql/measure-registry.ts src/measure/measure-catalog.ts src/engine/cql/elm/ src/engine/synthetic/measure-bindings.ts src/engine/synthetic/fhir-bundle-builder.test.ts
+git add measures/mmr.cql measures/mmr.yaml src/measure/value-set-seed.ts src/engine/cql/measure-registry.ts src/measure/measure-catalog.ts src/engine/cql/elm/ src/engine/synthetic/measure-bindings.ts src/engine/synthetic/measure-bindings.taxonomy.test.ts src/engine/synthetic/fhir-bundle-builder.test.ts
 git commit -m "feat(measure): MMR permanent series-completion measure (E10.6, #193)"
 ```
 
