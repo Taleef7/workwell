@@ -8,10 +8,13 @@ import lib5 from "./BreastCancerScreeningCQL-1.0.0.elm.json" with { type: "json"
 import lib6 from "./DiabetesHbA1cMonitoringCQL-1.0.0.elm.json" with { type: "json" };
 import lib7 from "./FluVaccineSeasonal-1.0.0.elm.json" with { type: "json" };
 import lib8 from "./HazwoperSurveillance-1.0.0.elm.json" with { type: "json" };
-import lib9 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib10 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib11 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
-import lib12 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
+import lib9 from "./HepatitisBSeries-1.0.0.elm.json" with { type: "json" };
+import lib10 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib11 from "./MmrSeries-1.0.0.elm.json" with { type: "json" };
+import lib12 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib13 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
+import lib14 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
+import lib15 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
 
 export const ELM_LIBRARIES: Record<string, unknown> = {
   "AdultImmunizationTdap-1.0.0": lib0,
@@ -23,8 +26,11 @@ export const ELM_LIBRARIES: Record<string, unknown> = {
   "DiabetesHbA1cMonitoringCQL-1.0.0": lib6,
   "FluVaccineSeasonal-1.0.0": lib7,
   "HazwoperSurveillance-1.0.0": lib8,
-  "HypertensionBPScreeningCQL-1.0.0": lib9,
-  "ObesityBMIScreeningCQL-1.0.0": lib10,
-  "TbSurveillance-1.3.0": lib11,
-  "FHIRHelpers-4.0.1": lib12,
+  "HepatitisBSeries-1.0.0": lib9,
+  "HypertensionBPScreeningCQL-1.0.0": lib10,
+  "MmrSeries-1.0.0": lib11,
+  "ObesityBMIScreeningCQL-1.0.0": lib12,
+  "TbSurveillance-1.3.0": lib13,
+  "VaricellaSeries-1.0.0": lib14,
+  "FHIRHelpers-4.0.1": lib15,
 };

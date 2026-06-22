@@ -1,0 +1,16 @@
+id: hepatitis_b_vaccination_series
+name: Hepatitis B Vaccination Series
+version: 1.0.0
+title: Hepatitis B vaccination series completion
+policyRef: OSHA 29 CFR 1910.1030
+tags: [vaccine, bbp, osha, permanent]
+complianceClass: PERMANENT
+cql: hepatitis_b.cql
+bindings:
+  rateKey: hepatitis_b_vaccination_series
+  complianceWindowDays: 0
+  series: { requiredDoses: 2 }
+  enrollment: { code: immz-enrolled, valueSet: "urn:workwell:vs:immz-enrollment" }
+  waiver:     { code: hepb-contraindication, valueSet: "urn:workwell:vs:hepb-contraindication" }
+  event:      { code: hepb-vaccine, valueSet: "urn:workwell:vs:hepb-vaccines", type: immunization }
+  refusal:    { code: hepb-refusal, valueSet: "urn:workwell:vs:hepb-refusal" }

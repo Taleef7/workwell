@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hepatitis_b_vaccination_series-missing"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "hepatitis_b_vaccination_series-missing-enr",
+        "subject": {
+          "reference": "Patient/hepatitis_b_vaccination_series-missing"
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:immz-enrollment",
+              "code": "immz-enrolled"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

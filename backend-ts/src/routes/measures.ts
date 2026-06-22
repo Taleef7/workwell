@@ -43,7 +43,7 @@ import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { exportMatBundle } from "../fhir/mat-export.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
-import { seedValueSets } from "../measure/value-set-seed.ts";
+import { seedValueSets, backfillImmunizationValueSets } from "../measure/value-set-seed.ts";
 import {
   listValueSets,
   listValueSetsByVersion,
@@ -84,12 +84,17 @@ async function store(env: MeasuresEnv): Promise<MeasureStore> {
   if (!seed) {
     seed = (async () => {
       await seedMeasureStore(stores.measures, measureCql);
-      // Value-set governance demo seed — after measures (links target version ids). Idempotent.
+      // Value-set governance demo seed — after measures (links target version ids).
+      const records = await stores.measures.listLatest();
+      const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
+      // Fresh store: full demo seed (all sets + links + terminology). Existing stores keep their
+      // seed — and any operator detaches/edits of seeded links — untouched.
       if (await stores.valueSets.isEmpty()) {
-        const records = await stores.measures.listLatest();
-        const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));
         await seedValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
       }
+      // Always back-fill ONLY the E10.6 immunization sets + links, and only on first introduction
+      // (detach-safe), so they appear on already-seeded DBs without re-asserting the pre-existing links.
+      await backfillImmunizationValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
     })();
     seeding.set(env, seed);
   }

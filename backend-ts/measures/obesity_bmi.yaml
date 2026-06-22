@@ -4,6 +4,7 @@ version: 1.0.0
 title: BMI Screening & Counseling
 policyRef: HEDIS WCC / Cigna Healthcare Wellness
 tags: [wellness, bmi, obesity]
+complianceClass: RECURRING
 cql: obesity_bmi.cql
 bindings:
   rateKey: obesity_bmi

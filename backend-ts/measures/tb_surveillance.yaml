@@ -4,6 +4,7 @@ version: 1.0.0
 title: Annual TB Screening
 policyRef: CDC TB screening guidance
 tags: [surveillance, infection-control, cdc]
+complianceClass: RECURRING
 cql: tb_surveillance.cql
 bindings:
   rateKey: tb_surveillance

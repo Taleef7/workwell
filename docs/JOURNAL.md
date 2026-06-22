@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-06-22 — E10 Plan 1: measure taxonomy + permanent immunization vaccine panel (branch)
+
+**Started the post-demo (June-15) WebChart-convergence roadmap.** Decomposed Doug's June-15 demo
+feedback (roster grid, "show compliant too", once-compliant-vs-recurring, YAML rules, multi-WebChart
+rollup, identity/mobility) into **GitHub Project #7** with epics **E10–E15 (#182–#187)**; E10 (#182)
+broken into sub-issues #188–#193. Wrote the E10 design spec
+(`docs/superpowers/specs/2026-06-22-e10-roster-compliance-design.md`) + a 3-plan split
+(foundation → read model → UI).
+
+**Implemented Plan 1 (foundation) on `feat/e10-roster-compliance` (not yet merged):** a
+`complianceClass: PERMANENT | RECURRING` measure-taxonomy field + a 3-measure permanent-immunity
+**vaccine panel** — MMR, Varicella, and Hepatitis B (promoted from an Approved catalog entry) — using
+the repo's first **series-completion CQL** (`Count(valid doses) >= 2`, no recency → "once compliant,
+always compliant"). **Now 14 runnable / 63 catalog** (was 11/61). No schema, no new deps; CQL stays the
+sole authority (ADR-008) — `complianceClass` is display/routing metadata only, and the engine still
+emits only the 5 canonical buckets (a partial series is canonically MISSING_DATA, to be refined to
+IN_PROGRESS by the roster read model in Plan 2).
+
+Built subagent-driven (TDD per task + spec & code-quality reviews), then an opus whole-branch review
+(approve-with-fixes — all applied). Caught + fixed a regression where the fixture generator's `rmSync`
+silently deleted the un-regenerable `_java_golden.json` (consumed by `compare-all.mjs`). **Verified:
+backend 575 pass / 0 fail / 1 skip, typecheck clean; the headless CLI proves permanence (MMR 2003 doses
+→ COMPLIANT, `Dose Count` 2); the Java-parity check passes 40/40** for the original 10 measures.
+Deferred to E11: titer-proves-immunity + the Heplisav-vs-traditional-3-dose distinction. Next: Plan 2
+(roster read model + status vocabulary, E10.2/E10.5) → Plan 3 (grid + employee screen, E10.3/E10.4).
+
 ## 2026-06-21 — QA/UX hardening pass 2 (PR #181 — merged + deployed)
 
 **Built on the 6/20 smoke test: continued the manual QA (blocks 4–11), ran a 13-surface

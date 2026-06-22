@@ -86,6 +86,31 @@ const VALUE_SETS: SeedVs[] = [
     c("ldl-lab", "LDL Cholesterol Lab", "urn:workwell:vs:ldl-labs"),
     c("83721", "LDL cholesterol direct measurement", CPT),
   ] },
+  // immunization shared enrollment + MMR sets (E10.6)
+  { id: "c0000001-0000-0000-0000-000000000001", oid: "urn:workwell:vs:immz-enrollment", name: "Immunization Program Enrollment", codes: [c("immz-enrolled", "Immunization Program Enrollment", "urn:workwell:vs:immz-enrollment")] },
+  { id: "c0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:mmr-vaccines", name: "MMR Vaccines", codes: [
+    c("mmr-vaccine", "MMR Vaccines", "urn:workwell:vs:mmr-vaccines"),
+    c("03", "MMR", CVX),
+    c("94", "MMRV", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000003", oid: "urn:workwell:vs:mmr-contraindication", name: "MMR Contraindication", codes: [c("mmr-contraindication", "MMR Contraindication", "urn:workwell:vs:mmr-contraindication")] },
+  { id: "c0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:mmr-refusal", name: "MMR Refusal", codes: [c("mmr-refusal", "MMR Refusal", "urn:workwell:vs:mmr-refusal")] },
+  // Varicella sets (E10.6 Task 4)
+  { id: "c0000001-0000-0000-0000-000000000005", oid: "urn:workwell:vs:varicella-vaccines", name: "Varicella Vaccines", codes: [
+    c("varicella-vaccine", "Varicella Vaccines", "urn:workwell:vs:varicella-vaccines"),
+    c("21", "Varicella", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000006", oid: "urn:workwell:vs:varicella-contraindication", name: "Varicella Contraindication", codes: [c("varicella-contraindication", "Varicella Contraindication", "urn:workwell:vs:varicella-contraindication")] },
+  { id: "c0000001-0000-0000-0000-000000000007", oid: "urn:workwell:vs:varicella-refusal", name: "Varicella Refusal", codes: [c("varicella-refusal", "Varicella Refusal", "urn:workwell:vs:varicella-refusal")] },
+  // Hepatitis B sets (E10.6 Task 5)
+  { id: "c0000001-0000-0000-0000-000000000008", oid: "urn:workwell:vs:hepb-vaccines", name: "Hep B Vaccines", codes: [
+    c("hepb-vaccine", "Hepatitis B Vaccines", "urn:workwell:vs:hepb-vaccines"),
+    c("08", "Hep B adolescent or pediatric", CVX),
+    c("43", "Hep B adult", CVX),
+    c("189", "Hep B Heplisav-B", CVX),
+  ] },
+  { id: "c0000001-0000-0000-0000-000000000009", oid: "urn:workwell:vs:hepb-contraindication", name: "Hep B Contraindication", codes: [c("hepb-contraindication", "Hepatitis B Contraindication", "urn:workwell:vs:hepb-contraindication")] },
+  { id: "c0000001-0000-0000-0000-00000000000a", oid: "urn:workwell:vs:hepb-refusal", name: "Hep B Refusal", codes: [c("hepb-refusal", "Hepatitis B Refusal", "urn:workwell:vs:hepb-refusal")] },
 ];
 
 /** measure slug → the value-set ids attached to it (Java's ensureLink table, keyed by slug). */
@@ -98,6 +123,9 @@ const LINKS: Record<string, string[]> = {
   diabetes_hba1c: ["b0000001-0000-0000-0000-000000000006", "b0000001-0000-0000-0000-000000000004", "b0000001-0000-0000-0000-000000000005"],
   obesity_bmi: ["b0000001-0000-0000-0000-000000000007", "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002"],
   cholesterol_ldl: ["b0000001-0000-0000-0000-000000000010", "b0000001-0000-0000-0000-000000000008", "b0000001-0000-0000-0000-000000000009"],
+  mmr: ["c0000001-0000-0000-0000-000000000002", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000003", "c0000001-0000-0000-0000-000000000004"],
+  varicella: ["c0000001-0000-0000-0000-000000000005", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000006", "c0000001-0000-0000-0000-000000000007"],
+  hepatitis_b_vaccination_series: ["c0000001-0000-0000-0000-000000000008", "c0000001-0000-0000-0000-000000000001", "c0000001-0000-0000-0000-000000000009", "c0000001-0000-0000-0000-00000000000a"],
 };
 
 /** The 5 demo terminology mappings from V013 (fixed ids so re-seed is idempotent by UNIQUE key). */
@@ -128,6 +156,41 @@ export async function seedValueSets(store: ValueSetStore, versionIdOf: (measureS
       await store.createTerminologyMapping(tm);
     } catch {
       // UNIQUE(local_system, local_code, standard_system, standard_code) — already seeded; ignore.
+    }
+  }
+}
+
+/** The E10.6 immunization measures whose value sets + links are back-filled onto already-seeded stores. */
+const IMMUNIZATION_MEASURES = ["mmr", "varicella", "hepatitis_b_vaccination_series"];
+
+/**
+ * Idempotent, **detach-safe** backfill of ONLY the E10.6 immunization value sets + their measure links,
+ * for stores that were seeded before E10.6. Unlike `seedValueSets` (the fresh-store full demo seed),
+ * this seeds + links a value set **only when it is absent** (`getById` is null), in a single
+ * first-introduction pass. So it never re-asserts a value set that already exists — and therefore never
+ * re-adds a link an operator deliberately detached, nor overwrites operator edits. Safe to run on every
+ * cold start; a no-op once the immunization sets are present.
+ */
+export async function backfillImmunizationValueSets(
+  store: ValueSetStore,
+  versionIdOf: (measureSlug: string) => string | undefined,
+): Promise<void> {
+  // value-set id → the immunization measure slugs that link it (from LINKS).
+  const linkedBy = new Map<string, string[]>();
+  for (const slug of IMMUNIZATION_MEASURES) {
+    for (const vsId of LINKS[slug] ?? []) {
+      const slugs = linkedBy.get(vsId) ?? [];
+      slugs.push(slug);
+      linkedBy.set(vsId, slugs);
+    }
+  }
+  for (const vs of VALUE_SETS) {
+    if (!linkedBy.has(vs.id)) continue; // not an immunization value set
+    if ((await store.getById(vs.id)) !== null) continue; // already present — leave edits/detaches intact
+    await store.seedValueSet({ id: vs.id, oid: vs.oid, name: vs.name, version: VER, codes: vs.codes });
+    for (const slug of linkedBy.get(vs.id) ?? []) {
+      const versionId = versionIdOf(slug);
+      if (versionId) await store.link(versionId, vs.id);
     }
   }
 }

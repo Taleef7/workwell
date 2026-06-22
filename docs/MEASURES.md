@@ -7,11 +7,14 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | Category | Count | Status | CQL |
 |----------|-------|--------|-----|
 | OSHA occupational safety — fully evaluated | 4 | Active | Full CQL, runnable |
-| OSHA occupational safety — catalog only | 3 | Draft / Approved / Deprecated | Partial or no CQL |
+| OSHA occupational safety — catalog only | 2 | Draft / Deprecated | Partial or no CQL |
 | HEDIS wellness — fully evaluated | 5 | Active | Full CQL, runnable |
+| Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
 | CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
 | CMS eCQM catalog (2026 performance period) | 47 | Draft | Catalog entry only — CQL authoring pending |
-| **Total** | **61** | | |
+| **Total** | **63** | | |
+
+Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS eCQM. Hepatitis B was promoted from an Approved catalog entry to Active (E10.6).
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 
@@ -175,6 +178,36 @@ to a case manager for intervention. Refusal does not trigger an EXCLUDED outcome
 an advisory `immunizationForecast` covering all 3 ACIP series (Td/Tdap, Influenza annual, Hepatitis B
 3-dose). This is computed by the `ImmunizationForecast` port (simulated default; ICE-ready; ADR-012)
 and is **advisory only** — it never affects the CQL `Outcome Status`.
+
+---
+
+## Category 3c — Permanent Immunization Panel (series-completion CQL)
+
+These three measures introduce the **PERMANENT** compliance class (E10.1 / E10.6): compliance is proven
+by a completed **dose series**, not recency — once the series is on file the employee stays COMPLIANT
+indefinitely ("once compliant, always compliant"). This contrasts with every other measure, which is
+**RECURRING** (windowed days-since-last with DUE_SOON/OVERDUE). The class is declared as `complianceClass`
+in each measure's YAML binding (default `RECURRING`); it is descriptive/routing metadata only — the CQL
+`Outcome Status` remains the sole compliance authority (ADR-008). These are the repo's first
+series-completion CQL measures (`Count("Valid Doses") >= N`, no recency filter).
+
+| Measure | id | Series | COMPLIANT when | Excludes |
+|---------|----|--------|----------------|----------|
+| MMR Immunity | `mmr` | 2 doses (CVX 03/94) | ≥ 2 valid MMR doses on file | contraindication |
+| Varicella Immunity | `varicella` | 2 doses (CVX 21) | ≥ 2 valid varicella doses on file | contraindication |
+| Hepatitis B Vaccination Series | `hepatitis_b_vaccination_series` | 2 doses (Heplisav; CVX 08/43/189) | ≥ 2 valid Hep B doses on file | contraindication |
+
+Outcome mapping (all three):
+- `EXCLUDED` when a documented contraindication Condition is present
+- `COMPLIANT` when enrolled, not contraindicated, and `Dose Count >= 2` (regardless of dose age)
+- `MISSING_DATA` otherwise — including a **partial** series (`0 < Dose Count < 2`), which the roster read
+  model **will surface** as **IN_PROGRESS** (planned in E10.5; not in this change)
+- `DUE_SOON` / `OVERDUE` are **not applicable** to PERMANENT measures
+
+A documented **refusal** (declination) Condition does not change the canonical bucket; it **will be surfaced**
+as **DECLINED** by the roster read model (planned in E10.5) and keeps the case open (same pattern as `adult_immunization`). The
+Heplisav-vs-traditional-3-dose distinction and **titer-proves-immunity** ("Allow positive titer") are
+deferred to E11.
 
 ---
 

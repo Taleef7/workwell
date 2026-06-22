@@ -22,7 +22,7 @@
  *   - Efficiency: `deriveExamConfig(binding, target)` + `buildSyntheticBundle` depend only on
  *     (measure, target), NOT on employee identity, so the engine outcome for a given (measure,
  *     target) is identical across employees. We precompute the (measure, target) → outcome map with
- *     11 measures × 5 targets = 55 engine evaluations, then assign all ~13.2k historical outcomes
+ *     14 measures × 5 targets = 70 engine evaluations, then assign all ~13.2k historical outcomes
  *     from the seeded distribution — not one engine call per employee.
  *
  * Invariants preserved: outcomes still come from the CQL engine (the (measure,target)→outcome map);

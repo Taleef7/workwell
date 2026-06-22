@@ -1,0 +1,16 @@
+id: varicella
+name: Varicella Immunity (2-dose series)
+version: 1.0.0
+title: Varicella (chickenpox) immunity (2 valid doses)
+policyRef: CDC ACIP Varicella recommendations
+tags: [wellness, immunization, varicella, permanent]
+complianceClass: PERMANENT
+cql: varicella.cql
+bindings:
+  rateKey: varicella
+  complianceWindowDays: 0
+  series: { requiredDoses: 2 }
+  enrollment: { code: immz-enrolled, valueSet: "urn:workwell:vs:immz-enrollment" }
+  waiver:     { code: varicella-contraindication, valueSet: "urn:workwell:vs:varicella-contraindication" }
+  event:      { code: varicella-vaccine, valueSet: "urn:workwell:vs:varicella-vaccines", type: immunization }
+  refusal:    { code: varicella-refusal, valueSet: "urn:workwell:vs:varicella-refusal" }
