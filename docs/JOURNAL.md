@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-06-21 — QA/UX hardening pass 2 (branch `feat/qa-ux-pass2`, not yet merged)
+## 2026-06-21 — QA/UX hardening pass 2 (PR #181 — merged + deployed)
 
 **Built on the 6/20 smoke test: continued the manual QA (blocks 4–11), ran a 13-surface
 multi-agent code+UX audit (80 findings), then implemented fixes across the whole app.** Blocks 4–11
@@ -8,10 +8,12 @@ verified live against `twh-api-ts.os.mieweb.org`: Runs/SEED/QRDA/CSV (4), Immuni
 3 ACIP series), Order proposals (8, 187 proposed/5 suppressed, real CPT codes, author 403), Auditor
 packets (10) all pass; RBAC matrix re-confirmed (author 403s on campaigns/admin/orders, 200 on
 reads). Audit verified several smoke-test premises as already-fixed and surfaced the real remaining
-work. Verification: backend full suite + typecheck green; frontend tsc + lint + build green; whole-diff
-code-review pass (1 P1 + 2 P2 found and fixed). **13 commits, branch not merged/deployed — awaiting review.**
+work. **Merged as PR #181 (merge `b5d9f7c`) and deployed to `main`.** 22 commits; verification at every
+step: backend full suite + typecheck green; frontend tsc + lint + build + vitest green; **three
+whole-diff code reviews** (the initial pass, a full-branch pass, and the maintainer's PR review —
+9 review items fixed in `a5433f2`, 3 verified false positives left with evidence). CI green on merge.
 
-What shipped on the branch (by theme):
+What shipped (by theme):
 - **RBAC nav + action gating** (`frontend/lib/rbac.ts` mirrors `authorize.ts`): the sidebar only hid
   Admin; now Cases/Worklist/Campaigns/Orders → CM/ADMIN, Studio → AUTHOR/APPROVER/ADMIN, Admin →
   ADMIN, with the run/rerun/create/bulk/send buttons gated to match. Fixes the user's "every role
@@ -55,9 +57,24 @@ version" rename + a clearer all-simulated campaign result line; and a **conserva
 blanket `cache:"no-store"`, no SWR dependency). Whole-branch code-review: clean (the GET cache was
 scrutinized hardest — cache entry is inserted at call-time and every mutation busts the map, so a
 read never serves post-write-stale data). Verification: backend full suite + frontend
-tsc/lint/build/vitest all green. Remaining genuinely-open (larger, not attempted): a full WCAG audit
-beyond table/label basics, and the documented production drop-ins (managed S3/R2 evidence bucket,
-real ICE/DataChaser/SendGrid adapters). Audit digest + roadmap saved under the run's workflow journal.
+tsc/lint/build/vitest all green.
+
+PR-review round (maintainer review on #181, fixed in `a5433f2`): hardened the run-status provider
+(handle a synchronous run that returns terminal immediately; latch `finished` + imperative
+`clearInterval` so completion fires exactly once; poll depends only on `activeRunId` and reads the
+client via a ref so a token refresh can't drop the timer); the GET cache now busts in `.finally`
+(a failed 5xx may have partially written); `/programs/[measureId]` listens for `ww:run-complete`;
+admin tabs lazy-load per active tab; Studio uses the shared `canApproveMeasures`/`isAdmin` helpers;
+and the audit-ledger reads are now bounded SQL — `recentAuditEvents(limit)` (admin viewer, also caps
+its per-case `getCase` loop) + `auditEventsForCases(ids,limit)` (employee profile), replacing the
+whole-ledger materialize-and-filter. Three review comments were verified **false positives** and left
+unchanged with evidence: measure-name resolution (ids are strings not UUIDs on the TS backend —
+confirmed populated live), `/api/runs` returning `runId` (read-models maps `run.id→runId`), and the
+campaigns zero-recipient send guard (intentional).
+
+Remaining genuinely-open (larger, not attempted): a full WCAG audit beyond table/label basics, and the
+documented production drop-ins (managed S3/R2 evidence bucket, real ICE/DataChaser/SendGrid adapters).
+Audit digest + roadmap saved under the run's workflow journal.
 
 ## 2026-06-21 — Synthetic trend-history backfill (#180) + full QA smoke test + H1 fix
 

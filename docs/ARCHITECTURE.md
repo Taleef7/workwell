@@ -66,10 +66,18 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `/runs`: run history, run detail, outcomes table, rerun selected scope.
 - `/cases`: worklist with filters, search, bulk actions, exports.
 - `/cases/[id]`: case detail, timeline, evidence, outreach/escalate/assign/rerun actions (the outreach action has a channel selector — EMAIL/SMS/PHONE); for `adult_immunization` cases an advisory immunization-forecast panel (Td/Tdap, Influenza, Hepatitis B next-dose-due) is shown — advisory only, never affects status (#76 / E6).
-- `/campaigns`: bulk outreach campaign launcher (measure/site/outcome/channel/template filters → Dry-run recipient preview → Send → result summary + recipients) + campaign history list → detail (#75 / E5).
-- `/measures`: measure list and create flow.
-- `/studio/[id]`: authoring tabs (Spec/CQL/Value Sets/Tests), compile + version cloning.
-- `/admin`: scheduler controls + integration health + manual sync.
+- `/campaigns`: bulk outreach campaign launcher (measure/site/outcome/channel/template filters → Dry-run recipient preview → Send-with-confirm → result summary + recipients) + campaign history list → detail (#75 / E5). CASE_MANAGER/ADMIN only (a client-side access guard mirrors the API gate).
+- `/orders`: advisory order proposals (E7 / #77) — proposed orders (subject / measure / CPT·CVX·LOCAL code / reason outcome / priority) + a standing-order-suppressed section + a measure filter + Copy-FHIR-Bundle. CASE_MANAGER/ADMIN only; advisory (never auto-submits). Surfaces the previously API-only `/api/orders/proposals` (#181).
+- `/measures`: measure catalog (Create gated to authors/admin).
+- `/studio/[id]`: authoring tabs (Spec/CQL/Value Sets/Tests), compile + version cloning; approve/activate/deprecate gated via the shared rbac helpers.
+- `/admin`: tabbed console (Operations / Governance / Outreach / Audit), lazy-loaded per active tab; integration health, scheduler, source/terminology mappings, outreach templates + delivery log, waivers, audit viewer (#181).
+
+> **Shell infra (#181):** the dashboard layout mounts a `RunStatusProvider` — a durable, global
+> run tracker (active run persisted in `localStorage`, re-adopted on reload, polled, surfaced as a
+> header pill, broadcasts a `ww:run-complete` window event consumed by /programs + /programs/[id]).
+> Role-based nav + action gating lives in `frontend/lib/rbac.ts` (mirrors `authorize.ts`). The API
+> client (`frontend/lib/api/client.ts`) adds GET in-flight dedup + a 1.5s TTL cache busted on every
+> write, replacing the blanket `cache:"no-store"`.
 
 ## 5) End-to-End Data Flow
 

@@ -234,6 +234,15 @@ INDEX audit_events_ref_run_id_idx(ref_run_id)
 INDEX audit_events_ref_case_id_idx(ref_case_id)
 ```
 
+> **Reads (#181, no DDL):** the case-detail timeline is sourced **solely** from `audit_events`
+> (`caseTimeline`) — the prior `audit_events UNION ALL case_actions` double-listed every action; both
+> rows are still written atomically (`recordCaseEvent`), only the read is single-source. New bounded,
+> newest-first store reads avoid materializing the whole ledger: `recentAuditEvents(limit)` (admin
+> audit viewer — also bounds its per-case `getCase` loop) and `auditEventsForCases(caseIds, limit)`
+> (employee-profile activity feed, pushes `ref_case_id IN (…)` + LIMIT into SQL). The admin **Outreach
+> Delivery Log** view is derived read-time from `CASE_OUTREACH_SENT` audit events (no dedicated table
+> on the demo stack — see §3.16). All additive store-contract changes; no schema change.
+
 ### 3.13 `integration_health`
 ```sql
 id TEXT PK
