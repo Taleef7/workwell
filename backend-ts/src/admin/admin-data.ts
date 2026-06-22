@@ -244,9 +244,8 @@ export function toAdminAuditRows(events: AuditEventRow[], caseEmployee: Map<stri
   const raw = scope?.trim().toLowerCase();
   const wanted = raw === "access" ? "access" : raw === "mutation" || raw === "mutations" ? "mutation" : null;
   const measureName = (vid: string) => MEASURES[vid.replace(/-v[\d.]+$/, "")]?.name ?? null;
+  // `events` arrives newest-first (recentAuditEvents ORDER BY occurred_at DESC) — no reverse/copy needed.
   return events
-    .slice()
-    .reverse() // newest-first for the viewer
     .map((e) => ({
       occurredAt: e.occurredAt,
       eventType: e.eventType,

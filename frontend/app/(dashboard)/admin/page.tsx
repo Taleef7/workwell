@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Button, Checkbox, Input, Select, Textarea } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
@@ -162,6 +162,7 @@ export default function AdminPage() {
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null);
   const [deliveryLog, setDeliveryLog] = useState<DeliveryLogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<AdminTab>("operations");
+  const loadedTabs = useRef(new Set<AdminTab>());
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDisableSchedulerConfirm, setShowDisableSchedulerConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -289,32 +290,36 @@ export default function AdminPage() {
     }
   }, [api, isAdmin]);
 
+  // Always-needed, cheap: integration status + scheduler + the measures list (used by several tabs).
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadIntegrations();
       void loadScheduler();
       void loadMeasures();
-      void loadDataMappings();
-      void loadTerminologyMappings();
-      void loadTemplates();
-      void loadDeliveryLog();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadIntegrations, loadMeasures, loadScheduler, loadDataMappings, loadTerminologyMappings, loadTemplates, loadDeliveryLog]);
+  }, [loadIntegrations, loadScheduler, loadMeasures]);
 
+  // Lazy per-tab loading: fetch each tab's heavier data (and its NitroGrids' rows) the first time the
+  // tab is shown, not all on mount — so landing on Operations doesn't fetch governance/outreach/audit
+  // data. `loadedTabs` is marked inside the timer so a cancelled fast tab-switch doesn't mark-without-load.
   useEffect(() => {
+    if (loadedTabs.current.has(activeTab)) return;
     const timer = window.setTimeout(() => {
-      void loadWaivers();
+      loadedTabs.current.add(activeTab);
+      if (activeTab === "governance") {
+        void loadDataMappings();
+        void loadTerminologyMappings();
+      } else if (activeTab === "outreach") {
+        void loadTemplates();
+        void loadDeliveryLog();
+        void loadWaivers();
+      } else if (activeTab === "audit") {
+        void loadAuditEvents();
+      }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadWaivers]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadAuditEvents();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loadAuditEvents]);
+  }, [activeTab, loadDataMappings, loadTerminologyMappings, loadTemplates, loadDeliveryLog, loadWaivers, loadAuditEvents]);
 
   async function validateMappings() {
     if (!isAdmin) return;
