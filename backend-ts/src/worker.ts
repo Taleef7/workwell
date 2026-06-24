@@ -28,6 +28,7 @@ import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
+import { handleComplianceSimulation } from "./routes/compliance-simulation.ts";
 import { handleOrders } from "./routes/orders.ts";
 import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
@@ -209,6 +210,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
   const immunizationResponse = await handleImmunizationForecast(req, env);
   if (immunizationResponse) return immunizationResponse;
+
+  // Advisory as-of-date compliance simulation for one employee (#197) — read-only, no writes.
+  const simulationResponse = await handleComplianceSimulation(req);
+  if (simulationResponse) return simulationResponse;
 
   // Order proposals — advisory "Action Evaluators → orders" over latest population runs (#77 E7).
   const ordersResponse = await handleOrders(req, env);
