@@ -60,14 +60,16 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
     return elm;
   }
 
-  async evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
+  async evaluate(input: EvaluateMeasureInput & { elm?: unknown }): Promise<MeasureOutcome> {
     const meta = MEASURES[input.measureId];
     if (!meta) throw new Error(`unknown measure '${input.measureId}'`);
     const evalDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
 
     const expand = this.opts.valueSetResolver != null && meta.expansionLibrary != null && meta.valueSets != null;
     const libraryName = expand ? meta.expansionLibrary! : meta.library;
-    const library = new cql.Library(this.loadElm(libraryName), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
+    // E11.1: an optional pre-translated ELM (e.g. generated CQL) overrides the bundled library — same
+    // measurement period / executor / extraction, so it proves codegen parity through the real engine path.
+    const library = new cql.Library(input.elm ?? this.loadElm(libraryName), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
     const startDate = meta.periodMonths > 0 ? subtractMonths(evalDate, meta.periodMonths) : evalDate;
     const measurementPeriod = new cql.Interval(
       cql.DateTime.parse(`${startDate}T00:00:00.0`),
