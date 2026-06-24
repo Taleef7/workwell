@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
 import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
+import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
 import { SkeletonCard } from '@/components/skeleton-loader';
 import { SlaChip } from '@/components/SlaChip';
 import { OUTCOME_LABELS, labelFor, outcomeStatusClass } from '@/lib/status';
@@ -77,6 +78,7 @@ export default function EmployeeProfilePage() {
       <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
       <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} />
+      <SimulateComplianceHistory externalId={externalId} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
