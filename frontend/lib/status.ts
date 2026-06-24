@@ -138,3 +138,28 @@ export function caseStatusClass(status: string): string {
   if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-900 dark:bg-indigo-900/30 dark:text-indigo-200";
   return "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
 }
+
+export const COMPLIANCE_STATUS_LABELS: Record<string, string> = {
+  COMPLIANT: "Compliant",
+  DUE_SOON: "Due Soon",
+  OVERDUE: "Overdue",
+  MISSING_DATA: "Missing Data",
+  EXCLUDED: "Excluded",
+  DECLINED: "Declined",
+  IN_PROGRESS: "In Progress",
+  NA: "N/A"
+};
+
+// Color + text for every roster display state (E10.5). Reuses the 5 canonical-bucket hues from
+// outcomeStatusClass and adds DECLINED (orange), IN_PROGRESS (blue), NA (faint). Dark-mode-aware.
+export function complianceStatusClass(status: string): string {
+  const normalized = normalizeEnumValue(status);
+  if (normalized === "COMPLIANT") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (normalized === "DUE_SOON") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (normalized === "OVERDUE") return "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300";
+  if (normalized === "MISSING_DATA") return "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300";
+  if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
+  if (normalized === "DECLINED") return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
+  if (normalized === "IN_PROGRESS") return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+  return "bg-neutral-100 text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400"; // NA / unknown
+}

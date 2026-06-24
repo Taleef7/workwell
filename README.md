@@ -132,6 +132,7 @@ npm run build
 
 ## Key routes
 
+- `/compliance` Individual Compliance Status roster grid (every employee × the selected panel's measures; chip + method per cell)
 - `/programs` compliance overview
 - `/programs/[measureId]` trend, drivers, risk outlook
 - `/programs/hierarchy` enterprise→location→provider→patient drill-down
