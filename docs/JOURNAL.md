@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-06-24 — E10 Plan 3: roster grid UI + per-employee compliance card (#190, #191)
+
+**Plan 2 merged (PR #195); shipped the E10 frontend on `feat/e10-plan3-roster-ui`.** New `/compliance`
+**"Individual Compliance Status"** grid (E10.3 #190): rows = every directory subject, columns = the
+selected panel's Active measures (Immunizations / OSHA Surveillance / Wellness & eCQM), each cell a
+status chip + method subtext using the E10.5 display vocabulary
+(COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED/DECLINED/IN_PROGRESS/NA). Panel/status/site/search
+filters + `X-Total-Count` paging; sticky subject column + `scope="col"` headers; row → employee profile.
+A RBAC-gated **Recalculate** triggers an `ALL_PROGRAMS` run through the #181 `RunStatusProvider` and
+refetches on `ww:run-complete`. Per-employee **Individual Compliance Status** card (E10.4 #191) on
+`/employees/[externalId]`: a RULE → STATUS → METHOD table merging all three panels (one roster call per
+panel, filtered to the subject), each row expandable to method/class/source-run. Pure frontend — no
+schema, no new deps; all status/method text comes verbatim from the read model (ADR-008). New shared
+pieces: `complianceStatusClass`/`COMPLIANCE_STATUS_LABELS` (`lib/status.ts`), `features/compliance`
+(`types.ts` + `ComplianceChip`). **Built subagent-driven (TDD per task).** One review catch on the grid
+task: the implementer had introduced an *unauthenticated* module-level `api` singleton to satisfy a bad
+`import { api }`; corrected to the token-bound `const api = useApi()` hook (mirrors `cases/page.tsx`) so
+live calls carry the session token, and the test mocks `@/lib/api/hooks` with a stable object (memoized
+hook parity). Frontend Vitest suite green; `npm run lint` + `npm run build` clean.
+
+**Open follow-ups (noted in the PR):** per-employee card **Recalculate** (EMPLOYEE rerun-to-verify) +
+**Simulate Compliance History** buttons, and inline `expressionResults` evidence drill-in (would need a
+backend outcome-evidence endpoint) — both deferred; the profile already exposes rerun + forecast and the
+case-detail page renders full evidence.
+
 ## 2026-06-22 — E10 Plan 2: roster read model + status vocabulary (branch)
 
 **Plan 1 merged (PR #194); started E10 Plan 2 on `feat/e10-plan2-roster-read-model`.** Adds the
