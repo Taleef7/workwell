@@ -16,8 +16,10 @@ const startTracking = vi.fn();
 const runState = { isActive: false };
 vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ isActive: runState.isActive, startTracking }) }));
 
-// Site scoping comes from the shared global filter (header selector / ?site=); default to no site.
-vi.mock("@/components/global-filter-context", () => ({ useGlobalFilters: () => ({ siteId: "" }) }));
+// Site scoping comes from the shared global filter (header selector / ?site=). Mutable holder so a
+// test can change the site between renders (the factory reads it lazily at render).
+const siteHolder = { siteId: "" };
+vi.mock("@/components/global-filter-context", () => ({ useGlobalFilters: () => ({ siteId: siteHolder.siteId }) }));
 
 vi.mock("@/lib/rbac", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/rbac")>();
@@ -52,6 +54,7 @@ beforeEach(() => {
   post.mockReset().mockResolvedValue({ runId: "run-9", status: "REQUESTED" });
   startTracking.mockReset();
   runState.isActive = false;
+  siteHolder.siteId = "";
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => vi.clearAllMocks());
@@ -85,6 +88,26 @@ describe("CompliancePage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Recalculate/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS" }));
     expect(startTracking).toHaveBeenCalledWith("run-9", "REQUESTED");
+  });
+
+  it("resets to page 1 when the global site filter changes", async () => {
+    // 200 matches over the default page size of 50 → 4 pages, so Next is enabled.
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: { panel: "immunizations", columns: rosterImmun.data.columns, rows: rosterImmun.data.rows },
+      headers: new Headers({ "X-Total-Count": "200" })
+    });
+    const { rerender } = render(<CompliancePage />);
+    await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    await waitFor(() => expect(String(getWithHeaders.mock.calls.at(-1)?.[0])).toContain("page=2"));
+
+    siteHolder.siteId = "Plant A"; // dashboard site selector changes externally
+    rerender(<CompliancePage />);
+    await waitFor(() => {
+      const url = String(getWithHeaders.mock.calls.at(-1)?.[0] ?? "");
+      expect(url).toContain("site=Plant+A");
+      expect(url).toContain("page=1");
+    });
   });
 
   it("disables Recalculate while a run is already active (no duplicate fan-out)", async () => {
