@@ -11,3 +11,7 @@ bindings:
   enrollment: { code: wellness-enrolled, valueSet: "urn:workwell:vs:wellness-enrollment" }
   waiver:     { code: wellness-exempt, valueSet: "urn:workwell:vs:wellness-exemption" }
   event:      { code: bp-screen, valueSet: "urn:workwell:vs:bp-screening", type: procedure }
+rule:
+  type: windowed-recency
+  windowDays: 365
+  dueSoonDays: 30
