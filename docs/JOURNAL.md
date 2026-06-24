@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-06-24 — Simulate Compliance History (#197)
+
+Shipped the last per-employee-screen action on `feat/simulate-compliance-history`. `GET
+/api/employees/:externalId/simulate?asOf=` runs an advisory, **non-persisted** as-of-date re-evaluation of
+one employee across every active measure — reusing the in-memory CQL engine + synthetic adapters
+(`simulateComplianceAsOf`): per measure it takes the seeded exam config, builds the bundle **anchored to
+today**, evaluates as-of the chosen date, and maps through the shared `deriveCell` vocabulary. Anchoring
+to today (not the as-of date) is what makes scrubbing meaningful — a later date ages RECURRING measures
+toward OVERDUE while PERMANENT (series-completion) measures stay constant, and simulate-as-of-today lines
+up with the live card's status (same seeded target; proven by a deterministic test: audiogram
+COMPLIANT→OVERDUE at +10y, mmr unchanged). The panel is a *live re-evaluation* (the card shows the last
+recorded run) and is framed advisory. A `SimulateComplianceHistory` panel on `/employees/[externalId]` lets the operator scrub a date
+and see the result with the same chips, clearly advisory. **Writes nothing** — no runs/outcomes/cases/audit;
+no schema; no new deps. CQL stays the sole compliance authority (ADR-008/ADR-012). This closes the
+per-employee-screen trio (Recalculate + evidence drill-in in #198, Simulate here). Built subagent-driven
+(TDD per task); backend + frontend suites green; lint + build clean.
+
 ## 2026-06-24 — Per-employee compliance card: Recalculate + CQL evidence drill-in
 
 Finished the two E10.4 deferrals on the `/employees/[externalId]` Individual Compliance Status card
