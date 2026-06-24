@@ -6,6 +6,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 
 interface OutcomesEnv {
   DB: CloudDatabase;
@@ -31,5 +32,11 @@ export async function handleOutcomes(req: Request, env: OutcomesEnv): Promise<Re
   const stores = await getStores(env);
   const outcome = await stores.outcomes.getOutcomeById(outcomeId);
   if (!outcome) return json({ error: "not_found", outcomeId }, 404);
-  return json({ outcomeId: outcome.id, status: outcome.status, evidenceJson: outcome.evidence });
+  // The engine persists only `expressionResults`; the case-detail path derives `why_flagged` on read.
+  // Merge it here so the card's CqlEvidence drill-in shows the same why_flagged summary (not undefined).
+  const evidenceJson = {
+    ...((outcome.evidence as Record<string, unknown>) ?? {}),
+    why_flagged: deriveWhyFlagged(outcome.evidence, outcome.measureId, outcome.evaluationPeriod, outcome.status),
+  };
+  return json({ outcomeId: outcome.id, status: outcome.status, evidenceJson });
 }

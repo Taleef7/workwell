@@ -12,6 +12,10 @@ vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 const authState = { role: "ROLE_ADMIN" as string | null };
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: authState.role ? { role: authState.role } : null }) }));
 
+const startTracking = vi.fn();
+const runState = { isActive: false };
+vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ startTracking, isActive: runState.isActive }) }));
+
 import { IndividualComplianceStatus } from "./IndividualComplianceStatus";
 
 function rosterFor(panel: string, measureId: string, name: string, status: string, method: string, outcomeId = "oc-1") {
@@ -30,6 +34,8 @@ function rosterFor(panel: string, measureId: string, name: string, status: strin
 
 beforeEach(() => {
   authState.role = "ROLE_ADMIN";
+  startTracking.mockReset();
+  runState.isActive = false;
   getWithHeaders.mockReset().mockImplementation((url: string) => {
     if (url.includes("panel=immunizations")) return Promise.resolve(rosterFor("immunizations", "mmr", "MMR", "COMPLIANT", "2 valid dose(s)"));
     if (url.includes("panel=osha")) return Promise.resolve(rosterFor("osha", "audiogram", "Audiogram", "OVERDUE", "Overdue — last 2024-01-01", "oc-2"));
@@ -59,15 +65,30 @@ describe("IndividualComplianceStatus", () => {
     expect(await screen.findByText("Dose Count")).toBeInTheDocument();
   });
 
-  it("Recalculate posts an EMPLOYEE run, then refetches and notifies the parent", async () => {
+  it("Recalculate fires an ALL_PROGRAMS run + tracks it; ww:run-complete refetches and notifies the parent", async () => {
     const onRecalculated = vi.fn();
     render(<IndividualComplianceStatus externalId="emp-001" onRecalculated={onRecalculated} />);
     await screen.findByText("MMR");
     getWithHeaders.mockClear();
     await userEvent.click(screen.getByRole("button", { name: /recalculate/i }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "EMPLOYEE", employeeExternalId: "emp-001" }));
+    // The card reads population runs (the roster excludes single-subject reruns), so it triggers a
+    // population ALL_PROGRAMS run via RunStatusProvider — not a per-employee run the roster would ignore.
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS" }));
+    expect(startTracking).toHaveBeenCalledWith("run-emp", "COMPLETED");
+    // The refetch + parent notify happen when the tracked run completes (not synchronously).
+    window.dispatchEvent(new CustomEvent("ww:run-complete", { detail: { runId: "run-emp", status: "COMPLETED" } }));
     await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
-    expect(onRecalculated).toHaveBeenCalled();
+    await waitFor(() => expect(onRecalculated).toHaveBeenCalled());
+  });
+
+  it("disables Recalculate while a run is already active (no duplicate fan-out)", async () => {
+    runState.isActive = true;
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    await screen.findByText("MMR");
+    const btn = screen.getByRole("button", { name: /run in progress/i });
+    expect(btn).toBeDisabled();
+    await userEvent.click(btn);
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("hides Recalculate for roles that cannot run measures", async () => {
