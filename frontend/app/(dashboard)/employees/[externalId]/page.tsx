@@ -18,7 +18,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function EmployeeProfilePage() {
   const { externalId } = useParams<{ externalId: string }>();
-  const { profile, loading, error } = useEmployeeProfile(externalId);
+  const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
 
   if (loading) {
     return (
@@ -76,7 +76,7 @@ export default function EmployeeProfilePage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
-      <IndividualComplianceStatus externalId={externalId} />
+      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">

@@ -108,6 +108,18 @@ export class PgOutcomeStore implements OutcomeStore {
     return rows.map(toRecord);
   }
 
+  async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
+    // Native UUID column — a malformed id yields no rows on the floor; don't let Postgres throw.
+    if (!isUuid(id)) return null;
+    const { rows } = await this.pool.query<OutcomeRow>(
+      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+         FROM ${T} WHERE id = $1`,
+      [id],
+    );
+    const row = rows[0];
+    return row ? toRecord(row) : null;
+  }
+
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { rows } = await this.pool.query<{
       measure_id: string;

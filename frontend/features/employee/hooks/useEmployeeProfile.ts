@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '@/lib/api/hooks';
 
 export interface MeasureOutcomeSummary {
@@ -50,16 +50,25 @@ export function useEmployeeProfile(externalId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refetch = useCallback(async () => {
     if (!externalId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
-    api.get<EmployeeProfile>(`/api/employees/${externalId}/profile`)
-      .then(setProfile)
-      .catch((e: Error) => setError(e.message ?? 'Failed to load profile'))
-      .finally(() => setLoading(false));
-  }, [externalId]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      setProfile(await api.get<EmployeeProfile>(`/api/employees/${externalId}/profile`));
+    } catch (e) {
+      setError((e as Error).message ?? "Failed to load profile");
+    } finally {
+      setLoading(false);
+    }
+  }, [api, externalId]);
 
-  return { profile, loading, error };
+  useEffect(() => {
+    // Defer out of the synchronous effect body (matches the compliance page) so refetch's setLoading
+    // doesn't trip react-hooks/set-state-in-effect. refetch() is still called directly by Recalculate.
+    const t = setTimeout(() => void refetch(), 0);
+    return () => clearTimeout(t);
+  }, [refetch]);
+
+  return { profile, loading, error, refetch };
 }

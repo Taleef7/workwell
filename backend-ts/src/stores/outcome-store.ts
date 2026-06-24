@@ -87,6 +87,7 @@ export interface OutcomeStore {
    */
   recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
   listOutcomes(runId: string): Promise<OutcomeRecord[]>;
+  getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —
    * bounds the scan to the selected measure/date range instead of all run history. Used by

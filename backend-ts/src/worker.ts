@@ -26,6 +26,7 @@ import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleCompliance } from "./routes/compliance.ts";
+import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
 import { handleOrders } from "./routes/orders.ts";
 import { handleExports } from "./routes/exports.ts";
@@ -200,6 +201,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
   const complianceResponse = await handleCompliance(req, env);
   if (complianceResponse) return complianceResponse;
+
+  // Single outcome evidence — hydrates a roster cell's evidenceRef for the compliance card.
+  const outcomesResponse = await handleOutcomes(req, env);
+  if (outcomesResponse) return outcomesResponse;
 
   // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
   const immunizationResponse = await handleImmunizationForecast(req, env);
