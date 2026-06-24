@@ -98,6 +98,18 @@ export class SqliteOutcomeStore implements OutcomeStore {
     return (results ?? []).map(toRecord);
   }
 
+  async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+           FROM outcomes WHERE id = ?`,
+      )
+      .bind(id)
+      .all<OutcomeRow>();
+    const row = (results ?? [])[0];
+    return row ? toRecord(row) : null;
+  }
+
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { results } = await this.db
       .prepare(
