@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import type { DisplayState } from "@/features/compliance/types";
@@ -30,28 +30,32 @@ export function SimulateComplianceHistory({ externalId }: { externalId: string }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (date: string) => {
+  // Debounced fetch (also fires on mount). A per-effect `cancelled` flag drops a stale in-flight
+  // response when the date changes again before it resolves, so an older request can never overwrite
+  // the newer selection (out-of-order race). setState lives in the timer callback (not synchronously in
+  // the effect body), so it doesn't trip react-hooks/set-state-in-effect.
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
       setLoading(true);
       setError(null);
       try {
-        setSnapshot(await api.get<Snapshot>(`/api/employees/${encodeURIComponent(externalId)}/simulate?asOf=${date}`));
+        const data = await api.get<Snapshot>(`/api/employees/${encodeURIComponent(externalId)}/simulate?asOf=${asOf}`);
+        if (!cancelled) setSnapshot(data);
       } catch (e) {
-        setError((e as Error).message ?? "Failed to simulate compliance.");
-        setSnapshot(null);
+        if (!cancelled) {
+          setError((e as Error).message ?? "Failed to simulate compliance.");
+          setSnapshot(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    },
-    [api, externalId]
-  );
-
-  // Debounced fetch when the date changes (also fires on mount). The setState lives in `load` (called
-  // from the timer callback), not synchronously in the effect body, so it doesn't trip set-state-in-effect.
-  useEffect(() => {
-    const t = setTimeout(() => void load(asOf), 300);
-    return () => clearTimeout(t);
-  }, [load, asOf]);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [api, externalId, asOf]);
 
   return (
     <section className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -82,6 +86,7 @@ export function SimulateComplianceHistory({ externalId }: { externalId: string }
         <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">Simulating…</p>
       ) : snapshot && snapshot.evaluations.length > 0 ? (
         <div className="mt-3 space-y-2">
+          <p className="text-[11px] text-neutral-400">Showing compliance as of {snapshot.asOf}</p>
           {snapshot.evaluations.map((ev) => (
             <div key={ev.measureId} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-2">
               <div>

@@ -45,4 +45,29 @@ describe("SimulateComplianceHistory", () => {
     render(<SimulateComplianceHistory externalId="emp-001" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   });
+
+  it("a stale (out-of-order) response cannot overwrite the latest selection", async () => {
+    // Hold each request open so we control resolution order.
+    const pending: Record<string, (snap: unknown) => void> = {};
+    get.mockReset().mockImplementation((url: string) => {
+      const asOf = new URL(`http://x${url}`).searchParams.get("asOf") ?? "";
+      return new Promise((resolve) => { pending[asOf] = resolve; });
+    });
+
+    render(<SimulateComplianceHistory externalId="emp-001" />);
+    // The mount request fires after the debounce; capture its (today's) date.
+    await waitFor(() => expect(Object.keys(pending).length).toBe(1));
+    const firstDate = Object.keys(pending)[0]!;
+
+    // Scrub to a newer date → a second request goes out while the first is still in flight.
+    fireEvent.change(screen.getByLabelText(/as of/i), { target: { value: "2030-01-01" } });
+    await waitFor(() => expect(pending["2030-01-01"]).toBeDefined());
+
+    // Resolve the NEWEST first, then the STALE first request — the stale one must be ignored.
+    pending["2030-01-01"]!(snapshotFor("2030-01-01"));
+    pending[firstDate]!(snapshotFor(firstDate));
+
+    await waitFor(() => expect(screen.getByText(`Showing compliance as of 2030-01-01`)).toBeInTheDocument());
+    expect(screen.queryByText(`Showing compliance as of ${firstDate}`)).not.toBeInTheDocument();
+  });
 });
