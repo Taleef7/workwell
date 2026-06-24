@@ -26,6 +26,15 @@ export default function CompliancePage() {
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
+  // Debounce the free-text inputs (site/search) so a fetch fires once the typing settles, not per
+  // keystroke (matches the cases page). The selects + paging drive `load` immediately.
+  const [debouncedSite, setDebouncedSite] = useState<string>("");
+  const [debouncedQ, setDebouncedQ] = useState<string>("");
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSite(site); setDebouncedQ(q); }, 300);
+    return () => clearTimeout(t);
+  }, [site, q]);
+
   const [roster, setRoster] = useState<Roster | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -39,8 +48,8 @@ export default function CompliancePage() {
       const params = new URLSearchParams();
       params.set("panel", panel);
       if (status) params.set("status", status);
-      if (site.trim()) params.set("site", site.trim());
-      if (q.trim()) params.set("q", q.trim());
+      if (debouncedSite.trim()) params.set("site", debouncedSite.trim());
+      if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${params.toString()}`);
@@ -54,7 +63,7 @@ export default function CompliancePage() {
     } finally {
       setLoading(false);
     }
-  }, [api, panel, status, site, q, page, pageSize]);
+  }, [api, panel, status, debouncedSite, debouncedQ, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls

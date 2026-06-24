@@ -25,7 +25,10 @@ export function IndividualComplianceStatus({ externalId }: { externalId: string 
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const params = new URLSearchParams({ q: externalId, pageSize: "5" });
+      // `q` is a substring match on name|externalId server-side; we exact-match the row below. Use a
+      // large pageSize (server cap) so the target subject can never be paged out of the match window
+      // even if the directory grows or another subject's name contains this id.
+      const params = new URLSearchParams({ q: externalId, pageSize: "200" });
       const results = await Promise.all(
         PANEL_OPTIONS.map(async (p) => {
           try {
