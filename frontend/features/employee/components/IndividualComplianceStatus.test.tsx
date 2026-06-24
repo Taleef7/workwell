@@ -38,9 +38,9 @@ afterEach(() => vi.clearAllMocks());
 describe("IndividualComplianceStatus", () => {
   it("merges all three panels into one RULE→STATUS→METHOD table", async () => {
     render(<IndividualComplianceStatus externalId="emp-001" />);
-    expect(await screen.findByText("Individual Compliance Status")).toBeInTheDocument();
-    await waitFor(() => expect(getWithHeaders).toHaveBeenCalledTimes(3));
-    expect(screen.getByText("MMR")).toBeInTheDocument();
+    // Wait on RENDERED output (not the mock call count) — the rows appear only after all 3 fetches
+    // resolve AND state flushes, which is later than when getWithHeaders is invoked.
+    expect(await screen.findByText("MMR")).toBeInTheDocument();
     expect(screen.getByText("Audiogram")).toBeInTheDocument();
     expect(screen.getByText("Diabetes HbA1c")).toBeInTheDocument();
     expect(screen.getByText("Compliant")).toBeInTheDocument();
@@ -49,8 +49,8 @@ describe("IndividualComplianceStatus", () => {
 
   it("expands a row to reveal the source run id", async () => {
     render(<IndividualComplianceStatus externalId="emp-001" />);
-    await waitFor(() => expect(getWithHeaders).toHaveBeenCalledTimes(3));
-    await userEvent.click(screen.getAllByRole("button", { name: /info/i })[0]);
+    const infoButtons = await screen.findAllByRole("button", { name: /info/i }); // waits until rows render
+    await userEvent.click(infoButtons[0]);
     expect(await screen.findByText(/run-7/)).toBeInTheDocument();
   });
 

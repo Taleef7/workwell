@@ -12,7 +12,12 @@ const apiMock = { getWithHeaders, post };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
 const startTracking = vi.fn();
-vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ isActive: false, startTracking }) }));
+// Mutable holder so a test can flip isActive without re-mocking (the factory reads it lazily at render).
+const runState = { isActive: false };
+vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ isActive: runState.isActive, startTracking }) }));
+
+// Site scoping comes from the shared global filter (header selector / ?site=); default to no site.
+vi.mock("@/components/global-filter-context", () => ({ useGlobalFilters: () => ({ siteId: "" }) }));
 
 vi.mock("@/lib/rbac", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/rbac")>();
@@ -46,6 +51,7 @@ beforeEach(() => {
   getWithHeaders.mockReset().mockResolvedValue(rosterImmun);
   post.mockReset().mockResolvedValue({ runId: "run-9", status: "REQUESTED" });
   startTracking.mockReset();
+  runState.isActive = false;
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 afterEach(() => vi.clearAllMocks());
@@ -79,6 +85,15 @@ describe("CompliancePage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Recalculate/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS" }));
     expect(startTracking).toHaveBeenCalledWith("run-9", "REQUESTED");
+  });
+
+  it("disables Recalculate while a run is already active (no duplicate fan-out)", async () => {
+    runState.isActive = true;
+    render(<CompliancePage />);
+    const btn = await screen.findByRole("button", { name: /run in progress/i });
+    expect(btn).toBeDisabled();
+    await userEvent.click(btn);
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("shows an error alert when the roster fetch fails", async () => {

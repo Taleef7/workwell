@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/api/hooks";
 import { useRunStatus } from "@/components/run-status-provider";
+import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
@@ -16,24 +17,25 @@ const PAGE_SIZES = [25, 50, 100, 200];
 export default function CompliancePage() {
   const api = useApi();
   const { user } = useAuth();
-  const { startTracking } = useRunStatus();
+  const { startTracking, isActive } = useRunStatus();
+  // Site scoping comes from the shared dashboard site selector (header) / `?site=` URL — same as the
+  // cases & programs pages — not a page-local field, so the global filter actually applies here.
+  const { siteId } = useGlobalFilters();
   const canRecalc = canRunMeasures(user?.role);
 
   const [panel, setPanel] = useState<PanelId>("immunizations");
   const [status, setStatus] = useState<string>("");
-  const [site, setSite] = useState<string>("");
   const [q, setQ] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
-  // Debounce the free-text inputs (site/search) so a fetch fires once the typing settles, not per
-  // keystroke (matches the cases page). The selects + paging drive `load` immediately.
-  const [debouncedSite, setDebouncedSite] = useState<string>("");
+  // Debounce the free-text search so a fetch fires once the typing settles, not per keystroke
+  // (matches the cases page). The selects + paging + global site filter drive `load` immediately.
   const [debouncedQ, setDebouncedQ] = useState<string>("");
   useEffect(() => {
-    const t = setTimeout(() => { setDebouncedSite(site); setDebouncedQ(q); }, 300);
+    const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
-  }, [site, q]);
+  }, [q]);
 
   const [roster, setRoster] = useState<Roster | null>(null);
   const [total, setTotal] = useState<number>(0);
@@ -48,7 +50,7 @@ export default function CompliancePage() {
       const params = new URLSearchParams();
       params.set("panel", panel);
       if (status) params.set("status", status);
-      if (debouncedSite.trim()) params.set("site", debouncedSite.trim());
+      if (siteId.trim()) params.set("site", siteId.trim());
       if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
@@ -63,7 +65,7 @@ export default function CompliancePage() {
     } finally {
       setLoading(false);
     }
-  }, [api, panel, status, debouncedSite, debouncedQ, page, pageSize]);
+  }, [api, panel, status, siteId, debouncedQ, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -81,7 +83,7 @@ export default function CompliancePage() {
   }, [load]);
 
   const recalculate = useCallback(async () => {
-    if (!canRecalc) return;
+    if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
     if (!window.confirm("Recalculate compliance for all programs? This runs every active measure across the workforce.")) return;
     setRecalcBusy(true);
     try {
@@ -95,7 +97,7 @@ export default function CompliancePage() {
     } finally {
       setRecalcBusy(false);
     }
-  }, [api, canRecalc, startTracking]);
+  }, [api, canRecalc, isActive, startTracking]);
 
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
@@ -114,10 +116,11 @@ export default function CompliancePage() {
           <button
             type="button"
             onClick={recalculate}
-            disabled={recalcBusy}
+            disabled={recalcBusy || isActive}
+            title={isActive ? "A run is already in progress" : undefined}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {recalcBusy ? "Starting…" : "Recalculate"}
+            {isActive ? "Run in progress…" : recalcBusy ? "Starting…" : "Recalculate"}
           </button>
         ) : null}
       </header>
@@ -143,15 +146,6 @@ export default function CompliancePage() {
             <option value="">All statuses</option>
             {STATUS_FILTER_OPTIONS.map((s) => (<option key={s} value={s}>{COMPLIANCE_STATUS_LABELS[s]}</option>))}
           </select>
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Site</span>
-          <input
-            value={site}
-            onChange={(e) => { setPage(1); setSite(e.target.value); }}
-            placeholder="All sites"
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          />
         </label>
         <label className="flex flex-col text-xs font-medium">
           <span className="mb-1">Search</span>
