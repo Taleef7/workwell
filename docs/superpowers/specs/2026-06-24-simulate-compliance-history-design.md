@@ -38,7 +38,10 @@ then `engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOf }
 `asOf − (TODAY − daysSince)`, so scrubbing `asOf` forward pushes a RECURRING measure toward OVERDUE and
 backward toward COMPLIANT — a real "history simulation". PERMANENT measures (series-completion, no recency)
 correctly stay constant across dates ("once compliant, always compliant"). A useful property falls out:
-**simulate as-of today reproduces the live cell** (both use the same seeded target).
+**simulate as-of today lines up with the live card's status** (both derive from the same deterministic
+seeded target). The panel is nonetheless a *live re-evaluation* (the card above shows the last recorded
+run), so it is framed as advisory and may differ in the `method` detail (absolute dates) — the caption
+makes this explicit rather than claiming byte-for-byte identity with the frozen run.
 
 ## 4. Architecture
 
