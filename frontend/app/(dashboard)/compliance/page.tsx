@@ -29,6 +29,17 @@ export default function CompliancePage() {
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
+  // A global site change can shrink the result set so the current page slices to empty
+  // ("No employees match" / "Page 5 of 1"). Jump back to page 1 the moment siteId changes — the
+  // React-documented "adjust state during render when a value changes" pattern, so `load` rebuilds with
+  // page=1 before it fires (no stale out-of-range request, no double fetch). The selects/search/page-size
+  // controls already reset the page in their own onChange; this covers the externally-driven site filter.
+  const [prevSiteId, setPrevSiteId] = useState(siteId);
+  if (siteId !== prevSiteId) {
+    setPrevSiteId(siteId);
+    setPage(1);
+  }
+
   // Debounce the free-text search so a fetch fires once the typing settles, not per keystroke
   // (matches the cases page). The selects + paging + global site filter drive `load` immediately.
   const [debouncedQ, setDebouncedQ] = useState<string>("");
