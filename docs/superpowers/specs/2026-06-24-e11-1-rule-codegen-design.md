@@ -96,28 +96,44 @@ live in `bindings:` — codegen reads them, so the `rule:` block carries only th
   build still compiles the hand-written `.cql` to ELM. The generated CQL is produced for the parity proof
   only — a later increment flips the build to consume `generated/` once it's trusted.
 
-### 4.4 Golden-parity proof (the de-risk)
+### 4.4 Outcome-parity proof (the de-risk)
 
-A test (`backend-ts/src/engine/cql/codegen/codegen-parity.test.ts`) that, for each migrated measure:
-1. reads the measure's `rule:` + `bindings:` from YAML, runs `generateCql`, and asserts the generated CQL
-   text **equals** the committed `measures/generated/<id>.cql` (snapshot — the generator is deterministic);
-2. compiles the generated CQL to ELM (reusing the spike translate path) and evaluates it against the
-   existing synthetic scenarios, asserting the **outcome + every define** matches the hand-written CQL's
-   golden (`backend-ts/spike/synthetic/_java_golden.json`, the same 40/40 harness) — i.e. **generated ≡
-   hand-written** for every scenario. Any drift fails CI.
+The generated CQL uses **canonical define names** (it need not reproduce each measure's idiosyncratic
+hand-written define names). For the series shape the canonical names already match the hand-written ones
+(`Enrolled` / `Has Contraindication` / `Refused` / `Dose Count` / `Series Complete` / `Excluded` /
+`Initial Population` / `Outcome Status`); for the windowed shape the canonical names are
+`Enrolled` / `Excluded` / `Most Recent Event Date` / `Days Since Last Event` / `Compliant` / `Due Soon` /
+`Overdue` / `Missing Data` / `Initial Population` / `Outcome Status` — chosen to satisfy the roster's
+`deriveWhyFlagged` regexes (`/^most recent .*date$/i`, `/^days since/i`, waiver/contraindication) so the
+existing roster/evidence surfaces keep working.
 
-This proves codegen produces the *same compliance behavior* as the trusted hand-written CQL before any UI
+The parity basis is **`Outcome Status`** — the only compliance authority (ADR-008). A test
+(`backend-ts/src/engine/cql/codegen/codegen-parity.test.ts`) that, for each migrated measure:
+1. reads the measure's `rule:` + `bindings:` from YAML, runs `generateCql`, asserts the generated CQL text
+   **equals** the committed `measures/generated/<id>.cql` (snapshot — the generator is deterministic);
+2. translates the generated CQL → ELM (the `@cqframework/cql` path the build's `compile-measures.mjs` uses)
+   and evaluates it over the existing synthetic scenarios, asserting its **`Outcome Status`** equals the
+   **hand-written** measure's `Outcome Status` (the committed ELM) for **every** scenario — i.e. **generated
+   ≡ hand-written on the compliance result**. Any drift fails CI. (Self-contained: compares generated vs
+   hand-written, both in Node — no dependence on the retired Java golden, so the E10 series measures are
+   covered too.)
+
+This proves codegen produces the *same compliance outcome* as the trusted hand-written CQL before any UI
 (E11.2) emits these params.
 
 ## 5. Scope — measures migrated in E11.1
 
-- **series-completion:** `mmr`, `varicella`, `hepatitis_b_vaccination_series` (the vaccine core, vamsi6).
-- **windowed-recency:** `audiogram`, `hazwoper`, `tb_surveillance` (the OSHA recurring core).
+- **series-completion:** `mmr`, `varicella`, `hepatitis_b_vaccination_series` (the vaccine core, vamsi6) —
+  structurally identical, code-scoped; the template reproduces them exactly.
+- **windowed-recency:** `audiogram`, `hypertension`, `cholesterol_ldl` — the three **code-scoped, uniform**
+  windowed measures (inline code-filter enrollment/waiver). They differ only in codes/value-sets + the
+  DUE_SOON band (`compliantMaxDays`), so one parameterized template covers all three.
 
-Each gets a `rule:` block in its YAML + a committed `measures/generated/<id>.cql` + golden-parity coverage.
-The other measures (wellness recurring, adult_immunization 10y, flu seasonal, cms122 value-based, cms125,
-eCQM catalog) are **left hand-written** and untouched this sub-project (codegen extends to them as the Rule
-Builder needs them).
+**Deliberately excluded this sub-project:** `hazwoper` + `tb_surveillance` use the **legacy non-code-scoped**
+pattern (`exists([Condition])` enrollment, `Count([Condition]) > 1` exemption) — generating code-scoped CQL
+for them would change behavior, so they need a separate migration to the inline-code pattern first (tracked,
+not in E11.1). Also left hand-written/untouched: adult_immunization (10y), flu (seasonal), cms122
+(value-based), cms125, the eCQM catalog. Codegen extends to these as the Rule Builder needs them.
 
 ## 6. Error / edge handling
 
@@ -131,8 +147,8 @@ Builder needs them).
 
 - **Codegen unit:** `generateCql` for each shape produces the expected CQL (snapshot vs the committed
   `generated/<id>.cql`); unknown `rule.type` throws.
-- **Golden parity:** generated-CQL ELM evaluates identically to the hand-written golden across all synthetic
-  scenarios for the 6 migrated measures (define-by-define).
+- **Outcome parity:** generated-CQL ELM's `Outcome Status` equals the hand-written measure's `Outcome
+  Status` across all synthetic scenarios for the 6 migrated measures (the compliance authority; §4.4).
 - **Schema:** the YAML loader accepts the new optional `rule:` block (existing measures without it still
   load).
 - **Full gate:** backend `tsc --noEmit` + `node --test` (incl. the existing 40/40 golden harness stays
