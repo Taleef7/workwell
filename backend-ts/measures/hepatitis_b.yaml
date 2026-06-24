@@ -14,3 +14,6 @@ bindings:
   waiver:     { code: hepb-contraindication, valueSet: "urn:workwell:vs:hepb-contraindication" }
   event:      { code: hepb-vaccine, valueSet: "urn:workwell:vs:hepb-vaccines", type: immunization }
   refusal:    { code: hepb-refusal, valueSet: "urn:workwell:vs:hepb-refusal" }
+rule:
+  type: series-completion
+  requiredDoses: 2

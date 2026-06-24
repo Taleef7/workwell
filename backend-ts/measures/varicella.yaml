@@ -14,3 +14,6 @@ bindings:
   waiver:     { code: varicella-contraindication, valueSet: "urn:workwell:vs:varicella-contraindication" }
   event:      { code: varicella-vaccine, valueSet: "urn:workwell:vs:varicella-vaccines", type: immunization }
   refusal:    { code: varicella-refusal, valueSet: "urn:workwell:vs:varicella-refusal" }
+rule:
+  type: series-completion
+  requiredDoses: 2

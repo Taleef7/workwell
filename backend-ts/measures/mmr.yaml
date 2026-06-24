@@ -14,3 +14,6 @@ bindings:
   waiver:     { code: mmr-contraindication, valueSet: "urn:workwell:vs:mmr-contraindication" }
   event:      { code: mmr-vaccine, valueSet: "urn:workwell:vs:mmr-vaccines", type: immunization }
   refusal:    { code: mmr-refusal, valueSet: "urn:workwell:vs:mmr-refusal" }
+rule:
+  type: series-completion
+  requiredDoses: 2
