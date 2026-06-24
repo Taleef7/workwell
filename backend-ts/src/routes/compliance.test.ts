@@ -32,6 +32,8 @@ before(async () => {
     runId: run.id, subjectId: "emp-001", measureId: "mmr", status: "COMPLIANT", evaluationPeriod: "2026-06-12",
     evidence: { expressionResults: [{ define: "Dose Count", result: 2 }] },
   });
+  // The roster only reads terminal (COMPLETED/PARTIAL_FAILURE) population runs — finalize so the cell shows.
+  await runStore.finalizeRun(run.id, "COMPLETED");
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 

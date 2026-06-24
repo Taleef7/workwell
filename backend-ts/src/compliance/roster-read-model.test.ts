@@ -45,6 +45,27 @@ test("buildRoster — status filter keeps only subjects with >=1 matching cell; 
   assert.equal(roster.total, 0);
 });
 
+test("buildRoster — a newer in-flight RUNNING run is ignored; the last COMPLETED roster stands", async () => {
+  // run-2 is newer but still RUNNING (an async ALL_PROGRAMS run persists outcomes before finalizing),
+  // carrying a partial OVERDUE outcome. The roster must keep run-1's COMPLETED COMPLIANT cell.
+  const withRun: OutcomeWithRun[] = [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
+    { runId: "run-2", runStartedAt: "2026-06-19T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "RUNNING", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "OVERDUE" },
+  ];
+  const byRun: Record<string, OutcomeRecord[]> = {
+    "run-1": [
+      { id: "o-1", runId: "run-1", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+    ],
+    "run-2": [
+      { id: "o-2", runId: "run-2", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-19", status: "OVERDUE", evidence: ev([["Dose Count", 0]]), evaluatedAt: "2026-06-19T00:00:00Z" },
+    ],
+  };
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun) }, { panel: "immunizations" });
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "COMPLIANT", "in-flight RUNNING run must not override the last COMPLETED cell");
+  assert.equal(row.cells["mmr"]!.evidenceRef?.runId, "run-1");
+});
+
 test("buildRoster — two panel measures sharing one run load it once (no N+1); unevaluated measure → NA method", async () => {
   const withRun: OutcomeWithRun[] = [
     { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
