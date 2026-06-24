@@ -9,24 +9,7 @@ import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, f
 import { useApi } from "@/lib/api/hooks";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-
-// CQL/FHIR measure-scaffolding defines that carry no domain meaning for the
-// Why-Flagged narrative (the custom WorkWell defines + "Outcome Status" tell the
-// story). Suppressed from the human-readable evidence list; the raw JSON view
-// below still contains them, so traceability is preserved.
-const INTERNAL_DEFINES = new Set([
-  "Patient",
-  "Initial Population",
-  "Numerator",
-  "Numerator Exclusion",
-  "Denominator",
-  "Denominator Exclusion",
-  "Denominator Exception",
-]);
-
-function isInternalDefine(define: string): boolean {
-  return INTERNAL_DEFINES.has(define.trim());
-}
+import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
 
 // Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
 // The input still accepts any free-text handle; this only offers quick picks.
@@ -604,15 +587,8 @@ export default function CaseDetailPage() {
 
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Why Flagged Evidence</summary>
-            <div className="mt-3 space-y-2">
-              {(caseDetail.evidenceJson.expressionResults ?? [])
-                .filter((row) => !isInternalDefine(String(row.define ?? "")))
-                .map((row, index) => (
-                <div key={`${String(row.define ?? index)}-${index}`} className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
-                  <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{String(row.define ?? "define")}</p>
-                  <p className="text-xs text-neutral-700 dark:text-neutral-300">{String(row.result)}</p>
-                </div>
-              ))}
+            <div className="mt-3">
+              <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} />
             </div>
           </details>
 
@@ -949,48 +925,8 @@ export default function CaseDetailPage() {
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
               <h4 className="mt-2 text-xl font-semibold">CQL Evidence Explorer</h4>
-              <div className="mt-4 space-y-2">
-                {(caseDetail.evidenceJson.expressionResults ?? [])
-                  .filter((row) => !isInternalDefine(String(row.define ?? "")))
-                  .map((row, index) => {
-                  const defineStr = String(row.define ?? "define");
-                  const resultStr = String(row.result ?? "");
-                  const isOutcomeStatus = defineStr === "Outcome Status";
-                  const isTrue = resultStr.toLowerCase() === "true";
-                  const isFalse = resultStr.toLowerCase() === "false";
-                  const isNull = resultStr === "null" || resultStr === "";
-                  const isDate = /^\d{4}-\d{2}-\d{2}/.test(resultStr);
-                  const isNumber = !isNaN(Number(resultStr)) && resultStr !== "" && !isDate;
-                  let chipClass = "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
-                  let chipLabel = resultStr || "—";
-                  if (isOutcomeStatus) {
-                    chipClass = "bg-amber-100 text-amber-900 font-semibold";
-                  } else if (isTrue) {
-                    chipClass = "bg-emerald-100 text-emerald-800";
-                    chipLabel = "✓ true";
-                  } else if (isFalse) {
-                    chipClass = "bg-red-100 text-red-800";
-                    chipLabel = "✗ false";
-                  } else if (isNull) {
-                    chipClass = "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 italic";
-                    chipLabel = "not found";
-                  } else if (isDate) {
-                    chipClass = "bg-blue-100 text-blue-800";
-                    chipLabel = `📅 ${resultStr.slice(0, 10)}`;
-                  } else if (isNumber) {
-                    const n = Number(resultStr);
-                    chipClass = n > 0 ? "bg-orange-100 text-orange-800" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
-                  }
-                  return (
-                    <div
-                      key={`${defineStr}-${index}`}
-                      className="flex items-center justify-between gap-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3"
-                    >
-                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{defineStr}</p>
-                      <span className={`rounded-full px-3 py-1 text-xs ${chipClass}`}>{chipLabel}</span>
-                    </div>
-                  );
-                })}
+              <div className="mt-4">
+                <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} />
               </div>
 
               {linkedValueSets.length > 0 ? (
@@ -1018,16 +954,7 @@ export default function CaseDetailPage() {
 
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">why_flagged</p>
-                {caseDetail.evidenceJson.why_flagged ? (
-                  <dl className="mt-3 grid gap-2 text-xs text-neutral-700 dark:text-neutral-300 sm:grid-cols-2">
-                    <Row label="Last exam date" value={caseDetail.evidenceJson.why_flagged.last_exam_date ?? "None"} />
-                    <Row label="Window (days)" value={String(caseDetail.evidenceJson.why_flagged.compliance_window_days)} />
-                    <Row label="Days overdue" value={String(caseDetail.evidenceJson.why_flagged.days_overdue ?? 0)} />
-                    <Row label="Role eligible" value={caseDetail.evidenceJson.why_flagged.role_eligible ? "Yes" : "No"} />
-                    <Row label="Site eligible" value={caseDetail.evidenceJson.why_flagged.site_eligible ? "Yes" : "No"} />
-                    <Row label="Waiver status" value={caseDetail.evidenceJson.why_flagged.waiver_status} />
-                  </dl>
-                ) : null}
+                <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                   {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
                 </pre>
