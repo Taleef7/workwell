@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-06-24 — Per-employee compliance card: Recalculate + CQL evidence drill-in
+
+Finished the two E10.4 deferrals on the `/employees/[externalId]` Individual Compliance Status card
+(`feat/compliance-card-actions`). **Recalculate** — a RBAC-gated button that fires the existing
+synchronous EMPLOYEE run (`POST /api/runs/manual`, audited), then refetches the card and the whole
+profile (`useEmployeeProfile` now exposes `refetch`). **Evidence drill-in** — each row's Info expander
+lazy-loads the cell's outcome via a new read-only `GET /api/outcomes/:outcomeId` (`getOutcomeById` on the
+floor + ceiling; no schema) and renders the CQL `expressionResults`/`why_flagged` through a new shared
+`CqlEvidence` component, which **also replaces the duplicated inline evidence JSX on case-detail** (single
+source — both the mobile + desktop blocks + the why_flagged summary now use `CqlExpressionResults`/
+`CqlWhyFlagged`). CQL stays the sole compliance authority — the endpoint is read-only and the card never
+derives status (ADR-008). Built subagent-driven (TDD per task); the only review catch was a
+`react-hooks/set-state-in-effect` lint trip on the new `load`/`refetch` effects, fixed with the same
+deferred-`setTimeout` pattern the compliance page uses. Simulate Compliance History stays deferred (its
+own issue, #197). Backend suite + frontend suite green; lint + build clean.
+
 ## 2026-06-24 — E10 Plan 3: roster grid UI + per-employee compliance card (#190, #191)
 
 **Plan 2 merged (PR #195); shipped the E10 frontend on `feat/e10-plan3-roster-ui`.** New `/compliance`
