@@ -53,4 +53,18 @@ describe("IndividualComplianceStatus", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /info/i })[0]);
     expect(await screen.findByText(/run-7/)).toBeInTheDocument();
   });
+
+  it("renders the surviving panels when one panel fetch fails (card never blanks)", async () => {
+    getWithHeaders.mockReset().mockImplementation((url: string) => {
+      if (url.includes("panel=immunizations")) return Promise.reject(new Error("panel down"));
+      if (url.includes("panel=osha")) return Promise.resolve(rosterFor("osha", "audiogram", "Audiogram", "OVERDUE", "Overdue — last 2024-01-01"));
+      return Promise.resolve(rosterFor("wellness", "cms122", "Diabetes HbA1c", "MISSING_DATA", "No record on file"));
+    });
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    await waitFor(() => expect(getWithHeaders).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Audiogram")).toBeInTheDocument();
+    expect(screen.getByText("Diabetes HbA1c")).toBeInTheDocument();
+    expect(screen.queryByText("MMR")).not.toBeInTheDocument();
+    expect(screen.queryByText("No evaluated measures for this employee yet.")).not.toBeInTheDocument();
+  });
 });

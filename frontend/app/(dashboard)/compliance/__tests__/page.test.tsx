@@ -80,4 +80,20 @@ describe("CompliancePage", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS" }));
     expect(startTracking).toHaveBeenCalledWith("run-9", "REQUESTED");
   });
+
+  it("shows an error alert when the roster fetch fails", async () => {
+    getWithHeaders.mockReset().mockRejectedValue(new Error("boom"));
+    render(<CompliancePage />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("boom");
+  });
+
+  it("shows an empty-state row when no employees match", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: { panel: "immunizations", columns: rosterImmun.data.columns, rows: [] },
+      headers: new Headers({ "X-Total-Count": "0" })
+    });
+    render(<CompliancePage />);
+    expect(await screen.findByText("No employees match these filters.")).toBeInTheDocument();
+  });
 });
