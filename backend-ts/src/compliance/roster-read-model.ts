@@ -10,7 +10,7 @@ import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { PANELS, DEFAULT_PANEL, isPanelId, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
 
@@ -56,8 +56,13 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     complianceClass: MEASURE_BINDINGS[id]?.complianceClass ?? "RECURRING",
   }));
 
-  // 1) latest population run per panel measure (no evidence) → its run id.
-  const popRows = (await deps.outcomeStore.listOutcomesWithRun({})).filter((r) => isPopulationRun(r.runScopeType));
+  // 1) latest population run per panel measure (no evidence) → its run id. Exclude single-subject
+  //    CASE/EMPLOYEE reruns AND in-flight RUNNING runs — an async ALL_PROGRAMS/SITE run persists each
+  //    outcome before it finalizes, so without the terminal-status guard `latestRunRows` could pick a
+  //    partial in-flight run and surface partial statuses/NA (matches programOverview / order proposals).
+  const popRows = (await deps.outcomeStore.listOutcomesWithRun({})).filter(
+    (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+  );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of popRows) {
     if (!measureIds.includes(r.measureId)) continue;
