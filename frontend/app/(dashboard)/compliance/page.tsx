@@ -57,7 +57,12 @@ export default function CompliancePage() {
   }, [api, panel, status, site, q, page, pageSize]);
 
   useEffect(() => {
-    void load();
+    // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
+    // don't trip react-hooks/set-state-in-effect.
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   useEffect(() => {
