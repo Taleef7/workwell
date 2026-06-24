@@ -1,5 +1,26 @@
 # Architecture Decision Records
 
+## ADR-015: CQL is canonical; rule-params compile to CQL (codegen) — E11.1 (#183)
+
+**Decision.** Answering Doug's "is CQL or YAML canonical?": **CQL/ELM is the sole execution + standards-
+fidelity layer** (ADR-008 holds — `Outcome Status` is the only compliance authority). Structured
+**rule-params** (a new `rule:` block in a measure's YAML) are the canonical *authoring* surface for
+parametric measures; a deterministic **codegen** (`backend-ts/src/engine/cql/codegen/generate-cql.ts`)
+compiles `rule:` (+ the existing `bindings:` codes) → CQL → ELM via the existing pipeline. **One execution
+path — no second evaluator.** Codegen is **opt-in per measure**: a measure with no `rule:` block keeps its
+hand-written `.cql` (eCQM/complex measures stay hand-authored; E14 import/diff unaffected).
+
+**Scope (E11.1).** Two rule shapes: `series-completion` (mmr/varicella/hepatitis_b) and `windowed-recency`
+(audiogram/hypertension/cholesterol_ldl — the code-scoped uniform windowed measures). The generated CQL
+uses canonical define names and is proven **`Outcome Status`-equivalent** to the hand-written CQL across the
+synthetic scenarios (`codegen-parity.test.ts`, 6 measures × 4 scenarios). **No cutover** — the hand-written
+`.cql` remains the build source; `measures/generated/<id>.cql` is the parity artifact. Legacy non-code-scoped
+measures (hazwoper, tb_surveillance) are excluded pending a code-scope migration. The Rule Builder UI (E11.2)
+emits the `rule:` params; segments/risk-groups (E11.3) are separate.
+
+**Consequences.** Non-CQL authors can change a rule's thresholds via params (E11.2 builds the form); CQL
+remains the standards layer; no schema/DDL (rule-params are build-time YAML); no new runtime deps.
+
 ## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
 
 - **Date:** 2026-06-19
