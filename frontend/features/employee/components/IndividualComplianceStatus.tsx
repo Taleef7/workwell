@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { CqlEvidence, type EvidenceJson } from "@/features/evidence/CqlEvidence";
@@ -33,6 +34,7 @@ export function IndividualComplianceStatus({
 }) {
   const api = useApi();
   const { user } = useAuth();
+  const { startTracking, isActive } = useRunStatus();
   const canRecalc = canRunMeasures(user?.role);
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -77,6 +79,16 @@ export function IndividualComplianceStatus({
     return () => clearTimeout(t);
   }, [load]);
 
+  // Refetch the card + parent profile when a tracked run finishes (Recalculate, or any run elsewhere).
+  useEffect(() => {
+    const onComplete = () => {
+      void load();
+      onRecalculated?.();
+    };
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [load, onRecalculated]);
+
   const toggle = useCallback(
     async (measureId: string, cell: RosterCell) => {
       const willOpen = !(open[measureId] ?? false);
@@ -95,24 +107,27 @@ export function IndividualComplianceStatus({
     [api, open, evidenceByOutcome]
   );
 
+  // The card shows the latest POPULATION run per measure (roster read model excludes single-subject
+  // EMPLOYEE/CASE reruns — isPopulationRun). So a per-employee rerun would never surface here; instead
+  // Recalculate fires an ALL_PROGRAMS population run (the run the roster actually reads) through the
+  // shared RunStatusProvider, and the ww:run-complete listener above refetches when it finishes. Same
+  // pattern as the /compliance grid's Recalculate.
   const recalculate = useCallback(async () => {
-    if (!canRecalc) return;
-    if (!window.confirm(`Recalculate compliance for ${externalId}? This re-evaluates every active measure for this employee.`)) return;
+    if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
+    if (!window.confirm("Recalculate compliance for all programs? This runs every active measure across the workforce.")) return;
     setRecalcBusy(true);
     setError(null);
     try {
-      await api.post<{ scopeType: string; employeeExternalId: string }, unknown>("/api/runs/manual", {
-        scopeType: "EMPLOYEE",
-        employeeExternalId: externalId,
+      const result = await api.post<{ scopeType: string }, { runId: string; status?: string }>("/api/runs/manual", {
+        scopeType: "ALL_PROGRAMS",
       });
-      await load();
-      onRecalculated?.();
+      startTracking(result.runId, result.status ?? "REQUESTED");
     } catch (e) {
       setError((e as Error).message ?? "Failed to recalculate.");
     } finally {
       setRecalcBusy(false);
     }
-  }, [api, canRecalc, externalId, load, onRecalculated]);
+  }, [api, canRecalc, isActive, startTracking]);
 
   return (
     <section className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -122,10 +137,11 @@ export function IndividualComplianceStatus({
           <button
             type="button"
             onClick={recalculate}
-            disabled={recalcBusy}
+            disabled={recalcBusy || isActive}
+            title={isActive ? "A run is already in progress" : undefined}
             className="rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {recalcBusy ? "Recalculating…" : "Recalculate"}
+            {isActive ? "Run in progress…" : recalcBusy ? "Starting…" : "Recalculate"}
           </button>
         ) : null}
       </div>

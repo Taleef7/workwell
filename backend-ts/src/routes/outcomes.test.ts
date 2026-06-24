@@ -45,10 +45,13 @@ test("POST is not handled by this route", async () => {
 test("GET /api/outcomes/:id → { outcomeId, status, evidenceJson }", async () => {
   const res = (await handleOutcomes(new Request(`http://x/api/outcomes/${outcomeId}`, { method: "GET" }), env as never))!;
   assert.equal(res.status, 200);
-  const body = (await res.json()) as { outcomeId: string; status: string; evidenceJson: { expressionResults: Array<{ define: string; result: unknown }> } };
+  const body = (await res.json()) as { outcomeId: string; status: string; evidenceJson: { expressionResults: Array<{ define: string; result: unknown }>; why_flagged?: { outcome_status?: string; compliance_window_days?: number } } };
   assert.equal(body.outcomeId, outcomeId);
   assert.equal(body.status, "COMPLIANT");
   assert.equal(body.evidenceJson.expressionResults[0]!.define, "Dose Count");
+  // why_flagged is derived on read (engine stores only expressionResults) so the card drill-in shows it.
+  assert.equal(body.evidenceJson.why_flagged?.outcome_status, "COMPLIANT");
+  assert.equal(typeof body.evidenceJson.why_flagged?.compliance_window_days, "number");
 });
 
 test("GET unknown outcome id → 404", async () => {
