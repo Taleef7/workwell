@@ -53,3 +53,20 @@ test("an unknown rule type throws", () => {
   // @ts-expect-error — deliberate bad type
   assert.throws(() => generateCql({ library: "X", version: "1.0.0", rule: { type: "nope" }, bindings: SERIES_CODES }));
 });
+
+test("windowed compliantMax = windowDays - dueSoonDays (catches an off-by-one with a NON-default band)", () => {
+  // All migrated measures use dueSoonDays:30 (→335); use 60 here so a wrong `windowDays + dueSoonDays`
+  // (=425) or any other miscompute can't pass on the hardcoded 335.
+  const cql = generateCql({
+    library: "X", version: "1.0.0",
+    rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 60 },
+    bindings: {
+      enrollment: { code: "e", valueSet: "urn:vs:e" },
+      waiver: { code: "w", valueSet: "urn:vs:w" },
+      event: { code: "ev", valueSet: "urn:vs:ev", type: "procedure" },
+    },
+  });
+  assert.match(cql, /"Days Since Last Event" <= 305/);                                  // 365 - 60
+  assert.match(cql, /"Days Since Last Event" > 305 and "Days Since Last Event" <= 365/);
+  assert.doesNotMatch(cql, /<= 425|<= 335/);
+});
