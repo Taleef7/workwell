@@ -50,6 +50,8 @@ export async function simulateComplianceAsOf(
 
   const evaluations: SnapshotEvaluation[] = [];
   for (const measureId of Object.keys(MEASURES)) {
+    // Every runnable measure is expected to have a binding; a gap is caught by the length-parity
+    // assertions in the snapshot/route tests (evaluations.length === Object.keys(MEASURES).length).
     const binding = MEASURE_BINDINGS[measureId];
     if (!binding) continue;
     const name = MEASURES[measureId]!.name;

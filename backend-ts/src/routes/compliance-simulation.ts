@@ -6,11 +6,13 @@
  * `/profile` + `/search`, so this `/simulate` path is not intercepted.
  */
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { simulateComplianceAsOf } from "../run/employee-compliance-snapshot.ts";
 
-// The engine is stateless after construction (loaded ELM) — build once, reuse across requests.
-const engine = new CqlExecutionEngine();
+// The engine is stateless after construction (loaded ELM) — build once, reuse across requests
+// (matches the singletons in cases.ts / runs.ts).
+const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });

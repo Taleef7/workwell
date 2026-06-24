@@ -59,7 +59,8 @@ export function SimulateComplianceHistory({ externalId }: { externalId: string }
         <div>
           <h2 className="text-base font-semibold">Simulate Compliance History</h2>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Advisory only — re-evaluates compliance as of the chosen date. Never changes status; CQL is the sole authority.
+            Advisory only — a live re-evaluation as of the chosen date (the card above shows the last recorded run).
+            Never changes status; CQL is the sole authority.
           </p>
         </div>
         <label className="flex flex-col text-xs font-medium">
@@ -85,7 +86,12 @@ export function SimulateComplianceHistory({ externalId }: { externalId: string }
             <div key={ev.measureId} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-2">
               <div>
                 <span className="text-sm font-medium">{ev.name}</span>
-                <span className="ml-1 text-[10px] uppercase text-neutral-400">{ev.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
+                <span
+                  className="ml-1 text-[10px] uppercase text-neutral-400"
+                  title={ev.complianceClass === "PERMANENT" ? "Permanent (series-completion)" : "Recurring (windowed)"}
+                >
+                  {ev.complianceClass === "PERMANENT" ? "perm" : "rec"}
+                </span>
               </div>
               <ComplianceChip cell={{ status: ev.status, method: ev.method }} />
             </div>
