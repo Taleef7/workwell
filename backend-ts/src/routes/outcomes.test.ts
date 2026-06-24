@@ -55,3 +55,8 @@ test("GET unknown outcome id → 404", async () => {
   const res = (await handleOutcomes(new Request("http://x/api/outcomes/00000000-0000-0000-0000-000000000000", { method: "GET" }), env as never))!;
   assert.equal(res.status, 404);
 });
+
+test("GET a malformed percent-encoded id → 404 (not a thrown 500)", async () => {
+  const res = (await handleOutcomes(new Request("http://x/api/outcomes/%E0%A4%A", { method: "GET" }), env as never))!;
+  assert.equal(res.status, 404);
+});

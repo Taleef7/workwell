@@ -77,6 +77,19 @@ describe("IndividualComplianceStatus", () => {
     expect(screen.queryByRole("button", { name: /recalculate/i })).not.toBeInTheDocument();
   });
 
+  it("renders the surviving panels when one panel fetch fails (card never blanks)", async () => {
+    getWithHeaders.mockReset().mockImplementation((url: string) => {
+      if (url.includes("panel=immunizations")) return Promise.reject(new Error("panel down"));
+      if (url.includes("panel=osha")) return Promise.resolve(rosterFor("osha", "audiogram", "Audiogram", "OVERDUE", "Overdue — last 2024-01-01", "oc-2"));
+      return Promise.resolve(rosterFor("wellness", "cms122", "Diabetes HbA1c", "MISSING_DATA", "No record on file", "oc-3"));
+    });
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(await screen.findByText("Audiogram")).toBeInTheDocument();
+    expect(screen.getByText("Diabetes HbA1c")).toBeInTheDocument();
+    expect(screen.queryByText("MMR")).not.toBeInTheDocument();
+    expect(screen.queryByText("No evaluated measures for this employee yet.")).not.toBeInTheDocument();
+  });
+
   it("shows 'Evidence unavailable' when the evidence fetch fails", async () => {
     get.mockReset().mockRejectedValue(new Error("boom"));
     render(<IndividualComplianceStatus externalId="emp-001" />);

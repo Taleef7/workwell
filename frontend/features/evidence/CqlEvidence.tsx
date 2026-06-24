@@ -27,9 +27,9 @@ const isInternalDefine = (define: string): boolean => INTERNAL_DEFINES.has(defin
 
 function WhyFlaggedRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <div className="flex items-start justify-between gap-4">
       <dt className="text-neutral-500 dark:text-neutral-400">{label}</dt>
-      <dd className="font-medium text-neutral-800 dark:text-neutral-200">{value}</dd>
+      <dd className="text-right font-medium text-neutral-900 dark:text-neutral-100">{value}</dd>
     </div>
   );
 }

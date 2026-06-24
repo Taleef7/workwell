@@ -21,7 +21,13 @@ export async function handleOutcomes(req: Request, env: OutcomesEnv): Promise<Re
   const match = url.pathname.match(/^\/api\/outcomes\/([^/]+)$/);
   if (!match) return null;
 
-  const outcomeId = decodeURIComponent(match[1]!);
+  let outcomeId: string;
+  try {
+    outcomeId = decodeURIComponent(match[1]!);
+  } catch {
+    // A malformed percent-encoding (e.g. a bare `%`) is a non-existent id → 404, not a thrown 500.
+    return json({ error: "not_found", outcomeId: match[1]! }, 404);
+  }
   const stores = await getStores(env);
   const outcome = await stores.outcomes.getOutcomeById(outcomeId);
   if (!outcome) return json({ error: "not_found", outcomeId }, 404);
