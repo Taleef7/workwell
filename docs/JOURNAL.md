@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-06-24 — E11.1: rule-params → CQL codegen + ADR-015 (canonical decision)
+
+Started epic E11 (#183) with the linchpin decision: **CQL is canonical; rule-params compile to CQL**
+(ADR-015) — answering Doug's CQL-vs-YAML question without a second execution path. New
+`engine/cql/codegen/generate-cql.ts` emits canonical CQL for two rule shapes — `series-completion`
+(mmr/varicella/hepatitis_b) and `windowed-recency` (audiogram/hypertension/cholesterol_ldl) — from each
+measure's new YAML `rule:` block (via `npm run gen-cql` → `measures/generated/<id>.cql`). Proven
+**`Outcome Status`-equivalent** to the hand-written CQL across all synthetic scenarios
+(`codegen-parity.test.ts`: 6 measures × 4 scenarios = 24 assertions green — translating generated CQL → ELM
+in-process via `compileCql` and evaluating through the real engine with an optional `elm` override). **No
+cutover** (hand-written `.cql` stays the build source), **no schema, no new deps**; legacy non-code-scoped
+measures (hazwoper/tb) excluded pending a code-scope migration. The de-risk landed clean — codegen produced
+identical outcomes with no template fixes needed. Next: E11.2 Rule Builder UI (form → `rule:`), E11.3
+segments/risk-groups. Built subagent-driven; backend suite + typecheck green.
+
 ## 2026-06-24 — Simulate Compliance History (#197)
 
 Shipped the last per-employee-screen action on `feat/simulate-compliance-history`. `GET

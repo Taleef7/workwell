@@ -11,3 +11,7 @@ bindings:
   enrollment: { code: hearing-enrollment, valueSet: "urn:workwell:vs:hearing-enrollment" }
   waiver:     { code: audiogram-waiver,   valueSet: "urn:workwell:vs:audiogram-waiver" }
   event:      { code: audiogram-procedure, valueSet: "urn:workwell:vs:audiogram-procedures", type: procedure }
+rule:
+  type: windowed-recency
+  windowDays: 365
+  dueSoonDays: 30
