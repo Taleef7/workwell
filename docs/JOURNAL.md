@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-22 — E10 Plan 2: roster read model + status vocabulary (branch)
+
+**Plan 1 merged (PR #194); started E10 Plan 2 on `feat/e10-plan2-roster-read-model`.** Adds the
+backend behind the "Individual Compliance Status" grid: a new `src/compliance/` module —
+`panels.ts` (immunizations / OSHA / wellness column sets), `roster-vocabulary.ts` (the **E10.5**
+`deriveCell`: maps a measure outcome's canonical bucket + evidence + `complianceClass` →
+`{ status, method }`, adding the **DECLINED / IN_PROGRESS / NA** display states + method strings on
+top of the 5 canonical buckets), and `roster-read-model.ts` (the **E10.2** `buildRoster`: rows = every
+directory subject, columns = the panel's Active measures, cells over the latest population run per
+measure — reusing `rollup-shared` `latestRunRows`/`isPopulationRun`, evidence via `listOutcomes`
+cached per run, NA where unevaluated; filters + paging + `total`). Exposed read-only as
+**`GET /api/compliance/roster`** (`+ X-Total-Count`), authenticated under `/api/**` (all roles, like
+`/api/hierarchy/rollup`). The persisted status is unchanged — `deriveCell` is a display refinement
+only (ADR-008). No schema, no new deps. Built subagent-driven (TDD per task), then an opus whole-branch
+review (**approve**, no Critical/Important); folded in its cheap polish (dose-count fallthrough harden,
+class-agnostic refusal comment + RECURRING-refusal test, a run-cache no-N+1 test). Suite green (~595
+backend tests, 0 fail), typecheck clean. NA is implemented but dormant on synthetic data (everyone is
+enrolled) until E11 segment eligibility. Next: **Plan 3** — the grid (E10.3 #190) + per-employee
+screen (E10.4 #191).
+
 ## 2026-06-22 — E10 Plan 1: measure taxonomy + permanent immunization vaccine panel (branch)
 
 **Started the post-demo (June-15) WebChart-convergence roadmap.** Decomposed Doug's June-15 demo
