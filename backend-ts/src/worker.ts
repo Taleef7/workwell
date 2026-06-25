@@ -26,6 +26,7 @@ import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleCompliance } from "./routes/compliance.ts";
+import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
 import { handleComplianceSimulation } from "./routes/compliance-simulation.ts";
@@ -198,6 +199,11 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4).
   const hierarchyResponse = await handleHierarchy(req, env);
   if (hierarchyResponse) return hierarchyResponse;
+
+  // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
+  // Placed before compliance so /api/segments/:id/preview is matched here.
+  const segmentsResponse = await handleSegments(req, env, actor);
+  if (segmentsResponse) return segmentsResponse;
 
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
   const complianceResponse = await handleCompliance(req, env);
