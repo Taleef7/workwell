@@ -16,6 +16,16 @@ export interface SeriesBinding {
   requiredDoses: number;
 }
 
+/** E11.2c — one alternative dose series for a multi-brand series-completion measure (Hep B
+ * Heplisav-vs-traditional). `codes` are bare CVX strings under `event.valueSet`; the synthetic dose
+ * model picks one alternative per employee and stamps its codes/spacing. */
+export interface SeriesAlternativeBinding {
+  label: string;
+  requiredDoses: number;
+  codes: string[];
+  minIntervalDays?: number[];
+}
+
 export interface MeasureBinding {
   rateKey: string;
   complianceClass: "PERMANENT" | "RECURRING";
@@ -26,6 +36,7 @@ export interface MeasureBinding {
   refusal?: CodeBinding;
   series?: SeriesBinding;
   gracePeriodDays?: number;
+  alternatives?: SeriesAlternativeBinding[];
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {
@@ -37,7 +48,7 @@ export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {
   "diabetes_hba1c": { rateKey: "diabetes_hba1c", complianceClass: "RECURRING", complianceWindowDays: 180, enrollment: {"code":"diabetes-enrolled","valueSet":"urn:workwell:vs:diabetes-program"}, waiver: {"code":"diabetes-exempt","valueSet":"urn:workwell:vs:diabetes-exemption"}, event: {"code":"hba1c-lab","valueSet":"urn:workwell:vs:hba1c-labs","type":"procedure"} },
   "flu_vaccine": { rateKey: "flu_vaccine", complianceClass: "RECURRING", complianceWindowDays: 365, enrollment: {"code":"clinical-role","valueSet":"urn:workwell:vs:clinical-roles"}, waiver: {"code":"flu-exemption","valueSet":"urn:workwell:vs:flu-exemption"}, event: {"code":"flu-vaccine","valueSet":"urn:workwell:vs:flu-vaccines","type":"immunization"} },
   "hazwoper": { rateKey: "hazwoper", complianceClass: "RECURRING", complianceWindowDays: 365, enrollment: {"code":"hazwoper-program","valueSet":"urn:workwell:vs:hazwoper-enrollment"}, waiver: {"code":"hazwoper-exemption","valueSet":"urn:workwell:vs:hazwoper-exemption"}, event: {"code":"hazwoper-exam","valueSet":"urn:workwell:vs:hazwoper-exams","type":"procedure"} },
-  "hepatitis_b_vaccination_series": { rateKey: "hepatitis_b_vaccination_series", complianceClass: "PERMANENT", complianceWindowDays: 0, enrollment: {"code":"immz-enrolled","valueSet":"urn:workwell:vs:immz-enrollment"}, waiver: {"code":"hepb-contraindication","valueSet":"urn:workwell:vs:hepb-contraindication"}, event: {"code":"hepb-vaccine","valueSet":"urn:workwell:vs:hepb-vaccines","type":"immunization"}, refusal: {"code":"hepb-refusal","valueSet":"urn:workwell:vs:hepb-refusal"}, series: {"requiredDoses":2} },
+  "hepatitis_b_vaccination_series": { rateKey: "hepatitis_b_vaccination_series", complianceClass: "PERMANENT", complianceWindowDays: 0, enrollment: {"code":"immz-enrolled","valueSet":"urn:workwell:vs:immz-enrollment"}, waiver: {"code":"hepb-contraindication","valueSet":"urn:workwell:vs:hepb-contraindication"}, event: {"code":"hepb-vaccine","valueSet":"urn:workwell:vs:hepb-vaccines","type":"immunization"}, refusal: {"code":"hepb-refusal","valueSet":"urn:workwell:vs:hepb-refusal"}, series: {"requiredDoses":2}, alternatives: [{"label":"Heplisav-B","requiredDoses":2,"codes":["189"],"minIntervalDays":[28]},{"label":"Traditional","requiredDoses":3,"codes":["08","43","44","45"],"minIntervalDays":[28,56]}] },
   "hypertension": { rateKey: "hypertension", complianceClass: "RECURRING", complianceWindowDays: 365, enrollment: {"code":"wellness-enrolled","valueSet":"urn:workwell:vs:wellness-enrollment"}, waiver: {"code":"wellness-exempt","valueSet":"urn:workwell:vs:wellness-exemption"}, event: {"code":"bp-screen","valueSet":"urn:workwell:vs:bp-screening","type":"procedure"} },
   "mmr": { rateKey: "mmr", complianceClass: "PERMANENT", complianceWindowDays: 0, enrollment: {"code":"immz-enrolled","valueSet":"urn:workwell:vs:immz-enrollment"}, waiver: {"code":"mmr-contraindication","valueSet":"urn:workwell:vs:mmr-contraindication"}, event: {"code":"mmr-vaccine","valueSet":"urn:workwell:vs:mmr-vaccines","type":"immunization"}, refusal: {"code":"mmr-refusal","valueSet":"urn:workwell:vs:mmr-refusal"}, series: {"requiredDoses":2} },
   "obesity_bmi": { rateKey: "obesity_bmi", complianceClass: "RECURRING", complianceWindowDays: 365, enrollment: {"code":"wellness-enrolled","valueSet":"urn:workwell:vs:wellness-enrollment"}, waiver: {"code":"wellness-exempt","valueSet":"urn:workwell:vs:wellness-exemption"}, event: {"code":"bmi-screen","valueSet":"urn:workwell:vs:bmi-screening","type":"procedure"} },

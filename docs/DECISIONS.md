@@ -36,7 +36,14 @@ CVX 08/43/44/45) — each alternative carrying a **multi-CVX code set** and opti
 minimum dose intervals** (an ordered multi-source `exists` with inclusive `>=` day gaps between doses).
 Additive and back-compatible: absent `alternatives` ⇒ byte-identical to E11.1, so the `codegen-parity.test.ts`
 proof is unchanged. CQL stays canonical (ADR-015) — this is the codegen capability only; no live measure is
-repointed in this PR (the live Hep B repoint to Heplisav-vs-traditional is the E11.2c PR-2 follow-up).
+repointed in PR-1 (PR #203).
+
+**E11.2c PR-2 (live Hep B repoint).** The live `hepatitis_b_vaccination_series` measure is now repointed
+onto this capability (Heplisav-B 2-dose CVX 189 ≥28d OR traditional 3-dose CVX 08/43/44/45, ACIP intervals
+28/56d). This is **additive seed/app data — no DB schema/DDL** (value-set CVX 44/45 + YAML rule +
+alternative-aware synthetic dose model); the hand-written + generated Hep B CQL/ELM were regenerated. Hep B's
+demo compliance semantics shift to Heplisav-vs-traditional by design (called out in JOURNAL + MEASURES);
+reversible by reverting the PR. CQL `Outcome Status` stays the sole compliance authority (ADR-008).
 
 ## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
 

@@ -102,12 +102,11 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 
 ## Category 2 — OSHA Occupational Safety (Catalog Only)
 
-These three measures are seeded for catalog richness and demonstrate the full measure lifecycle (Draft → Approved → Deprecated). They have no runnable CQL evaluation.
+These two measures are seeded for catalog richness and demonstrate the full measure lifecycle (Draft → Approved → Deprecated). They have no runnable CQL evaluation. (Hepatitis B Vaccination Series was promoted to a runnable Active measure in E10.6 and is now a multi-alternative series — see Category 3c.)
 
 | Name | Policy Ref | Status | Tags |
 |------|-----------|--------|------|
 | Respirator Fit Test | OSHA 29 CFR 1910.134 | Draft v0.9 | surveillance, respiratory, osha |
-| Hepatitis B Vaccination Series | OSHA 29 CFR 1910.1030 | Approved v2.0 | vaccine, bbp, osha |
 | Lead Medical Surveillance | OSHA 29 CFR 1910.1025 | Deprecated v1.1 | surveillance, lead, osha |
 
 ---
@@ -195,19 +194,26 @@ series-completion CQL measures (`Count("Valid Doses") >= N`, no recency filter).
 |---------|----|--------|----------------|----------|
 | MMR Immunity | `mmr` | 2 doses (CVX 03/94) | ≥ 2 valid MMR doses on file | contraindication |
 | Varicella Immunity | `varicella` | 2 doses (CVX 21) | ≥ 2 valid varicella doses on file | contraindication |
-| Hepatitis B Vaccination Series | `hepatitis_b_vaccination_series` | 2 doses (Heplisav; CVX 08/43/189) | ≥ 2 valid Hep B doses on file | contraindication |
+| Hepatitis B Vaccination Series | `hepatitis_b_vaccination_series` | **multi-alternative** (E11.2c): Heplisav-B 2 doses (CVX 189, ≥28d apart) **OR** traditional 3 doses (CVX 08/43/44/45, ACIP min intervals 28/56d) | either alternative series complete | contraindication |
 
-Outcome mapping (all three):
+Outcome mapping (MMR / Varicella):
 - `EXCLUDED` when a documented contraindication Condition is present
 - `COMPLIANT` when enrolled, not contraindicated, and `Dose Count >= 2` (regardless of dose age)
-- `MISSING_DATA` otherwise — including a **partial** series (`0 < Dose Count < 2`), which the roster read
-  model **will surface** as **IN_PROGRESS** (planned in E10.5; not in this change)
+- `MISSING_DATA` otherwise — including a **partial** series (`0 < Dose Count < 2`), surfaced by the roster
+  read model as **IN_PROGRESS** (E10.5)
 - `DUE_SOON` / `OVERDUE` are **not applicable** to PERMANENT measures
 
-A documented **refusal** (declination) Condition does not change the canonical bucket; it **will be surfaced**
-as **DECLINED** by the roster read model (planned in E10.5) and keeps the case open (same pattern as `adult_immunization`). The
-Heplisav-vs-traditional-3-dose distinction and **titer-proves-immunity** ("Allow positive titer") are
-deferred to E11.
+**Hepatitis B (multi-alternative, E11.2c / #183):** COMPLIANT requires a **complete alternative series** —
+`"Heplisav-B Complete"` (2 doses CVX 189 ≥28 days apart) **OR** `"Traditional Complete"` (3 doses CVX
+08/43/44/45 with consecutive gaps ≥28 and ≥56 days). A union `"Dose Count"` define (any Hep B CVX) is kept
+for the roster's method string only — so a mid-**traditional-3** series shows the approximate "1 of 2 doses
+on file" (the IN_PROGRESS denominator uses the top-level `series.requiredDoses` 2; the canonical bucket is
+CQL-authoritative). `EXCLUDED`/`MISSING_DATA`/refusal behave as the other two. The codegen capability is
+E11.2c (ADR-015); this repoint is additive seed/app data with **no schema change**.
+
+A documented **refusal** (declination) Condition does not change the canonical bucket; it is surfaced
+as **DECLINED** by the roster read model (E10.5) and keeps the case open (same pattern as `adult_immunization`).
+**Titer-proves-immunity** ("Allow positive titer") for Hep B remains deferred.
 
 ---
 
