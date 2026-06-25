@@ -196,11 +196,12 @@ export async function backfillImmunizationValueSets(
     const existing = await store.getById(vs.id);
     if (existing !== null) {
       // Already present — leave links/detaches intact, but additively union in any missing canonical
-      // codes (preserving operator-added ones). No-op when every code is already there.
+      // codes (preserving operator-added ones). `setCodes` is codes-only, so governance metadata
+      // (status/version/resolution_status/last_resolved_at) is untouched. No-op when all codes present.
       const have = new Set(existing.codes.map((c) => `${c.system}|${c.code}`));
       const missing = vs.codes.filter((c) => !have.has(`${c.system}|${c.code}`));
       if (missing.length > 0) {
-        await store.seedValueSet({ id: vs.id, oid: vs.oid, name: vs.name, version: VER, codes: [...existing.codes, ...missing] });
+        await store.setCodes(vs.id, [...existing.codes, ...missing]);
       }
       continue;
     }
