@@ -32,7 +32,14 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
     const dc = get(/^dose count$/i);
     const doseCount = typeof dc === "number" ? dc : 0;
     const required = binding.series?.requiredDoses ?? 2;
-    if (canonicalStatus === "COMPLIANT") return { status: "COMPLIANT", method: `${doseCount} valid dose(s)` };
+    if (canonicalStatus === "COMPLIANT") {
+      // Titer-proves-immunity (E11.2a): when compliance is reached via a positive titer rather than a
+      // complete dose series, show the immunity path instead of a contradictory "0 valid dose(s)".
+      if (doseCount < required && get(/^has positive titer$/i) === true) {
+        return { status: "COMPLIANT", method: "Immune (positive titer)" };
+      }
+      return { status: "COMPLIANT", method: `${doseCount} valid dose(s)` };
+    }
     if (doseCount > 0 && doseCount < required) return { status: "IN_PROGRESS", method: `${doseCount} of ${required} doses on file` };
     // doseCount === 0 (no doses) — or, defensively, a count that isn't a passing series — report it honestly.
     return { status: "MISSING_DATA", method: doseCount > 0 ? `${doseCount} dose(s) on file` : "No doses on file" };

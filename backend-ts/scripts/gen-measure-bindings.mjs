@@ -36,6 +36,9 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith(".yaml")).sort()) {
     event: { code: inField(ev, "code"), valueSet: inField(ev, "valueSet"), type: inField(ev, "type") },
     refusal: rf ? { code: inField(rf, "code"), valueSet: inField(rf, "valueSet") } : undefined,
     series: sr ? { requiredDoses: Number(inField(sr, "requiredDoses") ?? 2) } : undefined,
+    // E11.2a: a windowed measure's grace period (from the `rule:` block) — emitted only when nonzero so
+    // existing measures' lines are unchanged. deriveWhyFlagged uses it for grace-aware days_overdue.
+    gracePeriodDays: Number(line(s, "gracePeriodDays") ?? 0),
   });
 }
 
@@ -43,9 +46,10 @@ const body = out
   .map((b) => {
     const refusal = b.refusal ? `, refusal: ${JSON.stringify(b.refusal)}` : "";
     const series = b.series ? `, series: ${JSON.stringify(b.series)}` : "";
+    const grace = b.gracePeriodDays ? `, gracePeriodDays: ${b.gracePeriodDays}` : "";
     return (
       `  ${JSON.stringify(b.id)}: { rateKey: ${JSON.stringify(b.rateKey)}, complianceClass: ${JSON.stringify(b.complianceClass)}, complianceWindowDays: ${b.complianceWindowDays}, ` +
-      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal}${series} },`
+      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal}${series}${grace} },`
     );
   })
   .join("\n");
@@ -77,6 +81,7 @@ export interface MeasureBinding {
   event: CodeBinding & { type: EventType };
   refusal?: CodeBinding;
   series?: SeriesBinding;
+  gracePeriodDays?: number;
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {

@@ -32,6 +32,9 @@ for (const f of readdirSync(measuresDir).filter((x) => x.endsWith(".yaml")).sort
   const refusal = codeOf(s, "refusal");
   const bindings = { enrollment, waiver, event, ...(refusal ? { refusal } : {}) };
 
+  // E11.2a added optional codegen capabilities — titer (allowPositiveTiter + a titer binding), grace
+  // (gracePeriodDays), and a windowed Refused define. They are intentionally NOT parsed here yet: no
+  // committed measure YAML sets them. When the E11.2b Rule Builder UI emits them, wire them in here.
   const rule = ruleType === "series-completion"
     ? { type: "series-completion", requiredDoses: Number(line(s, "requiredDoses") ?? 2) }
     : { type: "windowed-recency", windowDays: Number(line(s, "windowDays") ?? 365), dueSoonDays: Number(line(s, "dueSoonDays") ?? 30) };

@@ -25,6 +25,7 @@ export interface MeasureBinding {
   event: CodeBinding & { type: EventType };
   refusal?: CodeBinding;
   series?: SeriesBinding;
+  gracePeriodDays?: number;
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {

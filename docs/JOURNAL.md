@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-24 — E11.2a: codegen titer + grace + declination
+
+Extended the E11.1 rule→CQL codegen (`generate-cql.ts`) with three additive, back-compatible capabilities
+toward the Rule Builder's "Compliance paths & timing" group (vamsi7): **grace** (windowed —
+`overdueThreshold = windowDays + gracePeriodDays`, extends Due-Soon before OVERDUE), **titer** (series —
+`allowPositiveTiter` ORs a `Has Positive Titer` Observation define into `Series Complete`, a real immunity
+path), and **declination** (a `Refused` define wherever a refusal binding is present; never changes
+`Outcome Status` — the roster shows DECLINED). Every new field is optional; absent ⇒ E11.1 output
+byte-for-byte, so the E11.1 parity proof (6×4) stays green unchanged. Proven by behavioral goldens
+(`generate-cql-extensions.test.ts`: grace shifts the OVERDUE boundary, a positive titer with 0 doses is
+COMPLIANT, a refusal sets Refused=true). ADR-008 holds — codegen only emits CQL. The Hep B
+multi-series/intervals/multi-CVX is deferred. Next: E11.2b Rule Builder UI (Studio tab → form → preview →
+save). Built subagent-driven; backend suite + typecheck green.
+
 ## 2026-06-24 — E11.1: rule-params → CQL codegen + ADR-015 (canonical decision)
 
 Started epic E11 (#183) with the linchpin decision: **CQL is canonical; rule-params compile to CQL**
