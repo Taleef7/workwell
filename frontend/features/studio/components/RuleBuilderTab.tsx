@@ -17,6 +17,17 @@ type Shape = "series-completion" | "windowed-recency";
 
 const emptyCode = (): RuleCodeBinding => ({ code: "", valueSet: "" });
 
+function readableError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const o = JSON.parse(raw);
+    if (o && typeof o === "object") return (o.message as string) || (o.error as string) || raw;
+  } catch {
+    /* not JSON */
+  }
+  return raw;
+}
+
 export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Props) {
   const r = measure.rule;
   const rb = measure.ruleBindings;
@@ -59,21 +70,50 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
     [enrollment, waiver, eventCode, eventType, allowDeclination, refusal, shape, allowTiter, titer]
   );
 
+  // Binding codes must be set before a preview can be generated or the rule saved
+  // (codegen accepts empty value sets, so we gate on the .code fields only).
+  const bindingsComplete = useMemo(() => {
+    if (!enrollment.code.trim() || !waiver.code.trim() || !eventCode.code.trim()) return false;
+    if (allowDeclination && !refusal.code.trim()) return false;
+    if (shape === "series-completion" && allowTiter && !titer.code.trim()) return false;
+    return true;
+  }, [enrollment.code, waiver.code, eventCode.code, allowDeclination, refusal.code, shape, allowTiter, titer.code]);
+
   // Debounced live preview.
   useEffect(() => {
+    let cancelled = false;
+    // Skip the fetch until binding codes are set; clear stale preview state so the
+    // pane shows the placeholder (deferred so it never runs synchronously in the effect body).
+    if (!bindingsComplete) {
+      const clear = setTimeout(() => {
+        if (!cancelled) {
+          setPreviewError(null);
+          setCql("");
+        }
+      }, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(clear);
+      };
+    }
     const t = setTimeout(async () => {
       try {
         const res = await api.post<{ rule: RuleParams; bindings: RuleBindings }, { cql: string }>(
           `/api/measures/${measureId}/rule/preview`, { rule, bindings }
         );
-        setCql(res.cql);
-        setPreviewError(null);
+        if (!cancelled) {
+          setCql(res.cql);
+          setPreviewError(null);
+        }
       } catch (e) {
-        setPreviewError(e instanceof Error ? e.message : "Preview failed");
+        if (!cancelled) setPreviewError(readableError(e));
       }
     }, 400);
-    return () => clearTimeout(t);
-  }, [api, measureId, rule, bindings]);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [api, measureId, rule, bindings, bindingsComplete]);
 
   async function save() {
     onError("");
@@ -85,7 +125,7 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
       emitToast(res.errors?.length ? `Saved with compile errors (${res.status})` : "Rule saved");
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Rule save failed");
+      onError(readableError(e));
     } finally {
       setSaving(false);
     }
@@ -171,7 +211,7 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
         </div>
 
         <div>
-          <button type="button" onClick={save} disabled={saving || previewError != null}
+          <button type="button" onClick={save} disabled={saving || previewError != null || !bindingsComplete}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
             {saving ? "Saving…" : "Save Rule"}
           </button>
