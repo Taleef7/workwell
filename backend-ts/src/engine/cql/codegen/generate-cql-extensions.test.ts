@@ -32,6 +32,10 @@ const immunization = (pid: string, system: string, code: string) => ({
 const observation = (pid: string, system: string, code: string, value: number) => ({
   resource: { resourceType: "Observation", id: `${pid}-o`, status: "final", subject: { reference: `Patient/${pid}` }, code: { coding: [{ system, code }] }, effectiveDateTime: "2026-04-23T00:00:00.000Z", valueQuantity: { value, unit: "ratio" } },
 });
+/** E11.2c — an Immunization with an explicit occurrence date. */
+const immz = (pid: string, system: string, code: string, dateISO: string) => ({
+  resource: { resourceType: "Immunization", id: `${pid}-i-${seq++}`, status: "completed", patient: { reference: `Patient/${pid}` }, vaccineCode: { coding: [{ system, code }] }, occurrenceDateTime: dateISO },
+});
 
 const WIN = {
   enrollment: { code: "e", valueSet: "urn:vs:e" },
@@ -98,4 +102,100 @@ test("declination: a refusal Condition sets Refused=true; Outcome Status is the 
   assert.equal(res.outcome, "MISSING_DATA");
   const refused = res.evidence.expressionResults.find((r) => r.define === "Refused");
   assert.ok(refused && /true/i.test(String(refused.result)), "Refused define must be true");
+});
+
+// E11.2c — multi-alternative series (Hep B: Heplisav-B 2-dose OR traditional 3-dose, multi-CVX, min intervals).
+const HEPB_SYS = "urn:workwell:vs:hepb-vaccines";
+const hepbRule: GenerateCqlInput = {
+  library: "HepatitisBVaccinationSeries", version: "1.0.0",
+  rule: {
+    type: "series-completion", requiredDoses: 2,
+    alternatives: [
+      { label: "Heplisav-B", requiredDoses: 2, minIntervalDays: [28] },
+      { label: "Traditional", requiredDoses: 3, minIntervalDays: [28, 56] },
+    ],
+  },
+  bindings: {
+    enrollment: { code: "ie", valueSet: "urn:vs:ie" },
+    waiver: { code: "wc", valueSet: "urn:vs:wc" },
+    event: { code: "hepb", valueSet: HEPB_SYS, type: "immunization" as const },
+    eventAlternatives: [
+      { label: "Heplisav-B", codes: [{ code: "189", valueSet: HEPB_SYS }] },
+      { label: "Traditional", codes: [{ code: "08", valueSet: HEPB_SYS }, { code: "43", valueSet: HEPB_SYS }, { code: "44", valueSet: HEPB_SYS }, { code: "45", valueSet: HEPB_SYS }] },
+    ],
+  },
+};
+const enrolled = (pid: string) => condition(pid, "urn:vs:ie", "ie");
+
+test("alternatives: 2 Heplisav (CVX 189) doses ≥28d apart → COMPLIANT", async () => {
+  const b = bundle([patient("h1"), enrolled("h1"),
+    immz("h1", HEPB_SYS, "189", "2026-01-01T00:00:00.000Z"),
+    immz("h1", HEPB_SYS, "189", "2026-02-15T00:00:00.000Z")]); // 45d apart
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "COMPLIANT");
+});
+
+test("alternatives: 2 traditional (CVX 08) doses → MISSING_DATA (needs 3)", async () => {
+  const b = bundle([patient("h2"), enrolled("h2"),
+    immz("h2", HEPB_SYS, "08", "2026-01-01T00:00:00.000Z"),
+    immz("h2", HEPB_SYS, "08", "2026-03-01T00:00:00.000Z")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "MISSING_DATA");
+});
+
+test("alternatives: 3 traditional doses spaced 60d (≥28,≥56) → COMPLIANT", async () => {
+  const b = bundle([patient("h3"), enrolled("h3"),
+    immz("h3", HEPB_SYS, "08", "2026-01-01T00:00:00.000Z"),
+    immz("h3", HEPB_SYS, "08", "2026-03-02T00:00:00.000Z"),  // 60d
+    immz("h3", HEPB_SYS, "08", "2026-05-01T00:00:00.000Z")]); // 60d
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "COMPLIANT");
+});
+
+test("alternatives: 3 traditional doses where one consecutive gap is 27d (<28) → MISSING_DATA", async () => {
+  const b = bundle([patient("h4"), enrolled("h4"),
+    immz("h4", HEPB_SYS, "08", "2026-01-01T00:00:00.000Z"),
+    immz("h4", HEPB_SYS, "08", "2026-01-28T00:00:00.000Z"),  // 27d gap (<28)
+    immz("h4", HEPB_SYS, "08", "2026-05-01T00:00:00.000Z")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "MISSING_DATA");
+});
+
+test("alternatives: 3 traditional doses with a gap exactly 28d (inclusive boundary) → COMPLIANT", async () => {
+  const b = bundle([patient("h5"), enrolled("h5"),
+    immz("h5", HEPB_SYS, "08", "2026-01-01T00:00:00.000Z"),
+    immz("h5", HEPB_SYS, "08", "2026-01-29T00:00:00.000Z"),  // exactly 28d
+    immz("h5", HEPB_SYS, "08", "2026-03-26T00:00:00.000Z")]); // 56d after
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "COMPLIANT");
+});
+
+test("alternatives: 1 Heplisav + 1 traditional (mixed brand, neither alt complete) → MISSING_DATA", async () => {
+  const b = bundle([patient("h6"), enrolled("h6"),
+    immz("h6", HEPB_SYS, "189", "2026-01-01T00:00:00.000Z"),
+    immz("h6", HEPB_SYS, "08", "2026-03-01T00:00:00.000Z")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "MISSING_DATA");
+});
+
+test("alternatives: enrollment + a contraindication condition → EXCLUDED", async () => {
+  const b = bundle([patient("h7"), enrolled("h7"), condition("h7", "urn:vs:wc", "wc")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "EXCLUDED");
+});
+
+// E11.2c — a one-dose alternative carries minIntervalDays:[] (length === requiredDoses-1 === 0); it must
+// compile (count-only, not a malformed interval exists) and evaluate.
+const oneDoseRule: GenerateCqlInput = {
+  library: "OneDoseSeries", version: "1.0.0",
+  rule: { type: "series-completion", requiredDoses: 1, alternatives: [{ label: "Single", requiredDoses: 1, minIntervalDays: [] }] },
+  bindings: {
+    enrollment: { code: "ie", valueSet: "urn:vs:ie" },
+    waiver: { code: "wc", valueSet: "urn:vs:wc" },
+    event: { code: "single", valueSet: HEPB_SYS, type: "immunization" as const },
+    eventAlternatives: [{ label: "Single", codes: [{ code: "189", valueSet: HEPB_SYS }] }],
+  },
+};
+
+test("alternatives: a 1-dose alternative (minIntervalDays []) with 1 matching dose → COMPLIANT", async () => {
+  const b = bundle([patient("o1"), enrolled("o1"), immz("o1", HEPB_SYS, "189", "2026-01-01T00:00:00.000Z")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", oneDoseRule, b)).outcome, "COMPLIANT");
+});
+
+test("alternatives: a 1-dose alternative (minIntervalDays []) with 0 doses → MISSING_DATA", async () => {
+  const b = bundle([patient("o2"), enrolled("o2")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", oneDoseRule, b)).outcome, "MISSING_DATA");
 });

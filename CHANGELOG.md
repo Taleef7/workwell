@@ -26,6 +26,11 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 ### Docs
 - Synced CLAUDE.md, AGENTS.md, README, DEPLOY, and the sprint index to the post-Sprint-7 / Sprint-8 state (measure catalog 60/49, Next.js 16 + React 19, OpenAI Spring AI starter, MIE-only deployment).
 
+## [2026-06-25]
+
+### Added
+- **Multi-alternative-series codegen capability + Rule Builder UI (E11.2c PR-1, #183 / PR #203):** the rule→CQL generator (`backend-ts/src/engine/cql/codegen/generate-cql.ts`) now supports a `series-completion` rule carrying `alternatives` — an OR of alternative dose series, each with its own multi-CVX code set (`bindings.eventAlternatives`, correlated by `label`) and optional per-alternative minimum dose intervals (an ordered multi-source `exists` with inclusive `>=` day gaps). The Rule Builder gains an "Alternative series (multi-brand)" sub-form (label / required doses / CVX codes / optional min intervals, hydrated by label) emitting `rule.alternatives` + `bindings.eventAlternatives` through the existing E11.2b preview/save endpoints. Proven by codegen unit tests (incl. negative validation: missing alternative codes, bad interval length, `requiredDoses >= 1`) + 7 in-process compile+evaluate Hepatitis B behavioral goldens (inclusive-28d boundary COMPLIANT, 27d-gap MISSING_DATA, mixed-brand neither-complete MISSING_DATA, contraindication EXCLUDED). **Capability only — no live measure changed** (the live Hepatitis B repoint to Heplisav-B-vs-traditional is the follow-up PR-2). Additive + back-compatible (absent `alternatives` ⇒ byte-identical to E11.1; the `codegen-parity.test.ts` proof is unchanged). No DB schema change, no new deps; CQL stays canonical (ADR-015) and `Outcome Status` remains the sole compliance authority (ADR-008).
+
 ## [2026-06-21]
 
 ### Added
