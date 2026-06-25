@@ -111,8 +111,11 @@ define "${a.label} Dose Dates":
       and exists(I.vaccineCode.coding C where C.system = '${sys}' and ${orVaccineCodes(codes)})
     return (I.occurrence as FHIR.dateTime)
 `;
-      const complete = a.minIntervalDays
-        ? "\n" + intervalExists(a.label, a.requiredDoses, a.minIntervalDays)
+      // Non-empty (not just present): an empty array (valid for a 1-dose alt) is count-only, since
+      // intervalExists(label, 1, []) would emit a malformed empty `exists(from … where  and )`.
+      const hasIntervals = (a.minIntervalDays?.length ?? 0) > 0;
+      const complete = hasIntervals
+        ? "\n" + intervalExists(a.label, a.requiredDoses, a.minIntervalDays!)
         : `
 define "${a.label} Complete":
   Count("${a.label} Dose Dates") >= ${a.requiredDoses}

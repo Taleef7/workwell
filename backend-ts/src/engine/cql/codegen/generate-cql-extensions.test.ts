@@ -176,3 +176,26 @@ test("alternatives: enrollment + a contraindication condition → EXCLUDED", asy
   const b = bundle([patient("h7"), enrolled("h7"), condition("h7", "urn:vs:wc", "wc")]);
   assert.equal((await evalGen("hepatitis_b_vaccination_series", hepbRule, b)).outcome, "EXCLUDED");
 });
+
+// E11.2c — a one-dose alternative carries minIntervalDays:[] (length === requiredDoses-1 === 0); it must
+// compile (count-only, not a malformed interval exists) and evaluate.
+const oneDoseRule: GenerateCqlInput = {
+  library: "OneDoseSeries", version: "1.0.0",
+  rule: { type: "series-completion", requiredDoses: 1, alternatives: [{ label: "Single", requiredDoses: 1, minIntervalDays: [] }] },
+  bindings: {
+    enrollment: { code: "ie", valueSet: "urn:vs:ie" },
+    waiver: { code: "wc", valueSet: "urn:vs:wc" },
+    event: { code: "single", valueSet: HEPB_SYS, type: "immunization" as const },
+    eventAlternatives: [{ label: "Single", codes: [{ code: "189", valueSet: HEPB_SYS }] }],
+  },
+};
+
+test("alternatives: a 1-dose alternative (minIntervalDays []) with 1 matching dose → COMPLIANT", async () => {
+  const b = bundle([patient("o1"), enrolled("o1"), immz("o1", HEPB_SYS, "189", "2026-01-01T00:00:00.000Z")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", oneDoseRule, b)).outcome, "COMPLIANT");
+});
+
+test("alternatives: a 1-dose alternative (minIntervalDays []) with 0 doses → MISSING_DATA", async () => {
+  const b = bundle([patient("o2"), enrolled("o2")]);
+  assert.equal((await evalGen("hepatitis_b_vaccination_series", oneDoseRule, b)).outcome, "MISSING_DATA");
+});

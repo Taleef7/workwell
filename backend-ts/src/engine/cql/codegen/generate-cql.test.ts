@@ -184,6 +184,17 @@ test("alternatives: requiredDoses < 1 throws", () => {
   );
 });
 
+test("alternatives: a single-dose alternative with empty minIntervalDays is count-only (no malformed interval exists)", () => {
+  const cql = gen(
+    { type: "series-completion", requiredDoses: 1, alternatives: [{ label: "Single", requiredDoses: 1, minIntervalDays: [] }] },
+    { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" },
+      event: { code: "x", valueSet: "v", type: "immunization" },
+      eventAlternatives: [{ label: "Single", codes: [{ code: "189", valueSet: "v" }] }] },
+  );
+  assert.match(cql, /Count\("Single Dose Dates"\) >= 1/);
+  assert.doesNotMatch(cql, /exists\(from "Single Dose Dates"/);
+});
+
 test("alternatives absent: series output is unchanged from the single-code path", () => {
   const single = gen({ type: "series-completion", requiredDoses: 2 },
     { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" }, event: { code: "x", valueSet: "v", type: "immunization" } });
