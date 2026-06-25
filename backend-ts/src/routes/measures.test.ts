@@ -442,3 +442,56 @@ test("GET /api/measures/:id/versions/:vid/export/mat → FHIR R4 Bundle XML; for
   // version belongs to a DIFFERENT measure than the path → 404 (measure/version mismatch)
   assert.equal((await get(`/api/measures/hazwoper/versions/${versionId}/export/mat`))?.status, 404);
 });
+
+test("POST /api/measures/:id/rule/preview generates CQL from series params", async () => {
+  const res = await post("/api/measures/mmr/rule/preview", {
+    rule: { type: "series-completion", requiredDoses: 2 },
+    bindings: {
+      enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
+      waiver: { code: "mmr-contraindication", valueSet: "urn:workwell:vs:mmr-contraindication" },
+      event: { code: "mmr-vaccine", valueSet: "urn:workwell:vs:mmr-vaccines", type: "immunization" },
+    },
+  });
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { cql: string };
+  assert.match(body.cql, /define "Dose Count":/);
+  assert.match(body.cql, /"Dose Count" >= 2/);
+});
+
+test("POST /rule/preview returns 400 when the params are invalid for the shape", async () => {
+  const res = await post("/api/measures/audiogram/rule/preview", {
+    rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 30 },
+    bindings: {
+      enrollment: { code: "e", valueSet: "urn:vs:e" }, waiver: { code: "w", valueSet: "urn:vs:w" },
+      event: { code: "ev", valueSet: "urn:vs:ev", type: "immunization" }, // wrong type for windowed
+    },
+  });
+  assert.equal(res?.status, 400);
+});
+
+test("POST /rule/preview returns 404 for an unknown measure", async () => {
+  const res = await post("/api/measures/nope-xyz/rule/preview", {
+    rule: { type: "series-completion", requiredDoses: 2 },
+    bindings: { enrollment: { code: "a", valueSet: "b" }, waiver: { code: "a", valueSet: "b" }, event: { code: "a", valueSet: "b", type: "immunization" } },
+  });
+  assert.equal(res?.status, 404);
+});
+
+test("PUT /api/measures/:id/rule persists rule + generated CQL + compile status, round-trips on GET", async () => {
+  const save = await put("/api/measures/mmr/rule", {
+    rule: { type: "series-completion", requiredDoses: 3 },
+    bindings: {
+      enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
+      waiver: { code: "mmr-contraindication", valueSet: "urn:workwell:vs:mmr-contraindication" },
+      event: { code: "mmr-vaccine", valueSet: "urn:workwell:vs:mmr-vaccines", type: "immunization" },
+    },
+  });
+  assert.equal(save?.status, 200);
+  const saved = (await save!.json()) as { cql: string; status: string };
+  assert.match(saved.cql, /"Dose Count" >= 3/);
+  assert.ok(["COMPILED", "WARNINGS", "ERROR"].includes(saved.status));
+
+  const detail = (await get("/api/measures/mmr").then((r) => r!.json())) as { rule?: { requiredDoses?: number }; cqlText: string };
+  assert.equal(detail.rule?.requiredDoses, 3, "rule params round-trip via spec_json");
+  assert.match(detail.cqlText, /"Dose Count" >= 3/, "generated CQL persisted to cql_text");
+});

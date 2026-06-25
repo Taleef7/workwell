@@ -84,6 +84,8 @@ export interface MeasureDetail {
   compileStatus: string;
   valueSets: unknown[];
   testFixtures: unknown[];
+  rule?: MeasureSpec["rule"];
+  ruleBindings?: MeasureSpec["ruleBindings"];
 }
 
 export interface VersionHistoryItem {
@@ -118,6 +120,8 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     compileStatus: r.compileStatus,
     valueSets,
     testFixtures: r.spec.testFixtures ?? [],
+    rule: r.spec.rule,
+    ruleBindings: r.spec.ruleBindings,
   };
 }
 
