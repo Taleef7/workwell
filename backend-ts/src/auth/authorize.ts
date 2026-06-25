@@ -73,6 +73,7 @@ const RULES: Rule[] = [
   { method: "POST", pattern: rx("/api/measures/*/status"), access: [APPROVER, A] },
   { method: "PUT", pattern: rx("/api/measures/*/spec"), access: [AUTHOR, A] },
   { method: "PUT", pattern: rx("/api/measures/*/cql"), access: [AUTHOR, A] },
+  { method: "PUT", pattern: rx("/api/measures/*/rule"), access: [AUTHOR, A] },
   { method: "PUT", pattern: rx("/api/measures/*/tests"), access: [AUTHOR, A] },
 
   { method: "POST", pattern: rx("/api/measures/compile"), access: "AUTHENTICATED" },
