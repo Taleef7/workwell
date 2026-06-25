@@ -1,5 +1,36 @@
 # Architecture Decision Records
 
+## ADR-016: Segments / risk-groups are an applicability layer, not a compliance authority — E11.3 (#183)
+
+Date: 2026-06-25
+Status: Accepted
+
+**Decision.** A *segment* (risk-group) maps a cohort to an applicable rule-set. The cohort is a `role`/`site`
+predicate rule (`{match: ANY|ALL, conditions:[{attr, op, value}]}`) plus per-employee INCLUDE/EXCLUDE
+overrides (hybrid membership; EXCLUDE wins over INCLUDE). The rule-set is a list of measure ids. A subject's
+**applicable measures** = the union of the rule-sets of every **enabled** segment the subject belongs to.
+
+Segment applicability gates two things only: **case creation** (the run→case upsert is skipped for an
+out-of-cohort `(subject, measure)`) and **display** (the roster + per-employee card show `NOT_APPLICABLE`).
+It **never** changes CQL evaluation or `Outcome Status` — the outcome is always computed and persisted with
+full evidence even when no case is created (ADR-008 holds; CQL is the sole compliance authority). The single
+applicability definition lives in `backend-ts/src/segment/segment-applicability.ts` and is consumed by both
+the roster read model and the run pipeline.
+
+**Reversibility invariant.** With **zero enabled segments, every measure is applicable to everyone** — i.e.
+the exact pre-E11.3 behavior. Disabling or deleting all segments fully reverts the feature, so it is a safe
+additive overlay. A *disabled* segment is also not selectable as a roster column/row scope (it is not in
+effect).
+
+**Persistence.** Three owner-gated tables on both the SQLite floor and the Postgres ceiling
+(`segments`, `segment_measures`, `segment_overrides`; see DATA_MODEL §3.22) behind a `SegmentStore` port —
+the first E11 feature to add schema (the rule-builder halves were schema-free). CRUD is exposed at
+`/api/segments` (writes ADMIN-only + audited `SEGMENT_*`; reads authenticated). The Configure Groups editor
+UI is E11.3 PR-2.
+
+**Scope.** Predicates are `role`/`site` only for now; richer (FHIR-data, program-enrollment) predicates and
+WebChart-group import are deferred to later epics (E12+).
+
 ## ADR-015: CQL is canonical; rule-params compile to CQL (codegen) — E11.1 (#183)
 
 **Decision.** Answering Doug's "is CQL or YAML canonical?": **CQL/ELM is the sole execution + standards-
