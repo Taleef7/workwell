@@ -30,6 +30,14 @@ optional; absent ⇒ E11.1 output byte-for-byte, so the parity proof is unaffect
 goldens (`generate-cql-extensions.test.ts`). The Hep B multi-alternative-series with min-interval validation
 + multi-CVX is deferred. The E11.2b Rule Builder UI emits these params.
 
+**E11.2c (multi-alternative series).** The `series-completion` codegen now supports **multi-alternative
+series** — an OR of alternative dose series (real Hep B = Heplisav-B 2-dose CVX 189 OR traditional 3-dose
+CVX 08/43/44/45) — each alternative carrying a **multi-CVX code set** and optional **per-alternative
+minimum dose intervals** (an ordered multi-source `exists` with inclusive `>=` day gaps between doses).
+Additive and back-compatible: absent `alternatives` ⇒ byte-identical to E11.1, so the `codegen-parity.test.ts`
+proof is unchanged. CQL stays canonical (ADR-015) — this is the codegen capability only; no live measure is
+repointed in this PR (the live Hep B repoint to Heplisav-vs-traditional is the E11.2c PR-2 follow-up).
+
 ## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
 
 - **Date:** 2026-06-19

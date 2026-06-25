@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-06-25 — E11.2c PR-1: multi-alternative-series codegen + Rule Builder
+
+Extended the `series-completion` codegen (`generate-cql.ts`) with **multi-alternative series**: a measure
+rule may carry `alternatives` — an OR of alternative dose series, each with a **multi-CVX code set** and
+optional **per-alternative minimum dose intervals** (an ordered multi-source `exists` with inclusive `>=`
+day gaps), the shape real Hep B needs (Heplisav-B 2-dose CVX 189 min 28d OR traditional 3-dose CVX
+08/43/44/45 min 28d/56d). Behavioral goldens cover the multi-CVX + min-interval logic incl. 7 in-process
+compile+evaluate Hep B scenarios; the Rule Builder gains an "Alternative series (multi-brand)" sub-form
+(multi-CVX + intervals). **Capability only — no live measure change** (the live Hep B repoint is the E11.2c
+PR-2 follow-up). Additive/back-compatible: absent `alternatives` ⇒ byte-identical to E11.1, so the
+`codegen-parity.test.ts` proof is unchanged. No schema, no new deps; ADR-008/ADR-015 honored — codegen only
+emits CQL, `Outcome Status` stays the sole compliance authority. Backend + frontend suites + lint + build green.
+
 ## 2026-06-24 — E11.2b: Rule Builder UI (Studio tab)
 
 Put a UI in front of the E11.1/E11.2a codegen: a **Rule Builder** tab in Studio (`/studio/[id]`). A
