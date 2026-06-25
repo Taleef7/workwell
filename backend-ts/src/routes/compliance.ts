@@ -30,14 +30,16 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
 
   const q = url.searchParams;
   const stores = await getStores(env);
+  const segments = await stores.segments.listSegments();
   const roster = await buildRoster(
-    { outcomeStore: stores.outcomes },
+    { outcomeStore: stores.outcomes, segments },
     {
       panel: q.get("panel"),
       status: q.get("status"),
       site: q.get("site"),
       role: q.get("role"),
       q: q.get("q"),
+      segment: q.get("segment"),
       page: intOr(q.get("page"), 1),
       pageSize: intOr(q.get("pageSize"), 50),
     },
