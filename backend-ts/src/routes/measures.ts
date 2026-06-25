@@ -35,8 +35,11 @@ import {
   compileMeasureCql,
   updateMeasureTests,
   validateMeasureTests,
+  previewRule,
+  saveRule,
   type SpecUpdate,
 } from "../measure/measure-authoring.ts";
+import type { Rule, CodegenBindings } from "../engine/cql/codegen/generate-cql.ts";
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
@@ -186,6 +189,16 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       const ok = await updateMeasureTests(await lifecycleDeps(env), testsId, fixtures, actor);
       return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: testsId }, 404);
     }
+    const ruleId = pathname.match(/^\/api\/measures\/([^/]+)\/rule$/)?.[1];
+    if (ruleId) {
+      const body = (await req.json().catch(() => ({}))) as { rule?: unknown; bindings?: unknown };
+      if (!body.rule || typeof body.rule !== "object" || !body.bindings || typeof body.bindings !== "object")
+        return json({ error: "invalid_request", message: "rule and bindings are required" }, 400);
+      const res = await saveRule(await lifecycleDeps(env), ruleId, body.rule as Rule, body.bindings as CodegenBindings, actor);
+      if (res === null) return json({ error: "not_found", measureId: ruleId }, 404);
+      if ("error" in res) return json(res, 400);
+      return json(res);
+    }
     return null;
   }
 
@@ -231,6 +244,16 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const res = await compileMeasureCql(await lifecycleDeps(env), compileId, cqlText, actor);
       return res ? json(res) : json({ error: "not_found", measureId: compileId }, 404);
+    }
+    const rulePreviewId = pathname.match(/^\/api\/measures\/([^/]+)\/rule\/preview$/)?.[1];
+    if (rulePreviewId) {
+      const body = (await req.json().catch(() => ({}))) as { rule?: unknown; bindings?: unknown };
+      if (!body.rule || typeof body.rule !== "object" || !body.bindings || typeof body.bindings !== "object")
+        return json({ error: "invalid_request", message: "rule and bindings are required" }, 400);
+      const res = await previewRule(await lifecycleDeps(env), rulePreviewId, body.rule as Rule, body.bindings as CodegenBindings);
+      if (res === null) return json({ error: "not_found", measureId: rulePreviewId }, 404);
+      if ("error" in res) return json(res, 400);
+      return json(res);
     }
     // Activation impact preview (dry-run): evaluate the population + estimate case impact.
     const impactId = pathname.match(/^\/api\/measures\/([^/]+)\/impact-preview$/)?.[1];

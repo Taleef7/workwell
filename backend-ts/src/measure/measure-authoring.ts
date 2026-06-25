@@ -14,6 +14,8 @@ import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, TestFixture } from "./measure-catalog.ts";
 import { compileCql } from "../engine/cql/cql-translator.ts";
 import { validateTests } from "./measure-read-models.ts";
+import { generateCql, type Rule, type CodegenBindings } from "../engine/cql/codegen/generate-cql.ts";
+import { MEASURES } from "../engine/cql/measure-registry.ts";
 
 export interface MeasureAuthoringDeps {
   measures: MeasureStore;
@@ -66,6 +68,9 @@ export async function updateMeasureSpec(deps: MeasureAuthoringDeps, measureId: s
     complianceWindow: s(body.complianceWindow),
     requiredDataElements: body.requiredDataElements ?? [],
     testFixtures: current.spec.testFixtures ?? [], // updateSpec never touches fixtures (updateTests owns them)
+    // A Spec-tab save must not drop Rule Builder params persisted in spec_json (saveRule owns them).
+    ...(current.spec.rule !== undefined ? { rule: current.spec.rule } : {}),
+    ...(current.spec.ruleBindings !== undefined ? { ruleBindings: current.spec.ruleBindings } : {}),
   };
   const policyRef = body.policyRef !== undefined ? s(body.policyRef).trim() : undefined;
   const updated = await deps.measures.updateSpec(measureId, spec, policyRef);
@@ -130,4 +135,56 @@ export async function validateMeasureTests(deps: MeasureAuthoringDeps, measureId
   const current = await deps.measures.getLatest(measureId);
   if (!current) return null;
   return validateTests(current.spec.testFixtures ?? []);
+}
+
+/** Resolve the generated CQL's `library X version 'Y'` header. Prefer the runnable registry
+ *  (MEASURES[id].library = "Name-1.2.3"); fall back to a sanitized measure name + version for measures
+ *  not yet in the registry. The name only labels the CQL header — it doesn't affect evaluation. */
+function resolveLibrary(measureId: string, record: MeasureRecord): { library: string; version: string } {
+  const meta = MEASURES[measureId];
+  if (meta) {
+    const m = meta.library.match(/^(.*)-(\d[\d.]*)$/);
+    if (m) return { library: m[1]!, version: m[2]! };
+    return { library: meta.library, version: record.version };
+  }
+  const lib = record.name.replace(/[^A-Za-z0-9]/g, "") || "Measure";
+  return { library: lib, version: record.version };
+}
+
+/** Stateless: generate CQL from rule params for a live preview. null = unknown measure; {error} = a
+ *  generate failure (e.g. wrong event.type for the shape). */
+export async function previewRule(
+  deps: MeasureAuthoringDeps, measureId: string, rule: Rule, bindings: CodegenBindings,
+): Promise<{ cql: string } | { error: string; message: string } | null> {
+  const current = await deps.measures.getLatest(measureId);
+  if (!current) return null;
+  const { library, version } = resolveLibrary(measureId, current);
+  try {
+    return { cql: generateCql({ library, version, rule, bindings }) };
+  } catch (e) {
+    return { error: "preview_failed", message: (e as Error).message };
+  }
+}
+
+/** Atomic save: generate CQL, persist rule+ruleBindings into spec_json AND the generated CQL into
+ *  cql_text (+ compile status), audit once. null = unknown measure; {error} = a generate failure. */
+export async function saveRule(
+  deps: MeasureAuthoringDeps, measureId: string, rule: Rule, bindings: CodegenBindings, actor: string,
+): Promise<(CompileResponse & { cql: string }) | { error: string; message: string } | null> {
+  const current = await deps.measures.getLatest(measureId);
+  if (!current) return null;
+  const { library, version } = resolveLibrary(measureId, current);
+  let cql: string;
+  try {
+    cql = generateCql({ library, version, rule, bindings });
+  } catch (e) {
+    return { error: "generate_failed", message: (e as Error).message };
+  }
+  const spec: MeasureSpec = { ...current.spec, rule, ruleBindings: bindings };
+  await deps.measures.updateSpec(measureId, spec);
+  const compile = toCompileResponse(cql);
+  const updated = await deps.measures.updateCql(measureId, cql, compile.status);
+  if (!updated) return null;
+  await auditDraftSaved(deps, updated, actor, { field: "rule", measureId });
+  return { cql, ...compile };
 }
