@@ -70,3 +70,69 @@ test("windowed compliantMax = windowDays - dueSoonDays (catches an off-by-one wi
   assert.match(cql, /"Days Since Last Event" > 305 and "Days Since Last Event" <= 365/);
   assert.doesNotMatch(cql, /<= 425|<= 335/);
 });
+
+test("titer: when allowPositiveTiter + a titer binding, Series Complete ORs in Has Positive Titer", () => {
+  const cql = generateCql({
+    library: "MmrSeries", version: "1.0.0",
+    rule: { type: "series-completion", requiredDoses: 2, allowPositiveTiter: true },
+    bindings: { ...SERIES_CODES, titer: { code: "mmr-titer", valueSet: "urn:workwell:vs:mmr-titer", minValue: 10 } },
+  });
+  assert.match(cql, /define "Has Positive Titer":/);
+  assert.match(cql, /C\.system = 'urn:workwell:vs:mmr-titer' and C\.code = 'mmr-titer'/);
+  assert.match(cql, /\(O\.value as FHIR\.Quantity\)\.value >= 10/);
+  assert.match(cql, /"Dose Count" >= 2 or "Has Positive Titer"/);
+});
+
+test("titer: disabled (default) reproduces the E11.1 series output — no titer define, plain Series Complete", () => {
+  const cql = generateCql({
+    library: "MmrSeries", version: "1.0.0",
+    rule: { type: "series-completion", requiredDoses: 2 },
+    bindings: SERIES_CODES,
+  });
+  assert.doesNotMatch(cql, /Has Positive Titer/);
+  assert.match(cql, /"Enrolled" and not "Has Contraindication" and "Dose Count" >= 2\n/);
+});
+
+test("grace: overdueThreshold = windowDays + gracePeriodDays shifts the OVERDUE boundary", () => {
+  const cql = generateCql({
+    library: "AnnualAudiogramCompleted", version: "1.0.0",
+    rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 30, gracePeriodDays: 30 },
+    bindings: {
+      enrollment: { code: "hearing-enrollment", valueSet: "urn:workwell:vs:hearing-enrollment" },
+      waiver: { code: "audiogram-waiver", valueSet: "urn:workwell:vs:audiogram-waiver" },
+      event: { code: "audiogram-procedure", valueSet: "urn:workwell:vs:audiogram-procedures", type: "procedure" },
+    },
+  });
+  assert.match(cql, /"Days Since Last Event" > 335 and "Days Since Last Event" <= 395/);
+  assert.match(cql, /define "Overdue":\n  "Enrolled" and not "Has Waiver" and "Days Since Last Event" > 395/);
+});
+
+test("grace: absent (default) reproduces the E11.1 windowed output (overdueThreshold = windowDays)", () => {
+  const cql = generateCql({
+    library: "AnnualAudiogramCompleted", version: "1.0.0",
+    rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 30 },
+    bindings: {
+      enrollment: { code: "hearing-enrollment", valueSet: "urn:workwell:vs:hearing-enrollment" },
+      waiver: { code: "audiogram-waiver", valueSet: "urn:workwell:vs:audiogram-waiver" },
+      event: { code: "audiogram-procedure", valueSet: "urn:workwell:vs:audiogram-procedures", type: "procedure" },
+    },
+  });
+  assert.match(cql, /"Days Since Last Event" > 335 and "Days Since Last Event" <= 365/);
+  assert.match(cql, /"Days Since Last Event" > 365\n/);
+  assert.doesNotMatch(cql, /<= 395|> 395/);
+});
+
+test("declination: a windowed rule with a refusal binding emits the Refused define", () => {
+  const cql = generateCql({
+    library: "AnnualAudiogramCompleted", version: "1.0.0",
+    rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 30 },
+    bindings: {
+      enrollment: { code: "hearing-enrollment", valueSet: "urn:workwell:vs:hearing-enrollment" },
+      waiver: { code: "audiogram-waiver", valueSet: "urn:workwell:vs:audiogram-waiver" },
+      event: { code: "audiogram-procedure", valueSet: "urn:workwell:vs:audiogram-procedures", type: "procedure" },
+      refusal: { code: "audiogram-refusal", valueSet: "urn:workwell:vs:audiogram-refusal" },
+    },
+  });
+  assert.match(cql, /define "Refused":/);
+  assert.match(cql, /x\.system = 'urn:workwell:vs:audiogram-refusal' and x\.code = 'audiogram-refusal'/);
+});

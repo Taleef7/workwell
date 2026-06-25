@@ -4,6 +4,7 @@
  * codegen-parity.test.ts. CQL stays the sole execution + standards layer (ADR-008); this only *produces*
  * CQL. Define names are chosen to satisfy the roster's deriveWhyFlagged regexes
  * (/^most recent .*date$/i, /^days since/i, waiver/contraindication, "Dose Count").
+ * E11.2a adds optional titer (series), grace (windowed), and a windowed Refused define — all back-compatible (absent ⇒ E11.1 output).
  */
 export interface CodeBinding {
   code: string;
@@ -14,10 +15,11 @@ export interface CodegenBindings {
   waiver: CodeBinding;
   event: CodeBinding & { type: "procedure" | "immunization" | "observation" };
   refusal?: CodeBinding;
+  titer?: { code: string; valueSet: string; minValue: number };
 }
 export type Rule =
-  | { type: "series-completion"; requiredDoses: number }
-  | { type: "windowed-recency"; windowDays: number; dueSoonDays: number };
+  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean }
+  | { type: "windowed-recency"; windowDays: number; dueSoonDays: number; gracePeriodDays?: number };
 
 export interface GenerateCqlInput {
   library: string;
@@ -46,12 +48,26 @@ define "${name}":
 function seriesCompletion(input: GenerateCqlInput): string {
   const b = input.bindings;
   if (b.event.type !== "immunization") throw new Error("series-completion requires event.type=immunization");
-  const n = (input.rule as { requiredDoses: number }).requiredDoses;
+  const rule = input.rule as { requiredDoses: number; allowPositiveTiter?: boolean };
+  const n = rule.requiredDoses;
+  const titerEnabled = rule.allowPositiveTiter === true && b.titer != null;
+  const titerDefine = titerEnabled
+    ? `
+define "Has Positive Titer":
+  exists([Observation] O
+    where exists(O.code.coding C where C.system = '${b.titer!.valueSet}' and C.code = '${b.titer!.code}')
+      and (O.value as FHIR.Quantity).value >= ${b.titer!.minValue})
+`
+    : "";
+  const seriesComplete = titerEnabled
+    ? `"Enrolled" and not "Has Contraindication" and ("Dose Count" >= ${n} or "Has Positive Titer")`
+    : `"Enrolled" and not "Has Contraindication" and "Dose Count" >= ${n}`;
   return (
     header(input.library, input.version) +
     conditionDefine("Enrolled", b.enrollment) +
     conditionDefine("Has Contraindication", b.waiver) +
     (b.refusal ? conditionDefine("Refused", b.refusal) : "") +
+    titerDefine +
     `
 define "Dose Count":
   Count([Immunization] I
@@ -59,7 +75,7 @@ define "Dose Count":
       and exists(I.vaccineCode.coding C where C.system = '${b.event.valueSet}' and C.code = '${b.event.code}'))
 
 define "Series Complete":
-  "Enrolled" and not "Has Contraindication" and "Dose Count" >= ${n}
+  ${seriesComplete}
 
 define "Excluded": "Has Contraindication"
 
@@ -76,12 +92,15 @@ define "Outcome Status":
 function windowedRecency(input: GenerateCqlInput): string {
   const b = input.bindings;
   if (b.event.type !== "procedure") throw new Error("windowed-recency (E11.1) requires event.type=procedure");
-  const { windowDays, dueSoonDays } = input.rule as { windowDays: number; dueSoonDays: number };
+  const rule = input.rule as { windowDays: number; dueSoonDays: number; gracePeriodDays?: number };
+  const { windowDays, dueSoonDays } = rule;
   const compliantMax = windowDays - dueSoonDays;
+  const overdueThreshold = windowDays + (rule.gracePeriodDays ?? 0);
   return (
     header(input.library, input.version) +
     conditionDefine("Enrolled", b.enrollment) +
     conditionDefine("Has Waiver", b.waiver) +
+    (b.refusal ? conditionDefine("Refused", b.refusal) : "") +
     `
 define "Most Recent Event Date":
   Last(
@@ -99,10 +118,10 @@ define "Compliant":
   "Enrolled" and not "Has Waiver" and "Days Since Last Event" <= ${compliantMax}
 
 define "Due Soon":
-  "Enrolled" and not "Has Waiver" and "Days Since Last Event" > ${compliantMax} and "Days Since Last Event" <= ${windowDays}
+  "Enrolled" and not "Has Waiver" and "Days Since Last Event" > ${compliantMax} and "Days Since Last Event" <= ${overdueThreshold}
 
 define "Overdue":
-  "Enrolled" and not "Has Waiver" and "Days Since Last Event" > ${windowDays}
+  "Enrolled" and not "Has Waiver" and "Days Since Last Event" > ${overdueThreshold}
 
 define "Missing Data":
   "Enrolled" and not "Has Waiver" and "Most Recent Event Date" is null
