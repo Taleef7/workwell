@@ -21,6 +21,15 @@ emits the `rule:` params; segments/risk-groups (E11.3) are separate.
 **Consequences.** Non-CQL authors can change a rule's thresholds via params (E11.2 builds the form); CQL
 remains the standards layer; no schema/DDL (rule-params are build-time YAML); no new runtime deps.
 
+**E11.2a (codegen extensions).** Added three additive, back-compatible rule capabilities to the codegen:
+**grace** (windowed — `overdueThreshold = windowDays + gracePeriodDays`, extends the Due-Soon band before
+OVERDUE), **titer** (series — `allowPositiveTiter` + a titer Observation binding ORs `Has Positive Titer`
+into `Series Complete`, a real immunity path), and **declination** (a `Refused` define wherever a refusal
+binding is present — read by the roster's DECLINED display, never changes `Outcome Status`). All fields are
+optional; absent ⇒ E11.1 output byte-for-byte, so the parity proof is unaffected. Proven by behavioral
+goldens (`generate-cql-extensions.test.ts`). The Hep B multi-alternative-series with min-interval validation
++ multi-CVX is deferred. The E11.2b Rule Builder UI emits these params.
+
 ## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
 
 - **Date:** 2026-06-19
