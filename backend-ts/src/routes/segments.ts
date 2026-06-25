@@ -15,6 +15,7 @@ import { getStores } from "../stores/factory.ts";
 import { matchesCohort } from "../segment/segment-applicability.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import type { SegmentRule, SegmentOverride } from "../stores/segment-store.ts";
+import type { CaseEventStore } from "../stores/case-event-store.ts";
 
 interface SegmentsEnv {
   DB: CloudDatabase;
@@ -61,14 +62,13 @@ function validateOverrides(overrides: unknown): string | null {
 }
 
 async function audit(
-  env: SegmentsEnv,
+  events: CaseEventStore,
   eventType: string,
   id: string,
   actor: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const stores = await getStores(env);
-  await stores.events.appendAudit({
+  await events.appendAudit({
     eventType,
     entityType: "segment",
     entityId: id,
@@ -93,7 +93,9 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     return json(await store.listSegments());
   }
 
-  // GET /api/segments/:id/preview
+  // GET /api/segments/:id/preview — "who would this cohort match?" for the authoring editor. Intentionally
+  // ignores `enabled` (it previews membership regardless of whether the segment is live), unlike the
+  // applicability overlay/gate which only count enabled segments.
   const previewId = req.method === "GET" ? pathname.match(/^\/api\/segments\/([^/]+)\/preview$/)?.[1] : undefined;
   if (previewId) {
     const seg = await store.getSegment(previewId);
@@ -120,7 +122,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
       measureIds: body.measureIds,
       overrides: body.overrides as SegmentOverride[] | undefined,
     });
-    await audit(env, "SEGMENT_CREATED", created.id, actor, { name: created.name, measureIds: created.measureIds });
+    await audit(stores.events, "SEGMENT_CREATED", created.id, actor, { name: created.name, measureIds: created.measureIds });
     return json(created, 201);
   }
 
@@ -150,7 +152,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     if (body.overrides !== undefined) await store.setOverrides(putId, body.overrides as SegmentOverride[]);
 
     const hydrated = await store.getSegment(putId);
-    await audit(env, "SEGMENT_UPDATED", putId, actor, {
+    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
       name: hydrated?.name,
       enabled: hydrated?.enabled,
       measureIds: hydrated?.measureIds,
@@ -164,7 +166,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const seg = await store.getSegment(delId);
     if (!seg) return json({ error: "not_found", message: `Segment not found: ${delId}` }, 404);
     await store.deleteSegment(delId);
-    await audit(env, "SEGMENT_DELETED", delId, actor, { name: seg.name });
+    await audit(stores.events, "SEGMENT_DELETED", delId, actor, { name: seg.name });
     return new Response(null, { status: 204 });
   }
 
