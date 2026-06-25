@@ -33,6 +33,16 @@ test("matchesRule: empty conditions match nobody", () => {
   assert.equal(matchesRule(emp(), { match: "ANY", conditions: [] }), false);
 });
 
+test("matchesCohort: EXCLUDE beats INCLUDE even with conflicting duplicate overrides (any order)", () => {
+  const r = { match: "ANY" as const, conditions: [] };
+  assert.equal(matchesCohort(emp(), seg({ rule: r, overrides: [
+    { externalId: "emp-006", mode: "INCLUDE" }, { externalId: "emp-006", mode: "EXCLUDE" },
+  ] })), false);
+  assert.equal(matchesCohort(emp(), seg({ rule: r, overrides: [
+    { externalId: "emp-006", mode: "EXCLUDE" }, { externalId: "emp-006", mode: "INCLUDE" },
+  ] })), false);
+});
+
 test("matchesCohort: EXCLUDE override wins, INCLUDE forces in", () => {
   const ruleHazwoper = { match: "ANY" as const, conditions: [{ attr: "role" as const, op: "contains" as const, value: "Welder" }] };
   assert.equal(matchesCohort(emp(), seg({ rule: ruleHazwoper, overrides: [{ externalId: "emp-006", mode: "EXCLUDE" }] })), false);

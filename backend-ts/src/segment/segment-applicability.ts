@@ -21,11 +21,12 @@ export function matchesRule(emp: EmployeeProfile, rule: SegmentRule): boolean {
   return rule.match === "ALL" ? conditions.every(testOne) : conditions.some(testOne);
 }
 
-/** Cohort membership = rule match, with per-employee overrides (EXCLUDE wins, then INCLUDE). */
+/** Cohort membership = rule match, with per-employee overrides. EXCLUDE wins over INCLUDE
+ *  unconditionally — independent of override ordering or any upstream duplicate entry. */
 export function matchesCohort(emp: EmployeeProfile, segment: HydratedSegment): boolean {
-  const override = segment.overrides.find((o) => o.externalId === emp.externalId);
-  if (override?.mode === "EXCLUDE") return false;
-  if (override?.mode === "INCLUDE") return true;
+  const mine = segment.overrides.filter((o) => o.externalId === emp.externalId);
+  if (mine.some((o) => o.mode === "EXCLUDE")) return false;
+  if (mine.some((o) => o.mode === "INCLUDE")) return true;
   return matchesRule(emp, segment.rule);
 }
 
