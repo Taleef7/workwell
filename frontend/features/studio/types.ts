@@ -1,7 +1,12 @@
 import type { OshaReferenceOption } from "@/components/osha-reference-combobox";
 
+export interface SeriesAlternative {
+  label: string;
+  requiredDoses: number;
+  minIntervalDays?: number[]; // length requiredDoses-1; absent ⇒ count-only
+}
 export type RuleParams =
-  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean }
+  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean; alternatives?: SeriesAlternative[] }
   | { type: "windowed-recency"; windowDays: number; dueSoonDays: number; gracePeriodDays?: number };
 export interface RuleCodeBinding { code: string; valueSet: string }
 export interface RuleBindings {
@@ -10,6 +15,7 @@ export interface RuleBindings {
   event: RuleCodeBinding & { type: "procedure" | "immunization" | "observation" };
   refusal?: RuleCodeBinding;
   titer?: { code: string; valueSet: string; minValue: number };
+  eventAlternatives?: Array<{ label: string; codes: RuleCodeBinding[] }>;
 }
 
 export type MeasureDetail = {
