@@ -79,10 +79,19 @@ export function expressionResults(evidence: unknown): ExprResult[] {
   return Array.isArray(er) ? (er as ExprResult[]) : [];
 }
 
+/** Days a recency measure is overdue, accounting for an optional grace period (E11.2a): overdue is
+ *  measured past `windowDays + gracePeriodDays`, so a subject still within grace (DUE_SOON) reads 0 —
+ *  consistent with the grace-aware CQL bucket. grace defaults to 0 ⇒ the pre-grace behavior. */
+export function overdueDays(daysSince: number, windowDays: number, gracePeriodDays = 0): number {
+  return Math.max(daysSince - (windowDays + gracePeriodDays), 0);
+}
+
 /** Derive the why_flagged block (matching the Java shape) from the CQL define results. */
 export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
-  const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
+  const binding = MEASURE_BINDINGS[measureId];
+  const window = binding?.complianceWindowDays ?? 365;
+  const grace = binding?.gracePeriodDays ?? 0;
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
 
@@ -111,7 +120,7 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   return {
     last_exam_date: lastExamDate,
     compliance_window_days: window,
-    days_overdue: days !== null ? Math.max(days - window, 0) : null,
+    days_overdue: days !== null ? overdueDays(days, window, grace) : null,
     role_eligible: true,
     site_eligible: true,
     waiver_status: waiverStatus,
