@@ -97,6 +97,8 @@ define "Has Positive Titer":
       return match.codes.map((c) => c.code);
     };
     const altBlocks = rule.alternatives.map((a) => {
+      if (a.requiredDoses < 1)
+        throw new Error(`series alternative '${a.label}' requiredDoses must be >= 1`);
       if (a.minIntervalDays && a.minIntervalDays.length !== a.requiredDoses - 1)
         throw new Error(
           `series alternative '${a.label}' minIntervalDays length must equal requiredDoses-1 (${a.requiredDoses - 1})`,

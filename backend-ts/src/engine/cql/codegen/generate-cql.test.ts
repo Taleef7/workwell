@@ -172,6 +172,18 @@ test("alternatives: minIntervalDays length != requiredDoses-1 throws", () => {
   );
 });
 
+test("alternatives: requiredDoses < 1 throws", () => {
+  assert.throws(
+    () => gen(
+      { type: "series-completion", requiredDoses: 1, alternatives: [{ label: "Traditional", requiredDoses: 0 }] },
+      { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" },
+        event: { code: "x", valueSet: "v", type: "immunization" },
+        eventAlternatives: [{ label: "Traditional", codes: [{ code: "08", valueSet: "v" }] }] },
+    ),
+    /requiredDoses must be >= 1/,
+  );
+});
+
 test("alternatives absent: series output is unchanged from the single-code path", () => {
   const single = gen({ type: "series-completion", requiredDoses: 2 },
     { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" }, event: { code: "x", valueSet: "v", type: "immunization" } });
