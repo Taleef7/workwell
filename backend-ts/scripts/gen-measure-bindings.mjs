@@ -16,9 +16,14 @@ const outFile = path.resolve(here, "../src/engine/synthetic/measure-bindings.ts"
 const line = (s, key) => s.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, "m"))?.[1].trim();
 const inField = (block, k) => block.match(new RegExp(`${k}:\\s*"?([^,"}\\]]+?)"?\\s*[,}\\]]`))?.[1].trim() ?? null;
 // E11.2c — flow-style list under `key:` (`    - { ... }` lines): returns each item's inner object text.
+// Each item MUST be on a single line (the regex is line-scoped). Fail loud if the key is present but no
+// items parse (e.g. a multi-line `- { … }`), rather than silently degrading to a single-code measure.
 const flowList = (s, key) => {
   const m = s.match(new RegExp(`^\\s*${key}:\\s*\\n((?:\\s*-\\s*\\{[^\\n]*\\}\\s*\\n?)+)`, "m"));
-  return m ? [...m[1].matchAll(/-\s*\{([^}]*)\}/g)].map((x) => x[1]) : [];
+  if (m) return [...m[1].matchAll(/-\s*\{([^}]*)\}/g)].map((x) => x[1]);
+  if (new RegExp(`^\\s*${key}:\\s*$`, "m").test(s))
+    throw new Error(`${key}: is present but no single-line "- { ... }" items parsed (each flow item must be on one line)`);
+  return [];
 };
 const numArray = (block, k) => {
   const a = block.match(new RegExp(`${k}:\\s*\\[([^\\]]*)\\]`));
