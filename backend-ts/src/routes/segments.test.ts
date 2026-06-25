@@ -95,6 +95,8 @@ test("malformed POST → 400", async () => {
   assert.equal((await post({ name: "x", rule: { match: "ANY", conditions: [{ attr: "role", op: "BOGUS", value: "a" }] }, measureIds: [] }))?.status, 400);
   // measureIds not an array of strings
   assert.equal((await post({ name: "x", rule: welderRule, measureIds: [1, 2] }))?.status, 400);
+  // unknown measure id (not in the runnable registry)
+  assert.equal((await post({ name: "x", rule: welderRule, measureIds: ["not_a_real_measure"] }))?.status, 400);
   // bad override mode
   assert.equal((await post({ name: "x", rule: welderRule, measureIds: ["audiogram"], overrides: [{ externalId: "emp-006", mode: "BOGUS" }] }))?.status, 400);
 });

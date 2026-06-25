@@ -19,9 +19,13 @@ compliance** (ADR-016; CQL `Outcome Status` stays the sole authority).
 - **Reversibility invariant** (tested both surfaces + the pipeline): zero enabled segments ⇒ everything
   applicable to everyone = pre-E11.3 behavior. Disabling/deleting all segments reverts the feature.
 - **`/api/segments` CRUD + `/preview`** — writes ADMIN-only (authorize rule + a dedicated authorize test) +
-  audited `SEGMENT_*`, reads authenticated, route-level enum validation (400 on malformed). Idempotent
-  boot seed of 4 demo cohorts (OSHA Safety-Sensitive / Clinical Staff / Office Staff / All Employees) so the
-  grid shows a real applicable/N-A mix.
+  audited `SEGMENT_*`, reads authenticated, route-level enum + `measureIds`-in-registry validation (400 on
+  malformed). Idempotent boot seed of **3 ENABLED demo cohorts** (All Employees baseline / OSHA
+  Safety-Sensitive / Clinical Staff) whose rule-sets together cover **every** Active runnable measure (a
+  `no-orphaned-measure` test guards this) so the grid shows a real applicable/N-A mix. **Note:** because the
+  seed ships enabled, the applicability overlay goes **live on the demo** on the first deploy (out-of-cohort
+  cells read NOT_APPLICABLE; out-of-cohort cases are suppressed on the next run) — a deliberate,
+  whole-branch-reviewed decision. Reversibility still holds (disable/delete all segments ⇒ pre-E11.3 behavior).
 
 Built subagent-driven (TDD per task; spec + code-quality review each task — several review findings folded
 in: EXCLUDE-beats-INCLUDE hardening, contract dedup coverage, disabled-segment filter guard, route audit/doc

@@ -431,9 +431,11 @@ segment_overrides (                                      -- per-employee INCLUDE
 `measure_id`/`external_id` are text keys into the synthetic measure registry + employee directory (no FK —
 backend-ts has no `measures`/`employees` tables). Backed by a `SegmentStore` port (floor + ceiling, store
 contract; `deleteSegment` removes child rows explicitly on the floor since `PRAGMA foreign_keys` is off,
-cascades on the ceiling). Seeded idempotently by name with 4 demo cohorts. **Reversibility:** zero enabled
-segments ⇒ everything applicable to everyone (pre-E11.3 behavior); the feature reverts by disabling/deleting
-all segments. `outcomes`/`cases` are unchanged — the run pipeline only *skips* a case upsert when not
+cascades on the ceiling). Seeded idempotently by name with **3 ENABLED** demo cohorts (All Employees baseline
+/ OSHA Safety-Sensitive / Clinical Staff) whose rule-sets together cover every Active runnable measure.
+Because the seed ships enabled, the applicability overlay is **active on the demo stack** from first deploy.
+**Reversibility:** zero enabled segments ⇒ everything applicable to everyone (pre-E11.3 behavior); the feature
+reverts by disabling/deleting all segments. `outcomes`/`cases` are unchanged — the run pipeline only *skips* a case upsert when not
 applicable; the outcome is still persisted. CQL `Outcome Status` stays authoritative (ADR-008/ADR-016).
 
 ## 4) Idempotency Contract for Case Upsert

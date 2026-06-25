@@ -1267,7 +1267,7 @@ and WebChart-group import are deferred to later epics. The Configure Groups edit
 
 - [ ] **Step 3: Update `docs/ARCHITECTURE.md`** — add `segment` to the backend module list (the applicability engine + store + route), note the roster `NOT_APPLICABLE` overlay + `?segment=` filter on `/api/compliance/roster`, the run-pipeline case-gating runtime invariant ("applicability gates case creation; the outcome is always persisted — ADR-016"), and the `GET/POST/PUT/DELETE /api/segments` external interface (ADMIN writes; reads authenticated).
 
-- [ ] **Step 4: Add a `docs/JOURNAL.md` entry** (newest on top, dated 2026-06-25) summarizing E11.3 PR-1: the 3-table segment model, the pure applicability engine, roster N/A overlay + segment filter, run-pipeline case-gating, the seed, ADR-016; "no behavior change until segments are created (reversibility); PR-2 = Configure Groups UI"; backend suite green.
+- [ ] **Step 4: Add a `docs/JOURNAL.md` entry** (newest on top, dated 2026-06-25) summarizing E11.3 PR-1: the 3-table segment model, the pure applicability engine, roster N/A overlay + segment filter, run-pipeline case-gating, the seed, ADR-016; PR-2 = Configure Groups UI; backend suite green. **Note (decided at the whole-branch review):** the demo seed ships ENABLED, so the overlay goes live on the demo on first deploy (deliberate, covers every Active measure); the reversibility property still holds (disable/delete all segments ⇒ pre-E11.3 behavior).
 
 - [ ] **Step 5: Commit**
 
