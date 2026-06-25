@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "@/lib/api/client";
 import { emitToast } from "@/lib/toast";
-import type { MeasureDetail, RuleParams, RuleBindings, RuleCodeBinding } from "../types";
+import type { MeasureDetail, RuleParams, RuleBindings, RuleCodeBinding, SeriesAlternative } from "../types";
 
 type Props = {
   measure: MeasureDetail;
@@ -16,6 +16,12 @@ type Props = {
 type Shape = "series-completion" | "windowed-recency";
 
 const emptyCode = (): RuleCodeBinding => ({ code: "", valueSet: "" });
+
+// An alternative series authored as free text (codes + intervals split on commas/spaces/newlines).
+type AltRow = { label: string; requiredDoses: number; codesText: string; intervalsText: string };
+const emptyAlt = (): AltRow => ({ label: "", requiredDoses: 2, codesText: "", intervalsText: "" });
+const parseTokens = (s: string): string[] => s.split(/[\s,]+/).map((t) => t.trim()).filter((t) => t !== "");
+const parseInts = (s: string): number[] => parseTokens(s).map((t) => Number(t)).filter((n) => Number.isFinite(n));
 
 function readableError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
@@ -46,6 +52,19 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
   const [eventCode, setEventCode] = useState<RuleCodeBinding>(rb?.event ? { code: rb.event.code, valueSet: rb.event.valueSet } : emptyCode());
   const [allowDeclination, setAllowDeclination] = useState<boolean>(!!rb?.refusal);
   const [refusal, setRefusal] = useState<RuleCodeBinding>(rb?.refusal ?? emptyCode());
+  // alternative series (series-completion only)
+  const hydratedAlts: SeriesAlternative[] | undefined = r?.type === "series-completion" ? r.alternatives : undefined;
+  const [alternativesOn, setAlternativesOn] = useState<boolean>(!!hydratedAlts?.length);
+  const [alts, setAlts] = useState<AltRow[]>(
+    hydratedAlts?.length
+      ? hydratedAlts.map((a) => ({
+          label: a.label,
+          requiredDoses: a.requiredDoses,
+          codesText: (rb?.eventAlternatives?.find((e) => e.label === a.label)?.codes ?? []).map((c) => c.code).join(", "),
+          intervalsText: (a.minIntervalDays ?? []).join(", "),
+        }))
+      : [emptyAlt()]
+  );
 
   const [cql, setCql] = useState<string>("");
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -53,12 +72,40 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
 
   const eventType: "procedure" | "immunization" | "observation" = shape === "series-completion" ? "immunization" : "procedure";
 
+  const useAlternatives = shape === "series-completion" && alternativesOn;
+
+  // Parsed alternative series → rule.alternatives + bindings.eventAlternatives (correlated by label).
+  // Each alt's codes inherit the event binding's value set. Intervals are omitted when blank (count-only).
+  const altParsed = useMemo(
+    () =>
+      alts.map((a) => {
+        const codes = parseTokens(a.codesText);
+        const intervals = parseInts(a.intervalsText);
+        const alternative: SeriesAlternative = {
+          label: a.label.trim(),
+          // Clamp the alt-path required doses to a floor of 1 so an empty/zero field can't emit a
+          // Count(...) >= 0 (always-COMPLIANT) series. This clamp is intentional and applies only to
+          // the alternatives path; the single-series requiredDoses path is left as the established behavior.
+          requiredDoses: Math.max(1, Number(a.requiredDoses) || 1),
+          ...(a.intervalsText.trim() !== "" ? { minIntervalDays: intervals } : {}),
+        };
+        const binding = { label: a.label.trim(), codes: codes.map((c) => ({ code: c, valueSet: eventCode.valueSet })) };
+        return { alternative, binding };
+      }),
+    [alts, eventCode.valueSet]
+  );
+
   const rule: RuleParams = useMemo(
     () =>
       shape === "series-completion"
-        ? { type: "series-completion", requiredDoses, ...(allowTiter ? { allowPositiveTiter: true } : {}) }
+        ? {
+            type: "series-completion",
+            requiredDoses,
+            ...(allowTiter ? { allowPositiveTiter: true } : {}),
+            ...(useAlternatives ? { alternatives: altParsed.map((p) => p.alternative) } : {}),
+          }
         : { type: "windowed-recency", windowDays, dueSoonDays, ...(gracePeriodDays ? { gracePeriodDays } : {}) },
-    [shape, requiredDoses, allowTiter, windowDays, dueSoonDays, gracePeriodDays]
+    [shape, requiredDoses, allowTiter, useAlternatives, altParsed, windowDays, dueSoonDays, gracePeriodDays]
   );
   const bindings: RuleBindings = useMemo(
     () => ({
@@ -66,8 +113,9 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
       event: { ...eventCode, type: eventType },
       ...(allowDeclination ? { refusal } : {}),
       ...(shape === "series-completion" && allowTiter ? { titer } : {}),
+      ...(useAlternatives ? { eventAlternatives: altParsed.map((p) => p.binding) } : {}),
     }),
-    [enrollment, waiver, eventCode, eventType, allowDeclination, refusal, shape, allowTiter, titer]
+    [enrollment, waiver, eventCode, eventType, allowDeclination, refusal, shape, allowTiter, titer, useAlternatives, altParsed]
   );
 
   // Each binding needs BOTH a code and a value set before a preview/save: the generated CQL matches
@@ -75,11 +123,22 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
   // real codings (incorrect outcomes). Gate on code + valueSet for every active binding.
   const bindingsComplete = useMemo(() => {
     const full = (b: RuleCodeBinding) => b.code.trim() !== "" && b.valueSet.trim() !== "";
-    if (!full(enrollment) || !full(waiver) || !full(eventCode)) return false;
+    if (!full(enrollment) || !full(waiver)) return false;
     if (allowDeclination && !full(refusal)) return false;
     if (shape === "series-completion" && allowTiter && !(titer.code.trim() !== "" && titer.valueSet.trim() !== "")) return false;
+    if (useAlternatives) {
+      // The alts inherit the event value set, so it must be set; the single event code is not the driver.
+      if (eventCode.valueSet.trim() === "") return false;
+      for (const a of alts) {
+        const codes = parseTokens(a.codesText);
+        if (a.label.trim() === "" || codes.length === 0) return false;
+        if (a.intervalsText.trim() !== "" && parseInts(a.intervalsText).length !== a.requiredDoses - 1) return false;
+      }
+      return true;
+    }
+    if (!full(eventCode)) return false;
     return true;
-  }, [enrollment, waiver, eventCode, allowDeclination, refusal, shape, allowTiter, titer]);
+  }, [enrollment, waiver, eventCode, allowDeclination, refusal, shape, allowTiter, titer, useAlternatives, alts]);
 
   // Debounced live preview.
   useEffect(() => {
@@ -162,12 +221,57 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
 
         {shape === "series-completion" ? (
           <>
-            <label className="flex flex-col text-xs">
-              <span className="mb-1">Required doses</span>
-              <input aria-label="Required doses" type="number" min={1} value={requiredDoses}
-                onChange={(e) => setRequiredDoses(Number(e.target.value))}
-                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" />
+            {!useAlternatives ? (
+              <label className="flex flex-col text-xs">
+                <span className="mb-1">Required doses</span>
+                <input aria-label="Required doses" type="number" min={1} value={requiredDoses}
+                  onChange={(e) => setRequiredDoses(Number(e.target.value))}
+                  className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" />
+              </label>
+            ) : null}
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" aria-label="Alternative series (multi-brand)" checked={alternativesOn}
+                onChange={(e) => setAlternativesOn(e.target.checked)} />
+              Alternative series (multi-brand) — OR of distinct dose series
             </label>
+            {useAlternatives ? (
+              <div className="grid gap-3 rounded border border-neutral-200 p-2 dark:border-neutral-800">
+                {alts.map((a, i) => (
+                  <div key={i} className="grid gap-2 border-b border-neutral-100 pb-2 last:border-b-0 last:pb-0 dark:border-neutral-800">
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex flex-col text-xs"><span className="mb-1">{`Alternative ${i + 1} label`}</span>
+                        <input aria-label={`Alternative ${i + 1} label`} value={a.label}
+                          onChange={(e) => setAlts((prev) => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                          className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" /></label>
+                      <label className="flex flex-col text-xs"><span className="mb-1">{`Alternative ${i + 1} required doses`}</span>
+                        <input aria-label={`Alternative ${i + 1} required doses`} type="number" min={1} value={a.requiredDoses}
+                          onChange={(e) => setAlts((prev) => prev.map((x, j) => (j === i ? { ...x, requiredDoses: Number(e.target.value) } : x)))}
+                          className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" /></label>
+                    </div>
+                    <label className="flex flex-col text-xs"><span className="mb-1">{`Alternative ${i + 1} CVX codes`}</span>
+                      <input aria-label={`Alternative ${i + 1} cvx codes`} value={a.codesText} placeholder="189 (comma/space separated)"
+                        onChange={(e) => setAlts((prev) => prev.map((x, j) => (j === i ? { ...x, codesText: e.target.value } : x)))}
+                        className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" /></label>
+                    <label className="flex flex-col text-xs"><span className="mb-1">{`Alternative ${i + 1} min intervals (days)`}</span>
+                      <input aria-label={`Alternative ${i + 1} min intervals (days)`} value={a.intervalsText} placeholder="optional, e.g. 28, 56"
+                        onChange={(e) => setAlts((prev) => prev.map((x, j) => (j === i ? { ...x, intervalsText: e.target.value } : x)))}
+                        className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" /></label>
+                    {alts.length > 1 ? (
+                      <button type="button" aria-label={`Remove alternative ${i + 1}`}
+                        onClick={() => setAlts((prev) => prev.filter((_, j) => j !== i))}
+                        className="justify-self-start rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <button type="button" onClick={() => setAlts((prev) => [...prev, emptyAlt()])}
+                  className="justify-self-start rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
+                  Add alternative
+                </button>
+                <p className="text-[11px] text-neutral-400">Each alternative&apos;s codes inherit the vaccine value set below.</p>
+              </div>
+            ) : null}
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={allowTiter} onChange={(e) => setAllowTiter(e.target.checked)} />
               Allow positive titer
@@ -204,7 +308,18 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
           <p className="mb-2 text-xs font-semibold uppercase text-neutral-500">Bindings (code + value set)</p>
           {codeFields("Enrollment", enrollment, setEnrollment)}
           {codeFields("Waiver", waiver, setWaiver)}
-          {codeFields(shape === "series-completion" ? "Vaccine" : "Event", eventCode, setEventCode)}
+          {useAlternatives ? (
+            // With alternatives on, the single event code is not the series driver — only its value set
+            // is reused by each alternative's codes, so collect just the value set here.
+            <label className="flex flex-col text-xs">
+              <span className="mb-1">Vaccine value set (shared by alternatives)</span>
+              <input aria-label="Vaccine value set" value={eventCode.valueSet}
+                onChange={(e) => setEventCode({ ...eventCode, valueSet: e.target.value })}
+                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700" />
+            </label>
+          ) : (
+            codeFields(shape === "series-completion" ? "Vaccine" : "Event", eventCode, setEventCode)
+          )}
           <label className="mt-2 flex items-center gap-2 text-xs">
             <input type="checkbox" checked={allowDeclination} onChange={(e) => setAllowDeclination(e.target.checked)} />
             Allow patient declination
