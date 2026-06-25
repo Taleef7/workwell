@@ -97,8 +97,27 @@ test("malformed POST → 400", async () => {
   assert.equal((await post({ name: "x", rule: welderRule, measureIds: [1, 2] }))?.status, 400);
   // unknown measure id (not in the runnable registry)
   assert.equal((await post({ name: "x", rule: welderRule, measureIds: ["not_a_real_measure"] }))?.status, 400);
+  // op/value shape mismatch — `in` needs a string[], equals/contains need a string (else it silently matches nobody)
+  assert.equal((await post({ name: "x", rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: "Clinic" }] }, measureIds: ["audiogram"] }))?.status, 400);
+  assert.equal((await post({ name: "x", rule: { match: "ANY", conditions: [{ attr: "role", op: "equals", value: ["Welder"] }] }, measureIds: ["audiogram"] }))?.status, 400);
   // bad override mode
   assert.equal((await post({ name: "x", rule: welderRule, measureIds: ["audiogram"], overrides: [{ externalId: "emp-006", mode: "BOGUS" }] }))?.status, 400);
+});
+
+test("cold DB: first GET /api/segments auto-seeds the demo cohorts (not just via /api/measures)", async () => {
+  const p = join(tmpdir(), `workwell-segroute-cold-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(p);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const coldEnv = { DB: db } as never;
+  try {
+    // No prior /api/measures call — the very first segment read must still see the seeded cohorts.
+    const list = (await handleSegments(new Request("http://x/api/segments", { method: "GET" }), coldEnv, actor).then((r) => r!.json())) as Array<{ name: string }>;
+    const names = list.map((s) => s.name);
+    assert.ok(names.includes("All Employees"), "demo cohorts seeded on a cold-DB segment read");
+    assert.ok(names.includes("OSHA Safety-Sensitive"));
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
 });
 
 test("malformed PUT (bad rule) → 400", async () => {

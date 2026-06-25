@@ -13,6 +13,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { matchesCohort } from "../segment/segment-applicability.ts";
+import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import type { SegmentRule, SegmentOverride } from "../stores/segment-store.ts";
@@ -53,7 +54,14 @@ function validateRule(rule: unknown): string | null {
     if (!isObject(c)) return "each condition must be an object";
     if (typeof c.attr !== "string" || !ATTRS.has(c.attr)) return "condition.attr must be role or site";
     if (typeof c.op !== "string" || !OPS.has(c.op)) return "condition.op must be equals, contains, or in";
-    if (typeof c.value !== "string" && !isStringArray(c.value)) return "condition.value must be a string or string[]";
+    // The value shape is operator-coupled: matchesRule only evaluates a string for equals/contains and a
+    // string[] for `in`. Rejecting a mismatched shape here prevents a valid-looking condition that
+    // silently matches nobody (and so silently disables applicability in preview/roster/case-gating).
+    if (c.op === "in") {
+      if (!isStringArray(c.value) || c.value.length === 0) return "condition.value must be a non-empty string[] when op is 'in'";
+    } else if (typeof c.value !== "string" || c.value === "") {
+      return `condition.value must be a non-empty string when op is '${c.op}'`;
+    }
   }
   return null;
 }
@@ -94,6 +102,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   const { pathname } = url;
   if (pathname !== "/api/segments" && !pathname.startsWith("/api/segments/")) return null;
 
+  await ensureSegmentSeed(env);
   const stores = await getStores(env);
   const store = stores.segments;
 

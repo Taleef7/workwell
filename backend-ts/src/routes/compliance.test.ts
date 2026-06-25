@@ -28,8 +28,11 @@ before(async () => {
     scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", requestedScope: { measureId: "mmr" },
     measurementPeriodStart: "2026-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
   });
+  // emp-041 (Nurse / Clinic) is in the seeded "Clinical Staff" cohort, whose rule-set includes mmr —
+  // so the applicability overlay leaves the real COMPLIANT cell visible (an out-of-cohort subject would
+  // read NOT_APPLICABLE; see the segments tests).
   await outcomes.recordOutcome({
-    runId: run.id, subjectId: "emp-001", measureId: "mmr", status: "COMPLIANT", evaluationPeriod: "2026-06-12",
+    runId: run.id, subjectId: "emp-041", measureId: "mmr", status: "COMPLIANT", evaluationPeriod: "2026-06-12",
     evidence: { expressionResults: [{ define: "Dose Count", result: 2 }] },
   });
   // The roster only reads terminal (COMPLETED/PARTIAL_FAILURE) population runs — finalize so the cell shows.
@@ -56,7 +59,7 @@ test("GET /api/compliance/roster → columns + rows + X-Total-Count; mmr cell ca
   };
   assert.equal(body.panel, "immunizations");
   assert.ok(body.columns.some((c) => c.measureId === "mmr" && c.complianceClass === "PERMANENT"));
-  const row = body.rows.find((r) => r.subject.externalId === "emp-001")!;
+  const row = body.rows.find((r) => r.subject.externalId === "emp-041")!;
   const mmrCell = row.cells["mmr"]!;
   assert.equal(mmrCell.status, "COMPLIANT");
   assert.equal(mmrCell.method, "2 valid dose(s)");
