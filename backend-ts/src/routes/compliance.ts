@@ -9,6 +9,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildRoster } from "../compliance/roster-read-model.ts";
+import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 
 interface ComplianceEnv {
   DB: CloudDatabase;
@@ -29,15 +30,18 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   if (url.pathname !== "/api/compliance/roster") return null;
 
   const q = url.searchParams;
+  await ensureSegmentSeed(env);
   const stores = await getStores(env);
+  const segments = await stores.segments.listSegments();
   const roster = await buildRoster(
-    { outcomeStore: stores.outcomes },
+    { outcomeStore: stores.outcomes, segments },
     {
       panel: q.get("panel"),
       status: q.get("status"),
       site: q.get("site"),
       role: q.get("role"),
       q: q.get("q"),
+      segment: q.get("segment"),
       page: intOr(q.get("page"), 1),
       pageSize: intOr(q.get("pageSize"), 50),
     },

@@ -93,6 +93,12 @@ const RULES: Rule[] = [
   // Order proposals (#77 E7) — clinical decision support over case/PII data; gated like campaigns.
   { pattern: rx("/api/orders/**"), access: [CM, A] },
 
+  // Segments (#183 E11.3) — risk-group config. Writes are ADMIN; reads (list + preview) fall through
+  // to the AUTHENTICATED /api/** rule (the roster + admin editor both read them).
+  { method: "POST", pattern: rx("/api/segments/**"), access: [A] },
+  { method: "PUT", pattern: rx("/api/segments/**"), access: [A] },
+  { method: "DELETE", pattern: rx("/api/segments/**"), access: [A] },
+
   { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
 

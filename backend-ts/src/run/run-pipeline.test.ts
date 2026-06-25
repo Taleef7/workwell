@@ -15,8 +15,9 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -185,4 +186,74 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
     mine.every((c) => /-(01|07)-01$/.test(c.evaluationPeriod)),
     "evaluation_period is a compliance-cycle anchor (Jan 1 / Jul 1), not the raw run date",
   );
+});
+
+// --- segment applicability gates case creation (#183 E11.3) ----------------
+// A Welder-only segment whose applicable rule-set is ["audiogram"]; emp-007 is Office Staff,
+// so audiogram is NOT applicable to them under this enabled segment.
+const welderSegment = (): HydratedSegment => ({
+  id: crypto.randomUUID(),
+  name: "Welders — Audiogram",
+  description: "",
+  enabled: true,
+  rule: { match: "ANY", conditions: [{ attr: "role", op: "equals", value: "Welder" }] },
+  measureIds: ["audiogram"],
+  overrides: [],
+  createdBy: "test",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+// Stub engine forces a deterministic OVERDUE (non-compliant) outcome regardless of synthetic config.
+const overdueEngine: RunPipelineDeps["engine"] = {
+  async evaluate() {
+    return {
+      subjectId: "ignored",
+      measure: "Audiogram",
+      outcome: "OVERDUE",
+      evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] },
+    };
+  },
+};
+
+test("gated: an out-of-cohort (subject, measure) creates NO case, but the outcome IS persisted", async () => {
+  const office = employeeById("emp-007")!; // Office Staff — not a Welder
+  const gatedDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [office],
+    segments: [welderSegment()],
+  };
+  const res = await executeManualRun(gatedDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+
+  // The non-compliant outcome is still persisted (CQL/recordOutcome is unconditional — ADR-008).
+  const outcomes = await deps.outcomeStore.listOutcomes(res.runId);
+  assert.equal(outcomes.length, 1, "the OVERDUE outcome was persisted");
+  assert.equal(outcomes[0]!.status, "OVERDUE");
+  assert.equal(outcomes[0]!.subjectId, "emp-007");
+
+  // No case was created for (emp-007, audiogram) — applicability gated it. This run is the only
+  // one that touched emp-007/audiogram, so any case here would be lastRunId === res.runId.
+  const mine = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.lastRunId === res.runId && c.employeeId === "emp-007" && c.measureId === "audiogram",
+  );
+  assert.equal(mine.length, 0, "out-of-cohort outcome creates no case");
+});
+
+test("reversibility: with zero enabled segments, the same scenario DOES create a case", async () => {
+  const office = employeeById("emp-007")!;
+  const openDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [office],
+    segments: [], // zero enabled segments ⇒ all applicable (cases created exactly as today)
+  };
+  const res = await executeManualRun(openDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2096-04-04" });
+
+  // The case's evaluation_period is bucketed to a compliance cycle (not the raw date), so key on
+  // (employee, measure, this run) instead of the literal `period`.
+  const mine = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.lastRunId === res.runId && c.employeeId === "emp-007" && c.measureId === "audiogram",
+  );
+  assert.equal(mine.length, 1, "no segments ⇒ a case IS created for the non-compliant outcome");
 });
