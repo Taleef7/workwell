@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-06-25 — E11.3 PR-1 merged + verified live; PR-2 (Configure Groups UI) spec'd + planned
+
+Merged **E11.3 PR-1** (#205, risk-group segments backend) and verified it on the live stack: the 3 segment
+tables self-created on Neon, the 3 enabled demo cohorts seeded, and the `NOT_APPLICABLE` overlay is correct
+across panels (immunizations: mmr/varicella/hepB are N-A for the ~80 non-Clinical employees, real for the
+Clinic/Nurse cohort; OSHA: audiogram/hazwoper N-A for non-field; spot-checks: emp-041 Nurse→mmr COMPLIANT,
+emp-007 Office→mmr/audiogram NOT_APPLICABLE). Health green, no regression. Addressed two Codex P2s on the PR
+before merge (per-operator value-shape validation so an `{op:"in", value:"Clinic"}` no longer silently
+matches nobody; `ensureSegmentSeed(env)` seed-once wired into every segment consumer so a cold-DB first hit
+to `/api/segments` / `/api/compliance/roster` / `/api/runs` seeds the cohorts rather than only the
+`/api/measures` initializer).
+
+Then brainstormed + planned **E11.3 PR-2 — the Configure Groups UI** (the frontend half that closes E11),
+on branch `feat/e11-3-segments-ui`: a `/admin → Groups` ADMIN editor (rule builder + applicable-measures
+multiselect + INCLUDE/EXCLUDE overrides picker via the existing `/api/employees/search` + a live
+server-computed membership preview), one new `POST /api/segments/preview` endpoint, and the roster
+`NOT_APPLICABLE` chip + segment filter. Design: `docs/superpowers/specs/2026-06-25-e11-3-segments-ui-design.md`;
+8-task TDD plan: `docs/superpowers/plans/2026-06-25-e11-3-segments-ui.md`. **Implementation deferred** — the
+spec + plan are committed; resume by executing the plan subagent-driven, then PR.
+
 ## 2026-06-25 — E11.3 PR-1: risk-group segments (backend)
 
 Closed the last E11 piece — the **segment / risk-group** model — on `feat/e11-3-segments` (PR-1, backend).
