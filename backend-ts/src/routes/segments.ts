@@ -14,6 +14,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { matchesCohort } from "../segment/segment-applicability.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { MEASURES } from "../engine/cql/measure-registry.ts";
 import type { SegmentRule, SegmentOverride } from "../stores/segment-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 
@@ -29,6 +30,14 @@ const bad = (message: string): Response => json({ error: "invalid_request", mess
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+/** Validate measureIds: a string[] of known runnable measure ids. Returns an error message, or null. */
+function validateMeasureIds(v: unknown): string | null {
+  if (!isStringArray(v)) return "measureIds must be an array of strings";
+  const unknown = v.filter((id) => !(id in MEASURES));
+  if (unknown.length) return `unknown measure id(s): ${unknown.join(", ")}`;
+  return null;
+}
 
 const MATCHES = new Set(["ANY", "ALL"]);
 const ATTRS = new Set(["role", "site"]);
@@ -110,7 +119,8 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     if (typeof body.name !== "string" || body.name.trim() === "") return bad("name is required");
     const ruleErr = validateRule(body.rule);
     if (ruleErr) return bad(ruleErr);
-    if (!isStringArray(body.measureIds)) return bad("measureIds must be an array of strings");
+    const measureErr = validateMeasureIds(body.measureIds);
+    if (measureErr) return bad(measureErr);
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
@@ -119,7 +129,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
       description: typeof body.description === "string" ? body.description : undefined,
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       rule: body.rule as SegmentRule,
-      measureIds: body.measureIds,
+      measureIds: body.measureIds as string[],
       overrides: body.overrides as SegmentOverride[] | undefined,
     });
     await audit(stores.events, "SEGMENT_CREATED", created.id, actor, { name: created.name, measureIds: created.measureIds });
@@ -137,7 +147,10 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
       const ruleErr = validateRule(body.rule);
       if (ruleErr) return bad(ruleErr);
     }
-    if (body.measureIds !== undefined && !isStringArray(body.measureIds)) return bad("measureIds must be an array of strings");
+    if (body.measureIds !== undefined) {
+      const measureErr = validateMeasureIds(body.measureIds);
+      if (measureErr) return bad(measureErr);
+    }
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
@@ -148,7 +161,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
       rule: body.rule as SegmentRule | undefined,
     });
     if (!patched) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
-    if (body.measureIds !== undefined) await store.setMeasures(putId, body.measureIds);
+    if (body.measureIds !== undefined) await store.setMeasures(putId, body.measureIds as string[]);
     if (body.overrides !== undefined) await store.setOverrides(putId, body.overrides as SegmentOverride[]);
 
     const hydrated = await store.getSegment(putId);
