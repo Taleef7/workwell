@@ -2,9 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 import { buildRoster } from "./roster-read-model.ts";
 
-const EMP = EMPLOYEES[0]!.externalId; // a real directory subject
+const EMP = EMPLOYEES[0]!.externalId; // a real directory subject (emp-001, role "Author", site "HQ")
+const EMP_ROLE = EMPLOYEES[0]!.role;
+
+/** A segment whose cohort matches the first directory subject by role. */
+function segmentFor(measureIds: string[], opts: { enabled?: boolean } = {}): HydratedSegment {
+  return {
+    id: "seg-1",
+    name: "Segment One",
+    description: "",
+    enabled: opts.enabled ?? true,
+    rule: { match: "ANY", conditions: [{ attr: "role", op: "equals", value: EMP_ROLE }] },
+    measureIds,
+    overrides: [],
+    createdBy: "test",
+    createdAt: "2026-06-25T00:00:00Z",
+    updatedAt: "2026-06-25T00:00:00Z",
+  };
+}
 
 function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecord[]>): OutcomeStore {
   return {
@@ -29,7 +47,7 @@ test("buildRoster — columns reflect the panel; a COMPLIANT mmr cell carries th
       { id: "o-1", runId: "run-1", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
     ],
   };
-  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun) }, { panel: "immunizations" });
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
 
   assert.equal(roster.panel, "immunizations");
   assert.ok(roster.columns.some((c) => c.measureId === "mmr" && c.complianceClass === "PERMANENT"));
@@ -41,7 +59,7 @@ test("buildRoster — columns reflect the panel; a COMPLIANT mmr cell carries th
 });
 
 test("buildRoster — status filter keeps only subjects with >=1 matching cell; page-size bounds rows", async () => {
-  const roster = await buildRoster({ outcomeStore: fakeStore([], {}) }, { panel: "osha", status: "COMPLIANT", pageSize: 10 });
+  const roster = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", status: "COMPLIANT", pageSize: 10 });
   assert.equal(roster.rows.length, 0);
   assert.equal(roster.total, 0);
 });
@@ -61,7 +79,7 @@ test("buildRoster — a newer in-flight RUNNING run is ignored; the last COMPLET
       { id: "o-2", runId: "run-2", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-19", status: "OVERDUE", evidence: ev([["Dose Count", 0]]), evaluatedAt: "2026-06-19T00:00:00Z" },
     ],
   };
-  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun) }, { panel: "immunizations" });
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT", "in-flight RUNNING run must not override the last COMPLETED cell");
   assert.equal(row.cells["mmr"]!.evidenceRef?.runId, "run-1");
@@ -83,11 +101,65 @@ test("buildRoster — two panel measures sharing one run load it once (no N+1); 
   const orig = store.listOutcomes.bind(store);
   store.listOutcomes = async (id: string) => { calls++; return orig(id); };
 
-  const roster = await buildRoster({ outcomeStore: store }, { panel: "immunizations" });
+  const roster = await buildRoster({ outcomeStore: store, segments: [] }, { panel: "immunizations" });
   assert.equal(calls, 1, "one shared run → listOutcomes called exactly once (run-cache)");
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
   assert.equal(row.cells["varicella"]!.status, "COMPLIANT");
   assert.equal(row.cells["adult_immunization"]!.status, "NA");
   assert.equal(row.cells["adult_immunization"]!.method, "Not evaluated");
+});
+
+// — E11.3 segment applicability overlay + filter —
+
+const mmrSeed = (): { withRun: OutcomeWithRun[]; byRun: Record<string, OutcomeRecord[]> } => ({
+  withRun: [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
+  ],
+  byRun: {
+    "run-1": [
+      { id: "o-1", runId: "run-1", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+    ],
+  },
+});
+
+test("buildRoster — overlay: an ENABLED segment matching the subject but excluding the measure ⇒ NOT_APPLICABLE", async () => {
+  const { withRun, byRun } = mmrSeed();
+  // Segment matches EMP (by role) but its rule-set does NOT include "mmr" → the COMPLIANT cell is overridden.
+  const segment = segmentFor(["varicella"]);
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [segment] }, { panel: "immunizations" });
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "NOT_APPLICABLE", "out-of-cohort overlay wins over the real outcome");
+  assert.equal(row.cells["mmr"]!.method, "Not applicable (no matching group)");
+  assert.equal(row.cells["mmr"]!.evidenceRef, undefined, "a NOT_APPLICABLE cell carries no evidenceRef");
+  // varicella IS in the rule-set → applicable; with no outcome it falls back to NA, not NOT_APPLICABLE.
+  assert.equal(row.cells["varicella"]!.status, "NA");
+});
+
+test("buildRoster — reversibility: zero enabled segments ⇒ the real COMPLIANT status stands (no overlay)", async () => {
+  const { withRun, byRun } = mmrSeed();
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
+  assert.equal(row.cells["mmr"]!.evidenceRef?.runId, "run-1");
+});
+
+test("buildRoster — segment filter scopes columns to the rule-set and rows to the cohort", async () => {
+  const { withRun, byRun } = mmrSeed();
+  const segment = segmentFor(["mmr", "varicella"]);
+  const roster = await buildRoster(
+    { outcomeStore: fakeStore(withRun, byRun), segments: [segment] },
+    { panel: "immunizations", segment: "seg-1" },
+  );
+  // columns = the segment's rule-set intersected with Active runnable measures (mmr + varicella are Active).
+  assert.deepEqual(roster.columns.map((c) => c.measureId).sort(), ["mmr", "varicella"]);
+  // every returned row's subject matches the segment cohort (role === EMP_ROLE).
+  assert.ok(roster.rows.length > 0);
+  for (const r of roster.rows) {
+    const e = EMPLOYEES.find((x) => x.externalId === r.subject.externalId)!;
+    assert.equal(e.role, EMP_ROLE, `row ${r.subject.externalId} must be in the cohort`);
+  }
+  // EMP is in cohort and its mmr is in-rule-set → keeps its real COMPLIANT status.
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
 });

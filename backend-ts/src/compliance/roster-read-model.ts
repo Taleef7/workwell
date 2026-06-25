@@ -6,11 +6,13 @@
  * `latestRunRows`) and loads evidence per run via `listOutcomes` (cached by run id).
  */
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS, DEFAULT_PANEL, isPanelId, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
 
@@ -35,6 +37,8 @@ export interface Roster {
 
 export interface RosterDeps {
   outcomeStore: OutcomeStore;
+  /** Configured risk-group segments (E11.3). Drives the N/A applicability overlay + `segment` filter. */
+  segments?: HydratedSegment[];
 }
 export interface RosterFilters {
   panel?: string | null;
@@ -42,6 +46,8 @@ export interface RosterFilters {
   site?: string | null;
   role?: string | null;
   q?: string | null;
+  /** Scope rows to a segment's cohort + columns to its rule-set (E11.3). */
+  segment?: string | null;
   page?: number;
   pageSize?: number;
 }
@@ -49,7 +55,14 @@ export interface RosterFilters {
 export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Promise<Roster> {
   const panel: PanelId = filters.panel && isPanelId(filters.panel) ? filters.panel : DEFAULT_PANEL;
   const active = new Set(MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id));
-  const measureIds = PANELS[panel].filter((m) => active.has(m));
+
+  // E11.3 segments: an active `segment` filter scopes columns to that segment's rule-set (∩ Active);
+  // otherwise columns are the panel set. `segments` (the configured set) drives the N/A overlay below.
+  const segments = deps.segments ?? [];
+  const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment) ?? null : null;
+  const measureIds = activeSegment
+    ? activeSegment.measureIds.filter((m) => active.has(m))
+    : PANELS[panel].filter((m) => active.has(m));
   const columns: RosterColumn[] = measureIds.map((id) => ({
     measureId: id,
     name: MEASURES[id]?.name ?? id,
@@ -92,13 +105,28 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   }
 
   // 3) assemble rows over the whole directory; NA where a measure has no cell for the subject.
+  //    Then apply the E11.3 applicability overlay: a measure the subject is in NO enabled segment for
+  //    becomes NOT_APPLICABLE (out-of-cohort wins over any real outcome; no evidenceRef). With zero
+  //    enabled segments `isApplicable` is always true ⇒ no overlay (today's behavior).
   let rows: RosterRow[] = EMPLOYEES.map((emp) => {
     const cells: Record<string, RosterCell> = {};
     for (const m of measureIds) {
+      if (!isApplicable(emp, m, segments)) {
+        cells[m] = { status: "NOT_APPLICABLE", method: "Not applicable (no matching group)" };
+        continue;
+      }
       cells[m] = cellByMeasureSubject.get(m)?.get(emp.externalId) ?? { status: "NA", method: "Not evaluated" };
     }
     return { subject: { externalId: emp.externalId, name: emp.name, role: emp.role, site: emp.site }, cells };
   });
+
+  // 3b) segment filter: scope rows to the active segment's cohort (before site/role/search/status + paging).
+  if (activeSegment) {
+    rows = rows.filter((r) => {
+      const e = employeeById(r.subject.externalId);
+      return e ? matchesCohort(e, activeSegment) : false;
+    });
+  }
 
   // 4) filters (site/role/search/status), then page.
   if (filters.site) rows = rows.filter((r) => r.subject.site === filters.site);

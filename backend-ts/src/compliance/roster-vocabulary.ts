@@ -8,7 +8,7 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveWhyFlagged, expressionResults } from "../case/case-detail-read-model.ts";
 
 export type DisplayState =
-  | "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED" | "DECLINED" | "IN_PROGRESS" | "NA";
+  | "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED" | "DECLINED" | "IN_PROGRESS" | "NA" | "NOT_APPLICABLE";
 
 export interface Cell {
   status: DisplayState;
