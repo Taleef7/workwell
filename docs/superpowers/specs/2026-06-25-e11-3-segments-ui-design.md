@@ -34,15 +34,14 @@ support the editor.
 beyond `role`/`site`; bulk import of WebChart groups (E12+); a per-employee-screen segment editor (the
 employee card already inherits the roster overlay read-only). No schema change.
 
-## 3. Backend additions (2 read-only endpoints, no schema)
+## 3. Backend additions (1 new read-only endpoint, no schema)
 
-### 3.1 `GET /api/employees?q=&limit=`
-Returns the synthetic directory as `{ externalId, name, role, site }[]` (from
-`engine/synthetic/employee-catalog.ts` `EMPLOYEES`). Optional `q` filters name/externalId/role/site
-(case-insensitive substring); optional `limit` (default all 100). Authenticated under `/api/**` (all
-roles, read-only). Powers the overrides employee picker. Added to `handleEmployees`
-(`backend-ts/src/routes/employees.ts`), which today matches only `/profile`, `/search`, `/simulate` — a
-bare `GET /api/employees` (+ trailing-slash) is free to add. Read-time; no schema.
+### 3.1 Overrides employee picker — REUSE the existing `GET /api/employees/search?q=&limit=`
+No new endpoint needed: `handleEmployees` (`backend-ts/src/routes/employees.ts`) already exposes
+`GET /api/employees/search?q=&limit=` → `EmployeeSearchResult[]` (`{ externalId, name, role, site,
+latestOutcome }`, `run/employee-profile.ts`), authenticated under `/api/**`, min `q` length 2, sorted by
+name, default `limit` 10. The overrides picker uses this directly (type-ahead). (The original design's
+proposed bare `GET /api/employees` list is dropped — the search endpoint covers it.)
 
 ### 3.2 `POST /api/segments/preview`
 Body `{ rule, overrides }` → `{ count, members: string[] }` (member externalIds). Dry-run membership over
@@ -94,9 +93,10 @@ A new ADMIN-only **"Groups"** tab in `/admin`.
     backend op/value coupling (`in` → non-empty list; equals/contains → non-empty string).
   - **Applicable measures:** a checkbox multiselect over the **Active runnable** measures (from
     `GET /api/measures`, filtered `status === "Active"`; id + name). ≥1 required.
-  - **Overrides:** a searchable employee picker (mirrors `osha-reference-combobox`, fed by
-    `GET /api/employees?q=`) → add a subject as INCLUDE or EXCLUDE; the chosen overrides render as
-    removable chips with an INCLUDE/EXCLUDE toggle. De-duped by externalId (last wins, matching the store).
+  - **Overrides:** a searchable employee picker (mirrors `osha-reference-combobox`, fed by the existing
+    `GET /api/employees/search?q=` — type-ahead, min 2 chars) → add a subject as INCLUDE or EXCLUDE; the
+    chosen overrides render as removable chips with an INCLUDE/EXCLUDE toggle. De-duped by externalId
+    (last wins, matching the store).
   - **Live preview:** a debounced (~300ms) `POST /api/segments/preview { rule, overrides }` →
     "**N employees match**" + a small sample of names; re-runs as the rule/overrides change. Skips the
     call while the rule is invalid (shows the validation hint instead).
@@ -104,7 +104,7 @@ A new ADMIN-only **"Groups"** tab in `/admin`.
     enabled, rule, measureIds, overrides }`; on success bust cache, close, refresh the list + the roster
     segment-filter options. Surface backend 400s inline.
 - **Hooks (`features/segments/hooks/`):** `useSegments` (list/create/update/delete via `useApi`),
-  `useDirectory` (debounced `GET /api/employees?q=`), `usePreview` (debounced dry-run). Each is small +
+  `useDirectorySearch` (debounced `GET /api/employees/search?q=`), `usePreview` (debounced dry-run). Each is small +
   single-purpose.
 
 ### 5.3 Types
@@ -113,8 +113,9 @@ A `features/segments/types.ts` mirroring the backend `HydratedSegment`/`SegmentR
 
 ## 6. Testing
 
-- **Backend:** `GET /api/employees` (list + `q` filter + shape); `POST /api/segments/preview` (count +
-  members via `matchesCohort`, ADMIN gate (403 for CM), malformed rule → 400, op/value-shape → 400).
+- **Backend:** `POST /api/segments/preview` (count + members via `matchesCohort`, ADMIN gate (403 for CM),
+  malformed rule → 400, op/value-shape → 400). (No employees-endpoint test — `/api/employees/search` is
+  pre-existing + already covered by `employees.test.ts`.)
 - **Frontend** (repo frontend test setup — Vitest/RTL per `frontend/package.json`):
   - `status.ts` — `NOT_APPLICABLE` label + class.
   - roster page — segment `<select>` populates from enabled segments + adds `&segment=` to the request;
@@ -130,16 +131,17 @@ A `features/segments/types.ts` mirroring the backend `HydratedSegment`/`SegmentR
 - New frontend module `features/segments/` (list, editor modal, hooks, types) — one focused unit per file,
   consumed by a thin `admin/page.tsx` Groups tab. No change to the roster grid component beyond the filter
   control + the `status.ts` chip entry.
-- Two backend endpoints are thin, read-only, reuse existing engine/synthetic + segment helpers — no new
-  module, no schema, no audit.
+- One new backend endpoint (`POST /api/segments/preview`) is thin, read-only, reuses the existing
+  `matchesCohort` + `validateRule`; the overrides picker reuses the existing `/api/employees/search` — no
+  new module, no schema, no audit.
 - The editor authors the same `{ rule, measureIds, overrides }` the PR-1 store + `/api/segments` already
   accept; the preview reuses the same `matchesCohort`. CQL stays the sole compliance authority (ADR-008);
   segments configure applicability only (ADR-016) — the UI never sets status.
 
 ## 8. PR boundary
 
-**One PR** (`feat/e11-3-segments-ui`): backend endpoints 3.1 + 3.2, then the roster surfacing (§4), then
-the Groups editor (§5). Closes E11 (#183). After merge, `/admin → Groups` lets an operator author cohorts
+**One PR** (`feat/e11-3-segments-ui`): the `POST /api/segments/preview` endpoint (§3.2), then the roster
+surfacing (§4), then the Groups editor (§5, reusing `/api/employees/search`). Closes E11 (#183). After merge, `/admin → Groups` lets an operator author cohorts
 and the roster shows the live applicable/N-A picture with a segment filter.
 
 ## 9. Risks
