@@ -73,9 +73,10 @@ test("backfillImmunizationValueSets — does NOT re-add a deliberately detached 
 
 test("backfillImmunizationValueSets — additively unions missing canonical codes into an existing set (E11.2c CVX 44/45)", async () => {
   const store = await freshStore();
-  // Simulate a store seeded BEFORE E11.2c: hepb-vaccines exists but lacks CVX 44/45, plus an operator-added code.
+  // Simulate a store seeded BEFORE E11.2c: hepb-vaccines exists but lacks CVX 44/45, plus an operator-added
+  // code and an operator-edited version (distinct from the seed VER) we must NOT clobber.
   await store.seedValueSet({
-    id: HEPB_VACCINES, oid: "urn:workwell:vs:hepb-vaccines", name: "Hep B Vaccines", version: "2025-demo",
+    id: HEPB_VACCINES, oid: "urn:workwell:vs:hepb-vaccines", name: "Hep B Vaccines", version: "operator-v9",
     codes: [
       { code: "hepb-vaccine", display: "Hepatitis B Vaccines", system: "urn:workwell:vs:hepb-vaccines" },
       { code: "08", display: "Hep B adolescent or pediatric", system: "http://hl7.org/fhir/sid/cvx" },
@@ -91,6 +92,7 @@ test("backfillImmunizationValueSets — additively unions missing canonical code
   const codes = new Set(after.codes.map((c) => c.code));
   assert.ok(codes.has("44") && codes.has("45"), "the E11.2c traditional-schedule CVX 44/45 must be back-filled");
   assert.ok(codes.has("OPERATOR"), "operator-added codes must be preserved (additive union, not replace)");
+  assert.equal(after.version, "operator-v9", "codes-only backfill must NOT clobber operator-edited version metadata");
 
   // Idempotent: a second run is a no-op (no duplicate codes).
   await backfillImmunizationValueSets(store, versionIdOf);

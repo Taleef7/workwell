@@ -122,6 +122,16 @@ export class PgValueSetStore implements ValueSetStore {
     );
   }
 
+  async setCodes(id: string, codes: { code: string; display: string; system: string }[]): Promise<void> {
+    const systems = [...new Set(codes.map((c) => c.system).filter(Boolean))];
+    // Codes-only update — never touches status/version/resolution_status/last_resolved_at (preserves
+    // operator-managed governance metadata, unlike seedValueSet's upsert).
+    await this.pool.query(
+      `UPDATE ${SPIKE_SCHEMA}.value_sets SET codes_json = $1::jsonb, code_systems = $2 WHERE id = $3`,
+      [JSON.stringify(codes), systems, id],
+    );
+  }
+
   async link(measureVersionId: string, valueSetId: string): Promise<void> {
     await this.pool.query(
       `INSERT INTO ${SPIKE_SCHEMA}.measure_value_set_links (measure_version_id, value_set_id)

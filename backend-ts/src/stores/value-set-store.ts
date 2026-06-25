@@ -81,6 +81,11 @@ export interface ValueSetStore {
   isEmpty(): Promise<boolean>;
   /** Upsert a value set by id; sets resolution_status=RESOLVED, status=ACTIVE (demo seed). */
   seedValueSet(input: SeedValueSetInput): Promise<void>;
+  /**
+   * Replace ONLY a value set's codes (+ derived code_systems), preserving all governance metadata
+   * (status, version, name, resolution_status, last_resolved_at). No-op if the id is unknown. Used by the
+   * additive immunization-code backfill so it never resets operator-managed metadata. */
+  setCodes(id: string, codes: CodeEntry[]): Promise<void>;
   /** Link a measure version to a value set; no-op if already linked (ON CONFLICT DO NOTHING). */
   link(measureVersionId: string, valueSetId: string): Promise<void>;
   /** Remove a measure-version↔value-set link (detach). */
