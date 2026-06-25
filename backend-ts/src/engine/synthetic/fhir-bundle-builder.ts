@@ -11,6 +11,16 @@
  */
 import type { EmployeeProfile } from "./employee-catalog.ts";
 import type { ExamConfig } from "./exam-config.ts";
+import type { MeasureBinding, SeriesAlternativeBinding } from "./measure-bindings.ts";
+
+/** Stable per-employee hash → pick one alternative dose series (Hep B Heplisav-vs-traditional). */
+function pickAlternative(binding: MeasureBinding, externalId: string): SeriesAlternativeBinding | null {
+  const alts = binding.alternatives;
+  if (!alts?.length) return null;
+  let h = 0;
+  for (const ch of externalId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return alts[h % alts.length]!;
+}
 
 const QICORE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 const QICORE_PROFILES = {
@@ -98,7 +108,27 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
   } else if (config.daysSinceLastExam !== null) {
     const when = dateMinusDays(evaluationDate, config.daysSinceLastExam);
     if (binding.event.type === "immunization") {
-      const doses = config.doseCount ?? 1;
+      // E11.2c — multi-alternative series (Hep B Heplisav-vs-traditional): when the binding carries
+      // alternatives, pick one per employee and stamp ITS CVX code + dose count. config.doseCount
+      // (set from series.requiredDoses) encodes complete/partial/none; map that onto the chosen alt's
+      // own requiredDoses. Spacing stays ~60d, which exceeds every Hep B ACIP min interval (≤56d).
+      // Absent alternatives ⇒ today's single-code path, unchanged.
+      const alt = pickAlternative(binding, externalId);
+      const required = binding.series?.requiredDoses ?? 1;
+      const doses = alt
+        ? (config.doseCount ?? 0) >= required
+          ? alt.requiredDoses // complete → the chosen alternative's full series
+          : (config.doseCount ?? 0) > 0
+            // Partial → neither alternative satisfied. Cap at `required - 1` (the roster's union
+            // denominator) so the union `Dose Count` stays below it and the roster renders IN_PROGRESS
+            // rather than MISSING_DATA with "N dose(s) on file" (e.g. a Traditional-3 partial would emit
+            // 2 doses and equal the denominator of 2). The CQL still returns MISSING_DATA either way.
+            ? Math.max(Math.min(alt.requiredDoses - 1, required - 1), 1)
+            : 0
+        : config.doseCount ?? 1;
+      const doseCoding = alt
+        ? { system: binding.event.valueSet, code: alt.codes[0], display: alt.codes[0] }
+        : coding;
       for (let i = 0; i < doses; i++) {
         // Stagger doses ~60 days apart (synthetic spacing, not a clinical dose schedule), oldest first.
         const doseWhen = dateMinusDays(evaluationDate, config.daysSinceLastExam! + i * 60);
@@ -109,7 +139,7 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
             id: `${externalId}-immunization-${i}`,
             status: "completed",
             patient: { reference: `Patient/${externalId}` },
-            vaccineCode: { coding: [coding] },
+            vaccineCode: { coding: [doseCoding] },
             occurrenceDateTime: doseWhen,
           },
         });

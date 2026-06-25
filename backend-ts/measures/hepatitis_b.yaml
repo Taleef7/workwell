@@ -14,6 +14,19 @@ bindings:
   waiver:     { code: hepb-contraindication, valueSet: "urn:workwell:vs:hepb-contraindication" }
   event:      { code: hepb-vaccine, valueSet: "urn:workwell:vs:hepb-vaccines", type: immunization }
   refusal:    { code: hepb-refusal, valueSet: "urn:workwell:vs:hepb-refusal" }
+  # E11.2c: per-alternative CVX code sets (correlated to rule.alternatives by label). Codes are bare
+  # CVX strings under the event value set (urn:workwell:vs:hepb-vaccines); the build scripts map each to
+  # { code, valueSet } (CodegenBindings.eventAlternatives).
+  eventAlternatives:
+    - { label: "Heplisav-B", codes: ["189"] }
+    - { label: "Traditional", codes: ["08", "43", "44", "45"] }
 rule:
+  # E11.2c — Hep B is an OR of alternative series: Heplisav-B (2 doses CVX 189, ≥28d apart) OR the
+  # traditional schedule (3 doses CVX 08/43/44/45, ACIP min intervals dose1→2 ≥28d, dose2→3 ≥56d).
+  # requiredDoses (2) is the union minimum the roster's IN_PROGRESS label uses; the per-alternative
+  # counts/intervals drive the canonical COMPLIANT bucket (ADR-008 — CQL Outcome Status authoritative).
   type: series-completion
   requiredDoses: 2
+  alternatives:
+    - { label: "Heplisav-B", requiredDoses: 2, minIntervalDays: [28] }
+    - { label: "Traditional", requiredDoses: 3, minIntervalDays: [28, 56] }

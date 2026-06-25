@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-06-25 — E11.2c PR-2: live Hep B repointed to Heplisav-vs-traditional
+
+Repointed the live `hepatitis_b_vaccination_series` measure onto the PR-1 multi-alternative-series codegen,
+so seeded Hep B outcomes + roster cells now reflect the real **Heplisav-B (2 doses CVX 189, ≥28d) OR
+traditional (3 doses CVX 08/43/44/45, ACIP min intervals 28/56d)** logic.
+
+- **Value set + binding:** added CVX 44/45 to `urn:workwell:vs:hepb-vaccines`; `hepatitis_b.yaml` gained
+  `rule.alternatives` + `bindings.eventAlternatives` (label-correlated). The two regex build scripts
+  (`gen-cql.mjs` → parity artifact, `gen-measure-bindings.mjs` → `measure-bindings.ts`) now parse the
+  flow-style alternatives lists; `measure-bindings.ts` carries a merged `alternatives` array. *(There is no
+  runtime YAML loader — these build-time scripts are the "loader"; the plan's `src/engine/yaml` path doesn't
+  exist, so the codegen-parity test + PR-1's behavioral goldens are the equivalent verification.)*
+- **CQL/ELM:** rewrote hand-written `hepatitis_b.cql` to the alternatives logic (copied from the generated
+  artifact ⇒ parity by construction) and recompiled the ELM. `codegen-parity` green; EOL-clean (git
+  normalizes — only the 6 intended files diff).
+- **Synthetic dose model:** made `fhir-bundle-builder.ts` alternative-aware — it picks one alternative per
+  employee by a stable `externalId` hash and stamps that brand's CVX code + dose count + ACIP-satisfying
+  spacing. *(Placed in the builder, which already has `employee.externalId`, rather than threading
+  `subjectId` through `deriveExamConfig`'s 6+ call sites — same "stable hash per employee" intent, smaller
+  blast radius.)* Absent `alternatives` ⇒ unchanged single-code path. Repointed the 4 spike fixtures
+  (present_recent = Heplisav-2, present_old = Traditional-3) via `gen-bundles.mjs`.
+- **Advisory consumers (never set status):** forecaster → Heplisav 2-dose default (`HEPB_DOSES_REQUIRED`
+  3→2, interval 30→28d); order-catalog Hep B CVX 08→189; measure-catalog spec text describes the
+  alternatives (drops "deferred to E11"). Roster `deriveCell` unchanged (reads the still-emitted union
+  `Dose Count`); pinned the repointed COMPLIANT/partial/none cells — the partial "1 of 2 doses on file"
+  under-read for a traditional-3 series is the accepted, documented display nuance.
+
+**No schema/DDL, no new deps; reversible by reverting the PR.** Smoke via `pnpm evaluate` on the live ELM:
+present_recent→COMPLIANT, present_old→COMPLIANT, missing→MISSING_DATA, excluded→EXCLUDED. Backend `tsc` +
+full suite green (664 pass / 1 self-skipped Pg-ceiling contract); frontend untouched. CQL `Outcome Status`
+stays the sole compliance authority (ADR-008/ADR-015); titer-proves-immunity for Hep B still deferred.
+
 ## 2026-06-25 — E11.2c PR-1: multi-alternative-series codegen + Rule Builder
 
 Extended the `series-completion` codegen (`generate-cql.ts`) with **multi-alternative series**: a measure

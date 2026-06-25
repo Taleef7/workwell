@@ -908,6 +908,19 @@ export function valueSetStoreContract(label: string, freshStore: () => Promise<V
     await store.seedValueSet({ id: "vs-a", oid: "urn:workwell:vs:alpha", name: "Alpha Set", version: "2025-demo", codes: [{ code: "A1", display: "Ay one", system: "urn:demo" }] });
     assert.equal((await store.getById("vs-a"))!.codes.length, 1, "re-seed replaces codes");
     assert.equal((await store.listAll()).length, 2, "re-seed did not duplicate");
+
+    // setCodes replaces ONLY the codes (+ derived code systems), preserving governance metadata.
+    await store.seedValueSet({ id: "vs-c", oid: "urn:workwell:vs:charlie", name: "Charlie Set", version: "operator-v9", codes: [{ code: "C1", display: "Cee one", system: "urn:demo" }] });
+    await store.setCodes("vs-c", [
+      { code: "C1", display: "Cee one", system: "urn:demo" },
+      { code: "C2", display: "Cee two", system: "http://hl7.org/fhir/sid/cvx" },
+    ]);
+    const c = (await store.getById("vs-c"))!;
+    assert.equal(c.codes.length, 2, "setCodes replaces the code list");
+    assert.deepEqual(c.codeSystems.sort(), ["http://hl7.org/fhir/sid/cvx", "urn:demo"], "setCodes re-derives code systems");
+    assert.equal(c.version, "operator-v9", "setCodes preserves version metadata");
+    assert.equal(c.governanceStatus, "ACTIVE", "setCodes preserves status metadata");
+    await store.setCodes("nope", [{ code: "Z", display: "Z", system: "urn:demo" }]); // unknown id → no-op, no throw
   });
 
   test(`[${label}] create + links: create is DRAFT/empty, link/unlink drive listByVersion`, async () => {

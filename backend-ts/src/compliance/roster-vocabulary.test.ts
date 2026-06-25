@@ -62,6 +62,26 @@ test("RECURRING COMPLIANT → COMPLIANT", () => {
   assert.equal(cell.status, "COMPLIANT");
 });
 
+// E11.2c — repointed Hep B (multi-alternative series). deriveCell reads the union `Dose Count` define
+// (still emitted by the alternatives CQL) + series.requiredDoses (2) for the method string only; the
+// canonical bucket comes from CQL Outcome Status (ADR-008). The roster behavior is unchanged.
+test("repointed Hep B COMPLIANT (2 doses) → COMPLIANT + dose-count method", () => {
+  const cell = deriveCell("COMPLIANT", ev([["Dose Count", 2], ["Refused", false]]), "hepatitis_b_vaccination_series", PERIOD);
+  assert.deepEqual(cell, { status: "COMPLIANT", method: "2 valid dose(s)" });
+});
+
+test("repointed Hep B partial (1 dose, canonical MISSING_DATA) → IN_PROGRESS '1 of 2 doses on file'", () => {
+  // Display nuance: the IN_PROGRESS denominator uses the union series.requiredDoses (2), so a partial
+  // traditional-3 series under-reads as "1 of 2". Accepted — CQL Outcome Status is authoritative.
+  const cell = deriveCell("MISSING_DATA", ev([["Dose Count", 1], ["Refused", false]]), "hepatitis_b_vaccination_series", PERIOD);
+  assert.deepEqual(cell, { status: "IN_PROGRESS", method: "1 of 2 doses on file" });
+});
+
+test("repointed Hep B no doses → MISSING_DATA", () => {
+  const cell = deriveCell("MISSING_DATA", ev([["Dose Count", 0], ["Refused", false]]), "hepatitis_b_vaccination_series", PERIOD);
+  assert.deepEqual(cell, { status: "MISSING_DATA", method: "No doses on file" });
+});
+
 test("RECURRING measure with a documented refusal → DECLINED (class-agnostic refusal check)", () => {
   // adult_immunization is RECURRING but has a Refused define; a refusal displays DECLINED regardless
   // of class (the canonical bucket stays OVERDUE — refusal keeps the case open, never excludes).

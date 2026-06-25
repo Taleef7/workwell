@@ -39,8 +39,11 @@ export const SCHEDULE = {
   TDAP_DUE_LEAD_DAYS: 60,
   INFLUENZA_INTERVAL_DAYS: 365,
   INFLUENZA_DUE_LEAD_DAYS: 30,
-  HEPB_DOSES_REQUIRED: 3,
-  HEPB_DOSE_INTERVAL_DAYS: 30,
+  // E11.2c — Hep B primary series is brand-dependent (Heplisav-B 2-dose ≥28d OR traditional 3-dose).
+  // The advisory forecaster models the modern 2-dose Heplisav default (≥2 doses ⇒ complete); the
+  // measure's CQL Outcome Status remains the sole compliance authority (ADR-012).
+  HEPB_DOSES_REQUIRED: 2,
+  HEPB_DOSE_INTERVAL_DAYS: 28,
   HEPB_DUE_LEAD_DAYS: 7,
 } as const;
 

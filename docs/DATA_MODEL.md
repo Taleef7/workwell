@@ -396,6 +396,17 @@ DELETE FROM workwell_spike.outcomes
 DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
 ```
 
+### 3.21 Multi-alternative Hep B repoint (E11.2c / #183) — no schema change
+The live `hepatitis_b_vaccination_series` measure was repointed onto the E11.2c multi-alternative-series
+codegen (Heplisav-B 2-dose CVX 189 OR traditional 3-dose CVX 08/43/44/45, ACIP min intervals). This is
+**additive seed/app data only — no DDL**: the `urn:workwell:vs:hepb-vaccines` value-set seed gained CVX
+44/45 (`value-set-seed.ts`); the measure binding (`hepatitis_b.yaml` → `measure-bindings.ts`) gained a
+merged `alternatives` array consumed by the alternative-aware synthetic dose model; the hand-written +
+generated Hep B CQL/ELM were regenerated. `outcomes`/`cases` are unchanged — the per-alternative dose
+counts/intervals ride in `outcomes.evidence_json.expressionResults` (the `"Heplisav-B Complete"` /
+`"Traditional Complete"` / union `"Dose Count"` defines). Reversible by reverting the PR. CQL `Outcome
+Status` remains the sole compliance authority (ADR-008/ADR-015).
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 

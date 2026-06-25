@@ -133,6 +133,17 @@ export class SqliteValueSetStore implements ValueSetStore {
       .run();
   }
 
+  async setCodes(id: string, codes: { code: string; display: string; system: string }[]): Promise<void> {
+    const codesJson = JSON.stringify(codes);
+    const systems = JSON.stringify([...new Set(codes.map((c) => c.system).filter(Boolean))]);
+    // Codes-only update — never touches status/version/resolution_status/last_resolved_at (preserves
+    // operator-managed governance metadata, unlike seedValueSet's upsert).
+    await this.db
+      .prepare("UPDATE value_sets SET codes_json = ?, code_systems = ? WHERE id = ?")
+      .bind(codesJson, systems, id)
+      .run();
+  }
+
   async link(measureVersionId: string, valueSetId: string): Promise<void> {
     await this.db
       .prepare(

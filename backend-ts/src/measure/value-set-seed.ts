@@ -107,6 +107,8 @@ const VALUE_SETS: SeedVs[] = [
     c("hepb-vaccine", "Hepatitis B Vaccines", "urn:workwell:vs:hepb-vaccines"),
     c("08", "Hep B adolescent or pediatric", CVX),
     c("43", "Hep B adult", CVX),
+    c("44", "Hep B, dialysis", CVX),
+    c("45", "Hep B, unspecified", CVX),
     c("189", "Hep B Heplisav-B", CVX),
   ] },
   { id: "c0000001-0000-0000-0000-000000000009", oid: "urn:workwell:vs:hepb-contraindication", name: "Hep B Contraindication", codes: [c("hepb-contraindication", "Hepatitis B Contraindication", "urn:workwell:vs:hepb-contraindication")] },
@@ -167,9 +169,14 @@ const IMMUNIZATION_MEASURES = ["mmr", "varicella", "hepatitis_b_vaccination_seri
  * Idempotent, **detach-safe** backfill of ONLY the E10.6 immunization value sets + their measure links,
  * for stores that were seeded before E10.6. Unlike `seedValueSets` (the fresh-store full demo seed),
  * this seeds + links a value set **only when it is absent** (`getById` is null), in a single
- * first-introduction pass. So it never re-asserts a value set that already exists — and therefore never
- * re-adds a link an operator deliberately detached, nor overwrites operator edits. Safe to run on every
- * cold start; a no-op once the immunization sets are present.
+ * first-introduction pass. So it never re-asserts a link an operator deliberately detached.
+ *
+ * **Additive code backfill (E11.2c):** when an immunization value set already exists, it does NOT
+ * re-link (detach-safe) but DOES **union in any canonical codes missing from the live expansion** — e.g.
+ * E11.2c added CVX 44/45 to `urn:workwell:vs:hepb-vaccines`, which a store seeded before E11.2c would
+ * otherwise never receive (compliance is unaffected — the CQL uses the inline-code path — but the
+ * value-set governance/detail surfaces would stay stale). The merge keeps operator-added codes and is a
+ * no-op once every canonical code is present, so it's safe to run on every cold start.
  */
 export async function backfillImmunizationValueSets(
   store: ValueSetStore,
@@ -186,7 +193,18 @@ export async function backfillImmunizationValueSets(
   }
   for (const vs of VALUE_SETS) {
     if (!linkedBy.has(vs.id)) continue; // not an immunization value set
-    if ((await store.getById(vs.id)) !== null) continue; // already present — leave edits/detaches intact
+    const existing = await store.getById(vs.id);
+    if (existing !== null) {
+      // Already present — leave links/detaches intact, but additively union in any missing canonical
+      // codes (preserving operator-added ones). `setCodes` is codes-only, so governance metadata
+      // (status/version/resolution_status/last_resolved_at) is untouched. No-op when all codes present.
+      const have = new Set(existing.codes.map((c) => `${c.system}|${c.code}`));
+      const missing = vs.codes.filter((c) => !have.has(`${c.system}|${c.code}`));
+      if (missing.length > 0) {
+        await store.setCodes(vs.id, [...existing.codes, ...missing]);
+      }
+      continue;
+    }
     await store.seedValueSet({ id: vs.id, oid: vs.oid, name: vs.name, version: VER, codes: vs.codes });
     for (const slug of linkedBy.get(vs.id) ?? []) {
       const versionId = versionIdOf(slug);
