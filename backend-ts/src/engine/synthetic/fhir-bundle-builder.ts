@@ -119,7 +119,11 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
         ? (config.doseCount ?? 0) >= required
           ? alt.requiredDoses // complete → the chosen alternative's full series
           : (config.doseCount ?? 0) > 0
-            ? Math.max(alt.requiredDoses - 1, 1) // partial → one short of complete (neither alt satisfied)
+            // Partial → neither alternative satisfied. Cap at `required - 1` (the roster's union
+            // denominator) so the union `Dose Count` stays below it and the roster renders IN_PROGRESS
+            // rather than MISSING_DATA with "N dose(s) on file" (e.g. a Traditional-3 partial would emit
+            // 2 doses and equal the denominator of 2). The CQL still returns MISSING_DATA either way.
+            ? Math.max(Math.min(alt.requiredDoses - 1, required - 1), 1)
             : 0
         : config.doseCount ?? 1;
       const doseCoding = alt
