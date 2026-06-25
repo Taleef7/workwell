@@ -201,7 +201,6 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (hierarchyResponse) return hierarchyResponse;
 
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
-  // Placed before compliance so /api/segments/:id/preview is matched here.
   const segmentsResponse = await handleSegments(req, env, actor);
   if (segmentsResponse) return segmentsResponse;
 
