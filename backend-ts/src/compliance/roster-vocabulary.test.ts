@@ -11,6 +11,16 @@ test("PERMANENT COMPLIANT → COMPLIANT + dose-count method", () => {
   assert.deepEqual(cell, { status: "COMPLIANT", method: "2 valid dose(s)" });
 });
 
+test("PERMANENT COMPLIANT via positive titer (0 doses) → immunity method, not '0 valid dose(s)' (E11.2a)", () => {
+  const cell = deriveCell("COMPLIANT", ev([["Dose Count", 0], ["Has Positive Titer", true], ["Refused", false]]), "mmr", PERIOD);
+  assert.deepEqual(cell, { status: "COMPLIANT", method: "Immune (positive titer)" });
+});
+
+test("PERMANENT COMPLIANT with a full series still shows doses even if a titer is also present", () => {
+  const cell = deriveCell("COMPLIANT", ev([["Dose Count", 2], ["Has Positive Titer", true], ["Refused", false]]), "mmr", PERIOD);
+  assert.deepEqual(cell, { status: "COMPLIANT", method: "2 valid dose(s)" });
+});
+
 test("PERMANENT partial series → IN_PROGRESS (canonical MISSING_DATA)", () => {
   const cell = deriveCell("MISSING_DATA", ev([["Dose Count", 1], ["Refused", false]]), "mmr", PERIOD);
   assert.deepEqual(cell, { status: "IN_PROGRESS", method: "1 of 2 doses on file" });
