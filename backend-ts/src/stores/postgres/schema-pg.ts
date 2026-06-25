@@ -252,4 +252,32 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.waivers (
 );
 
 CREATE INDEX IF NOT EXISTS spike_waivers_measure_idx ON ${SPIKE_SCHEMA}.waivers (measure_id, active);
+
+-- Segments / risk-groups (#183 E11.3). cohort (rule_json predicate + per-employee overrides) →
+-- applicable rule-set (segment_measures). Applicability gates case creation + roster display only;
+-- never compliance (CQL Outcome Status stays authoritative — ADR-008/ADR-016). Reversibility:
+-- zero ENABLED segments ⇒ everything applies (= pre-E11.3 behavior).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.segments (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+  rule_json    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL,
+  updated_at   TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.segment_measures (
+  segment_id   TEXT NOT NULL REFERENCES ${SPIKE_SCHEMA}.segments(id) ON DELETE CASCADE,
+  measure_id   TEXT NOT NULL,
+  PRIMARY KEY (segment_id, measure_id)
+);
+
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.segment_overrides (
+  segment_id   TEXT NOT NULL REFERENCES ${SPIKE_SCHEMA}.segments(id) ON DELETE CASCADE,
+  external_id  TEXT NOT NULL,
+  mode         TEXT NOT NULL,
+  PRIMARY KEY (segment_id, external_id)
+);
 `;
