@@ -70,14 +70,16 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
     [enrollment, waiver, eventCode, eventType, allowDeclination, refusal, shape, allowTiter, titer]
   );
 
-  // Binding codes must be set before a preview can be generated or the rule saved
-  // (codegen accepts empty value sets, so we gate on the .code fields only).
+  // Each binding needs BOTH a code and a value set before a preview/save: the generated CQL matches
+  // a coding's system against the value-set URI, so an empty value set compiles but never matches
+  // real codings (incorrect outcomes). Gate on code + valueSet for every active binding.
   const bindingsComplete = useMemo(() => {
-    if (!enrollment.code.trim() || !waiver.code.trim() || !eventCode.code.trim()) return false;
-    if (allowDeclination && !refusal.code.trim()) return false;
-    if (shape === "series-completion" && allowTiter && !titer.code.trim()) return false;
+    const full = (b: RuleCodeBinding) => b.code.trim() !== "" && b.valueSet.trim() !== "";
+    if (!full(enrollment) || !full(waiver) || !full(eventCode)) return false;
+    if (allowDeclination && !full(refusal)) return false;
+    if (shape === "series-completion" && allowTiter && !(titer.code.trim() !== "" && titer.valueSet.trim() !== "")) return false;
     return true;
-  }, [enrollment.code, waiver.code, eventCode.code, allowDeclination, refusal.code, shape, allowTiter, titer.code]);
+  }, [enrollment, waiver, eventCode, allowDeclination, refusal, shape, allowTiter, titer]);
 
   // Debounced live preview.
   useEffect(() => {

@@ -59,4 +59,21 @@ describe("RuleBuilderTab", () => {
     await waitFor(() => expect(post).not.toHaveBeenCalled());
     expect(screen.getByRole("button", { name: /save rule/i })).toBeDisabled();
   });
+
+  it("treats a blank value set as incomplete (codes set, value sets empty)", async () => {
+    const post = vi.fn().mockResolvedValue({ cql: "x" });
+    // Codes present but value sets blank — codegen would compile but never match real codings.
+    const noVs: MeasureDetail = {
+      ...base,
+      ruleBindings: {
+        enrollment: { code: "immz-enrolled", valueSet: "" },
+        waiver: { code: "mmr-contra", valueSet: "" },
+        event: { code: "mmr-vaccine", valueSet: "", type: "immunization" },
+      },
+    };
+    renderTab({ post, put: vi.fn() }, noVs);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitFor(() => expect(post).not.toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: /save rule/i })).toBeDisabled();
+  });
 });
