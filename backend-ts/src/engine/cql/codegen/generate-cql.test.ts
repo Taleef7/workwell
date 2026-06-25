@@ -120,6 +120,7 @@ test("grace: absent (default) reproduces the E11.1 windowed output (overdueThres
   assert.match(cql, /"Days Since Last Event" > 335 and "Days Since Last Event" <= 365/);
   assert.match(cql, /"Days Since Last Event" > 365\n/);
   assert.doesNotMatch(cql, /<= 395|> 395/);
+  assert.doesNotMatch(cql, /define "Refused"/); // no refusal binding → no Refused define
 });
 
 test("declination: a windowed rule with a refusal binding emits the Refused define", () => {

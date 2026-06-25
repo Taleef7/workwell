@@ -55,7 +55,8 @@ function seriesCompletion(input: GenerateCqlInput): string {
     ? `
 define "Has Positive Titer":
   exists([Observation] O
-    where exists(O.code.coding C where C.system = '${b.titer!.valueSet}' and C.code = '${b.titer!.code}')
+    where O.status = 'final'
+      and exists(O.code.coding C where C.system = '${b.titer!.valueSet}' and C.code = '${b.titer!.code}')
       and (O.value as FHIR.Quantity).value >= ${b.titer!.minValue})
 `
     : "";
