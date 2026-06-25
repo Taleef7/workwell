@@ -18,6 +18,8 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { isApplicable } from "../segment/segment-applicability.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -58,6 +60,8 @@ export interface RunPipelineDeps {
   engine: EvaluateMeasureBinding;
   /** When present, each outcome upserts/resolves a case (idempotent). */
   caseStore?: CaseStore;
+  /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
+  segments?: HydratedSegment[];
   /** Injectable for tests (defaults to the full synthetic directory). */
   employees?: readonly EmployeeProfile[];
 }
@@ -226,14 +230,18 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       status,
       evidence,
     });
-    // Idempotent case upsert: non-compliant opens, EXCLUDED excludes, COMPLIANT resolves.
-    await deps.caseStore?.upsertFromOutcome({
-      runId: run.id,
-      subjectId: item.employee.externalId,
-      measureId: item.measureId,
-      evaluationPeriod: period,
-      outcomeStatus: status,
-    });
+    // Idempotent case upsert — gated by segment applicability (#183 E11.3): an out-of-cohort
+    // (subject, measure) does NOT create/upsert a case. The outcome above is ALWAYS persisted
+    // (CQL stays the sole compliance authority — ADR-008). Empty/absent segments ⇒ all applicable.
+    if (deps.caseStore && isApplicable(item.employee, item.measureId, deps.segments ?? [])) {
+      await deps.caseStore.upsertFromOutcome({
+        runId: run.id,
+        subjectId: item.employee.externalId,
+        measureId: item.measureId,
+        evaluationPeriod: period,
+        outcomeStatus: status,
+      });
+    }
     if (status === "COMPLIANT") compliant++;
     else if (NON_COMPLIANT.has(status)) nonCompliant++;
   }
