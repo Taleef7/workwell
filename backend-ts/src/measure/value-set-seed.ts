@@ -107,6 +107,8 @@ const VALUE_SETS: SeedVs[] = [
     c("hepb-vaccine", "Hepatitis B Vaccines", "urn:workwell:vs:hepb-vaccines"),
     c("08", "Hep B adolescent or pediatric", CVX),
     c("43", "Hep B adult", CVX),
+    c("44", "Hep B, dialysis", CVX),
+    c("45", "Hep B, unspecified", CVX),
     c("189", "Hep B Heplisav-B", CVX),
   ] },
   { id: "c0000001-0000-0000-0000-000000000009", oid: "urn:workwell:vs:hepb-contraindication", name: "Hep B Contraindication", codes: [c("hepb-contraindication", "Hepatitis B Contraindication", "urn:workwell:vs:hepb-contraindication")] },

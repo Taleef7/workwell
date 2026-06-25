@@ -37,7 +37,7 @@
           "coding": [
             {
               "system": "urn:workwell:vs:hepb-vaccines",
-              "code": "hepb-vaccine"
+              "code": "08"
             }
           ]
         },
@@ -56,11 +56,30 @@
           "coding": [
             {
               "system": "urn:workwell:vs:hepb-vaccines",
-              "code": "hepb-vaccine"
+              "code": "08"
             }
           ]
         },
-        "occurrenceDateTime": "2023-11-25T00:00:00.000Z"
+        "occurrenceDateTime": "2023-10-26T00:00:00.000Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "hepatitis_b_vaccination_series-present_old-evt-2",
+        "status": "completed",
+        "patient": {
+          "reference": "Patient/hepatitis_b_vaccination_series-present_old"
+        },
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "urn:workwell:vs:hepb-vaccines",
+              "code": "08"
+            }
+          ]
+        },
+        "occurrenceDateTime": "2023-08-27T00:00:00.000Z"
       }
     }
   ]

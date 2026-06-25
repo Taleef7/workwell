@@ -64,21 +64,38 @@ function seriesDoses(pid, m, baseDays) {
   return out;
 }
 
+// E11.2c — Hep B is a multi-alternative series (Heplisav-B 2-dose CVX 189 OR traditional 3-dose CVX
+// 08, ACIP min intervals dose1→2 ≥28d, dose2→3 ≥56d). The generic 30-day seriesDoses can't satisfy the
+// traditional 56-day gap, so emit Hep B doses explicitly: `count` doses of `code`, 60 days apart
+// (exceeds every Hep B interval), oldest first.
+const HEPB_SYS = "urn:workwell:vs:hepb-vaccines";
+function hepbDoses(pid, baseDays, code, count) {
+  return Array.from({ length: count }, (_, i) => ({
+    resource: { resourceType: "Immunization", id: `${pid}-evt-${i}`, status: "completed", patient: { reference: `Patient/${pid}` }, vaccineCode: { coding: [{ system: HEPB_SYS, code }] }, occurrenceDateTime: daysAgo(baseDays + i * 60) },
+  }));
+}
+
 function bundle(m, scenario) {
   const pid = `${m.id}-${scenario}`;
   const entries = [{ resource: { resourceType: "Patient", id: pid } }];
   entries.push({ resource: condition(pid, m.enroll, "enr") });
   if (scenario === "excluded") entries.push({ resource: condition(pid, m.waiver, "wvr") });
+  // E11.2c — Hep B uses the alternative-aware emitter: present_recent → Heplisav-B (2× CVX 189),
+  // present_old → traditional (3× CVX 08), excluded → Heplisav doses (+ contraindication dominates).
+  const hepb = m.id === "hepatitis_b_vaccination_series";
   if (scenario === "present_recent") {
-    if (m.series) entries.push(...seriesDoses(pid, m, 50));
+    if (hepb) entries.push(...hepbDoses(pid, 50, "189", 2));
+    else if (m.series) entries.push(...seriesDoses(pid, m, 50));
     else entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
   }
   if (scenario === "present_old") {
-    if (m.series) entries.push(...seriesDoses(pid, m, m.oldDays ?? 900));
+    if (hepb) entries.push(...hepbDoses(pid, m.oldDays ?? 900, "08", 3));
+    else if (m.series) entries.push(...seriesDoses(pid, m, m.oldDays ?? 900));
     else entries.push({ resource: eventResource(pid, m, daysAgo(m.oldDays ?? 900), 10.5) });
   }
   if (scenario === "excluded") {
-    if (m.series) entries.push(...seriesDoses(pid, m, 50));
+    if (hepb) entries.push(...hepbDoses(pid, 50, "189", 2));
+    else if (m.series) entries.push(...seriesDoses(pid, m, 50));
     else entries.push({ resource: eventResource(pid, m, daysAgo(50), 7.5) });
   }
   return { resourceType: "Bundle", type: "collection", entry: entries };

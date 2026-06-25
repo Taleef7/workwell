@@ -233,3 +233,22 @@ test("permanent series: OVERDUE bucket emits a partial series (requiredDoses - 1
   const imms = bundle.entry.filter((e) => (e.resource as Record<string, unknown>)["resourceType"] === "Immunization");
   assert.equal(imms.length, 1, "one dose expected for a partial 2-dose series");
 });
+
+// E11.2c — multi-alternative series (Hep B Heplisav-vs-traditional): the COMPLIANT bundle is stamped
+// with ONE chosen alternative's real CVX code (not the legacy `hepb-vaccine` union placeholder) and its
+// own dose count — so the per-alternative `<alt> Complete` CQL define matches.
+test("multi-alternative series: Hep B COMPLIANT stamps a single alternative's CVX code + its dose count", () => {
+  const binding = MEASURE_BINDINGS["hepatitis_b_vaccination_series"]!;
+  const config = deriveExamConfig(binding, "COMPLIANT");
+  const bundle = buildSyntheticBundle(emp, config, EVAL_DATE);
+  const codes = bundle.entry
+    .map((e) => e.resource as Record<string, unknown>)
+    .filter((r) => r["resourceType"] === "Immunization")
+    .map((r) => ((r["vaccineCode"] as { coding: { code: string }[] }).coding[0]!.code));
+  assert.ok(codes.length > 0, "expected at least one Hep B dose");
+  assert.ok(!codes.includes("hepb-vaccine"), "doses must use a real CVX code, not the union placeholder");
+  const chosen = binding.alternatives!.find((a) => a.codes.includes(codes[0]!));
+  assert.ok(chosen, `dose code ${codes[0]} must belong to a declared alternative`);
+  assert.ok(codes.every((c) => c === codes[0]), "all doses share the one chosen alternative's code");
+  assert.equal(codes.length, chosen!.requiredDoses, "dose count equals the chosen alternative's requiredDoses");
+});

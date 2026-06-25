@@ -14,7 +14,20 @@ const dir = path.resolve(here, "../measures");
 const outFile = path.resolve(here, "../src/engine/synthetic/measure-bindings.ts");
 
 const line = (s, key) => s.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, "m"))?.[1].trim();
-const inField = (block, k) => block.match(new RegExp(`${k}:\\s*"?([^,"}]+?)"?\\s*[,}]`))?.[1].trim() ?? null;
+const inField = (block, k) => block.match(new RegExp(`${k}:\\s*"?([^,"}\\]]+?)"?\\s*[,}\\]]`))?.[1].trim() ?? null;
+// E11.2c — flow-style list under `key:` (`    - { ... }` lines): returns each item's inner object text.
+const flowList = (s, key) => {
+  const m = s.match(new RegExp(`^\\s*${key}:\\s*\\n((?:\\s*-\\s*\\{[^\\n]*\\}\\s*\\n?)+)`, "m"));
+  return m ? [...m[1].matchAll(/-\s*\{([^}]*)\}/g)].map((x) => x[1]) : [];
+};
+const numArray = (block, k) => {
+  const a = block.match(new RegExp(`${k}:\\s*\\[([^\\]]*)\\]`));
+  return a ? a[1].split(",").map((x) => Number(x.trim())).filter((n) => !Number.isNaN(n)) : undefined;
+};
+const strArray = (block, k) => {
+  const a = block.match(new RegExp(`${k}:\\s*\\[([^\\]]*)\\]`));
+  return a ? a[1].split(",").map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
+};
 
 const out = [];
 for (const f of readdirSync(dir).filter((x) => x.endsWith(".yaml")).sort()) {
@@ -26,6 +39,14 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith(".yaml")).sort()) {
   const rf = line(s, "refusal");
   const cc = line(s, "complianceClass") ?? "RECURRING";
   const sr = line(s, "series");
+  // E11.2c — multi-alternative series: merge rule.alternatives (counts/intervals) with
+  // bindings.eventAlternatives (CVX code lists) by label into one array the synthetic dose model reads.
+  const evAlt = Object.fromEntries(flowList(s, "eventAlternatives").map((b) => [inField(b, "label"), strArray(b, "codes")]));
+  const alternatives = flowList(s, "alternatives").map((b) => {
+    const label = inField(b, "label");
+    const minIntervalDays = numArray(b, "minIntervalDays");
+    return { label, requiredDoses: Number(inField(b, "requiredDoses") ?? 2), codes: evAlt[label] ?? [], ...(minIntervalDays ? { minIntervalDays } : {}) };
+  });
   out.push({
     id,
     rateKey: line(s, "rateKey") ?? id,
@@ -36,6 +57,7 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith(".yaml")).sort()) {
     event: { code: inField(ev, "code"), valueSet: inField(ev, "valueSet"), type: inField(ev, "type") },
     refusal: rf ? { code: inField(rf, "code"), valueSet: inField(rf, "valueSet") } : undefined,
     series: sr ? { requiredDoses: Number(inField(sr, "requiredDoses") ?? 2) } : undefined,
+    alternatives: alternatives.length ? alternatives : undefined,
     // E11.2a: a windowed measure's grace period (from the `rule:` block) — emitted only when nonzero so
     // existing measures' lines are unchanged. deriveWhyFlagged uses it for grace-aware days_overdue.
     gracePeriodDays: Number(line(s, "gracePeriodDays") ?? 0),
@@ -47,9 +69,10 @@ const body = out
     const refusal = b.refusal ? `, refusal: ${JSON.stringify(b.refusal)}` : "";
     const series = b.series ? `, series: ${JSON.stringify(b.series)}` : "";
     const grace = b.gracePeriodDays ? `, gracePeriodDays: ${b.gracePeriodDays}` : "";
+    const alternatives = b.alternatives ? `, alternatives: ${JSON.stringify(b.alternatives)}` : "";
     return (
       `  ${JSON.stringify(b.id)}: { rateKey: ${JSON.stringify(b.rateKey)}, complianceClass: ${JSON.stringify(b.complianceClass)}, complianceWindowDays: ${b.complianceWindowDays}, ` +
-      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal}${series}${grace} },`
+      `enrollment: ${JSON.stringify(b.enrollment)}, waiver: ${JSON.stringify(b.waiver)}, event: ${JSON.stringify(b.event)}${refusal}${series}${grace}${alternatives} },`
     );
   })
   .join("\n");
@@ -72,6 +95,16 @@ export interface SeriesBinding {
   requiredDoses: number;
 }
 
+/** E11.2c — one alternative dose series for a multi-brand series-completion measure (Hep B
+ * Heplisav-vs-traditional). \`codes\` are bare CVX strings under \`event.valueSet\`; the synthetic dose
+ * model picks one alternative per employee and stamps its codes/spacing. */
+export interface SeriesAlternativeBinding {
+  label: string;
+  requiredDoses: number;
+  codes: string[];
+  minIntervalDays?: number[];
+}
+
 export interface MeasureBinding {
   rateKey: string;
   complianceClass: "PERMANENT" | "RECURRING";
@@ -82,6 +115,7 @@ export interface MeasureBinding {
   refusal?: CodeBinding;
   series?: SeriesBinding;
   gracePeriodDays?: number;
+  alternatives?: SeriesAlternativeBinding[];
 }
 
 export const MEASURE_BINDINGS: Record<string, MeasureBinding> = {

@@ -13,8 +13,21 @@ const outDir = path.join(measuresDir, "generated");
 mkdirSync(outDir, { recursive: true });
 
 const line = (s, key) => s.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, "m"))?.[1].trim();
-const inField = (block, k) => block?.match(new RegExp(`${k}:\\s*"?([^,"}]+?)"?\\s*[,}]`))?.[1].trim() ?? null;
+const inField = (block, k) => block?.match(new RegExp(`${k}:\\s*"?([^,"}\\]]+?)"?\\s*[,}\\]]`))?.[1].trim() ?? null;
 const codeOf = (s, key) => { const b = line(s, key); return b ? { code: inField(b, "code"), valueSet: inField(b, "valueSet"), type: inField(b, "type") ?? undefined } : null; };
+// E11.2c — flow-style list under `key:` (`    - { ... }` lines): returns each item's inner object text.
+const flowList = (s, key) => {
+  const m = s.match(new RegExp(`^\\s*${key}:\\s*\\n((?:\\s*-\\s*\\{[^\\n]*\\}\\s*\\n?)+)`, "m"));
+  return m ? [...m[1].matchAll(/-\s*\{([^}]*)\}/g)].map((x) => x[1]) : [];
+};
+const numArray = (block, k) => {
+  const a = block.match(new RegExp(`${k}:\\s*\\[([^\\]]*)\\]`));
+  return a ? a[1].split(",").map((x) => Number(x.trim())).filter((n) => !Number.isNaN(n)) : undefined;
+};
+const strArray = (block, k) => {
+  const a = block.match(new RegExp(`${k}:\\s*\\[([^\\]]*)\\]`));
+  return a ? a[1].split(",").map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
+};
 
 let count = 0;
 for (const f of readdirSync(measuresDir).filter((x) => x.endsWith(".yaml")).sort()) {
@@ -30,13 +43,24 @@ for (const f of readdirSync(measuresDir).filter((x) => x.endsWith(".yaml")).sort
   const waiver = codeOf(s, "waiver");
   const event = codeOf(s, "event");
   const refusal = codeOf(s, "refusal");
-  const bindings = { enrollment, waiver, event, ...(refusal ? { refusal } : {}) };
+
+  // E11.2c — multi-alternative series (Hep B Heplisav-vs-traditional). `eventAlternatives` codes are
+  // bare CVX strings under the event value set; map each to a { code, valueSet } CodeBinding.
+  const eventAlternatives = flowList(s, "eventAlternatives").map((b) => ({
+    label: inField(b, "label"),
+    codes: strArray(b, "codes").map((code) => ({ code, valueSet: event.valueSet })),
+  }));
+  const alternatives = flowList(s, "alternatives").map((b) => {
+    const minIntervalDays = numArray(b, "minIntervalDays");
+    return { label: inField(b, "label"), requiredDoses: Number(inField(b, "requiredDoses") ?? 2), ...(minIntervalDays ? { minIntervalDays } : {}) };
+  });
+  const bindings = { enrollment, waiver, event, ...(refusal ? { refusal } : {}), ...(eventAlternatives.length ? { eventAlternatives } : {}) };
 
   // E11.2a added optional codegen capabilities — titer (allowPositiveTiter + a titer binding), grace
   // (gracePeriodDays), and a windowed Refused define. They are intentionally NOT parsed here yet: no
   // committed measure YAML sets them. When the E11.2b Rule Builder UI emits them, wire them in here.
   const rule = ruleType === "series-completion"
-    ? { type: "series-completion", requiredDoses: Number(line(s, "requiredDoses") ?? 2) }
+    ? { type: "series-completion", requiredDoses: Number(line(s, "requiredDoses") ?? 2), ...(alternatives.length ? { alternatives } : {}) }
     : { type: "windowed-recency", windowDays: Number(line(s, "windowDays") ?? 365), dueSoonDays: Number(line(s, "dueSoonDays") ?? 30) };
 
   const cql = generateCql({ library, version, rule, bindings });
