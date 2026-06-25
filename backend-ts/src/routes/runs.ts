@@ -23,6 +23,7 @@ import { getStores } from "../stores/factory.ts";
 import type { CreateRunInput, RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
@@ -78,6 +79,12 @@ async function outcomes(env: RunsEnv): Promise<OutcomeStore> {
 }
 async function cases(env: RunsEnv): Promise<CaseStore> {
   return (await getStores(env)).cases;
+}
+/** Enabled segments only — the run pipeline gates case creation by applicability (#183 E11.3);
+ *  zero enabled segments ⇒ all (subject, measure) pairs are applicable (reversibility). */
+async function enabledSegments(env: RunsEnv): Promise<HydratedSegment[]> {
+  const all = await (await getStores(env)).segments.listSegments();
+  return all.filter((s) => s.enabled);
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -174,7 +181,13 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
   // the run, return RUNNING immediately, and finish in the background (the page polls to terminal).
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
-    const deps = { runStore: await store(env), outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
+    const deps = {
+      runStore: await store(env),
+      outcomeStore: await outcomes(env),
+      caseStore: await cases(env),
+      engine,
+      segments: await enabledSegments(env),
+    };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
       if (running) return json(running, 201);
@@ -207,7 +220,13 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       if (!detail) return json({ error: "not_found", id: caseId }, 404);
       return json(caseRerunResponse(detail), 201);
     }
-    const deps = { runStore, outcomeStore: await outcomes(env), caseStore: await cases(env), engine };
+    const deps = {
+      runStore,
+      outcomeStore: await outcomes(env),
+      caseStore: await cases(env),
+      engine,
+      segments: await enabledSegments(env),
+    };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,
       // so they must use the async waitUntil path too — not a synchronous executeRerun.
