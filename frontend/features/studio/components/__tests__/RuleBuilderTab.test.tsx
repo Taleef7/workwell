@@ -48,4 +48,15 @@ describe("RuleBuilderTab", () => {
     expect(screen.getByLabelText(/window \(days\)/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/due-soon \(days\)/i)).toBeInTheDocument();
   });
+
+  it("skips preview and disables Save when binding codes are empty", async () => {
+    const post = vi.fn().mockResolvedValue({ cql: "x" });
+    // No rule/ruleBindings → bindings default to empty codes.
+    const bare: MeasureDetail = { ...base, rule: undefined, ruleBindings: undefined };
+    renderTab({ post, put: vi.fn() }, bare);
+    // give the debounce window time to (not) fire
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitFor(() => expect(post).not.toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: /save rule/i })).toBeDisabled();
+  });
 });
