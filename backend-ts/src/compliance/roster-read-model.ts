@@ -59,7 +59,10 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // E11.3 segments: an active `segment` filter scopes columns to that segment's rule-set (∩ Active);
   // otherwise columns are the panel set. `segments` (the configured set) drives the N/A overlay below.
   const segments = deps.segments ?? [];
-  const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment) ?? null : null;
+  // Only an ENABLED segment can scope the grid — a disabled segment is not in effect, so filtering by
+  // one falls back to the panel view (otherwise its columns would all read NOT_APPLICABLE, since the
+  // overlay below only counts enabled segments). Keeps the filter consistent with applicability.
+  const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment && s.enabled) ?? null : null;
   const measureIds = activeSegment
     ? activeSegment.measureIds.filter((m) => active.has(m))
     : PANELS[panel].filter((m) => active.has(m));

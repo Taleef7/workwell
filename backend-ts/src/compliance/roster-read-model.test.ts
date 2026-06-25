@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
+import { PANELS } from "./panels.ts";
 import { buildRoster } from "./roster-read-model.ts";
 
 const EMP = EMPLOYEES[0]!.externalId; // a real directory subject (emp-001, role "Author", site "HQ")
@@ -160,6 +161,20 @@ test("buildRoster — segment filter scopes columns to the rule-set and rows to 
     assert.equal(e.role, EMP_ROLE, `row ${r.subject.externalId} must be in the cohort`);
   }
   // EMP is in cohort and its mmr is in-rule-set → keeps its real COMPLIANT status.
+  const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
+  assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
+});
+
+test("buildRoster — filtering by a DISABLED segment falls back to the panel (segment not in effect)", async () => {
+  const { withRun, byRun } = mmrSeed();
+  const segment = segmentFor(["mmr", "varicella"], { enabled: false });
+  const roster = await buildRoster(
+    { outcomeStore: fakeStore(withRun, byRun), segments: [segment] },
+    { panel: "immunizations", segment: "seg-1" },
+  );
+  // Columns are the full panel (a disabled segment does not scope them), not the segment's 2-measure rule-set.
+  assert.deepEqual(roster.columns.map((c) => c.measureId).sort(), PANELS.immunizations.slice().sort());
+  // With no ENABLED segment the overlay is inert — EMP's mmr keeps its real COMPLIANT status.
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
 });
