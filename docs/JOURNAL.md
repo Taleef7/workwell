@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-06-25 — E11.3 PR-1: risk-group segments (backend)
+
+Closed the last E11 piece — the **segment / risk-group** model — on `feat/e11-3-segments` (PR-1, backend).
+A *segment* maps a cohort (a `role`/`site` predicate rule + per-employee INCLUDE/EXCLUDE overrides; EXCLUDE
+wins) to an applicable measure-id rule-set. A subject's applicable measures = the union of the rule-sets of
+every **enabled** segment they belong to. **Applicability gates case creation + display only — never
+compliance** (ADR-016; CQL `Outcome Status` stays the sole authority).
+
+- **First E11 schema:** 3 owner-gated tables (`segments`, `segment_measures`, `segment_overrides`) on the
+  SQLite floor + Postgres ceiling (TEXT ids, `enabled` INTEGER/BOOLEAN, `rule_json` TEXT/JSONB), behind a
+  `SegmentStore` port (both adapters, store-contract parity incl. a dedup case). Self-creating
+  `CREATE … IF NOT EXISTS` — drops into Neon on the next deploy boot, additive, reversible.
+- **Single applicability engine** (`segment-applicability.ts`, pure) consumed by both surfaces: the roster
+  read model gains a `NOT_APPLICABLE` overlay (distinct from `NA` "no data") + a `?segment=<id>` filter
+  (scopes rows to the cohort, columns to the rule-set; only an *enabled* segment scopes), and the run
+  pipeline gates the case upsert (`isApplicable` guard) while **always persisting the outcome** (ADR-008).
+- **Reversibility invariant** (tested both surfaces + the pipeline): zero enabled segments ⇒ everything
+  applicable to everyone = pre-E11.3 behavior. Disabling/deleting all segments reverts the feature.
+- **`/api/segments` CRUD + `/preview`** — writes ADMIN-only (authorize rule + a dedicated authorize test) +
+  audited `SEGMENT_*`, reads authenticated, route-level enum validation (400 on malformed). Idempotent
+  boot seed of 4 demo cohorts (OSHA Safety-Sensitive / Clinical Staff / Office Staff / All Employees) so the
+  grid shows a real applicable/N-A mix.
+
+Built subagent-driven (TDD per task; spec + code-quality review each task — several review findings folded
+in: EXCLUDE-beats-INCLUDE hardening, contract dedup coverage, disabled-segment filter guard, route audit/doc
+polish). **No new deps.** Backend `tsc` + full suite green (697 pass / 1 self-skipped Pg-ceiling contract).
+Frontend untouched — the **Configure Groups editor UI is PR-2**. Design: `docs/superpowers/specs/2026-06-25-e11-3-segments-design.md`;
+plan: `docs/superpowers/plans/2026-06-25-e11-3-segments-backend.md`. ADR-016; DATA_MODEL §3.22.
+
 ## 2026-06-25 — E11.2c PR-2: live Hep B repointed to Heplisav-vs-traditional
 
 Repointed the live `hepatitis_b_vaccination_series` measure onto the PR-1 multi-alternative-series codegen,
