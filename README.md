@@ -22,6 +22,7 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **Multi-alternative-series codegen + Rule Builder UI (E11.2c PR-1, PR #203 — in review).** The CQL rule→codegen now supports an OR of alternative dose series with multi-CVX code sets + per-alternative ACIP minimum dose intervals, plus a Rule Builder "Alternative series (multi-brand)" authoring sub-form. **Capability only — no live measure change** (the live Hepatitis B repoint to Heplisav-B-vs-traditional is the follow-up PR-2); additive + back-compatible (absent `alternatives` ⇒ identical to E11.1), no schema, no new deps. CQL stays canonical (ADR-015); `Outcome Status` is the sole compliance authority (ADR-008). See `docs/JOURNAL.md`.
 - **QA/UX hardening pass 2 (PR #181) — merged + deployed.** Role-aware nav + action gating, programs/case-detail/runs/admin UX + perf fixes, a new `/orders` page (E7 UI), a global run-progress indicator, a conservative API GET cache, an accessibility pass, and bounded audit-ledger queries — no schema change, no new deps. See `docs/JOURNAL.md`.
 - All planned sprints (**0–7**) are implemented and merged to `main`; Sprint 7 issues `#47`–`#51` are closed.
 - Sprint 8 scoped-run parity, the 8-way CI test-sharding speedup (~3.8×), the MIE Container Manager v1 API deploy migration, and the `@mieweb/ui` frontend migration (PR #68) are all merged.
