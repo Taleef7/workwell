@@ -68,6 +68,9 @@ export async function updateMeasureSpec(deps: MeasureAuthoringDeps, measureId: s
     complianceWindow: s(body.complianceWindow),
     requiredDataElements: body.requiredDataElements ?? [],
     testFixtures: current.spec.testFixtures ?? [], // updateSpec never touches fixtures (updateTests owns them)
+    // A Spec-tab save must not drop Rule Builder params persisted in spec_json (saveRule owns them).
+    ...(current.spec.rule !== undefined ? { rule: current.spec.rule } : {}),
+    ...(current.spec.ruleBindings !== undefined ? { ruleBindings: current.spec.ruleBindings } : {}),
   };
   const policyRef = body.policyRef !== undefined ? s(body.policyRef).trim() : undefined;
   const updated = await deps.measures.updateSpec(measureId, spec, policyRef);

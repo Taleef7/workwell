@@ -495,3 +495,24 @@ test("PUT /api/measures/:id/rule persists rule + generated CQL + compile status,
   assert.equal(detail.rule?.requiredDoses, 3, "rule params round-trip via spec_json");
   assert.match(detail.cqlText, /"Dose Count" >= 3/, "generated CQL persisted to cql_text");
 });
+
+test("PUT /api/measures/:id/spec preserves Rule Builder params persisted in spec_json", async () => {
+  await put("/api/measures/mmr/rule", {
+    rule: { type: "series-completion", requiredDoses: 2 },
+    bindings: {
+      enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
+      waiver: { code: "mmr-contraindication", valueSet: "urn:workwell:vs:mmr-contraindication" },
+      event: { code: "mmr-vaccine", valueSet: "urn:workwell:vs:mmr-vaccines", type: "immunization" },
+    },
+  });
+  // A plain Spec-tab save (carries no rule fields) must not drop the saved rule params.
+  const specSave = await put("/api/measures/mmr/spec", {
+    policyRef: "x", description: "edited via spec tab",
+    eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },
+    exclusions: [], complianceWindow: "", requiredDataElements: [],
+  });
+  assert.equal(specSave?.status, 200);
+  const detail = (await get("/api/measures/mmr").then((r) => r!.json())) as { rule?: { requiredDoses?: number }; description: string };
+  assert.equal(detail.description, "edited via spec tab");
+  assert.equal(detail.rule?.requiredDoses, 2, "rule params survive a spec-tab save");
+});
