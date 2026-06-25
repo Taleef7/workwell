@@ -5,6 +5,8 @@
  * CQL. Define names are chosen to satisfy the roster's deriveWhyFlagged regexes
  * (/^most recent .*date$/i, /^days since/i, waiver/contraindication, "Dose Count").
  * E11.2a adds optional titer (series), grace (windowed), and a windowed Refused define — all back-compatible (absent ⇒ E11.1 output).
+ * E11.2c adds optional `series-completion` `alternatives` (an OR of alternative multi-CVX dose series, each with optional min dose intervals) — back-compatible (absent ⇒ E11.1/E11.2a output).
+ * Note: codegen inputs (labels/codes/value sets) are trusted, author-controlled measure params (not end-user input) and are interpolated into CQL without escaping — a malformed value surfaces as a compile failure, not a silent mis-evaluation.
  */
 export interface CodeBinding {
   code: string;
@@ -16,9 +18,17 @@ export interface CodegenBindings {
   event: CodeBinding & { type: "procedure" | "immunization" | "observation" };
   refusal?: CodeBinding;
   titer?: { code: string; valueSet: string; minValue: number };
+  /** E11.2c: per-alternative multi-CVX code sets, correlated to `rule.alternatives` by `label`. */
+  eventAlternatives?: Array<{ label: string; codes: CodeBinding[] }>;
+}
+/** E11.2c: one alternative dose series in an OR of series-completion alternatives. */
+export interface SeriesAlternative {
+  label: string; // human label → CQL define names ("Heplisav-B", "Traditional")
+  requiredDoses: number;
+  minIntervalDays?: number[]; // consecutive-gap minimums, length requiredDoses-1; absent ⇒ count-only
 }
 export type Rule =
-  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean }
+  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean; alternatives?: SeriesAlternative[] }
   | { type: "windowed-recency"; windowDays: number; dueSoonDays: number; gracePeriodDays?: number };
 
 export interface GenerateCqlInput {
@@ -45,10 +55,27 @@ define "${name}":
     where exists(C.code.coding x where x.system = '${b.valueSet}' and x.code = '${b.code}'))
 `;
 
+/** OR-of-codes membership fragment over a single system: `(C.code = 'a' or C.code = 'b' …)`. */
+const orVaccineCodes = (codes: string[]): string => `(${codes.map((c) => `C.code = '${c}'`).join(" or ")})`;
+
+/** Ordered multi-source `exists` for an interval-validated alternative (R sources, R-1 gap clauses). */
+function intervalExists(label: string, requiredDoses: number, gaps: number[]): string {
+  const sources = Array.from({ length: requiredDoses }, (_, i) => `"${label} Dose Dates" d${i}`).join(", ");
+  const order = Array.from({ length: requiredDoses - 1 }, (_, i) => `d${i} < d${i + 1}`).join(" and ");
+  const intervals = gaps
+    .map((g, i) => `difference in days between d${i} and d${i + 1} >= ${g}`)
+    .join("\n      and ");
+  return `define "${label} Complete":
+  exists(from ${sources}
+    where ${order}
+      and ${intervals})
+`;
+}
+
 function seriesCompletion(input: GenerateCqlInput): string {
   const b = input.bindings;
   if (b.event.type !== "immunization") throw new Error("series-completion requires event.type=immunization");
-  const rule = input.rule as { requiredDoses: number; allowPositiveTiter?: boolean };
+  const rule = input.rule as { requiredDoses: number; allowPositiveTiter?: boolean; alternatives?: SeriesAlternative[] };
   const n = rule.requiredDoses;
   const titerEnabled = rule.allowPositiveTiter === true && b.titer != null;
   const titerDefine = titerEnabled
@@ -60,6 +87,73 @@ define "Has Positive Titer":
       and (O.value as FHIR.Quantity).value >= ${b.titer!.minValue})
 `
     : "";
+
+  // E11.2c — multi-alternative series (OR of alternative dose series, each with its own multi-CVX codes).
+  if (rule.alternatives?.length) {
+    const sys = b.event.valueSet;
+    const altCodes = (label: string): string[] => {
+      const match = b.eventAlternatives?.find((e) => e.label === label);
+      if (!match) throw new Error(`series alternative '${label}' has no eventAlternatives codes`);
+      return match.codes.map((c) => c.code);
+    };
+    const altBlocks = rule.alternatives.map((a) => {
+      if (a.requiredDoses < 1)
+        throw new Error(`series alternative '${a.label}' requiredDoses must be >= 1`);
+      if (a.minIntervalDays && a.minIntervalDays.length !== a.requiredDoses - 1)
+        throw new Error(
+          `series alternative '${a.label}' minIntervalDays length must equal requiredDoses-1 (${a.requiredDoses - 1})`,
+        );
+      const codes = altCodes(a.label);
+      const doseDates = `
+define "${a.label} Dose Dates":
+  [Immunization] I
+    where I.status = 'completed'
+      and exists(I.vaccineCode.coding C where C.system = '${sys}' and ${orVaccineCodes(codes)})
+    return (I.occurrence as FHIR.dateTime)
+`;
+      // Non-empty (not just present): an empty array (valid for a 1-dose alt) is count-only, since
+      // intervalExists(label, 1, []) would emit a malformed empty `exists(from … where  and )`.
+      const hasIntervals = (a.minIntervalDays?.length ?? 0) > 0;
+      const complete = hasIntervals
+        ? "\n" + intervalExists(a.label, a.requiredDoses, a.minIntervalDays!)
+        : `
+define "${a.label} Complete":
+  Count("${a.label} Dose Dates") >= ${a.requiredDoses}
+`;
+      return doseDates + complete;
+    });
+    // Union Dose Count over EVERY code in EVERY alternative (dedup) — read by deriveCell's method string.
+    const allCodes = [...new Set(rule.alternatives.flatMap((a) => altCodes(a.label)))];
+    const completeRefs = rule.alternatives.map((a) => `"${a.label} Complete"`).join(" or ");
+    const seriesComplete = `"Enrolled" and not "Has Contraindication" and (${completeRefs}${titerEnabled ? ' or "Has Positive Titer"' : ""})`;
+    return (
+      header(input.library, input.version) +
+      conditionDefine("Enrolled", b.enrollment) +
+      conditionDefine("Has Contraindication", b.waiver) +
+      (b.refusal ? conditionDefine("Refused", b.refusal) : "") +
+      titerDefine +
+      altBlocks.join("") +
+      `
+define "Dose Count":
+  Count([Immunization] I
+    where I.status = 'completed'
+      and exists(I.vaccineCode.coding C where C.system = '${sys}' and ${orVaccineCodes(allCodes)}))
+
+define "Series Complete":
+  ${seriesComplete}
+
+define "Excluded": "Has Contraindication"
+
+define "Initial Population": "Enrolled" or "Has Contraindication"
+
+define "Outcome Status":
+  if "Excluded" then 'EXCLUDED'
+  else if "Series Complete" then 'COMPLIANT'
+  else 'MISSING_DATA'
+`
+    );
+  }
+
   const seriesComplete = titerEnabled
     ? `"Enrolled" and not "Has Contraindication" and ("Dose Count" >= ${n} or "Has Positive Titer")`
     : `"Enrolled" and not "Has Contraindication" and "Dose Count" >= ${n}`;
