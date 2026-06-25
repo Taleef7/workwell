@@ -49,7 +49,8 @@ test("only one env var set still returns simulated (inert-unless-fully-configure
 });
 
 // Regression: HepB completed series must be UP_TO_DATE with nextDueDate === null, not OVERDUE.
-// emp-001 has hash % 3 === 2, so dosesReceived === 3 (=== dosesRequired).
+// emp-001 has hash % 3 === 2, so dosesReceived === 3 (>= dosesRequired 2 after the E11.2c
+// Heplisav-2-dose default).
 test("HepB completed primary series is UP_TO_DATE with nextDueDate null (not OVERDUE)", () => {
   const f = simulatedForecaster.forecast("emp-001", "2026-06-19");
   const hepb = f.series.find((s) => s.series === "HEPB")!;
