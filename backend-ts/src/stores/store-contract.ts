@@ -1091,4 +1091,16 @@ export function segmentStoreContract(label: string, freshStore: () => Promise<Se
     assert.equal(await store.getSegment(s.id), null);
     assert.deepEqual(await store.listSegments(), []);
   });
+
+  test(`[${label}] setMeasures/setOverrides dedupe duplicate input (composite-PK safe)`, async () => {
+    const store = await freshStore();
+    const s = await store.createSegment({ name: "Z", rule: { match: "ANY", conditions: [] }, measureIds: [] });
+    // Duplicate measure ids + duplicate override externalIds must not throw on the PK and must collapse.
+    await store.setMeasures(s.id, ["audiogram", "audiogram", "hazwoper"]);
+    await store.setOverrides(s.id, [{ externalId: "emp-003", mode: "INCLUDE" }, { externalId: "emp-003", mode: "EXCLUDE" }]);
+    const after = await store.getSegment(s.id);
+    assert.deepEqual(after!.measureIds.slice().sort(), ["audiogram", "hazwoper"]);
+    assert.equal(after!.overrides.length, 1, "duplicate externalId collapses to a single override row");
+    assert.equal(after!.overrides[0]!.externalId, "emp-003");
+  });
 }
