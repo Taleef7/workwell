@@ -9,7 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toCaseDetail, deriveWhyFlagged } from "./case-detail-read-model.ts";
+import { toCaseDetail, deriveWhyFlagged, overdueDays } from "./case-detail-read-model.ts";
 import { simulatedForecaster } from "../engine/immunization/immunization-forecast.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 
@@ -84,4 +84,14 @@ test("deriveWhyFlagged — non-excluded immunization case with Has Contraindicat
   const wf = deriveWhyFlagged(evidence, "adult_immunization", "2026-06-19", "MISSING_DATA");
   assert.equal(wf.waiver_status, "none", "contraindication false must produce waiver_status 'none'");
   assert.equal(wf.outcome_status, "MISSING_DATA");
+});
+
+test("overdueDays is grace-aware: overdue is measured past windowDays + gracePeriodDays (E11.2a)", () => {
+  // No grace (default 0) — pre-grace behavior, unchanged.
+  assert.equal(overdueDays(400, 365), 35); // 400 - 365
+  assert.equal(overdueDays(350, 365), 0); // within window
+  // With a 30-day grace: a subject within grace (DUE_SOON band) reads 0; only past 395 counts as overdue.
+  assert.equal(overdueDays(380, 365, 30), 0); // within grace (≤ 395)
+  assert.equal(overdueDays(395, 365, 30), 0); // exactly at the graced deadline
+  assert.equal(overdueDays(410, 365, 30), 15); // 410 - (365 + 30)
 });
