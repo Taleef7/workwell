@@ -47,7 +47,6 @@ import { exportMatBundle } from "../fhir/mat-export.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "../measure/impact-preview.ts";
 import type { TestFixture } from "../measure/measure-catalog.ts";
 import { seedValueSets, backfillImmunizationValueSets } from "../measure/value-set-seed.ts";
-import { seedSegments } from "../segment/segment-seed.ts";
 import {
   listValueSets,
   listValueSetsByVersion,
@@ -99,8 +98,9 @@ async function store(env: MeasuresEnv): Promise<MeasureStore> {
       // Always back-fill ONLY the E10.6 immunization sets + links, and only on first introduction
       // (detach-safe), so they appear on already-seeded DBs without re-asserting the pre-existing links.
       await backfillImmunizationValueSets(stores.valueSets, (slug) => versionBySlug.get(slug));
-      // Demo risk-group segments (#183 E11.3) — idempotent by name, always runs on boot.
-      await seedSegments(stores.segments);
+      // Demo risk-group segments (#183 E11.3) are seeded via ensureSegmentSeed(env), called by every
+      // segment consumer (/api/segments, /api/compliance/roster, /api/runs) — NOT here — so a cold-DB
+      // first hit to any of those seeds them (this measures initializer is not on their path).
     })();
     seeding.set(env, seed);
   }

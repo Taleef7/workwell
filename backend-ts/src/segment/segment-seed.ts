@@ -9,6 +9,7 @@
  * `no-orphaned-measure-in-demo-seed` (segment-seed.test.ts) guards the coverage invariant.
  */
 import type { CreateSegmentInput, SegmentStore } from "../stores/segment-store.ts";
+import { getStores, type StoresEnv } from "../stores/factory.ts";
 
 export const DEMO_SEGMENTS: CreateSegmentInput[] = [
   {
@@ -50,4 +51,32 @@ export async function seedSegments(store: SegmentStore): Promise<void> {
     if (existing.has(seg.name)) continue;
     await store.createSegment(seg);
   }
+}
+
+// Seed runs exactly once per env object (the host builds env once + reuses it across requests).
+const seeded = new WeakMap<object, Promise<void>>();
+
+/**
+ * Ensure the demo segments are seeded before any segment consumer reads them. Every route that reads
+ * segments (the /api/segments CRUD, the compliance roster, the run pipeline's case gate) calls this
+ * first, so a cold-DB first hit to ANY of them seeds the table — rather than only the /api/measures
+ * initializer, which the segment/roster/run routes never trigger (else the zero-enabled-segments
+ * fallback would silently bypass the overlay + case gating until a measures request happened).
+ * Idempotent + cached per env, so concurrent cold-start requests share one seed.
+ */
+export function ensureSegmentSeed(env: StoresEnv): Promise<void> {
+  const key = env as object;
+  let pending = seeded.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const stores = await getStores(env);
+      await seedSegments(stores.segments);
+    })();
+    seeded.set(key, pending);
+    // If the seed fails (e.g. a transient DB error), evict so the next request retries.
+    void pending.catch(() => {
+      if (seeded.get(key) === pending) seeded.delete(key);
+    });
+  }
+  return pending;
 }

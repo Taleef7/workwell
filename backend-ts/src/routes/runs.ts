@@ -24,6 +24,7 @@ import type { CreateRunInput, RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
+import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
@@ -83,6 +84,7 @@ async function cases(env: RunsEnv): Promise<CaseStore> {
 /** Enabled segments only — the run pipeline gates case creation by applicability (#183 E11.3);
  *  zero enabled segments ⇒ all (subject, measure) pairs are applicable (reversibility). */
 async function enabledSegments(env: RunsEnv): Promise<HydratedSegment[]> {
+  await ensureSegmentSeed(env);
   const all = await (await getStores(env)).segments.listSegments();
   return all.filter((s) => s.enabled);
 }
