@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-06-24 — E11.2b: Rule Builder UI (Studio tab)
+
+Put a UI in front of the E11.1/E11.2a codegen: a **Rule Builder** tab in Studio (`/studio/[id]`). A
+structured form (shape = series-completion | windowed-recency; params requiredDoses / windowDays·dueSoon·
+grace; the Compliance-paths toggles allow-positive-titer + allow-declination; binding codes) emits the
+codegen `{rule, bindings}`, shows a debounced **live generated-CQL preview** (`POST …/rule/preview`), and
+**atomically saves** (`PUT …/rule`: generate → persist `spec_json.rule`/`ruleBindings` + `cql_text` +
+compile status, audited). Params round-trip on re-open via `spec_json` (additive — no schema). AUTHOR/ADMIN;
+CQL stays canonical (ADR-015) — the builder authors params + the generated CQL, no new eval path (and, like
+the CQL tab, runtime-edited CQL isn't evaluated until a build — pre-existing). Hep B multi-series/intervals/
+multi-CVX deferred. Built subagent-driven; backend + frontend suites + lint + build green.
+
 ## 2026-06-24 — E11.2a: codegen titer + grace + declination
 
 Extended the E11.1 rule→CQL codegen (`generate-cql.ts`) with three additive, back-compatible capabilities

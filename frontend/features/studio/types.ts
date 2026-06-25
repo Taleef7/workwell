@@ -1,5 +1,17 @@
 import type { OshaReferenceOption } from "@/components/osha-reference-combobox";
 
+export type RuleParams =
+  | { type: "series-completion"; requiredDoses: number; allowPositiveTiter?: boolean }
+  | { type: "windowed-recency"; windowDays: number; dueSoonDays: number; gracePeriodDays?: number };
+export interface RuleCodeBinding { code: string; valueSet: string }
+export interface RuleBindings {
+  enrollment: RuleCodeBinding;
+  waiver: RuleCodeBinding;
+  event: RuleCodeBinding & { type: "procedure" | "immunization" | "observation" };
+  refusal?: RuleCodeBinding;
+  titer?: { code: string; valueSet: string; minValue: number };
+}
+
 export type MeasureDetail = {
   id: string;
   name: string;
@@ -21,6 +33,8 @@ export type MeasureDetail = {
   compileStatus: "COMPILED" | "ERROR" | string;
   valueSets: ValueSetRef[];
   testFixtures: TestFixture[];
+  rule?: RuleParams;
+  ruleBindings?: RuleBindings;
 };
 
 export type ValueSetRef = {
