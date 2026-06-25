@@ -87,6 +87,20 @@ test("order proposals require CASE_MANAGER or ADMIN (all methods), not the AUTHE
   assert.deepEqual(authorize("POST", "/api/orders/anything", author), { ok: false, status: 403 });
 });
 
+test("segments: writes are ADMIN-only; reads fall through to AUTHENTICATED (#183 E11.3)", () => {
+  // Writes (POST/PUT/DELETE) are ADMIN-only — must match before the AUTHENTICATED /api/** fallback.
+  for (const method of ["POST", "PUT", "DELETE"] as const) {
+    assert.equal(authorize(method, "/api/segments", admin).ok, true, method);
+    assert.deepEqual(authorize(method, "/api/segments/abc", cm), { ok: false, status: 403 }, method);
+    assert.deepEqual(authorize(method, "/api/segments/abc", author), { ok: false, status: 403 }, method);
+    assert.deepEqual(authorize(method, "/api/segments", null), { ok: false, status: 401 }, method);
+  }
+  // Reads (list + preview) are AUTHENTICATED for any role.
+  assert.equal(authorize("GET", "/api/segments", cm).ok, true);
+  assert.equal(authorize("GET", "/api/segments/abc/preview", author).ok, true);
+  assert.deepEqual(authorize("GET", "/api/segments", null), { ok: false, status: 401 });
+});
+
 test("auditor packets: run packets are CM/ADMIN, measure-version packets are APPROVER/ADMIN", () => {
   // run packets — CASE_MANAGER or ADMIN (operational), not AUTHOR/APPROVER
   assert.equal(authorize("GET", "/api/auditor/runs/abc/packet", cm).ok, true);
