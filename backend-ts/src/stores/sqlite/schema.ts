@@ -263,6 +263,34 @@ CREATE TABLE IF NOT EXISTS waivers (
 );
 
 CREATE INDEX IF NOT EXISTS waivers_measure_idx ON waivers (measure_id, active);
+
+/* Segments / risk-groups (#183 E11.3). Floor analogue: enabled INTEGER 0/1, rule_json JSON TEXT.
+   cohort (rule_json + overrides) → applicable rule-set (segment_measures). Applicability gates case
+   creation + roster display only — never compliance (ADR-008/ADR-016). deleteSegment removes child
+   rows explicitly (the floor does not enable PRAGMA foreign_keys, so ON DELETE CASCADE is advisory). */
+CREATE TABLE IF NOT EXISTS segments (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  rule_json    TEXT NOT NULL DEFAULT '{}',
+  created_by   TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS segment_measures (
+  segment_id   TEXT NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+  measure_id   TEXT NOT NULL,
+  PRIMARY KEY (segment_id, measure_id)
+);
+
+CREATE TABLE IF NOT EXISTS segment_overrides (
+  segment_id   TEXT NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+  external_id  TEXT NOT NULL,
+  mode         TEXT NOT NULL,
+  PRIMARY KEY (segment_id, external_id)
+);
 `;
 
 /**

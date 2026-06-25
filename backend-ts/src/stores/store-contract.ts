@@ -19,6 +19,7 @@ import type { AppointmentStore } from "./appointment-store.ts";
 import type { ValueSetStore } from "./value-set-store.ts";
 import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
+import type { SegmentStore } from "./segment-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -1038,5 +1039,68 @@ export function waiverStoreContract(label: string, freshStore: () => Promise<Wai
     assert.deepEqual((await store.list({ expiresBefore: "2026-06-01T00:00:00.000Z" })).map((w) => w.id), ["w-3"]);
     assert.deepEqual((await store.list({ expiresAfter: "2026-06-01T00:00:00.000Z" })).map((w) => w.id), ["w-1"]);
     void w2;
+  });
+}
+
+/** Registers the SegmentStore contract for one backend. `freshStore` → isolated, empty. */
+export function segmentStoreContract(label: string, freshStore: () => Promise<SegmentStore>): void {
+  test(`[${label}] createSegment persists hydrated measures + overrides; listSegments reads back`, async () => {
+    const store = await freshStore();
+    const created = await store.createSegment({
+      name: "OSHA Safety-Sensitive",
+      description: "field roles",
+      rule: { match: "ANY", conditions: [{ attr: "role", op: "contains", value: "Welder" }] },
+      measureIds: ["audiogram", "hazwoper"],
+      overrides: [{ externalId: "emp-001", mode: "INCLUDE" }],
+    });
+    assert.ok(created.id);
+    assert.equal(created.enabled, true);
+    assert.deepEqual(created.measureIds.slice().sort(), ["audiogram", "hazwoper"]);
+    assert.deepEqual(created.overrides, [{ externalId: "emp-001", mode: "INCLUDE" }]);
+    assert.equal(created.rule.conditions[0]!.op, "contains");
+
+    const all = await store.listSegments();
+    assert.equal(all.length, 1);
+    assert.deepEqual(all[0], created);
+  });
+
+  test(`[${label}] getSegment returns null for unknown id`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.getSegment(crypto.randomUUID()), null);
+  });
+
+  test(`[${label}] updateSegment patches enabled + rule, leaves measures; null for unknown`, async () => {
+    const store = await freshStore();
+    const s = await store.createSegment({ name: "X", rule: { match: "ANY", conditions: [] }, measureIds: ["flu_vaccine"] });
+    const upd = await store.updateSegment(s.id, { enabled: false, rule: { match: "ALL", conditions: [{ attr: "site", op: "equals", value: "Clinic" }] } });
+    assert.equal(upd!.enabled, false);
+    assert.equal(upd!.rule.match, "ALL");
+    assert.deepEqual(upd!.measureIds, ["flu_vaccine"], "measures untouched by updateSegment");
+    assert.equal(await store.updateSegment(crypto.randomUUID(), { enabled: true }), null);
+  });
+
+  test(`[${label}] setMeasures/setOverrides replace; deleteSegment removes children`, async () => {
+    const store = await freshStore();
+    const s = await store.createSegment({ name: "Y", rule: { match: "ANY", conditions: [] }, measureIds: ["audiogram"] });
+    await store.setMeasures(s.id, ["hazwoper", "tb_surveillance"]);
+    await store.setOverrides(s.id, [{ externalId: "emp-002", mode: "EXCLUDE" }]);
+    const after = await store.getSegment(s.id);
+    assert.deepEqual(after!.measureIds.slice().sort(), ["hazwoper", "tb_surveillance"]);
+    assert.deepEqual(after!.overrides, [{ externalId: "emp-002", mode: "EXCLUDE" }]);
+    await store.deleteSegment(s.id);
+    assert.equal(await store.getSegment(s.id), null);
+    assert.deepEqual(await store.listSegments(), []);
+  });
+
+  test(`[${label}] setMeasures/setOverrides dedupe duplicate input (composite-PK safe)`, async () => {
+    const store = await freshStore();
+    const s = await store.createSegment({ name: "Z", rule: { match: "ANY", conditions: [] }, measureIds: [] });
+    // Duplicate measure ids + duplicate override externalIds must not throw on the PK and must collapse.
+    await store.setMeasures(s.id, ["audiogram", "audiogram", "hazwoper"]);
+    await store.setOverrides(s.id, [{ externalId: "emp-003", mode: "INCLUDE" }, { externalId: "emp-003", mode: "EXCLUDE" }]);
+    const after = await store.getSegment(s.id);
+    assert.deepEqual(after!.measureIds.slice().sort(), ["audiogram", "hazwoper"]);
+    assert.equal(after!.overrides.length, 1, "duplicate externalId collapses to a single override row");
+    assert.equal(after!.overrides[0]!.externalId, "emp-003");
   });
 }

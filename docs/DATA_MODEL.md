@@ -407,6 +407,37 @@ counts/intervals ride in `outcomes.evidence_json.expressionResults` (the `"Hepli
 `"Traditional Complete"` / union `"Dose Count"` defines). Reversible by reverting the PR. CQL `Outcome
 Status` remains the sole compliance authority (ADR-008/ADR-015).
 
+### 3.22 Segments / risk-groups (E11.3 / #183) — 3 owner-gated tables
+
+Segments map a cohort → an applicable rule-set; applicability gates **case creation + display only**, never
+compliance (ADR-016). The first E11 feature with schema. Three tables on the floor + ceiling (TEXT ids,
+app-generated `crypto.randomUUID()`; floor `enabled` INTEGER 0/1 + `rule_json` JSON TEXT, ceiling `enabled`
+BOOLEAN + `rule_json` JSONB, schema-qualified to `workwell_spike`):
+
+```sql
+segments (
+  id TEXT PK, name TEXT NOT NULL, description TEXT, enabled BOOLEAN/INTEGER NOT NULL DEFAULT true/1,
+  rule_json JSONB/TEXT NOT NULL DEFAULT '{}',           -- cohort predicate {match, conditions[]}
+  created_by TEXT, created_at TIMESTAMPTZ/TEXT NOT NULL, updated_at TIMESTAMPTZ/TEXT NOT NULL
+)
+segment_measures (                                       -- the applicable rule-set (M:N)
+  segment_id → segments(id) ON DELETE CASCADE, measure_id TEXT, PRIMARY KEY (segment_id, measure_id)
+)
+segment_overrides (                                      -- per-employee INCLUDE/EXCLUDE membership corrections
+  segment_id → segments(id) ON DELETE CASCADE, external_id TEXT, mode TEXT, PRIMARY KEY (segment_id, external_id)
+)
+```
+
+`measure_id`/`external_id` are text keys into the synthetic measure registry + employee directory (no FK —
+backend-ts has no `measures`/`employees` tables). Backed by a `SegmentStore` port (floor + ceiling, store
+contract; `deleteSegment` removes child rows explicitly on the floor since `PRAGMA foreign_keys` is off,
+cascades on the ceiling). Seeded idempotently by name with **3 ENABLED** demo cohorts (All Employees baseline
+/ OSHA Safety-Sensitive / Clinical Staff) whose rule-sets together cover every Active runnable measure.
+Because the seed ships enabled, the applicability overlay is **active on the demo stack** from first deploy.
+**Reversibility:** zero enabled segments ⇒ everything applicable to everyone (pre-E11.3 behavior); the feature
+reverts by disabling/deleting all segments. `outcomes`/`cases` are unchanged — the run pipeline only *skips* a case upsert when not
+applicable; the outcome is still persisted. CQL `Outcome Status` stays authoritative (ADR-008/ADR-016).
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 
