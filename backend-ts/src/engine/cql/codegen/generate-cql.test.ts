@@ -2,7 +2,11 @@
  *   node --import tsx --test src/engine/cql/codegen/generate-cql.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateCql } from "./generate-cql.ts";
+import { generateCql, type Rule, type CodegenBindings } from "./generate-cql.ts";
+
+/** E11.2c helper — build CQL from a rule + bindings with a fixed library/version. */
+const gen = (rule: Rule, bindings: CodegenBindings): string =>
+  generateCql({ library: "Lib", version: "1.0.0", rule, bindings });
 
 const SERIES_CODES = {
   enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
@@ -121,6 +125,58 @@ test("grace: absent (default) reproduces the E11.1 windowed output (overdueThres
   assert.match(cql, /"Days Since Last Event" > 365\n/);
   assert.doesNotMatch(cql, /<= 395|> 395/);
   assert.doesNotMatch(cql, /define "Refused"/); // no refusal binding → no Refused define
+});
+
+test("alternatives: emits a per-alternative Complete define + a union Dose Count, no single Dose Count >= N", () => {
+  const cql = gen(
+    { type: "series-completion", requiredDoses: 2, alternatives: [
+      { label: "Heplisav-B", requiredDoses: 2, minIntervalDays: [28] },
+      { label: "Traditional", requiredDoses: 3, minIntervalDays: [28, 56] },
+    ] },
+    { enrollment: { code: "e", valueSet: "urn:vs:enr" }, waiver: { code: "w", valueSet: "urn:vs:wai" },
+      event: { code: "hepb", valueSet: "urn:workwell:vs:hepb-vaccines", type: "immunization" },
+      eventAlternatives: [
+        { label: "Heplisav-B", codes: [{ code: "189", valueSet: "urn:workwell:vs:hepb-vaccines" }] },
+        { label: "Traditional", codes: [{ code: "08", valueSet: "urn:workwell:vs:hepb-vaccines" }, { code: "43", valueSet: "urn:workwell:vs:hepb-vaccines" }] },
+      ] }
+  );
+  assert.match(cql, /define "Heplisav-B Complete":/);
+  assert.match(cql, /define "Traditional Complete":/);
+  assert.match(cql, /define "Dose Count":/);
+  assert.match(cql, /"Heplisav-B Complete" or "Traditional Complete"/);
+  assert.match(cql, /difference in days between .* >= 28/);
+  assert.doesNotMatch(cql, /"Dose Count" >= 2/);
+});
+
+test("alternatives: a declared alternative with no matching eventAlternatives entry throws", () => {
+  assert.throws(
+    () => gen(
+      { type: "series-completion", requiredDoses: 2, alternatives: [{ label: "Heplisav-B", requiredDoses: 2 }] },
+      { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" },
+        event: { code: "x", valueSet: "v", type: "immunization" },
+        eventAlternatives: [{ label: "Traditional", codes: [{ code: "08", valueSet: "v" }] }] },
+    ),
+    /no eventAlternatives codes/,
+  );
+});
+
+test("alternatives: minIntervalDays length != requiredDoses-1 throws", () => {
+  assert.throws(
+    () => gen(
+      { type: "series-completion", requiredDoses: 2, alternatives: [{ label: "Traditional", requiredDoses: 3, minIntervalDays: [28] }] },
+      { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" },
+        event: { code: "x", valueSet: "v", type: "immunization" },
+        eventAlternatives: [{ label: "Traditional", codes: [{ code: "08", valueSet: "v" }] }] },
+    ),
+    /minIntervalDays length must equal requiredDoses-1/,
+  );
+});
+
+test("alternatives absent: series output is unchanged from the single-code path", () => {
+  const single = gen({ type: "series-completion", requiredDoses: 2 },
+    { enrollment: { code: "e", valueSet: "v" }, waiver: { code: "w", valueSet: "v" }, event: { code: "x", valueSet: "v", type: "immunization" } });
+  assert.match(single, /"Dose Count" >= 2/);
+  assert.doesNotMatch(single, /Complete":\n  exists/);
 });
 
 test("declination: a windowed rule with a refusal binding emits the Refused define", () => {
