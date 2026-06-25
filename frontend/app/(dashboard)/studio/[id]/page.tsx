@@ -15,12 +15,13 @@ import { useOshaReferences } from "@/features/studio/hooks/useOshaReferences";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { SpecTab } from "@/features/studio/components/SpecTab";
 import { CqlTab } from "@/features/studio/components/CqlTab";
+import { RuleBuilderTab } from "@/features/studio/components/RuleBuilderTab";
 import { ValueSetsTab } from "@/features/studio/components/ValueSetsTab";
 import { TestsTab } from "@/features/studio/components/TestsTab";
 import { ReleaseApprovalTab } from "@/features/studio/components/ReleaseApprovalTab";
 import { TraceabilityTab } from "@/features/studio/components/TraceabilityTab";
 
-type Tab = "spec" | "cql" | "valuesets" | "tests" | "release" | "traceability";
+type Tab = "spec" | "cql" | "rules" | "valuesets" | "tests" | "release" | "traceability";
 
 export default function StudioMeasurePage() {
   const { user } = useAuth();
@@ -86,8 +87,8 @@ export default function StudioMeasurePage() {
     ?? versionHistory.find((item) => item.version === measure?.version)?.id
     ?? null;
 
-  const tabs: Tab[] = ["spec", "cql", "valuesets", "tests", "release", "traceability"];
-  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
+  const tabs: Tab[] = ["spec", "cql", "rules", "valuesets", "tests", "release", "traceability"];
+  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", rules: "Rule Builder", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
 
   return (
     <section className="space-y-4">
@@ -195,6 +196,10 @@ export default function StudioMeasurePage() {
           liveCompileStatus={liveCompileStatus}
           onCompileStatusChange={setLiveCompileStatus}
         />
+      ) : null}
+
+      {measure && tab === "rules" ? (
+        <RuleBuilderTab measure={measure} measureId={measureId} api={api} onSaved={load} onError={(msg) => setError(msg || null)} />
       ) : null}
 
       {measure && tab === "valuesets" ? (
