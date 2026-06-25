@@ -50,3 +50,18 @@ export interface UpdateSegmentPatch {
   enabled?: boolean;
   rule?: SegmentRule;
 }
+
+export interface SegmentStore {
+  /** All segments, hydrated with measures + overrides, ordered by name ASC. */
+  listSegments(): Promise<HydratedSegment[]>;
+  getSegment(id: string): Promise<HydratedSegment | null>;
+  createSegment(input: CreateSegmentInput): Promise<HydratedSegment>;
+  /** Patch name/description/enabled/rule (bumps updated_at). null if id unknown. */
+  updateSegment(id: string, patch: UpdateSegmentPatch): Promise<HydratedSegment | null>;
+  /** Delete the segment and its measures + overrides. No-op if id unknown. */
+  deleteSegment(id: string): Promise<void>;
+  /** Replace the applicable rule-set (delete-then-insert). */
+  setMeasures(id: string, measureIds: string[]): Promise<void>;
+  /** Replace the overrides (delete-then-insert). */
+  setOverrides(id: string, overrides: SegmentOverride[]): Promise<void>;
+}
