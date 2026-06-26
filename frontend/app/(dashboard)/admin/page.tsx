@@ -9,6 +9,7 @@ import { useApi } from "@/lib/api/hooks";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn } from "datavis/src/components/table/types";
+import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
 
 type IntegrationHealth = {
   integration: string;
@@ -123,6 +124,7 @@ const ADMIN_TABS = [
   { id: "operations", label: "Operations" },
   { id: "governance", label: "Governance" },
   { id: "outreach", label: "Outreach" },
+  { id: "groups", label: "Groups" },
   { id: "audit", label: "Audit" },
 ] as const;
 type AdminTab = (typeof ADMIN_TABS)[number]["id"];
@@ -1277,6 +1279,8 @@ export default function AdminPage() {
         )}
       </article>
       </>)}
+
+      {activeTab === "groups" && <SegmentsAdmin />}
 
       {activeTab === "audit" && (<>
       {demoResetVisible ? (
