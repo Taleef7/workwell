@@ -68,9 +68,11 @@ function seedConditions(rule: SegmentRule | undefined): EditCondition[] {
 }
 
 // Edit condition → API SegmentCondition (strip `id`; normalize "in" raw string → string[]).
+// Scalar values are trimmed (like the "in" parser) so a padded "Welder " can't slip through —
+// the backend matcher lower-cases but does not trim, so an untrimmed value would match nobody.
 function toApiCondition(c: EditCondition): SegmentCondition {
   if (c.op === "in") return { attr: c.attr, op: c.op, value: parseInValues(c.value) };
-  return { attr: c.attr, op: c.op, value: c.value };
+  return { attr: c.attr, op: c.op, value: c.value.trim() };
 }
 
 function readableError(e: unknown): string {

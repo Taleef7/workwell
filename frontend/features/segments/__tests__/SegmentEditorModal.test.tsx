@@ -60,4 +60,19 @@ describe("SegmentEditorModal", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0][0].rule.conditions[0]).toMatchObject({ op: "in", value: ["Plant A", "Plant B"] });
   });
+
+  it("trims a padded scalar value in the posted draft (so the backend matcher can match it)", async () => {
+    const onSave = vi.fn().mockResolvedValue({ id: "s3" });
+    render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={onSave} />);
+    await userEvent.type(screen.getByLabelText(/group name/i), "Welders");
+    await userEvent.click(screen.getByRole("button", { name: /add condition/i }));
+    // Default condition is attr=role, op=contains; type a value with surrounding whitespace.
+    await userEvent.type(screen.getByLabelText(/condition value/i), "  Welder  ");
+    await userEvent.click(screen.getByLabelText(/measure audiogram/i));
+    const save = screen.getByRole("button", { name: /save/i });
+    await waitFor(() => expect(save).toBeEnabled());
+    await userEvent.click(save);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0].rule.conditions[0]).toMatchObject({ attr: "role", op: "contains", value: "Welder" });
+  });
 });
