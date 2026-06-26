@@ -1,5 +1,41 @@
 # Architecture Decision Records
 
+## ADR-019: Multi-tenant rollup modeled in the read-time synthetic directory; cross-system aggregate root — E13 PR-1 (#185)
+
+Date: 2026-06-26
+Status: Accepted
+
+**Decision.** E13 PR-1 adds a **tenant/system dimension** above the existing
+enterprise→location→provider→patient hierarchy (#74 E4) so compliance from **multiple WebChart systems**
+rolls up into one dashboard. The dimension is modeled **entirely in the read-time synthetic directory**
+(`backend-ts/src/engine/synthetic/employee-catalog.ts`): a `Tenant`/`Enterprise` model + `tenantId` on
+`EmployeeProfile`/`Provider`, exactly like `site`/`providerId` today. A second synthetic system —
+**Indus Hospital Network** (`ihn`, 50 employees across 3 campuses) — joins the existing 100-employee
+**Total Worker Health** (`twh`) tenant; `EMPLOYEES` spans both, so the run pipeline evaluates everyone and
+both systems carry real outcomes. **No schema, no new dependencies** — `outcomes`/`cases` still persist only
+`subjectId`; the hierarchy above a subject is resolved in code (the #93 schema stop-and-ask gate is satisfied
+with no migration, consistent with ADR-010).
+
+**Cross-system aggregate root.** The rollup (`hierarchy-rollup.ts`) returns a single reconciling
+**"All Systems"** root (`level:"all"`) whose children are **tenant** nodes, each →
+enterprise → location → provider → patient. The E4 reconciliation invariant (parent totals = Σ children at
+every level) extends to the two new top edges (All = Σ tenants; tenant = its enterprise). Internal
+accumulation maps are **tenant-qualified** (`${tenantId}|…`) so same-named locations/providers never merge
+across systems. `?tenant=<id>` returns that single tenant's subtree as the root (an empty zero-node when the
+tenant has no data).
+
+**Multi-tenant everywhere via an optional filter.** Every read surface (`/api/hierarchy/rollup`,
+`/api/compliance/roster`, `/api/programs/*`) gains an **optional `?tenant=<id>`** filter (default = all
+systems), plus a new read-only `GET /api/tenants` for the UI selector (authenticated under the catch-all
+`GET /api/**`). Omitting `tenant` preserves prior behavior aggregated across all systems, so existing callers
+keep working; the live demo numbers grow because the second tenant is now evaluated (accepted trade-off).
+
+**Consequences.** Tenant resolution is **display/grouping only** — it never sets or overrides an outcome; CQL
+`Outcome Status` remains the sole compliance authority (ADR-008). Reversible by reverting the PR (Tenant 2 is
+purely additive synthetic data). **Deferred to later E13 PRs:** population-scale batch (~120k) + a seed/scale
+harness (PR-2), and scheduled cron recompute wiring the inert `/api/admin/scheduler` stub (PR-3); the real
+WebChart/MariaDB→FHIR adapter is E12 PR-2 (blocked on MIE's schema).
+
 ## ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)
 
 Date: 2026-06-26
