@@ -8,7 +8,7 @@
  *   pnpm evaluate --patient ./bundle.json --measure audiogram [--date 2026-06-18] [--pretty]
  */
 import { readFileSync } from "node:fs";
-import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
+import { evaluateBundle } from "../ingress/evaluate-bundle.ts";
 import type { MeasureOutcome } from "../evaluate-measure.ts";
 
 export const USAGE =
@@ -51,8 +51,7 @@ export async function evaluate(parsed: CliArgs): Promise<MeasureOutcome> {
   } catch (e) {
     throw new CliUsageError(`cannot read patient bundle '${parsed.patient}': ${e instanceof Error ? e.message : String(e)}`);
   }
-  const engine = new CqlExecutionEngine();
-  return engine.evaluate({ measureId: parsed.measure, patientBundle: bundle, evaluationDate: parsed.date });
+  return evaluateBundle(bundle, parsed.measure, { evaluationDate: parsed.date });
 }
 
 /** Parse args and evaluate in one call — the same path as the CLI entry point. */
