@@ -103,28 +103,15 @@ function AstNode({
 
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
+      {/* The expand/collapse toggle and the select-source target are SIBLINGS (not nested) so
+          neither interactive control is a descendant of the other (avoids nested-interactive). */}
       <div
-        role="button"
-        tabIndex={0}
-        aria-label={`Highlight CQL source for ${node.type ?? "node"}`}
-        onClick={() => onSelect(node)}
-        onKeyDown={(e) => {
-          // Only act when the event originates on this row itself, so key presses
-          // on the nested expand/collapse button don't also fire a select.
-          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
-            e.preventDefault();
-            onSelect(node);
-          }
-        }}
-        className={`flex cursor-pointer items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
-        title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
+        className={`flex items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
       >
         {hasChildren ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen((o) => !o);
-            }}
+            type="button"
+            onClick={() => setOpen((o) => !o)}
             className="w-3 shrink-0 text-neutral-500"
             aria-label={open ? "collapse" : "expand"}
           >
@@ -133,9 +120,24 @@ function AstNode({
         ) : (
           <span className="w-3 shrink-0" />
         )}
-        <span className="text-neutral-400">{label}:</span>
-        <span className="font-semibold text-sky-700 dark:text-sky-300">{node.type ?? "?"}</span>
-        {summary ? <span className="text-neutral-500">{summary}</span> : null}
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={`Highlight CQL source for ${node.type ?? "node"}`}
+          onClick={() => onSelect(node)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect(node);
+            }
+          }}
+          className="flex flex-1 cursor-pointer items-baseline gap-2"
+          title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
+        >
+          <span className="text-neutral-400">{label}:</span>
+          <span className="font-semibold text-sky-700 dark:text-sky-300">{node.type ?? "?"}</span>
+          {summary ? <span className="text-neutral-500">{summary}</span> : null}
+        </span>
       </div>
       {open && hasChildren ? (
         <div className="border-l border-neutral-200 dark:border-neutral-800">
