@@ -175,6 +175,22 @@ test("GET /api/measures/:id/activation-readiness reflects the compile + fixture 
   assert.equal((await get("/api/measures/nope/activation-readiness"))?.status, 404);
 });
 
+test("GET /api/measures/cms122/fidelity returns the fidelity report", async () => {
+  const res = await get("/api/measures/cms122/fidelity");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { available: boolean; ecqmId: string; summary: { omitted: number } };
+  assert.equal(body.available, true);
+  assert.equal(body.ecqmId, "CMS122v14");
+  assert.ok(body.summary.omitted > 0);
+});
+
+test("GET /api/measures/audiogram/fidelity → available:false (no official reference yet)", async () => {
+  const res = await get("/api/measures/audiogram/fidelity");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { available: boolean };
+  assert.equal(body.available, false);
+});
+
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
   const res = await get("/api/measures/audiogram/elm");
   assert.equal(res?.status, 200);

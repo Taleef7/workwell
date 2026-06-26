@@ -59,6 +59,8 @@ import {
   ValueSetError,
   type ValueSetGovernanceDeps,
 } from "../measure/value-set-governance.ts";
+import { referenceFor } from "../standards/references/index.ts";
+import { computeFidelity } from "../standards/measure-fidelity.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -430,6 +432,18 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const r = await (await store(env)).getLatest(readyId);
     if (!r) return json({ error: "not_found", measureId: readyId }, 404);
     return json(await computeDataReadiness({ outcomes: (await getStores(env)).outcomes }, r));
+  }
+
+  // Standards fidelity: a documented structural diff of WorkWell's authored measure vs the official
+  // eCQM spec (E14 / #186). Read-only, descriptive — never affects an outcome (ADR-008). Returns
+  // { available: false } for measures without a vendored official reference yet.
+  const fidelityId = pathname.match(/^\/api\/measures\/([^/]+)\/fidelity$/)?.[1];
+  if (fidelityId && req.method === "GET") {
+    const r = await (await store(env)).getLatest(fidelityId);
+    if (!r) return json({ error: "not_found", measureId: fidelityId }, 404);
+    const ref = referenceFor(fidelityId);
+    if (!ref) return json({ measureId: fidelityId, available: false });
+    return json({ available: true, ...computeFidelity(ref) });
   }
 
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
