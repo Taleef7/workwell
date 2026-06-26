@@ -16,6 +16,8 @@ export interface MeasureMeta {
   expansionLibrary?: string;
   /** Value-set URLs the expansion-mode library references (expanded into the CodeService). */
   valueSets?: string[];
+  /** Regulatory jurisdiction this measure's spec belongs to (E14 / #186). Defaults to "US" when absent. */
+  jurisdiction?: string;
 }
 
 export const MEASURES: Record<string, MeasureMeta> = {
