@@ -96,10 +96,6 @@ pnpm evaluate --patient ./patient-bundle.json --measure audiogram --date 2026-06
 It's a thin shell (`backend-ts/src/engine/cli/`) over the same `CqlExecutionEngine` the run pipeline uses.
 Output is the `MeasureOutcome` JSON:
 
-The same DB-less evaluation is also a **library** entry (E12 PR-1, #184) — `evaluateBundle(bundle, measureId)`
-for a single JSON/FHIR object and `evaluateBatch(bundles, measureId)` for a "bucket" of them (per-item error
-isolation), both from `backend-ts/src/engine/ingress`, with no server or DB.
-
 ## Seed synthetic trend history (so `/programs` charts vary)
 
 `pnpm seed:trend-history` backfills backdated weekly COMPLETED runs per runnable measure so the
@@ -122,6 +118,10 @@ measure's latest real run so the programs overview is never affected, and add no
   "evidence" : { "expressionResults" : [ { "define" : "Days Since Last Audiogram", "result" : 100 }, "..." ] }
 }
 ```
+
+The same DB-less evaluation is also a **library** entry (E12 PR-1, #184) — `evaluateBundle(bundle, measureId)`
+for a single JSON/FHIR object and `evaluateBatch(bundles, measureId)` for a "bucket" of them (per-item error
+isolation), both from `backend-ts/src/engine/ingress`, with no server or DB.
 
 ## Verification commands
 

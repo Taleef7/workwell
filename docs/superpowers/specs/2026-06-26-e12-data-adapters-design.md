@@ -213,6 +213,11 @@ get a short "DB-less library evaluation" note. **No schema, no new deps.**
   there's one evaluation path; the new value is the library surface + batch ("bucket") + the port.
 - **PR-2 needs a real WebChart schema:** flagged — PR-2's documented mapping needs a schema reference
   from MIE; the inert stub keeps PR-1 unblocked and the seam ready.
+- **`loadBundles()` is eager (`Promise<unknown[]>`):** fine for the JSON bucket (demo scale), but a real
+  WebChart adapter over a full patient population would materialize every bundle in memory before
+  `evaluateBatch` iterates. **PR-2 decision point:** if streaming large cohorts is needed, change the port
+  to `AsyncIterable<unknown>` (and add a streaming `evaluateSource`) — a deliberate, scoped port change,
+  not a surprise. Recorded here so PR-1's eager shape is a conscious YAGNI choice.
 
 ## 11. Out of scope (explicit)
 
