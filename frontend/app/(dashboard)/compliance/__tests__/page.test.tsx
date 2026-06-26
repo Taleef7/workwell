@@ -4,11 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getWithHeaders = vi.fn();
+const get = vi.fn();
 const post = vi.fn();
 // The page calls the token-bound useApi() hook (mirrors cases/page.tsx). The real hook returns a
 // MEMOIZED (stable) client; mirror that here with a single stable object so the page's effect deps
 // don't see a new reference every render (which would refetch on every render).
-const apiMock = { getWithHeaders, post };
+const apiMock = { getWithHeaders, get, post };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
 const startTracking = vi.fn();
@@ -51,6 +52,7 @@ const rosterImmun = {
 
 beforeEach(() => {
   getWithHeaders.mockReset().mockResolvedValue(rosterImmun);
+  get.mockReset().mockResolvedValue([]);
   post.mockReset().mockResolvedValue({ runId: "run-9", status: "REQUESTED" });
   startTracking.mockReset();
   runState.isActive = false;
@@ -124,6 +126,32 @@ describe("CompliancePage", () => {
     render(<CompliancePage />);
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("boom");
+  });
+
+  it("segment filter: selecting a group adds &segment= to the roster request and lists only enabled segments", async () => {
+    get.mockReset().mockResolvedValue([
+      {
+        id: "s1", name: "Clinical Staff", enabled: true,
+        rule: { match: "ANY", conditions: [] }, measureIds: [], overrides: [],
+        description: "", createdBy: "", createdAt: "", updatedAt: ""
+      },
+      {
+        id: "s2", name: "Disabled One", enabled: false,
+        rule: { match: "ANY", conditions: [] }, measureIds: [], overrides: [],
+        description: "", createdBy: "", createdAt: "", updatedAt: ""
+      }
+    ]);
+    render(<CompliancePage />);
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/api/segments"));
+    const segmentSelect = await screen.findByLabelText(/Segment/i);
+    // only the enabled segment is an option (plus the "All segments" default)
+    expect(within(segmentSelect).getByRole("option", { name: "Clinical Staff" })).toBeInTheDocument();
+    expect(within(segmentSelect).queryByRole("option", { name: "Disabled One" })).not.toBeInTheDocument();
+    await userEvent.selectOptions(segmentSelect, "s1");
+    await waitFor(() => {
+      const lastUrl = String(getWithHeaders.mock.calls.at(-1)?.[0] ?? "");
+      expect(lastUrl).toContain("segment=s1");
+    });
   });
 
   it("shows an empty-state row when no employees match", async () => {

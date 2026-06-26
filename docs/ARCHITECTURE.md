@@ -61,7 +61,7 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `web`: REST controllers and request/response contracts.
 
 ## 4) Frontend Route Surfaces (`app/(dashboard)`)
-- `/compliance`: "Individual Compliance Status" roster grid (E10.3 / #190) — every directory subject × the selected panel's (Immunizations / OSHA Surveillance / Wellness & eCQM) Active measures, each cell a status chip + method subtext using the E10.5 display vocabulary (COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED/DECLINED/IN_PROGRESS/NA). Panel/status/site/search filters + `X-Total-Count` paging; sticky subject column + `scope="col"` headers; row → `/employees/[externalId]`. A RBAC-gated **Recalculate** triggers an `ALL_PROGRAMS` run via `RunStatusProvider` and refetches on `ww:run-complete`. Read-only for all roles; consumes `GET /api/compliance/roster`. All status/method text comes verbatim from the read model — the UI never re-derives compliance (ADR-008).
+- `/compliance`: "Individual Compliance Status" roster grid (E10.3 / #190) — every directory subject × the selected panel's (Immunizations / OSHA Surveillance / Wellness & eCQM) Active measures, each cell a status chip + method subtext using the E10.5 display vocabulary (COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED/DECLINED/IN_PROGRESS/NA, plus the **`NOT_APPLICABLE`** segment overlay — slate, distinct from `NA`). Panel/status/site/search filters + a **Segment** `<select>` (enabled segments only; adds `&segment=<id>`, scoping rows to the cohort + columns to its rule-set) + `X-Total-Count` paging; sticky subject column + `scope="col"` headers; row → `/employees/[externalId]`. A RBAC-gated **Recalculate** triggers an `ALL_PROGRAMS` run via `RunStatusProvider` and refetches on `ww:run-complete`. Read-only for all roles; consumes `GET /api/compliance/roster`. All status/method text comes verbatim from the read model — the UI never re-derives compliance (ADR-008).
 - `/programs`: compliance KPI overview + per-program cards.
 - `/programs/[measureId]`: measure-specific trend and driver view.
 - `/programs/hierarchy`: enterprise→location→provider→patient drill-down (nested expandable rollup table with a measure filter; linked from `/programs`).
@@ -73,7 +73,7 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 - `/employees/[externalId]`: employee profile (header, compliance posture bar, open cases, per-measure details, activity timeline) + an **Individual Compliance Status** card (E10.4 / #191) — a RULE → STATUS → METHOD table over every applicable measure across all three panels (consumes `GET /api/compliance/roster` filtered to the subject, one call per panel), each row expandable to its method/class/source-run. The card adds a **Recalculate** action (#198) and a per-row evidence drill-in (`GET /api/outcomes/:id`), and below it a **Simulate Compliance History** panel (#197) — a date scrubber that renders the advisory `/simulate` snapshot per measure with the same chips. Advisory display only; never sets status (ADR-008/ADR-012).
 - `/measures`: measure catalog (Create gated to authors/admin).
 - `/studio/[id]`: authoring tabs (Spec/CQL/Rule Builder/Value Sets/Tests), compile + version cloning; approve/activate/deprecate gated via the shared rbac helpers + a **Rule Builder** tab (E11.2b / #183): a structured form (shape + params + binding codes + titer/grace/declination toggles) → a live generated-CQL preview → an atomic save; emits the codegen `rule:` params.
-- `/admin`: tabbed console (Operations / Governance / Outreach / Audit), lazy-loaded per active tab; integration health, scheduler, source/terminology mappings, outreach templates + delivery log, waivers, audit viewer (#181).
+- `/admin`: tabbed console (Operations / Governance / Outreach / Audit / Groups), lazy-loaded per active tab; integration health, scheduler, source/terminology mappings, outreach templates + delivery log, waivers, audit viewer (#181), and a **Groups** tab (E11.3 PR-2 / #183) — the Configure Groups editor: a `SegmentsList` + `SegmentEditorModal` (rule builder = match ANY/ALL + condition rows attr/op/value incl. multi-value `in`; applicable-measures checkboxes; INCLUDE/EXCLUDE overrides employee-picker via `/api/employees/search`; live server-computed membership preview via `POST /api/segments/preview`). ADMIN-gated New/Edit/Delete (`canManageSegments`).
 
 > **Shell infra (#181):** the dashboard layout mounts a `RunStatusProvider` — a durable, global
 > run tracker (active run persisted in `localStorage`, re-adopted on reload, polled, surfaced as a
@@ -163,6 +163,9 @@ Public API actions derive audit identity from the authenticated security context
   CQL stays canonical (ADR-015).
 - Segments (#183 / E11.3): `GET /api/segments` → `HydratedSegment[]`, `GET /api/segments/:id/preview` →
   `{ count, members }` (cohort membership over the directory via `matchesCohort`, ignores `enabled`),
+  `POST /api/segments/preview` → `{ count, members }` (**dry-run** membership for an *unsaved* rule —
+  ADMIN; reuses `matchesCohort`/`validateRule`; read-time; no schema; shares the `previewResponse` helper
+  with the GET `:id/preview`; powers the Configure Groups editor's live preview, E11.3 PR-2),
   `POST /api/segments`, `PUT /api/segments/:id`, `DELETE /api/segments/:id`. **Writes ADMIN-only**
   (`authorize.ts` `/api/segments/** → [ADMIN]`) + audited (`SEGMENT_CREATED/UPDATED/DELETED`); reads
   authenticated. Route-level enum validation (400 on malformed rule/override). The compliance roster
