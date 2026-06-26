@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-06-26 — E14 PR-1: standards fidelity diff (CMS122v14) + jurisdiction metadata
+
+Opened **E14 — standards fidelity** (#186) on `feat/e14-standards-fidelity`, answering Doug's June-15 ask to
+*"compare official ECQI documented CQL"* and *"look for the latest regulatory updates based on your country."*
+WorkWell's eCQM measures are hand-authored, **simplified** CQL (local value sets, gist-level logic); E14 makes
+the **officially published** spec the reference and produces a **documented fidelity diff** of WorkWell's
+authored version against it.
+
+- **`backend-ts/src/standards/` module (beside, never inside, the engine):** a vendored, sourced
+  `OfficialMeasureReference` for **CMS122v14** (`references/cms122v14.ts` — v14.0.000, steward NCQA,
+  proportion; official IPP/DENOM/DENEX/NUMER/NUMEX criteria, ~21 VSAC value sets, a curated grounded coverage
+  judgement per criterion, provenance URLs + an `omissionSummary`). Every claim is transcribed from the cited
+  eCQI Resource Center HTML + QPP MIPS frozen-code PDF (no VSAC login). `computeFidelity(ref)`
+  (`measure-fidelity.ts`) is a **pure** assembler → a `FidelityReport`: each criterion classified
+  COVERED/SIMPLIFIED/OMITTED + value-set coverage + reconciling summary counts + a data-driven headline + a
+  disclaimer that it is structural, not an outcome diff. Pure data + pure functions — no DB, no `node:fs`, no
+  engine call, no outcome mutation.
+- **`GET /api/measures/:id/fidelity`** — the report for cms122; `{ available: false }` (200) for measures
+  without a vendored reference; 404 for an unknown id. Read-only, authenticated, read-time.
+- **Jurisdiction metadata** — `jurisdiction?: string` on the registry `MeasureMeta` (default `"US"`),
+  surfaced on the measure-detail read model; plus the country-aware **design memo**
+  (`docs/standards/country-aware-regulatory-sourcing.md` — a `RegulatorySource` model, country-switch rule
+  selection, and the aspirational "latest regulatory updates by country" watcher; design-first per the issue
+  Notes — PR-1 ships only the metadata field + memo).
+
+The pivotal **scope decision (ADR-018):** fidelity is **structural/definitional-first** — official-CQL
+**execution** + an evaluated-outcome diff is research-grade (QDM→FHIR, ~20 VSAC value sets, shared exclusion
+libraries, QI-Core bundles) and is **deferred to PR-2** behind the existing E3.2 `ValueSetResolver` seam
+(frozen QPP code lists as a no-VSAC expansion source). Built TDD per task; one whole-branch review fold-in
+(data-driven headline via `omissionSummary`, count single-source). **No schema, no new deps**; descriptive
+only — CQL `Outcome Status` stays the sole compliance authority (ADR-008/ADR-018). Backend `tsc` + full suite
+green (node:test; 1 self-skipped Pg-ceiling contract). Design + plan in `docs/superpowers/`.
+
 ## 2026-06-26 — WCAG accessibility pass (frontend)
 
 Closed the last tracked QA follow-up — the fuller accessibility pass beyond table/label basics. A
