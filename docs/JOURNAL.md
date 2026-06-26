@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-06-26 — Deploy reliability: container-status polling + MIE-outage recovery
+
+A push-to-`main` deploy failed with `Container is 'offline', expected running` while the live app was
+actually healthy (200/200) — a **status-check race**: `deploy-mieweb-container.sh` read the container
+status **once**, immediately after the create job reported `success`, and failed if it wasn't yet
+`running`, even though the container reached `running` on its own seconds later. Fixed (PR #211) by
+**polling** the status up to ~3 min (18× / 10s) until `running`, mirroring the self-heal reconciler's
+retry. A separate, transient **MIE Container-Manager API outage** (`manager.os.mieweb.org` unreachable
+~5 min) then failed the next deploys in the job-wait loop (before the new polling code is even reached),
+leaving the merged #209/#210 changes undeployed; a clean `workflow_dispatch` re-trigger of the main
+deploy recovered the stack and validated the polling fix on a real run. Live stack verified current +
+healthy afterward (frontend/login/programs 200; the new `/api/measures/:id/fidelity` endpoint live,
+401 auth-gated). DEPLOY.md gained a troubleshooting entry for the symptom. Infra-only; no app code.
+
 ## 2026-06-26 — E14 PR-1: standards fidelity diff (CMS122v14) + jurisdiction metadata
 
 Opened **E14 — standards fidelity** (#186) on `feat/e14-standards-fidelity`, answering Doug's June-15 ask to
