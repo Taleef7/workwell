@@ -34,6 +34,18 @@ test("resolveChannel returns the simulated adapter by default (no DataChaser con
   }
 });
 
+test("resolveChannel EMAIL honors the email-provider env (SendGrid stub when configured) (H2)", () => {
+  // Default EMAIL is still simulated (covered above). When provider=sendgrid + key are set, the
+  // EMAIL channel resolves the inert SendGrid stub — without a DataChaser config.
+  const ch = resolveChannel("EMAIL", { WORKWELL_EMAIL_PROVIDER: "sendgrid", WORKWELL_EMAIL_SENDGRID_API_KEY: "SG.key" });
+  const r = ch.send({ channel: "EMAIL", to: "x@workwell-demo.dev", subject: "s", body: "b" });
+  assert.equal(r.provider, "sendgrid");
+  assert.equal(r.status, "QUEUED");
+  // DataChaser still wins for EMAIL when ITS env is set (provider precedence unchanged).
+  const dc = resolveChannel("EMAIL", { WORKWELL_OUTREACH_DATACHASER_API_KEY: "k", WORKWELL_OUTREACH_DATACHASER_BASE_URL: "https://dc.example", WORKWELL_EMAIL_PROVIDER: "sendgrid", WORKWELL_EMAIL_SENDGRID_API_KEY: "SG.key" });
+  assert.equal(dc.send({ channel: "EMAIL", to: "x", body: "b" }).provider, "datachaser");
+});
+
 test("resolveChannel returns the DataChaser stub only when both env vars are set", () => {
   const ch = resolveChannel("SMS", {
     WORKWELL_OUTREACH_DATACHASER_API_KEY: "k",
