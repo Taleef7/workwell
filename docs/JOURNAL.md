@@ -1,5 +1,43 @@
 # Journal
 
+## 2026-06-26 — E13 PR-1: multi-tenant (multi-system) rollup
+
+Started E13 (#185, multi-WebChart rollup + population scale + scheduled recompute) with **PR-1: the
+multi-tenant rollup** — the headline "roll up any WebChart system into 1 quality dashboard" capability.
+Sliced E13 into three PRs (multi-tenant rollup / population-scale harness / cron recompute); this is the
+first. Spec + plan: `docs/superpowers/specs/2026-06-26-e13-multitenant-rollup-design.md`,
+`docs/superpowers/plans/2026-06-26-e13-multitenant-rollup.md`.
+
+**What shipped.** A **tenant/system dimension** above the existing enterprise→location→provider→patient
+hierarchy, modeled **read-time in the synthetic directory** (no schema; ADR-019):
+- `employee-catalog.ts` — a `Tenant`/`Enterprise` model + `tenantId` on `EmployeeProfile`/`Provider`, a
+  second synthetic system **Indus Hospital Network** (`ihn`, 50 employees / 3 campuses / 6 providers)
+  alongside the unchanged **Total Worker Health** (`twh`, the original 100). `EMPLOYEES` spans both, so
+  `ALL_PROGRAMS` evaluates everyone and both systems carry real outcomes. Helpers `tenantById` /
+  `enterpriseForTenant` / `employeesForTenant`.
+- `hierarchy-rollup.ts` — a single reconciling **"All Systems"** root (`level:"all"`) → tenant →
+  enterprise → location → provider → patient, **tenant-qualified** maps so same-named locations/providers
+  never merge across systems. Reconciliation (parent = Σ children) extends to the new top edges.
+  `?tenant=<id>` returns that tenant's subtree as root.
+- **Multi-tenant everywhere** via an optional `?tenant=` filter on `/api/hierarchy/rollup`,
+  `/api/compliance/roster` (rows now carry `tenantId`/`tenantName`), and `/api/programs/*`; a new
+  read-only `GET /api/tenants` feeds the UI selector. Defaults = all systems, so existing callers are
+  unchanged.
+- **Frontend** — an "All systems" System `<select>` on `/programs`, `/compliance`, and
+  `/programs/hierarchy` (which renders the new all/tenant levels); the roster subject subtext shows the
+  system name.
+
+**Invariants/guarantees.** Tenant resolution is display/grouping only — CQL `Outcome Status` stays the sole
+compliance authority (ADR-008). No schema, no new deps; reversible by reverting the PR.
+
+**Verification.** Backend `pnpm typecheck` + full `pnpm test` green; frontend `npm run lint` + `npm run
+build` + `npm run test` (99 vitest) green. New/updated tests: multi-tenant directory partitioning,
+cross-tenant rollup reconciliation + `?tenant=` subtree equality, roster + programs tenant filters,
+`GET /api/tenants`.
+
+**Next (E13):** PR-2 population-scale batch (~120k) + seed/scale harness; PR-3 scheduled cron recompute
+(wire the inert `/api/admin/scheduler`). The real WebChart adapter is E12 PR-2 (blocked on MIE schema).
+
 ## 2026-06-26 — Deploy reliability: container-status polling + MIE-outage recovery
 
 A push-to-`main` deploy failed with `Container is 'offline', expected running` while the live app was
