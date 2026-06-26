@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-06-26 — E11.3 PR-2: Configure Groups UI (closes E11)
+
+Built the frontend half of segments on `feat/e11-3-segments-ui` — the **Configure Groups** editor that
+makes the PR-1 backend operable from the UI and **closes E11**. A segment is still a cohort (role/site
+predicate + per-employee INCLUDE/EXCLUDE overrides) → an applicable measure-id rule-set; this PR adds the
+controls to author one and surfaces applicability on the roster.
+
+- **`POST /api/segments/preview`** — a dry-run cohort-membership endpoint for an **unsaved** rule (reuses
+  the existing `matchesCohort` + `validateRule`; ADMIN-gated; read-only; returns `{count, members}`). A
+  shared `previewResponse` helper now backs both the GET `:id/preview` (saved) and this new POST (unsaved).
+- **`/admin → Groups` tab** — a `SegmentsAdmin` orchestrator over a `SegmentsList` + `SegmentEditorModal`:
+  a rule builder (match ANY/ALL + condition rows of attr/op/value, incl. multi-value `in`), applicable-measures
+  checkboxes, an INCLUDE/EXCLUDE overrides employee-picker (debounced `/api/employees/search` → chips), and a
+  live server-computed membership preview. Validity-gated save through a `useSegments` CRUD hook;
+  New/Edit/Delete are ADMIN-only via a `canManageSegments` RBAC helper.
+- **Roster surfacing on `/compliance`** — a `NOT_APPLICABLE` chip (slate, distinct from `NA`) in
+  `lib/status.ts`, and a "Segment" `<select>` (enabled segments only) that adds `&segment=<id>` to
+  `GET /api/compliance/roster` (scopes rows to the cohort + columns to its rule-set).
+
+Built subagent-driven (TDD per task). Two-stage subagent review folded in two fixes: the `in`-operator
+multi-value input buffer dropped keystrokes mid-edit (raw-string buffer fix), and three
+`react-hooks/set-state-in-effect` lint errors in the new hooks/modal. **No schema, no new deps.** Backend
+`tsc` + full suite green (node:test; 1 self-skipped Pg-ceiling contract); frontend Vitest green + lint clean.
+Segments configure applicability/case-creation + display only — never compliance (ADR-008/ADR-016; CQL
+`Outcome Status` stays authoritative). Design + plan in `docs/superpowers/`.
+
 ## 2026-06-25 — E11.3 PR-1 merged + verified live; PR-2 (Configure Groups UI) spec'd + planned
 
 Merged **E11.3 PR-1** (#205, risk-group segments backend) and verified it on the live stack: the 3 segment
