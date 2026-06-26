@@ -26,6 +26,8 @@ export default function CompliancePage() {
   const [panel, setPanel] = useState<PanelId>("immunizations");
   const [status, setStatus] = useState<string>("");
   const [q, setQ] = useState<string>("");
+  const [segment, setSegment] = useState<string>("");
+  const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
@@ -63,6 +65,7 @@ export default function CompliancePage() {
       if (status) params.set("status", status);
       if (siteId.trim()) params.set("site", siteId.trim());
       if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
+      if (segment) params.set("segment", segment);
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${params.toString()}`);
@@ -76,7 +79,7 @@ export default function CompliancePage() {
     } finally {
       setLoading(false);
     }
-  }, [api, panel, status, siteId, debouncedQ, page, pageSize]);
+  }, [api, panel, status, siteId, debouncedQ, segment, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -92,6 +95,18 @@ export default function CompliancePage() {
     window.addEventListener("ww:run-complete", onComplete);
     return () => window.removeEventListener("ww:run-complete", onComplete);
   }, [load]);
+
+  // Load the enabled segments once for the optional Segment filter. Best-effort: the filter is
+  // optional and must never break the roster, so swallow errors and leave the options empty. The
+  // setState rides in the async .then so it doesn't trip react-hooks/set-state-in-effect.
+  useEffect(() => {
+    api
+      .get<{ id: string; name: string; enabled: boolean }[]>("/api/segments")
+      .then((list) =>
+        setSegmentOptions((Array.isArray(list) ? list : []).filter((s) => s.enabled).map(({ id, name }) => ({ id, name })))
+      )
+      .catch(() => setSegmentOptions([]));
+  }, [api]);
 
   const recalculate = useCallback(async () => {
     if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
@@ -145,6 +160,18 @@ export default function CompliancePage() {
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
             {PANEL_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
+          </select>
+        </label>
+        <label className="flex flex-col text-xs font-medium">
+          <span className="mb-1">Segment</span>
+          <select
+            aria-label="Segment"
+            value={segment}
+            onChange={(e) => { setPage(1); setSegment(e.target.value); }}
+            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+          >
+            <option value="">All segments</option>
+            {segmentOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
           </select>
         </label>
         <label className="flex flex-col text-xs font-medium">

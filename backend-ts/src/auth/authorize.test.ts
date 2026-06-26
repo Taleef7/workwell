@@ -99,6 +99,10 @@ test("segments: writes are ADMIN-only; reads fall through to AUTHENTICATED (#183
   assert.equal(authorize("GET", "/api/segments", cm).ok, true);
   assert.equal(authorize("GET", "/api/segments/abc/preview", author).ok, true);
   assert.deepEqual(authorize("GET", "/api/segments", null), { ok: false, status: 401 });
+  // POST /api/segments/preview (the editor's dry-run) is a write-method path → ADMIN-only via /api/segments/**.
+  assert.equal(authorize("POST", "/api/segments/preview", admin).ok, true);
+  assert.deepEqual(authorize("POST", "/api/segments/preview", cm), { ok: false, status: 403 });
+  assert.deepEqual(authorize("POST", "/api/segments/preview", null), { ok: false, status: 401 });
 });
 
 test("auditor packets: run packets are CM/ADMIN, measure-version packets are APPROVER/ADMIN", () => {
