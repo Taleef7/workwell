@@ -25,8 +25,14 @@ export interface RosterCell {
 }
 
 export interface RosterRow {
-  subject: { externalId: string; name: string; role: string; site: string };
+  subject: { externalId: string; name: string; role: string; site: string; tenantId: string; tenantName: string };
   cells: Record<string, RosterCell>;
+}
+
+// GET /api/tenants — the WebChart systems for the multi-tenant selector (E13 PR-1).
+export interface TenantOption {
+  id: string;
+  name: string;
 }
 
 export interface Roster {

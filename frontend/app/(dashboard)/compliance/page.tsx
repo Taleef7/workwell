@@ -9,7 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
-import { PANEL_OPTIONS, type PanelId, type Roster } from "@/features/compliance/types";
+import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
 const PAGE_SIZES = [25, 50, 100, 200];
@@ -28,6 +28,8 @@ export default function CompliancePage() {
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
+  const [tenant, setTenant] = useState<string>("");
+  const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
@@ -66,6 +68,7 @@ export default function CompliancePage() {
       if (siteId.trim()) params.set("site", siteId.trim());
       if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
       if (segment) params.set("segment", segment);
+      if (tenant) params.set("tenant", tenant);
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${params.toString()}`);
@@ -79,7 +82,7 @@ export default function CompliancePage() {
     } finally {
       setLoading(false);
     }
-  }, [api, panel, status, siteId, debouncedQ, segment, page, pageSize]);
+  }, [api, panel, status, siteId, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -106,6 +109,14 @@ export default function CompliancePage() {
         setSegmentOptions((Array.isArray(list) ? list : []).filter((s) => s.enabled).map(({ id, name }) => ({ id, name })))
       )
       .catch(() => setSegmentOptions([]));
+  }, [api]);
+
+  // Load the tenants/systems once for the optional Tenant filter (E13 PR-1). Best-effort, like segments.
+  useEffect(() => {
+    api
+      .get<TenantOption[]>("/api/tenants")
+      .then((list) => setTenantOptions(Array.isArray(list) ? list : []))
+      .catch(() => setTenantOptions([]));
   }, [api]);
 
   const recalculate = useCallback(async () => {
@@ -160,6 +171,18 @@ export default function CompliancePage() {
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
             {PANEL_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
+          </select>
+        </label>
+        <label className="flex flex-col text-xs font-medium">
+          <span className="mb-1">System</span>
+          <select
+            aria-label="System"
+            value={tenant}
+            onChange={(e) => { setPage(1); setTenant(e.target.value); }}
+            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+          >
+            <option value="">All systems</option>
+            {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
           </select>
         </label>
         <label className="flex flex-col text-xs font-medium">
@@ -239,7 +262,7 @@ export default function CompliancePage() {
                     <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
                       {r.subject.name}
                     </Link>
-                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.subject.site} · {r.subject.role}</div>
+                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.subject.tenantName} · {r.subject.site} · {r.subject.role}</div>
                   </th>
                   {columns.map((c) => {
                     const cell = r.cells[c.measureId] ?? { status: "NA" as const, method: "Not evaluated" };
