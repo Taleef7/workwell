@@ -71,3 +71,6 @@ export const canUseStudio = (role: string | null | undefined): boolean =>
 
 /** Admin console (/api/admin/**). */
 export const canUseAdmin = isAdmin;
+
+/** Segment (risk-group) management is ADMIN-only, mirroring the backend /api/segments write gate. */
+export const canManageSegments = (role: string | null | undefined): boolean => isAdmin(role);
