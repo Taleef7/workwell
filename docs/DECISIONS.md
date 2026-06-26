@@ -1,5 +1,41 @@
 # Architecture Decision Records
 
+## ADR-017: E12 data ingress is FHIR-native-first; adapters feed the unchanged engine (no CQL→SQL transpile) — E12 (#184)
+
+Date: 2026-06-26
+Status: Accepted
+
+**Decision.** E12 (pluggable data adapters) resolves the E9 (#78) architectural fork — how real
+WebChart/EHR data reaches the measure engine — in favor of **FHIR-native-first**. A new patient-data
+**ingress seam** sits *above* the unchanged `CqlExecutionEngine`: data sources adapt their native
+representation into FHIR bundles, which the existing JVM-free CQL→ELM engine evaluates. We do **not**
+transpile CQL→SQL to run measures inside WebChart's MariaDB.
+
+**The fork (E9 / #78).** Three options were on the table (ADR-014's recommendation memo): (A) a
+FHIR-native adapter feeding the existing engine; (B) a wholesale CQL→MariaDB transpiler; (C) hybrid.
+We choose **FHIR-native-first (A, opening the door to C later)** because the engine is already built,
+golden-parity-proven across all runnable measures (ADR-008), and JVM-free — so the adapter is the only
+new surface. A CQL→SQL transpiler is research-grade/high-risk (the only concrete transpiler is
+Databricks-only/partial, targets Spark not transactional MariaDB) and would fork the execution path. The
+adapter seam is fully reversible — it adds a layer, it does not touch the engine. A bounded SQL-on-FHIR
+opt-in second executor stays available as future work (ADR-014 Option C) but is not built here.
+
+**PR-1 deliverable.** A new `backend-ts/src/engine/ingress/` module: a `PatientDataSource` port + a
+DB-less, fs-less JSON-bucket library entry — `evaluateBundle(bundle, measureId)` (single) and
+`evaluateBatch(bundles, measureId)` (a "bucket", with per-item error isolation). `resolveDataSource(env)`
+selects the source config-driven (mirrors `resolveForecaster`/`resolveChannel`/`resolveStandingOrderProvider`:
+JSON by default). The headless CLI is refactored to reuse `evaluateBundle` (one evaluation path). The
+library path imports no DB and no `node:fs`, so it stays portable across every `@mieweb/cloud` target.
+
+**WebChart adapter is an inert stub now.** `webChartDataSource` is **inert-unless-configured** —
+selected only when both `WORKWELL_WEBCHART_BASE_URL` + `WORKWELL_WEBCHART_API_KEY` are set, and it
+rejects with a clear "not yet wired (E12 PR-2)" message. The real WebChart/MariaDB→FHIR mapping is **PR-2**.
+
+**Consequences.** CQL `Outcome Status` remains the sole compliance authority (ADR-008) — the ingress
+seam only feeds bundles in, it never decides compliance. **No schema, no new dependencies.** The engine
+is unmodified. PR-2 adds the real WebChart adapter behind the same port; deeper data depth and the
+optional SQL-on-FHIR executor are later epics.
+
 ## ADR-016: Segments / risk-groups are an applicability layer, not a compliance authority — E11.3 (#183)
 
 Date: 2026-06-25
