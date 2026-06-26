@@ -1,20 +1,22 @@
 /**
- * Hierarchy rollup (#74 E4) — the enterprise→location→provider→patient tree for the
- * multi-level dashboard. Aggregates the SAME outcome rows the programs overview uses
- * (latest population run per Active measure; single-subject CASE/EMPLOYEE reruns excluded)
- * into a node tree where parent count totals equal the sum of their children at every level.
+ * Hierarchy rollup (#74 E4; multi-tenant #185 E13 PR-1) — the
+ * all→tenant→enterprise→location→provider→patient tree for the multi-level dashboard.
+ * Aggregates the SAME outcome rows the programs overview uses (latest population run per Active
+ * measure; single-subject CASE/EMPLOYEE reruns excluded) into a node tree where parent count totals
+ * equal the sum of their children at every level — now reconciling across systems (All = Σ tenants).
  *
  * No DB schema: the hierarchy is resolved at read-time from the synthetic directory
- * (employee.site = location, employee.providerId = provider). Subjects that don't resolve
- * to a directory employee can't be placed in the tree and are skipped.
+ * (employee.tenantId = system, employee.site = location, employee.providerId = provider). Subjects
+ * that don't resolve to a directory employee can't be placed in the tree and are skipped.
+ * `?tenant=<id>` returns that single tenant's subtree as the root (E13).
  */
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
-import { ENTERPRISE, employeeById, providerById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById, providerById, tenantById, enterpriseForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { day, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
 
-export type HierarchyLevel = "enterprise" | "location" | "provider" | "patient";
+export type HierarchyLevel = "all" | "tenant" | "enterprise" | "location" | "provider" | "patient";
 
 export interface HierarchyTotals {
   evaluated: number;
@@ -45,6 +47,8 @@ export interface HierarchyFilters {
   measureId?: string | null;
   from?: string | null;
   to?: string | null;
+  /** Scope the tree to one tenant/system; the returned root is that tenant's subtree (#185 E13). */
+  tenant?: string | null;
 }
 
 interface MutableTotals {
@@ -99,47 +103,90 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     }
   }
 
-  const providerTotals = new Map<string, MutableTotals>();
-  const locationTotals = new Map<string, MutableTotals>();
-  const patientsByProvider = new Map<string, HierarchyNode[]>();
-  const ent = zero();
+  const tenantFilter = filters.tenant?.trim() || null;
+
+  // Accumulate bottom-up with TENANT-QUALIFIED keys so same-named locations/providers never merge
+  // across systems (E13: each WebChart system is its own tenant above enterprise).
+  const provTotals = new Map<string, MutableTotals>(); // key: `${tenantId}|${providerId}`
+  const locTotals = new Map<string, MutableTotals>(); // key: `${tenantId}|${location}`
+  const entTotals = new Map<string, MutableTotals>(); // key: tenantId (1 enterprise per tenant in PR-1)
+  const patientsByProvKey = new Map<string, HierarchyNode[]>();
+  const tenantsSeen = new Set<string>();
 
   for (const [subjectId, t] of byPatient) {
     if (t.evaluated === 0 && t.openCases === 0) continue;
     const emp = employeeById(subjectId)!;
+    if (tenantFilter && emp.tenantId !== tenantFilter) continue;
+    const prov = providerById(emp.providerId);
+    const location = prov?.location ?? "Unknown";
+    const provKey = `${emp.tenantId}|${emp.providerId}`;
+    const locKey = `${emp.tenantId}|${location}`;
+    tenantsSeen.add(emp.tenantId);
     const node: HierarchyNode = {
       level: "patient", id: subjectId, name: emp.name, parentId: emp.providerId, totals: seal(t), children: [],
     };
-    (patientsByProvider.get(emp.providerId) ?? patientsByProvider.set(emp.providerId, []).get(emp.providerId)!).push(node);
-    const pt = providerTotals.get(emp.providerId) ?? providerTotals.set(emp.providerId, zero()).get(emp.providerId)!;
-    const lt = locationTotals.get(emp.site) ?? locationTotals.set(emp.site, zero()).get(emp.site)!;
-    accumulate(pt, t);
-    accumulate(lt, t);
-    accumulate(ent, t);
+    (patientsByProvKey.get(provKey) ?? patientsByProvKey.set(provKey, []).get(provKey)!).push(node);
+    accumulate(provTotals.get(provKey) ?? provTotals.set(provKey, zero()).get(provKey)!, t);
+    accumulate(locTotals.get(locKey) ?? locTotals.set(locKey, zero()).get(locKey)!, t);
+    accumulate(entTotals.get(emp.tenantId) ?? entTotals.set(emp.tenantId, zero()).get(emp.tenantId)!, t);
   }
 
-  const locationNodes = new Map<string, HierarchyNode[]>();
-  for (const [providerId, patients] of patientsByProvider) {
+  // provider nodes grouped under tenant-qualified location keys
+  const provsByLocKey = new Map<string, HierarchyNode[]>();
+  for (const [provKey, patients] of patientsByProvKey) {
+    const [tenantId, providerId] = provKey.split("|") as [string, string];
     const prov = providerById(providerId);
     const location = prov?.location ?? "Unknown";
+    const locKey = `${tenantId}|${location}`;
     const provNode: HierarchyNode = {
       level: "provider", id: providerId, name: prov?.name ?? providerId, parentId: location,
-      totals: seal(providerTotals.get(providerId)!),
+      totals: seal(provTotals.get(provKey)!),
       children: patients.sort((a, b) => a.id.localeCompare(b.id)),
     };
-    (locationNodes.get(location) ?? locationNodes.set(location, []).get(location)!).push(provNode);
+    (provsByLocKey.get(locKey) ?? provsByLocKey.set(locKey, []).get(locKey)!).push(provNode);
   }
 
-  const locationChildren: HierarchyNode[] = [...locationNodes.entries()]
-    .map(([location, providers]): HierarchyNode => ({
-      level: "location", id: location, name: location, parentId: ENTERPRISE.id,
-      totals: seal(locationTotals.get(location)!),
-      children: providers.sort((a, b) => a.id.localeCompare(b.id)),
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  // location nodes grouped under tenant (for the per-tenant enterprise subtree)
+  const locsByTenant = new Map<string, HierarchyNode[]>();
+  for (const [locKey, provs] of provsByLocKey) {
+    const [tenantId, location] = locKey.split("|") as [string, string];
+    const locNode: HierarchyNode = {
+      level: "location", id: location, name: location, parentId: tenantId,
+      totals: seal(locTotals.get(locKey)!),
+      children: provs.sort((a, b) => a.id.localeCompare(b.id)),
+    };
+    (locsByTenant.get(tenantId) ?? locsByTenant.set(tenantId, []).get(tenantId)!).push(locNode);
+  }
 
+  // enterprise node (1 per tenant) wrapped in a tenant node
+  const tenantNodes: HierarchyNode[] = [...tenantsSeen].sort().map((tenantId): HierarchyNode => {
+    const ent = enterpriseForTenant(tenantId);
+    const tenantTotals = seal(entTotals.get(tenantId)!);
+    const locations = (locsByTenant.get(tenantId) ?? []).sort((a, b) => a.id.localeCompare(b.id));
+    const enterpriseNode: HierarchyNode = {
+      level: "enterprise", id: ent?.id ?? tenantId, name: ent?.name ?? tenantId, parentId: tenantId,
+      totals: tenantTotals, children: locations,
+    };
+    return {
+      level: "tenant", id: tenantId, name: tenantById(tenantId)?.name ?? tenantId, parentId: "all",
+      totals: tenantTotals, children: [enterpriseNode],
+    };
+  });
+
+  // tenant-filtered → that single tenant subtree IS the root (empty zero-node if it has no data)
+  if (tenantFilter) {
+    return (
+      tenantNodes.find((t) => t.id === tenantFilter) ?? {
+        level: "tenant", id: tenantFilter, name: tenantById(tenantFilter)?.name ?? tenantFilter,
+        parentId: "all", totals: seal(zero()), children: [],
+      }
+    );
+  }
+
+  const allTotals = zero();
+  for (const t of entTotals.values()) accumulate(allTotals, t);
   return {
-    level: "enterprise", id: ENTERPRISE.id, name: ENTERPRISE.name, parentId: null,
-    totals: seal(ent), children: locationChildren,
+    level: "all", id: "all", name: "All Systems", parentId: null,
+    totals: seal(allTotals), children: tenantNodes,
   };
 }
