@@ -38,5 +38,8 @@ test("computeFidelity: value-set fidelity marks the exclusion concepts unreprese
 test("computeFidelity: a plain-English headline + disclaimer are present", () => {
   const r = computeFidelity(CMS122V14);
   assert.ok(r.summary.headline.length > 0);
+  // The headline surfaces the real counts AND the measure-specific omissionSummary (not a hardcoded example).
+  assert.match(r.summary.headline, new RegExp(String(r.summary.omitted)));
+  assert.match(r.summary.headline, /age\/visit gating/);
   assert.match(r.disclaimer, /structural/i);
 });

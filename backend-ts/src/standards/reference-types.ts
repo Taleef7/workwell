@@ -47,6 +47,8 @@ export interface OfficialMeasureReference {
   version: string;
   steward: string;
   scoring: string;
+  /** Short, measure-specific example of what WorkWell omits — used in the fidelity headline. */
+  omissionSummary?: string;
   provenance: { sourceUrl: string; frozenCodesUrl?: string; retrieved: string };
   criteria: OfficialCriterion[];
   valueSets: OfficialValueSet[];

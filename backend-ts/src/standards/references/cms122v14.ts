@@ -16,6 +16,7 @@ export const CMS122V14: OfficialMeasureReference = {
   version: "14.0.000",
   steward: "NCQA",
   scoring: "proportion",
+  omissionSummary: "age/visit gating + denominator exclusions",
   provenance: {
     sourceUrl: "https://ecqi.healthit.gov/ecqm/ec/2026/cms0122v14",
     frozenCodesUrl: "https://qpp.cms.gov/docs/QPP_quality_measure_specifications/CQM-Measures/2026_Measure_001_MIPSCQM.pdf",
