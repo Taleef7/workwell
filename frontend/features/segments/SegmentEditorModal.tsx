@@ -131,16 +131,15 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
     [rule]
   );
 
-  const valid = useMemo(
-    () =>
-      name.trim() !== "" &&
-      measureIds.length >= 1 &&
-      rule.conditions.length >= 1 &&
-      rule.conditions.every(conditionValid),
-    [name, measureIds, rule]
+  // Membership/preview depends ONLY on the rule + overrides — never on name/measures.
+  const ruleValid = useMemo(
+    () => rule.conditions.length >= 1 && rule.conditions.every(conditionValid),
+    [rule]
   );
+  // Saving additionally requires a name and at least one applicable measure.
+  const canSave = ruleValid && name.trim() !== "" && measureIds.length >= 1;
 
-  const { preview, previewError } = usePreview(apiRule, overrides, valid);
+  const { preview, previewError } = usePreview(apiRule, overrides, ruleValid);
 
   function updateCondition(idx: number, patch: Partial<Pick<EditCondition, "attr" | "op" | "value">>) {
     setRule((prev) => ({
@@ -163,7 +162,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
   }
 
   async function save() {
-    if (!valid || saving) return;
+    if (!canSave || saving) return;
     setSaving(true);
     setFormError(null);
     const draft: SegmentDraft = { name: name.trim(), description, enabled, rule: apiRule, measureIds, overrides };
@@ -350,14 +349,17 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
                 ) : null}
               </>
             ) : null}
-            {!valid ? (
-              <p className="text-neutral-500">Add a name, at least one condition, and at least one measure to preview membership.</p>
+            {!ruleValid ? (
+              <p className="text-neutral-500">Add at least one complete condition to preview membership.</p>
             ) : null}
             {previewError ? <p role="alert" className="text-rose-600 dark:text-rose-400">{previewError}</p> : null}
           </div>
         </div>
       </ModalBody>
       <ModalFooter>
+        {ruleValid && !canSave ? (
+          <span className="mr-auto text-xs text-neutral-500">Add a name and at least one measure to save.</span>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
@@ -368,7 +370,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
         <button
           type="button"
           onClick={() => void save()}
-          disabled={!valid || saving}
+          disabled={!canSave || saving}
           className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
         >
           {saving ? "Saving…" : "Save"}
