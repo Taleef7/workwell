@@ -24,8 +24,54 @@ type Props = {
   onSave: (draft: SegmentDraft) => Promise<unknown>;
 };
 
-const emptyRule = (): SegmentRule => ({ match: "ANY", conditions: [] });
-const newCondition = (): SegmentCondition => ({ attr: "role", op: "contains", value: "" });
+// First N preview members surfaced in the live-preview footer.
+const PREVIEW_LIMIT = 5;
+
+// Internal editing shape. Each condition carries a stable `id` for React keys ONLY — it is stripped
+// when building the API draft. `value` is always a RAW edit-buffer string here (even for op="in");
+// it is normalized to string[] for "in" at validity/draft/preview time so commas can be typed freely.
+interface EditCondition {
+  id: string;
+  attr: ConditionAttr;
+  op: ConditionOp;
+  value: string;
+}
+interface EditRule {
+  match: "ANY" | "ALL";
+  conditions: EditCondition[];
+}
+
+let cidSeq = 0;
+function genId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* jsdom/older runtime without crypto.randomUUID */
+  }
+  return `c-${Date.now()}-${cidSeq++}`;
+}
+
+const emptyRule = (): EditRule => ({ match: "ANY", conditions: [] });
+const newCondition = (): EditCondition => ({ id: genId(), attr: "role", op: "contains", value: "" });
+
+// Split the raw "in" buffer into trimmed, non-empty tokens (only at validity / draft / preview time).
+const parseInValues = (raw: string): string[] => raw.split(",").map((v) => v.trim()).filter((v) => v !== "");
+
+function seedConditions(rule: SegmentRule | undefined): EditCondition[] {
+  if (!rule) return [];
+  return rule.conditions.map((c) => ({
+    id: genId(),
+    attr: c.attr,
+    op: c.op,
+    value: Array.isArray(c.value) ? c.value.join(", ") : c.value,
+  }));
+}
+
+// Edit condition → API SegmentCondition (strip `id`; normalize "in" raw string → string[]).
+function toApiCondition(c: EditCondition): SegmentCondition {
+  if (c.op === "in") return { attr: c.attr, op: c.op, value: parseInValues(c.value) };
+  return { attr: c.attr, op: c.op, value: c.value };
+}
 
 function readableError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
@@ -38,10 +84,10 @@ function readableError(e: unknown): string {
   return raw;
 }
 
-function conditionValid(c: SegmentCondition): boolean {
+function conditionValid(c: EditCondition): boolean {
   if (!c.attr || !c.op) return false;
-  if (c.op === "in") return Array.isArray(c.value) && c.value.length > 0 && c.value.every((v) => v.trim() !== "");
-  return typeof c.value === "string" && c.value.trim() !== "";
+  if (c.op === "in") return parseInValues(c.value).length > 0;
+  return c.value.trim() !== "";
 }
 
 const inputClass =
@@ -51,7 +97,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const [rule, setRule] = useState<SegmentRule>(emptyRule());
+  const [rule, setRule] = useState<EditRule>(emptyRule());
   const [measureIds, setMeasureIds] = useState<string[]>([]);
   const [overrides, setOverrides] = useState<SegmentOverride[]>([]);
   const [nameById, setNameById] = useState<Record<string, string>>({});
@@ -65,7 +111,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
     setName(initial?.name ?? "");
     setDescription(initial?.description ?? "");
     setEnabled(initial?.enabled ?? true);
-    setRule(initial?.rule ? { match: initial.rule.match, conditions: initial.rule.conditions.map((c) => ({ ...c })) } : emptyRule());
+    setRule(initial?.rule ? { match: initial.rule.match, conditions: seedConditions(initial.rule) } : emptyRule());
     setMeasureIds(initial?.measureIds ? [...initial.measureIds] : []);
     setOverrides(initial?.overrides ? initial.overrides.map((o) => ({ ...o })) : []);
     setNameById({});
@@ -76,6 +122,12 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
 
   const hits = useDirectorySearch(employeeQuery);
 
+  // Normalized API rule (ids stripped, "in" values parsed) — used for both the live preview and the draft.
+  const apiRule: SegmentRule = useMemo(
+    () => ({ match: rule.match, conditions: rule.conditions.map(toApiCondition) }),
+    [rule]
+  );
+
   const valid = useMemo(
     () =>
       name.trim() !== "" &&
@@ -85,33 +137,21 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
     [name, measureIds, rule]
   );
 
-  const { preview, previewError } = usePreview(rule, overrides, valid);
+  const { preview, previewError } = usePreview(apiRule, overrides, valid);
 
-  function updateCondition(idx: number, patch: Partial<SegmentCondition>) {
+  function updateCondition(idx: number, patch: Partial<Pick<EditCondition, "attr" | "op" | "value">>) {
     setRule((prev) => ({
       ...prev,
-      conditions: prev.conditions.map((c, i) => {
-        if (i !== idx) return c;
-        const next = { ...c, ...patch };
-        // Keep value shape aligned with the operator when it changes.
-        if (patch.op && patch.op !== c.op) {
-          if (patch.op === "in") {
-            next.value = typeof c.value === "string" && c.value.trim() !== "" ? [c.value] : [];
-          } else {
-            next.value = Array.isArray(c.value) ? c.value.join(", ") : c.value;
-          }
-        }
-        return next;
-      }),
+      conditions: prev.conditions.map((c, i) => (i === idx ? { ...c, ...patch } : c)),
     }));
   }
 
   function addOverride(externalId: string, displayName: string) {
     setNameById((prev) => ({ ...prev, [externalId]: displayName }));
-    setOverrides((prev) => {
-      const without = prev.filter((o) => o.externalId !== externalId);
-      return [...without, { externalId, mode: "INCLUDE" as OverrideMode }];
-    });
+    // Preserve an existing override's mode — re-selecting from search must not flip EXCLUDE → INCLUDE.
+    setOverrides((prev) =>
+      prev.some((o) => o.externalId === externalId) ? prev : [...prev, { externalId, mode: "INCLUDE" as OverrideMode }]
+    );
     setEmployeeQuery("");
   }
 
@@ -123,7 +163,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
     if (!valid || saving) return;
     setSaving(true);
     setFormError(null);
-    const draft: SegmentDraft = { name: name.trim(), description, enabled, rule, measureIds, overrides };
+    const draft: SegmentDraft = { name: name.trim(), description, enabled, rule: apiRule, measureIds, overrides };
     try {
       await onSave(draft);
       onSaved();
@@ -176,7 +216,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
             {rule.conditions.map((c, i) => {
               const isIn = c.op === "in";
               return (
-                <div key={i} className="grid gap-2 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
+                <div key={c.id} className="grid gap-2 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
                   <label className="flex flex-col text-xs">
                     <span className="mb-1">Attribute</span>
                     <select aria-label={`condition ${i + 1} attribute`} value={c.attr} onChange={(e) => updateCondition(i, { attr: e.target.value as ConditionAttr })} className={inputClass}>
@@ -192,27 +232,16 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
                       <option value="in">in</option>
                     </select>
                   </label>
-                  {isIn ? (
-                    <label className="flex flex-col text-xs">
-                      <span className="mb-1">Values (comma separated)</span>
-                      <input
-                        aria-label="condition values"
-                        value={Array.isArray(c.value) ? c.value.join(", ") : c.value}
-                        onChange={(e) => updateCondition(i, { value: e.target.value.split(",").map((v) => v.trim()).filter((v) => v !== "") })}
-                        className={inputClass}
-                      />
-                    </label>
-                  ) : (
-                    <label className="flex flex-col text-xs">
-                      <span className="mb-1">Value</span>
-                      <input
-                        aria-label="condition value"
-                        value={Array.isArray(c.value) ? c.value.join(", ") : c.value}
-                        onChange={(e) => updateCondition(i, { value: e.target.value })}
-                        className={inputClass}
-                      />
-                    </label>
-                  )}
+                  <label className="flex flex-col text-xs">
+                    <span className="mb-1">{isIn ? "Values (comma separated)" : "Value"}</span>
+                    <input
+                      aria-label={`condition value ${i + 1}`}
+                      value={c.value}
+                      placeholder={isIn ? "Plant A, Plant B" : undefined}
+                      onChange={(e) => updateCondition(i, { value: e.target.value })}
+                      className={inputClass}
+                    />
+                  </label>
                   <button
                     type="button"
                     aria-label={`remove condition ${i + 1}`}
@@ -314,7 +343,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
               <>
                 <p className="font-medium">{preview.count} employees match</p>
                 {preview.members.length > 0 ? (
-                  <p className="text-neutral-500">{preview.members.slice(0, 5).join(", ")}{preview.members.length > 5 ? "…" : ""}</p>
+                  <p className="text-neutral-500">{preview.members.slice(0, PREVIEW_LIMIT).join(", ")}{preview.members.length > PREVIEW_LIMIT ? "…" : ""}</p>
                 ) : null}
               </>
             ) : null}
