@@ -71,20 +71,30 @@ const DATE_PRESETS = [
 function RunStatusIndicator() {
   const { isActive, status, evaluated } = useRunStatus();
   const router = useRouter();
-  if (!isActive) return null;
   return (
-    <button
-      type="button"
-      onClick={() => router.push("/runs")}
-      title="A measure run is in progress — click to view"
-      className="hidden items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:flex dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
-    >
-      <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-      <span>
-        Run {status.toLowerCase()}
-        {evaluated > 0 ? ` · ${evaluated} evaluated` : ""}
+    <>
+      {/* Screen-reader announcement of run start/progress. Always mounted (so transitions are
+          announced); completion is announced separately by the toast. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {isActive
+          ? `Measure run ${status.toLowerCase()}${evaluated > 0 ? `, ${evaluated} evaluated` : ""}`
+          : ""}
       </span>
-    </button>
+      {isActive ? (
+        <button
+          type="button"
+          onClick={() => router.push("/runs")}
+          title="A measure run is in progress — click to view"
+          className="hidden items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:flex dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+          <span>
+            Run {status.toLowerCase()}
+            {evaluated > 0 ? ` · ${evaluated} evaluated` : ""}
+          </span>
+        </button>
+      ) : null}
+    </>
   );
 }
 

@@ -103,17 +103,15 @@ function AstNode({
 
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
+      {/* The expand/collapse toggle and the select-source target are SIBLINGS (not nested) so
+          neither interactive control is a descendant of the other (avoids nested-interactive). */}
       <div
-        onClick={() => onSelect(node)}
-        className={`flex cursor-pointer items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
-        title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
+        className={`flex items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
       >
         {hasChildren ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen((o) => !o);
-            }}
+            type="button"
+            onClick={() => setOpen((o) => !o)}
             className="w-3 shrink-0 text-neutral-500"
             aria-label={open ? "collapse" : "expand"}
           >
@@ -122,14 +120,29 @@ function AstNode({
         ) : (
           <span className="w-3 shrink-0" />
         )}
-        <span className="text-neutral-400">{label}:</span>
-        <span className="font-semibold text-sky-700 dark:text-sky-300">{node.type ?? "?"}</span>
-        {summary ? <span className="text-neutral-500">{summary}</span> : null}
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={`Highlight CQL source for ${node.type ?? "node"}`}
+          onClick={() => onSelect(node)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect(node);
+            }
+          }}
+          className="flex flex-1 cursor-pointer items-baseline gap-2"
+          title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
+        >
+          <span className="text-neutral-400">{label}:</span>
+          <span className="font-semibold text-sky-700 dark:text-sky-300">{node.type ?? "?"}</span>
+          {summary ? <span className="text-neutral-500">{summary}</span> : null}
+        </span>
       </div>
       {open && hasChildren ? (
         <div className="border-l border-neutral-200 dark:border-neutral-800">
-          {childEntries.map((c, i) => (
-            <AstNode key={i} node={c.node} label={c.key} depth={depth + 1} selected={selected} onSelect={onSelect} />
+          {childEntries.map((c) => (
+            <AstNode key={c.key} node={c.node} label={c.key} depth={depth + 1} selected={selected} onSelect={onSelect} />
           ))}
         </div>
       ) : null}
@@ -290,7 +303,7 @@ export function ElmExplorer({
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Diagnostics</p>
           <ul className="space-y-1 text-xs">
             {diagnostics.map((d, i) => (
-              <li key={i}>
+              <li key={`${d.severity}-${d.startLine ?? "?"}-${d.startChar ?? "?"}-${d.message}-${i}`}>
                 <button
                   onClick={() => jumpTo(undefined, d.startLine, d.startChar)}
                   className={`text-left hover:underline ${d.severity.toLowerCase() === "error" ? "text-red-700 dark:text-red-300" : "text-amber-600 dark:text-amber-400"}`}
