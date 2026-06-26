@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-06-26 — E12 PR-1: pluggable data ingress + DB-less JSON-bucket adapter
+
+Opened **E12 — pluggable data adapters** (#184) on `feat/e12-data-adapters`, starting with the
+architectural fork it inherits from **E9 (#78, CQL→SQL bridge)**: how does real WebChart/EHR data reach
+the measure engine? Decision recorded as **ADR-017 — FHIR-native-first**. Adapters adapt their native
+representation into FHIR bundles fed to the **unchanged** `CqlExecutionEngine`; we do **not** transpile
+CQL→SQL to run measures inside MariaDB. Rationale: the engine is already built, golden-parity-proven, and
+JVM-free, so the adapter is the only new surface; a transpiler is research-grade/high-risk; the seam is
+fully reversible (it adds a layer above the engine, touching nothing in it).
+
+- **`engine/ingress/` module (above the engine):** `evaluate-bundle.ts` — a DB-less, `node:fs`-less
+  library entry: `evaluateBundle(bundle, measureId)` (single) + `evaluateBatch(bundles, measureId)` (a
+  "bucket" with per-item error isolation → one bad bundle never aborts the rest → `BatchResult`). A thin
+  shell over the engine, so it stays portable across every `@mieweb/cloud` target (file I/O lives only at
+  the CLI edge).
+- **`PatientDataSource` port:** `jsonBucketDataSource` (default, in-memory) + an inert `webChartDataSource`
+  stub (rejects "not yet wired (E12 PR-2)") + `resolveDataSource(env, jsonInput?)` (config-driven: JSON by
+  default, WebChart only when both `WORKWELL_WEBCHART_BASE_URL` + `WORKWELL_WEBCHART_API_KEY` are set —
+  inert-unless-configured, mirroring `resolveForecaster`/`resolveChannel`/`resolveStandingOrderProvider`) +
+  `evaluateSource` sugar.
+- **CLI refactor:** the headless `pnpm evaluate` CLI now reuses `evaluateBundle` — one evaluation path,
+  behavior-preserving (golden CLI regression stays green).
+
+Built TDD per task. **No schema, no new deps**; the engine is unmodified. Ingress feeds bundles in — it
+never decides compliance (CQL `Outcome Status` stays authoritative; ADR-008/ADR-017). Backend `tsc` + full
+suite green (node:test; 1 self-skipped Pg-ceiling contract). **PR-2 deferred** — the real
+WebChart/MariaDB→FHIR adapter depth. Spec + plan in `docs/superpowers/`.
+
 ## 2026-06-26 — E11.3 PR-2: Configure Groups UI (closes E11)
 
 Built the frontend half of segments on `feat/e11-3-segments-ui` — the **Configure Groups** editor that
