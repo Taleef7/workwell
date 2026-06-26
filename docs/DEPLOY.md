@@ -210,14 +210,53 @@ must be verified manually before deploy; the CI workflow does not validate deplo
 
 The demo stack runs `WORKWELL_EMAIL_PROVIDER=simulated`. Outreach actions never send a real
 email — each attempt is logged and written to `outreach_delivery_log` with `status=SIMULATED`,
-visible in the Admin → Outreach Delivery Log panel. SendGrid wiring (`com.workwell.notification.EmailService`)
-exists for post-demo / non-demo use only and is exercised solely when both
+visible in the Admin → Outreach Delivery Log panel. SendGrid wiring lives in `backend-ts`
+(`resolveEmailService(env)` + `sendgridEmailService` in `backend-ts/src/case/email-service.ts`,
+routed through the EMAIL outreach channel) and is selected solely when both
 `WORKWELL_EMAIL_PROVIDER=sendgrid` and `WORKWELL_EMAIL_SENDGRID_API_KEY` are set; if the
 provider is `sendgrid` but no key is configured it degrades safely back to a simulated send.
-Do not set `WORKWELL_EMAIL_SENDGRID_API_KEY` on the demo stack.
+The SendGrid adapter is currently an **inert stub** (returns a `QUEUED` record, no real HTTP —
+inert-unless-configured, mirroring the DataChaser channel stub, ADR-011); a real SendGrid v3
+send is the documented drop-in behind it. Do not set `WORKWELL_EMAIL_SENDGRID_API_KEY` on the
+demo stack.
 
 The non-prod `POST /api/admin/demo-reset` endpoint (admin-only, `@Profile("!prod")`) truncates
 volatile demo tables including `audit_events`; it returns 403 under the `prod` profile.
+
+### Evidence upload persistence (managed S3/R2 bucket)
+
+Evidence bytes are stored behind the `CloudBucket` port (`@mieweb/cloud`): `EvidenceService`
+(`backend-ts/src/case/evidence-service.ts`) only calls `bucket.put(key, bytes)` / `bucket.get(key)`,
+so **the storage backend is a binding choice — no app code changes to make evidence persistent.**
+
+The live TWH container runs the `local` mieweb target, whose `BUCKET` binding is
+`{"driver":"fs","path":".data/local/evidence"}` (`backend-ts/mieweb.jsonc`) — an **in-container
+filesystem** bucket, so uploaded evidence is **lost on container recreate** (every deploy/heal
+recreates the container). The DB persists (Neon) because it is overridden to Postgres via
+`DATABASE_URL`; the bucket has no equivalent managed backend wired yet.
+
+**To make evidence durable, point `BUCKET` at a managed S3-compatible bucket (AWS S3 or Cloudflare
+R2).** The `mieweb` target in `mieweb.jsonc` already shows the exact `s3` driver shape:
+
+```jsonc
+"BUCKET": {
+  "driver": "s3",
+  "endpoint": "https://<account>.r2.cloudflarestorage.com",   // or an S3 region endpoint
+  "bucket": "workwell-evidence",
+  "accessKeyId":  "<from a GitHub secret>",
+  "secretAccessKey": "<from a GitHub secret>",
+  "forcePathStyle": true,
+  "createIfMissing": true
+}
+```
+
+Steps when a bucket is available: (1) provision an R2/S3 bucket + scoped credentials; (2) add the
+access key/secret as GitHub secrets and map them onto the backend container env in
+`deploy-twh-mieweb.yml` (alongside `DATABASE_URL_TWH`); (3) set the live `BUCKET` binding to the `s3`
+driver above (env-substituted from those secrets). No code change — the `CloudBucket` contract is
+unchanged. **Owner-gated, like schema/DDL — provisioning + the deploy-config edit are Taleef's;**
+this is the documented recipe for when the bucket exists. Until then, treat evidence upload as
+ephemeral (demo-only).
 
 ## Neon (Postgres)
 

@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-06-26 — Tracked QA follow-ups closeout (M1 + H2 + evidence-bucket)
+
+Methodical closeout of three long-tracked follow-ups (no schema, no new deps; one PR).
+
+- **M1 — `nextActionFor` measure-aware label.** The case next-action hint keyed off the measure
+  *display name* and defaulted every unmatched measure to **"audiogram"**, so all 13 non-OSHA measures
+  (TB, immunizations, HbA1c, BMI, CMS eCQMs, …) mislabeled their action. Now keyed by `measureId` across
+  all 14 runnable measures (`NEXT_ACTION_LABELS`) with a generic fallback, and the inaccurate "annual"
+  was dropped from the DUE_SOON phrasing (windows vary — biannual HbA1c, 27-month mammogram, 10-year
+  Td/Tdap, permanent series). A regression-guard test asserts every `MEASURES` entry has a specific label.
+- **H2 — SendGrid inert seam (code↔docs gap).** `DEPLOY.md`/`CLAUDE.md` described SendGrid wiring that
+  did not exist in `backend-ts`. Added `resolveEmailService(env)` + an inert `sendgridEmailService` stub
+  (`QUEUED`, no real HTTP) mirroring the DataChaser pattern (ADR-011): `simulated` by default, the SendGrid
+  stub only when `WORKWELL_EMAIL_PROVIDER=sendgrid` + the api key are set, provider-without-key degrading
+  to simulated. The EMAIL outreach channel now routes through it (DataChaser precedence unchanged). The
+  demo stack stays simulated. Real SendGrid v3 send is the documented drop-in.
+- **Evidence-upload persistence — verified + documented (no code).** Evidence bytes already sit behind the
+  `CloudBucket` port (`EvidenceService` only `put`/`get`s), so persistence is a binding choice, not app
+  code. The live TWH container runs the `local` target whose `BUCKET` is an in-container `fs` driver
+  (ephemeral across recreate). `DEPLOY.md` now carries the turnkey recipe to point `BUCKET` at a managed
+  S3/R2 bucket (the `mieweb` target already shows the `s3` driver shape) — owner-gated like schema/DDL,
+  pending a provisioned bucket + credentials.
+
 ## 2026-06-26 — E12 PR-1: pluggable data ingress + DB-less JSON-bucket adapter
 
 Opened **E12 — pluggable data adapters** (#184) on `feat/e12-data-adapters`, starting with the
