@@ -10,10 +10,11 @@ type Props = {
   onEdit: (s: Segment) => void;
   onDelete: (s: Segment) => void;
   canManage: boolean;
+  loading?: boolean;
 };
 
 /** Presentational table of configured risk-group segments. Parent owns all state + delete confirm. */
-export function SegmentsList({ segments, counts, measureNames, onEdit, onDelete, canManage }: Props) {
+export function SegmentsList({ segments, counts, measureNames, onEdit, onDelete, canManage, loading = false }: Props) {
   return (
     <div className="overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
       <table className="w-full text-left text-sm">
@@ -29,7 +30,7 @@ export function SegmentsList({ segments, counts, measureNames, onEdit, onDelete,
           </tr>
         </thead>
         <tbody>
-          {segments.length === 0 ? (
+          {segments.length === 0 && !loading ? (
             <tr>
               <td colSpan={canManage ? 5 : 4} className="px-4 py-6 text-center text-neutral-500 dark:text-neutral-400">
                 No groups configured.

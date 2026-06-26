@@ -9,21 +9,27 @@ export function useDirectorySearch(query: string) {
   const [results, setResults] = useState<DirectoryEmployee[]>([]);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      return;
-    }
     let cancelled = false;
-    const t = setTimeout(() => {
-      void api
-        .get<DirectoryEmployee[]>(`/api/employees/search?q=${encodeURIComponent(q)}&limit=10`)
-        .then((r) => {
-          if (!cancelled) setResults(r);
-        })
-        .catch(() => {
+    // Defer ALL state updates (including the <2-char reset) out of the synchronous effect body so
+    // we never trip react-hooks/set-state-in-effect (matches useSegments/useEmployeeProfile). The
+    // reset fires on the next tick (0ms); the fetch keeps its 250ms debounce.
+    const t = setTimeout(
+      () => {
+        if (q.length < 2) {
           if (!cancelled) setResults([]);
-        });
-    }, 250);
+          return;
+        }
+        void api
+          .get<DirectoryEmployee[]>(`/api/employees/search?q=${encodeURIComponent(q)}&limit=10`)
+          .then((r) => {
+            if (!cancelled) setResults(r);
+          })
+          .catch(() => {
+            if (!cancelled) setResults([]);
+          });
+      },
+      q.length < 2 ? 0 : 250
+    );
     return () => {
       cancelled = true;
       clearTimeout(t);
