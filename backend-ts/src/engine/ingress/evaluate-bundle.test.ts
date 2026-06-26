@@ -51,3 +51,14 @@ test("evaluateBatch: empty bucket → zero totals", async () => {
   assert.equal(res.failed, 0);
   assert.equal(res.results.length, 0);
 });
+
+test("evaluateBatch: unknown measure fails fast (throws once) — not one failed item per bundle", async () => {
+  // A mistyped measureId is a global caller/config error, not per-bundle data: it must throw up front
+  // (matching the single-bundle path), not degrade into N failed items.
+  await assert.rejects(
+    () => evaluateBatch([load("audiogram", "present_recent"), load("audiogram", "missing")], "nope", { evaluationDate: EVAL }),
+    /unknown measure 'nope'/,
+  );
+  // ...and an empty bucket with a bad measure rejects rather than reporting success.
+  await assert.rejects(() => evaluateBatch([], "nope", { evaluationDate: EVAL }), /unknown measure 'nope'/);
+});

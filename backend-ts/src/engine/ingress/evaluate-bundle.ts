@@ -5,6 +5,7 @@
  * lives only at the CLI edge. The core engine is untouched.
  */
 import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
+import { MEASURES } from "../cql/measure-registry.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../evaluate-measure.ts";
 
 export interface EvaluateBundleOptions {
@@ -50,12 +51,17 @@ export function evaluateBundle(
  * Evaluate a "bucket" of bundles, isolating per-bundle errors: each evaluate is wrapped so one bad
  * bundle (malformed / no Patient / unknown structure) never aborts the rest. Returns one result per
  * input index, in order. All items share one evaluationDate (resolved once for a consistent report).
+ *
+ * An unknown `measureId` is a global caller/config error, NOT per-bundle data — so it throws ONCE,
+ * up front (fail-fast), rather than degrading into one failed item per bundle (and an empty bucket
+ * with a bad measure rightly fails instead of reporting success). This matches the single-bundle path.
  */
 export async function evaluateBatch(
   bundles: unknown[],
   measureId: string,
   opts?: EvaluateBundleOptions,
 ): Promise<BatchResult> {
+  if (!MEASURES[measureId]) throw new Error(`unknown measure '${measureId}'`);
   const evaluationDate = opts?.evaluationDate ?? today();
   const engine = engineOf(opts);
   const results: BatchItemResult[] = [];
