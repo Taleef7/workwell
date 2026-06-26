@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
@@ -89,6 +89,21 @@ export default function StudioMeasurePage() {
 
   const tabs: Tab[] = ["spec", "cql", "rules", "valuesets", "tests", "release", "traceability"];
   const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", rules: "Rule Builder", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
+  const tablistRef = useRef<HTMLDivElement>(null);
+
+  // Roving-tabindex arrow-key navigation across the tab strip (WCAG ARIA tabs pattern).
+  function onTabKeyDown(e: React.KeyboardEvent, index: number) {
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    const nextTab = tabs[next];
+    setTab(nextTab);
+    tablistRef.current?.querySelector<HTMLButtonElement>(`#studio-tab-${nextTab}`)?.focus();
+  }
 
   return (
     <section className="space-y-4">
@@ -139,9 +154,20 @@ export default function StudioMeasurePage() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        {tabs.map((t) => (
-          <button key={t} className={`rounded-md px-3 py-2 text-sm ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`} onClick={() => setTab(t)}>
+      <div ref={tablistRef} role="tablist" aria-label="Measure authoring sections" className="flex gap-2">
+        {tabs.map((t, i) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            id={`studio-tab-${t}`}
+            aria-selected={tab === t}
+            aria-controls={`studio-tabpanel-${t}`}
+            tabIndex={tab === t ? 0 : -1}
+            onKeyDown={(e) => onTabKeyDown(e, i)}
+            className={`rounded-md px-3 py-2 text-sm ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}
+            onClick={() => setTab(t)}
+          >
             {tabLabels[t]}
           </button>
         ))}
@@ -168,6 +194,7 @@ export default function StudioMeasurePage() {
       ) : null}
 
       {measure && tab === "spec" ? (
+        <div role="tabpanel" id="studio-tabpanel-spec" aria-labelledby="studio-tab-spec">
         <SpecTab
           measure={measure}
           measureId={measureId}
@@ -176,9 +203,11 @@ export default function StudioMeasurePage() {
           onSaved={load}
           onError={(msg) => setError(msg || null)}
         />
+        </div>
       ) : null}
 
       {measure && tab === "cql" ? (
+        <div role="tabpanel" id="studio-tabpanel-cql" aria-labelledby="studio-tab-cql">
         <CqlTab
           measure={measure}
           measureId={measureId}
@@ -196,13 +225,17 @@ export default function StudioMeasurePage() {
           liveCompileStatus={liveCompileStatus}
           onCompileStatusChange={setLiveCompileStatus}
         />
+        </div>
       ) : null}
 
       {measure && tab === "rules" ? (
+        <div role="tabpanel" id="studio-tabpanel-rules" aria-labelledby="studio-tab-rules">
         <RuleBuilderTab measure={measure} measureId={measureId} api={api} onSaved={load} onError={(msg) => setError(msg || null)} />
+        </div>
       ) : null}
 
       {measure && tab === "valuesets" ? (
+        <div role="tabpanel" id="studio-tabpanel-valuesets" aria-labelledby="studio-tab-valuesets">
         <ValueSetsTab
           measure={measure}
           measureId={measureId}
@@ -212,9 +245,11 @@ export default function StudioMeasurePage() {
           onValueSetsChanged={loadValueSets}
           onError={(msg) => setError(msg || null)}
         />
+        </div>
       ) : null}
 
       {measure && tab === "tests" ? (
+        <div role="tabpanel" id="studio-tabpanel-tests" aria-labelledby="studio-tab-tests">
         <TestsTab
           measureId={measureId}
           api={api}
@@ -222,9 +257,11 @@ export default function StudioMeasurePage() {
           onSaved={load}
           onError={(msg) => setError(msg || null)}
         />
+        </div>
       ) : null}
 
       {measure && tab === "release" ? (
+        <div role="tabpanel" id="studio-tabpanel-release" aria-labelledby="studio-tab-release">
         <ReleaseApprovalTab
           measure={measure}
           measureId={measureId}
@@ -237,10 +274,13 @@ export default function StudioMeasurePage() {
           onChanged={load}
           onError={(msg) => setError(msg || null)}
         />
+        </div>
       ) : null}
 
       {measureId && tab === "traceability" ? (
+        <div role="tabpanel" id="studio-tabpanel-traceability" aria-labelledby="studio-tab-traceability">
         <TraceabilityTab measureId={measureId} api={api} />
+        </div>
       ) : null}
       </div>
     </section>
