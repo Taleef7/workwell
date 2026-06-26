@@ -5,7 +5,7 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { matchesRule, matchesCohort, applicableMeasures, isApplicable } from "./segment-applicability.ts";
 
 const emp = (over: Partial<EmployeeProfile> = {}): EmployeeProfile => ({
-  externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001", ...over,
+  externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001", tenantId: "twh", ...over,
 });
 
 const seg = (over: Partial<HydratedSegment> = {}): HydratedSegment => ({
