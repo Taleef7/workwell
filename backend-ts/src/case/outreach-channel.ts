@@ -17,7 +17,7 @@ export interface OutreachMessage {
 
 export interface OutreachDeliveryRecord {
   channel: ChannelType;
-  provider: string; // "simulated" | "datachaser"
+  provider: string; // "simulated" | "datachaser" | "sendgrid"
   status: string; // "SIMULATED" | "SENT" | "FAILED" | "QUEUED"
   messageId: string;
   to: string;
