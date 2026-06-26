@@ -37,6 +37,7 @@ export interface ProgramFilters {
   site?: string | null;
   from?: string | null; // inclusive lower bound (day-granular) on run started / case created
   to?: string | null; // inclusive upper bound
+  tenant?: string | null; // scope the population to one tenant/system (E13 PR-1)
 }
 
 export interface ProgramDeps {
@@ -119,10 +120,17 @@ const siteMatcher = (filters: ProgramFilters) => {
   return (subjectId: string) => !site || eq(employeeById(subjectId)?.site ?? null, site);
 };
 
+/** Tenant/system filter (E13 PR-1) — exact tenantId match, resolved read-time from the directory. */
+const tenantMatcher = (filters: ProgramFilters) => {
+  const tenant = filters.tenant?.trim() || null;
+  return (subjectId: string) => !tenant || (employeeById(subjectId)?.tenantId ?? null) === tenant;
+};
+
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;
   const to = filters.to?.trim() || null;
   const siteMatch = siteMatcher(filters);
+  const tenantMatch = tenantMatcher(filters);
   const inPeriod = (iso: string): boolean => (!from || day(iso) >= day(from)) && (!to || day(iso) <= day(to));
 
   // ONE bounded query (measure/date filtering pushed into SQL) instead of fanning out a
@@ -132,7 +140,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
   // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
   const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
-    (r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+    (r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -147,7 +155,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const total = os.length;
     const compliant = n("COMPLIANT");
     const openCaseCount = cases.filter(
-      (c) => c.measureId === m.id && c.status === "OPEN" && siteMatch(c.employeeId) && inPeriod(c.createdAt),
+      (c) => c.measureId === m.id && c.status === "OPEN" && siteMatch(c.employeeId) && tenantMatch(c.employeeId) && inPeriod(c.createdAt),
     ).length;
     return {
       measureId: m.id,
@@ -172,13 +180,14 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
 /** Run groups carrying site-filtered outcomes for one measure (bounded query, no per-run fan-out). */
 async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: ProgramFilters): Promise<RunGroup[]> {
   const siteMatch = siteMatcher(filters);
+  const tenantMatch = tenantMatcher(filters);
   const rows = (
     await deps.outcomeStore.listOutcomesWithRun({
       measureId,
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
     })
-  ).filter((r) => siteMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
+  ).filter((r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
   return groupByRun(rows);
 }
 
