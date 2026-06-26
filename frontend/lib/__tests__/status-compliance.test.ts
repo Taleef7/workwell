@@ -24,4 +24,12 @@ describe("compliance status vocabulary", () => {
     expect(complianceStatusClass("NA")).toContain("dark:");
     expect(complianceStatusClass("in progress")).toBe(complianceStatusClass("IN_PROGRESS"));
   });
+
+  it("NOT_APPLICABLE has a label and a distinct (slate) chip class", () => {
+    expect(COMPLIANCE_STATUS_LABELS.NOT_APPLICABLE).toBe("Not Applicable");
+    const cls = complianceStatusClass("NOT_APPLICABLE");
+    expect(cls).toContain("slate");
+    // distinct from the NA ("no data") neutral grey
+    expect(cls).not.toBe(complianceStatusClass("NA"));
+  });
 });
