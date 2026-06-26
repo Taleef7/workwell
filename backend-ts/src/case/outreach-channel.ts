@@ -4,7 +4,7 @@
  * for the real provider and is selected ONLY when explicitly configured (inert-unless-configured,
  * mirroring the SendGrid pattern); its transport is a documented stub pending API access (Doug Q4).
  */
-import { simulatedEmailService } from "./email-service.ts";
+import { simulatedEmailService, resolveEmailService, type EmailEnv } from "./email-service.ts";
 
 export type ChannelType = "EMAIL" | "SMS" | "PHONE";
 
@@ -30,8 +30,9 @@ export interface OutreachChannel {
   send(msg: OutreachMessage): OutreachDeliveryRecord;
 }
 
-/** Env knobs the channel selector reads (a subset of the worker env). */
-export interface ChannelEnv {
+/** Env knobs the channel selector reads (a subset of the worker env). Includes the email-provider
+ * knobs (EmailEnv) so the EMAIL channel can resolve simulated-vs-SendGrid. */
+export interface ChannelEnv extends EmailEnv {
   WORKWELL_OUTREACH_DATACHASER_API_KEY?: string;
   WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
 }
@@ -46,14 +47,26 @@ const simRecord = (msg: OutreachMessage, prefix: string): OutreachDeliveryRecord
   errorDetail: null,
 });
 
+/** Map an EmailDeliveryRecord onto the channel's OutreachDeliveryRecord shape. */
+const emailToChannelRecord = (rec: ReturnType<typeof simulatedEmailService.send>): OutreachDeliveryRecord => ({
+  channel: "EMAIL", provider: rec.provider, status: rec.status, messageId: rec.messageId, to: rec.toAddress, sentAt: rec.sentAt, errorDetail: rec.errorDetail,
+});
+
 /** EMAIL simulated channel — delegates to the existing simulatedEmailService so email behavior is unchanged. */
 export const simulatedEmailChannel: OutreachChannel = {
   type: "EMAIL",
-  send(msg) {
-    const rec = simulatedEmailService.send(msg.to, msg.subject ?? "", msg.body);
-    return { channel: "EMAIL", provider: rec.provider, status: rec.status, messageId: rec.messageId, to: rec.toAddress, sentAt: rec.sentAt, errorDetail: rec.errorDetail };
-  },
+  send: (msg) => emailToChannelRecord(simulatedEmailService.send(msg.to, msg.subject ?? "", msg.body)),
 };
+
+/**
+ * EMAIL channel over the env-resolved EmailService (H2): simulated by default; the inert SendGrid
+ * stub when WORKWELL_EMAIL_PROVIDER=sendgrid + the api key are set. Lets the EMAIL channel honor the
+ * email-provider env the same way DataChaser is honored — simulated stays the demo default.
+ */
+export function emailChannel(env: EmailEnv): OutreachChannel {
+  const svc = resolveEmailService(env);
+  return { type: "EMAIL", send: (msg) => emailToChannelRecord(svc.send(msg.to, msg.subject ?? "", msg.body)) };
+}
 
 export const simulatedSmsChannel: OutreachChannel = { type: "SMS", send: (msg) => simRecord(msg, "sim-sms") };
 export const simulatedPhoneChannel: OutreachChannel = { type: "PHONE", send: (msg) => simRecord(msg, "sim-phone") };
@@ -87,6 +100,7 @@ export function resolveChannel(type: ChannelType, env: ChannelEnv): OutreachChan
   const apiKey = (env.WORKWELL_OUTREACH_DATACHASER_API_KEY ?? "").trim();
   const baseUrl = (env.WORKWELL_OUTREACH_DATACHASER_BASE_URL ?? "").trim();
   if (apiKey && baseUrl) return dataChaserChannel(type, { apiKey, baseUrl });
+  if (type === "EMAIL") return emailChannel(env); // EMAIL honors the email-provider env (simulated default)
   return SIMULATED[type];
 }
 
