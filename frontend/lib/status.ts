@@ -147,6 +147,7 @@ export const COMPLIANCE_STATUS_LABELS: Record<string, string> = {
   EXCLUDED: "Excluded",
   DECLINED: "Declined",
   IN_PROGRESS: "In Progress",
+  NOT_APPLICABLE: "Not Applicable",
   NA: "N/A"
 };
 
@@ -161,5 +162,6 @@ export function complianceStatusClass(status: string): string {
   if (normalized === "EXCLUDED") return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
   if (normalized === "DECLINED") return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
   if (normalized === "IN_PROGRESS") return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+  if (normalized === "NOT_APPLICABLE") return "bg-slate-100 text-slate-600 dark:bg-slate-800/40 dark:text-slate-400";
   return "bg-neutral-100 text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400"; // NA / unknown
 }
