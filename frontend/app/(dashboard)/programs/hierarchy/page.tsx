@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import type { TenantOption } from "@/features/compliance/types";
 
-const ENTERPRISE_ROOT_ID = "twh";
+// The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
+const ALL_SYSTEMS_ROOT_ID = "all";
 
 type ProgramSummary = {
   measureId: string;
@@ -24,7 +26,7 @@ interface Totals {
 }
 
 interface HierarchyNode {
-  level: "enterprise" | "location" | "provider" | "patient";
+  level: "all" | "tenant" | "enterprise" | "location" | "provider" | "patient";
   id: string;
   name: string;
   parentId: string | null;
@@ -33,6 +35,8 @@ interface HierarchyNode {
 }
 
 const LEVEL_LABELS: Record<HierarchyNode["level"], string> = {
+  all: "All Systems",
+  tenant: "System",
   enterprise: "Enterprise",
   location: "Location",
   provider: "Provider",
@@ -48,7 +52,9 @@ export default function HierarchyPage() {
   const [error, setError] = useState<string | null>(null);
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
   const [measureId, setMeasureId] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set([ENTERPRISE_ROOT_ID]));
+  const [tenant, setTenant] = useState("");
+  const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
+  const [open, setOpen] = useState<Set<string>>(new Set([ALL_SYSTEMS_ROOT_ID]));
 
   // Measure dropdown is sourced the same way /programs sources its measures.
   useEffect(() => {
@@ -66,24 +72,37 @@ export default function HierarchyPage() {
     };
   }, [api]);
 
+  // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the rollup.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<TenantOption[]>("/api/tenants")
+      .then((data) => { if (!cancelled) setTenantOptions(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setTenantOptions([]); });
+    return () => { cancelled = true; };
+  }, [api]);
+
   const loadRollup = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (measureId) params.set("measureId", measureId);
+      if (tenant) params.set("tenant", tenant);
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       const qs = params.toString();
       const data = await api.get<HierarchyNode>(`/api/hierarchy/rollup${qs ? `?${qs}` : ""}`);
       setRoot(data);
+      // Always expand the returned root (it's "all" by default, or the tenant node when filtered).
+      setOpen((s) => new Set(s).add(data.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setRoot(null);
     } finally {
       setLoading(false);
     }
-  }, [api, measureId, from, to]);
+  }, [api, measureId, tenant, from, to]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -137,6 +156,23 @@ export default function HierarchyPage() {
           {measures.map((m) => (
             <option key={m.measureId} value={m.measureId}>
               {m.measureName}
+            </option>
+          ))}
+        </select>
+
+        <label htmlFor="tenant-filter" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+          System
+        </label>
+        <select
+          id="tenant-filter"
+          value={tenant}
+          onChange={(e) => setTenant(e.target.value)}
+          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+        >
+          <option value="">All systems</option>
+          {tenantOptions.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
             </option>
           ))}
         </select>
