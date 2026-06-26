@@ -119,6 +119,10 @@ measure's latest real run so the programs overview is never affected, and add no
 }
 ```
 
+The same DB-less evaluation is also a **library** entry (E12 PR-1, #184) — `evaluateBundle(bundle, measureId)`
+for a single JSON/FHIR object and `evaluateBatch(bundles, measureId)` for a "bucket" of them (per-item error
+isolation), both from `backend-ts/src/engine/ingress`, with no server or DB.
+
 ## Verification commands
 
 ```bash
