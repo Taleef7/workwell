@@ -15,30 +15,36 @@ export function usePreview(rule: SegmentRule, overrides: SegmentOverride[], vali
   const [previewError, setPreviewError] = useState<string | null>(null);
   const key = JSON.stringify({ rule, overrides });
   useEffect(() => {
-    if (!valid) {
-      setPreview(null);
-      return;
-    }
     let cancelled = false;
-    const t = setTimeout(() => {
-      void api
-        .post<{ rule: SegmentRule; overrides: SegmentOverride[] }, PreviewResult>(
-          "/api/segments/preview",
-          { rule, overrides }
-        )
-        .then((r) => {
-          if (!cancelled) {
-            setPreview(r);
-            setPreviewError(null);
-          }
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setPreview(null);
-            setPreviewError(e instanceof Error ? e.message : "preview failed");
-          }
-        });
-    }, 300);
+    // Defer ALL state updates (including the invalid-rule reset) out of the synchronous effect body so
+    // we never trip react-hooks/set-state-in-effect (matches useSegments/useEmployeeProfile). The reset
+    // fires on the next tick (0ms); the dry-run fetch keeps its 300ms debounce.
+    const t = setTimeout(
+      () => {
+        if (!valid) {
+          if (!cancelled) setPreview(null);
+          return;
+        }
+        void api
+          .post<{ rule: SegmentRule; overrides: SegmentOverride[] }, PreviewResult>(
+            "/api/segments/preview",
+            { rule, overrides }
+          )
+          .then((r) => {
+            if (!cancelled) {
+              setPreview(r);
+              setPreviewError(null);
+            }
+          })
+          .catch((e) => {
+            if (!cancelled) {
+              setPreview(null);
+              setPreviewError(e instanceof Error ? e.message : "preview failed");
+            }
+          });
+      },
+      valid ? 300 : 0
+    );
     return () => {
       cancelled = true;
       clearTimeout(t);

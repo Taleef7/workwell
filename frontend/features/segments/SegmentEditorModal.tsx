@@ -105,9 +105,12 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Re-seed local state whenever the modal (re-)opens or the edited segment changes.
+  // Re-seed local form state whenever the modal opens for a different segment. This is the canonical
+  // "reset state when a prop changes" case: the seed must run synchronously on open so the fields are
+  // populated on first paint (deferring would flash stale/empty inputs). Suppress the rule here only.
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setName(initial?.name ?? "");
     setDescription(initial?.description ?? "");
     setEnabled(initial?.enabled ?? true);

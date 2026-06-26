@@ -62,6 +62,9 @@ export function SegmentsAdmin() {
   const recomputeCounts = useCallback(
     (list: Segment[]) => {
       let cancelled = false;
+      // Only keep counts for the segments currently in the list so the map can't grow unbounded as
+      // segments are deleted — each resolution rebuilds a fresh map pruned to the current ids.
+      const liveIds = new Set(list.map((s) => s.id));
       list.forEach((s) => {
         void api
           .post<{ rule: Segment["rule"]; overrides: Segment["overrides"] }, { count: number; members: string[] }>(
@@ -69,7 +72,13 @@ export function SegmentsAdmin() {
             { rule: s.rule, overrides: s.overrides }
           )
           .then((r) => {
-            if (!cancelled) setCounts((prev) => ({ ...prev, [s.id]: r.count }));
+            if (!cancelled)
+              setCounts((prev) => {
+                const next: Record<string, number> = {};
+                for (const id of liveIds) if (id in prev) next[id] = prev[id];
+                next[s.id] = r.count;
+                return next;
+              });
           })
           .catch(() => {
             /* leave the count as "—" on failure */
@@ -133,6 +142,7 @@ export function SegmentsAdmin() {
           onEdit={(s) => setEditing(s)}
           onDelete={(s) => setPendingDelete(s)}
           canManage={canManage}
+          loading={loading}
         />
       </div>
 
