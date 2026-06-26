@@ -782,13 +782,27 @@ export default function RunsPage() {
             </thead>
             <tbody>
               {runs.map((run) => (
+                // The whole-row onClick is a mouse-only convenience (the row stays a real table row
+                // for assistive tech); the first cell carries a real <button> so keyboard + screen-
+                // reader users get an accessible, table-semantics-preserving control.
                 <tr
                   key={run.runId}
-                  className={`cursor-pointer border-t border-neutral-200 dark:border-neutral-800 ${selectedRunId === run.runId ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"}`}
+                  className={`border-t border-neutral-200 dark:border-neutral-800 ${selectedRunId === run.runId ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"}`}
                   onClick={() => setSelectedRunId(run.runId)}
                 >
                   <td className="px-3 py-2 align-top">
-                    <p className="font-medium text-neutral-800 dark:text-neutral-200">{run.measureName}</p>
+                    <button
+                      type="button"
+                      aria-label={`View run details for ${run.measureName}`}
+                      aria-pressed={selectedRunId === run.runId}
+                      onClick={(e) => {
+                        e.stopPropagation(); // the row onClick already handles selection
+                        setSelectedRunId(run.runId);
+                      }}
+                      className="cursor-pointer text-left font-medium text-neutral-800 hover:underline dark:text-neutral-200"
+                    >
+                      {run.measureName}
+                    </button>
                     <p className="text-xs text-neutral-500 dark:text-neutral-400" title={run.runId}>
                       {run.runId.slice(0, 8)}...
                     </p>

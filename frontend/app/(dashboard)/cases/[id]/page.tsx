@@ -985,13 +985,18 @@ export default function CaseDetailPage() {
                     Explain Why Flagged
                   </Button>
                   {explaining ? <div className="mt-3 h-16 animate-pulse rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800" /> : null}
-                  {aiExplanation ? (
-                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
-                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">Plain-language explanation (AI-assisted)</p>
-                      <p>{aiExplanation.explanation}</p>
-                      <p className="mt-2 text-xs text-primary-700 dark:text-primary-400">{aiExplanation.disclaimer}</p>
-                    </div>
-                  ) : null}
+                  {/* Always-mounted live region so the AI explanation is reliably announced when it
+                      arrives (a polite region that appears together with its first content is not
+                      announced by several screen readers). */}
+                  <div role="status" aria-live="polite">
+                    {aiExplanation ? (
+                      <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">Plain-language explanation (AI-assisted)</p>
+                        <p>{aiExplanation.explanation}</p>
+                        <p className="mt-2 text-xs text-primary-700 dark:text-primary-400">{aiExplanation.disclaimer}</p>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 

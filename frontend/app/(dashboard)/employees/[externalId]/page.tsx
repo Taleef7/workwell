@@ -188,7 +188,7 @@ export default function EmployeeProfilePage() {
         )}
         <div className="space-y-3">
           {profile.recentAuditEvents.map((ev, i) => (
-            <div key={i} className="flex gap-3 text-sm">
+            <div key={`${ev.occurredAt}-${ev.eventType}-${ev.actor}-${i}`} className="flex gap-3 text-sm">
               <span className="w-36 shrink-0 text-xs text-neutral-400">
                 {new Date(ev.occurredAt).toLocaleString()}
               </span>
