@@ -150,6 +150,28 @@ test("POST /api/segments/preview applies overrides (EXCLUDE removes a rule match
   assert.ok(!body.members.includes("emp-006"), "EXCLUDE override drops emp-006");
 });
 
+test("POST /api/segments/preview applies overrides (INCLUDE adds a non-rule-matching member)", async () => {
+  // emp-007 (Sana Imtiaz, "Office Staff") does NOT satisfy welderRule (role contains "Welder").
+  const res = await handleSegments(
+    new Request("http://x/api/segments/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rule: welderRule, overrides: [{ externalId: "emp-007", mode: "INCLUDE" }] }) }),
+    env as never, actor,
+  );
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { members: string[] };
+  assert.ok(body.members.includes("emp-007"), "INCLUDE override adds emp-007 despite not matching the rule");
+});
+
+test("POST /api/segments/preview → { count: 0, members: [] } for a rule matching nobody", async () => {
+  const res = await handleSegments(
+    new Request("http://x/api/segments/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rule: { match: "ANY", conditions: [{ attr: "role", op: "equals", value: "Nonexistent Role" }] }, overrides: [] }) }),
+    env as never, actor,
+  );
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { count: number; members: string[] };
+  assert.equal(body.count, 0);
+  assert.deepEqual(body.members, []);
+});
+
 test("POST /api/segments/preview → 400 on a malformed rule (op/value shape)", async () => {
   const res = await handleSegments(
     new Request("http://x/api/segments/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: "Clinic" }] } }) }),

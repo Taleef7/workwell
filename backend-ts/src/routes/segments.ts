@@ -29,6 +29,13 @@ const json = (data: unknown, status = 200): Response =>
 
 const bad = (message: string): Response => json({ error: "invalid_request", message }, 400);
 
+/** Shared membership-preview projection used by BOTH preview surfaces (GET :id/preview + POST /preview)
+ *  so they can't drift: filter the directory through the canonical matchesCohort, return { count, members }. */
+const previewResponse = (seg: HydratedSegment): Response => {
+  const members = EMPLOYEES.filter((e) => matchesCohort(e, seg)).map((e) => e.externalId);
+  return json({ count: members.length, members });
+};
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
@@ -102,28 +109,28 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   const { pathname } = url;
   if (pathname !== "/api/segments" && !pathname.startsWith("/api/segments/")) return null;
 
-  await ensureSegmentSeed(env);
-  const stores = await getStores(env);
-  const store = stores.segments;
-
   // POST /api/segments/preview — dry-run membership for an UNSAVED rule (the editor's live preview).
-  // Reuses the exact matchesCohort + validateRule, so the preview can never drift from real
-  // applicability. ADMIN-gated by the existing POST /api/segments/** rule. Read-only; no audit.
+  // Genuinely stateless: reads only the request body + the in-memory directory, so it runs ABOVE the
+  // seed/store init and never pays for them. Reuses the exact validateRule + matchesCohort (via
+  // previewResponse), so the preview can never drift from real applicability. ADMIN-gated by the
+  // existing POST /api/segments/** rule. Read-only; no audit.
   if (req.method === "POST" && pathname === "/api/segments/preview") {
     const body = (await req.json().catch(() => ({}))) as { rule?: unknown; overrides?: unknown };
     const ruleErr = validateRule(body.rule);
     if (ruleErr) return bad(ruleErr);
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
-    const draft: HydratedSegment = {
+    return previewResponse({
       id: "preview", name: "preview", description: "", enabled: true,
       rule: body.rule as SegmentRule, measureIds: [],
       overrides: (body.overrides ?? []) as SegmentOverride[],
       createdBy: "", createdAt: "", updatedAt: "",
-    };
-    const members = EMPLOYEES.filter((e) => matchesCohort(e, draft)).map((e) => e.externalId);
-    return json({ count: members.length, members });
+    });
   }
+
+  await ensureSegmentSeed(env);
+  const stores = await getStores(env);
+  const store = stores.segments;
 
   // GET /api/segments
   if (req.method === "GET" && pathname === "/api/segments") {
@@ -137,8 +144,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   if (previewId) {
     const seg = await store.getSegment(previewId);
     if (!seg) return json({ error: "not_found", message: `Segment not found: ${previewId}` }, 404);
-    const members = EMPLOYEES.filter((e) => matchesCohort(e, seg)).map((e) => e.externalId);
-    return json({ count: members.length, members });
+    return previewResponse(seg);
   }
 
   // POST /api/segments
