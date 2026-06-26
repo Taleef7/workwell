@@ -216,12 +216,27 @@ if [ "$create_result" -ne 0 ]; then
   exit 1
 fi
 
-final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}")"
-container_status="$(echo "$final_json" | jq -r '.data[0].status // "unknown"')"
-container_url="$(echo "$final_json" | jq -r '.data[0].httpEntries[0].externalUrl // empty')"
+# The create job reporting "success" means the container was provisioned, but it can still be
+# transitioning (pending/offline/starting) for a few seconds before it reports "running". A single
+# eager read therefore races startup and fails an otherwise-good deploy (observed: the container
+# reached "running" on its own moments after the script gave up). Poll until "running" with a
+# bounded timeout instead — mirrors the self-heal reconciler's retrying health check.
+status_attempts=18 # ~3 min at 10s — comfortably longer than a normal cold start
+container_status="unknown"
+container_url=""
+for status_attempt in $(seq 1 "$status_attempts"); do
+  final_json="$(request GET "/sites/${SITE_ID}/containers?hostname=${CONTAINER_HOSTNAME}")"
+  container_status="$(echo "$final_json" | jq -r '.data[0].status // "unknown"')"
+  container_url="$(echo "$final_json" | jq -r '.data[0].httpEntries[0].externalUrl // empty')"
+  echo "Container status attempt ${status_attempt}/${status_attempts}: ${container_status}"
+  if [ "$container_status" = "running" ]; then
+    break
+  fi
+  sleep 10
+done
 echo "Container status: ${container_status}"
 echo "Container URL: ${container_url:-not reported yet}"
 if [ "$container_status" != "running" ]; then
-  echo "::error::Container is '${container_status}', expected running." >&2
+  echo "::error::Container is '${container_status}' after ${status_attempts} status checks (~3 min), expected running." >&2
   exit 1
 fi
