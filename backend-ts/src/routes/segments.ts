@@ -16,7 +16,7 @@ import { matchesCohort } from "../segment/segment-applicability.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import type { SegmentRule, SegmentOverride } from "../stores/segment-store.ts";
+import type { SegmentRule, SegmentOverride, HydratedSegment } from "../stores/segment-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 
 interface SegmentsEnv {
@@ -105,6 +105,25 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   await ensureSegmentSeed(env);
   const stores = await getStores(env);
   const store = stores.segments;
+
+  // POST /api/segments/preview — dry-run membership for an UNSAVED rule (the editor's live preview).
+  // Reuses the exact matchesCohort + validateRule, so the preview can never drift from real
+  // applicability. ADMIN-gated by the existing POST /api/segments/** rule. Read-only; no audit.
+  if (req.method === "POST" && pathname === "/api/segments/preview") {
+    const body = (await req.json().catch(() => ({}))) as { rule?: unknown; overrides?: unknown };
+    const ruleErr = validateRule(body.rule);
+    if (ruleErr) return bad(ruleErr);
+    const overrideErr = validateOverrides(body.overrides);
+    if (overrideErr) return bad(overrideErr);
+    const draft: HydratedSegment = {
+      id: "preview", name: "preview", description: "", enabled: true,
+      rule: body.rule as SegmentRule, measureIds: [],
+      overrides: (body.overrides ?? []) as SegmentOverride[],
+      createdBy: "", createdAt: "", updatedAt: "",
+    };
+    const members = EMPLOYEES.filter((e) => matchesCohort(e, draft)).map((e) => e.externalId);
+    return json({ count: members.length, members });
+  }
 
   // GET /api/segments
   if (req.method === "GET" && pathname === "/api/segments") {
