@@ -5,6 +5,10 @@
  */
 import type { Coverage, OfficialMeasureReference, Population } from "./reference-types.ts";
 
+/**
+ * A deliberate DTO copy of an OfficialCriterion for the fidelity wire contract — decouples the
+ * report's public shape from the reference's internal shape, so the near-duplication is intentional.
+ */
 export interface CriterionFidelity {
   population: Population;
   key: string;
@@ -79,11 +83,15 @@ export function computeFidelity(ref: OfficialMeasureReference): FidelityReport {
   const workwellValueSetCount = new Set(
     ref.workwellValueSetCoverage.filter((w) => w.represented && w.workwellValueSet).map((w) => w.workwellValueSet!),
   ).size;
+  const officialValueSetCount = ref.valueSets.length;
 
+  // The omission example is measure-specific data (omissionSummary), not baked into this generic
+  // function — included as a parenthetical only when present, so the headline stays grammatical without it.
+  const omitClause = ref.omissionSummary ? ` (e.g. ${ref.omissionSummary})` : "";
   const headline =
     `WorkWell's authored ${ref.measureId} covers ${covered} and simplifies ${simplified} of ${criteria.length} ` +
-    `official ${ref.ecqmId} criteria, omitting ${omitted} (e.g. age/visit gating + denominator exclusions); ` +
-    `it references ${workwellValueSetCount} local value sets vs ${ref.valueSets.length} official VSAC value sets.`;
+    `official ${ref.ecqmId} criteria, omitting ${omitted}${omitClause}; ` +
+    `it references ${workwellValueSetCount} local value sets vs ${officialValueSetCount} official VSAC value sets.`;
 
   return {
     measureId: ref.measureId,
@@ -94,7 +102,7 @@ export function computeFidelity(ref: OfficialMeasureReference): FidelityReport {
     provenance: ref.provenance,
     criteria,
     valueSets,
-    summary: { covered, simplified, omitted, officialValueSetCount: ref.valueSets.length, workwellValueSetCount, headline },
+    summary: { covered, simplified, omitted, officialValueSetCount, workwellValueSetCount, headline },
     disclaimer: DISCLAIMER,
   };
 }
