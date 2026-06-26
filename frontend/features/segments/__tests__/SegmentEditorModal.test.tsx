@@ -36,6 +36,16 @@ describe("SegmentEditorModal", () => {
     expect(screen.getByText(/3 employees match/i)).toBeInTheDocument();
   });
 
+  it("previews membership from the rule alone — before any measure is selected", async () => {
+    render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={vi.fn()} />);
+    // No name, no measure — just a complete condition.
+    await userEvent.click(screen.getByRole("button", { name: /add condition/i }));
+    await userEvent.type(screen.getByLabelText(/condition value/i), "Welder");
+    expect(screen.getByText(/3 employees match/i)).toBeInTheDocument();
+    // Save is still gated on the full canSave (name + measure missing).
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+  });
+
   it("handles the in-operator: a comma-separated value posts a trimmed string[] in the draft", async () => {
     const onSave = vi.fn().mockResolvedValue({ id: "s2" });
     render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={onSave} />);
