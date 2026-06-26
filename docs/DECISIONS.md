@@ -1,5 +1,44 @@
 # Architecture Decision Records
 
+## ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)
+
+Date: 2026-06-26
+Status: Accepted
+
+**Decision.** E14 (standards fidelity) makes the **officially published** eCQM definition the reference and
+ships a **documented structural fidelity diff** of WorkWell's authored (simplified) measure against it —
+**not** an execution of the official CQL. PR-1 delivers a sourced, versioned `OfficialMeasureReference`
+(CMS122v14 first), a pure `computeFidelity(ref)` assembler → a `FidelityReport` (per-criterion
+COVERED/SIMPLIFIED/OMITTED + value-set coverage + reconciling counts + a disclaimer), and a read-only
+`GET /api/measures/:id/fidelity`. A new `backend-ts/src/standards/` module — pure data + pure functions, no
+DB, no `node:fs`, no engine call.
+
+**Why structural-first.** The issue (#186) says *"scope the build conservatively."* Executing the official
+CMS122v14 CQL for an evaluated-outcome diff is research-grade: QDM→FHIR translation, expansion of ~20 VSAC
+value sets, the shared exclusion libraries (Hospice / AdvancedIllnessAndFrailty / PalliativeCare /
+SupplementalDataElements / QICoreCommon), and QI-Core patient bundles carrying encounter/hospice/frailty/
+palliative resources. PR-1 instead documents exactly where the authored measure **diverges in definition**
+from the official spec — honest, sourced (every claim cites the official eCQI/QPP provenance URLs), and
+already useful, since WorkWell evaluates its own measure today. **Official-CQL execution + outcome diff is
+PR-2**, deferred behind the existing E3.2 (#90) `ValueSetResolver` seam (frozen QPP code lists as a no-VSAC
+expansion source).
+
+**Coverage is curated, not fully auto-derived (honest).** Value-set coverage is derived (does WorkWell
+reference a value set for each official concept?); criterion coverage uses a small **curated, sourced**
+coverage map in the reference, because semantic equivalence ("WorkWell's one generic `Has Exclusion` ≈ which
+official exclusions?") cannot be reliably auto-derived from CQL text. The report's `disclaimer` states this;
+PR-2's execution diff is the objective complement.
+
+**Jurisdiction.** Country/jurisdiction is modeled as **measure metadata** — `jurisdiction?: string` on the
+registry `MeasureMeta` (default `"US"`), surfaced on the measure-detail read model. The per-country rule
+sets, a `RegulatorySource` registry, non-US references, and a "latest regulatory updates by country" watcher
+are **design-first/aspirational** (`docs/standards/country-aware-regulatory-sourcing.md`), not built in PR-1.
+
+**Consequences.** The fidelity report is **descriptive only** — it never sets or overrides an outcome; CQL
+`Outcome Status` remains the sole compliance authority (ADR-008). **No schema, no new dependencies.** The
+engine is unmodified. PR-2 adds the official-CQL execution path behind the `ValueSetResolver` seam; non-US
+regulatory sourcing and the version watcher are later work.
+
 ## ADR-017: E12 data ingress is FHIR-native-first; adapters feed the unchanged engine (no CQL→SQL transpile) — E12 (#184)
 
 Date: 2026-06-26
