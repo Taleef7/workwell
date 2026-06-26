@@ -784,8 +784,17 @@ export default function RunsPage() {
               {runs.map((run) => (
                 <tr
                   key={run.runId}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`View run details for ${run.measureName}`}
                   className={`cursor-pointer border-t border-neutral-200 dark:border-neutral-800 ${selectedRunId === run.runId ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"}`}
                   onClick={() => setSelectedRunId(run.runId)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedRunId(run.runId);
+                    }
+                  }}
                 >
                   <td className="px-3 py-2 align-top">
                     <p className="font-medium text-neutral-800 dark:text-neutral-200">{run.measureName}</p>

@@ -104,7 +104,18 @@ function AstNode({
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Highlight CQL source for ${node.type ?? "node"}`}
         onClick={() => onSelect(node)}
+        onKeyDown={(e) => {
+          // Only act when the event originates on this row itself, so key presses
+          // on the nested expand/collapse button don't also fire a select.
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onSelect(node);
+          }
+        }}
         className={`flex cursor-pointer items-baseline gap-2 rounded px-1 py-0.5 font-mono text-xs ${isSel ? "bg-amber-300/70 dark:bg-amber-500/40" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
         title={node.locator ? `locator ${node.locator} — click to highlight source` : undefined}
       >
@@ -128,8 +139,8 @@ function AstNode({
       </div>
       {open && hasChildren ? (
         <div className="border-l border-neutral-200 dark:border-neutral-800">
-          {childEntries.map((c, i) => (
-            <AstNode key={i} node={c.node} label={c.key} depth={depth + 1} selected={selected} onSelect={onSelect} />
+          {childEntries.map((c) => (
+            <AstNode key={c.key} node={c.node} label={c.key} depth={depth + 1} selected={selected} onSelect={onSelect} />
           ))}
         </div>
       ) : null}
@@ -290,7 +301,7 @@ export function ElmExplorer({
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Diagnostics</p>
           <ul className="space-y-1 text-xs">
             {diagnostics.map((d, i) => (
-              <li key={i}>
+              <li key={`${d.severity}-${d.startLine ?? "?"}-${d.startChar ?? "?"}-${d.message}-${i}`}>
                 <button
                   onClick={() => jumpTo(undefined, d.startLine, d.startChar)}
                   className={`text-left hover:underline ${d.severity.toLowerCase() === "error" ? "text-red-700 dark:text-red-300" : "text-amber-600 dark:text-amber-400"}`}
