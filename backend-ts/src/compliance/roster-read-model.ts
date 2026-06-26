@@ -6,7 +6,7 @@
  * `latestRunRows`) and loads evidence per run via `listOutcomes` (cached by run id).
  */
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
-import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, employeeById, tenantById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -25,7 +25,7 @@ export interface RosterCell extends Cell {
   evidenceRef?: { runId: string; outcomeId: string };
 }
 export interface RosterRow {
-  subject: { externalId: string; name: string; role: string; site: string };
+  subject: { externalId: string; name: string; role: string; site: string; tenantId: string; tenantName: string };
   cells: Record<string, RosterCell>;
 }
 export interface Roster {
@@ -48,6 +48,8 @@ export interface RosterFilters {
   q?: string | null;
   /** Scope rows to a segment's cohort + columns to its rule-set (E11.3). */
   segment?: string | null;
+  /** Scope rows to one tenant/system (E13 PR-1). */
+  tenant?: string | null;
   page?: number;
   pageSize?: number;
 }
@@ -120,7 +122,13 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
       }
       cells[m] = cellByMeasureSubject.get(m)?.get(emp.externalId) ?? { status: "NA", method: "Not evaluated" };
     }
-    return { subject: { externalId: emp.externalId, name: emp.name, role: emp.role, site: emp.site }, cells };
+    return {
+      subject: {
+        externalId: emp.externalId, name: emp.name, role: emp.role, site: emp.site,
+        tenantId: emp.tenantId, tenantName: tenantById(emp.tenantId)?.name ?? emp.tenantId,
+      },
+      cells,
+    };
   });
 
   // 3b) segment filter: scope rows to the active segment's cohort (before site/role/search/status + paging).
@@ -131,7 +139,8 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     });
   }
 
-  // 4) filters (site/role/search/status), then page.
+  // 4) filters (tenant/site/role/search/status), then page.
+  if (filters.tenant) rows = rows.filter((r) => r.subject.tenantId === filters.tenant);
   if (filters.site) rows = rows.filter((r) => r.subject.site === filters.site);
   if (filters.role) rows = rows.filter((r) => r.subject.role === filters.role);
   if (filters.q) {
