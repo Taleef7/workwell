@@ -317,6 +317,11 @@ Each outcome evidence payload includes:
   evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
   `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`
   asserts outcomes for all 11 measures × 4 scenarios (#72 / E2, updated for E6).
+  - **E12 PR-1 (#184):** the same DB-less evaluation is also a **library** entry —
+    `evaluateBundle(bundle, measureId)` (single JSON/FHIR object) + `evaluateBatch(bundles, measureId)`
+    (a "bucket", per-item error isolation), from `backend-ts/src/engine/ingress`. A `PatientDataSource`
+    port + `resolveDataSource(env)` make the ingress pluggable (JSON default; WebChart adapter is an
+    inert stub until E12 PR-2). FHIR-native-first — adapters feed the unchanged engine (ADR-017).
 - **Immunization forecasting (E6 / #76):** `GET /api/immunization/forecast?subjectId=&asOf=` returns an
   advisory `ImmunizationForecast` (Td/Tdap, Influenza, Hepatitis B next-dose-due) computed by the
   `ImmunizationForecast` port (`backend-ts/src/engine/immunization/immunization-forecast.ts`). The
