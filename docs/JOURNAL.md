@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-06-26 — WCAG accessibility pass (frontend)
+
+Closed the last tracked QA follow-up — the fuller accessibility pass beyond table/label basics. A
+verify-first sweep confirmed the frontend was **already substantially accessible** (all 91 hand-written
+`<th>` already carry `scope="col"`; form inputs/icon-buttons/status-badges already labeled via
+`@mieweb/ui` + prior passes), so the genuine gaps were focused:
+
+- **Keyboard-accessible activation** — `/runs` rows and the ELM Explorer AST nodes were mouse-only
+  `onClick`s. Runs rows keep their whole-row mouse `onClick` (a real `<tr>`, table semantics intact) and
+  the first cell now carries a real keyboard/SR `<button>` (`aria-pressed`); the ELM Explorer select
+  target moved onto a label span so it's a **sibling** of the expand/collapse toggle (no nested
+  interactive controls), both Enter/Space operable.
+- **Studio authoring tabs → ARIA tab pattern** — `role="tablist"/"tab"/"tabpanel"`,
+  `aria-selected`/`aria-controls`/`aria-labelledby`, roving `tabIndex`, and ArrowLeft/Right + Home/End
+  keyboard navigation (mirrors the `/admin` tabs).
+- **`aria-live` announcements** — an always-mounted `sr-only role="status"` region mirrors the global
+  run-status text (start/progress announced to screen readers, completion already covered by the toast),
+  and the case-detail "Explain Why Flagged" AI result is an always-mounted live region so it's announced
+  on arrival.
+- **Stable list keys** — index keys → content/id composites where lists can reorder.
+
+No visual redesign, no new deps. Frontend `npm run lint` clean, **99 vitest pass**, build green.
+Two whole-branch-review items folded in (the `<tr>` row-semantics fix + the always-mounted AI live
+region). **Accessible alternatives for the Recharts charts** (a hidden data-table/summary per chart) are
+the one genuinely larger, partly-subjective item — split out as a follow-up rather than ballooning this PR.
+
 ## 2026-06-26 — E12 PR-1: pluggable data ingress + DB-less JSON-bucket adapter
 
 Opened **E12 — pluggable data adapters** (#184) on `feat/e12-data-adapters`, starting with the
