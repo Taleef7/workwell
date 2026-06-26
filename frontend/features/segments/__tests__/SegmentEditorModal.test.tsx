@@ -35,4 +35,19 @@ describe("SegmentEditorModal", () => {
     render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={vi.fn()} />);
     expect(screen.getByText(/3 employees match/i)).toBeInTheDocument();
   });
+
+  it("handles the in-operator: a comma-separated value posts a trimmed string[] in the draft", async () => {
+    const onSave = vi.fn().mockResolvedValue({ id: "s2" });
+    render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={onSave} />);
+    await userEvent.type(screen.getByLabelText(/group name/i), "Plants");
+    await userEvent.click(screen.getByRole("button", { name: /add condition/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/condition 1 operator/i), "in");
+    await userEvent.type(screen.getByLabelText(/condition value/i), "Plant A, Plant B");
+    await userEvent.click(screen.getByLabelText(/measure audiogram/i));
+    const save = screen.getByRole("button", { name: /save/i });
+    await waitFor(() => expect(save).toBeEnabled());
+    await userEvent.click(save);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0].rule.conditions[0]).toMatchObject({ op: "in", value: ["Plant A", "Plant B"] });
+  });
 });
