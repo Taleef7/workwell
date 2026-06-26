@@ -364,6 +364,15 @@ If any approaches limit, fix that day. Don't wait.
 - Confirm the API base resolves to `<manager-origin>/api/v1` (the origin serves the SPA; `/api` serves Swagger)
 - Responses are `{"data": ...}` enveloped; the create body uses `template` + `services[]`; job polling reads `.data.status` (`"success"`)
 
+**Deploy fails with `Container is 'offline', expected running`**
+- This is a **startup race**, not a crash: the create job reports `success` once the container is
+  provisioned, but it can still be `offline`/`pending` for a few seconds before it reports `running`.
+  `deploy-mieweb-container.sh` now **polls** the container status up to ~3 min (18× / 10s) instead of a
+  single eager read, so a brief startup window no longer fails an otherwise-good deploy.
+- If it still fails after the full poll window, the container genuinely failed to start — check the
+  image tag, the container env vars, and (for the backend) `DATABASE_URL`/auth secrets; the self-heal
+  reconciler will also retry from `:latest` within ~15 min.
+
 ---
 
 ## Appendix A — Decommissioned Vercel + Fly.io stack (historical reference)
