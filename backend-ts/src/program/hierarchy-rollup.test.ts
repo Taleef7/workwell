@@ -18,6 +18,12 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { buildHierarchyRollup, type HierarchyNode } from "./hierarchy-rollup.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 
+/** Drill from the All-Systems root to the twh tenant's enterprise node (locations live under it). */
+function twhEnterprise(root: HierarchyNode): HierarchyNode {
+  const twh = root.children.find((c) => c.id === "twh")!;
+  return twh.children.find((c) => c.level === "enterprise")!;
+}
+
 const dbPath = join(tmpdir(), `workwell-hier-${crypto.randomUUID()}.sqlite`);
 let outcomes: SqliteOutcomeStore;
 let cases: SqliteCaseStore;
@@ -55,20 +61,26 @@ before(async () => {
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
-test("rollup reconciles at every level and the root totals the population", async () => {
+test("rollup reconciles at every level and the All-Systems root totals the population", async () => {
   const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram" });
-  assert.equal(root.level, "enterprise");
+  assert.equal(root.level, "all");
+  assert.equal(root.id, "all");
   assert.equal(root.totals.evaluated, 3);
   assert.equal(root.totals.compliant, 2);
   assert.equal(root.totals.overdue, 1);
   assert.equal(root.totals.openCases, 1);
   assert.equal(root.totals.complianceRate, 66.7);
+  // only twh subjects were seeded → exactly one tenant child, all tenant nodes
+  assert.ok(root.children.every((c) => c.level === "tenant"));
+  const twh = root.children.find((c) => c.id === "twh")!;
+  assert.equal(twh.level, "tenant");
+  assert.equal(twh.children[0]!.level, "enterprise");
   assertReconciles(root);
 });
 
-test("levels are enterprise→location→provider→patient and a patient maps to its provider's location", async () => {
+test("levels are all→tenant→enterprise→location→provider→patient and a patient maps to its provider's location", async () => {
   const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram" });
-  const plantA = root.children.find((c) => c.id === "Plant A")!;
+  const plantA = twhEnterprise(root).children.find((c) => c.id === "Plant A")!;
   assert.equal(plantA.level, "location");
   assert.equal(plantA.totals.evaluated, 2);
   const provider = plantA.children[0]!;
@@ -78,9 +90,9 @@ test("levels are enterprise→location→provider→patient and a patient maps t
   assert.ok(["emp-006", "emp-010"].includes(patient.id));
 });
 
-test("empty scope (unknown measure) → enterprise node with zeros and no children", async () => {
+test("empty scope (unknown measure) → All-Systems node with zeros and no children", async () => {
   const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "does-not-exist" });
-  assert.equal(root.level, "enterprise");
+  assert.equal(root.level, "all");
   assert.equal(root.totals.evaluated, 0);
   assert.equal(root.totals.complianceRate, 0);
   assert.equal(root.children.length, 0);
@@ -90,6 +102,32 @@ test("omitting measureId aggregates across all Active measures (no crash, reconc
   const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, {});
   assert.ok(root.totals.evaluated >= 3);
   assertReconciles(root);
+});
+
+test("default root is the All-Systems aggregate over tenants, reconciling at every level", async () => {
+  const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram" });
+  assert.equal(root.level, "all");
+  assert.ok(root.children.every((c) => c.level === "tenant"));
+  assertReconciles(root);
+});
+
+test("?tenant=twh returns the twh tenant subtree as root, totals = its slice of the unfiltered tree", async () => {
+  const all = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram" });
+  const sub = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram", tenant: "twh" });
+  assert.equal(sub.level, "tenant");
+  assert.equal(sub.id, "twh");
+  const twhInAll = all.children.find((c) => c.id === "twh")!;
+  assert.equal(sub.totals.evaluated, twhInAll.totals.evaluated);
+  assert.equal(sub.totals.compliant, twhInAll.totals.compliant);
+  assertReconciles(sub);
+});
+
+test("?tenant=ihn (no seeded ihn outcomes) → empty tenant root with zeros", async () => {
+  const sub = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "audiogram", tenant: "ihn" });
+  assert.equal(sub.level, "tenant");
+  assert.equal(sub.id, "ihn");
+  assert.equal(sub.totals.evaluated, 0);
+  assert.equal(sub.children.length, 0);
 });
 
 // ---- deeper coverage (#74 E4 review): multi-child accumulation + open-case-only leaf ----
@@ -138,7 +176,7 @@ test("multi-child accumulation: a Plant A location totals 2 providers × 2 diffe
     await o.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "audiogram", status: "MISSING_DATA", evidence: {} });
 
     const root = await buildHierarchyRollup({ outcomeStore: o, caseStore: c }, { measureId: "audiogram" });
-    const plantA = root.children.find((n) => n.id === "Plant A")!;
+    const plantA = twhEnterprise(root).children.find((n) => n.id === "Plant A")!;
     assert.equal(plantA.level, "location");
     // Parent total is the SUM of two non-equal children, not a trivial single-child pass-through.
     assert.equal(plantA.totals.evaluated, 4);
@@ -181,7 +219,7 @@ test("open-case-only subject (no outcome row in scope) is a leaf with evaluated:
     const root = await buildHierarchyRollup({ outcomeStore: o, caseStore: c }, { measureId: "audiogram" });
 
     // The open-case-only subject still appears as a patient leaf.
-    const plantA = root.children.find((n) => n.id === "Plant A")!;
+    const plantA = twhEnterprise(root).children.find((n) => n.id === "Plant A")!;
     const prov1 = plantA.children.find((n) => n.id === "prov-001")!;
     const emp009 = prov1.children.find((n) => n.id === "emp-009")!;
     assert.ok(emp009, "emp-009 patient leaf exists");
