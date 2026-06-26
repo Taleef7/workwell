@@ -28,7 +28,7 @@ import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
 import { rerunToVerify, type RerunDeps } from "../case/case-rerun.ts";
-import { isChannelType } from "../case/outreach-channel.ts";
+import { resolveChannel, isChannelType, type ChannelType, type OutreachChannel } from "../case/outreach-channel.ts";
 import {
   uploadEvidence,
   listEvidence,
@@ -48,6 +48,11 @@ interface CasesEnv {
   BUCKET: CloudBucket;
   WORKWELL_IMMZ_ICE_API_KEY?: string;
   WORKWELL_IMMZ_ICE_BASE_URL?: string;
+  // Outreach channel/email-provider knobs read by resolveChannel (simulated by default).
+  WORKWELL_EMAIL_PROVIDER?: string;
+  WORKWELL_EMAIL_SENDGRID_API_KEY?: string;
+  WORKWELL_OUTREACH_DATACHASER_API_KEY?: string;
+  WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
 }
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
@@ -58,9 +63,11 @@ async function caseStore(env: CasesEnv): Promise<CaseStore> {
 async function outcomeStore(env: CasesEnv): Promise<OutcomeStore> {
   return (await getStores(env)).outcomes;
 }
-async function actionDeps(env: CasesEnv): Promise<CaseActionDeps> {
+async function actionDeps(env: CasesEnv): Promise<CaseActionDeps & { channels: (type: ChannelType) => OutreachChannel }> {
   const s = await getStores(env);
-  return { cases: s.cases, events: s.events, outcomes: s.outcomes };
+  // Thread the real worker env so single-case outreach honors the EMAIL provider (simulated default;
+  // inert SendGrid stub when configured) and DataChaser — the same selection campaigns already use (H2).
+  return { cases: s.cases, events: s.events, outcomes: s.outcomes, channels: (t) => resolveChannel(t, env) };
 }
 async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
   const s = await getStores(env);
