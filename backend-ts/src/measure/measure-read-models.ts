@@ -6,6 +6,7 @@
  */
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
+import { MEASURES } from "../engine/cql/measure-registry.ts";
 
 export interface Measure {
   id: string;
@@ -86,6 +87,7 @@ export interface MeasureDetail {
   testFixtures: unknown[];
   rule?: MeasureSpec["rule"];
   ruleBindings?: MeasureSpec["ruleBindings"];
+  jurisdiction: string;
 }
 
 export interface VersionHistoryItem {
@@ -122,6 +124,7 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     testFixtures: r.spec.testFixtures ?? [],
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
+    jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
   };
 }
 
