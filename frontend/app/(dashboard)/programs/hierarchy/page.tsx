@@ -7,7 +7,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import type { TenantOption } from "@/features/compliance/types";
 
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
-const ALL_SYSTEMS_ROOT_ID = "all";
+const ALL_SYSTEMS_ROOT_KEY = "all:all";
 
 type ProgramSummary = {
   measureId: string;
@@ -43,6 +43,10 @@ const LEVEL_LABELS: Record<HierarchyNode["level"], string> = {
   patient: "Patient",
 };
 
+// Expand/collapse state is keyed by level+id: tenant and enterprise nodes share the same id
+// (e.g. "twh"), so keying on id alone would link their carets (E13 PR-1).
+const nodeKey = (n: Pick<HierarchyNode, "level" | "id">): string => `${n.level}:${n.id}`;
+
 export default function HierarchyPage() {
   const api = useApi();
   const { from, to } = useGlobalFilters();
@@ -54,7 +58,7 @@ export default function HierarchyPage() {
   const [measureId, setMeasureId] = useState("");
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
-  const [open, setOpen] = useState<Set<string>>(new Set([ALL_SYSTEMS_ROOT_ID]));
+  const [open, setOpen] = useState<Set<string>>(new Set([ALL_SYSTEMS_ROOT_KEY]));
 
   // Measure dropdown is sourced the same way /programs sources its measures.
   useEffect(() => {
@@ -95,7 +99,7 @@ export default function HierarchyPage() {
       const data = await api.get<HierarchyNode>(`/api/hierarchy/rollup${qs ? `?${qs}` : ""}`);
       setRoot(data);
       // Always expand the returned root (it's "all" by default, or the tenant node when filtered).
-      setOpen((s) => new Set(s).add(data.id));
+      setOpen((s) => new Set(s).add(nodeKey(data)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setRoot(null);
@@ -122,7 +126,7 @@ export default function HierarchyPage() {
   const rows: Array<{ node: HierarchyNode; depth: number }> = [];
   const walk = (node: HierarchyNode, depth: number) => {
     rows.push({ node, depth });
-    if (open.has(node.id)) {
+    if (open.has(nodeKey(node))) {
       node.children.forEach((child) => walk(child, depth + 1));
     }
   };
@@ -209,10 +213,11 @@ export default function HierarchyPage() {
             <tbody>
               {rows.map(({ node, depth }) => {
                 const hasChildren = node.children.length > 0;
-                const isOpen = open.has(node.id);
+                const key = nodeKey(node);
+                const isOpen = open.has(key);
                 return (
                   <tr
-                    key={`${node.level}:${node.id}`}
+                    key={key}
                     className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50"
                   >
                     <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">
@@ -220,7 +225,7 @@ export default function HierarchyPage() {
                         {hasChildren ? (
                           <button
                             type="button"
-                            onClick={() => toggle(node.id)}
+                            onClick={() => toggle(key)}
                             aria-expanded={isOpen}
                             aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
                             className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
