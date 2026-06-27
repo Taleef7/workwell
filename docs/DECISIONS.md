@@ -1,5 +1,39 @@
 # Architecture Decision Records
 
+## ADR-020: Population scale via generated outcomes + encoded `subject_id` + SQL aggregation (provider-leaf) — E13 PR-2 (#185)
+
+Date: 2026-06-26
+Status: Accepted
+
+**Decision.** E13 PR-2 proves the multi-tenant rollup scales to a ~120k-subject tenant (`mhn` /
+"MetroHealth Network") on the live stack. Because live-evaluating 120k×14 ≈ **1.68M CQL evaluations per
+run** is infeasible (and storing/serving millions of rows in app memory worse), the scale tenant's
+compliance is **generated, not live-evaluated**, seeded **once on-demand** (`pnpm seed:scale`, modeled
+on `seed:trend-history` — NOT on deploy), and **aggregated in SQL**:
+- The 120k subjects are **not** in the in-memory directory. They exist only as `outcomes` rows whose
+  `subject_id` **encodes the hierarchy** — `mhn|Lxx|Pxx|nnnnnnn` (`scale-structure.ts` is the codec +
+  the small ~240-provider structure that names the rollup nodes).
+- A new `OutcomeStore.aggregateScaleRun(runId)` does a single `GROUP BY` (Postgres `split_part`, SQLite
+  `substr` over the fixed-width id) → O(locations×providers×statuses) rows (~1.2k), **never** the
+  per-subject rows. This is the one path that must scale.
+- The hierarchy rollup + programs overview **exclude `seed:scale` runs from the existing in-memory
+  scan** (`runTriggeredBy !== 'seed:scale'`) so the live 150-employee tenants keep their exact
+  directory-resolved path and the 120k rows are never materialized in app memory; the scale tenant is
+  built/folded in from `aggregateScaleRun`. `?tenant=mhn` returns the scale subtree only.
+
+**Provider-leaf.** The scale subtree stops at **provider** (no patient level) — enumerating 120k
+patient nodes would defeat the purpose. Reconciliation (parent = Σ children) holds for the levels that
+exist: All = Σ tenants; `mhn` = Σ locations = Σ providers. The roster (`/compliance`) is **excluded**
+(no paging through 120k individuals).
+
+**Consequences.** **No DDL** (encoded `subject_id` + `GROUP BY` over existing columns), **no new deps**.
+The default demo stays 150 live employees until the owner runs `seed:scale`; **reversible** by deleting
+the `seed:scale` runs+outcomes (documented SQL). Every scale-seed write is audited
+(`SCALE_POPULATION_SEEDED`). CQL `Outcome Status` stays the sole compliance authority for the
+live-evaluated subjects (ADR-008) — the scale tenant is generated demo data and never sets a live
+subject's status. **Deferred:** the scale tenant in the roster / per-patient drill-down /
+trend·top-drivers; live CQL evaluation of the scale tenant; PR-3 scheduled cron recompute.
+
 ## ADR-019: Multi-tenant rollup modeled in the read-time synthetic directory; cross-system aggregate root — E13 PR-1 (#185)
 
 Date: 2026-06-26

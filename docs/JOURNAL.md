@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-06-26 — E13 PR-2: population-scale tenant (120k) in the rollup
+
+Second E13 slice — proving the multi-tenant rollup scales to a ~120k-subject tenant on the live stack
+(Doug: *"120,000 people, up from 800"*). Spec + plan:
+`docs/superpowers/specs/2026-06-26-e13-population-scale-design.md`,
+`docs/superpowers/plans/2026-06-26-e13-population-scale.md`. ADR-020.
+
+**The infeasibility that shaped it.** Live-evaluating 120k×14 ≈ **1.68M CQL evals per run** is
+impractical (hours) and storing/serving millions of rows in app memory worse. So the scale tenant
+(`mhn` / "MetroHealth Network") is **generated, not live-evaluated**, seeded once on-demand, and
+**aggregated in SQL**:
+- `engine/synthetic/scale-structure.ts` — the `mhn` tenant's small structure (24 locations × 10
+  providers = 240) + a `subject_id` codec (`mhn|L07|P03|0000123`). The 120k subjects live **only** as
+  outcome rows; they're not in the in-memory directory.
+- `pnpm seed:scale [--subjects 120000]` (`run/backfill-scale.ts` + CLI) — owner-run, **not** on deploy;
+  writes one COMPLETED run per runnable measure with generated, subject_id-encoded outcomes (minimal
+  evidence), audited (`SCALE_POPULATION_SEEDED`), idempotent, reversible.
+- `OutcomeStore.aggregateScaleRun(runId)` — a single `GROUP BY` (Postgres `split_part`; SQLite `substr`
+  over the fixed-width id) → ~1.2k grouped rows, **never** the 120k per-subject rows.
+- The hierarchy rollup + programs overview **exclude `seed:scale` runs from the in-memory scan** (the
+  live 150-employee tenants keep their exact path) and build/fold the scale tenant from
+  `aggregateScaleRun` (`program/scale-rollup.ts`; **provider-leaf** — no 120k patient nodes).
+  `?tenant=mhn` isolates the scale subtree/KPIs.
+
+**Bounded memory** is the headline guarantee — a test asserts the aggregation row-count is independent
+of N (equal at 2k and 20k subjects). The roster (`/compliance`) is out of scope (no paging 120k
+individuals); cron recompute is PR-3.
+
+**Guarantees.** No DDL (encoded `subject_id` + `GROUP BY`), no new deps; reversible; CQL stays
+authoritative for the live-evaluated subjects (ADR-008). The default demo stays 150 live employees
+until the owner runs `seed:scale`. Frontend needs no change — the PR-1 System selector + depth-agnostic
+rollup table already render `mhn` and its provider leaves.
+
 ## 2026-06-26 — E13 PR-1: multi-tenant (multi-system) rollup
 
 Started E13 (#185, multi-WebChart rollup + population scale + scheduled recompute) with **PR-1: the

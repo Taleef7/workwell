@@ -114,6 +114,21 @@ Seeded runs are labeled `SEED` (real operator runs stay `MANUAL`), are anchored 
 measure's latest real run so the programs overview is never affected, and add no schema. See
 [Deploy Guide](docs/DEPLOY.md) for the reversible rollback SQL.
 
+## Seed the population-scale tenant (so the rollup aggregates ~120k)
+
+`pnpm seed:scale` populates the **`mhn` "MetroHealth Network" ~120k-subject tenant** so the
+`/programs/hierarchy` rollup + `/programs` KPIs aggregate a real population-scale system (E13 PR-2).
+The subjects are **generated demo data** (not live-evaluated) living only as `outcomes` rows whose
+`subject_id` encodes the hierarchy (`mhn|Lxx|Pxx|n`) — **no schema**; the rollup aggregates them in SQL
+(`GROUP BY`), so app memory never holds the 120k rows. On-demand, idempotent, **not** auto-run on
+deploy (`backend-ts/src/run/cli/`):
+
+```bash
+pnpm seed:scale --subjects 120000 --as-of 2026-06-26
+```
+
+Reversible (delete the `seed:scale` runs+outcomes — see the [Deploy Guide](docs/DEPLOY.md)).
+
 ```json
 {
   "subjectId" : "demo-patient-1",

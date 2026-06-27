@@ -126,6 +126,38 @@ DELETE FROM workwell_spike.outcomes
 DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
 ```
 
+### Seeding the population-scale tenant (E13 PR-2, on-demand, NOT auto-run on deploy)
+
+`pnpm seed:scale` populates the **`mhn` ("MetroHealth Network") ~120k-subject tenant** so the
+`/programs/hierarchy` rollup + the `/programs` KPIs aggregate a real population-scale system (Doug's
+"120,000 people"). The subjects are **generated demo data** (not live CQL-evaluated) and exist only as
+`outcomes` rows whose `subject_id` encodes the hierarchy (`mhn|Lxx|Pxx|n`) — **no schema change**. It is
+a controlled, on-demand, owner-gated tool and is **not** run automatically on deploy. Run it once
+against Neon from `backend-ts/` (honors `DATABASE_URL` for the Pg ceiling; opens no local SQLite when
+set):
+
+```bash
+cd backend-ts
+DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26
+```
+
+It writes one COMPLETED `MEASURE` run per runnable measure (`triggered_by='seed:scale'`, minimal
+`evidence_json`), audited (`SCALE_POPULATION_SEEDED`). It is **idempotent** — a single existing
+`seed:scale` run makes a rerun a no-op (re-seed after a rollback, or to change `--subjects`, requires
+the rollback below first). The bounded SQL aggregation (`aggregateScaleRun`) is what keeps the rollup
+fast at 120k — app memory never holds the per-subject rows. **Storage note:** 120k × 14 runnable
+measures ≈ **1.68M `outcomes` rows** on Neon (minimal evidence keeps each row small); size accordingly
+or seed fewer `--subjects`.
+
+**Rollback (reversible, synthetic data only) — delete tagged outcomes first, then runs**
+(schema-qualify on the Pg ceiling):
+
+```sql
+DELETE FROM workwell_spike.outcomes
+  WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:scale');
+DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';
+```
+
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
