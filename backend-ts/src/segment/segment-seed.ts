@@ -8,16 +8,25 @@
  *   - Clinical Staff     — clinic/nursing roles add infection control + the healthcare-worker immunity series
  * `no-orphaned-measure-in-demo-seed` (segment-seed.test.ts) guards the coverage invariant.
  */
-import type { CreateSegmentInput, SegmentStore } from "../stores/segment-store.ts";
+import type { CreateSegmentInput, SegmentStore, SegmentRule } from "../stores/segment-store.ts";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
+import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+
+/** Every distinct site across ALL tenants — so the universal baseline auto-covers a new tenant's
+ *  sites without hand-editing this list (E13 PR-1: the IHN campuses join twh's sites here). */
+const ALL_SITES: string[] = [...new Set(EMPLOYEES.map((e) => e.site))].sort((a, b) => a.localeCompare(b));
+
+const BASELINE_NAME = "All Employees";
+/** The universal baseline cohort rule — matches every employee by site, across all tenants. */
+const BASELINE_RULE: SegmentRule = { match: "ANY", conditions: [{ attr: "site", op: "in", value: ALL_SITES }] };
 
 export const DEMO_SEGMENTS: CreateSegmentInput[] = [
   {
     // Everyone: chronic-disease + preventive screening (incl. the two CMS eCQMs) and the routine
     // adult Td/Tdap booster. CQL still decides per-subject eligibility WITHIN each measure.
-    name: "All Employees",
+    name: BASELINE_NAME,
     description: "Universal occupational-health baseline — wellness screening, preventive eCQMs, and the adult Td/Tdap booster, applicable to everyone.",
-    rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: ["HQ", "Plant A", "Plant B", "Clinic"] }] },
+    rule: BASELINE_RULE,
     measureIds: [
       "hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms125", "cms122", "adult_immunization",
     ],
@@ -44,7 +53,19 @@ export const DEMO_SEGMENTS: CreateSegmentInput[] = [
   },
 ];
 
-/** Idempotently seed the demo segments — skips any whose name already exists. */
+/**
+ * Idempotently seed the demo segments — skips any whose name already exists (a boot over an
+ * already-seeded DB adds no duplicates and never clobbers operator edits). Bootstrap data only.
+ *
+ * NOTE (E13 PR-1): the baseline rule above now derives its site list from the directory, so a
+ * **fresh** DB (the SQLite floor, a new instance) covers every tenant automatically. An
+ * **already-seeded** stack (e.g. the live Neon demo seeded pre-E13) keeps its old `All Employees`
+ * row because seeding is name-idempotent — and we deliberately do NOT auto-mutate it here: a
+ * boot-time write would be unaudited (every state change must write `audit_event`) and could clobber
+ * an operator-customized rule. The one-time repair is owner-gated (like all data migrations): widen
+ * `All Employees` to the new tenant's sites via the audited `PUT /api/segments/:id` route (the
+ * Configure Groups editor), which records a `SEGMENT_UPDATED` audit event. See docs/DEPLOY.md.
+ */
 export async function seedSegments(store: SegmentStore): Promise<void> {
   const existing = new Set((await store.listSegments()).map((s) => s.name));
   for (const seg of DEMO_SEGMENTS) {

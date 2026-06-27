@@ -28,13 +28,23 @@ test("ordering is deterministic and a complete permutation of the population", (
 });
 
 test("seededDistribution splits the population into the Java proportions", () => {
-  // audiogram rate 0.78 over 100 employees: 78 compliant, 3 excluded, 2 missing,
-  // remaining 17 → 8 due-soon / 9 overdue.
+  // Derive the expected split from N + the base rate (the documented formula in distribution.ts):
+  // compliant = round(N*rate); excluded ≤ 3; missing ≤ 2; the remainder splits half DUE_SOON / half
+  // OVERDUE. Computed from N (not hardcoded) so it stays correct as the synthetic directory grows
+  // (a second tenant landed in E13; population-scale lands in E13 PR-2).
+  const n = EMPLOYEES.length;
+  const compliant = Math.round(n * complianceRate("audiogram")); // audiogram base rate 0.78
+  const excluded = Math.min(3, n - compliant);
+  const missing = Math.min(2, n - compliant - excluded);
+  const remaining = n - compliant - excluded - missing;
+  const dueSoon = Math.trunc(remaining / 2);
+  const overdue = remaining - dueSoon;
+
   const counts = seededDistribution(EMPLOYEES, "audiogram").reduce<Record<string, number>>((acc, a) => {
     acc[a.target] = (acc[a.target] ?? 0) + 1;
     return acc;
   }, {});
-  assert.deepEqual(counts, { COMPLIANT: 78, EXCLUDED: 3, MISSING_DATA: 2, DUE_SOON: 8, OVERDUE: 9 });
+  assert.deepEqual(counts, { COMPLIANT: compliant, EXCLUDED: excluded, MISSING_DATA: missing, DUE_SOON: dueSoon, OVERDUE: overdue });
 });
 
 test("seededTargetFor returns the bucket a specific employee lands in (employee-scoped runs)", () => {

@@ -111,6 +111,24 @@ test("buildRoster — two panel measures sharing one run load it once (no N+1); 
   assert.equal(row.cells["adult_immunization"]!.method, "Not evaluated");
 });
 
+// — E13 multi-tenant filter —
+
+test("buildRoster — tenant filter scopes rows; rows carry tenantId/tenantName", async () => {
+  const all = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", pageSize: 200 });
+  // the full directory spans both tenants
+  assert.ok(all.rows.some((r) => r.subject.tenantId === "twh"));
+  assert.ok(all.rows.some((r) => r.subject.tenantId === "ihn"));
+
+  const twh = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", tenant: "twh", pageSize: 200 });
+  assert.ok(twh.rows.length > 0);
+  assert.ok(twh.rows.every((r) => r.subject.tenantId === "twh"), "tenant filter scopes rows to twh");
+  assert.equal(twh.rows[0]!.subject.tenantName, "Total Worker Health");
+  assert.ok(twh.total < all.total, "twh-only total is smaller than the all-tenant total");
+
+  const ihn = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", tenant: "ihn", pageSize: 200 });
+  assert.equal(twh.total + ihn.total, all.total, "twh + ihn partitions the full directory");
+});
+
 // — E11.3 segment applicability overlay + filter —
 
 const mmrSeed = (): { withRun: OutcomeWithRun[]; byRun: Record<string, OutcomeRecord[]> } => ({

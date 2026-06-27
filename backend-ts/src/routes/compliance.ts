@@ -3,7 +3,7 @@
  * frontend contract. Authenticated read-only under the /api/** matrix (all roles), like
  * /api/hierarchy/rollup.
  *
- *   GET /api/compliance/roster?panel=&status=&site=&role=&q=&page=&pageSize=
+ *   GET /api/compliance/roster?panel=&status=&site=&role=&q=&segment=&tenant=&page=&pageSize=
  *     → { panel, columns, rows }  + X-Total-Count header (full filtered match count)
  */
 import type { CloudDatabase } from "@mieweb/cloud";
@@ -42,6 +42,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
       role: q.get("role"),
       q: q.get("q"),
       segment: q.get("segment"),
+      tenant: q.get("tenant"),
       page: intOr(q.get("page"), 1),
       pageSize: intOr(q.get("pageSize"), 50),
     },

@@ -40,17 +40,26 @@ before(async () => {
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
-test("GET /api/hierarchy/rollup returns the enterprise tree, reconciling, filtered by measure", async () => {
+test("GET /api/hierarchy/rollup returns the All-Systems tree, reconciling, filtered by measure", async () => {
   const res = await get("?measureId=audiogram");
   assert.equal(res?.status, 200);
   const root = (await res!.json()) as Node;
-  assert.equal(root.level, "enterprise");
+  assert.equal(root.level, "all");
   assert.equal(root.totals.evaluated, 2);
   assert.equal(root.totals.compliant, 1);
   assert.equal(root.totals.complianceRate, 50);
   assert.equal(root.totals.openCases, 1);
-  const locEvaluated = root.children.reduce((a, c) => a + c.totals.evaluated, 0);
-  assert.equal(locEvaluated, root.totals.evaluated);
+  const tenantEvaluated = root.children.reduce((a, c) => a + c.totals.evaluated, 0);
+  assert.equal(tenantEvaluated, root.totals.evaluated);
+});
+
+test("?tenant=twh returns a tenant-level root", async () => {
+  const res = await get("?measureId=audiogram&tenant=twh");
+  assert.equal(res?.status, 200);
+  const root = (await res!.json()) as Node;
+  assert.equal(root.level, "tenant");
+  assert.equal(root.id, "twh");
+  assert.equal(root.totals.evaluated, 2);
 });
 
 test("non-GET → null (not handled here)", async () => {
@@ -72,11 +81,11 @@ test("malformed from date → 400 (parity with /api/programs)", async () => {
   assert.equal((await get("?from=2026-01-01&to=2026-12-31"))?.status, 200, "valid dates still 200");
 });
 
-test("unknown measureId → 200 with an empty enterprise tree", async () => {
+test("unknown measureId → 200 with an empty All-Systems tree", async () => {
   const res = await get("?measureId=does-not-exist");
   assert.equal(res?.status, 200);
   const root = (await res!.json()) as { level: string; totals: { evaluated: number }; children: unknown[] };
-  assert.equal(root.level, "enterprise");
+  assert.equal(root.level, "all");
   assert.equal(root.totals.evaluated, 0);
   assert.equal(root.children.length, 0);
 });
