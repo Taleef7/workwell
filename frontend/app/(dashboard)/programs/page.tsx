@@ -10,6 +10,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import type { TenantOption } from "@/features/compliance/types";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { niceDomain } from "@/lib/charts";
 import {
@@ -55,6 +56,8 @@ export default function ProgramsPage() {
   const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
+  const [tenant, setTenant] = useState("");
+  const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
   const [driversByMeasure, setDriversByMeasure] = useState<Record<string, TopDrivers>>({});
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +72,7 @@ export default function ProgramsPage() {
 
     const params = new URLSearchParams();
     if (siteId) params.set("site", siteId);
+    if (tenant) params.set("tenant", tenant);
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -114,7 +118,17 @@ export default function ProgramsPage() {
     // Trend and driver fleets are independent — load them concurrently, not in series.
     await Promise.allSettled([loadTrends, loadDrivers]);
     setDetailsLoading(false);
-  }, [api, siteId, from, to]);
+  }, [api, siteId, tenant, from, to]);
+
+  // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the overview.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<TenantOption[]>("/api/tenants")
+      .then((data) => { if (!cancelled) setTenantOptions(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setTenantOptions([]); });
+    return () => { cancelled = true; };
+  }, [api]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -160,6 +174,20 @@ export default function ProgramsPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+            System
+            <select
+              value={tenant}
+              onChange={(e) => setTenant(e.target.value)}
+              aria-label="System"
+              className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm normal-case tracking-normal text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+            >
+              <option value="">All systems</option>
+              {tenantOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </label>
           <Link
             href="/programs/hierarchy"
             className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"

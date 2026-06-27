@@ -177,7 +177,7 @@ test("emits a refusal Condition when config.refused and binding.refusal present"
   const binding = MEASURE_BINDINGS["adult_immunization"];
   const base = deriveExamConfig(binding!, "OVERDUE");
   const bundle = buildSyntheticBundle(
-    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001" },
+    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001", tenantId: "twh" },
     withRefusal(base),
     "2026-06-19",
   );
@@ -190,7 +190,7 @@ test("emits a refusal Condition when config.refused and binding.refusal present"
 test("does NOT emit a refusal Condition when config.refused is false", () => {
   const binding = MEASURE_BINDINGS["adult_immunization"];
   const bundle = buildSyntheticBundle(
-    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001" },
+    { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", providerId: "prov-001", tenantId: "twh" },
     deriveExamConfig(binding!, "OVERDUE"),
     "2026-06-19",
   );

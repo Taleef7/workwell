@@ -81,6 +81,24 @@ The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
 
 Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
 
+#### One-time segment repair after adding a tenant (E13 PR-1, owner-gated)
+
+The demo **risk-group segments** seed (`backend-ts/src/segment/segment-seed.ts`) is **name-idempotent**:
+a boot over an already-seeded DB adds no duplicates and **never mutates an existing segment** (so it
+can't clobber operator edits, and it writes no unaudited boot-time change). The universal
+`All Employees` baseline now derives its cohort site list from the directory, so any **fresh** DB (the
+SQLite floor, a new instance) automatically covers every tenant — including a newly added one (E13's
+`ihn` / Indus Hospital Network campuses).
+
+An **already-seeded** stack (the live Neon demo, seeded pre-E13) keeps its old `All Employees` row,
+which lists only the original `twh` sites — so the new tenant's employees would read
+`NOT_APPLICABLE` for the baseline wellness/eCQM measures until repaired. The repair is **owner-gated**
+(like all data migrations): edit `All Employees` to add the new tenant's sites
+(`North Campus`, `South Campus`, `Outpatient Clinic`) via the **audited** `PUT /api/segments/:id`
+route — i.e. the `/admin → Groups` Configure Groups editor — which records a `SEGMENT_UPDATED` audit
+event. (Do **not** hand-edit `segment_measures`/`rule_json` directly; use the route so the change is
+audited.)
+
 ### Seeding synthetic trend history (on-demand, NOT auto-run on deploy)
 
 The `/programs` + `/programs/[measureId]` trend charts can read as flat lines on a stack with only a

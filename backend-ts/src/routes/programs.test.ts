@@ -217,6 +217,33 @@ test("malformed from/to date filters → 400 (Java parseFromDate/parseToDate par
   assert.equal((await get("/overview?from=2026-01-01&to=2026-12-31"))?.status, 200);
 });
 
+test("E13: ?tenant scopes the overview population to that tenant/system", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const oc = new SqliteOutcomeStore(env.DB as never);
+  // obesity_bmi is otherwise unused here — seed one twh + one ihn COMPLIANT subject.
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "obesity_bmi", triggeredBy: "test", status: "COMPLETED",
+    requestedScope: { measureId: "obesity_bmi" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await oc.recordOutcome({ runId: run.id, subjectId: "emp-005", measureId: "obesity_bmi", status: "COMPLIANT", evidence: {} }); // twh / Plant A
+  await oc.recordOutcome({ runId: run.id, subjectId: "ihn-emp-001", measureId: "obesity_bmi", status: "OVERDUE", evidence: {} }); // ihn / North Campus
+
+  const bmiOf = async (qs = "") =>
+    ((await get(`/overview${qs}`).then((r) => r!.json())) as Summary[]).find((p) => p.measureId === "obesity_bmi")!;
+
+  const all = await bmiOf();
+  assert.equal(all.totalEvaluated, 2, "both tenants counted with no filter");
+
+  const twh = await bmiOf("?tenant=twh");
+  assert.equal(twh.totalEvaluated, 1, "only the twh subject");
+  assert.equal(twh.compliant, 1);
+
+  const ihn = await bmiOf("?tenant=ihn");
+  assert.equal(ihn.totalEvaluated, 1, "only the ihn subject");
+  assert.equal(ihn.overdue, 1);
+});
+
 test("C4: a single-subject CASE rerun does not become a measure's latest run or skew the rollup", async () => {
   const runStore = new SqliteRunStore(env.DB as never);
   const oc = new SqliteOutcomeStore(env.DB as never);

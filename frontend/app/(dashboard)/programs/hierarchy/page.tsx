@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import type { TenantOption } from "@/features/compliance/types";
 
-const ENTERPRISE_ROOT_ID = "twh";
+// The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
+const ALL_SYSTEMS_ROOT_KEY = "all:all";
 
 type ProgramSummary = {
   measureId: string;
@@ -24,7 +26,7 @@ interface Totals {
 }
 
 interface HierarchyNode {
-  level: "enterprise" | "location" | "provider" | "patient";
+  level: "all" | "tenant" | "enterprise" | "location" | "provider" | "patient";
   id: string;
   name: string;
   parentId: string | null;
@@ -33,11 +35,17 @@ interface HierarchyNode {
 }
 
 const LEVEL_LABELS: Record<HierarchyNode["level"], string> = {
+  all: "All Systems",
+  tenant: "System",
   enterprise: "Enterprise",
   location: "Location",
   provider: "Provider",
   patient: "Patient",
 };
+
+// Expand/collapse state is keyed by level+id: tenant and enterprise nodes share the same id
+// (e.g. "twh"), so keying on id alone would link their carets (E13 PR-1).
+const nodeKey = (n: Pick<HierarchyNode, "level" | "id">): string => `${n.level}:${n.id}`;
 
 export default function HierarchyPage() {
   const api = useApi();
@@ -48,7 +56,9 @@ export default function HierarchyPage() {
   const [error, setError] = useState<string | null>(null);
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
   const [measureId, setMeasureId] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set([ENTERPRISE_ROOT_ID]));
+  const [tenant, setTenant] = useState("");
+  const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
+  const [open, setOpen] = useState<Set<string>>(new Set([ALL_SYSTEMS_ROOT_KEY]));
 
   // Measure dropdown is sourced the same way /programs sources its measures.
   useEffect(() => {
@@ -66,24 +76,37 @@ export default function HierarchyPage() {
     };
   }, [api]);
 
+  // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the rollup.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<TenantOption[]>("/api/tenants")
+      .then((data) => { if (!cancelled) setTenantOptions(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setTenantOptions([]); });
+    return () => { cancelled = true; };
+  }, [api]);
+
   const loadRollup = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (measureId) params.set("measureId", measureId);
+      if (tenant) params.set("tenant", tenant);
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       const qs = params.toString();
       const data = await api.get<HierarchyNode>(`/api/hierarchy/rollup${qs ? `?${qs}` : ""}`);
       setRoot(data);
+      // Always expand the returned root (it's "all" by default, or the tenant node when filtered).
+      setOpen((s) => new Set(s).add(nodeKey(data)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setRoot(null);
     } finally {
       setLoading(false);
     }
-  }, [api, measureId, from, to]);
+  }, [api, measureId, tenant, from, to]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -103,7 +126,7 @@ export default function HierarchyPage() {
   const rows: Array<{ node: HierarchyNode; depth: number }> = [];
   const walk = (node: HierarchyNode, depth: number) => {
     rows.push({ node, depth });
-    if (open.has(node.id)) {
+    if (open.has(nodeKey(node))) {
       node.children.forEach((child) => walk(child, depth + 1));
     }
   };
@@ -140,6 +163,23 @@ export default function HierarchyPage() {
             </option>
           ))}
         </select>
+
+        <label htmlFor="tenant-filter" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+          System
+        </label>
+        <select
+          id="tenant-filter"
+          value={tenant}
+          onChange={(e) => setTenant(e.target.value)}
+          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+        >
+          <option value="">All systems</option>
+          {tenantOptions.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error ? (
@@ -173,10 +213,11 @@ export default function HierarchyPage() {
             <tbody>
               {rows.map(({ node, depth }) => {
                 const hasChildren = node.children.length > 0;
-                const isOpen = open.has(node.id);
+                const key = nodeKey(node);
+                const isOpen = open.has(key);
                 return (
                   <tr
-                    key={`${node.level}:${node.id}`}
+                    key={key}
                     className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50"
                   >
                     <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">
@@ -184,7 +225,7 @@ export default function HierarchyPage() {
                         {hasChildren ? (
                           <button
                             type="button"
-                            onClick={() => toggle(node.id)}
+                            onClick={() => toggle(key)}
                             aria-expanded={isOpen}
                             aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
                             className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"

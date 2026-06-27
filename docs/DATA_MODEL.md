@@ -115,14 +115,18 @@ PRIMARY KEY(measure_version_id, value_set_id)
 > **backend-ts has no `employees` DB table.** In the TypeScript backend the workforce is the
 > **synthetic employee directory** (`backend-ts/src/engine/synthetic/employee-catalog.ts`), resolved
 > at read-time — it is the source of truth, not a relational table. Each entry is
-> `{externalId, name, role, site, providerId}`, where `site` is the **location** level and
-> `providerId` attributes the employee to a clinician. The directory also exports `PROVIDERS` (8
-> synthetic occupational-health clinicians, 2 per location — the **provider** level) and a single
-> `ENTERPRISE` root, giving the **enterprise→location→provider→patient** hierarchy. `outcomes` and
-> `cases` persist only the `subjectId` (the employee/patient); the hierarchy above a subject is
-> resolved at read-time from the directory, so the multi-level rollup (`hierarchy-rollup.ts`, #74/E4)
-> requires **no SQL and no `employees` table** (the #93 schema stop-and-ask gate is satisfied with no
-> migration).
+> `{externalId, name, role, site, providerId, tenantId}`, where `site` is the **location** level,
+> `providerId` attributes the employee to a clinician, and `tenantId` is the **WebChart system /
+> employer** (the level above enterprise, E13 PR-1 / #185). The directory also exports `PROVIDERS`
+> (synthetic occupational-health clinicians, 2 per location — the **provider** level, each carrying a
+> `tenantId`), `TENANTS` + `enterpriseForTenant` (one enterprise per tenant in PR-1), giving the
+> **tenant→enterprise→location→provider→patient** hierarchy. Two tenants ship: `twh` (Total Worker
+> Health — the original 100 employees) and `ihn` (Indus Hospital Network — a second synthetic system,
+> 50 employees / 3 campuses / 6 providers). `outcomes` and `cases` persist only the `subjectId`; every
+> level above a subject — provider, location, enterprise, **tenant** — is resolved at read-time from
+> the directory, so the multi-level rollup (`hierarchy-rollup.ts`, #74/E4; multi-tenant #185/E13)
+> requires **no SQL and no `employees`/`tenants` table** (the #93 schema stop-and-ask gate is satisfied
+> with no migration; ADR-010/ADR-019).
 
 The schema below is the **historical Java-era `employees` table** (retired with the JVM in #109 PR4),
 retained for reference only:

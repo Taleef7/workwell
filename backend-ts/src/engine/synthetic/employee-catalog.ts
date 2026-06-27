@@ -11,32 +11,61 @@ export interface EmployeeProfile {
   role: string;
   site: string;        // = location level
   providerId: string;  // attributed provider (an entry in PROVIDERS), at the same `site`
+  tenantId: string;    // = WebChart system / employer (an entry in TENANTS), above enterprise (#185 E13)
 }
 
 export interface Provider {
   id: string;
   name: string;
   location: string; // one of the employee `site` values
+  tenantId: string; // the tenant this provider belongs to (#185 E13)
 }
 
-/** Single-tenant enterprise root for the multi-level dashboard hierarchy (#74 E4). */
+/** A WebChart system / employer — the top of the rollup hierarchy (#185 E13 PR-1). */
+export interface Tenant { id: string; name: string; }
+/** An employer org under a tenant (1 per tenant in PR-1; the level is retained for future multi-org tenants). */
+export interface Enterprise { id: string; name: string; tenantId: string; }
+
+/** The tenants/systems whose compliance rolls up into one dashboard (#185 E13 PR-1). */
+export const TENANTS: readonly Tenant[] = [
+  { id: "twh", name: "Total Worker Health" },
+  { id: "ihn", name: "Indus Hospital Network" },
+];
+
+/** One enterprise per tenant (PR-1). */
+const ENTERPRISES: readonly Enterprise[] = [
+  { id: "twh", name: "Total Worker Health", tenantId: "twh" },
+  { id: "ihn", name: "Indus Hospital Network", tenantId: "ihn" },
+];
+
+/** Tenant 1's enterprise root (back-compat; = ENTERPRISES[0]). Pre-E13 single-tenant callers. */
 export const ENTERPRISE = { id: "twh", name: "Total Worker Health" } as const;
 
-/** Synthetic occupational-health clinicians — 2 per location (provider level, #74 E4). */
+/** Synthetic occupational-health clinicians — 2 per location (provider level, #74 E4 / #185 E13). */
 export const PROVIDERS: readonly Provider[] = [
-  { id: "prov-001", name: "Dr. Sara Mahmood", location: "Plant A" },
-  { id: "prov-002", name: "NP Kamran Sheikh", location: "Plant A" },
-  { id: "prov-003", name: "Dr. Lubna Aziz", location: "Plant B" },
-  { id: "prov-004", name: "NP Faisal Dar", location: "Plant B" },
-  { id: "prov-005", name: "Dr. Hina Qureshi", location: "HQ" },
-  { id: "prov-006", name: "NP Bilal Mansoor", location: "HQ" },
-  { id: "prov-007", name: "Dr. Ayesha Raza", location: "Clinic" },
-  { id: "prov-008", name: "NP Tariq Saleem", location: "Clinic" },
+  // Tenant 1 — Total Worker Health (twh)
+  { id: "prov-001", name: "Dr. Sara Mahmood", location: "Plant A", tenantId: "twh" },
+  { id: "prov-002", name: "NP Kamran Sheikh", location: "Plant A", tenantId: "twh" },
+  { id: "prov-003", name: "Dr. Lubna Aziz", location: "Plant B", tenantId: "twh" },
+  { id: "prov-004", name: "NP Faisal Dar", location: "Plant B", tenantId: "twh" },
+  { id: "prov-005", name: "Dr. Hina Qureshi", location: "HQ", tenantId: "twh" },
+  { id: "prov-006", name: "NP Bilal Mansoor", location: "HQ", tenantId: "twh" },
+  { id: "prov-007", name: "Dr. Ayesha Raza", location: "Clinic", tenantId: "twh" },
+  { id: "prov-008", name: "NP Tariq Saleem", location: "Clinic", tenantId: "twh" },
+  // Tenant 2 — Indus Hospital Network (ihn): 2 clinicians per campus
+  { id: "prov-101", name: "Dr. Saima Anwar", location: "North Campus", tenantId: "ihn" },
+  { id: "prov-102", name: "NP Rizwan Tariq", location: "North Campus", tenantId: "ihn" },
+  { id: "prov-103", name: "Dr. Maria Yusuf", location: "South Campus", tenantId: "ihn" },
+  { id: "prov-104", name: "NP Hamid Raza", location: "South Campus", tenantId: "ihn" },
+  { id: "prov-105", name: "Dr. Nida Kamal", location: "Outpatient Clinic", tenantId: "ihn" },
+  { id: "prov-106", name: "NP Asad Mahmood", location: "Outpatient Clinic", tenantId: "ihn" },
 ];
 
 type EmployeeBase = Omit<EmployeeProfile, "providerId">;
+/** A tenant-less base row (the original twh seed); `tenantId: "twh"` is injected below. */
+type TenantlessBase = Omit<EmployeeProfile, "providerId" | "tenantId">;
 
-const EMPLOYEE_BASE: readonly EmployeeBase[] = [
+const TWH_BASE_RAW: readonly TenantlessBase[] = [
   { externalId: "emp-001", name: "Demo Author", role: "Author", site: "HQ" },
   { externalId: "emp-002", name: "Demo Approver", role: "Approver", site: "HQ" },
   { externalId: "emp-003", name: "Demo Case Manager", role: "Case Manager", site: "HQ" },
@@ -139,6 +168,69 @@ const EMPLOYEE_BASE: readonly EmployeeBase[] = [
   { externalId: "emp-100", name: "Nihal Sadiq", role: "Clinic Staff", site: "Clinic" },
 ];
 
+/** Tenant 1 (twh) — the original 100, stamped with their tenant. Identities unchanged. */
+const TWH_BASE: readonly EmployeeBase[] = TWH_BASE_RAW.map((e) => ({ ...e, tenantId: "twh" }));
+
+/** Tenant 2 (ihn) — Indus Hospital Network: 50 employees across 3 campuses, healthcare roles. */
+const IHN_BASE: readonly EmployeeBase[] = [
+  // North Campus (17)
+  { externalId: "ihn-emp-001", name: "Ayesha Noor", role: "Nurse", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-002", name: "Bilal Hashmi", role: "Physician", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-003", name: "Caira Sattar", role: "Lab Tech", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-004", name: "Daniyal Khan", role: "Front Desk", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-005", name: "Erum Pervaiz", role: "Pharmacist", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-006", name: "Faraz Iqbal", role: "Radiology Tech", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-007", name: "Gohar Nawaz", role: "Nurse", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-008", name: "Hafsa Malik", role: "Nurse", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-009", name: "Imran Sethi", role: "Physician", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-010", name: "Jaweria Aslam", role: "Lab Tech", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-011", name: "Kamran Butt", role: "Front Desk", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-012", name: "Lubna Shafiq", role: "Pharmacist", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-013", name: "Moeen Akhtar", role: "Radiology Tech", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-014", name: "Nashit Raza", role: "Nurse", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-015", name: "Owais Latif", role: "Physician", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-016", name: "Pakeeza Amin", role: "Nurse", site: "North Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-017", name: "Qaiser Shah", role: "Lab Tech", site: "North Campus", tenantId: "ihn" },
+  // South Campus (17)
+  { externalId: "ihn-emp-018", name: "Rida Farooqi", role: "Nurse", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-019", name: "Saqib Mehmood", role: "Physician", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-020", name: "Tooba Yaseen", role: "Lab Tech", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-021", name: "Usman Ghani", role: "Front Desk", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-022", name: "Vania Rashid", role: "Pharmacist", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-023", name: "Wahaj Ansari", role: "Radiology Tech", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-024", name: "Xara Kamran", role: "Nurse", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-025", name: "Yousuf Adil", role: "Physician", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-026", name: "Zoya Hameed", role: "Nurse", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-027", name: "Adnan Saqib", role: "Lab Tech", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-028", name: "Bushra Naveed", role: "Front Desk", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-029", name: "Chand Riaz", role: "Pharmacist", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-030", name: "Dua Sami", role: "Radiology Tech", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-031", name: "Ehsan Tariq", role: "Nurse", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-032", name: "Fariha Zaman", role: "Physician", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-033", name: "Ghulam Abbas", role: "Nurse", site: "South Campus", tenantId: "ihn" },
+  { externalId: "ihn-emp-034", name: "Huda Saleem", role: "Lab Tech", site: "South Campus", tenantId: "ihn" },
+  // Outpatient Clinic (16)
+  { externalId: "ihn-emp-035", name: "Ibrahim Dar", role: "Nurse", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-036", name: "Jamila Karim", role: "Physician", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-037", name: "Kashan Vohra", role: "Lab Tech", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-038", name: "Laila Nawaz", role: "Front Desk", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-039", name: "Mahad Sohail", role: "Pharmacist", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-040", name: "Noreen Akram", role: "Radiology Tech", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-041", name: "Obaid Rauf", role: "Nurse", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-042", name: "Pari Gul", role: "Physician", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-043", name: "Qudsia Bano", role: "Nurse", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-044", name: "Rehan Aziz", role: "Lab Tech", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-045", name: "Sadia Munir", role: "Front Desk", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-046", name: "Talha Qamar", role: "Pharmacist", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-047", name: "Uzair Hanif", role: "Radiology Tech", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-048", name: "Wajiha Sajid", role: "Nurse", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-049", name: "Yahya Mir", role: "Physician", site: "Outpatient Clinic", tenantId: "ihn" },
+  { externalId: "ihn-emp-050", name: "Zainab Asif", role: "Nurse", site: "Outpatient Clinic", tenantId: "ihn" },
+];
+
+/** Both tenants' directory rows. */
+const EMPLOYEE_BASE: readonly EmployeeBase[] = [...TWH_BASE, ...IHN_BASE];
+
 const PROVIDERS_BY_LOCATION = new Map<string, Provider[]>();
 for (const p of PROVIDERS) {
   (PROVIDERS_BY_LOCATION.get(p.location) ?? PROVIDERS_BY_LOCATION.set(p.location, []).get(p.location)!).push(p);
@@ -183,4 +275,22 @@ export function employeeById(externalId: string): EmployeeProfile | null {
 /** Lookup a provider by id; null when unknown. */
 export function providerById(id: string): Provider | null {
   return PROVIDER_BY_ID.get(id) ?? null;
+}
+
+const TENANT_BY_ID = new Map<string, Tenant>(TENANTS.map((t) => [t.id, t]));
+const ENTERPRISE_BY_TENANT = new Map<string, Enterprise>(ENTERPRISES.map((e) => [e.tenantId, e]));
+
+/** Lookup a tenant by id; null when unknown (#185 E13). */
+export function tenantById(id: string): Tenant | null {
+  return TENANT_BY_ID.get(id) ?? null;
+}
+
+/** The enterprise for a tenant; null when unknown. */
+export function enterpriseForTenant(tenantId: string): Enterprise | null {
+  return ENTERPRISE_BY_TENANT.get(tenantId) ?? null;
+}
+
+/** Employees belonging to a tenant, in directory order. */
+export function employeesForTenant(tenantId: string): EmployeeProfile[] {
+  return EMPLOYEES.filter((e) => e.tenantId === tenantId);
 }

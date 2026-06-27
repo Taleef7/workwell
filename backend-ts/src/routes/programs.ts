@@ -48,11 +48,11 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
     return json(listSites());
   }
 
-  // Shared ?site=&from=&to= parsing (date filters validated like the Java controller).
+  // Shared ?site=&tenant=&from=&to= parsing (date filters validated like the Java controller).
   const q = url.searchParams;
-  let filters: { site: string | null; from?: string; to?: string };
+  let filters: { site: string | null; tenant: string | null; from?: string; to?: string };
   try {
-    filters = { site: q.get("site"), from: parseQueryDate(q.get("from"), "from"), to: parseQueryDate(q.get("to"), "to") };
+    filters = { site: q.get("site"), tenant: q.get("tenant"), from: parseQueryDate(q.get("from"), "from"), to: parseQueryDate(q.get("to"), "to") };
   } catch (err) {
     if (err instanceof QueryDateError) return json({ error: "invalid_request", message: err.message }, 400);
     throw err;

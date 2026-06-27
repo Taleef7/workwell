@@ -2,7 +2,8 @@
  * Hierarchy route (#74 E4) — the multi-level dashboard rollup behind the unchanged frontend
  * contract. Authenticated under /api/** by the worker's security matrix.
  *
- *   GET /api/hierarchy/rollup?measureId=&from=&to=  → HierarchyNode (enterprise root)
+ *   GET /api/hierarchy/rollup?measureId=&from=&to=&tenant=  → HierarchyNode (All-Systems root,
+ *     or the given tenant's subtree when ?tenant= is set; #185 E13 PR-1)
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -35,7 +36,7 @@ export async function handleHierarchy(req: Request, env: HierarchyEnv): Promise<
   const s = await getStores(env);
   const tree = await buildHierarchyRollup(
     { outcomeStore: s.outcomes, caseStore: s.cases },
-    { measureId: q.get("measureId"), from, to },
+    { measureId: q.get("measureId"), from, to, tenant: q.get("tenant") },
   );
   return json(tree);
 }

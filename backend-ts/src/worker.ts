@@ -25,6 +25,7 @@ import { handleCampaigns } from "./routes/campaigns.ts";
 import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
+import { handleTenants } from "./routes/tenants.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
@@ -196,9 +197,13 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const programsResponse = await handlePrograms(req, env);
   if (programsResponse) return programsResponse;
 
-  // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4).
+  // Hierarchy — multi-level dashboard rollup over outcomes/cases (#74 E4; multi-tenant #185 E13).
   const hierarchyResponse = await handleHierarchy(req, env);
   if (hierarchyResponse) return hierarchyResponse;
+
+  // Tenants — WebChart system list for the multi-tenant selector (#185 E13 PR-1).
+  const tenantsResponse = await handleTenants(req);
+  if (tenantsResponse) return tenantsResponse;
 
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
   const segmentsResponse = await handleSegments(req, env, actor);
