@@ -6,11 +6,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleTenants } from "./tenants.ts";
 
-test("GET /api/tenants lists both tenants", async () => {
+test("GET /api/tenants lists the live tenants + the mhn scale tenant", async () => {
   const res = (await handleTenants(new Request("http://x/api/tenants", { method: "GET" })))!;
   assert.equal(res.status, 200);
   const body = (await res.json()) as { id: string; name: string }[];
-  assert.deepEqual(body.map((t) => t.id).sort(), ["ihn", "twh"]);
+  assert.deepEqual(body.map((t) => t.id).sort(), ["ihn", "mhn", "twh"]);
   assert.ok(body.every((t) => typeof t.name === "string" && t.name.length > 0));
 });
 
