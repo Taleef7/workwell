@@ -13,6 +13,7 @@ import type {
   OutcomeMeasureFilter,
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
+  ScaleGroupCount,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -195,5 +196,20 @@ export class PgOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
     }));
+  }
+
+  async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
+    // Single GROUP BY over the encoded subject_id (`mhn|Lxx|Pxx|n`) — returns
+    // O(locations×providers×statuses) rows, never the 120k per-subject rows.
+    const { rows } = await this.pool.query<{ location_id: string; provider_id: string; status: string; count: string }>(
+      `SELECT split_part(subject_id, '|', 2) AS location_id,
+              split_part(subject_id, '|', 3) AS provider_id,
+              status, COUNT(*)::text AS count
+         FROM ${SPIKE_SCHEMA}.outcomes
+        WHERE run_id = $1 AND subject_id LIKE 'mhn|%'
+        GROUP BY 1, 2, 3`,
+      [runId],
+    );
+    return rows.map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
   }
 }

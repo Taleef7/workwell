@@ -104,4 +104,19 @@ export interface OutcomeStore {
    * get_employee history and check_compliance lookup. Bounded scan over the outcomes table.
    */
   listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]>;
+  /**
+   * Aggregate a population-scale run's outcomes by (location, provider, status), parsing the encoded
+   * subject_id (`mhn|Lxx|Pxx|n`) — a single GROUP BY that never materializes the per-subject rows.
+   * Used by the hierarchy rollup + programs KPIs for the scale tenant (#185 E13 PR-2).
+   */
+  aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]>;
+}
+
+/** A grouped count from a scale run: outcomes per (location, provider, status). The SQL aggregation
+ *  returns O(locations×providers×statuses) rows — never O(subjects) — so app memory stays bounded. */
+export interface ScaleGroupCount {
+  locationId: string;
+  providerId: string;
+  status: string;
+  count: number;
 }
