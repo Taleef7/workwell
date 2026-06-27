@@ -442,6 +442,31 @@ Because the seed ships enabled, the applicability overlay is **active on the dem
 reverts by disabling/deleting all segments. `outcomes`/`cases` are unchanged — the run pipeline only *skips* a case upsert when not
 applicable; the outcome is still persisted. CQL `Outcome Status` stays authoritative (ADR-008/ADR-016).
 
+### 3.23 Population-scale tenant (E13 PR-2 / #185) — encoded `subject_id`, no schema change
+
+The `mhn` ("MetroHealth Network") tenant's ~120k subjects are **generated demo data with no schema
+change**: they exist **only** as `outcomes` rows whose `subject_id` **encodes the hierarchy** —
+`mhn|Lxx|Pxx|nnnnnnn` (tenant | location | provider | sequence; the codec + the small ~240-provider
+structure are in `backend-ts/src/engine/synthetic/scale-structure.ts`). No employees, no new columns,
+no new tables.
+
+- **Seeded** by `pnpm seed:scale [--subjects 120000]` (`backend-ts/src/run/cli/`) — owner-run on-demand,
+  **not** on deploy. One COMPLETED `MEASURE` run per runnable measure with `triggered_by='seed:scale'`,
+  backdated, `evidence_json` minimal (`{scale:true}` — generated rows need no `expressionResults`).
+  Idempotent (a single `seed:scale` run ⇒ no-op rerun); audited (`SCALE_POPULATION_SEEDED` per measure).
+- **Read** via `OutcomeStore.aggregateScaleRun(runId)` — a single `GROUP BY` over the encoded
+  `subject_id` (Postgres `split_part(subject_id,'|',…)`; SQLite `substr` over the fixed-width id),
+  returning per (location, provider, status) counts — **O(providers)** rows, never the per-subject rows.
+  The rollup + programs overview exclude `seed:scale` runs from the in-memory scan and build/fold `mhn`
+  from this. `outcomes`/`cases`/`runs` schemas are **unchanged**.
+- **Reversible** (delete tagged outcomes first, then runs; schema-qualify on the Pg ceiling):
+  ```sql
+  DELETE FROM workwell_spike.outcomes
+    WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:scale');
+  DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';
+  ```
+CQL `Outcome Status` stays authoritative for live-evaluated subjects (ADR-008/ADR-020).
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 
