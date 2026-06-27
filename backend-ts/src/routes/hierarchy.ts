@@ -35,7 +35,7 @@ export async function handleHierarchy(req: Request, env: HierarchyEnv): Promise<
   }
   const s = await getStores(env);
   const tree = await buildHierarchyRollup(
-    { outcomeStore: s.outcomes, caseStore: s.cases },
+    { outcomeStore: s.outcomes, caseStore: s.cases, runStore: s.runs },
     { measureId: q.get("measureId"), from, to, tenant: q.get("tenant") },
   );
   return json(tree);
