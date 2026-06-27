@@ -140,7 +140,12 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
   // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
   const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
-    (r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+    (r) =>
+      siteMatch(r.subjectId) &&
+      tenantMatch(r.subjectId) &&
+      isPopulationRun(r.runScopeType) &&
+      isCompletedRun(r.runStatus) &&
+      r.runTriggeredBy !== "seed:scale",
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -174,7 +179,50 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       openCaseCount,
     };
   });
+
+  // E13 PR-2: fold in the population-scale mhn tenant's per-measure counts via SQL aggregation
+  // (the in-memory scan above excluded seed:scale runs). When ?tenant=mhn, REPLACE the live counts
+  // with the scale ones; otherwise ADD them. Skipped when scoped to a non-mhn tenant.
+  await foldScaleCounts(deps, summaries, filters.tenant?.trim() || null);
+
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
+}
+
+/** Add (or, for ?tenant=mhn, replace with) the scale tenant's per-measure counts from the latest
+ *  seed:scale run per measure. Bounded — aggregateScaleRun never materializes the per-subject rows. */
+async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], tenant: string | null): Promise<void> {
+  if (tenant && tenant !== "mhn") return; // scoped to a non-scale tenant → no scale data
+  const scaleRuns = (await deps.runStore.listRuns(100_000))
+    .filter((r) => r.triggeredBy === "seed:scale" && r.status === "COMPLETED")
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  if (scaleRuns.length === 0) return;
+  const latest = new Map<string, string>(); // measureId → latest scale runId
+  for (const r of scaleRuns) if (r.scopeId) latest.set(r.scopeId, r.id);
+
+  for (const s of summaries) {
+    const runId = latest.get(s.measureId);
+    if (!runId) {
+      if (tenant === "mhn") zeroSummary(s); // mhn-scoped but no scale data for this measure
+      continue;
+    }
+    const groups = await deps.outcomeStore.aggregateScaleRun(runId);
+    const n = (st: string) => groups.filter((g) => g.status === st).reduce((a, g) => a + g.count, 0);
+    const baseTotal = tenant === "mhn" ? 0 : s.totalEvaluated;
+    const base = (cur: number) => (tenant === "mhn" ? 0 : cur);
+    s.compliant = base(s.compliant) + n("COMPLIANT");
+    s.dueSoon = base(s.dueSoon) + n("DUE_SOON");
+    s.overdue = base(s.overdue) + n("OVERDUE");
+    s.missingData = base(s.missingData) + n("MISSING_DATA");
+    s.excluded = base(s.excluded) + n("EXCLUDED");
+    s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
+    s.complianceRate = round1(s.compliant, s.totalEvaluated);
+    if (tenant === "mhn") s.latestRunId = runId;
+  }
+}
+
+function zeroSummary(s: ProgramSummary): void {
+  s.totalEvaluated = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
+  s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
 /** Run groups carrying site-filtered outcomes for one measure (bounded query, no per-run fan-out). */
