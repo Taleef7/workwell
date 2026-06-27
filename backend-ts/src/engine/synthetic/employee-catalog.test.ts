@@ -50,10 +50,11 @@ test("provider attribution is deterministic (stable across imports)", () => {
 
 // ---- multi-tenant (#185 E13 PR-1) ----
 
-test("two tenants exist with stable ids/names", () => {
-  assert.deepEqual(TENANTS.map((t) => t.id).sort(), ["ihn", "twh"]);
+test("tenants exist with stable ids/names (twh + ihn live; mhn is the scale tenant)", () => {
+  assert.deepEqual(TENANTS.map((t) => t.id).sort(), ["ihn", "mhn", "twh"]);
   assert.equal(tenantById("twh")?.name, "Total Worker Health");
   assert.equal(tenantById("ihn")?.name, "Indus Hospital Network");
+  assert.equal(tenantById("mhn")?.name, "MetroHealth Network");
   assert.equal(tenantById("nope"), null);
 });
 
