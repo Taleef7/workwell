@@ -12,6 +12,7 @@ import type {
   OutcomeMeasureFilter,
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
+  ScaleGroupCount,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -171,5 +172,20 @@ export class SqliteOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
     }));
+  }
+
+  async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
+    // Group by (location, provider, status) parsed from the fixed-width encoded subject_id
+    // (`mhn|Lxx|Pxx|nnnnnnnn`): substr 5..7 = location, 9..11 = provider. The GROUP BY returns
+    // O(locations×providers×statuses) rows, never the per-subject rows.
+    const { results } = await this.db
+      .prepare(
+        `SELECT substr(subject_id, 5, 3) AS location_id, substr(subject_id, 9, 3) AS provider_id, status, COUNT(*) AS count
+           FROM outcomes WHERE run_id = ? AND subject_id LIKE 'mhn|%'
+          GROUP BY location_id, provider_id, status`,
+      )
+      .bind(runId)
+      .all<{ location_id: string; provider_id: string; status: string; count: number }>();
+    return (results ?? []).map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
   }
 }
