@@ -76,35 +76,16 @@ test("IHN employees are applicable to the baseline wellness/eCQM measures under 
   assert.ok(isApplicable(physician, "adult_immunization", segments), "IHN physician applicable to adult_immunization");
 });
 
-test("self-heal: an already-seeded twh-only baseline is widened to cover new tenant sites", async () => {
+test("seeding is name-idempotent — an already-seeded baseline is left untouched (owner-gated repair)", async () => {
   const db = await freshDb();
   const store = new SqliteSegmentStore(db);
-  // Simulate the pre-E13 live state: "All Employees" exists with only the twh sites.
-  await store.createSegment({
-    name: "All Employees",
-    description: "pre-E13",
-    rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: ["HQ", "Plant A", "Plant B", "Clinic"] }] },
-    measureIds: ["hypertension"],
-  });
-  await seedSegments(store);
-  const healed = (await store.listSegments()).find((s) => s.name === "All Employees")!;
-  const sites = new Set(healed.rule.conditions[0]!.value as string[]);
-  for (const s of ["North Campus", "South Campus", "Outpatient Clinic"]) {
-    assert.ok(sites.has(s), `self-heal must add IHN site ${s}`);
-  }
-  // the other demo segments still get created
-  assert.ok((await store.listSegments()).find((s) => s.name === "OSHA Safety-Sensitive"));
-});
-
-test("self-heal leaves an operator-reshaped baseline untouched", async () => {
-  const db = await freshDb();
-  const store = new SqliteSegmentStore(db);
-  // An operator narrowed "All Employees" to a role rule — a non-seed shape we must not clobber.
+  // An operator-customized "All Employees" already exists; a re-seed must not clobber it (the
+  // E13 site widening for an already-seeded row is an owner-gated audited route edit, not a boot write).
   const operatorRule = { match: "ANY" as const, conditions: [{ attr: "role" as const, op: "contains" as const, value: "Nurse" }] };
   await store.createSegment({ name: "All Employees", description: "operator", rule: operatorRule, measureIds: ["hypertension"] });
   await seedSegments(store);
   const after = (await store.listSegments()).find((s) => s.name === "All Employees")!;
-  assert.deepEqual(after.rule, operatorRule, "operator-reshaped baseline must be left as-is");
+  assert.deepEqual(after.rule, operatorRule, "existing baseline must be left as-is");
 });
 
 test("demo seed covers every Active runnable measure (no measure orphaned)", () => {
