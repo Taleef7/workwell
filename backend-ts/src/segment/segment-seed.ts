@@ -53,38 +53,24 @@ export const DEMO_SEGMENTS: CreateSegmentInput[] = [
   },
 ];
 
-/** The seed-managed baseline shape — a single ANY/site-in condition. A rule an operator has
- *  reshaped (different match/attr/op or condition count) is intentionally left untouched. */
-function isSeedBaselineShape(rule: SegmentRule): boolean {
-  const c = rule.conditions ?? [];
-  return rule.match === "ANY" && c.length === 1 && c[0]!.attr === "site" && c[0]!.op === "in" && Array.isArray(c[0]!.value);
-}
-/** True if a seed-shaped baseline rule is missing any current directory site — i.e. it predates a
- *  newly-added tenant and under-covers the workforce. */
-function baselineUnderCoversSites(rule: SegmentRule): boolean {
-  const have = new Set((rule.conditions[0]!.value as string[]).map(String));
-  return ALL_SITES.some((s) => !have.has(s));
-}
-
 /**
- * Idempotently seed the demo segments — skips any whose name already exists, EXCEPT it self-heals
- * the universal baseline's site coverage. Seeding is name-idempotent and never clobbers operator
- * edits; but when a new tenant adds sites the already-seeded "All Employees" row predates (E13 PR-1),
- * we WIDEN the recognizable seed-shaped baseline rule to all current directory sites so the new
- * tenant isn't silently NOT_APPLICABLE for the baseline measures. We never narrow it, never touch its
- * measures/overrides, and skip a baseline an operator has reshaped.
+ * Idempotently seed the demo segments — skips any whose name already exists (a boot over an
+ * already-seeded DB adds no duplicates and never clobbers operator edits). Bootstrap data only.
+ *
+ * NOTE (E13 PR-1): the baseline rule above now derives its site list from the directory, so a
+ * **fresh** DB (the SQLite floor, a new instance) covers every tenant automatically. An
+ * **already-seeded** stack (e.g. the live Neon demo seeded pre-E13) keeps its old `All Employees`
+ * row because seeding is name-idempotent — and we deliberately do NOT auto-mutate it here: a
+ * boot-time write would be unaudited (every state change must write `audit_event`) and could clobber
+ * an operator-customized rule. The one-time repair is owner-gated (like all data migrations): widen
+ * `All Employees` to the new tenant's sites via the audited `PUT /api/segments/:id` route (the
+ * Configure Groups editor), which records a `SEGMENT_UPDATED` audit event. See docs/DEPLOY.md.
  */
 export async function seedSegments(store: SegmentStore): Promise<void> {
-  const byName = new Map((await store.listSegments()).map((s) => [s.name, s]));
+  const existing = new Set((await store.listSegments()).map((s) => s.name));
   for (const seg of DEMO_SEGMENTS) {
-    const current = byName.get(seg.name);
-    if (!current) {
-      await store.createSegment(seg);
-      continue;
-    }
-    if (seg.name === BASELINE_NAME && isSeedBaselineShape(current.rule) && baselineUnderCoversSites(current.rule)) {
-      await store.updateSegment(current.id, { rule: BASELINE_RULE });
-    }
+    if (existing.has(seg.name)) continue;
+    await store.createSegment(seg);
   }
 }
 

@@ -35,6 +35,16 @@ build` + `npm run test` (99 vitest) green. New/updated tests: multi-tenant direc
 cross-tenant rollup reconciliation + `?tenant=` subtree equality, roster + programs tenant filters,
 `GET /api/tenants`.
 
+**Review fix (Codex PR review).** The enabled `All Employees` baseline segment was scoped to the `twh`
+sites only, so IHN employees would read `NOT_APPLICABLE` for the baseline wellness/eCQM measures and the
+run pipeline would skip their case creation. Fix: the baseline cohort now derives its site list from the
+directory (`ALL_SITES`), so any **fresh** DB auto-covers every tenant. A first attempt added a boot-time
+*self-heal* of an already-seeded row, but a follow-up review flagged it as an unaudited state change (the
+hard "every state change writes `audit_event`" rule) that could also clobber operator edits — so it was
+removed. The one already-seeded **live** row is an **owner-gated, audited repair** via `PUT /api/segments/:id`
+(the Configure Groups editor), documented in `docs/DEPLOY.md`. Also fixed `distribution.test.ts` to derive
+expected outcome counts from `N` (was hardcoded to the old 100-employee population).
+
 **Next (E13):** PR-2 population-scale batch (~120k) + seed/scale harness; PR-3 scheduled cron recompute
 (wire the inert `/api/admin/scheduler`). The real WebChart adapter is E12 PR-2 (blocked on MIE schema).
 
