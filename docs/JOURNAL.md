@@ -31,8 +31,16 @@ timeout); the next `pnpm seed:scale` invocation sees no `COMPLETED` run and re-s
 **Verification.** 765 tests: 764 pass, 1 skipped (Pg-ceiling self-skips without local Postgres), 0 fail.
 PR #215 merged by Taleef; local branch `feat/e13-population-scale` deleted.
 
-**Owner step (pending):** run `pnpm seed:scale --subjects 120000 --as-of 2026-06-26` against Neon
-once the deploy settles — the feature is live but `mhn` only appears in the rollup after seeding.
+**Owner steps completed (2026-06-29):**
+- `pnpm seed:scale --subjects 120000 --as-of 2026-06-26` run against Neon via Neon MCP connection string:
+  **14 runs × 120,000 subjects = 1,680,000 outcomes** written; `mhn` now in the live rollup.
+- `All Employees` segment widened via the audited `PUT /api/segments/ad1facc4-...` to all 7 sites
+  (`Clinic`, `HQ`, `North Campus`, `Outpatient Clinic`, `Plant A`, `Plant B`, `South Campus`) —
+  `SEGMENT_UPDATED` audit event recorded; `updatedAt` → 2026-06-29T15:12:24.
+- `ALL_PROGRAMS` run triggered (runId `1a9f2ed4-...`) to evaluate all 150 employees (twh + ihn)
+  → 2100 outcomes, COMPLETED in ~10.5 min (631,966 ms).
+- **Live smoke check:** All Systems rollup = 1,682,100 evaluated (ihn 700 + twh 1,400 + mhn 1,680,000),
+  78.1% overall. All three tenants present; reconciliation holds (All = Σ tenants).
 
 ---
 
