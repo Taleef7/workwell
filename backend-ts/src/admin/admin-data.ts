@@ -61,22 +61,6 @@ export function syncIntegration(integration: string): IntegrationHealth | null {
   return { ...entry };
 }
 
-// ---- scheduler (in-process toggle; resets on restart — demo settings) --------
-export interface SchedulerStatus {
-  enabled: boolean;
-  cron: string;
-  nextFireAt: string | null;
-  lastRunAt: string | null;
-  lastRunStatus: string;
-}
-let schedulerEnabled = false;
-const CRON = "0 0 6 * * *";
-export const schedulerStatus = (): SchedulerStatus => ({ enabled: schedulerEnabled, cron: CRON, nextFireAt: null, lastRunAt: null, lastRunStatus: "unknown" });
-export function setSchedulerEnabled(enabled: boolean): SchedulerStatus {
-  schedulerEnabled = enabled;
-  return schedulerStatus();
-}
-
 // Terminology mappings moved to value-set governance (#108): they are now persisted in the
 // terminology_mappings table (demo rows seeded by value-set-seed.ts) and served from the
 // ValueSetStore via /api/admin/terminology-mappings (list + create). See value-set-governance.ts.

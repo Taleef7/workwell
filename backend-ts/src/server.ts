@@ -17,6 +17,8 @@
  * §4 prerequisites in docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md).
  */
 
+import { initSchedulerFromEnv, schedulerTick } from "./admin/scheduler.ts";
+
 export {}; // module marker (keeps this a module even though every import below is dynamic)
 
 const target = process.env.MIEWEB_TARGET ?? "mieweb";
@@ -45,11 +47,24 @@ async function main(): Promise<void> {
   const host = await startLocalHost({ config });
   console.log(`[workwell] backend-ts host listening on :${host.port} (target=${target})`);
 
+  // Scheduled cron recompute (E13 PR-3): fires an ALL_PROGRAMS run once the 23.5h cooldown
+  // expires. The 5-min poll is shorter than the cooldown so the window is never missed; runTick
+  // is idempotent — two concurrent ticks are safe (the cooldown check inside runTick debounces).
+  // StoresEnv.DB is optional; when DATABASE_URL is set the Pg ceiling is used and DB is not accessed.
+  initSchedulerFromEnv(process.env);
+  const schedulerEnv = { DATABASE_URL: process.env.DATABASE_URL };
+  const schedulerInterval = setInterval(() => {
+    void schedulerTick(schedulerEnv).catch((e: unknown) =>
+      console.error("[workwell] scheduler tick error", e instanceof Error ? e.message : e),
+    );
+  }, 5 * 60 * 1000); // 5 minutes
+
   let stopping = false;
   const shutdown = (signal: string): void => {
     if (stopping) return;
     stopping = true;
     console.log(`[workwell] ${signal} received — draining for up to ${shutdownGraceMs}ms, then exiting`);
+    clearInterval(schedulerInterval); // stop the in-process scheduler tick before draining
     host.stop(); // stops accepting new connections + clears the cron tick
     // host.stop() does NOT await in-flight responses (nor ctx.waitUntil run-jobs — a host-harness
     // limitation that doesn't expose the underlying server), so give them a bounded drain window and
