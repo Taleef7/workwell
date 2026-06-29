@@ -191,6 +191,10 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   if (deps.runStore && (!tenantFilter || tenantFilter === SCALE_TENANT.id)) {
     const scaleRuns = (await deps.runStore.listRuns(100_000))
       .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED")
+      // Honor the date window: skip scale runs seeded outside the requested [from, to] period so
+      // a date-filtered rollup doesn't silently include the full 120k mhn population when it
+      // shouldn't (the live branch already filters live outcomes by the same window).
+      .filter((r) => (!from || day(r.startedAt) >= from) && (!to || day(r.startedAt) <= to))
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt)); // asc → last write per measure wins
     const latestByMeasure = new Map<string, string>(); // measureId → latest scale runId
     for (const r of scaleRuns) {

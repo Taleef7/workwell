@@ -24,7 +24,9 @@ test("buildScaleSubtree → tenant→enterprise→location→provider(leaf), rec
   const loc = ent.children.find((c) => c.id === "L00")!;
   assert.equal(loc.level, "location");
   assert.equal(loc.totals.evaluated, 4);
-  const p00 = loc.children.find((c) => c.id === "P00")!;
+  // provider ids are location-qualified (L00:P00) to avoid duplicate keys when multiple
+  // mhn locations are expanded simultaneously in the hierarchy UI (Fix 3, Codex P2).
+  const p00 = loc.children.find((c) => c.id === "L00:P00")!;
   assert.equal(p00.level, "provider");
   assert.equal(p00.children.length, 0, "provider is a leaf (no 120k patients)");
   assert.equal(p00.totals.evaluated, 3);
