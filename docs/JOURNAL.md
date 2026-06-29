@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-06-29 — E14 PR-2: criteria-impact outcome diff
+
+**What shipped:** `GET /api/measures/:id/fidelity/diff` — a pure criteria-impact analysis that shows, criterion by criterion, how many subjects from the latest CMS122 population run would have different outcomes if the official eCQM criteria (currently OMITTED/SIMPLIFIED in WorkWell's authored measure) were applied. Descriptive only (ADR-008).
+
+**New files:**
+- `backend-ts/src/standards/outcome-diff.ts` — `computeOutcomeDiff(ref, outcomes, evalYear)` pure function + `CriterionImpact` / `OutcomeDiffReport` types. Contains a local `syntheticBirthYear` duplicate (keeps standards module free of engine/synthetic deps).
+- Tests: `outcome-diff.test.ts` — 11 unit tests (spec bundled items 10a+10b into separate tests).
+
+**Route wired:** `measures.ts` + 3 integration tests. Route placed before the existing `/fidelity` block to prevent pattern swallow.
+
+**Criteria analysis:**
+- `age-18-75` (OMITTED, IPP) — verifiable: synthetic employees hash to birth years 1980–1999 → ages 27–46 in 2026 → **0 divergent** for the synthetic dataset. A past evalYear test confirms out-of-range ages are counted.
+- `qualifying-visit`, `hospice`, `long-term-care-66`, `advanced-illness-frailty-66`, `palliative-care` — **unverifiable**: synthetic FHIR bundles carry no Encounter/hospice/frailty/palliative resources.
+- `denominator-equals-ipp` — unverifiable (depends on IPP gate divergence).
+- `numerator-exclusions-none` (COVERED) — verifiable, 0 divergent.
+
+**Test results:** 785 pass, 0 fail, 1 pg-skip. No schema change, no new deps.
+
+**Deferred:** A full outcome diff (running the official CQL with real VSAC value sets) requires the `ValueSetResolver` port once VSAC credentials are available (E3.2 seam already in place). The criteria-impact analysis is the PR-2 structural-first deliverable (ADR-018).
+
+**Next:** E14 PR-3 (full official-CQL execution/outcome diff via ValueSetResolver), E13 PR-3 (scheduled cron recompute), E12 PR-2 (WebChart adapter — blocked on MIE schema).
+
 ## 2026-06-29 — E13 PR-3: scheduled cron recompute
 
 Third and final E13 slice — wires the previously-inert `/api/admin/scheduler` endpoint to fire
