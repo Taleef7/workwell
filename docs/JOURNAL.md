@@ -1,5 +1,70 @@
 # Journal
 
+## 2026-06-29 — E13 PR-3: scheduled cron recompute
+
+Third and final E13 slice — wires the previously-inert `/api/admin/scheduler` endpoint to fire
+real, audited `ALL_PROGRAMS` runs on a 24-hour interval. This closes E13 (#185).
+
+**What was built (backend-ts only; no schema, no new deps):**
+
+- **`backend-ts/src/admin/scheduler.ts`** (new, ~200 lines) — the scheduler module:
+  - `initSchedulerFromEnv(env)` — reads `WORKWELL_SCHEDULER_ENABLED` on server start (opt-in,
+    `false` by default so the demo stack is unaffected without the env var).
+  - `runTick(deps)` — the audited tick: (1) guard if disabled, (2) debounce: skip if < 23.5h since
+    last `triggered_by="scheduler"` run (checked via `listRuns(50)` — no extra table), (3) write
+    `SCHEDULER_RUN_TRIGGERED` audit event **before** `planManualRun` (hard rule: every state change
+    writes audit first), (4) `planManualRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler" })`,
+    (5) `finishOrFail` (never throws — safe outside `ctx.waitUntil`), returns `true`.
+  - `getSchedulerStatusFromStores(stores)` — derives `lastRunAt`/`nextFireAt`/`lastRunStatus`
+    read-time from `listRuns(50)` filtered by `triggered_by`; no new DB column.
+  - `schedulerTick(env)` — production wrapper; errors swallowed so the `setInterval` callback
+    never crashes the process.
+
+- **`backend-ts/src/admin/scheduler.test.ts`** (new, 5 tests on the SQLite floor + mock engine):
+  1. Disabled guard returns `false` without writing any audit event.
+  2. Happy path: `runTick` fires one `ALL_PROGRAMS` run + one `SCHEDULER_RUN_TRIGGERED` audit event.
+  3. Debounce: a second call within 23.5h returns `false` (single run in DB).
+  4. `getSchedulerStatusFromStores` reflects `enabled=true`, `lastRunAt`, and a non-null `nextFireAt`.
+  5. `getSchedulerStatusFromStores` returns `nextFireAt=null` when disabled.
+
+- **`backend-ts/src/run/read-models.ts`** — `triggerTypeOf` now returns `"SCHEDULED"` for
+  `triggered_by === "scheduler"` (alongside the existing `"SEED"` and `"MANUAL"` values). Scheduler
+  runs appear with `triggerType:"SCHEDULED"` on `GET /api/runs`.
+
+- **`backend-ts/src/admin/admin-data.ts`** — removed the ~16-line in-memory stub (`SchedulerStatus`,
+  `schedulerEnabled`, `CRON`, `schedulerStatus()`, `setSchedulerEnabled()`).
+
+- **`backend-ts/src/routes/admin.ts`** — `GET /scheduler` now calls `getSchedulerStatus(env)` (real,
+  derived from DB); `POST /scheduler` calls `setSchedulerEnabled(enabled)` then returns the real
+  status. Imports switched from `admin-data.ts` to `scheduler.ts`.
+
+- **`backend-ts/src/server.ts`** — after host start: `initSchedulerFromEnv(process.env)` reads the
+  opt-in flag; `setInterval(() => void schedulerTick({...}).catch(...), 5 * 60 * 1000)` fires the
+  tick every 5 minutes (shorter than the 23.5h cooldown, so the scheduler never misses its window;
+  `runTick` debounce makes extra ticks idempotent). The interval handle is cleared on process shutdown.
+
+**Design decisions:**
+- **In-process `setInterval`** — mirrors the self-heal reconciler philosophy (small, contained). No
+  new cron infrastructure. 5-min tick × 23.5h debounce means worst-case lag is ~5 min.
+- **Audit-before-run invariant** — `SCHEDULER_RUN_TRIGGERED` is written before `planManualRun`
+  so a crash between audit and run creation is self-healing (the run is created on the next tick;
+  the audit event is not re-written twice — debounce sees the COMPLETED run).
+- **No schema** — scheduler status is derived read-time from `runs.triggered_by`; the existing
+  `audit_events` table absorbs `SCHEDULER_RUN_TRIGGERED` with no DDL.
+- **Opt-in** — `WORKWELL_SCHEDULER_ENABLED` is unset on the current demo stack; deploying this PR
+  does not change live behaviour without the env var. Add to `deploy-twh-mieweb.yml` env block
+  when ready to activate.
+
+**Verification.** 770 tests: 769 pass, 1 skipped (Pg-ceiling self-skips), 0 fail. TypeScript
+typecheck clean. Three commits: `8b7a6ed` (Task 1 — `triggerTypeOf`), `76bdc7d` (Tasks 2+3 —
+scheduler module + tests), `096f2c2` (Tasks 4–6 — route/server wiring).
+
+**Next:** E14 PR-2 (official-CQL execution/outcome diff against the vendored CMS122v14 spec),
+E12 PR-2 (WebChart/MariaDB→FHIR adapter — blocked on MIE schema), E15 (#187, cross-system identity
+— leans on E12+E13), and the deferred WCAG chart accessible-alternatives.
+
+---
+
 ## 2026-06-29 — E13 PR-2 Codex review fixes + merge (PR #215)
 
 Four Codex P2 inline comments on PR #215 addressed before merge:
