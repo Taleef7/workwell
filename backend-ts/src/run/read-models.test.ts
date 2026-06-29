@@ -60,6 +60,11 @@ test("triggerType reflects triggered_by — seed runs surface as SEED, not MANUA
   assert.equal(matchesRunFilters(run({ triggeredBy: "seed:trend-history" }), { triggerType: "MANUAL" }), false);
   assert.equal(matchesRunFilters(run({ triggeredBy: "seed:trend-history" }), { triggerType: "SEED" }), true);
   assert.equal(matchesRunFilters(run({ triggeredBy: "manual" }), { triggerType: "MANUAL" }), true);
+  assert.equal(toRunListItem(run({ triggeredBy: "scheduler" }), sample).triggerType, "SCHEDULED");
+  assert.equal(matchesRunFilters(run({ triggeredBy: "scheduler" }), { triggerType: "SCHEDULED" }), true);
+  assert.equal(matchesRunFilters(run({ triggeredBy: "scheduler" }), { triggerType: "MANUAL" }), false);
+  assert.equal(toRunListItem(run({ triggeredBy: "seed:scale" }), sample).triggerType, "SEED");
+  assert.equal(matchesRunFilters(run({ triggeredBy: "seed:scale" }), { triggerType: "SEED" }), true);
 });
 
 test("toRunSummary computes passRate as a percentage + outcomeCounts + freshness + version", () => {
