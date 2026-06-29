@@ -185,17 +185,27 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // E13 PR-2: fold in the population-scale mhn tenant's per-measure counts via SQL aggregation
   // (the in-memory scan above excluded seed:scale runs). When ?tenant=mhn, REPLACE the live counts
   // with the scale ones; otherwise ADD them. Skipped when scoped to a non-mhn tenant.
-  await foldScaleCounts(deps, summaries, filters.tenant?.trim() || null);
+  await foldScaleCounts(deps, summaries, filters);
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
 }
 
 /** Add (or, for ?tenant=mhn, replace with) the scale tenant's per-measure counts from the latest
- *  seed:scale run per measure. Bounded — aggregateScaleRun never materializes the per-subject rows. */
-async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], tenant: string | null): Promise<void> {
+ *  seed:scale run per measure. Bounded — aggregateScaleRun never materializes the per-subject rows.
+ *  Skipped when a site filter is active (scale data has no equivalent site dimension) or when the
+ *  date window excludes the scale run's startedAt (keeps filtered KPIs consistent). */
+async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], filters: ProgramFilters): Promise<void> {
+  const tenant = filters.tenant?.trim() || null;
   if (tenant && tenant !== "mhn") return; // scoped to a non-scale tenant → no scale data
+  // Scale data is not filterable by the live-tenant site dimension — skip when site is active so
+  // a scoped view like ?site=Plant+A doesn't silently add the full 120k mhn population.
+  if (filters.site?.trim()) return;
+  const from = filters.from?.trim() || null;
+  const to = filters.to?.trim() || null;
   const scaleRuns = (await deps.runStore.listRuns(100_000))
     .filter((r) => r.triggeredBy === "seed:scale" && r.status === "COMPLETED")
+    // Honor the date window so a date-filtered view doesn't include out-of-window scale runs.
+    .filter((r) => (!from || day(r.startedAt) >= from) && (!to || day(r.startedAt) <= to))
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   if (scaleRuns.length === 0) return;
   const latest = new Map<string, string>(); // measureId → latest scale runId

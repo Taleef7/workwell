@@ -39,7 +39,10 @@ export function buildScaleSubtree(groups: ScaleGroupCount[]): HierarchyNode | nu
   for (const [k, t] of provTotals) {
     const [locId, provId] = k.split("|") as [string, string];
     const provName = scaleProvidersFor(locId).find((p) => p.id === provId)?.name ?? provId;
-    const provNode: HierarchyNode = { level: "provider", id: provId, name: provName, parentId: locId, totals: seal(t), children: [] };
+    // Use a location-qualified id so P00 in L00 and P00 in L01 never share a tree key (the
+    // hierarchy UI keys expansion state as `${level}:${id}` — duplicate bare provId would cause
+    // React to reconcile the wrong row when multiple mhn locations are open simultaneously).
+    const provNode: HierarchyNode = { level: "provider", id: `${locId}:${provId}`, name: provName, parentId: locId, totals: seal(t), children: [] };
     (provsByLoc.get(locId) ?? provsByLoc.set(locId, []).get(locId)!).push(provNode);
     acc(locTotals.get(locId) ?? locTotals.set(locId, zero()).get(locId)!, t);
   }
