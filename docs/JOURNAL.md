@@ -1,5 +1,41 @@
 # Journal
 
+## 2026-06-29 — E13 PR-2 Codex review fixes + merge (PR #215)
+
+Four Codex P2 inline comments on PR #215 addressed before merge:
+
+**P2-1 — site filter in `foldScaleCounts`.** The scale tenant (`mhn`) has its own location/provider
+dimension that doesn't map to the `?site=` filter used by live tenants. When a site filter is active
+the correct behaviour is to skip the scale fold entirely rather than blindly adding unfiltered 120k
+data. Added an early return: `if (filters.site?.trim()) return;` in `program/program-read-models.ts`.
+
+**P2-2 — date window in both read paths.** `foldScaleCounts` (programs overview) and
+`buildHierarchyRollup` (hierarchy rollup) both now honour `from`/`to` when selecting which
+`seed:scale` runs to aggregate. Uses the existing `day()` helper from `rollup-shared.ts` to compare
+ISO date strings at day granularity — the same mechanism the live branch uses for live outcomes.
+
+**P2-3 — React key uniqueness for mhn providers.** Provider IDs `P00`–`P09` are recycled across
+all 24 `mhn` locations. Using a bare `provId` as the node id meant React could reconcile the wrong
+row when multiple mhn locations were expanded simultaneously in the hierarchy UI (expansion state is
+keyed `${level}:${id}`). Fixed in `program/scale-rollup.ts`: provider node id is now
+`${locId}:${provId}` (e.g. `L00:P00`). No UI change required. Updated `scale-rollup.test.ts`
+assertion accordingly.
+
+**P2-4 — partial-seed idempotency.** The idempotency check in `run/backfill-scale.ts` previously
+skipped a measure if any `seed:scale` run existed for it — including a `RUNNING` run left by a
+prior crash. Now only `COMPLETED` runs are treated as fully seeded. The seed flow was changed to
+create the run as `RUNNING`, write outcomes in chunks, then call `finalizeRun(id, "COMPLETED")`.
+A crashed mid-seed run stays `RUNNING` and is eventually failed by `failStuckRuns` (30 min
+timeout); the next `pnpm seed:scale` invocation sees no `COMPLETED` run and re-seeds that measure.
+
+**Verification.** 765 tests: 764 pass, 1 skipped (Pg-ceiling self-skips without local Postgres), 0 fail.
+PR #215 merged by Taleef; local branch `feat/e13-population-scale` deleted.
+
+**Owner step (pending):** run `pnpm seed:scale --subjects 120000 --as-of 2026-06-26` against Neon
+once the deploy settles — the feature is live but `mhn` only appears in the rollup after seeding.
+
+---
+
 ## 2026-06-26 — E13 PR-2: population-scale tenant (120k) in the rollup
 
 Second E13 slice — proving the multi-tenant rollup scales to a ~120k-subject tenant on the live stack
