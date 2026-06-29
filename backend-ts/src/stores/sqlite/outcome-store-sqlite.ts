@@ -12,6 +12,8 @@ import type {
   OutcomeMeasureFilter,
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
+  ScaleGroupCount,
+  MeasureScanOptions,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -127,11 +129,13 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }));
   }
 
-  async listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]> {
+  async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
+    // E13 PR-2: excludeScale drops the population-scale tenant's (mhn-prefixed) rows in SQL.
+    const scaleClause = opts?.excludeScale ? ` AND subject_id NOT LIKE 'mhn|%'` : "";
     const { results } = await this.db
       .prepare(
         `SELECT subject_id, status, evaluation_period, evaluated_at, evidence_json
-           FROM outcomes WHERE measure_id = ? ORDER BY evaluated_at ASC`,
+           FROM outcomes WHERE measure_id = ?${scaleClause} ORDER BY evaluated_at ASC`,
       )
       .bind(measureId)
       .all<{ subject_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
@@ -153,6 +157,8 @@ export class SqliteOutcomeStore implements OutcomeStore {
     if (filter.measureId) (where.push("o.measure_id = ?"), binds.push(filter.measureId));
     if (filter.from) (where.push("substr(r.started_at, 1, 10) >= ?"), binds.push(filter.from));
     if (filter.to) (where.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));
+    // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
+    if (filter.excludeScale) where.push("r.triggered_by <> 'seed:scale'");
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
@@ -171,5 +177,20 @@ export class SqliteOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
     }));
+  }
+
+  async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
+    // Group by (location, provider, status) parsed from the fixed-width encoded subject_id
+    // (`mhn|Lxx|Pxx|nnnnnnn`): substr 5..7 = location, 9..11 = provider. The GROUP BY returns
+    // O(locations×providers×statuses) rows, never the per-subject rows.
+    const { results } = await this.db
+      .prepare(
+        `SELECT substr(subject_id, 5, 3) AS location_id, substr(subject_id, 9, 3) AS provider_id, status, COUNT(*) AS count
+           FROM outcomes WHERE run_id = ? AND subject_id LIKE 'mhn|%'
+          GROUP BY location_id, provider_id, status`,
+      )
+      .bind(runId)
+      .all<{ location_id: string; provider_id: string; status: string; count: number }>();
+    return (results ?? []).map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
   }
 }

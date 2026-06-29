@@ -10,11 +10,15 @@
  * that don't resolve to a directory employee can't be placed in the tree and are skipped.
  * `?tenant=<id>` returns that single tenant's subtree as the root (E13).
  */
-import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
+import type { OutcomeStore, OutcomeWithRun, ScaleGroupCount } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
+import type { RunStore } from "../stores/run-store.ts";
 import { employeeById, providerById, tenantById, enterpriseForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { day, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
+import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
+import { buildScaleSubtree } from "./scale-rollup.ts";
+import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
 
 export type HierarchyLevel = "all" | "tenant" | "enterprise" | "location" | "provider" | "patient";
 
@@ -41,6 +45,9 @@ export interface HierarchyNode {
 export interface HierarchyDeps {
   outcomeStore: OutcomeStore;
   caseStore: CaseStore;
+  /** When present, the population-scale `mhn` tenant (seed:scale runs) is SQL-aggregated + merged in
+   *  (E13 PR-2). Optional so existing callers/tests without scale data compile unchanged. */
+  runStore?: RunStore;
 }
 
 export interface HierarchyFilters {
@@ -85,7 +92,11 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   };
 
   if (scopeMeasures.length > 0) {
-    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to })).filter((r) => isPopulationRun(r.runScopeType));
+    // The scale tenant (~120k rows) is excluded IN SQL (excludeScale) — never fetched into memory; it
+    // is read only via aggregateScaleRun below. The JS guard stays as defense-in-depth.
+    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true })).filter(
+      (r) => isPopulationRun(r.runScopeType) && r.runTriggeredBy !== SCALE_TRIGGER,
+    );
     const byMeasure = new Map<string, OutcomeWithRun[]>();
     for (const r of allRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scopeMeasures) {
@@ -173,8 +184,37 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     };
   });
 
+  // E13 PR-2: the population-scale mhn subtree, SQL-aggregated (provider-leaf), merged in when a
+  // runStore is provided and the tenant filter doesn't exclude it. Bounded — aggregateScaleRun never
+  // materializes the 120k per-subject rows in app memory.
+  let scaleNode: HierarchyNode | null = null;
+  if (deps.runStore && (!tenantFilter || tenantFilter === SCALE_TENANT.id)) {
+    const scaleRuns = (await deps.runStore.listRuns(100_000))
+      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED")
+      // Honor the date window: skip scale runs seeded outside the requested [from, to] period so
+      // a date-filtered rollup doesn't silently include the full 120k mhn population when it
+      // shouldn't (the live branch already filters live outcomes by the same window).
+      .filter((r) => (!from || day(r.startedAt) >= from) && (!to || day(r.startedAt) <= to))
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt)); // asc → last write per measure wins
+    const latestByMeasure = new Map<string, string>(); // measureId → latest scale runId
+    for (const r of scaleRuns) {
+      if (!r.scopeId) continue;
+      if (measureId && r.scopeId !== measureId) continue;
+      latestByMeasure.set(r.scopeId, r.id);
+    }
+    const groups: ScaleGroupCount[] = [];
+    for (const runId of latestByMeasure.values()) groups.push(...(await deps.outcomeStore.aggregateScaleRun(runId)));
+    scaleNode = buildScaleSubtree(groups);
+  }
+
   // tenant-filtered → that single tenant subtree IS the root (empty zero-node if it has no data)
   if (tenantFilter) {
+    if (tenantFilter === SCALE_TENANT.id) {
+      return scaleNode ?? {
+        level: "tenant", id: SCALE_TENANT.id, name: SCALE_TENANT.name,
+        parentId: "all", totals: seal(zero()), children: [],
+      };
+    }
     return (
       tenantNodes.find((t) => t.id === tenantFilter) ?? {
         level: "tenant", id: tenantFilter, name: tenantById(tenantFilter)?.name ?? tenantFilter,
@@ -183,10 +223,20 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     );
   }
 
+  const allChildren = scaleNode ? [...tenantNodes, scaleNode] : tenantNodes;
   const allTotals = zero();
   for (const t of entTotals.values()) accumulate(allTotals, t);
+  if (scaleNode) accumulate(allTotals, toMut(scaleNode.totals));
   return {
     level: "all", id: "all", name: "All Systems", parentId: null,
-    totals: seal(allTotals), children: tenantNodes,
+    totals: seal(allTotals), children: allChildren.sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+/** Sealed totals → the mutable shape `accumulate` expects (drops the derived complianceRate). */
+function toMut(t: HierarchyTotals): MutableTotals {
+  return {
+    evaluated: t.evaluated, compliant: t.compliant, dueSoon: t.dueSoon, overdue: t.overdue,
+    missingData: t.missingData, excluded: t.excluded, openCases: t.openCases,
   };
 }

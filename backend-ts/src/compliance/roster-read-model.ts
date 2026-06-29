@@ -78,7 +78,10 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   //    CASE/EMPLOYEE reruns AND in-flight RUNNING runs — an async ALL_PROGRAMS/SITE run persists each
   //    outcome before it finalizes, so without the terminal-status guard `latestRunRows` could pick a
   //    partial in-flight run and surface partial statuses/NA (matches programOverview / order proposals).
-  const popRows = (await deps.outcomeStore.listOutcomesWithRun({})).filter(
+  // excludeScale: the population-scale tenant (~120k rows) is excluded IN SQL — the roster is the
+  // live directory grid (E13 PR-2 scope excludes scale), and a seed:scale run must never become a
+  // measure's "latest population run" here (it would both load 120k rows and show NA for everyone).
+  const popRows = (await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true })).filter(
     (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();

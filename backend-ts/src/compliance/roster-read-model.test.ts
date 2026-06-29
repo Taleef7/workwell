@@ -34,6 +34,7 @@ function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecor
     listOutcomesForMeasure: async () => { throw new Error("unused"); },
     listOutcomesForEmployee: async () => { throw new Error("unused"); },
     getOutcomeById: async () => { throw new Error("unused"); },
+    aggregateScaleRun: async () => [],
   } as OutcomeStore;
 }
 
