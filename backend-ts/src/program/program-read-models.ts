@@ -139,7 +139,9 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // run". An in-flight ALL_PROGRAMS run writes outcomes incrementally, so without this filter the
   // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
   // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
-  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
+  // excludeScale drops the scale tenant's ~120k rows IN SQL (the scale KPIs are folded in separately
+  // via aggregateScaleRun below). The JS guard stays as defense-in-depth.
+  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true })).filter(
     (r) =>
       siteMatch(r.subjectId) &&
       tenantMatch(r.subjectId) &&
@@ -234,6 +236,9 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
       measureId,
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
+      // E13 PR-2: trend + top-drivers are NOT extended to the scale tenant; exclude it in SQL so a
+      // seeded measure's 120k rows never enter this scan (bounded) and never skew the live charts.
+      excludeScale: true,
     })
   ).filter((r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
   return groupByRun(rows);
@@ -345,7 +350,9 @@ export async function programRiskOutlook(
   const horizon = Math.max(1, Math.min(Number.isFinite(horizonDays) ? Math.trunc(horizonDays) : 30, 180));
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId);
+  // E13 PR-2: risk-outlook is NOT extended to the scale tenant; exclude its (mhn-prefixed) rows in SQL
+  // so a seeded measure's 120k rows never materialize into the per-subject map (bounded memory).
+  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId, { excludeScale: true });
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
   const latestBySubject = new Map<string, MeasureOutcomeRow>();

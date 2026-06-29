@@ -14,6 +14,7 @@ import type {
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
   ScaleGroupCount,
+  MeasureScanOptions,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -142,7 +143,10 @@ export class PgOutcomeStore implements OutcomeStore {
     }));
   }
 
-  async listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]> {
+  async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
+    // E13 PR-2: when excludeScale is set, drop the population-scale tenant's rows IN SQL (its subject
+    // ids are mhn-prefixed) so the per-measure analytics never fetch the 120k rows into app memory.
+    const scaleClause = opts?.excludeScale ? ` AND subject_id NOT LIKE 'mhn|%'` : "";
     const { rows } = await this.pool.query<{
       subject_id: string;
       status: string;
@@ -151,7 +155,7 @@ export class PgOutcomeStore implements OutcomeStore {
       evidence_json: unknown;
     }>(
       `SELECT subject_id, status, evaluation_period, evaluated_at, evidence_json
-         FROM ${T} WHERE measure_id = $1 ORDER BY evaluated_at ASC`,
+         FROM ${T} WHERE measure_id = $1${scaleClause} ORDER BY evaluated_at ASC`,
       [measureId],
     );
     return rows.map((r) => ({
@@ -171,6 +175,8 @@ export class PgOutcomeStore implements OutcomeStore {
     if (filter.measureId) where.push(`o.measure_id = $${binds.push(filter.measureId)}`);
     if (filter.from) where.push(`r.started_at::date >= $${binds.push(filter.from)}::date`);
     if (filter.to) where.push(`r.started_at::date <= $${binds.push(filter.to)}::date`);
+    // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
+    if (filter.excludeScale) where.push(`r.triggered_by <> 'seed:scale'`);
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { rows } = await this.pool.query<{
       run_id: string;
@@ -199,6 +205,7 @@ export class PgOutcomeStore implements OutcomeStore {
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
+    if (!isUuid(runId)) return []; // guard like the sibling reads (avoid invalid-uuid-syntax errors)
     // Single GROUP BY over the encoded subject_id (`mhn|Lxx|Pxx|n`) — returns
     // O(locations×providers×statuses) rows, never the 120k per-subject rows.
     const { rows } = await this.pool.query<{ location_id: string; provider_id: string; status: string; count: string }>(

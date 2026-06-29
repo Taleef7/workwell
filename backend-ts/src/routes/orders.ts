@@ -45,7 +45,9 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
   const s = await getStores(env);
   const atRisk: AtRiskOutcome[] = [];
   if (scope.length > 0) {
-    const all = (await s.outcomes.listOutcomesWithRun({ from, to })).filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
+    // excludeScale: order proposals derive from the latest live population run per measure; the
+    // generated scale tenant (~120k rows) is excluded in SQL (E13 PR-2 — bounded + never proposes for it).
+    const all = (await s.outcomes.listOutcomesWithRun({ from, to, excludeScale: true })).filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
     const byMeasure = new Map<string, typeof all>();
     for (const r of all) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scope) {

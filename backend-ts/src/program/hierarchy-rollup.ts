@@ -92,7 +92,9 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   };
 
   if (scopeMeasures.length > 0) {
-    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to })).filter(
+    // The scale tenant (~120k rows) is excluded IN SQL (excludeScale) — never fetched into memory; it
+    // is read only via aggregateScaleRun below. The JS guard stays as defense-in-depth.
+    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true })).filter(
       (r) => isPopulationRun(r.runScopeType) && r.runTriggeredBy !== SCALE_TRIGGER,
     );
     const byMeasure = new Map<string, OutcomeWithRun[]>();
