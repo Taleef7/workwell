@@ -37,16 +37,22 @@ const SCHEDULER_RUN_INTERVAL_HOURS = 24;
 // ---------------------------------------------------------------------------
 
 let schedulerEnabled = false;
+/** Wall-clock ms when the scheduler was last enabled — used to compute the first-fire gate. */
+let _enabledAtMs: number | null = null;
 
 /** Read WORKWELL_SCHEDULER_ENABLED from env once at startup and set the flag. */
 export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string }): void {
   const val = (env.WORKWELL_SCHEDULER_ENABLED ?? "").trim().toLowerCase();
-  schedulerEnabled = val === "true" || val === "1";
+  setSchedulerEnabled(val === "true" || val === "1");
 }
 
-/** Programmatically enable or disable the scheduler (e.g. from the admin toggle route). */
-export function setSchedulerEnabled(enabled: boolean): void {
+/**
+ * Programmatically enable or disable the scheduler (e.g. from the admin toggle route).
+ * The optional `enabledAtMs` override is for tests — in production it defaults to Date.now().
+ */
+export function setSchedulerEnabled(enabled: boolean, enabledAtMs?: number): void {
   schedulerEnabled = enabled;
+  _enabledAtMs = enabled ? (enabledAtMs ?? Date.now()) : null;
 }
 
 /** Returns the current in-memory enabled state. */
@@ -97,8 +103,7 @@ function computeNextFireAt(lastAt: string | null): string | null {
  * Injectable for tests — takes a resolved Stores bundle directly.
  */
 export async function getSchedulerStatusFromStores(stores: Stores): Promise<SchedulerStatus> {
-  const runs = await stores.runs.listRuns(50);
-  const schedulerRun = runs.find((r) => r.triggeredBy === "scheduler");
+  const schedulerRun = await stores.runs.getLastRunByTriggeredBy("scheduler");
   const lastRunAt = schedulerRun?.startedAt ?? null;
   const lastRunStatus = schedulerRun?.status ?? "unknown";
   return {
@@ -135,17 +140,28 @@ export interface SchedulerTickDeps {
  *
  * Invariant: the SCHEDULER_RUN_TRIGGERED audit event is written BEFORE the run is created.
  * finishOrFail never throws — safe to hand to ctx.waitUntil.
+ *
+ * @param nowMs - Current time in ms (injectable for tests; defaults to Date.now()).
  */
-export async function runTick(deps: SchedulerTickDeps): Promise<boolean> {
+export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Promise<boolean> {
   if (!schedulerEnabled) return false;
 
-  // Debounce: skip if a scheduler run already exists and is less than (interval - 0.5 h) old.
-  const runs = await deps.stores.runs.listRuns(50);
-  const lastSchedulerRun = runs.find((r) => r.triggeredBy === "scheduler");
+  // P2-2 fix: targeted single-row query avoids the listRuns page cap.
+  const lastSchedulerRun = await deps.stores.runs.getLastRunByTriggeredBy("scheduler");
   if (lastSchedulerRun) {
-    const elapsed = Date.now() - new Date(lastSchedulerRun.startedAt).getTime();
+    // Debounce: skip if the last scheduler run is less than (interval - 0.5 h) old.
+    const elapsed = nowMs - new Date(lastSchedulerRun.startedAt).getTime();
     const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
     if (elapsed < minGapMs) return false;
+  } else {
+    // P2-1 fix: no prior run — honor the next-fire time computed at enable time.
+    // Wait until today's 06:00 UTC has passed (or tomorrow's if enabled past 06:00).
+    if (_enabledAtMs !== null) {
+      const ref = new Date(_enabledAtMs);
+      const refSix = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), 6, 0, 0, 0));
+      const firstFireAt = _enabledAtMs < refSix.getTime() ? refSix.getTime() : refSix.getTime() + 24 * 3_600_000;
+      if (nowMs < firstFireAt) return false;
+    }
   }
 
   // Write the audit event BEFORE creating the run (hard rule: every state change writes audit_event).

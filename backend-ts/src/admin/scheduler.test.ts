@@ -93,13 +93,33 @@ test("runTick returns false when scheduler is disabled", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Test 1b — P2-1: first-fire gate honors the advertised nextFireAt
+// ---------------------------------------------------------------------------
+
+test("runTick returns false before the first-fire window (honors nextFireAt, no prior run)", async () => {
+  // Enable at midnight UTC so firstFireAt = today 06:00 UTC.
+  const today = new Date();
+  const midnightUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0);
+  setSchedulerEnabled(true, midnightUTC);
+  // Tick at 02:00 UTC — before the 06:00 first-fire window.
+  const twoAM = midnightUTC + 2 * 3_600_000;
+  const fired = await runTick(deps(), twoAM);
+  assert.equal(fired, false, "Expected false — tick is before the first-fire window (02:00 < 06:00 UTC)");
+  setSchedulerEnabled(false);
+});
+
+// ---------------------------------------------------------------------------
 // Test 2 — happy path: fires run + writes audit event
 // ---------------------------------------------------------------------------
 
 test("runTick fires an ALL_PROGRAMS run and writes SCHEDULER_RUN_TRIGGERED audit when enabled", async () => {
-  setSchedulerEnabled(true);
-  const fired = await runTick(deps());
-  assert.equal(fired, true, "Expected true — scheduler is enabled and no prior run exists");
+  // Enable at midnight UTC → firstFireAt = today 06:00. Simulate tick at 07:00 UTC (past the window).
+  const today = new Date();
+  const midnightUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0);
+  setSchedulerEnabled(true, midnightUTC);
+  const sevenAM = midnightUTC + 7 * 3_600_000;
+  const fired = await runTick(deps(), sevenAM);
+  assert.equal(fired, true, "Expected true — past the first-fire window, no prior run exists");
 
   // A scheduler-tagged run must exist.
   const runs = await stores.runs.listRuns(10);
