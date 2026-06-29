@@ -39,5 +39,9 @@ backend/src/test/resources/logback-test.xml
 .tmp_eval_payload.json
 .vercel
 
+# Git worktrees (isolated workspaces — project-local)
+.worktrees/
+
 # Local-only notes (tokens, personal config — never commit)
 docs/MCP_LOCAL.md
+docs/vision doc screenshots
