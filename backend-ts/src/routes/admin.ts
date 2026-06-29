@@ -19,13 +19,12 @@ import { getStores, getBackend } from "../stores/factory.ts";
 import {
   listIntegrations,
   syncIntegration,
-  schedulerStatus,
-  setSchedulerEnabled,
   listDataMappings,
   validateDataMappings,
   toAdminAuditRows,
   toDeliveryLog,
 } from "../admin/admin-data.ts";
+import { getSchedulerStatus, setSchedulerEnabled } from "../admin/scheduler.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
 import {
@@ -107,9 +106,10 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   }
 
   // ---- scheduler -----------------------------------------------------------
-  if (pathname === "/api/admin/scheduler" && req.method === "GET") return json(schedulerStatus());
+  if (pathname === "/api/admin/scheduler" && req.method === "GET") return json(await getSchedulerStatus(env));
   if (pathname === "/api/admin/scheduler" && req.method === "POST") {
-    return json(setSchedulerEnabled((q.get("enabled") ?? "false").toLowerCase() === "true"));
+    setSchedulerEnabled((q.get("enabled") ?? "false").toLowerCase() === "true");
+    return json(await getSchedulerStatus(env));
   }
 
   // ---- audit viewer (over the persisted ledger) ----------------------------
