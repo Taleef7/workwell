@@ -139,8 +139,15 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // run". An in-flight ALL_PROGRAMS run writes outcomes incrementally, so without this filter the
   // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
   // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
-  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined })).filter(
-    (r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+  // excludeScale drops the scale tenant's ~120k rows IN SQL (the scale KPIs are folded in separately
+  // via aggregateScaleRun below). The JS guard stays as defense-in-depth.
+  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true })).filter(
+    (r) =>
+      siteMatch(r.subjectId) &&
+      tenantMatch(r.subjectId) &&
+      isPopulationRun(r.runScopeType) &&
+      isCompletedRun(r.runStatus) &&
+      r.runTriggeredBy !== "seed:scale",
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -174,7 +181,60 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       openCaseCount,
     };
   });
+
+  // E13 PR-2: fold in the population-scale mhn tenant's per-measure counts via SQL aggregation
+  // (the in-memory scan above excluded seed:scale runs). When ?tenant=mhn, REPLACE the live counts
+  // with the scale ones; otherwise ADD them. Skipped when scoped to a non-mhn tenant.
+  await foldScaleCounts(deps, summaries, filters);
+
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
+}
+
+/** Add (or, for ?tenant=mhn, replace with) the scale tenant's per-measure counts from the latest
+ *  seed:scale run per measure. Bounded — aggregateScaleRun never materializes the per-subject rows.
+ *  Skipped when a site filter is active (scale data has no equivalent site dimension) or when the
+ *  date window excludes the scale run's startedAt (keeps filtered KPIs consistent). */
+async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], filters: ProgramFilters): Promise<void> {
+  const tenant = filters.tenant?.trim() || null;
+  if (tenant && tenant !== "mhn") return; // scoped to a non-scale tenant → no scale data
+  // Scale data is not filterable by the live-tenant site dimension — skip when site is active so
+  // a scoped view like ?site=Plant+A doesn't silently add the full 120k mhn population.
+  if (filters.site?.trim()) return;
+  const from = filters.from?.trim() || null;
+  const to = filters.to?.trim() || null;
+  const scaleRuns = (await deps.runStore.listRuns(100_000))
+    .filter((r) => r.triggeredBy === "seed:scale" && r.status === "COMPLETED")
+    // Honor the date window so a date-filtered view doesn't include out-of-window scale runs.
+    .filter((r) => (!from || day(r.startedAt) >= from) && (!to || day(r.startedAt) <= to))
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  if (scaleRuns.length === 0) return;
+  const latest = new Map<string, string>(); // measureId → latest scale runId
+  for (const r of scaleRuns) if (r.scopeId) latest.set(r.scopeId, r.id);
+
+  for (const s of summaries) {
+    const runId = latest.get(s.measureId);
+    if (!runId) {
+      if (tenant === "mhn") zeroSummary(s); // mhn-scoped but no scale data for this measure
+      continue;
+    }
+    const groups = await deps.outcomeStore.aggregateScaleRun(runId);
+    const n = (st: string) => groups.filter((g) => g.status === st).reduce((a, g) => a + g.count, 0);
+    const baseTotal = tenant === "mhn" ? 0 : s.totalEvaluated;
+    const base = (cur: number) => (tenant === "mhn" ? 0 : cur);
+    s.compliant = base(s.compliant) + n("COMPLIANT");
+    s.dueSoon = base(s.dueSoon) + n("DUE_SOON");
+    s.overdue = base(s.overdue) + n("OVERDUE");
+    s.missingData = base(s.missingData) + n("MISSING_DATA");
+    s.excluded = base(s.excluded) + n("EXCLUDED");
+    s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
+    s.complianceRate = round1(s.compliant, s.totalEvaluated);
+    if (tenant === "mhn") s.latestRunId = runId;
+  }
+}
+
+function zeroSummary(s: ProgramSummary): void {
+  s.totalEvaluated = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
+  s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
 /** Run groups carrying site-filtered outcomes for one measure (bounded query, no per-run fan-out). */
@@ -186,6 +246,9 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
       measureId,
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
+      // E13 PR-2: trend + top-drivers are NOT extended to the scale tenant; exclude it in SQL so a
+      // seeded measure's 120k rows never enter this scan (bounded) and never skew the live charts.
+      excludeScale: true,
     })
   ).filter((r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
   return groupByRun(rows);
@@ -297,7 +360,9 @@ export async function programRiskOutlook(
   const horizon = Math.max(1, Math.min(Number.isFinite(horizonDays) ? Math.trunc(horizonDays) : 30, 180));
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId);
+  // E13 PR-2: risk-outlook is NOT extended to the scale tenant; exclude its (mhn-prefixed) rows in SQL
+  // so a seeded measure's 120k rows never materialize into the per-subject map (bounded memory).
+  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId, { excludeScale: true });
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
   const latestBySubject = new Map<string, MeasureOutcomeRow>();

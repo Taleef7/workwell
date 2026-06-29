@@ -75,6 +75,18 @@ export interface OutcomeMeasureFilter {
   measureId?: string;
   from?: string; // inclusive lower bound (YYYY-MM-DD) on the run's started day
   to?: string; // inclusive upper bound
+  /**
+   * Exclude population-scale (`triggered_by='seed:scale'`) runs IN SQL (#185 E13 PR-2). The scale
+   * tenant's ~120k rows must never be fetched into app memory by the live read models — they are read
+   * only via `aggregateScaleRun` (a bounded GROUP BY). Pushing the predicate into the query, not a JS
+   * `.filter()`, is what keeps these surfaces bounded at 120k.
+   */
+  excludeScale?: boolean;
+}
+
+/** Options for the per-measure outcome scan; `excludeScale` drops the scale tenant in SQL (E13 PR-2). */
+export interface MeasureScanOptions {
+  excludeScale?: boolean;
 }
 
 export interface OutcomeStore {
@@ -98,10 +110,25 @@ export interface OutcomeStore {
    * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence —
    * the per-subject history the risk-outlook analytics group in the app.
    */
-  listOutcomesForMeasure(measureId: string): Promise<MeasureOutcomeRow[]>;
+  listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**
    * The latest `limit` outcomes for one employee (by subjectId), newest-first — the MCP
    * get_employee history and check_compliance lookup. Bounded scan over the outcomes table.
    */
   listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]>;
+  /**
+   * Aggregate a population-scale run's outcomes by (location, provider, status), parsing the encoded
+   * subject_id (`mhn|Lxx|Pxx|n`) — a single GROUP BY that never materializes the per-subject rows.
+   * Used by the hierarchy rollup + programs KPIs for the scale tenant (#185 E13 PR-2).
+   */
+  aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]>;
+}
+
+/** A grouped count from a scale run: outcomes per (location, provider, status). The SQL aggregation
+ *  returns O(locations×providers×statuses) rows — never O(subjects) — so app memory stays bounded. */
+export interface ScaleGroupCount {
+  locationId: string;
+  providerId: string;
+  status: string;
+  count: number;
 }

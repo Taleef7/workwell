@@ -26,16 +26,19 @@ export interface Tenant { id: string; name: string; }
 /** An employer org under a tenant (1 per tenant in PR-1; the level is retained for future multi-org tenants). */
 export interface Enterprise { id: string; name: string; tenantId: string; }
 
-/** The tenants/systems whose compliance rolls up into one dashboard (#185 E13 PR-1). */
+/** The tenants/systems whose compliance rolls up into one dashboard (#185 E13 PR-1; `mhn` scale
+ *  tenant added in PR-2 — its 120k subjects live only as outcome rows, not in this directory). */
 export const TENANTS: readonly Tenant[] = [
   { id: "twh", name: "Total Worker Health" },
   { id: "ihn", name: "Indus Hospital Network" },
+  { id: "mhn", name: "MetroHealth Network" },
 ];
 
-/** One enterprise per tenant (PR-1). */
+/** One enterprise per tenant (PR-1; `mhn` is the population-scale tenant, PR-2). */
 const ENTERPRISES: readonly Enterprise[] = [
   { id: "twh", name: "Total Worker Health", tenantId: "twh" },
   { id: "ihn", name: "Indus Hospital Network", tenantId: "ihn" },
+  { id: "mhn", name: "MetroHealth Network", tenantId: "mhn" },
 ];
 
 /** Tenant 1's enterprise root (back-compat; = ENTERPRISES[0]). Pre-E13 single-tenant callers. */

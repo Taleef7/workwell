@@ -16,6 +16,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { handlePrograms } from "./programs.ts";
+import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 
 const dbPath = join(tmpdir(), `workwell-programs-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -242,6 +243,31 @@ test("E13: ?tenant scopes the overview population to that tenant/system", async 
   const ihn = await bmiOf("?tenant=ihn");
   assert.equal(ihn.totalEvaluated, 1, "only the ihn subject");
   assert.equal(ihn.overdue, 1);
+});
+
+test("E13 PR-2: programs overview folds in the scale tenant counts (excluded by ?tenant=twh)", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const oc = new SqliteOutcomeStore(env.DB as never);
+  // cholesterol_ldl is otherwise unused here — seed a seed:scale run of 3 mhn subjects.
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cholesterol_ldl", triggeredBy: "seed:scale", status: "COMPLETED",
+    requestedScope: { measureId: "cholesterol_ldl" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await oc.recordOutcomes([
+    { runId: run.id, subjectId: encodeScaleSubject(0, 0, 1), measureId: "cholesterol_ldl", status: "COMPLIANT", evidence: {} },
+    { runId: run.id, subjectId: encodeScaleSubject(0, 0, 2), measureId: "cholesterol_ldl", status: "COMPLIANT", evidence: {} },
+    { runId: run.id, subjectId: encodeScaleSubject(0, 1, 3), measureId: "cholesterol_ldl", status: "OVERDUE", evidence: {} },
+  ]);
+  const cholOf = async (qs = "") =>
+    ((await get(`/overview${qs}`).then((r) => r!.json())) as Summary[]).find((p) => p.measureId === "cholesterol_ldl")!;
+
+  assert.equal((await cholOf()).totalEvaluated, 3, "scale counts included by default");
+  assert.equal((await cholOf("?tenant=twh")).totalEvaluated, 0, "scale excluded when scoped to twh");
+  const mhn = await cholOf("?tenant=mhn");
+  assert.equal(mhn.totalEvaluated, 3);
+  assert.equal(mhn.compliant, 2);
+  assert.equal(mhn.overdue, 1);
 });
 
 test("C4: a single-subject CASE rerun does not become a measure's latest run or skew the rollup", async () => {

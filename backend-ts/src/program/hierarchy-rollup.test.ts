@@ -17,6 +17,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { buildHierarchyRollup, type HierarchyNode } from "./hierarchy-rollup.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 
 /** Drill from the All-Systems root to the twh tenant's enterprise node (locations live under it). */
 function twhEnterprise(root: HierarchyNode): HierarchyNode {
@@ -143,6 +144,56 @@ async function freshStores(dbFile: string) {
     cases: new SqliteCaseStore(db),
   };
 }
+
+test("E13 PR-2: merges the SQL-aggregated mhn scale subtree and reconciles; ?tenant=mhn isolates it", async () => {
+  const dbFile = join(tmpdir(), `workwell-hier-scale-${crypto.randomUUID()}.sqlite`);
+  try {
+    const { runStore, outcomes: o, cases: c } = await freshStores(dbFile);
+    // live audiogram run: emp-006 OVERDUE (a twh subject in the directory)
+    const live = await createAudiogramRun(runStore);
+    await o.recordOutcome({ runId: live.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    // seed:scale audiogram run: 4 mhn subjects (3 COMPLIANT, 1 OVERDUE) across 2 providers
+    const scale = await runStore.createRun({
+      scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed:scale", status: "COMPLETED",
+      requestedScope: { measureId: "audiogram" },
+      measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    });
+    await o.recordOutcomes([
+      { runId: scale.id, subjectId: encodeScaleSubject(0, 0, 1), measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: scale.id, subjectId: encodeScaleSubject(0, 0, 2), measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: scale.id, subjectId: encodeScaleSubject(0, 1, 3), measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: scale.id, subjectId: encodeScaleSubject(1, 0, 4), measureId: "audiogram", status: "OVERDUE", evidence: {} },
+    ]);
+
+    const root = await buildHierarchyRollup({ outcomeStore: o, caseStore: c, runStore }, { measureId: "audiogram" });
+    assert.equal(root.level, "all");
+    const mhn = root.children.find((n) => n.id === "mhn")!;
+    assert.equal(mhn.level, "tenant");
+    assert.equal(mhn.totals.evaluated, 4);
+    assert.equal(mhn.totals.compliant, 3);
+    // mhn provider nodes are leaves (no patient children)
+    const mhnLoc = mhn.children[0]!.children[0]!; // enterprise → first location
+    assert.equal(mhnLoc.level, "location");
+    assert.equal(mhnLoc.children[0]!.level, "provider");
+    assert.equal(mhnLoc.children[0]!.children.length, 0, "scale provider is a leaf");
+    // All = Σ tenants (twh live + mhn scale) at every level
+    assertReconciles(root);
+    assert.equal(root.totals.evaluated, 1 + 4, "live emp-006 + 4 mhn subjects");
+
+    // ?tenant=mhn → just the scale subtree
+    const sub = await buildHierarchyRollup({ outcomeStore: o, caseStore: c, runStore }, { measureId: "audiogram", tenant: "mhn" });
+    assert.equal(sub.level, "tenant");
+    assert.equal(sub.id, "mhn");
+    assert.equal(sub.totals.evaluated, 4);
+
+    // the in-memory path must NOT have pulled scale rows: ?tenant=twh excludes mhn entirely
+    const twh = await buildHierarchyRollup({ outcomeStore: o, caseStore: c, runStore }, { measureId: "audiogram", tenant: "twh" });
+    assert.equal(twh.id, "twh");
+    assert.equal(twh.totals.evaluated, 1, "only the live emp-006 subject");
+  } finally {
+    try { rmSync(dbFile, { force: true }); } catch { /* best effort */ }
+  }
+});
 
 const createAudiogramRun = (runStore: SqliteRunStore) =>
   runStore.createRun({
