@@ -85,7 +85,9 @@ export async function computeDataReadiness(deps: DataReadinessDeps, measure: Mea
   for (const dm of listDataMappings()) canonicalToMapping.set(dm.canonicalElement, dm);
 
   // Missingness from this measure's outcomes (rate + up to 3 sample subjects with MISSING_DATA).
-  const outcomes = await deps.outcomes.listOutcomesForMeasure(measure.measureId);
+  // excludeScale: data-readiness reports on the live workforce; the generated scale tenant (~120k
+  // rows) is excluded in SQL (E13 PR-2 — bounded, and its synthetic missingness shouldn't skew this).
+  const outcomes = await deps.outcomes.listOutcomesForMeasure(measure.measureId, { excludeScale: true });
   const total = outcomes.length;
   const missing = outcomes.filter((o) => o.status === "MISSING_DATA");
   const missingnessRate = total === 0 ? 0 : missing.length / total;

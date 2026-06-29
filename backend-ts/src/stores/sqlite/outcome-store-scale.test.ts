@@ -56,6 +56,26 @@ test("aggregateScaleRun groups by location/provider/status (bounded rows)", asyn
   assert.equal(groups.reduce((s, g) => s + g.count, 0), 4);
 });
 
+test("excludeScale drops seed:scale rows IN SQL (bounded-memory guard for the live read path)", async () => {
+  // a live MANUAL run for the same measure + the existing seed:scale run from `before`
+  const live = await runs.createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "manual", status: "COMPLETED",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await outcomes.recordOutcome({ runId: live.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+
+  const withScale = await outcomes.listOutcomesWithRun({ measureId: "audiogram" });
+  const withoutScale = await outcomes.listOutcomesWithRun({ measureId: "audiogram", excludeScale: true });
+  assert.ok(withScale.some((r) => r.subjectId.startsWith("mhn|")), "default scan still returns scale rows");
+  assert.ok(!withoutScale.some((r) => r.subjectId.startsWith("mhn|")), "excludeScale removes ALL scale rows in SQL");
+  assert.ok(withoutScale.some((r) => r.subjectId === "emp-006"), "live rows are kept");
+
+  // listOutcomesForMeasure excludeScale too
+  const measOnly = await outcomes.listOutcomesForMeasure("audiogram", { excludeScale: true });
+  assert.ok(!measOnly.some((r) => r.subjectId.startsWith("mhn|")), "listOutcomesForMeasure excludeScale drops scale");
+});
+
 test("group count is bounded by structure, not by subject count", async () => {
   const small = await scaleRun();
   const big = await scaleRun();

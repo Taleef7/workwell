@@ -117,7 +117,8 @@ async function precomputeOutcomes(
  * + stable real-run state (a different anchor shifts the target days).
  */
 async function seededDaysForMeasure(outcomeStore: OutcomeStore, measureId: string): Promise<Set<string>> {
-  const rows = await outcomeStore.listOutcomesForMeasure(measureId);
+  // excludeScale: never scan the population-scale tenant's ~120k rows here (E13 PR-2; bounded).
+  const rows = await outcomeStore.listOutcomesForMeasure(measureId, { excludeScale: true });
   const days = new Set<string>();
   for (const r of rows) {
     if ((r.evidence as { seedTrendHistory?: boolean } | null)?.seedTrendHistory === true) days.add(r.evaluationPeriod);
@@ -135,7 +136,8 @@ async function seededDaysForMeasure(outcomeStore: OutcomeStore, measureId: strin
  * reruns (excluding by day could drop a same-day real run and let a resume anchor at asOf).
  */
 async function latestRealRunMs(outcomeStore: OutcomeStore, measureId: string): Promise<number | null> {
-  const rows = await outcomeStore.listOutcomesWithRun({ measureId });
+  // excludeScale: a seed:scale run must not count as the "latest real run" anchor (E13 PR-2; bounded).
+  const rows = await outcomeStore.listOutcomesWithRun({ measureId, excludeScale: true });
   let max: number | null = null;
   for (const r of rows) {
     if (!isPopulationRun(r.runScopeType)) continue; // exclude CASE/EMPLOYEE reruns (overview parity)

@@ -58,10 +58,16 @@ const PROVIDER_PAIRS: ReadonlyArray<{ li: number; pi: number }> = SCALE_LOCATION
 
 export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: ScaleBackfillArgs): Promise<ScaleBackfillSummary> {
   const measureIds = Object.keys(MEASURES);
-  // Idempotent: a single seed:scale run anywhere means the scale population is already seeded — a
-  // rerun must not double-write the (potentially 120k×measures) rows.
-  const alreadySeeded = (await deps.runStore.listRuns(100_000)).some((r) => r.triggeredBy === SCALE_TRIGGER);
-  if (alreadySeeded) return { skipped: true, runsCreated: 0, outcomesCreated: 0, subjects: args.subjects };
+  // Per-measure idempotency (resumable): skip any measure that ALREADY has a seed:scale run, so a
+  // re-run fills only the missing measures (e.g. resuming after a crash mid-seed) and never
+  // double-writes. To re-seed with a different --subjects, roll back first (see header).
+  const seededMeasures = new Set(
+    (await deps.runStore.listRuns(100_000))
+      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.scopeId)
+      .map((r) => r.scopeId as string),
+  );
+  const todo = measureIds.filter((m) => !seededMeasures.has(m));
+  if (todo.length === 0) return { skipped: true, runsCreated: 0, outcomesCreated: 0, subjects: args.subjects };
 
   const startedMs = new Date(`${args.asOf}T00:00:00.000Z`).getTime();
   const startedAt = new Date(startedMs).toISOString();
@@ -71,7 +77,7 @@ export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: Sca
 
   let runsCreated = 0;
   let outcomesCreated = 0;
-  for (const measureId of measureIds) {
+  for (const measureId of todo) {
     const run = await deps.runStore.createRun({
       scopeType: "MEASURE",
       scopeId: measureId,
@@ -82,6 +88,19 @@ export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: Sca
       requestedScope: { measureId, evaluationDate: args.asOf, scalePopulation: true },
       measurementPeriodStart: periodStart,
       measurementPeriodEnd: periodEnd,
+    });
+    // Audit the run creation IMMEDIATELY (before the bulk outcome inserts) so a crash mid-insert never
+    // leaves an un-audited seed:scale run — "every state change writes audit_event" (CLAUDE.md). The
+    // run's existence is what the idempotency skip keys on, so the audit and the skip-key are in sync.
+    await deps.auditStore.appendAudit({
+      eventType: SCALE_POPULATION_SEEDED_EVENT,
+      entityType: "run",
+      entityId: run.id,
+      actor: SCALE_TRIGGER,
+      refRunId: run.id,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload: { measureId, subjects: args.subjects, asOf: args.asOf },
     });
     const rate = complianceRate(MEASURE_BINDINGS[measureId]!.rateKey);
     const inputs: RecordOutcomeInput[] = Array.from({ length: args.subjects }, (_, i) => {
@@ -102,16 +121,6 @@ export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: Sca
     }
     runsCreated++;
     outcomesCreated += inputs.length;
-    await deps.auditStore.appendAudit({
-      eventType: SCALE_POPULATION_SEEDED_EVENT,
-      entityType: "run",
-      entityId: run.id,
-      actor: SCALE_TRIGGER,
-      refRunId: run.id,
-      refCaseId: null,
-      refMeasureVersionId: null,
-      payload: { measureId, subjects: args.subjects, asOf: args.asOf },
-    });
   }
   return { skipped: false, runsCreated, outcomesCreated, subjects: args.subjects };
 }
