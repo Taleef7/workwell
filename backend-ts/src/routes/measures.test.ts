@@ -15,6 +15,8 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -189,6 +191,45 @@ test("GET /api/measures/audiogram/fidelity → available:false (no official refe
   assert.equal(res?.status, 200);
   const body = (await res!.json()) as { available: boolean };
   assert.equal(body.available, false);
+});
+
+// ── fidelity/diff (E14 PR-2) ──────────────────────────────────────────────────────────────────
+test("GET /api/measures/audiogram/fidelity/diff returns { available: false } (no CMS reference for OSHA measures)", async () => {
+  const res = await get("/api/measures/audiogram/fidelity/diff");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { available: boolean };
+  assert.equal(body.available, false);
+});
+
+test("GET /api/measures/cms122/fidelity/diff returns totalSubjectsEvaluated=0 when no outcomes exist", async () => {
+  const res = await get("/api/measures/cms122/fidelity/diff");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { totalSubjectsEvaluated: number; runId: string | null };
+  assert.equal(body.totalSubjectsEvaluated, 0);
+  assert.equal(body.runId, null);
+});
+
+test("GET /api/measures/cms122/fidelity/diff returns a valid OutcomeDiffReport when a population run exists", async () => {
+  // Seed a COMPLETED ALL_PROGRAMS run with one cms122 outcome inline so the diff has data.
+  // This test must run after the 'no outcomes' test above (shared DB, definition order = run order).
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "test",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-29T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-29T00:00:00.000Z",
+  });
+  await outStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "cms122", status: "COMPLIANT", evidence: {} });
+  await runStore.finalizeRun(run.id, "COMPLETED");
+
+  const res = await get("/api/measures/cms122/fidelity/diff");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as { ecqmId: string; criterionImpacts: unknown[]; totalSubjectsEvaluated: number };
+  assert.equal(body.ecqmId, "CMS122v14");
+  assert.ok(body.criterionImpacts.length > 0, "criterionImpacts must not be empty");
+  assert.ok(body.totalSubjectsEvaluated >= 1, "at least one subject must be evaluated");
 });
 
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
