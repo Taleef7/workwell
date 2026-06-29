@@ -169,7 +169,8 @@ jobs:
                 {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
                 {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
                 {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
-                {key: "WORKWELL_INSTANCE", value: "twh"}
+                {key: "WORKWELL_INSTANCE", value: "twh"},
+                {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"
