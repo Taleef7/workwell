@@ -83,6 +83,12 @@ Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
 
 #### One-time segment repair after adding a tenant (E13 PR-1, owner-gated)
 
+> **✓ Done on 2026-06-29 (live Neon).** `PUT /api/segments/ad1facc4-14f5-4897-8d67-a3f9136c3f6c`
+> widened `All Employees` from `["HQ","Plant A","Plant B","Clinic"]` to all 7 sites
+> (`Clinic`, `HQ`, `North Campus`, `Outpatient Clinic`, `Plant A`, `Plant B`, `South Campus`).
+> `SEGMENT_UPDATED` audit event recorded; `updatedAt` → 2026-06-29T15:12:24Z.
+> If the stack is ever re-provisioned from a fresh DB, the seed auto-covers all sites — no repair needed.
+
 The demo **risk-group segments** seed (`backend-ts/src/segment/segment-seed.ts`) is **name-idempotent**:
 a boot over an already-seeded DB adds no duplicates and **never mutates an existing segment** (so it
 can't clobber operator edits, and it writes no unaudited boot-time change). The universal
@@ -127,6 +133,11 @@ DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
 ```
 
 ### Seeding the population-scale tenant (E13 PR-2, on-demand, NOT auto-run on deploy)
+
+> **✓ Done on 2026-06-29 (live Neon).** `pnpm seed:scale --subjects 120000 --as-of 2026-06-26`
+> wrote **14 runs × 120,000 subjects = 1,680,000 outcomes** to `workwell_spike` (14 `SCALE_POPULATION_SEEDED`
+> audit events). Live All Systems rollup = 1,682,100 (ihn 700 + twh 1,400 + mhn 1,680,000), all reconciling.
+> Re-run only after rolling back (see SQL below) or to change `--subjects`.
 
 `pnpm seed:scale` populates the **`mhn` ("MetroHealth Network") ~120k-subject tenant** so the
 `/programs/hierarchy` rollup + the `/programs` KPIs aggregate a real population-scale system (Doug's
