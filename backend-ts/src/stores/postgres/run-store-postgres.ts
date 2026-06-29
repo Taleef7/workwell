@@ -109,6 +109,15 @@ export class PgRunStore implements RunStore {
     return rows.map(toRecord);
   }
 
+  async getLastRunByTriggeredBy(triggeredBy: string): Promise<RunRecord | null> {
+    const { rows } = await this.pool.query<RunRow>(
+      `SELECT ${RUN_COLS}
+         FROM ${T} WHERE triggered_by = $1 ORDER BY started_at DESC LIMIT 1`,
+      [triggeredBy],
+    );
+    return rows[0] ? toRecord(rows[0]) : null;
+  }
+
   async appendLog(runId: string, level: string, message: string): Promise<void> {
     await this.pool.query(
       `INSERT INTO ${SPIKE_SCHEMA}.run_logs (run_id, ts, level, message) VALUES ($1, $2, $3, $4)`,
