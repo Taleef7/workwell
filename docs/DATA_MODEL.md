@@ -444,6 +444,9 @@ applicable; the outcome is still persisted. CQL `Outcome Status` stays authorita
 
 ### 3.23 Population-scale tenant (E13 PR-2 / #185) — encoded `subject_id`, no schema change
 
+> **Live Neon status (2026-06-29):** seeded — 14 runs × 120,000 subjects = **1,680,000 outcomes** in
+> `workwell_spike`; live All Systems = 1,682,100 (ihn 700 + twh 1,400 + mhn 1,680,000).
+
 The `mhn` ("MetroHealth Network") tenant's ~120k subjects are **generated demo data with no schema
 change**: they exist **only** as `outcomes` rows whose `subject_id` **encodes the hierarchy** —
 `mhn|Lxx|Pxx|nnnnnnn` (tenant | location | provider | sequence; the codec + the small ~240-provider

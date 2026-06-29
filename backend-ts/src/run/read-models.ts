@@ -88,9 +88,11 @@ function durationMs(run: RunRecord): number {
 }
 
 /** Map a run's `triggered_by` to the list/filter `triggerType`. Real operator runs stay MANUAL;
- *  synthetic trend-history seed runs surface as SEED so they aren't shown/filtered as operator runs. */
+ *  seed runs surface as SEED; scheduler-fired runs surface as SCHEDULED. */
 export function triggerTypeOf(run: RunRecord): string {
-  return run.triggeredBy === "seed:trend-history" ? "SEED" : "MANUAL";
+  if (run.triggeredBy === "seed:trend-history" || run.triggeredBy === "seed:scale") return "SEED";
+  if (run.triggeredBy === "scheduler") return "SCHEDULED";
+  return "MANUAL";
 }
 
 export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunListItem {
