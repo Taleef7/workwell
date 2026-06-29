@@ -82,6 +82,8 @@ export interface RunStore {
   getRun(id: string): Promise<RunRecord | null>;
   /** Runs newest-first (by started_at), capped at `limit` — the /api/runs list read model. */
   listRuns(limit?: number): Promise<RunRecord[]>;
+  /** Return the single most-recent run with the given `triggered_by` value, or null if none. */
+  getLastRunByTriggeredBy(triggeredBy: string): Promise<RunRecord | null>;
   appendLog(runId: string, level: string, message: string): Promise<void>;
   /** A run's log timeline, oldest-first, capped at `limit` when given. */
   listLogs(runId: string, limit?: number): Promise<RunLogRow[]>;
