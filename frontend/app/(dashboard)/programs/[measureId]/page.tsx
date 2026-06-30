@@ -195,13 +195,18 @@ export default function ProgramDetailPage() {
                 </div>
               ) : (
                 <>
+                  {/* aria-hidden — the sr-only ChartDataTable below is the accessible
+                      alternative. Disable Recharts' built-in keyboard layers (default-focusable
+                      in v3) so no focusable element lives inside the aria-hidden subtree:
+                      accessibilityLayer={false} on PieChart + rootTabIndex={-1} on Pie. */}
                   <div aria-hidden="true">
                     <ResponsiveContainer width="100%" height={200}>
-                      <PieChart>
+                      <PieChart accessibilityLayer={false}>
                         <Pie
                           data={outcomeBreakdown}
                           dataKey="value"
                           nameKey="key"
+                          rootTabIndex={-1}
                           cx="50%"
                           cy="50%"
                           innerRadius={45}
@@ -479,9 +484,11 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
 
   return (
     <>
+      {/* aria-hidden — sr-only ChartDataTable below is the accessible alternative;
+          accessibilityLayer={false} keeps the focusable <svg> out of the hidden subtree. */}
       <div aria-hidden="true">
         <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+          <AreaChart data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
             <defs>
               <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />

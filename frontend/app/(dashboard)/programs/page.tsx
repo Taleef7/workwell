@@ -416,9 +416,13 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
           {deltaPositive ? "↑" : "↓"} {Math.abs(parseFloat(delta))}% from last run
         </span>
       </div>
+      {/* The sr-only ChartDataTable below is the accessible alternative, so the chart is
+          aria-hidden. Disable Recharts' built-in accessibilityLayer (default true in v3 —
+          it puts tabIndex=0/role="application" on the <svg>), else a keyboard user would tab
+          onto a focusable element inside an aria-hidden subtree (axe aria-hidden-focus). */}
       <div aria-hidden="true">
         <ResponsiveContainer width="100%" height={80}>
-          <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <LineChart data={chartData} accessibilityLayer={false} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
             <YAxis
