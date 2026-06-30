@@ -19,10 +19,15 @@ export interface IntegrationHealth {
   config: Record<string, unknown>;
 }
 
+// The in-process integrations (fhir/mcp/ai) are live from process start, so their "last sync" is the
+// boot time — not "Never", which read as broken/stale. hris stays null: it's a simulated directory with
+// no real sync source. A manual sync (syncIntegration) restamps whichever one is synced.
+const BOOT_TIME = new Date().toISOString();
+
 const INTEGRATIONS: IntegrationHealth[] = [
-  { integration: "fhir", displayName: "FHIR Repository", status: "healthy", lastSyncAt: null, detail: "In-process CQL/FHIR evaluation (synthetic adapter).", config: {} },
-  { integration: "mcp", displayName: "MCP Server", status: "healthy", lastSyncAt: null, detail: "Read-only MCP tools over /sse.", config: {} },
-  { integration: "ai", displayName: "AI Services", status: "healthy", lastSyncAt: null, detail: "OpenAI-backed draft/explain surfaces with deterministic fallback.", config: {} },
+  { integration: "fhir", displayName: "FHIR Repository", status: "healthy", lastSyncAt: BOOT_TIME, detail: "In-process CQL/FHIR evaluation (synthetic adapter).", config: {} },
+  { integration: "mcp", displayName: "MCP Server", status: "healthy", lastSyncAt: BOOT_TIME, detail: "Read-only MCP tools over /sse.", config: {} },
+  { integration: "ai", displayName: "AI Services", status: "healthy", lastSyncAt: BOOT_TIME, detail: "OpenAI-backed draft/explain surfaces with deterministic fallback.", config: {} },
   { integration: "hris", displayName: "HRIS Sync", status: "simulated", lastSyncAt: null, detail: "Synthetic employee directory (no live HRIS).", config: {} },
 ];
 const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));

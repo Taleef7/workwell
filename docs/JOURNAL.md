@@ -40,10 +40,13 @@ read-models 35 incl. GROUP-BY parity, runs route, roster, `worker` 5, demo-users
 eslint clean + full vitest 101 pass. The `/api/runs` real-world speedup is only measurable once deployed
 against the Neon scale tenant. **No schema change, no new deps.**
 
-**Deferred (P3, low value):** demo accounts sort first in the roster (would touch the synthetic
-directory); the Rule Builder live-preview (endpoint is alive; needs a complete rule); integration
-"Last sync" auto-refresh (manual sync works; the Java `@Scheduled` refresh wasn't ported); the Studio
-desktop-only gate (by design).
+**P3 follow-up (branch `fix/audit-p3-polish`):** the roster now sorts subjects with real compliance data
+above all-NA rows, so the demo login personas no longer head the grid (`roster-read-model.ts`, stable
+sort before paging + an ordering test); the in-process integrations (fhir/mcp/ai) seed `lastSyncAt` to
+boot time instead of "Never" (`admin-data.ts`; hris stays null — no real sync source). The Rule Builder
+live-preview turned out to be **working-as-designed** — it deliberately gates on a complete binding set
+(code + value set for enrollment/waiver/event) so it never emits CQL that compiles but never matches; the
+Studio desktop-only gate is intentional. Both left as-is.
 
 ## 2026-06-30 — WCAG chart accessible-alternatives + roadmap housekeeping (E11 close, E15/E9 specs)
 
