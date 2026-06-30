@@ -280,4 +280,36 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.segment_overrides (
   mode         TEXT NOT NULL,
   PRIMARY KEY (segment_id, external_id)
 );
+
+-- Quality-over-time snapshots (#E16). Materialized AGGREGATE of a population run's outcomes per
+-- (measure, calendar month, scope): numerator/denominator + the 5 bucket counts at every scope level
+-- (all -> tenant -> site -> provider). Read by the quality-history API + /programs trend so historical
+-- population compliance is a bounded table read, never a re-scan of the per-subject outcomes (O(120k)
+-- at scale). Aggregate-only (never per-employee); descriptive — CQL Outcome Status stays authoritative
+-- (ADR-008). Idempotent on the UNIQUE key (last write wins).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.quality_snapshots (
+  id            TEXT PRIMARY KEY,
+  measure_id    TEXT NOT NULL,
+  period        TEXT NOT NULL,
+  period_start  TIMESTAMPTZ NOT NULL,
+  period_end    TIMESTAMPTZ NOT NULL,
+  scope_level   TEXT NOT NULL,
+  scope_id      TEXT NOT NULL,
+  tenant_id     TEXT,
+  numerator     INTEGER NOT NULL,
+  denominator   INTEGER NOT NULL,
+  compliant     INTEGER NOT NULL,
+  due_soon      INTEGER NOT NULL,
+  overdue       INTEGER NOT NULL,
+  missing_data  INTEGER NOT NULL,
+  excluded      INTEGER NOT NULL,
+  source_run_id TEXT,
+  computed_at   TIMESTAMPTZ NOT NULL,
+  UNIQUE (measure_id, period, scope_level, scope_id)
+);
+
+CREATE INDEX IF NOT EXISTS spike_quality_snapshots_measure_period_idx
+  ON ${SPIKE_SCHEMA}.quality_snapshots (measure_id, period);
+CREATE INDEX IF NOT EXISTS spike_quality_snapshots_scope_idx
+  ON ${SPIKE_SCHEMA}.quality_snapshots (scope_level, scope_id);
 `;

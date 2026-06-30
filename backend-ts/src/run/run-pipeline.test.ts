@@ -14,6 +14,8 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
@@ -118,6 +120,30 @@ test("ALL_PROGRAMS manual run evaluates every runnable measure × the whole popu
   assert.equal(run?.scopeType, "ALL_PROGRAMS");
   assert.equal(run?.scopeId, null);
   assert.equal((await deps.outcomeStore.listOutcomes(res.runId)).length, 56);
+});
+
+test("a completed population run materializes quality-over-time snapshots when the snapshot deps are present (#E16)", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-snap-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const qualitySnapshots = new SqliteQualitySnapshotStore(db);
+  const snapDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4), // all twh / HQ
+    qualitySnapshots,
+    events: new SqliteCaseEventStore(db),
+  };
+  const res = await executeManualRun(snapDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+
+  const rows = await qualitySnapshots.querySnapshots({ measureId: "audiogram" });
+  assert.ok(rows.length > 0, "the completed run wrote snapshot rows");
+  const all = rows.find((r) => r.scopeLevel === "all" && r.scopeId === "ALL");
+  assert.ok(all, "an 'all' snapshot row exists for the run's month");
+  assert.equal(all!.sourceRunId, res.runId);
+  const tenants = rows.filter((r) => r.scopeLevel === "tenant");
+  assert.equal(tenants.reduce((a, t) => a + t.numerator, 0), all!.numerator, "All = Σ tenants reconciles");
 });
 
 test("SITE manual run scopes to one site's employees, with full-population targets", async () => {

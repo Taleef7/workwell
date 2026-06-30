@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-06-30 — E16 PR-1: quality-over-time snapshot store (materialization core + table)
+
+Started **E16** — *"your system is the source of truth for quality over time"* (Doug's June-24 ask).
+The gap (confirmed by a code scan): no persisted numerator/denominator-per-period store; every
+`/programs` trend recomputes live from `outcomes` and only exists where a run ran — which does not scale
+to 160k. PR-1 lands the store + the materialization, all TDD-first (branch `feat/e16-quality-over-time`):
+
+- **`quality_snapshots` table** (additive DDL, floor + ceiling) — a materialized AGGREGATE per
+  (measure, calendar month, scope: all → tenant → site → provider): numerator/denominator + the 5 bucket
+  counts; UNIQUE (measure_id, period, scope_level, scope_id) for idempotent upsert. NEW schema,
+  `CREATE … IF NOT EXISTS`, reversible. (DATA_MODEL §3.24; ADR-021.) **Note:** keyed by `measure_id` (the
+  outcomes slug), not the Java-era `measure_version_id`.
+- **Pure core** `buildSnapshotRows` (`backend-ts/src/quality/materialize-snapshot.ts`) — DI'd scope
+  resolver (no DB/catalog import), reconciles All = Σ tenants = Σ sites = Σ providers; reuses the
+  `countPopulations` proportion model. 6 unit tests.
+- **`QualitySnapshotStore` port** + floor/ceiling adapters (floor `INSERT OR REPLACE` to sidestep the
+  `excluded` column vs ON CONFLICT pseudo-table; ceiling `ON CONFLICT DO UPDATE`), run on the shared
+  store contract (4 tests, both backends; ceiling self-skips with no local Postgres).
+- **`materializeRun(runId)`** orchestration — groups a completed population run's live outcomes by
+  measure, folds the latest `seed:scale` run per measure via the bounded `aggregateScaleRun` (**never**
+  the 120k rows), upserts idempotently, writes a `QUALITY_SNAPSHOT_MATERIALIZED` audit event. 3
+  integration tests. **Hooked best-effort** into `finishManualRun` (after `finalizeRun`) — so the sync,
+  async, and scheduler run paths all stamp a snapshot, and a snapshot failure never fails the run. Wired
+  at the three deps sites (`routes/runs.ts` ×2 + `admin/scheduler.ts`).
+- Aggregate-only (no per-employee row); **descriptive — never sets `Outcome Status`** (ADR-008/ADR-021).
+- **Green:** typecheck clean; full suite **803 tests, 802 pass / 1 pg-skip / 0 fail** (+18 new).
+
+**Owner note:** the DDL self-creates on boot (`CREATE … IF NOT EXISTS`) on the SQLite floor and the Neon
+`workwell_spike` ceiling — no migration runner; applied automatically on the next deploy.
+
+**Next:** E16 PR-2 — `GET /api/quality/history` + an as-of backfill CLI (replacing the synthetic
+sine-wave trend-history) + `/programs` trend rewired to read snapshots. PR-3 — the UI (scope selector +
+as-of month picker; a "compliance on date D" KPI).
+
 ## 2026-06-30 — Live deployment audit + post-audit fixes (branch `fix/post-audit-qa`)
 
 A full end-to-end audit of the live stack (`twh.os.mieweb.org`) driven through the real browser

@@ -25,6 +25,7 @@ import { SqliteValueSetStore } from "./value-set-store-sqlite.ts";
 import { SqliteOutreachTemplateStore } from "./outreach-template-store-sqlite.ts";
 import { SqliteWaiverStore } from "./waiver-store-sqlite.ts";
 import { SqliteSegmentStore } from "./segment-store-sqlite.ts";
+import { SqliteQualitySnapshotStore } from "./quality-snapshot-store-sqlite.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -37,6 +38,7 @@ import {
   outreachTemplateStoreContract,
   waiverStoreContract,
   segmentStoreContract,
+  qualitySnapshotStoreContract,
 } from "../store-contract.ts";
 
 const created: string[] = [];
@@ -86,6 +88,8 @@ outreachTemplateStoreContract("sqlite", async () => new SqliteOutreachTemplateSt
 waiverStoreContract("sqlite", async () => new SqliteWaiverStore(await freshDb()));
 
 segmentStoreContract("sqlite", async () => new SqliteSegmentStore(await freshDb()));
+
+qualitySnapshotStoreContract("sqlite", async () => new SqliteQualitySnapshotStore(await freshDb()));
 
 test("getRun surfaces the measurement period", async () => {
   const db = await freshDb();
