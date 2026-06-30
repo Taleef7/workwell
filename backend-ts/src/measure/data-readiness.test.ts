@@ -49,6 +49,22 @@ test("all required elements resolve to MAPPED + FRESH → READY when no missingn
   assert.equal(audiogram.freshnessStatus, "FRESH");
 });
 
+test("fhir-backed source freshness does not decay with process uptime (no spurious stale after 24h)", async () => {
+  const realNow = Date.now;
+  try {
+    // Simulate a long-running container (200h uptime), past the STALE/VERY_STALE thresholds. The in-process
+    // fhir source must stay FRESH regardless of uptime — it's live every request, never actually "synced".
+    Date.now = () => realNow() + 200 * 3_600_000;
+    const deps = { outcomes: outcomesStub([{ subjectId: "emp-001", status: "COMPLIANT" }]) };
+    const r = await computeDataReadiness(deps, record(["Last audiogram date", "Role", "Site", "Program enrollment"]));
+    const audiogram = r.requiredElements.find((e) => e.canonicalElement === "procedure.audiogram")!;
+    assert.equal(audiogram.freshnessStatus, "FRESH", "in-process fhir source stays FRESH regardless of uptime");
+    assert.equal(r.overallStatus, "READY", "no spurious READY_WITH_WARNINGS from a decayed in-process source");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("'Program enrollment' resolves by measure: audiogram → hearingConservation MAPPED", async () => {
   const deps = { outcomes: outcomesStub([{ subjectId: "emp-001", status: "COMPLIANT" }]) };
   const r = await computeDataReadiness(deps, record(["Program enrollment"], "audiogram"));
