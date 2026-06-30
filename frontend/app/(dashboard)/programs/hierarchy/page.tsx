@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import type { TenantOption } from "@/features/compliance/types";
+import { SkeletonRow } from "@/components/skeleton-loader";
 
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
 const ALL_SYSTEMS_ROOT_KEY = "all:all";
@@ -189,7 +190,16 @@ export default function HierarchyPage() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>
+        <div className="overflow-hidden rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+          <table className="min-w-full text-sm">
+            <caption className="sr-only">Loading compliance hierarchy…</caption>
+            <tbody>
+              {Array.from({ length: 8 }, (_, i) => (
+                <SkeletonRow key={i} cols={5} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       {isEmpty ? (
@@ -235,7 +245,16 @@ export default function HierarchyPage() {
                         ) : (
                           <span className="inline-block h-5 w-5 shrink-0" aria-hidden="true" />
                         )}
-                        <span className="font-medium">{node.name}</span>
+                        {node.level === "patient" ? (
+                          <Link
+                            href={`/employees/${node.id}`}
+                            className="font-medium text-primary-700 hover:underline dark:text-primary-400"
+                          >
+                            {node.name}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{node.name}</span>
+                        )}
                         <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
                           {LEVEL_LABELS[node.level]}
                         </span>
