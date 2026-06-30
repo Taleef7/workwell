@@ -4,9 +4,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toRunListItem, toRunSummary, toRunLogEntries, matchesRunFilters, toRunOutcomeRows } from "./read-models.ts";
+import { toRunListItem, toRunSummary, toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, matchesRunFilters, toRunOutcomeRows } from "./read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
-import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
 const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   id: "run-1",
@@ -75,6 +75,40 @@ test("toRunSummary computes passRate as a percentage + outcomeCounts + freshness
   assert.equal(s.dataFreshAsOf, "2026-06-13T10:00:04.500Z"); // MAX(evaluated_at)
   const counts = Object.fromEntries(s.outcomeCounts.map((c) => [c.status, c.count]));
   assert.deepEqual(counts, { COMPLIANT: 2, OVERDUE: 1, MISSING_DATA: 1, EXCLUDED: 1 });
+});
+
+// The bounded GROUP BY (countOutcomesByStatus) that the /api/runs list/summary now use instead of
+// loading every outcome row — must produce the SAME list item + summary as the per-row path (post-audit
+// perf fix: per-run listOutcomes pushed ?limit=20 past the 60s gateway timeout once 120k-row seed:scale
+// runs existed).
+const sampleCounts: OutcomeStatusCount[] = [
+  { status: "COMPLIANT", count: 2, latestEvaluatedAt: "2026-06-13T10:00:02.000Z" },
+  { status: "OVERDUE", count: 1, latestEvaluatedAt: "2026-06-13T10:00:03.000Z" },
+  { status: "MISSING_DATA", count: 1, latestEvaluatedAt: "2026-06-13T10:00:04.000Z" },
+  { status: "EXCLUDED", count: 1, latestEvaluatedAt: "2026-06-13T10:00:04.500Z" },
+];
+
+test("toRunListItemFromCounts matches the per-row toRunListItem (bounded GROUP BY parity)", () => {
+  assert.deepEqual(toRunListItemFromCounts(run(), sampleCounts), toRunListItem(run(), sample));
+});
+
+test("toRunSummaryFromCounts matches the per-row toRunSummary (counts + passRate + freshness)", () => {
+  const s = toRunSummaryFromCounts(run(), sampleCounts);
+  assert.equal(s.passRate, 40);
+  assert.equal(s.totalEvaluated, 5);
+  assert.equal(s.compliantCount, 2);
+  assert.equal(s.nonCompliantCount, 2);
+  assert.equal(s.dataFreshAsOf, "2026-06-13T10:00:04.500Z"); // MAX(evaluated_at) across status groups
+  const counts = Object.fromEntries(s.outcomeCounts.map((c) => [c.status, c.count]));
+  assert.deepEqual(counts, { COMPLIANT: 2, OVERDUE: 1, MISSING_DATA: 1, EXCLUDED: 1 });
+});
+
+test("empty counts read cleanly (no outcomes for a run → 0 / null / -1)", () => {
+  const s = toRunSummaryFromCounts(run({ scopeType: "ALL_PROGRAMS", scopeId: null }), []);
+  assert.equal(s.totalEvaluated, 0);
+  assert.equal(s.passRate, 0);
+  assert.equal(s.dataFreshAsOf, null);
+  assert.equal(s.dataFreshnessMinutes, -1);
 });
 
 test("an ALL_PROGRAMS run (no scopeId) is labelled 'All Programs', and empty runs read cleanly", () => {
