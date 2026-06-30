@@ -61,6 +61,8 @@ import {
 } from "../measure/value-set-governance.ts";
 import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -432,6 +434,19 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const r = await (await store(env)).getLatest(readyId);
     if (!r) return json({ error: "not_found", measureId: readyId }, 404);
     return json(await computeDataReadiness({ outcomes: (await getStores(env)).outcomes }, r));
+  }
+
+  // Outcome diff: compare the latest population run's outcomes against the official eCQM population
+  // criteria (E14 PR-2 / #186). Pure read — never affects a stored outcome (ADR-008, ADR-018).
+  // Returns { available: false } for measures without a vendored official reference.
+  const diffId = pathname.match(/^\/api\/measures\/([^/]+)\/fidelity\/diff$/)?.[1];
+  if (diffId && req.method === "GET") {
+    const ref = referenceFor(diffId);
+    if (!ref) return json({ available: false });
+    const allOutcomes = await (await getStores(env)).outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
+    const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
+    const report = computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear());
+    return json(report);
   }
 
   // Standards fidelity: a documented structural diff of WorkWell's authored measure vs the official
