@@ -61,7 +61,7 @@ import {
 } from "../measure/value-set-governance.ts";
 import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
-import { latestRunRows, isPopulationRun } from "../program/rollup-shared.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 
 interface MeasuresEnv {
@@ -444,7 +444,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const ref = referenceFor(diffId);
     if (!ref) return json({ available: false });
     const allOutcomes = await (await getStores(env)).outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
-    const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType)));
+    const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
     const report = computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear());
     return json(report);
   }
