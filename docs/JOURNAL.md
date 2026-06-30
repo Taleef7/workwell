@@ -20,7 +20,7 @@
 
 **Deferred:** A full outcome diff (running the official CQL with real VSAC value sets) requires the `ValueSetResolver` port once VSAC credentials are available (E3.2 seam already in place). The criteria-impact analysis is the PR-2 structural-first deliverable (ADR-018).
 
-**Next:** E14 PR-3 (full official-CQL execution/outcome diff via ValueSetResolver), E13 PR-3 (scheduled cron recompute), E12 PR-2 (WebChart adapter — blocked on MIE schema).
+**Next:** E14 PR-3 (full official-CQL execution/outcome diff via ValueSetResolver — blocked on VSAC credentials), E12 PR-2 (WebChart adapter — blocked on MIE schema), E15 (#187, cross-system identity — leans on E12+E13), and the deferred WCAG chart accessible-alternatives.
 
 ## 2026-06-29 — E13 PR-3: scheduled cron recompute
 
