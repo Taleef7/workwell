@@ -155,6 +155,16 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     rows = rows.filter((r) => Object.values(r.cells).some((c) => c.status === s));
   }
 
+  // E10 polish: subjects with no applicable/evaluated cell in this panel (e.g. the demo login personas —
+  // system roles "Author"/"Approver"/… with no occupational measures) sink below employees with real
+  // compliance data, so the top of the roster isn't a wall of "Not applicable". Stable: a paired-index
+  // tiebreaker preserves directory order within each group.
+  const hasData = (r: RosterRow) => Object.values(r.cells).some((c) => c.status !== "NA" && c.status !== "NOT_APPLICABLE");
+  rows = rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Number(hasData(b.r)) - Number(hasData(a.r)) || a.i - b.i)
+    .map((x) => x.r);
+
   const total = rows.length;
   const page = Math.max(1, Math.trunc(filters.page ?? 1));
   const pageSize = Math.max(1, Math.min(Math.trunc(filters.pageSize ?? 50), 200));
