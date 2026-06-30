@@ -62,26 +62,21 @@ export class PgQualitySnapshotStore implements QualitySnapshotStore {
   constructor(private readonly pool: PgPool) {}
 
   async upsertSnapshots(inputs: QualitySnapshotInput[]): Promise<void> {
-    for (const s of inputs) {
-      await this.pool.query(
-        `INSERT INTO ${S}.quality_snapshots
-           (id, measure_id, period, period_start, period_end, scope_level, scope_id, tenant_id,
-            numerator, denominator, compliant, due_soon, overdue, missing_data, excluded, source_run_id, computed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-         ON CONFLICT (measure_id, period, scope_level, scope_id) DO UPDATE SET
-           period_start = EXCLUDED.period_start,
-           period_end = EXCLUDED.period_end,
-           tenant_id = EXCLUDED.tenant_id,
-           numerator = EXCLUDED.numerator,
-           denominator = EXCLUDED.denominator,
-           compliant = EXCLUDED.compliant,
-           due_soon = EXCLUDED.due_soon,
-           overdue = EXCLUDED.overdue,
-           missing_data = EXCLUDED.missing_data,
-           excluded = EXCLUDED.excluded,
-           source_run_id = EXCLUDED.source_run_id,
-           computed_at = EXCLUDED.computed_at`,
-        [
+    if (inputs.length === 0) return;
+    // Chunked multi-row upsert (mirrors OutcomeStore.recordOutcomes' Neon batching discipline): a single
+    // ALL_PROGRAMS materialization emits ~14 measures × ~265 scale-tenant rows ≈ 4k rows — one INSERT per
+    // row would be ~4k sequential Neon round-trips. 17 cols/row × 100 rows = 1700 params per statement,
+    // well under Postgres's 65535 bind-param limit. buildSnapshotRows emits one row per (measure, scope)
+    // and materializeRun spans DISTINCT measures, so a chunk never holds a duplicate ON CONFLICT key
+    // (which Postgres rejects: "ON CONFLICT DO UPDATE command cannot affect row a second time").
+    const COLS = 17;
+    const CHUNK = 100;
+    for (let i = 0; i < inputs.length; i += CHUNK) {
+      const slice = inputs.slice(i, i + CHUNK);
+      const params: unknown[] = [];
+      const tuples = slice.map((s, r) => {
+        const o = r * COLS;
+        params.push(
           crypto.randomUUID(),
           s.measureId,
           s.period,
@@ -99,7 +94,28 @@ export class PgQualitySnapshotStore implements QualitySnapshotStore {
           s.excluded,
           s.sourceRunId,
           s.computedAt,
-        ],
+        );
+        return `(${Array.from({ length: COLS }, (_, c) => `$${o + c + 1}`).join(", ")})`;
+      });
+      await this.pool.query(
+        `INSERT INTO ${S}.quality_snapshots
+           (id, measure_id, period, period_start, period_end, scope_level, scope_id, tenant_id,
+            numerator, denominator, compliant, due_soon, overdue, missing_data, excluded, source_run_id, computed_at)
+         VALUES ${tuples.join(", ")}
+         ON CONFLICT (measure_id, period, scope_level, scope_id) DO UPDATE SET
+           period_start = EXCLUDED.period_start,
+           period_end = EXCLUDED.period_end,
+           tenant_id = EXCLUDED.tenant_id,
+           numerator = EXCLUDED.numerator,
+           denominator = EXCLUDED.denominator,
+           compliant = EXCLUDED.compliant,
+           due_soon = EXCLUDED.due_soon,
+           overdue = EXCLUDED.overdue,
+           missing_data = EXCLUDED.missing_data,
+           excluded = EXCLUDED.excluded,
+           source_run_id = EXCLUDED.source_run_id,
+           computed_at = EXCLUDED.computed_at`,
+        params,
       );
     }
   }

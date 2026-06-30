@@ -105,6 +105,9 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   }
 
   await deps.qualitySnapshots.upsertSnapshots(rows);
+  // Audit AFTER the upsert (not the usual audit-before-action): a snapshot is a descriptive, idempotently
+  // re-materializable aggregate, not an irreversible compliance state change — re-running the run rewrites
+  // it and re-audits. (The hard "audit-before" rule guards irreversible mutations; this isn't one.)
   await deps.events.appendAudit({
     eventType: QUALITY_SNAPSHOT_MATERIALIZED_EVENT,
     entityType: "run",
