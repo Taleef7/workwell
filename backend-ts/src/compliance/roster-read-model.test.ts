@@ -67,6 +67,25 @@ test("buildRoster — status filter keeps only subjects with >=1 matching cell; 
   assert.equal(roster.total, 0);
 });
 
+test("buildRoster — subjects with real compliance data sort above all-NA rows (demo personas sink)", async () => {
+  // emp-005 (Nadia Anwar) is a real employee but NOT first in the directory (emp-001..004 are the demo
+  // login personas). Give only emp-005 a real cell — it must float above the all-NA demo personas.
+  const REAL = "emp-005";
+  const withRun: OutcomeWithRun[] = [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: REAL, measureId: "mmr", status: "COMPLIANT" },
+  ];
+  const byRun: Record<string, OutcomeRecord[]> = {
+    "run-1": [
+      { id: "o-1", runId: "run-1", subjectId: REAL, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+    ],
+  };
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
+  const idxReal = roster.rows.findIndex((r) => r.subject.externalId === REAL);
+  const idxDemo = roster.rows.findIndex((r) => r.subject.externalId === "emp-001"); // Demo Author — all NA
+  assert.equal(idxReal, 0, "the only subject with a real cell floats to the top");
+  assert.ok(idxReal < idxDemo, "all-NA demo persona sinks below the subject with data");
+});
+
 test("buildRoster — a newer in-flight RUNNING run is ignored; the last COMPLETED roster stands", async () => {
   // run-2 is newer but still RUNNING (an async ALL_PROGRAMS run persists outcomes before finalizing),
   // carrying a partial OVERDUE outcome. The roster must keep run-1's COMPLETED COMPLIANT cell.

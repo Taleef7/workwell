@@ -19,10 +19,15 @@ export interface IntegrationHealth {
   config: Record<string, unknown>;
 }
 
+// The in-process integrations (fhir/mcp/ai) are live from process start, so their "last sync" is the
+// boot time — not "Never", which read as broken/stale. hris stays null: it's a simulated directory with
+// no real sync source. A manual sync (syncIntegration) restamps whichever one is synced.
+const BOOT_TIME = new Date().toISOString();
+
 const INTEGRATIONS: IntegrationHealth[] = [
-  { integration: "fhir", displayName: "FHIR Repository", status: "healthy", lastSyncAt: null, detail: "In-process CQL/FHIR evaluation (synthetic adapter).", config: {} },
-  { integration: "mcp", displayName: "MCP Server", status: "healthy", lastSyncAt: null, detail: "Read-only MCP tools over /sse.", config: {} },
-  { integration: "ai", displayName: "AI Services", status: "healthy", lastSyncAt: null, detail: "OpenAI-backed draft/explain surfaces with deterministic fallback.", config: {} },
+  { integration: "fhir", displayName: "FHIR Repository", status: "healthy", lastSyncAt: BOOT_TIME, detail: "In-process CQL/FHIR evaluation (synthetic adapter).", config: {} },
+  { integration: "mcp", displayName: "MCP Server", status: "healthy", lastSyncAt: BOOT_TIME, detail: "Read-only MCP tools over /sse.", config: {} },
+  { integration: "ai", displayName: "AI Services", status: "healthy", lastSyncAt: BOOT_TIME, detail: "OpenAI-backed draft/explain surfaces with deterministic fallback.", config: {} },
   { integration: "hris", displayName: "HRIS Sync", status: "simulated", lastSyncAt: null, detail: "Synthetic employee directory (no live HRIS).", config: {} },
 ];
 const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));
@@ -159,7 +164,12 @@ export function validateDataMappings(): DataElementMapping[] {
 export function sourceFreshness(sourceId: string): string {
   const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
   if (!ih) return "UNKNOWN";
-  if (ih.lastSyncAt == null) return sourceId === "hris" || sourceId === "fhir" ? "FRESH" : "UNKNOWN";
+  // In-process synthetic sources (fhir/hris) are live every request — never actually "synced" — so their
+  // freshness must NOT decay with process uptime. This is independent of the displayed `lastSyncAt` (which
+  // is now seeded to BOOT_TIME for the panel); without this guard, seeding fhir's lastSyncAt would age it
+  // to STALE after 24h of container uptime and spuriously flag clinical measures as stale in data-readiness.
+  if (sourceId === "fhir" || sourceId === "hris") return "FRESH";
+  if (ih.lastSyncAt == null) return "UNKNOWN";
   const hoursAgo = (Date.now() - new Date(ih.lastSyncAt).getTime()) / 3_600_000;
   if (hoursAgo <= 24) return "FRESH";
   if (hoursAgo <= 168) return "STALE";
