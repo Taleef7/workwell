@@ -5,9 +5,11 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "")
 export const DEMO_EMAIL = "admin@workwell.dev";
 export const DEMO_PASSWORD = "Workwell123!";
 
-// The public sandbox auto-signs in as a lower-privilege case manager,
-// kept distinct from the documented admin demo account used on the login form.
-export const SANDBOX_EMAIL = "cm@workwell.dev";
+// The public sandbox auto-signs in as a read-only viewer (ROLE_VIEWER): visitors can browse every
+// read surface, but the backend blocks all non-GET requests for this role — so anonymous traffic can't
+// mutate the shared demo state or trigger compute. Kept distinct from the admin demo account used on
+// the login form.
+export const SANDBOX_EMAIL = "viewer@workwell.dev";
 export const SANDBOX_PASSWORD = DEMO_PASSWORD;
 
 export type LoginResponse = {

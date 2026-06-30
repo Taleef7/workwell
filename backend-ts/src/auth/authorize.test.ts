@@ -12,6 +12,7 @@ const admin = p("ROLE_ADMIN");
 const author = p("ROLE_AUTHOR");
 const approver = p("ROLE_APPROVER");
 const cm = p("ROLE_CASE_MANAGER");
+const viewer = p("ROLE_VIEWER");
 
 test("public routes are permitted without a principal", () => {
   for (const path of ["/api/auth/login", "/api/auth/refresh", "/actuator/health", "/api/version", "/health"]) {
@@ -122,6 +123,23 @@ test("the ELM Explorer endpoints are gated to any authenticated user", () => {
   assert.equal(authorize("POST", "/api/measures/compile", author).ok, true);
   assert.equal(authorize("POST", "/api/measures/compile", cm).ok, true); // not author-gated
   assert.equal(authorize("GET", "/api/measures/audiogram/elm", cm).ok, true);
+});
+
+test("read-only viewer (public sandbox) may GET anything authenticated but never write", () => {
+  // reads across the surfaces the sandbox browses succeed (AUTHENTICATED /api/** fallback)
+  assert.equal(authorize("GET", "/api/runs", viewer).ok, true);
+  assert.equal(authorize("GET", "/api/compliance/roster", viewer).ok, true);
+  assert.equal(authorize("GET", "/api/measures/abc", viewer).ok, true);
+  // every write is 403 — including AUTHENTICATED-fallback writes other roles CAN do (e.g. compile)
+  assert.deepEqual(authorize("POST", "/api/measures/compile", viewer), { ok: false, status: 403 });
+  assert.deepEqual(authorize("POST", "/api/runs/manual", viewer), { ok: false, status: 403 });
+  assert.deepEqual(authorize("POST", "/api/cases/abc/actions/outreach", viewer), { ok: false, status: 403 });
+  assert.deepEqual(authorize("PUT", "/api/measures/abc/spec", viewer), { ok: false, status: 403 });
+  assert.deepEqual(authorize("DELETE", "/api/segments/abc", viewer), { ok: false, status: 403 });
+  // role-restricted GETs the viewer isn't on still 403 (admin/evidence/packets)
+  assert.deepEqual(authorize("GET", "/api/admin/integrations", viewer), { ok: false, status: 403 });
+  // logout is PERMIT, so a viewer session can still sign out
+  assert.equal(authorize("POST", "/api/auth/logout", viewer).ok, true);
 });
 
 test("non-/api routes default to permit", () => {
