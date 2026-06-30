@@ -17,6 +17,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
 } from "recharts";
+import { ChartDataTable } from "@/components/chart-data-table";
 import { SkeletonCard } from "@/components/skeleton-loader";
 
 type ProgramSummary = {
@@ -268,7 +269,7 @@ export default function ProgramsPage() {
 
               <div className="relative z-10 mt-4">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
-                <TrendChart data={trend} loading={detailsLoading} />
+                <TrendChart data={trend} loading={detailsLoading} caption={`${program.measureName} compliance trend by run`} />
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
@@ -380,7 +381,7 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
   return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
 }
 
-function TrendChart({ data, loading }: { data: TrendPoint[]; loading?: boolean }) {
+function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: boolean; caption: string }) {
   const sorted = [...(data ?? [])]
     .filter((t) => t.totalEvaluated > 0)
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
@@ -415,33 +416,44 @@ function TrendChart({ data, loading }: { data: TrendPoint[]; loading?: boolean }
           {deltaPositive ? "↑" : "↓"} {Math.abs(parseFloat(delta))}% from last run
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={80}>
-        <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-          <YAxis
-            tickFormatter={(v: number) => `${v}%`}
-            domain={[domainLo, domainHi]}
-            allowDecimals={false}
-            tick={{ fontSize: 10, fill: "#94a3b8" }}
-            axisLine={false}
-            tickLine={false}
-            width={36}
-          />
-          <Tooltip
-            formatter={(v) => [`${v}%`, "Compliance"]}
-            contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
-          />
-          <Line
-            type="monotone"
-            dataKey="rate"
-            stroke="currentColor"
-            strokeWidth={2}
-            dot={{ r: 3, fill: "currentColor" }}
-            activeDot={{ r: 4 }}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      {/* The sr-only ChartDataTable below is the accessible alternative, so the chart is
+          aria-hidden. Disable Recharts' built-in accessibilityLayer (default true in v3 —
+          it puts tabIndex=0/role="application" on the <svg>), else a keyboard user would tab
+          onto a focusable element inside an aria-hidden subtree (axe aria-hidden-focus). */}
+      <div aria-hidden="true">
+        <ResponsiveContainer width="100%" height={80}>
+          <LineChart data={chartData} accessibilityLayer={false} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+            <YAxis
+              tickFormatter={(v: number) => `${v}%`}
+              domain={[domainLo, domainHi]}
+              allowDecimals={false}
+              tick={{ fontSize: 10, fill: "#94a3b8" }}
+              axisLine={false}
+              tickLine={false}
+              width={36}
+            />
+            <Tooltip
+              formatter={(v) => [`${v}%`, "Compliance"]}
+              contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+            />
+            <Line
+              type="monotone"
+              dataKey="rate"
+              stroke="currentColor"
+              strokeWidth={2}
+              dot={{ r: 3, fill: "currentColor" }}
+              activeDot={{ r: 4 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <ChartDataTable
+        caption={caption}
+        columns={["Run date", "Compliance"]}
+        rows={chartData.map((d) => [d.label, `${d.rate}%`])}
+      />
     </div>
   );
 }

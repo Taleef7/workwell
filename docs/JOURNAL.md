@@ -1,5 +1,48 @@
 # Journal
 
+## 2026-06-30 — WCAG chart accessible-alternatives + roadmap housekeeping (E11 close, E15/E9 specs)
+
+A status-driven cleanup session. Reconciled the June-15 roadmap (E10–E15, #182–#187) against GitHub,
+then did the three things that were actionable without an external blocker.
+
+**1. Closed the E11 epic (#183).** All E11 sub-PRs (#203/#204 Rule Builder + live Hep B repoint;
+#205/#206 segments backend + Configure Groups UI) were merged, deployed, and live — the tracking issue
+was simply never closed. Posted a comment mapping each acceptance criterion (ADR-015 canonical-CQL
+decision, Rule Builder UI, segment/risk-group model) to its PR and closed it as completed.
+
+**2. WCAG chart accessible-alternatives (this PR).** The chart half of the a11y pass deferred from
+PR #210. There are exactly **3 Recharts charts** in the dashboard (everything else is the
+already-accessible NITRO/datavis grid):
+- `/programs` per-card `TrendChart` (LineChart)
+- `/programs/[measureId]` `ComplianceTrendChart` (AreaChart) + outcome `PieChart`
+
+New shared `frontend/components/chart-data-table.tsx` — `ChartDataTable`: an `sr-only` `<table>` with a
+`<caption>` and scoped column headers, em-dash for nullish cells, an empty-label fallback. Each chart's
+visual SVG is now wrapped in `aria-hidden="true"` and paired with a `ChartDataTable` carrying the same
+numbers, so screen-reader users get the data instead of an unlabeled graphic (WCAG 1.1.1). 6 unit tests
+(`components/__tests__/chart-data-table.test.tsx`). **No new deps, no schema.**
+
+Verification: frontend `npm run lint` clean (the one warning is pre-existing in `test/mocks/next-font.ts`),
+**105/105 vitest pass** (21 files, incl. the new 6), production `npm run build` green + TypeScript clean.
+
+**3. Drafted the E15 + E9 specs** (so they're ready the moment their blockers clear; both marked
+*Draft — pending owner review*):
+- `docs/superpowers/specs/2026-06-30-e15-cross-system-identity-design.md` — cross-system identity &
+  mobility (#187). Key finding: a **synthetic-first PR-1 is buildable now** over the E13 multi-tenant
+  directory (cross-system people + DUPLICATE surface + unified person view + mobility timeline,
+  read-only/no-schema) even though the real EMPI resolver is blocked on E12 PR-2. Match-don't-auto-merge,
+  human-in-the-loop, CQL stays authoritative, E13 reconciliation preserved. 3 open questions for Doug.
+- `docs/superpowers/specs/2026-06-30-e9-cql-sql-bridge-decision-memo.md` — the CQL→SQL decision memo (#78,
+  no code per the epic). FHIR-native (A) / CQL→SQL transpile (B) / hybrid pluggable executors (C) with
+  pros/cons; **recommends C** — keep FHIR-native as default + parity oracle, record a `MeasureExecutor`
+  seam as an ADR, build no transpiler until Doug confirms Q2 and a concrete high-volume measure justifies
+  it.
+
+**Roadmap status after this session:** E10 + E13 fully closed; E11 closed (issue + code); E12 (PR-2 blocked
+on MIE WebChart schema) and E14 (PR-3 blocked on VSAC credentials) partially done; E15 not started (spec
+drafted). Remaining non-epic open items: #167 (managed S3/R2 evidence bucket — owner-gated deploy config),
+#168 (Proxmox onboot — nice-to-have), #78 (E9 decision memo — drafted, awaiting Doug Q2).
+
 ## 2026-06-29 — E14 PR-2: criteria-impact outcome diff
 
 **What shipped:** `GET /api/measures/:id/fidelity/diff` — a pure criteria-impact analysis that shows, criterion by criterion, how many subjects from the latest CMS122 population run would have different outcomes if the official eCQM criteria (currently OMITTED/SIMPLIFIED in WorkWell's authored measure) were applied. Descriptive only (ADR-008).
@@ -20,7 +63,7 @@
 
 **Deferred:** A full outcome diff (running the official CQL with real VSAC value sets) requires the `ValueSetResolver` port once VSAC credentials are available (E3.2 seam already in place). The criteria-impact analysis is the PR-2 structural-first deliverable (ADR-018).
 
-**Next:** E14 PR-3 (full official-CQL execution/outcome diff via ValueSetResolver), E13 PR-3 (scheduled cron recompute), E12 PR-2 (WebChart adapter — blocked on MIE schema).
+**Next:** E14 PR-3 (full official-CQL execution/outcome diff via ValueSetResolver — blocked on VSAC credentials), E12 PR-2 (WebChart adapter — blocked on MIE schema), E15 (#187, cross-system identity — leans on E12+E13), and the deferred WCAG chart accessible-alternatives.
 
 ## 2026-06-29 — E13 PR-3: scheduled cron recompute
 

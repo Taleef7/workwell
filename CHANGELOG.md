@@ -26,6 +26,18 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 ### Docs
 - Synced CLAUDE.md, AGENTS.md, README, DEPLOY, and the sprint index to the post-Sprint-7 / Sprint-8 state (measure catalog 60/49, Next.js 16 + React 19, OpenAI Spring AI starter, MIE-only deployment).
 
+## [2026-06-30]
+
+### Added
+- **WCAG chart accessible-alternatives (PR #218):** a shared `ChartDataTable` (`frontend/components/chart-data-table.tsx`) — a screen-reader-only captioned `<table>` with scoped column headers — is now rendered beside each of the 3 dashboard Recharts charts (the `/programs` per-card `TrendChart` line chart, and the `/programs/[measureId]` `ComplianceTrendChart` area chart + outcome `PieChart`). Each chart's visual SVG is marked `aria-hidden="true"`, so assistive tech reads the underlying numbers instead of an unlabeled graphic (WCAG 1.1.1 non-text content). Completes the chart half of the a11y pass deferred from PR #210. 6 unit tests. No schema, no new deps.
+- **E15 (#187) + E9 (#78) design specs (drafts):** `docs/superpowers/specs/2026-06-30-e15-cross-system-identity-design.md` (cross-system identity & mobility — a synthetic-first PR-1 is buildable over the E13 directory; the real EMPI resolver is blocked on E12 PR-2) and `docs/superpowers/specs/2026-06-30-e9-cql-sql-bridge-decision-memo.md` (the CQL→SQL decision memo — recommends hybrid pluggable executors; awaiting Doug Q2). Both marked *Draft — pending owner review*.
+
+### Fixed
+- **`aria-hidden-focus` avoided on the now-hidden charts (PR #218):** Recharts v3 defaults `accessibilityLayer=true` (a focusable `<svg>` with `role="application"`) and Pie defaults `rootTabIndex=0`; wrapping the charts in `aria-hidden="true"` would otherwise leave focusable elements inside a hidden subtree (an axe `aria-hidden-focus` violation + keyboard focus-order regression). The built-in keyboard layers — now redundant since the `sr-only` table is the accessible alternative — are disabled (`accessibilityLayer={false}` on the Line/Area/Pie charts + `rootTabIndex={-1}` on the Pie). Found by the whole-PR `code-reviewer` pass.
+
+### Docs
+- Closed the **E11 epic (#183)** (all sub-PRs #203–#206 were already merged + live; the tracking issue was never closed). Reconciled `CLAUDE.md`, `README.md`, `docs/ARCHITECTURE.md` (§4 chart-a11y note), and `docs/JOURNAL.md` to the 2026-06-30 state.
+
 ## [2026-06-25]
 
 ### Added
