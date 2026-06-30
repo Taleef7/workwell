@@ -3,6 +3,10 @@
  * `INSERT OR REPLACE` on the UNIQUE (measure_id, period, scope_level, scope_id) key (last write wins) —
  * which also sidesteps the `excluded` ON CONFLICT pseudo-table clashing with the column literally named
  * `excluded`. Counts only; never decides compliance (ADR-008).
+ *
+ * Note: INSERT OR REPLACE delete+inserts on a UNIQUE conflict, so a re-materialized row gets a NEW `id`
+ * — floor ids are NOT stable across re-materialization (the Pg ceiling's ON CONFLICT DO UPDATE keeps the
+ * id). Snapshot ids are opaque; consumers (the PR-2 read API) must not assume floor id stability.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import type {
