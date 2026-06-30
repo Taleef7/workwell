@@ -18,7 +18,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
-import { toRunSummary } from "../run/read-models.ts";
+import { toRunSummaryFromCounts } from "../run/read-models.ts";
 import { createChat, type ChatFn } from "../ai/openai-chat.ts";
 import {
   draftSpec,
@@ -157,9 +157,10 @@ export async function handleAi(req: Request, env: AiEnv, actor = "system"): Prom
     const s = await getStores(env);
     const run = await s.runs.getRun(insightId);
     if (!run) return json({ error: "not_found", id: insightId }, 404);
-    const outcomes = await s.outcomes.listOutcomes(insightId);
     const totalCases = await s.cases.countByLastRun(insightId);
-    const summary = toRunSummary(run, outcomes, totalCases);
+    // Counts-based (bounded GROUP BY) — the run-insight prompt only needs the summary counts, not the
+    // per-subject rows (which are 120k for a seed:scale run).
+    const summary = toRunSummaryFromCounts(run, await s.outcomes.countOutcomesByStatus(insightId), totalCases);
     const res = await runInsight(
       await aiDeps(env),
       {
