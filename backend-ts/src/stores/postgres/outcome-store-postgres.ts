@@ -14,6 +14,7 @@ import type {
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
   ScaleGroupCount,
+  OutcomeStatusCount,
   MeasureScanOptions,
 } from "../outcome-store.ts";
 
@@ -218,5 +219,22 @@ export class PgOutcomeStore implements OutcomeStore {
       [runId],
     );
     return rows.map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+  }
+
+  async countOutcomesByStatus(runId: string): Promise<OutcomeStatusCount[]> {
+    if (!isUuid(runId)) return [];
+    // Bounded GROUP BY status (+ MAX evaluated_at) — the run list/summary read models use this instead
+    // of materializing every outcome row per run (O(120k) for seed:scale runs; pushed ?limit=20 past
+    // the 60s gateway timeout). Same discipline as aggregateScaleRun.
+    const { rows } = await this.pool.query<{ status: string; count: string; latest: Date | string | null }>(
+      `SELECT status, COUNT(*)::text AS count, MAX(evaluated_at) AS latest
+         FROM ${T} WHERE run_id = $1 GROUP BY status`,
+      [runId],
+    );
+    return rows.map((r) => ({
+      status: r.status,
+      count: Number(r.count),
+      latestEvaluatedAt: r.latest == null ? null : r.latest instanceof Date ? r.latest.toISOString() : r.latest,
+    }));
   }
 }

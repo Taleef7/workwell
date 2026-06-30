@@ -14,7 +14,7 @@
  * "MANUAL" — the floor only holds manually-created runs so far.
  */
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
-import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 
@@ -82,6 +82,26 @@ function tally(outcomes: OutcomeRecord[]) {
   return { total: outcomes.length, compliant, nonCompliant, byStatus, freshAsOf };
 }
 
+type Tally = { total: number; compliant: number; nonCompliant: number; byStatus: Map<string, number>; freshAsOf: string | null };
+
+/** Same tally as `tally(outcomes)`, but from a bounded `GROUP BY status` (+ MAX evaluated_at) instead
+ *  of the per-subject rows — so the run list/summary never load the 120k rows of a seed:scale run. */
+function tallyFromCounts(counts: OutcomeStatusCount[]): Tally {
+  let total = 0;
+  let compliant = 0;
+  let nonCompliant = 0;
+  const byStatus = new Map<string, number>();
+  let freshAsOf: string | null = null;
+  for (const c of counts) {
+    total += c.count;
+    byStatus.set(c.status, (byStatus.get(c.status) ?? 0) + c.count);
+    if (c.status === "COMPLIANT") compliant += c.count;
+    else if (NON_COMPLIANT.has(c.status)) nonCompliant += c.count;
+    if (c.latestEvaluatedAt && (freshAsOf === null || c.latestEvaluatedAt > freshAsOf)) freshAsOf = c.latestEvaluatedAt;
+  }
+  return { total, compliant, nonCompliant, byStatus, freshAsOf };
+}
+
 function durationMs(run: RunRecord): number {
   if (!run.completedAt) return 0;
   return Math.max(0, new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime());
@@ -95,8 +115,7 @@ export function triggerTypeOf(run: RunRecord): string {
   return "MANUAL";
 }
 
-export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunListItem {
-  const t = tally(outcomes);
+function buildListItem(run: RunRecord, t: Tally): RunListItem {
   return {
     runId: run.id,
     measureName: measureLabel(run.scopeId).name,
@@ -112,11 +131,10 @@ export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunLis
   };
 }
 
-export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCases = 0): RunSummary {
+function buildSummary(run: RunRecord, t: Tally, totalCases: number): RunSummary {
   const { name, version } = measureLabel(run.scopeId);
-  const t = tally(outcomes);
   return {
-    ...toRunListItem(run, outcomes),
+    ...buildListItem(run, t),
     measureName: name,
     measureVersion: version,
     totalCases,
@@ -125,6 +143,25 @@ export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCas
     dataFreshAsOf: t.freshAsOf,
     dataFreshnessMinutes: t.freshAsOf === null ? -1 : Math.floor((Date.now() - new Date(t.freshAsOf).getTime()) / 60000),
   };
+}
+
+export function toRunListItem(run: RunRecord, outcomes: OutcomeRecord[]): RunListItem {
+  return buildListItem(run, tally(outcomes));
+}
+
+/** Counts-based run list item — uses the bounded `countOutcomesByStatus` GROUP BY instead of loading
+ *  every outcome row, so `/api/runs` scales to the 120k-row seed:scale runs without the 60s timeout. */
+export function toRunListItemFromCounts(run: RunRecord, counts: OutcomeStatusCount[]): RunListItem {
+  return buildListItem(run, tallyFromCounts(counts));
+}
+
+export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCases = 0): RunSummary {
+  return buildSummary(run, tally(outcomes), totalCases);
+}
+
+/** Counts-based run summary — same bounded-aggregation path as `toRunListItemFromCounts`. */
+export function toRunSummaryFromCounts(run: RunRecord, counts: OutcomeStatusCount[], totalCases = 0): RunSummary {
+  return buildSummary(run, tallyFromCounts(counts), totalCases);
 }
 
 export function toRunLogEntries(logs: RunLogRow[]): RunLogEntry[] {

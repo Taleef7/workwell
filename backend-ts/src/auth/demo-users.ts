@@ -26,6 +26,10 @@ export const DEMO_USERS: readonly DemoUser[] = [
   { email: "approver@workwell.dev", role: "ROLE_APPROVER", passwordHash: DEMO_PASSWORD_HASH },
   { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
   { email: "admin@workwell.dev", role: "ROLE_ADMIN", passwordHash: DEMO_PASSWORD_HASH },
+  // ROLE_VIEWER is a read-only role (not in the original Java seed): the public /sandbox signs in as
+  // this so anonymous visitors can browse every read surface but cannot mutate shared demo state or
+  // trigger compute (authorize.ts blocks all non-GET for VIEWER). Frontend rbac already treats it read-only.
+  { email: "viewer@workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
 ];
 
 /** Case-insensitive lookup, matching the Java `LOWER(email) = LOWER(?)` query. */

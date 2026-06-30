@@ -27,7 +27,7 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
-import { toRunListItem, toRunSummary, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import {
   executeManualRun,
@@ -166,7 +166,10 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     // Filter first, then cap, so `limit` bounds the *matching* rows (matches the Java
     // endpoint) rather than pre-truncating before filters apply.
     const matching = (await runStore.listRuns(1000)).filter((r) => matchesRunFilters(r, filters)).slice(0, limit);
-    const items = await Promise.all(matching.map(async (r) => toRunListItem(r, await outcomeStore.listOutcomes(r.id))));
+    // Bounded GROUP BY per run (not listOutcomes) so the list never materializes the 120k-row
+    // seed:scale outcomes — the previous per-run full-row load pushed ?limit=20 past the 60s gateway
+    // timeout once scale was seeded on Neon (post-audit perf fix).
+    const items = await Promise.all(matching.map(async (r) => toRunListItemFromCounts(r, await outcomeStore.countOutcomesByStatus(r.id))));
     return json(items);
   }
 
@@ -367,7 +370,9 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     const run = await (await store(env)).getRun(id);
     if (!run) return json({ error: "not_found", id }, 404);
     const totalCases = await (await cases(env)).countByLastRun(id);
-    return json(toRunSummary(run, await (await outcomes(env)).listOutcomes(id), totalCases));
+    // Counts-based summary (bounded GROUP BY) so opening a 120k-row seed:scale run's detail header is
+    // also fast; the per-employee outcomes grid (/outcomes) still loads rows on demand.
+    return json(toRunSummaryFromCounts(run, await (await outcomes(env)).countOutcomesByStatus(id), totalCases));
   }
 
   return null;

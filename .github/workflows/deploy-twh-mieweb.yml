@@ -40,7 +40,7 @@ env:
   SITE_ID: 1
   APP_NAME: "WorkWell TWH"
   APP_TAGLINE: "Total Worker Health — safety and wellness unified."
-  APP_DESCRIPTION: "Eight measures (OSHA safety + wellness), complete case management, and a full audit trail — one reviewable dashboard."
+  APP_DESCRIPTION: "OSHA safety, clinical wellness, and CMS eCQM measures, complete case management, and a full audit trail — one reviewable dashboard."
 
 jobs:
   build-backend-ts:

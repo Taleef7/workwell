@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEMO_USERS, findDemoUser, authenticate } from "./demo-users.ts";
 
-test("seeds exactly the four Java demo roles", () => {
+test("seeds the four Java demo roles plus the read-only viewer (public sandbox)", () => {
   assert.deepEqual(
     DEMO_USERS.map((u) => `${u.email}:${u.role}`).sort(),
     [
@@ -15,6 +15,7 @@ test("seeds exactly the four Java demo roles", () => {
       "approver@workwell.dev:ROLE_APPROVER",
       "author@workwell.dev:ROLE_AUTHOR",
       "cm@workwell.dev:ROLE_CASE_MANAGER",
+      "viewer@workwell.dev:ROLE_VIEWER",
     ],
   );
 });

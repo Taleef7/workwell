@@ -13,6 +13,7 @@ import type {
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
   ScaleGroupCount,
+  OutcomeStatusCount,
   MeasureScanOptions,
 } from "../outcome-store.ts";
 
@@ -192,5 +193,18 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(runId)
       .all<{ location_id: string; provider_id: string; status: string; count: number }>();
     return (results ?? []).map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+  }
+
+  async countOutcomesByStatus(runId: string): Promise<OutcomeStatusCount[]> {
+    // Bounded GROUP BY status (+ MAX evaluated_at) — the run list/summary read models use this
+    // instead of materializing every outcome row per run (O(120k) for seed:scale runs).
+    const { results } = await this.db
+      .prepare(
+        `SELECT status, COUNT(*) AS count, MAX(evaluated_at) AS latest
+           FROM outcomes WHERE run_id = ? GROUP BY status`,
+      )
+      .bind(runId)
+      .all<{ status: string; count: number; latest: string | null }>();
+    return (results ?? []).map((r) => ({ status: r.status, count: Number(r.count), latestEvaluatedAt: r.latest ?? null }));
   }
 }

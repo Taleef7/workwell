@@ -27,6 +27,7 @@ const APPROVER = "ROLE_APPROVER";
 const AUTHOR = "ROLE_AUTHOR";
 const CM = "ROLE_CASE_MANAGER";
 const MCP = "ROLE_MCP_CLIENT";
+const VIEWER = "ROLE_VIEWER"; // read-only (public /sandbox); may GET but never write
 
 /**
  * Glob → anchored regex, Spring AntPathMatcher semantics:
@@ -122,6 +123,11 @@ export function authorize(method: string, pathname: string, principal: JwtPrinci
     if (!rule.pattern.test(pathname)) continue;
     if (rule.access === "PERMIT") return { ok: true };
     if (!principal) return { ok: false, status: 401 };
+    // Read-only sandbox role: ROLE_VIEWER may read (GET/HEAD) anything it is otherwise authorized for,
+    // but never write — so the public /sandbox can browse without mutating shared demo state or
+    // triggering compute. Public routes (login/refresh/logout/health) are PERMIT and already returned
+    // above, so a viewer can still log out.
+    if (principal.role === VIEWER && method !== "GET" && method !== "HEAD") return { ok: false, status: 403 };
     if (rule.access === "AUTHENTICATED") return { ok: true };
     return rule.access.includes(principal.role) ? { ok: true } : { ok: false, status: 403 };
   }

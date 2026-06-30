@@ -10,7 +10,7 @@ const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "A clean operating surface for occupational-health compliance.";
-const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION ?? "Four measures, complete case management, and a full audit trail — one reviewable dashboard.";
+const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION ?? "Occupational safety and clinical wellness measures, complete case management, and a full audit trail — one reviewable dashboard.";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
 const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 

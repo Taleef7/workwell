@@ -12,6 +12,7 @@ import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
+import { SkeletonCard } from "@/components/skeleton-loader";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { niceDomain } from "@/lib/charts";
@@ -458,7 +459,11 @@ export default function ProgramDetailPage() {
           </div>
         </>
       ) : (
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading program detail...</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          {[0, 1].map((i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
       )}
     </section>
   );
