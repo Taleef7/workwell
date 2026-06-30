@@ -20,8 +20,9 @@ import { ValueSetsTab } from "@/features/studio/components/ValueSetsTab";
 import { TestsTab } from "@/features/studio/components/TestsTab";
 import { ReleaseApprovalTab } from "@/features/studio/components/ReleaseApprovalTab";
 import { TraceabilityTab } from "@/features/studio/components/TraceabilityTab";
+import { StandardsTab } from "@/features/studio/components/StandardsTab";
 
-type Tab = "spec" | "cql" | "rules" | "valuesets" | "tests" | "release" | "traceability";
+type Tab = "spec" | "cql" | "rules" | "valuesets" | "tests" | "release" | "traceability" | "standards";
 
 export default function StudioMeasurePage() {
   const { user } = useAuth();
@@ -87,8 +88,8 @@ export default function StudioMeasurePage() {
     ?? versionHistory.find((item) => item.version === measure?.version)?.id
     ?? null;
 
-  const tabs: Tab[] = ["spec", "cql", "rules", "valuesets", "tests", "release", "traceability"];
-  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", rules: "Rule Builder", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability" };
+  const tabs: Tab[] = ["spec", "cql", "rules", "valuesets", "tests", "release", "traceability", "standards"];
+  const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", rules: "Rule Builder", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability", standards: "Standards" };
   const tablistRef = useRef<HTMLDivElement>(null);
 
   // Roving-tabindex arrow-key navigation across the tab strip (WCAG ARIA tabs pattern).
@@ -280,6 +281,12 @@ export default function StudioMeasurePage() {
       {measureId && tab === "traceability" ? (
         <div role="tabpanel" id="studio-tabpanel-traceability" aria-labelledby="studio-tab-traceability">
         <TraceabilityTab measureId={measureId} api={api} />
+        </div>
+      ) : null}
+
+      {measureId && tab === "standards" ? (
+        <div role="tabpanel" id="studio-tabpanel-standards" aria-labelledby="studio-tab-standards">
+        <StandardsTab measureId={measureId} api={api} />
         </div>
       ) : null}
       </div>
