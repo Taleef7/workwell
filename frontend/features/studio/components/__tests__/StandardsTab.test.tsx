@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { StandardsTab } from "../StandardsTab";
 import type { ApiClient } from "@/lib/api/client";
 
@@ -33,7 +33,9 @@ const diff = {
 };
 
 function mockApi(byUrl: Record<string, unknown>): Partial<ApiClient> {
-  return { get: vi.fn((url: string) => Promise.resolve(byUrl[url])) };
+  // Cast around ApiClient.get's generic <T> signature — the mock dispatches by URL.
+  const get = ((url: string) => Promise.resolve(byUrl[url])) as unknown as ApiClient["get"];
+  return { get };
 }
 
 describe("StandardsTab", () => {
