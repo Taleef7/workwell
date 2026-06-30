@@ -164,7 +164,12 @@ export function validateDataMappings(): DataElementMapping[] {
 export function sourceFreshness(sourceId: string): string {
   const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
   if (!ih) return "UNKNOWN";
-  if (ih.lastSyncAt == null) return sourceId === "hris" || sourceId === "fhir" ? "FRESH" : "UNKNOWN";
+  // In-process synthetic sources (fhir/hris) are live every request — never actually "synced" — so their
+  // freshness must NOT decay with process uptime. This is independent of the displayed `lastSyncAt` (which
+  // is now seeded to BOOT_TIME for the panel); without this guard, seeding fhir's lastSyncAt would age it
+  // to STALE after 24h of container uptime and spuriously flag clinical measures as stale in data-readiness.
+  if (sourceId === "fhir" || sourceId === "hris") return "FRESH";
+  if (ih.lastSyncAt == null) return "UNKNOWN";
   const hoursAgo = (Date.now() - new Date(ih.lastSyncAt).getTime()) / 3_600_000;
   if (hoursAgo <= 24) return "FRESH";
   if (hoursAgo <= 168) return "STALE";
