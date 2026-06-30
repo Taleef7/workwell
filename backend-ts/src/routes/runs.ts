@@ -192,6 +192,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       caseStore: await cases(env),
       engine,
       segments: await enabledSegments(env),
+      qualitySnapshots: (await getStores(env)).qualitySnapshots,
+      events: (await getStores(env)).events,
     };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
@@ -231,6 +233,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       caseStore: await cases(env),
       engine,
       segments: await enabledSegments(env),
+      qualitySnapshots: (await getStores(env)).qualitySnapshots,
+      events: (await getStores(env)).events,
     };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,

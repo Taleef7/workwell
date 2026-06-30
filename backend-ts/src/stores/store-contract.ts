@@ -20,6 +20,7 @@ import type { ValueSetStore } from "./value-set-store.ts";
 import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
+import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -1102,5 +1103,87 @@ export function segmentStoreContract(label: string, freshStore: () => Promise<Se
     assert.deepEqual(after!.measureIds.slice().sort(), ["audiogram", "hazwoper"]);
     assert.equal(after!.overrides.length, 1, "duplicate externalId collapses to a single override row");
     assert.equal(after!.overrides[0]!.externalId, "emp-003");
+  });
+}
+
+/** Registers the QualitySnapshotStore contract for one backend (#E16). `freshStore` → isolated, empty. */
+export function qualitySnapshotStoreContract(label: string, freshStore: () => Promise<QualitySnapshotStore>): void {
+  const base = (over: Partial<QualitySnapshotInput>): QualitySnapshotInput => ({
+    measureId: "audiogram",
+    period: "2026-06",
+    periodStart: "2026-06-01T00:00:00.000Z",
+    periodEnd: "2026-06-30T23:59:59.999Z",
+    scopeLevel: "all",
+    scopeId: "ALL",
+    tenantId: null,
+    numerator: 0,
+    denominator: 0,
+    compliant: 0,
+    dueSoon: 0,
+    overdue: 0,
+    missingData: 0,
+    excluded: 0,
+    sourceRunId: "run-1",
+    computedAt: "2026-06-30T12:00:00.000Z",
+    ...over,
+  });
+
+  test(`[${label}] quality snapshots: upsert + querySnapshots round-trip, ordered by period then scopeId`, async () => {
+    const store = await freshStore();
+    await store.upsertSnapshots([
+      base({ period: "2026-05", scopeLevel: "all", scopeId: "ALL", numerator: 5, denominator: 10, compliant: 5 }),
+      base({ period: "2026-06", scopeLevel: "all", scopeId: "ALL", numerator: 7, denominator: 10, compliant: 7 }),
+      base({ period: "2026-06", scopeLevel: "tenant", scopeId: "twh", tenantId: "twh", numerator: 3, denominator: 4, compliant: 3 }),
+    ]);
+    const rows = await store.querySnapshots({ measureId: "audiogram" });
+    assert.equal(rows.length, 3);
+    assert.deepEqual(
+      rows.map((r) => `${r.period}:${r.scopeLevel}:${r.scopeId}`),
+      ["2026-05:all:ALL", "2026-06:all:ALL", "2026-06:tenant:twh"],
+    );
+    assert.ok(rows[0]!.id, "rows carry a persisted id");
+    assert.equal(rows[0]!.numerator, 5);
+    assert.equal(rows[0]!.denominator, 10);
+    assert.equal(rows[0]!.tenantId, null);
+    assert.equal(rows[2]!.tenantId, "twh");
+    assert.equal(rows[2]!.compliant, 3);
+  });
+
+  test(`[${label}] quality snapshots: upsert is idempotent on (measure, period, scope) — last write wins, no dup`, async () => {
+    const store = await freshStore();
+    await store.upsertSnapshots([base({ numerator: 1, denominator: 10, compliant: 1 })]);
+    await store.upsertSnapshots([base({ numerator: 9, denominator: 10, compliant: 9 })]);
+    const rows = await store.querySnapshots({ measureId: "audiogram" });
+    assert.equal(rows.length, 1, "same (measure, period, scope) overwrites, never duplicates");
+    assert.equal(rows[0]!.numerator, 9);
+    assert.equal(rows[0]!.compliant, 9);
+  });
+
+  test(`[${label}] quality snapshots: filters by period range, scopeLevel/scopeId, tenantId`, async () => {
+    const store = await freshStore();
+    await store.upsertSnapshots([
+      base({ period: "2026-04", scopeLevel: "all", scopeId: "ALL" }),
+      base({ period: "2026-05", scopeLevel: "all", scopeId: "ALL" }),
+      base({ period: "2026-06", scopeLevel: "all", scopeId: "ALL" }),
+      base({ period: "2026-06", scopeLevel: "tenant", scopeId: "twh", tenantId: "twh" }),
+      base({ period: "2026-06", scopeLevel: "tenant", scopeId: "ihn", tenantId: "ihn" }),
+      base({ period: "2026-06", scopeLevel: "site", scopeId: "twh|HQ", tenantId: "twh" }),
+    ]);
+    assert.deepEqual(
+      (await store.querySnapshots({ from: "2026-05", to: "2026-06", scopeLevel: "all" })).map((r) => r.period),
+      ["2026-05", "2026-06"],
+    );
+    assert.deepEqual((await store.querySnapshots({ scopeLevel: "tenant" })).map((r) => r.scopeId).sort(), ["ihn", "twh"]);
+    assert.deepEqual((await store.querySnapshots({ scopeLevel: "tenant", scopeId: "twh" })).map((r) => r.scopeId), ["twh"]);
+    assert.deepEqual(
+      (await store.querySnapshots({ tenantId: "twh" })).map((r) => `${r.scopeLevel}:${r.scopeId}`).sort(),
+      ["site:twh|HQ", "tenant:twh"],
+    );
+  });
+
+  test(`[${label}] quality snapshots: upsertSnapshots([]) is a no-op`, async () => {
+    const store = await freshStore();
+    await store.upsertSnapshots([]);
+    assert.deepEqual(await store.querySnapshots({}), []);
   });
 }

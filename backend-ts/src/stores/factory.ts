@@ -27,6 +27,7 @@ import { SqliteValueSetStore } from "./sqlite/value-set-store-sqlite.ts";
 import { SqliteOutreachTemplateStore } from "./sqlite/outreach-template-store-sqlite.ts";
 import { SqliteWaiverStore } from "./sqlite/waiver-store-sqlite.ts";
 import { SqliteSegmentStore } from "./sqlite/segment-store-sqlite.ts";
+import { SqliteQualitySnapshotStore } from "./sqlite/quality-snapshot-store-sqlite.ts";
 
 import { createPgPool, type PgPool } from "./postgres/pg-database.ts";
 import { RUN_STORE_PG_DDL } from "./postgres/schema-pg.ts";
@@ -41,6 +42,7 @@ import { PgValueSetStore } from "./postgres/value-set-store-postgres.ts";
 import { PgOutreachTemplateStore } from "./postgres/outreach-template-store-postgres.ts";
 import { PgWaiverStore } from "./postgres/waiver-store-postgres.ts";
 import { PgSegmentStore } from "./postgres/segment-store-postgres.ts";
+import { PgQualitySnapshotStore } from "./postgres/quality-snapshot-store-postgres.ts";
 
 import type { RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
@@ -53,6 +55,7 @@ import type { ValueSetStore } from "./value-set-store.ts";
 import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
+import type { QualitySnapshotStore } from "./quality-snapshot-store.ts";
 import type { CampaignStore } from "./campaign-store.ts";
 import { AuditBackedCampaignStore } from "./audit-campaign-store.ts";
 
@@ -69,6 +72,8 @@ export interface Stores {
   outreachTemplates: OutreachTemplateStore;
   waivers: WaiverStore;
   segments: SegmentStore;
+  /** Quality-over-time aggregate snapshots (#E16) — materialized per (measure, month, scope). */
+  qualitySnapshots: QualitySnapshotStore;
   /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
   campaigns: CampaignStore;
 }
@@ -138,6 +143,7 @@ async function buildPostgres(url: string): Promise<Stores> {
     outreachTemplates: new PgOutreachTemplateStore(pool),
     waivers: new PgWaiverStore(pool),
     segments: new PgSegmentStore(pool),
+    qualitySnapshots: new PgQualitySnapshotStore(pool),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }
@@ -176,6 +182,7 @@ async function buildSqlite(db: CloudDatabase): Promise<Stores> {
     outreachTemplates: new SqliteOutreachTemplateStore(db),
     waivers: new SqliteWaiverStore(db),
     segments: new SqliteSegmentStore(db),
+    qualitySnapshots: new SqliteQualitySnapshotStore(db),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }

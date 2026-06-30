@@ -28,6 +28,9 @@ import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-c
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
+import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
+import type { CaseEventStore } from "../stores/case-event-store.ts";
+import { materializeRun } from "../quality/materialize-run.ts";
 
 export type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
 
@@ -64,6 +67,11 @@ export interface RunPipelineDeps {
   segments?: HydratedSegment[];
   /** Injectable for tests (defaults to the full synthetic directory). */
   employees?: readonly EmployeeProfile[];
+  /** When BOTH present, a completed population run (ALL_PROGRAMS/MEASURE) materializes quality-over-time
+   *  snapshots (#E16), best-effort — a snapshot failure never fails the run. Absent ⇒ no materialization
+   *  (non-run paths like impact-preview/case-rerun simply don't pass them). */
+  qualitySnapshots?: QualitySnapshotStore;
+  events?: Pick<CaseEventStore, "appendAudit">;
 }
 
 /** Thrown for scopes not served by this path (CASE — handled by rerun-to-verify in the cases module). */
@@ -248,6 +256,22 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(run.id, terminalStatus);
+  // Materialize the quality-over-time snapshot for this run's month (#E16) — AFTER finalize and
+  // best-effort, so a snapshot failure can never fail an otherwise-complete run. materializeRun skips
+  // non-population scopes (EMPLOYEE/SITE/CASE) and seed:scale runs internally; the scale tenant folds
+  // in via the bounded GROUP-BY, never the 120k per-subject rows.
+  if (deps.qualitySnapshots && deps.events) {
+    await materializeRun(run.id, {
+      runStore: deps.runStore,
+      outcomeStore: deps.outcomeStore,
+      qualitySnapshots: deps.qualitySnapshots,
+      events: deps.events,
+    }).catch((err) => {
+      void deps.runStore
+        .appendLog(run.id, "WARN", `Quality snapshot materialization failed: ${String((err as Error)?.message ?? err)}`)
+        .catch(() => {});
+    });
+  }
   return {
     runId: run.id,
     scopeType,
