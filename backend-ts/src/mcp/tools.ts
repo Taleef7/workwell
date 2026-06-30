@@ -15,7 +15,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { toCaseSummary } from "../case/case-read-models.ts";
-import { toRunSummary, toRunListItem } from "../run/read-models.ts";
+import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-models.ts";
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
@@ -154,9 +154,9 @@ async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unkno
   if (rawRunId && !UUID_RE.test(rawRunId)) return safeError("INVALID_ARGUMENT", "runId must be a valid UUID");
   const run = rawRunId ? await deps.runStore.getRun(rawRunId) : (await deps.runStore.listRuns(1))[0] ?? null;
   if (!run) throw new ToolArgError(rawRunId ? `Run not found: ${rawRunId}` : "No runs found");
-  const outcomes = await deps.outcomeStore.listOutcomes(run.id);
   const totalCases = await deps.caseStore.countByLastRun(run.id);
-  const s = toRunSummary(run, outcomes, totalCases);
+  // Counts-based (bounded GROUP BY) — never materialize a seed:scale run's 120k rows for the summary.
+  const s = toRunSummaryFromCounts(run, await deps.outcomeStore.countOutcomesByStatus(run.id), totalCases);
   return {
     run_id: s.runId,
     scope: s.scopeType,
@@ -233,10 +233,10 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   runs = runs.slice(0, limit);
   const results = await Promise.all(
     runs.map(async (run) => {
-      const outcomes = await deps.outcomeStore.listOutcomes(run.id);
-      const item = toRunListItem(run, outcomes);
+      const statusCounts = await deps.outcomeStore.countOutcomesByStatus(run.id);
+      const item = toRunListItemFromCounts(run, statusCounts);
       const counts: Record<string, number> = Object.fromEntries(OUTCOME_KEYS.map((k) => [k, 0]));
-      for (const o of outcomes) if (o.status in counts) counts[o.status] = (counts[o.status] ?? 0) + 1;
+      for (const c of statusCounts) if (c.status in counts) counts[c.status] = c.count;
       const complianceRate = item.totalEvaluated === 0 ? 0 : Math.round((1000 * (counts.COMPLIANT ?? 0)) / item.totalEvaluated) / 10;
       return {
         run_id: run.id,

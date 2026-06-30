@@ -6,7 +6,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { toRunSummary } from "../run/read-models.ts";
+import { toRunSummaryFromCounts } from "../run/read-models.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -29,7 +29,10 @@ export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, li
   const runs = await runStore.listRuns(limit);
   const rows = await Promise.all(
     runs.map(async (run) => {
-      const s = toRunSummary(run, await outcomeStore.listOutcomes(run.id));
+      // Counts-based (bounded GROUP BY) so the runs CSV never loads the 120k-row seed:scale outcomes
+      // per run — same scale regression the /api/runs list fix addresses (this endpoint is on the
+      // deploy smoke checklist).
+      const s = toRunSummaryFromCounts(run, await outcomeStore.countOutcomesByStatus(run.id));
       const count = (status: string) => s.outcomeCounts.find((c) => c.status === status)?.count ?? 0;
       return [
         s.runId, s.measureName, s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
