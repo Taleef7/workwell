@@ -39,10 +39,10 @@ describe("SandboxPage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("logs in with the shared demo credentials and redirects to /programs", async () => {
+  it("auto-signs in as the read-only viewer and redirects to /programs", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ token: "tok", email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" })
+      json: async () => ({ token: "tok", email: "viewer@workwell.dev", role: "ROLE_VIEWER" })
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -52,7 +52,10 @@ describe("SandboxPage", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockLogin).toHaveBeenCalledWith("tok", "cm@workwell.dev", "ROLE_CASE_MANAGER");
+    // the sandbox must sign in with the read-only viewer account, not a write-capable role
+    const options = fetchMock.mock.calls[0]?.[1] as { body: string };
+    expect(options.body).toContain("viewer@workwell.dev");
+    expect(mockLogin).toHaveBeenCalledWith("tok", "viewer@workwell.dev", "ROLE_VIEWER");
     expect(mockReplace).toHaveBeenCalledWith("/programs");
   });
 });

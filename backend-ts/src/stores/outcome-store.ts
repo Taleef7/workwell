@@ -122,6 +122,22 @@ export interface OutcomeStore {
    * Used by the hierarchy rollup + programs KPIs for the scale tenant (#185 E13 PR-2).
    */
   aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]>;
+  /**
+   * Status histogram for one run — a single bounded `GROUP BY status` (+ MAX(evaluated_at)), returning
+   * O(statuses) rows, never the per-subject rows. The run-list/summary read models use this instead of
+   * `listOutcomes(runId)`: the `/api/runs` list previously loaded every outcome row per run just to
+   * count them, which is O(120k) for each `seed:scale` run and pushed `?limit=20` past the 60s gateway
+   * timeout. (Post-audit fix; same bounded-aggregation discipline as `aggregateScaleRun`.)
+   */
+  countOutcomesByStatus(runId: string): Promise<OutcomeStatusCount[]>;
+}
+
+/** A per-status count for one run (a bounded GROUP BY). `latestEvaluatedAt` is MAX(evaluated_at) within
+ *  the group, so the run summary can derive `dataFreshAsOf` without materializing any outcome rows. */
+export interface OutcomeStatusCount {
+  status: string;
+  count: number;
+  latestEvaluatedAt: string | null;
 }
 
 /** A grouped count from a scale run: outcomes per (location, provider, status). The SQL aggregation

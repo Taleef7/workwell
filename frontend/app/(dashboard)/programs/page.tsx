@@ -169,6 +169,9 @@ export default function ProgramsPage() {
     .filter((ts): ts is string => Boolean(ts))
     .sort()
     .at(-1);
+  // On the very first load (no data yet) show an em-dash instead of the computed zeros, which would
+  // otherwise flash "0.0% compliance / 0 open cases" — reading as "everything broken" for a beat.
+  const initialLoad = loading && programs.length === 0;
 
   return (
     <section className="space-y-4">
@@ -211,11 +214,18 @@ export default function ProgramsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <KpiCard label="Evaluations (latest runs)" value={String(totalEvaluations)} />
-        <KpiCard label="Overall compliance" value={`${overallComplianceRate.toFixed(1)}%`} />
-        <KpiCard label="Open cases" value={String(openCases)} />
-        <KpiCard label="Last run" value={lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
+        <KpiCard label="Evaluations (latest runs)" value={initialLoad ? "—" : String(totalEvaluations)} />
+        <KpiCard label="Overall compliance" value={initialLoad ? "—" : `${overallComplianceRate.toFixed(1)}%`} />
+        <KpiCard label="Open cases" value={initialLoad ? "—" : String(openCases)} />
+        <KpiCard label="Last run" value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
+
+      {tenant === "mhn" ? (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          MetroHealth Network is a generated population-scale dataset (~120k subjects) that demonstrates rollup
+          performance at scale — it has no individual cases or worklist.
+        </p>
+      ) : null}
 
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">

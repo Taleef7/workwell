@@ -1,5 +1,50 @@
 # Journal
 
+## 2026-06-30 — Live deployment audit + post-audit fixes (branch `fix/post-audit-qa`)
+
+A full end-to-end audit of the live stack (`twh.os.mieweb.org`) driven through the real browser
+(Playwright) across all four roles + API-level verification, then fixes for the confirmed findings.
+
+**Audit verdict:** ~90% of the documented E10–E14 roadmap is genuinely live and correct — the
+multi-tenant + scale rollup reconciles exactly (All Systems 1,682,100 = mhn 1,680,000 + ihn 700 + twh
+1,400), 14 runnable measures, WCAG chart alternatives, E10 roster + E11.3 segments, the M1–M4 QA fixes,
+the E13 PR-3 scheduler firing in prod, and clean RBAC across all four roles. Three findings were
+**false positives** on code inspection (the app is better than a browser-only check showed): the
+hierarchy/compliance filter selects are labelled via `<label htmlFor>` / `<label>`-wrapping (not
+`aria-label`), and the case-detail "duplicate" action panels are intentional responsive markup
+(`md:hidden` vs `hidden md:grid`).
+
+**Fixes (6 commits):**
+- **perf(runs)** — the headline P0. `/api/runs` called `listOutcomes(runId)` per run to compute summary
+  counts; after the 120k-row `seed:scale` runs were seeded on Neon, listing 20 runs loaded millions of
+  rows and pushed `?limit=20` (the Runs page default) past the 60s gateway `proxy_read_timeout` — the
+  run-history table intermittently rendered empty (surfaced as a CORS error since the timed-out response
+  skips CORS middleware). Added `OutcomeStore.countOutcomesByStatus` (a bounded GROUP BY mirroring
+  `aggregateScaleRun`) + counts-based `toRunListItemFromCounts` / `toRunSummaryFromCounts`. The
+  per-employee outcomes grid + exports still load rows on demand.
+- **feat(studio)** — surfaced E14 standards fidelity as a read-only "Standards" Studio tab (was
+  API-only / invisible to users). Criterion COVERED/SIMPLIFIED/OMITTED, value-set fidelity, and the
+  criteria-impact outcome diff; adapts to a "no official reference" state for non-CMS measures.
+  Descriptive only (ADR-008).
+- **fix(sandbox)** — the public `/sandbox` auto-signed-in as a Case Manager (write access on the shared
+  live DB). Added a read-only `ROLE_VIEWER` (`viewer@workwell.dev`), enforced in `authorize.ts` (GET/HEAD
+  only; all writes 403; logout stays PERMIT); the sandbox now signs in as the viewer. Frontend rbac
+  already treated VIEWER as read-only, so its nav auto-collapses to the read surfaces.
+- **fix(content)** — replaced the stale "Eight measures" landing copy (the deploy build-arg + the code
+  default) with a count-free description.
+- **fix(ux)** — KPI zero-flash guard, MetroHealth-Network "(generated population-scale dataset)" caption,
+  hierarchy patient→profile links, and loading skeletons on the hierarchy + program-detail pages.
+
+**Verification:** backend `tsc` + targeted tests green (auth 18 incl. the VIEWER read-only test,
+read-models 35 incl. GROUP-BY parity, runs route, roster, `worker` 5, demo-users); frontend `tsc` +
+eslint clean + full vitest 101 pass. The `/api/runs` real-world speedup is only measurable once deployed
+against the Neon scale tenant. **No schema change, no new deps.**
+
+**Deferred (P3, low value):** demo accounts sort first in the roster (would touch the synthetic
+directory); the Rule Builder live-preview (endpoint is alive; needs a complete rule); integration
+"Last sync" auto-refresh (manual sync works; the Java `@Scheduled` refresh wasn't ported); the Studio
+desktop-only gate (by design).
+
 ## 2026-06-30 — WCAG chart accessible-alternatives + roadmap housekeeping (E11 close, E15/E9 specs)
 
 A status-driven cleanup session. Reconciled the June-15 roadmap (E10–E15, #182–#187) against GitHub,
