@@ -16,6 +16,7 @@ import { SkeletonCard } from "@/components/skeleton-loader";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { niceDomain } from "@/lib/charts";
+import { ChartDataTable } from "@/components/chart-data-table";
 
 type ProgramSummary = {
   measureId: string;
@@ -194,32 +195,46 @@ export default function ProgramDetailPage() {
                   <span className="text-xs text-neutral-400">No outcomes for the latest run</span>
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie
-                      data={outcomeBreakdown}
-                      dataKey="value"
-                      nameKey="key"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={75}
-                      paddingAngle={2}
-                    >
-                      {outcomeBreakdown.map((slice) => (
-                        <Cell key={slice.key} fill={OUTCOME_COLORS[slice.key] ?? "#94a3b8"} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value, name) => [value, labelFor(OUTCOME_LABELS, String(name))]}
-                      contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
-                    />
-                    <Legend
-                      formatter={(value) => labelFor(OUTCOME_LABELS, String(value))}
-                      wrapperStyle={{ fontSize: 11 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <>
+                  {/* aria-hidden — the sr-only ChartDataTable below is the accessible
+                      alternative. Disable Recharts' built-in keyboard layers (default-focusable
+                      in v3) so no focusable element lives inside the aria-hidden subtree:
+                      accessibilityLayer={false} on PieChart + rootTabIndex={-1} on Pie. */}
+                  <div aria-hidden="true">
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart accessibilityLayer={false}>
+                        <Pie
+                          data={outcomeBreakdown}
+                          dataKey="value"
+                          nameKey="key"
+                          rootTabIndex={-1}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={2}
+                        >
+                          {outcomeBreakdown.map((slice) => (
+                            <Cell key={slice.key} fill={OUTCOME_COLORS[slice.key] ?? "#94a3b8"} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value, name) => [value, labelFor(OUTCOME_LABELS, String(name))]}
+                          contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+                        />
+                        <Legend
+                          formatter={(value) => labelFor(OUTCOME_LABELS, String(value))}
+                          wrapperStyle={{ fontSize: 11 }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <ChartDataTable
+                    caption="Outcome breakdown for the latest run"
+                    columns={["Outcome", "Subjects"]}
+                    rows={outcomeBreakdown.map((slice) => [labelFor(OUTCOME_LABELS, slice.key), slice.value])}
+                  />
+                </>
               )}
             </div>
           </div>
@@ -473,33 +488,44 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
-        <defs>
-          <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
-            <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-        <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
-        <Tooltip
-          formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
-          contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
-          labelStyle={{ fontSize: 11, color: "#475569" }}
-        />
-        <Area
-          type="monotone"
-          dataKey="rate"
-          name="Compliance"
-          stroke="#059669"
-          strokeWidth={2.5}
-          fill="url(#complianceGrad)"
-          dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
-          activeDot={{ r: 5 }}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <>
+      {/* aria-hidden — sr-only ChartDataTable below is the accessible alternative;
+          accessibilityLayer={false} keeps the focusable <svg> out of the hidden subtree. */}
+      <div aria-hidden="true">
+        <ResponsiveContainer width="100%" height={200}>
+          <AreaChart data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+            <defs>
+              <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+            <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
+            <Tooltip
+              formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
+              contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+              labelStyle={{ fontSize: 11, color: "#475569" }}
+            />
+            <Area
+              type="monotone"
+              dataKey="rate"
+              name="Compliance"
+              stroke="#059669"
+              strokeWidth={2.5}
+              fill="url(#complianceGrad)"
+              dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <ChartDataTable
+        caption="Compliance trend by run (last 10 runs)"
+        columns={["Run date", "Compliance"]}
+        rows={data.map((d) => [d.label, `${d.rate}%`])}
+      />
+    </>
   );
 }

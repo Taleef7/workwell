@@ -83,6 +83,14 @@ Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on st
 > client (`frontend/lib/api/client.ts`) adds GET in-flight dedup + a 1.5s TTL cache busted on every
 > write, replacing the blanket `cache:"no-store"`.
 
+> **Chart accessible alternatives (WCAG 1.1.1):** every Recharts chart in the dashboard pairs its
+> (visual-only) SVG — marked `aria-hidden="true"` — with a screen-reader-only data table rendered by the
+> shared `frontend/components/chart-data-table.tsx` `ChartDataTable` (an `sr-only` `<table>` with a
+> `<caption>` and scoped column headers). This covers the three charts (`/programs` per-card `TrendChart`
+> line chart; `/programs/[measureId]` `ComplianceTrendChart` area chart + outcome `PieChart`), giving AT
+> users the underlying numbers instead of an unlabeled graphic. Completes the chart half of the a11y pass
+> deferred from PR #210. The large operational tables are the already-accessible NITRO/datavis grid.
+
 ## 5) End-to-End Data Flow
 
 ### 5.1 OSHA/Policy Text -> Spec
