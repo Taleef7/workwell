@@ -25,6 +25,10 @@ const VOLATILE_TABLES = [
   // volatile run data so a demo reset doesn't leave stale compliance history behind. No FK, so the
   // position is arbitrary; grouped with the run-derived tables.
   "quality_snapshots",
+  // Cross-system identity overrides (#187 E15 PR-2): manual CONFIRM/UNLINK links. Clear them with the
+  // volatile data so a demo reset returns to the auto-resolved baseline — otherwise a CM/Admin split or
+  // merge would persist while its `audit_events` rows are wiped, leaving an inconsistent baseline. No FK.
+  "person_links",
   "run_logs",
   "runs",
   "audit_events",
