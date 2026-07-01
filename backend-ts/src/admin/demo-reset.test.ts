@@ -13,6 +13,7 @@ const EXPECTED_ORDER = [
   "case_actions",
   "cases",
   "outcomes",
+  "quality_snapshots",
   "run_logs",
   "runs",
   "audit_events",

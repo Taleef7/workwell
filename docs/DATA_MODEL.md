@@ -470,6 +470,46 @@ no new tables.
   ```
 CQL `Outcome Status` stays authoritative for live-evaluated subjects (ADR-008/ADR-020).
 
+### 3.24 Quality-over-time snapshots — `quality_snapshots` (E16) — NEW table
+
+A materialized AGGREGATE of a completed population run's outcomes per (measure, calendar month, scope),
+so "what was measure X's population compliance on month M for scope S?" is a bounded table read instead
+of a re-scan of the per-subject `outcomes` (O(120k) at population scale). The first E16 schema — one
+table on the floor (`stores/sqlite/schema.ts`) + ceiling (`stores/postgres/schema-pg.ts`,
+`workwell_spike`); TEXT id (`crypto.randomUUID()`), floor TEXT timestamps / ceiling TIMESTAMPTZ:
+
+```sql
+quality_snapshots (
+  id TEXT PK, measure_id TEXT, period TEXT,                 -- period = 'YYYY-MM' (calendar month); measure_id = the outcomes slug
+  period_start <ts>, period_end <ts>,                       -- calendar-month bounds
+  scope_level TEXT,                                         -- 'all' | 'tenant' | 'site' | 'provider'
+  scope_id TEXT,                                            -- 'ALL' | tenantId | tenantId|site | tenantId|site|providerId
+  tenant_id TEXT,                                           -- null only for the 'all' root
+  numerator INTEGER, denominator INTEGER,                   -- numerator = compliant; denominator = total − excluded
+  compliant INTEGER, due_soon INTEGER, overdue INTEGER, missing_data INTEGER, excluded INTEGER,
+  source_run_id TEXT, computed_at <ts>,
+  UNIQUE (measure_id, period, scope_level, scope_id)        -- idempotent upsert; last write wins
+)
+-- indexes: (measure_id, period); (scope_level, scope_id)
+```
+
+- **Written** by `materializeRun` (`backend-ts/src/quality/`) on completion of a population run
+  (ALL_PROGRAMS/MEASURE), hooked best-effort into `finishManualRun`. The scale tenant (`mhn`) folds in
+  via `OutcomeStore.aggregateScaleRun` (a bounded GROUP BY) — the 120k per-subject rows are never loaded.
+  Idempotent (floor `INSERT OR REPLACE`, ceiling `ON CONFLICT DO UPDATE`); audited
+  (`QUALITY_SNAPSHOT_MATERIALIZED`).
+- **Aggregate-only** — no per-employee row (that would reintroduce the 160k-row scan the table exists to
+  avoid; the per-person Simulate path #197 covers the individual case). Reconciles
+  All = Σ tenants = Σ sites = Σ providers at every (measure, period). `numerator`/`denominator` reuse the
+  proportion model (`fhir/measure-report.ts` `countPopulations`).
+- **Read** via the `QualitySnapshotStore` port (`querySnapshots({measureId, scopeLevel, scopeId, tenantId, from, to})`);
+  the history API + the `/programs` trend rewire are E16 PR-2.
+- **Reversible** (synthetic-friendly; schema-qualify on the Pg ceiling):
+  ```sql
+  DELETE FROM workwell_spike.quality_snapshots;
+  ```
+Descriptive only — CQL `Outcome Status` stays the sole compliance authority (ADR-008/ADR-021).
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 

@@ -185,6 +185,9 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     engine: deps.engine,
     segments: deps.segments,
     employees: deps.employees,
+    // The scheduled ALL_PROGRAMS run materializes a quality-over-time snapshot for the period (#E16).
+    qualitySnapshots: deps.stores.qualitySnapshots,
+    events: deps.stores.events,
   };
 
   const planned = await planManualRun(runDeps, {

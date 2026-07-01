@@ -291,6 +291,40 @@ CREATE TABLE IF NOT EXISTS segment_overrides (
   mode         TEXT NOT NULL,
   PRIMARY KEY (segment_id, external_id)
 );
+
+/* Quality-over-time snapshots (#E16). Materialized AGGREGATE of a population run's outcomes per
+   (measure, calendar month, scope): numerator/denominator + the 5 bucket counts at every scope level
+   (all -> tenant -> site -> provider). Read by the quality-history API + /programs trend so historical
+   population compliance is a bounded table read, never a re-scan of the per-subject outcomes (O(120k)
+   at scale). Aggregate-only (never per-employee). Idempotent on UNIQUE (measure_id, period, scope_level,
+   scope_id) — re-materializing a month/scope overwrites in place (INSERT OR REPLACE). Descriptive only:
+   it counts what CQL already decided; CQL Outcome Status stays authoritative (ADR-008).
+   OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (E16 PR-1, PR #221) — the
+   AGENTS.md schema-owner rule ("edit these files only on explicit owner instruction") is satisfied;
+   additive (CREATE IF NOT EXISTS), reversible (DELETE FROM quality_snapshots), no data migration. */
+CREATE TABLE IF NOT EXISTS quality_snapshots (
+  id            TEXT PRIMARY KEY,
+  measure_id    TEXT NOT NULL,
+  period        TEXT NOT NULL,
+  period_start  TEXT NOT NULL,
+  period_end    TEXT NOT NULL,
+  scope_level   TEXT NOT NULL,
+  scope_id      TEXT NOT NULL,
+  tenant_id     TEXT,
+  numerator     INTEGER NOT NULL,
+  denominator   INTEGER NOT NULL,
+  compliant     INTEGER NOT NULL,
+  due_soon      INTEGER NOT NULL,
+  overdue       INTEGER NOT NULL,
+  missing_data  INTEGER NOT NULL,
+  excluded      INTEGER NOT NULL,
+  source_run_id TEXT,
+  computed_at   TEXT NOT NULL,
+  UNIQUE (measure_id, period, scope_level, scope_id)
+);
+
+CREATE INDEX IF NOT EXISTS quality_snapshots_measure_period_idx ON quality_snapshots (measure_id, period);
+CREATE INDEX IF NOT EXISTS quality_snapshots_scope_idx ON quality_snapshots (scope_level, scope_id);
 `;
 
 /**
