@@ -169,6 +169,33 @@ DELETE FROM workwell_spike.outcomes
 DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';
 ```
 
+### Seeding quality-over-time history (E16 PR-2, on-demand, NOT auto-run on deploy)
+
+`pnpm seed:quality-history` materializes **real evaluated** `quality_snapshots` (numerator/denominator +
+the 5 bucket counts per measure × month × scope) for a range of past calendar months, so the
+`/programs/[measureId]` "Quality over time" card has genuine history — Doug's *"how do I know if they were
+compliant in December? October?"* answered from a persisted aggregate. It **supersedes** the synthetic
+sine-wave `seed:trend-history` for the quality trend: these rows are actually CQL-evaluated as-of each
+month's end, not faked. On-demand, owner-run, **not** auto-run on deploy. Run once against Neon from
+`backend-ts/` (honors `DATABASE_URL`; no local SQLite when set):
+
+```bash
+cd backend-ts
+DATABASE_URL=<neon-pooled> pnpm seed:quality-history --months 12 --as-of 2026-06
+```
+
+Forward materialization also accrues a snapshot on every completed population run (E16 PR-1), so this CLI
+is only needed to backfill *history* the live runs haven't produced yet. It re-evaluates the in-directory
+workforce per month and folds the 120k `mhn` scale tenant via the bounded `aggregateScaleRun` (never its
+per-subject rows). Audited (`QUALITY_HISTORY_BACKFILLED`, one per month). **Idempotent + resumable** at the
+month level (a rerun skips months that already have snapshots).
+
+**Rollback (reversible) — the whole table is a rebuildable cache** (schema-qualify on the Pg ceiling):
+
+```sql
+DELETE FROM workwell_spike.quality_snapshots;
+```
+
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.

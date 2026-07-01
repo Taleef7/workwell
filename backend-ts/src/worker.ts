@@ -26,6 +26,7 @@ import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
+import { handleQuality } from "./routes/quality.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
@@ -204,6 +205,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Tenants — WebChart system list for the multi-tenant selector (#185 E13 PR-1).
   const tenantsResponse = await handleTenants(req);
   if (tenantsResponse) return tenantsResponse;
+
+  // Quality-over-time history — materialized snapshot time-series read (#E16 PR-2).
+  const qualityResponse = await handleQuality(req, env);
+  if (qualityResponse) return qualityResponse;
 
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
   const segmentsResponse = await handleSegments(req, env, actor);

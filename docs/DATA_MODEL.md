@@ -502,8 +502,12 @@ quality_snapshots (
   avoid; the per-person Simulate path #197 covers the individual case). Reconciles
   All = Σ tenants = Σ sites = Σ providers at every (measure, period). `numerator`/`denominator` reuse the
   proportion model (`fhir/measure-report.ts` `countPopulations`).
-- **Read** via the `QualitySnapshotStore` port (`querySnapshots({measureId, scopeLevel, scopeId, tenantId, from, to})`);
-  the history API + the `/programs` trend rewire are E16 PR-2.
+- **Read** via the `QualitySnapshotStore` port (`querySnapshots({measureId, scopeLevel, scopeId, tenantId, from, to})`),
+  surfaced by `GET /api/quality/history` (E16 PR-2, authenticated read-only). Also **backfilled** for past
+  months by `pnpm seed:quality-history` (`run/backfill-quality-history.ts`) — real evaluated snapshots
+  (audited `QUALITY_HISTORY_BACKFILLED`), superseding the synthetic `seed:trend-history` for the quality
+  trend; idempotent + resumable at the month level. The `/programs/[measureId]` "Quality over time" card
+  (E16 PR-3) consumes the read API.
 - **Reversible** (synthetic-friendly; schema-qualify on the Pg ceiling):
   ```sql
   DELETE FROM workwell_spike.quality_snapshots;

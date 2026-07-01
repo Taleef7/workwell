@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-01 — E16 PR-2 + PR-3: quality-over-time history read API, backfill CLI, and UI
+
+Built the read + surface half of E16 on top of PR-1's snapshot store (branch `feat/e16-quality-history`).
+
+**PR-2 (backend) — read API + as-of backfill CLI:**
+- **`GET /api/quality/history?measureId=&scopeLevel=&scopeId=&tenant=&from=&to=`** (`routes/quality.ts`) —
+  a bounded read of the materialized `quality_snapshots` time-series (period ASC). Validates `from`/`to`
+  as inclusive `YYYY-MM` (400 on malformed) + `scopeLevel` enum; authenticated read-only under the
+  `/api/**` fallback (all roles). Wired into `worker.ts`. 6 route tests.
+- **`pnpm seed:quality-history [--months 12] [--as-of YYYY-MM]`** (`run/backfill-quality-history.ts` +
+  `run/cli/seed-quality-history*.ts`) — materializes **real evaluated** snapshots for a range of past
+  months, **superseding** the synthetic sine-wave `seed:trend-history` for the quality trend. Per month
+  it re-evaluates every in-directory employee as-of that month's end (reusing the Simulate #197 bundle
+  anchoring), reduces raw CQL outcomes through the shared pure `buildSnapshotRows`, folds the 120k `mhn`
+  scale tenant via the bounded `aggregateScaleRun` (never per-subject rows), and idempotently upserts.
+  Audited (`QUALITY_HISTORY_BACKFILLED`, one per month, **before** the upsert). Idempotent + resumable
+  at the month level; reversible (`DELETE FROM quality_snapshots` — the whole table is a rebuildable
+  cache). 2 backfill + 3 CLI-parse tests.
+- **Scoping decision (deviation from plan):** left `programTrend` (the /programs overview cards) on its
+  existing live per-run aggregation — it works and is a safe fallback — and delivered the
+  snapshot-backed trend at the **presentation layer** (PR-3 measure-detail card consuming the new API),
+  where the scope selector + month picker live. Avoids destabilizing the working overview chart; fully
+  backward compatible.
+
+**PR-3 (frontend) — UI:** a new **"Quality over time (source of truth)"** card on
+`/programs/[measureId]` (`QualityOverTime`) — a **scope selector** (All Systems / per WebChart system
+from `/api/tenants`), an **as-of month picker**, a **"compliance on month M"** numerator/denominator KPI,
+and a snapshot-backed monthly area chart with the `ChartDataTable` sr-only accessible alternative (WCAG,
+per #218). Reads `GET /api/quality/history`; graceful empty state pointing at `seed:quality-history`.
+
+**Green:** backend `tsc` clean; frontend lint clean (1 pre-existing test-mock warning) + build + 107
+vitest pass. No schema change (reuses PR-1's `quality_snapshots`), no new deps.
+
 ## 2026-06-30 — E16 PR-1: quality-over-time snapshot store (materialization core + table)
 
 Started **E16** — *"your system is the source of truth for quality over time"* (Doug's June-24 ask).
