@@ -21,6 +21,7 @@ import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
+import type { PersonLinkStore } from "./person-link-store.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -1198,5 +1199,40 @@ export function qualitySnapshotStoreContract(label: string, freshStore: () => Pr
     const rows = await store.querySnapshots({ measureId: "audiogram" });
     assert.equal(rows.length, 1, "an in-batch duplicate key collapses to a single row (no throw)");
     assert.equal(rows[0]!.numerator, 9, "the last write in the batch wins (floor/ceiling parity)");
+  });
+}
+
+/** Registers the PersonLinkStore contract for one backend (#187 E15 PR-2). */
+export function personLinkStoreContract(label: string, freshStore: () => Promise<PersonLinkStore>): void {
+  const ref = (t: string, e: string) => ({ tenantId: t, externalId: e });
+
+  test(`[${label}] person links: upsert normalizes the pair (direction-independent) + reads back`, async () => {
+    const store = await freshStore();
+    // Insert with b < a lexicographically; the store normalizes so `a` is the smaller ref.
+    const link = await store.upsertLink({ a: ref("twh", "emp-007"), b: ref("ihn", "ihn-emp-002"), linkType: "CONFIRMED", createdBy: "cm" });
+    assert.equal(link.a.tenantId, "ihn", "smaller ref (ihn|…) is normalized to `a`");
+    assert.equal(link.b.tenantId, "twh");
+    const all = await store.listLinks();
+    assert.equal(all.length, 1);
+    assert.equal(all[0]!.linkType, "CONFIRMED");
+    assert.equal(all[0]!.createdBy, "cm");
+  });
+
+  test(`[${label}] person links: re-asserting the same pair (either direction) is last-write-wins, no dup`, async () => {
+    const store = await freshStore();
+    await store.upsertLink({ a: ref("twh", "emp-007"), b: ref("ihn", "ihn-emp-002"), linkType: "CONFIRMED", createdBy: "cm" });
+    // Same pair, reversed direction, different type → overwrites in place.
+    await store.upsertLink({ a: ref("ihn", "ihn-emp-002"), b: ref("twh", "emp-007"), linkType: "BROKEN", createdBy: "admin" });
+    const all = await store.listLinks();
+    assert.equal(all.length, 1, "one row per pair, direction-independent");
+    assert.equal(all[0]!.linkType, "BROKEN", "last write wins");
+    assert.equal(all[0]!.createdBy, "admin");
+  });
+
+  test(`[${label}] person links: distinct pairs coexist`, async () => {
+    const store = await freshStore();
+    await store.upsertLink({ a: ref("twh", "emp-007"), b: ref("ihn", "ihn-emp-002"), linkType: "CONFIRMED", createdBy: "cm" });
+    await store.upsertLink({ a: ref("twh", "emp-005"), b: ref("ihn", "ihn-emp-050"), linkType: "CONFIRMED", createdBy: "cm" });
+    assert.equal((await store.listLinks()).length, 2);
   });
 }

@@ -325,6 +325,29 @@ CREATE TABLE IF NOT EXISTS quality_snapshots (
 
 CREATE INDEX IF NOT EXISTS quality_snapshots_measure_period_idx ON quality_snapshots (measure_id, period);
 CREATE INDEX IF NOT EXISTS quality_snapshots_scope_idx ON quality_snapshots (scope_level, scope_id);
+
+/* Cross-system identity links (#187 E15 PR-2). A human-confirmed assertion that two source-system
+   records ARE (CONFIRMED) or are NOT (BROKEN) the same person — overrides the auto matchKey grouping
+   at read time (resolvePeople): CONFIRMED unions two records' groups (links records even without a
+   shared national id); BROKEN removes the direct edge (undo a bad shared-id auto-match, or unlink a
+   prior CONFIRM). The pair is normalized so (a_tenant_id,a_external_id) <= (b_*) lexicographically, so
+   the UNIQUE key is direction-independent and UNLINK re-upserts the same pair to BROKEN (last write
+   wins). Written only by the audited CASE_MANAGER/ADMIN reconcile endpoint (match-don't-auto-merge).
+   Descriptive only — identity groups/follows, never decides compliance (ADR-008/ADR-022).
+   OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (E15 PR-2) — the AGENTS.md
+   schema-owner rule is satisfied; additive (CREATE IF NOT EXISTS), reversible (DELETE FROM
+   person_links), no data migration. */
+CREATE TABLE IF NOT EXISTS person_links (
+  id             TEXT PRIMARY KEY,
+  a_tenant_id    TEXT NOT NULL,
+  a_external_id  TEXT NOT NULL,
+  b_tenant_id    TEXT NOT NULL,
+  b_external_id  TEXT NOT NULL,
+  link_type      TEXT NOT NULL,
+  created_by     TEXT,
+  created_at     TEXT NOT NULL,
+  UNIQUE (a_tenant_id, a_external_id, b_tenant_id, b_external_id)
+);
 `;
 
 /**
