@@ -202,12 +202,13 @@ export function resolvePeople(
     // order, and UNIQUE per component — so a BROKEN split of a shared-id pair yields two distinct ids,
     // which a match-key-based canonical could not since both halves share the same match key).
     const canonical = records.map((r) => refKey(recRef(r))).sort()[0]!;
-    const withId = records.find((r) => r.nationalId) ?? records[0]!;
     people.push({
       personId: personIdFor(canonical),
       displayName: primary.name,
-      nationalId: withId.nationalId ?? null,
-      dateOfBirth: withId.dateOfBirth ?? null,
+      // Pick each identity field from the first record that HAS it (independently) — a record with a
+      // nationalId but a null DOB must not null out another member's DOB.
+      nationalId: records.find((r) => r.nationalId)?.nationalId ?? null,
+      dateOfBirth: records.find((r) => r.dateOfBirth)?.dateOfBirth ?? null,
       crossSystem: distinctTenants.size > 1,
       sources,
     });
