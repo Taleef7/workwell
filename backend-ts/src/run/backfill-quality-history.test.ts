@@ -80,3 +80,21 @@ test("resume=true skips already-materialized months (idempotent)", async () => {
   assert.equal(again.monthsSkipped, 3);
   assert.equal(again.monthsWritten, 0);
 });
+
+test("resume recomputes a month that is only PARTIALLY materialized (not all measures)", async () => {
+  // Pre-seed a single-measure `all` row for a fresh month (as PR-1 would for a one-measure run).
+  await deps.qualitySnapshots.upsertSnapshots([
+    {
+      measureId: "audiogram", period: "2026-03", periodStart: "2026-03-01T00:00:00.000Z", periodEnd: "2026-03-31T23:59:59.999Z",
+      scopeLevel: "all", scopeId: "ALL", tenantId: null,
+      numerator: 1, denominator: 2, compliant: 1, dueSoon: 0, overdue: 1, missingData: 0, excluded: 0,
+      sourceRunId: "run-x", computedAt: "2026-03-31T00:00:00.000Z",
+    },
+  ]);
+  const summary = await backfillQualityHistory(deps, { months: 1, asOf: "2026-03" });
+  assert.equal(summary.monthsWritten, 1, "an incomplete month is recomputed, not skipped");
+  assert.equal(summary.monthsSkipped, 0);
+  // Now the month is complete → a rerun skips it.
+  const again = await backfillQualityHistory(deps, { months: 1, asOf: "2026-03" });
+  assert.equal(again.monthsSkipped, 1);
+});
