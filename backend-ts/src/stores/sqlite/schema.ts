@@ -298,7 +298,10 @@ CREATE TABLE IF NOT EXISTS segment_overrides (
    population compliance is a bounded table read, never a re-scan of the per-subject outcomes (O(120k)
    at scale). Aggregate-only (never per-employee). Idempotent on UNIQUE (measure_id, period, scope_level,
    scope_id) — re-materializing a month/scope overwrites in place (INSERT OR REPLACE). Descriptive only:
-   it counts what CQL already decided; CQL Outcome Status stays authoritative (ADR-008). */
+   it counts what CQL already decided; CQL Outcome Status stays authoritative (ADR-008).
+   OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (E16 PR-1, PR #221) — the
+   AGENTS.md schema-owner rule ("edit these files only on explicit owner instruction") is satisfied;
+   additive (CREATE IF NOT EXISTS), reversible (DELETE FROM quality_snapshots), no data migration. */
 CREATE TABLE IF NOT EXISTS quality_snapshots (
   id            TEXT PRIMARY KEY,
   measure_id    TEXT NOT NULL,

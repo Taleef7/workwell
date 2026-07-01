@@ -287,6 +287,9 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.segment_overrides (
 -- population compliance is a bounded table read, never a re-scan of the per-subject outcomes (O(120k)
 -- at scale). Aggregate-only (never per-employee); descriptive — CQL Outcome Status stays authoritative
 -- (ADR-008). Idempotent on the UNIQUE key (last write wins).
+-- OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (E16 PR-1, PR #221) — the
+-- AGENTS.md schema-owner rule ("edit these files only on explicit owner instruction") is satisfied;
+-- additive (CREATE IF NOT EXISTS), reversible (DELETE FROM …quality_snapshots), no data migration.
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.quality_snapshots (
   id            TEXT PRIMARY KEY,
   measure_id    TEXT NOT NULL,

@@ -1186,4 +1186,17 @@ export function qualitySnapshotStoreContract(label: string, freshStore: () => Pr
     await store.upsertSnapshots([]);
     assert.deepEqual(await store.querySnapshots({}), []);
   });
+
+  test(`[${label}] quality snapshots: an in-batch duplicate (measure, period, scope) collapses last-write-wins`, async () => {
+    const store = await freshStore();
+    // Two inputs with the SAME key in ONE call: the floor loops last-write-wins; the ceiling's
+    // multi-row ON CONFLICT would otherwise raise "cannot affect row a second time" — both must agree.
+    await store.upsertSnapshots([
+      base({ numerator: 1, denominator: 10, compliant: 1 }),
+      base({ numerator: 9, denominator: 10, compliant: 9 }),
+    ]);
+    const rows = await store.querySnapshots({ measureId: "audiogram" });
+    assert.equal(rows.length, 1, "an in-batch duplicate key collapses to a single row (no throw)");
+    assert.equal(rows[0]!.numerator, 9, "the last write in the batch wins (floor/ceiling parity)");
+  });
 }
