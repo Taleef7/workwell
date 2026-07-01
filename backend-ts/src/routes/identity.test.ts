@@ -21,7 +21,7 @@ const get = (p: string) => handleIdentity(new Request(`http://x${p}`, { method: 
 const post = (p: string, body: unknown) =>
   handleIdentity(new Request(`http://x${p}`, { method: "POST", body: JSON.stringify(body) }), env as never, "cm@workwell.dev");
 
-interface Person { personId: string; displayName: string; crossSystem: boolean; sources: { tenantId: string; status: string }[]; }
+interface Person { personId: string; displayName: string; crossSystem: boolean; sources: { tenantId: string; externalId: string; status: string }[]; }
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
@@ -106,6 +106,37 @@ test("reconcile UNLINK splits a duplicate; CONFIRM_LINK re-merges it", async () 
   });
   assert.equal(confirm?.status, 200);
   assert.equal(((await (await get("/api/identity/duplicates"))!.json()) as Person[]).length, 1, "duplicate restored");
+});
+
+test("UNLINK removes the target fully from a 3-member component (never ejects the wrong record)", async () => {
+  // Build a star centered on ihn-emp-050: CONFIRM it to emp-005, then CONFIRM emp-008 (which attaches
+  // to ihn-emp-050) → ihn-emp-050 has TWO edges (to emp-005 and emp-008). A single-anchor UNLINK would
+  // break only one edge and leave ihn-emp-050 wrongly merged with the other; breaking against ALL members
+  // removes exactly the target.
+  const p1 = ((await (await get("/api/identity/people?q=emp-005"))!.json()) as Person[])
+    .find((p) => p.sources.some((s) => s.externalId === "emp-005"))!;
+  await post(`/api/identity/people/${encodeURIComponent(p1.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "ihn", externalId: "ihn-emp-050" });
+  const p2 = ((await (await get("/api/identity/people?q=ihn-emp-050"))!.json()) as Person[])[0]!;
+  const three = await post(`/api/identity/people/${encodeURIComponent(p2.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "twh", externalId: "emp-008" });
+  const person3 = ((await three!.json()) as { person: Person }).person;
+  assert.equal(person3.sources.length, 3, "three-member component");
+
+  // UNLINK the CENTER (ihn-emp-050) → it must be fully removed; no remaining person contains it.
+  await post(`/api/identity/people/${encodeURIComponent(person3.personId)}/reconcile`, { action: "UNLINK", tenantId: "ihn", externalId: "ihn-emp-050" });
+  const solo = ((await (await get("/api/identity/people?q=ihn-emp-050"))!.json()) as Person[])[0]!;
+  assert.equal(solo.sources.length, 1, "the unlinked target is its own singleton");
+  const emp005 = ((await (await get("/api/identity/people?q=emp-005"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.externalId === "emp-005"))!;
+  assert.ok(!emp005.sources.some((s) => s.externalId === "ihn-emp-050"), "the target is not wrongly left grouped with a leaf");
+
+  // cleanup: break the remaining emp-005↔emp-008 (they separated when the center left, but be safe).
+  const c = ((await (await get("/api/identity/people?q=emp-008"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.externalId === "emp-008"))!;
+  if (c.sources.length > 1) await post(`/api/identity/people/${encodeURIComponent(c.personId)}/reconcile`, { action: "UNLINK", tenantId: "twh", externalId: "emp-008" });
+});
+
+test("CONFIRM_LINK rejects a target that isn't a real directory record", async () => {
+  const twhSana = ((await (await get("/api/identity/people?q=Sana"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.tenantId === "twh"))!;
+  const res = await post(`/api/identity/people/${encodeURIComponent(twhSana.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "twh", externalId: "does-not-exist" });
+  assert.equal(res?.status, 400);
 });
 
 test("reconcile validates action + membership", async () => {

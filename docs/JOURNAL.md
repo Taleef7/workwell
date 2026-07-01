@@ -27,6 +27,14 @@ in-session (reviewed once, then applied — the self-creating schema applies on 
   self-creates on boot (`CREATE … IF NOT EXISTS`) — applies automatically on the next deploy.
 - **Deferred:** a full CONFIRM_LINK merge-picker UI (merging two separately-resolved people) — the API
   supports it; the UI is a follow-up.
+- **Code review (whole-branch) folded in:** (Important) UNLINK now breaks the target against **every**
+  other component member — a single-anchor break could eject the wrong record from a 3+ member group
+  (+a 3-member guard test); CONFIRM_LINK validates the target is a real directory record (400 on a
+  typo); the audit logs the semantic anchor/target (not the normalized pair order); `nationalId`/`DOB`
+  are picked independently per field; and — the security one — **`/api/identity/**` reads are now
+  CASE_MANAGER/ADMIN-gated** (the directory exposes national/MRN ids + DOB, which the public read-only
+  VIEWER sandbox would otherwise enumerate via the AUTHENTICATED `/api/**` fallback) + the `/people` nav
+  is CM/ADMIN. **840 tests (839 pass / 1 pg-skip).**
 
 ## 2026-07-01 — E15 PR-1: cross-system identity (person resolution, duplicates, mobility)
 

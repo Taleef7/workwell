@@ -18,7 +18,8 @@ import { getStores } from "../stores/factory.ts";
 import { resolvePeople, duplicateCandidates, personById, type Person } from "../identity/identity-model.ts";
 import { mergedComplianceTimeline, type TimelineOutcome } from "../identity/compliance-timeline.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import type { PersonLinkRef, PersonLinkType } from "../stores/person-link-store.ts";
+import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import type { PersonLinkRef } from "../stores/person-link-store.ts";
 
 interface IdentityEnv {
   DB: CloudDatabase;
@@ -107,10 +108,14 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
 
 /**
  * POST /api/identity/people/:personId/reconcile — confirm/break an identity link (E15 PR-2).
- * Body `{ action: "CONFIRM_LINK" | "UNLINK", tenantId, externalId }`. Persists a CONFIRMED/BROKEN pair
- * between the target record and the person's primary source (CONFIRM) or the person's other source
- * (UNLINK), audited `IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`. Gated CASE_MANAGER/ADMIN by the
- * worker matrix. Descriptive only — the pair overrides read-time grouping, never `Outcome Status`.
+ * Body `{ action: "CONFIRM_LINK" | "UNLINK", tenantId, externalId }`.
+ *   CONFIRM_LINK — attach the (real) target record to this person (paired CONFIRMED with a distinct member).
+ *   UNLINK — split the target fully OUT: it must be a member, and it's broken against EVERY other member
+ *            (not one anchor), so a 3+ member component removes exactly the target and never ejects the
+ *            wrong record.
+ * Audited `IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN` (semantic anchor/target, not normalized order).
+ * Gated CASE_MANAGER/ADMIN by the worker matrix. Descriptive only — overrides read-time grouping, never
+ * `Outcome Status`.
  */
 async function reconcile(req: Request, env: IdentityEnv, actor: string, personId: string): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as { action?: string; tenantId?: string; externalId?: string };
@@ -129,47 +134,46 @@ async function reconcile(req: Request, env: IdentityEnv, actor: string, personId
 
   const isTarget = (ref: { tenantId: string; externalId: string }) =>
     ref.tenantId === target.tenantId && ref.externalId === target.externalId;
+  const audit = async (eventType: string, id: string, payload: Record<string, unknown>): Promise<void> => {
+    await s.events.appendAudit({
+      eventType, entityType: "person_link", entityId: id, actor,
+      refRunId: null, refCaseId: null, refMeasureVersionId: null, payload,
+    });
+  };
 
-  let anchor: PersonLinkRef | undefined;
-  let linkType: PersonLinkType;
   if (action === "CONFIRM_LINK") {
-    // Attach the target to this person: pair it with the person's primary source. (No-op if it's already
-    // a member — the same pair re-CONFIRMED is idempotent, and pairing a member with itself is rejected.)
-    anchor = person.sources[0];
-    linkType = "CONFIRMED";
-  } else {
-    // Split the target OUT of this person: the target must currently be a member; pair it (BROKEN) with
-    // another of the person's sources so the direct edge is removed.
-    if (!person.sources.some(isTarget)) {
-      return json({ error: "invalid_request", message: "record is not part of this person" }, 400);
+    // The target must be a real directory record — otherwise a typo persists a dangling link + audit row.
+    const emp = employeeById(target.externalId);
+    if (!emp || emp.tenantId !== target.tenantId) {
+      return json({ error: "invalid_request", message: "target is not a known directory record" }, 400);
     }
-    anchor = person.sources.find((sr) => !isTarget(sr));
-    linkType = "BROKEN";
-  }
-  if (!anchor || isTarget(anchor)) {
-    return json({ error: "invalid_request", message: "no distinct anchor record to link against" }, 400);
+    // Pair the target with a DISTINCT member of the person (its primary, unless that IS the target).
+    const anchor = person.sources.find((sr) => !isTarget(sr));
+    if (!anchor) return json({ error: "invalid_request", message: "no distinct record to link the target to" }, 400);
+    const link = await s.personLinks.upsertLink({ a: anchor, b: target, linkType: "CONFIRMED", createdBy: actor });
+    await audit("IDENTITY_LINK_CONFIRMED", link.id, { personId, action, anchor, target });
+    const after = resolvePeople(undefined, await s.personLinks.listLinks());
+    const updated = after.find((p) => p.sources.some((sr) => sr.tenantId === anchor.tenantId && sr.externalId === anchor.externalId)) ?? null;
+    return json({ action, link, person: updated }, 200);
   }
 
-  const link = await s.personLinks.upsertLink({
-    a: { tenantId: anchor.tenantId, externalId: anchor.externalId },
-    b: target,
-    linkType,
-    createdBy: actor,
-  });
-  await s.events.appendAudit({
-    eventType: linkType === "CONFIRMED" ? "IDENTITY_LINK_CONFIRMED" : "IDENTITY_LINK_BROKEN",
-    entityType: "person_link",
-    entityId: link.id,
-    actor,
-    refRunId: null,
-    refCaseId: null,
-    refMeasureVersionId: null,
-    payload: { personId, action, anchor: link.a, target: link.b },
-  });
-  // Return the re-resolved person so the client reflects the new grouping immediately. The personId can
-  // change when grouping changes (its canonical key shifts), so locate by membership of the anchor
-  // record (which stays in the person for both CONFIRM and UNLINK) rather than by the old id.
+  // UNLINK — the target must currently be a member; break it against EVERY other member so it splits out
+  // fully regardless of which edge(s) held it (a single-anchor break could eject the wrong record).
+  const others = person.sources.filter((sr) => !isTarget(sr));
+  if (person.sources.length === others.length) {
+    return json({ error: "invalid_request", message: "record is not part of this person" }, 400);
+  }
+  if (others.length === 0) return json({ error: "invalid_request", message: "cannot unlink the only source" }, 400);
+  const brokenIds: string[] = [];
+  for (const other of others) {
+    const link = await s.personLinks.upsertLink({ a: other, b: target, linkType: "BROKEN", createdBy: actor });
+    brokenIds.push(link.id);
+  }
+  await audit("IDENTITY_LINK_BROKEN", brokenIds[0]!, { personId, action, target, brokenAgainst: others, linkIds: brokenIds });
+  // The remaining members keep their grouping; return the person the target was split OUT of (located by
+  // an untouched member, since the personId may change when grouping changes).
   const after = resolvePeople(undefined, await s.personLinks.listLinks());
-  const updated = after.find((p) => p.sources.some((sr) => sr.tenantId === anchor!.tenantId && sr.externalId === anchor!.externalId)) ?? null;
-  return json({ action, link, person: updated }, 200);
+  const survivor = others[0]!;
+  const updated = after.find((p) => p.sources.some((sr) => sr.tenantId === survivor.tenantId && sr.externalId === survivor.externalId)) ?? null;
+  return json({ action, brokenLinkIds: brokenIds, person: updated }, 200);
 }
