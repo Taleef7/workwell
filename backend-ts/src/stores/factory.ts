@@ -28,6 +28,7 @@ import { SqliteOutreachTemplateStore } from "./sqlite/outreach-template-store-sq
 import { SqliteWaiverStore } from "./sqlite/waiver-store-sqlite.ts";
 import { SqliteSegmentStore } from "./sqlite/segment-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "./sqlite/quality-snapshot-store-sqlite.ts";
+import { SqlitePersonLinkStore } from "./sqlite/person-link-store-sqlite.ts";
 
 import { createPgPool, type PgPool } from "./postgres/pg-database.ts";
 import { RUN_STORE_PG_DDL } from "./postgres/schema-pg.ts";
@@ -43,6 +44,7 @@ import { PgOutreachTemplateStore } from "./postgres/outreach-template-store-post
 import { PgWaiverStore } from "./postgres/waiver-store-postgres.ts";
 import { PgSegmentStore } from "./postgres/segment-store-postgres.ts";
 import { PgQualitySnapshotStore } from "./postgres/quality-snapshot-store-postgres.ts";
+import { PgPersonLinkStore } from "./postgres/person-link-store-postgres.ts";
 
 import type { RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
@@ -56,6 +58,7 @@ import type { OutreachTemplateStore } from "./outreach-template-store.ts";
 import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore } from "./quality-snapshot-store.ts";
+import type { PersonLinkStore } from "./person-link-store.ts";
 import type { CampaignStore } from "./campaign-store.ts";
 import { AuditBackedCampaignStore } from "./audit-campaign-store.ts";
 
@@ -74,6 +77,8 @@ export interface Stores {
   segments: SegmentStore;
   /** Quality-over-time aggregate snapshots (#E16) — materialized per (measure, month, scope). */
   qualitySnapshots: QualitySnapshotStore;
+  /** Cross-system identity links (#187 E15 PR-2) — human-confirmed CONFIRMED/BROKEN record pairs. */
+  personLinks: PersonLinkStore;
   /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
   campaigns: CampaignStore;
 }
@@ -144,6 +149,7 @@ async function buildPostgres(url: string): Promise<Stores> {
     waivers: new PgWaiverStore(pool),
     segments: new PgSegmentStore(pool),
     qualitySnapshots: new PgQualitySnapshotStore(pool),
+    personLinks: new PgPersonLinkStore(pool),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }
@@ -183,6 +189,7 @@ async function buildSqlite(db: CloudDatabase): Promise<Stores> {
     waivers: new SqliteWaiverStore(db),
     segments: new SqliteSegmentStore(db),
     qualitySnapshots: new SqliteQualitySnapshotStore(db),
+    personLinks: new SqlitePersonLinkStore(db),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }

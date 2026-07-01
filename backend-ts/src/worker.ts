@@ -211,8 +211,9 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const qualityResponse = await handleQuality(req, env);
   if (qualityResponse) return qualityResponse;
 
-  // Identity — cross-system person resolution / duplicates / mobility timeline (#187 E15 PR-1).
-  const identityResponse = await handleIdentity(req, env);
+  // Identity — cross-system person resolution / duplicates / mobility (#187 E15). Reconcile writes
+  // (POST) are CASE_MANAGER/ADMIN-gated + audited; reads are all-roles under /api/**.
+  const identityResponse = await handleIdentity(req, env, actor);
   if (identityResponse) return identityResponse;
 
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.

@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canReconcileIdentity } from "@/lib/rbac";
+import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { OUTCOME_LABELS, labelFor } from "@/lib/status";
 
@@ -86,8 +90,12 @@ export default function PersonDetailPage() {
   const params = useParams<{ personId: string }>();
   const personId = params.personId;
   const api = useApi();
+  const router = useRouter();
+  const { user } = useAuth();
+  const mayReconcile = canReconcileIdentity(user?.role);
   const [detail, setDetail] = useState<PersonDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!personId) return;
@@ -103,6 +111,27 @@ export default function PersonDetailPage() {
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // Unlink a source record out of this person (it's not actually the same person). The person's id
+  // changes when it splits, so route back to /people (which refetches) on success.
+  const unlink = useCallback(
+    async (src: SourceLink) => {
+      if (!window.confirm(`Unlink ${src.tenantName} (${src.externalId}) — mark it as a different person?`)) return;
+      setBusy(true);
+      try {
+        await api.post(`/api/identity/people/${encodeURIComponent(personId)}/reconcile`, {
+          action: "UNLINK", tenantId: src.tenantId, externalId: src.externalId,
+        });
+        emitToast(`Unlinked ${src.tenantName} record`);
+        router.push("/people");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, personId, router],
+  );
 
   return (
     <section className="space-y-4">
@@ -152,9 +181,24 @@ export default function PersonDetailPage() {
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
                     {s.status}{s.status === "PRIOR" && s.moveDate ? ` · moved ${fmtDay(s.moveDate)}` : ""}
                   </span>
+                  {mayReconcile && detail.person.sources.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => void unlink(s)}
+                      disabled={busy}
+                      className="rounded border border-rose-300 dark:border-rose-800 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40"
+                    >
+                      Not this person — unlink
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
+            {mayReconcile && detail.person.crossSystem ? (
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                Reconcile: if a linked record is not actually this person, unlink it. Every link change is audited.
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">

@@ -315,4 +315,22 @@ CREATE INDEX IF NOT EXISTS spike_quality_snapshots_measure_period_idx
   ON ${SPIKE_SCHEMA}.quality_snapshots (measure_id, period);
 CREATE INDEX IF NOT EXISTS spike_quality_snapshots_scope_idx
   ON ${SPIKE_SCHEMA}.quality_snapshots (scope_level, scope_id);
+
+-- Cross-system identity links (#187 E15 PR-2). A human-confirmed assertion that two source-system
+-- records ARE (CONFIRMED) or are NOT (BROKEN) the same person — overrides the auto matchKey grouping
+-- at read time (resolvePeople). The pair is normalized (a) <= (b) lexicographically so the UNIQUE key
+-- is direction-independent; UNLINK re-upserts the same pair to BROKEN (last write wins). Written only
+-- by the audited CASE_MANAGER/ADMIN reconcile endpoint. Descriptive only — never decides compliance
+-- (ADR-008/ADR-022). OWNER-APPROVED DDL (E15 PR-2); additive, reversible (DELETE FROM person_links).
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.person_links (
+  id             TEXT PRIMARY KEY,
+  a_tenant_id    TEXT NOT NULL,
+  a_external_id  TEXT NOT NULL,
+  b_tenant_id    TEXT NOT NULL,
+  b_external_id  TEXT NOT NULL,
+  link_type      TEXT NOT NULL,
+  created_by     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL,
+  UNIQUE (a_tenant_id, a_external_id, b_tenant_id, b_external_id)
+);
 `;
