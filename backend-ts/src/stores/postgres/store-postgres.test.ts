@@ -28,6 +28,7 @@ import { PgValueSetStore } from "./value-set-store-postgres.ts";
 import { PgOutreachTemplateStore } from "./outreach-template-store-postgres.ts";
 import { PgWaiverStore } from "./waiver-store-postgres.ts";
 import { PgSegmentStore } from "./segment-store-postgres.ts";
+import { PgQualitySnapshotStore } from "./quality-snapshot-store-postgres.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -40,6 +41,7 @@ import {
   outreachTemplateStoreContract,
   waiverStoreContract,
   segmentStoreContract,
+  qualitySnapshotStoreContract,
 } from "../store-contract.ts";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
@@ -81,7 +83,7 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
   const truncate = () =>
     pool.query(
-      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments RESTART IDENTITY CASCADE`,
+      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots RESTART IDENTITY CASCADE`,
     );
 
   runStoreContract("postgres", async () => {
@@ -137,5 +139,10 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   segmentStoreContract("postgres", async () => {
     await truncate();
     return new PgSegmentStore(pool);
+  });
+
+  qualitySnapshotStoreContract("postgres", async () => {
+    await truncate();
+    return new PgQualitySnapshotStore(pool);
   });
 }
