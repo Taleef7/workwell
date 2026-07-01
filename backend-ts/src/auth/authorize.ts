@@ -94,6 +94,12 @@ const RULES: Rule[] = [
   // Order proposals (#77 E7) — clinical decision support over case/PII data; gated like campaigns.
   { pattern: rx("/api/orders/**"), access: [CM, A] },
 
+  // Identity (#187 E15) — the cross-system person directory exposes national/MRN ids + DOB and the
+  // reconcile write mis-merges medical records if wrong, so ALL methods on /api/identity/** are
+  // CASE_MANAGER/ADMIN (not left to the AUTHENTICATED /api/** fallback — which the public read-only
+  // VIEWER sandbox would otherwise use to enumerate everyone's PII). Writes are additionally audited.
+  { pattern: rx("/api/identity/**"), access: [CM, A] },
+
   // Segments (#183 E11.3) — risk-group config. Writes are ADMIN; reads (list + preview) fall through
   // to the AUTHENTICATED /api/** rule (the roster + admin editor both read them).
   { method: "POST", pattern: rx("/api/segments/**"), access: [A] },

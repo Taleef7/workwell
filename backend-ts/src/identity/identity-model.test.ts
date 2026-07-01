@@ -6,10 +6,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  matchKey, normalizeName, personIdFor, resolvePeople, duplicateCandidates, personById, MOBILITY_OVERLAY,
+  matchKey, normalizeName, personIdFor, resolvePeople, duplicateCandidates, MOBILITY_OVERLAY,
 } from "./identity-model.ts";
 import { mergedComplianceTimeline, type TimelineOutcome } from "./compliance-timeline.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import type { PersonLink } from "../stores/person-link-store.ts";
+
+const link = (aExt: string, aTen: string, bExt: string, bTen: string, linkType: "CONFIRMED" | "BROKEN"): PersonLink => ({
+  id: `${aExt}-${bExt}`, a: { tenantId: aTen, externalId: aExt }, b: { tenantId: bTen, externalId: bExt },
+  linkType, createdBy: "test", createdAt: "2026-07-01T00:00:00.000Z",
+});
 
 test("normalizeName folds case/whitespace/diacritics", () => {
   assert.equal(normalizeName("  Omar   Siddiq "), "omar siddiq");
@@ -68,8 +74,26 @@ test("E13 reconciliation guard: each source record still belongs to exactly one 
   assert.deepEqual(perTenant, expected);
 });
 
+test("a CONFIRMED link unions two records without a shared nationalId", () => {
+  // emp-005 (twh) and ihn-emp-050 (ihn) share no nationalId → normally two singletons.
+  const dir = EMPLOYEES.filter((e) => e.externalId === "emp-005" || e.externalId === "ihn-emp-050");
+  assert.equal(resolvePeople(dir).length, 2, "two singletons without a link");
+  const linked = resolvePeople(dir, [link("emp-005", "twh", "ihn-emp-050", "ihn", "CONFIRMED")]);
+  assert.equal(linked.length, 1, "confirmed → one cross-system person");
+  assert.equal(linked[0]!.crossSystem, true);
+  assert.equal(linked[0]!.sources.length, 2);
+});
+
+test("a BROKEN link splits an auto-matched (shared-id) pair", () => {
+  const dir = EMPLOYEES.filter((e) => e.externalId === "emp-007" || e.externalId === "ihn-emp-002");
+  assert.equal(resolvePeople(dir).length, 1, "shared nationalId auto-groups them");
+  const split = resolvePeople(dir, [link("emp-007", "twh", "ihn-emp-002", "ihn", "BROKEN")]);
+  assert.equal(split.length, 2, "broken → two singletons");
+  assert.ok(split.every((p) => !p.crossSystem));
+});
+
 test("mergedComplianceTimeline unions sources, newest-first, with a move annotation", () => {
-  const omar = personById(personIdFor("nid:nid-100-omar"))!;
+  const omar = resolvePeople().find((p) => p.nationalId === "NID-100-OMAR")!;
   const outcomes = new Map<string, TimelineOutcome[]>([
     ["emp-006", [{ measureId: "audiogram", status: "OVERDUE", evaluatedAt: "2026-01-10T00:00:00.000Z" }]], // twh (PRIOR)
     ["ihn-emp-001", [{ measureId: "flu_vaccine", status: "COMPLIANT", evaluatedAt: "2026-06-10T00:00:00.000Z" }]], // ihn (ACTIVE)
