@@ -38,12 +38,12 @@ before(async () => {
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
-test("GET /api/identity/duplicates → the 2 cross-system people", async () => {
+test("GET /api/identity/duplicates → only the true duplicate (moved person excluded)", async () => {
   const res = await get("/api/identity/duplicates");
   assert.equal(res?.status, 200);
   const dups = (await res!.json()) as Person[];
-  assert.equal(dups.length, 2);
-  assert.ok(dups.every((p) => p.crossSystem));
+  assert.equal(dups.length, 1, "Sana (active in both) only; Omar is moved, not a duplicate");
+  assert.ok(dups.every((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR")));
 });
 
 test("GET /api/identity/people?q=omar finds the cross-system person + sets X-Total-Count", async () => {

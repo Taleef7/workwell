@@ -139,9 +139,13 @@ export function resolvePeople(
   return people;
 }
 
-/** The cross-system / duplicate subset — people whose links span more than one WebChart system. */
+/**
+ * The DUPLICATE worklist — cross-system people who are **active in >1 system** (a genuine duplicate to
+ * reconcile). A person with a PRIOR source is a MOBILITY case (they *moved*, one continuous history),
+ * not a duplicate, so they are excluded here — the two E15 stories stay distinct for consumers.
+ */
 export function duplicateCandidates(directory: readonly EmployeeProfile[] = EMPLOYEES): Person[] {
-  return resolvePeople(directory).filter((p) => p.crossSystem);
+  return resolvePeople(directory).filter((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR"));
 }
 
 /** Resolve a single person by id (over the full or a provided directory). */

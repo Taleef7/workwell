@@ -72,6 +72,16 @@ const fmt = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 };
 
+// A calendar date (YYYY-MM-DD, e.g. a move date) is not a wall-clock instant — format it in UTC so a
+// browser west of UTC doesn't render midnight-UTC as the previous local day.
+const fmtDay = (day: string): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) return day;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric", timeZone: "UTC",
+  });
+};
+
 export default function PersonDetailPage() {
   const params = useParams<{ personId: string }>();
   const personId = params.personId;
@@ -127,7 +137,7 @@ export default function PersonDetailPage() {
             <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
               History continues from <strong>{detail.timeline.move.fromTenantName}</strong> →{" "}
               <strong>{detail.timeline.move.toTenantName}</strong>
-              {detail.timeline.move.date ? <> as of {fmt(detail.timeline.move.date)}</> : null}. Compliance history
+              {detail.timeline.move.date ? <> as of {fmtDay(detail.timeline.move.date)}</> : null}. Compliance history
               below is the union across both systems.
             </div>
           ) : null}
@@ -140,7 +150,7 @@ export default function PersonDetailPage() {
                   <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.tenantName}</span>
                   <span className="text-neutral-500 dark:text-neutral-400">{s.role} · {s.site} · {s.externalId}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
-                    {s.status}{s.status === "PRIOR" && s.moveDate ? ` · moved ${fmt(s.moveDate)}` : ""}
+                    {s.status}{s.status === "PRIOR" && s.moveDate ? ` · moved ${fmtDay(s.moveDate)}` : ""}
                   </span>
                 </li>
               ))}

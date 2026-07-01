@@ -49,10 +49,11 @@ test("resolvePeople groups the two seeded cross-system pairs, everyone else sing
   assert.equal(omar.sources[0]!.tenantId, "ihn");
 });
 
-test("duplicateCandidates = the cross-system subset", () => {
+test("duplicateCandidates = cross-system people with NO prior link (moved excluded)", () => {
   const dups = duplicateCandidates();
-  assert.equal(dups.length, 2);
-  assert.ok(dups.every((p) => p.crossSystem));
+  assert.equal(dups.length, 1, "Sana (active in both) is a duplicate; Omar (moved) is not");
+  assert.equal(dups[0]!.nationalId, "NID-200-SANA");
+  assert.ok(dups.every((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR")));
 });
 
 test("E13 reconciliation guard: each source record still belongs to exactly one tenant", () => {

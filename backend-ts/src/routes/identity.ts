@@ -66,7 +66,10 @@ export async function handleIdentity(req: Request, env: IdentityEnv): Promise<Re
     const s = await getStores(env);
     const outcomesByExternalId = new Map<string, TimelineOutcome[]>();
     for (const src of person.sources) {
-      const rows = await s.outcomes.listOutcomesForEmployee(src.externalId, 50);
+      // Full per-source history (matches the employee-profile read) — a low cap would silently drop
+      // older outcomes (e.g. after the weekly trend-history backfill), rendering "compliance history
+      // (all systems)" incomplete. Demo-scale; the real read is paginated behind the E12 adapter (PR-3).
+      const rows = await s.outcomes.listOutcomesForEmployee(src.externalId, 100000);
       outcomesByExternalId.set(
         src.externalId,
         rows.map((r) => ({ measureId: r.measureId, measureName: MEASURES[r.measureId]?.name, status: r.status, evaluatedAt: r.evaluatedAt })),
