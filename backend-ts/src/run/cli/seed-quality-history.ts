@@ -41,7 +41,11 @@ export function parseArgs(args: string[]): SeedCliArgs {
       out.months = Math.trunc(n);
     } else if (a === "--as-of") {
       const d = args[++i];
-      if (!d || !/^\d{4}-\d{2}$/.test(d)) throw new SeedCliUsageError(`--as-of must be YYYY-MM\n${USAGE}`);
+      const m = d ? /^(\d{4})-(\d{2})$/.exec(d) : null;
+      const month = m ? Number(m[2]) : 0;
+      // Validate the month is 01–12 (matching the API's YYYY-MM validator) — otherwise a typo like
+      // `2026-13` would pass the regex and get normalized by Date.UTC into a wrong/future month range.
+      if (!m || month < 1 || month > 12) throw new SeedCliUsageError(`--as-of must be YYYY-MM\n${USAGE}`);
       out.asOf = d;
     } else if (a === "--help" || a === "-h") {
       throw new SeedCliUsageError(USAGE);

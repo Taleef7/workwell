@@ -494,7 +494,9 @@ const rateOf = (s: QualitySnapshot): number =>
 const monthLabel = (period: string): string => {
   const [y, m] = period.split("-").map(Number);
   if (!y || !m) return period;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  // Format in UTC — the period is a calendar month, not a wall-clock instant. Without timeZone:"UTC"
+  // a browser west of UTC renders midnight-UTC as the prior local day, showing e.g. "2026-07" as Jun.
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
 };
 
 /**
