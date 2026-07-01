@@ -559,7 +559,10 @@ person_links (
   store-contract tested).
 - **Descriptive only** — a link overrides read-time grouping, never `Outcome Status` (ADR-008/ADR-022);
   E13 reconciliation (All = Σ tenants) is unaffected (a link never moves a record between tenants).
-- **Reversible** (schema-qualify on the Pg ceiling): `DELETE FROM workwell_spike.person_links;`
+- **Reversible** (schema-qualify on the Pg ceiling): `DELETE FROM workwell_spike.person_links;` Also
+  **truncated by the non-prod `DemoResetService`** (with the run-derived volatile tables) so a demo reset
+  returns to the auto-resolved baseline — a manual CONFIRM/UNLINK never persists past a reset while its
+  `audit_events` are wiped.
 
 The read-time note in §3.25 (identity resolved from the synthetic directory, no table in PR-1) still holds
 for the auto grouping; PR-2 adds only this overrides table.
