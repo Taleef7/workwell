@@ -129,8 +129,14 @@ export async function backfillQualityHistory(
 
   for (const period of periods) {
     if (resume) {
+      // Skip only a COMPLETE month — one that already has an `all`-scope row for every expected
+      // measure. Skipping on "any row exists" would abandon a month that PR-1 materialized for a
+      // single measure, or a backfill interrupted mid-write, leaving measures/scopes missing from
+      // /api/quality/history. An incomplete month is recomputed (the idempotent upsert fills the
+      // gaps + overwrites in place, last-write-wins).
       const existing = await deps.qualitySnapshots.querySnapshots({ from: period, to: period });
-      if (existing.length > 0) {
+      const coveredMeasures = new Set(existing.filter((r) => r.scopeLevel === "all").map((r) => r.measureId));
+      if (measureIds.every((id) => coveredMeasures.has(id))) {
         monthsSkipped++;
         continue;
       }

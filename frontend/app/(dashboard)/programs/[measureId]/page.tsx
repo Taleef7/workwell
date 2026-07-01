@@ -535,6 +535,15 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
     return () => clearTimeout(timer);
   }, [load]);
 
+  // A run triggered from this page materializes a new snapshot for the current month (E16 PR-1),
+  // but neither measureId nor scope changes — so re-load on the global ww:run-complete event
+  // (the parent page fires the same refresh for its trend/drivers).
+  useEffect(() => {
+    const onComplete = () => void load();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [load]);
+
   const selected = snapshots.find((s) => s.period === asOf) ?? null;
   const data = snapshots.map((s) => ({ label: monthLabel(s.period), rate: rateOf(s) }));
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
