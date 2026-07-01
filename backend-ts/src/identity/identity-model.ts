@@ -64,10 +64,17 @@ export function normalizeName(raw: string): string {
  * This is the documented seam for a real EMPI / demographic matcher (E15 PR-3).
  */
 export function matchKey(rec: Pick<EmployeeProfile, "tenantId" | "externalId" | "nationalId">): string {
-  return rec.nationalId ? `nid:${rec.nationalId.trim().toLowerCase()}` : `local:${rec.tenantId}:${rec.externalId}`;
+  // Trim BEFORE the truthiness check so a blank/whitespace-only id doesn't collapse to the shared
+  // key `nid:` and false-group unrelated records — the "absent id ⇒ unique local key" invariant.
+  const nid = rec.nationalId?.trim();
+  return nid ? `nid:${nid.toLowerCase()}` : `local:${rec.tenantId}:${rec.externalId}`;
 }
 
-/** Stable, reproducible person id from a match key (FNV-1a; no persistence needed across reseeds). */
+/**
+ * Stable, reproducible person id from a match key (32-bit FNV-1a; no persistence needed across reseeds).
+ * Collision risk is negligible at synthetic-directory scale; the real persisted/EMPI id (E15 PR-3)
+ * replaces this hash, so a growing directory never relies on 32-bit uniqueness in production.
+ */
 export function personIdFor(key: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {

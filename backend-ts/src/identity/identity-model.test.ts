@@ -21,6 +21,8 @@ test("matchKey groups on a shared nationalId; absent ⇒ unique local key", () =
   assert.equal(matchKey({ tenantId: "ihn", externalId: "ihn-emp-001", nationalId: "NID-100-OMAR" }), "nid:nid-100-omar");
   // no shared id ⇒ each record is its own key, never grouped by accident
   assert.equal(matchKey({ tenantId: "twh", externalId: "emp-005", nationalId: undefined }), "local:twh:emp-005");
+  // a blank/whitespace-only id must NOT collapse to the shared `nid:` key (defensive false-group guard)
+  assert.equal(matchKey({ tenantId: "twh", externalId: "emp-005", nationalId: "   " }), "local:twh:emp-005");
   assert.notEqual(
     matchKey({ tenantId: "twh", externalId: "emp-005", nationalId: undefined }),
     matchKey({ tenantId: "ihn", externalId: "ihn-emp-050", nationalId: undefined }),
