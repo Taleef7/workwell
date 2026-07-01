@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-07-01 — E15 PR-1: cross-system identity (person resolution, duplicates, mobility)
+
+First slice of E15 (#187, ADR-022) — the buildable-now synthetic-first person-identity layer, on branch
+`feat/e15-cross-system-identity`. Addresses Doug's June-15 *"same employee in two different systems,"*
+*"an expatriate might move,"* DUPLICATE-badge asks.
+
+- **`backend-ts/src/identity/` (pure, read-time):** `identity-model.ts` — `matchKey` (deterministic
+  grouping on a shared national/MRN id; absent one, a record keys uniquely and never groups by accident —
+  the EMPI seam), `resolvePeople`/`duplicateCandidates`/`personById`, a `MOBILITY_OVERLAY` seed. 
+  `compliance-timeline.ts` — `mergedComplianceTimeline`: outcomes unioned across linked systems,
+  newest-first, system-tagged, with a mobility (PRIOR → ACTIVE + date) annotation. 7 model tests incl.
+  the **E13 reconciliation guard** (each source record still belongs to exactly one tenant → All = Σ
+  tenants holds).
+- **Directory (no schema, no count change):** added optional `dateOfBirth`/`nationalId` to the synthetic
+  `EmployeeProfile` and gave a shared synthetic identity to two **existing** twh↔ihn pairs — `emp-006`
+  "Omar Siddiq" is the mobility subject (moved twh→ihn; twh link PRIOR), `emp-007`/`ihn-emp-002` a plain
+  cross-system duplicate. twh stays 100, ihn stays 50, `EMPLOYEES.length` unchanged.
+- **`GET /api/identity/{people,people/:id,duplicates}`** (`routes/identity.ts`, wired in `worker.ts`) —
+  search (X-Total-Count paging), unified person view (person + merged timeline), duplicate worklist.
+  Authenticated read-only; unknown id → 404. 5 route tests.
+- **Frontend:** a new **`/people`** route (nav item) — cross-system directory with a **DUPLICATE badge** +
+  search; `/people/[personId]` unified view with a **mobility banner** and a merged, system-tagged
+  compliance timeline. Read-only.
+- Descriptive only — identity groups/follows, never decides compliance (ADR-008); reconcile write path is
+  E15 PR-2 (owner-gated), real WebChart sources E15 PR-3 (E12 seam).
+- **Green:** backend `tsc` + **831 tests (830 pass / 1 pg-skip)**; frontend lint + build (both `/people`
+  routes compile). No schema, no new deps.
+
 ## 2026-07-01 — E16 PR-2 + PR-3: quality-over-time history read API, backfill CLI, and UI
 
 Built the read + surface half of E16 on top of PR-1's snapshot store (branch `feat/e16-quality-history`).
