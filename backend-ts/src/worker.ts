@@ -27,6 +27,7 @@ import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
 import { handleQuality } from "./routes/quality.ts";
+import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
@@ -209,6 +210,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Quality-over-time history — materialized snapshot time-series read (#E16 PR-2).
   const qualityResponse = await handleQuality(req, env);
   if (qualityResponse) return qualityResponse;
+
+  // Identity — cross-system person resolution / duplicates / mobility timeline (#187 E15 PR-1).
+  const identityResponse = await handleIdentity(req, env);
+  if (identityResponse) return identityResponse;
 
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
   const segmentsResponse = await handleSegments(req, env, actor);
