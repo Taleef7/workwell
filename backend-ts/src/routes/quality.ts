@@ -44,6 +44,12 @@ export async function handleQuality(req: Request, env: QualityEnv): Promise<Resp
   if (url.pathname !== "/api/quality/history") return null;
 
   const q = url.searchParams;
+  // Require measureId to keep the read bounded: per-measure the worst case is ~12 months × the scope
+  // fan-out (~a few thousand rows), whereas an unfiltered read would return the whole table (tens of
+  // thousands after a full backfill of the 120k scale tenant). The UI always sends it.
+  const measureId = q.get("measureId");
+  if (!measureId) return json({ error: "invalid_request", message: "measureId is required" }, 400);
+
   let from: string | undefined;
   let to: string | undefined;
   try {
@@ -61,7 +67,7 @@ export async function handleQuality(req: Request, env: QualityEnv): Promise<Resp
 
   const s = await getStores(env);
   const rows = await s.qualitySnapshots.querySnapshots({
-    measureId: q.get("measureId") ?? undefined,
+    measureId,
     scopeLevel: (scopeLevelRaw as QualityScopeLevel) ?? undefined,
     scopeId: q.get("scopeId") ?? undefined,
     tenantId: q.get("tenant") ?? undefined,
