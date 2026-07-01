@@ -19,5 +19,7 @@ test("rejects bad flags", () => {
   assert.throws(() => parseArgs(["--months", "x"]), SeedCliUsageError);
   assert.throws(() => parseArgs(["--as-of", "2026-6"]), SeedCliUsageError);
   assert.throws(() => parseArgs(["--as-of", "2026-06-01"]), SeedCliUsageError);
+  assert.throws(() => parseArgs(["--as-of", "2026-13"]), SeedCliUsageError);
+  assert.throws(() => parseArgs(["--as-of", "2026-00"]), SeedCliUsageError);
   assert.throws(() => parseArgs(["--nope"]), SeedCliUsageError);
 });
