@@ -15,6 +15,7 @@
  * singleton person — nothing is grouped by accident.
  */
 import { EMPLOYEES, tenantById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { normalizePair, type PersonLink, type PersonLinkRef } from "../stores/person-link-store.ts";
 
 export type SourceStatus = "ACTIVE" | "PRIOR";
 
@@ -99,27 +100,97 @@ function toSourceLink(e: EmployeeProfile): SourceLink {
   };
 }
 
+const refKey = (r: PersonLinkRef): string => `${r.tenantId}|${r.externalId}`;
+const recRef = (e: EmployeeProfile): PersonLinkRef => ({ tenantId: e.tenantId, externalId: e.externalId });
+/** Unordered pair key for a normalized (a,b) pair — for the BROKEN-edge lookup. */
+const pairKey = (a: PersonLinkRef, b: PersonLinkRef): string => `${refKey(a)}::${refKey(b)}`;
+
+/** Minimal union-find over record ref-keys (smaller key wins, so component roots are deterministic). */
+class UnionFind {
+  private parent = new Map<string, string>();
+  find(k: string): string {
+    if (!this.parent.has(k)) this.parent.set(k, k);
+    let root = k;
+    while (this.parent.get(root) !== root) root = this.parent.get(root)!;
+    let cur = k;
+    while (this.parent.get(cur) !== root) {
+      const next = this.parent.get(cur)!;
+      this.parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+  union(a: string, b: string): void {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra === rb) return;
+    const [lo, hi] = ra < rb ? [ra, rb] : [rb, ra];
+    this.parent.set(hi, lo);
+  }
+}
+
 /**
- * Group the directory into resolved people by match key. A person's `sources` are ordered ACTIVE-first
- * then by tenant (so the current system leads); `displayName` comes from the ACTIVE source. Pure —
- * pass a directory slice + mobility overlay for tests; defaults to the full synthetic directory.
+ * Group the directory into resolved people. Auto-grouping is by match key; human-confirmed identity
+ * `links` (E15 PR-2) then override it: a CONFIRMED pair unions two records (links them even without a
+ * shared identifier), a BROKEN pair removes the direct auto/confirmed edge between exactly those two
+ * records (undo a bad shared-id auto-match or a prior CONFIRM). `sources` are ordered ACTIVE-first then
+ * by tenant; `displayName` comes from the ACTIVE source. Pure — pass a directory slice + links for
+ * tests; defaults to the full synthetic directory + no links.
+ *
+ * NOTE (PR-2 scope): BROKEN removes the *direct* edge; two records still connected transitively via a
+ * third record stay grouped. Sufficient for the 2-source cases; a fuller split model is future work.
  */
 export function resolvePeople(
   directory: readonly EmployeeProfile[] = EMPLOYEES,
+  links: readonly PersonLink[] = [],
 ): Person[] {
-  const groups = new Map<string, EmployeeProfile[]>();
-  for (const e of directory) {
-    const key = matchKey(e);
-    let arr = groups.get(key);
-    if (!arr) {
-      arr = [];
-      groups.set(key, arr);
+  const byRef = new Map<string, EmployeeProfile>();
+  for (const e of directory) byRef.set(refKey(recRef(e)), e);
+
+  const broken = new Set<string>();
+  for (const l of links) {
+    if (l.linkType === "BROKEN") {
+      const { a, b } = normalizePair(l.a, l.b);
+      broken.add(pairKey(a, b));
     }
-    arr.push(e);
+  }
+
+  const uf = new UnionFind();
+  for (const e of directory) uf.find(refKey(recRef(e))); // seed singletons
+
+  // Auto edges: within each match-key group, a star from the first record to the rest (skip BROKEN pairs).
+  const keyGroups = new Map<string, EmployeeProfile[]>();
+  for (const e of directory) {
+    const k = matchKey(e);
+    const g = keyGroups.get(k);
+    if (g) g.push(e);
+    else keyGroups.set(k, [e]);
+  }
+  for (const records of keyGroups.values()) {
+    for (let i = 1; i < records.length; i++) {
+      const { a, b } = normalizePair(recRef(records[0]!), recRef(records[i]!));
+      if (!broken.has(pairKey(a, b))) uf.union(refKey(a), refKey(b));
+    }
+  }
+  // CONFIRMED edges: only between two distinct records that both exist in the directory.
+  for (const l of links) {
+    if (l.linkType !== "CONFIRMED") continue;
+    const ak = refKey(l.a);
+    const bk = refKey(l.b);
+    if (ak !== bk && byRef.has(ak) && byRef.has(bk)) uf.union(ak, bk);
+  }
+
+  // Collect components.
+  const components = new Map<string, EmployeeProfile[]>();
+  for (const e of directory) {
+    const root = uf.find(refKey(recRef(e)));
+    const g = components.get(root);
+    if (g) g.push(e);
+    else components.set(root, [e]);
   }
 
   const people: Person[] = [];
-  for (const [key, records] of groups) {
+  for (const records of components.values()) {
     const sources = records
       .map(toSourceLink)
       .sort((a, b) =>
@@ -127,11 +198,16 @@ export function resolvePeople(
       );
     const primary = sources[0]!;
     const distinctTenants = new Set(sources.map((s) => s.tenantId));
+    // Deterministic id: the smallest record ref-key in the component (stable across reseeds + iteration
+    // order, and UNIQUE per component — so a BROKEN split of a shared-id pair yields two distinct ids,
+    // which a match-key-based canonical could not since both halves share the same match key).
+    const canonical = records.map((r) => refKey(recRef(r))).sort()[0]!;
+    const withId = records.find((r) => r.nationalId) ?? records[0]!;
     people.push({
-      personId: personIdFor(key),
+      personId: personIdFor(canonical),
       displayName: primary.name,
-      nationalId: records[0]!.nationalId ?? null,
-      dateOfBirth: records[0]!.dateOfBirth ?? null,
+      nationalId: withId.nationalId ?? null,
+      dateOfBirth: withId.dateOfBirth ?? null,
       crossSystem: distinctTenants.size > 1,
       sources,
     });
@@ -144,11 +220,18 @@ export function resolvePeople(
  * reconcile). A person with a PRIOR source is a MOBILITY case (they *moved*, one continuous history),
  * not a duplicate, so they are excluded here — the two E15 stories stay distinct for consumers.
  */
-export function duplicateCandidates(directory: readonly EmployeeProfile[] = EMPLOYEES): Person[] {
-  return resolvePeople(directory).filter((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR"));
+export function duplicateCandidates(
+  directory: readonly EmployeeProfile[] = EMPLOYEES,
+  links: readonly PersonLink[] = [],
+): Person[] {
+  return resolvePeople(directory, links).filter((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR"));
 }
 
-/** Resolve a single person by id (over the full or a provided directory). */
-export function personById(personId: string, directory: readonly EmployeeProfile[] = EMPLOYEES): Person | null {
-  return resolvePeople(directory).find((p) => p.personId === personId) ?? null;
+/** Resolve a single person by id (over the full or a provided directory + links). */
+export function personById(
+  personId: string,
+  directory: readonly EmployeeProfile[] = EMPLOYEES,
+  links: readonly PersonLink[] = [],
+): Person | null {
+  return resolvePeople(directory, links).find((p) => p.personId === personId) ?? null;
 }

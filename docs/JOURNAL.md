@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-07-01 — E15 PR-2: identity reconcile write path (owner-approved `person_links`)
+
+The confirm/unlink half of E15 (branch `feat/e15-identity-reconcile`, ADR-022). Owner-approved the DDL
+in-session (reviewed once, then applied — the self-creating schema applies on deploy).
+
+- **`person_links` table** (owner-approved DDL, floor + ceiling, `workwell_spike`; DATA_MODEL §3.26) — a
+  human-confirmed CONFIRMED/BROKEN assertion between two source records, pair normalized `(a) <= (b)` so
+  the key is direction-independent (UNLINK re-upserts to BROKEN, last write wins). `PersonLinkStore` port
+  (floor `INSERT OR REPLACE` / ceiling `ON CONFLICT DO UPDATE`), wired in the factory, store-contract
+  tested on both backends.
+- **`resolvePeople` is now override-aware** (union-find): CONFIRMED unions two records (links even
+  without a shared identifier), BROKEN removes the direct auto/confirmed edge. The component `personId`
+  became the smallest **record ref-key** (unique per component) — a match-key-based id couldn't tell the
+  two halves of a BROKEN split apart (found + fixed via a repro during testing).
+- **`POST /api/identity/people/:personId/reconcile`** (`routes/identity.ts`) — `{action, tenantId,
+  externalId}`, **CASE_MANAGER/ADMIN-gated** (`authorize.ts` POST `/api/identity/** → [CM, A]`) + audited
+  (`IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`); validates action/membership (400) + unknown person
+  (404); returns the re-resolved person (located by anchor membership, since the id can change).
+- **Frontend:** a CM/ADMIN **"Not this person — unlink"** action per linked system on `/people/[personId]`
+  (confirm dialog → reconcile → back to `/people`); rbac `canReconcileIdentity`.
+- Still descriptive only — a link overrides read-time grouping, never `Outcome Status` (ADR-008); E13
+  reconciliation unaffected. Reversible (`DELETE FROM person_links`).
+- **Green:** backend `tsc` + **838 tests (837 pass / 1 pg-skip)** (+7, incl. 2 model link tests, 4
+  reconcile route tests, 3 store-contract cases); frontend lint + build. **Owner note:** the DDL
+  self-creates on boot (`CREATE … IF NOT EXISTS`) — applies automatically on the next deploy.
+- **Deferred:** a full CONFIRM_LINK merge-picker UI (merging two separately-resolved people) — the API
+  supports it; the UI is a follow-up.
+
 ## 2026-07-01 — E15 PR-1: cross-system identity (person resolution, duplicates, mobility)
 
 First slice of E15 (#187, ADR-022) — the buildable-now synthetic-first person-identity layer, on branch

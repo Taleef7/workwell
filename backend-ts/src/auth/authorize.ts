@@ -94,6 +94,11 @@ const RULES: Rule[] = [
   // Order proposals (#77 E7) — clinical decision support over case/PII data; gated like campaigns.
   { pattern: rx("/api/orders/**"), access: [CM, A] },
 
+  // Identity reconcile (#187 E15 PR-2) — confirm/break an identity link mis-merges medical records if
+  // wrong, so the WRITE path is CASE_MANAGER/ADMIN + audited. Reads (people/duplicates/timeline) fall
+  // through to the AUTHENTICATED /api/** rule below (all roles browse the cross-system directory).
+  { method: "POST", pattern: rx("/api/identity/**"), access: [CM, A] },
+
   // Segments (#183 E11.3) — risk-group config. Writes are ADMIN; reads (list + preview) fall through
   // to the AUTHENTICATED /api/** rule (the roster + admin editor both read them).
   { method: "POST", pattern: rx("/api/segments/**"), access: [A] },

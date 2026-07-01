@@ -13,12 +13,13 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
-import { personIdFor } from "../identity/identity-model.ts";
 import { handleIdentity } from "./identity.ts";
 
 const dbPath = join(tmpdir(), `workwell-identity-route-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
-const get = (p: string) => handleIdentity(new Request(`http://x${p}`, { method: "GET" }), env as never);
+const get = (p: string) => handleIdentity(new Request(`http://x${p}`, { method: "GET" }), env as never, "tester@workwell.dev");
+const post = (p: string, body: unknown) =>
+  handleIdentity(new Request(`http://x${p}`, { method: "POST", body: JSON.stringify(body) }), env as never, "cm@workwell.dev");
 
 interface Person { personId: string; displayName: string; crossSystem: boolean; sources: { tenantId: string; status: string }[]; }
 
@@ -64,7 +65,8 @@ test("?tenant= scopes people to a system", async () => {
 });
 
 test("GET /api/identity/people/:id → unified, system-tagged, newest-first timeline + move", async () => {
-  const res = await get(`/api/identity/people/${personIdFor("nid:nid-100-omar")}`);
+  const omar = ((await (await get("/api/identity/people?q=omar"))!.json()) as Person[])[0]!;
+  const res = await get(`/api/identity/people/${encodeURIComponent(omar.personId)}`);
   assert.equal(res?.status, 200);
   const body = (await res!.json()) as {
     person: Person;
@@ -79,5 +81,38 @@ test("GET /api/identity/people/:id → unified, system-tagged, newest-first time
 test("unknown person → 404; unrelated path/method → null", async () => {
   assert.equal((await get("/api/identity/people/person-deadbeef"))?.status, 404);
   assert.equal(await get("/api/other"), null);
-  assert.equal(await handleIdentity(new Request("http://x/api/identity/people", { method: "POST" }), env as never), null);
+  // a POST that isn't a reconcile path → null (not handled here)
+  assert.equal(await handleIdentity(new Request("http://x/api/identity/people", { method: "POST" }), env as never, "x"), null);
+});
+
+test("reconcile UNLINK splits a duplicate; CONFIRM_LINK re-merges it", async () => {
+  // Sana = emp-007 (twh) ↔ ihn-emp-002 (ihn), a duplicate (both ACTIVE). Find her personId.
+  const sana = ((await (await get("/api/identity/duplicates"))!.json()) as Person[])[0]!;
+  assert.equal(sana.sources.length, 2);
+
+  // UNLINK the ihn record out of Sana → she's no longer a duplicate.
+  const unlink = await post(`/api/identity/people/${encodeURIComponent(sana.personId)}/reconcile`, {
+    action: "UNLINK", tenantId: "ihn", externalId: "ihn-emp-002",
+  });
+  assert.equal(unlink?.status, 200);
+  assert.equal(((await (await get("/api/identity/duplicates"))!.json()) as Person[]).length, 0, "no duplicates after unlink");
+
+  // CONFIRM_LINK the record back to emp-007's person → duplicate restored. (Select by EXACT source id —
+  // a substring `q=emp-007` would also match `ihn-emp-007`.)
+  const twhSana = ((await (await get("/api/identity/people?q=Sana"))!.json()) as Person[])
+    .find((p) => p.sources.some((s) => s.tenantId === "twh"))!;
+  const confirm = await post(`/api/identity/people/${encodeURIComponent(twhSana.personId)}/reconcile`, {
+    action: "CONFIRM_LINK", tenantId: "ihn", externalId: "ihn-emp-002",
+  });
+  assert.equal(confirm?.status, 200);
+  assert.equal(((await (await get("/api/identity/duplicates"))!.json()) as Person[]).length, 1, "duplicate restored");
+});
+
+test("reconcile validates action + membership", async () => {
+  const sana = ((await (await get("/api/identity/duplicates"))!.json()) as Person[])[0]!;
+  const base = `/api/identity/people/${encodeURIComponent(sana.personId)}/reconcile`;
+  assert.equal((await post(base, { action: "NOPE", tenantId: "ihn", externalId: "ihn-emp-002" }))?.status, 400);
+  assert.equal((await post(base, { action: "UNLINK" }))?.status, 400, "missing tenantId/externalId");
+  assert.equal((await post(base, { action: "UNLINK", tenantId: "ihn", externalId: "ihn-emp-050" }))?.status, 400, "not a member");
+  assert.equal((await post("/api/identity/people/person-nope/reconcile", { action: "CONFIRM_LINK", tenantId: "twh", externalId: "emp-005" }))?.status, 404);
 });

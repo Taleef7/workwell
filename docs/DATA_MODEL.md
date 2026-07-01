@@ -526,11 +526,43 @@ and no existing ids change, so E13 tenant counts and reconciliation (All = Σ te
 - `resolvePeople`/`duplicateCandidates`/`mergedComplianceTimeline` (`backend-ts/src/identity/`) group and
   annotate at read-time; the merged timeline reuses the existing per-subject `outcomes` read
   (`listOutcomesForEmployee`). A `MOBILITY_OVERLAY` seed marks a moved person's PRIOR system + move date.
-- **Production drop-in (documented, not built):** an owner-gated `person_links` table (personId ↔ source
-  `(tenantId, externalId)` + status + move date) — or an audit-backed store like `CampaignStore` (§3.17) —
-  fed by the E15 PR-2 reconcile write path (`POST /api/identity/people/:id/reconcile`, audited
-  `IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`). Until then the resolution layer keeps the data model
-  unchanged. Descriptive only — identity never sets `Outcome Status` (ADR-008/ADR-022).
+- **Reconcile overrides (E15 PR-2, now built):** human-confirmed CONFIRMED/BROKEN links are persisted in
+  the owner-approved `person_links` table (**§3.26**) and applied at read-time by `resolvePeople`, written
+  by the audited `POST /api/identity/people/:id/reconcile`. The auto grouping above still needs no table;
+  only the manual overrides do. Descriptive only — identity never sets `Outcome Status` (ADR-008/ADR-022).
+
+### 3.26 Cross-system identity links — `person_links` (E15 PR-2 / #187) — NEW owner-approved table
+
+The first E15 schema. A human-confirmed assertion that two source-system records ARE (`CONFIRMED`) or
+are NOT (`BROKEN`) the same person — the audited write path behind the reconcile action. One table on
+the floor (`stores/sqlite/schema.ts`) + ceiling (`stores/postgres/schema-pg.ts`, `workwell_spike`); TEXT
+id (`crypto.randomUUID()`), floor TEXT / ceiling TIMESTAMPTZ timestamps:
+
+```sql
+person_links (
+  id             TEXT PK,
+  a_tenant_id    TEXT NOT NULL, a_external_id TEXT NOT NULL,   -- pair normalized so (a) <= (b)
+  b_tenant_id    TEXT NOT NULL, b_external_id TEXT NOT NULL,   -- lexicographically, direction-independent
+  link_type      TEXT NOT NULL,                               -- 'CONFIRMED' | 'BROKEN'
+  created_by     TEXT, created_at <ts> NOT NULL,
+  UNIQUE (a_tenant_id, a_external_id, b_tenant_id, b_external_id)
+)
+```
+
+- **Read-time override** (`resolvePeople`, `backend-ts/src/identity/`): auto matchKey grouping is unioned
+  by CONFIRMED pairs and split by BROKEN pairs (union-find; BROKEN removes the direct edge). Pairs are
+  normalized on write, so CONFIRM(x,y) and UNLINK(y,x) hit the same row (last write wins — the floor uses
+  `INSERT OR REPLACE`, the ceiling `ON CONFLICT … DO UPDATE`). No FK — `a_*`/`b_*` are text refs into the
+  synthetic directory (backend-ts has no `employees` table).
+- **Written** only by `POST /api/identity/people/:personId/reconcile` (CASE_MANAGER/ADMIN), audited
+  `IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`. Backed by the `PersonLinkStore` port (floor + ceiling;
+  store-contract tested).
+- **Descriptive only** — a link overrides read-time grouping, never `Outcome Status` (ADR-008/ADR-022);
+  E13 reconciliation (All = Σ tenants) is unaffected (a link never moves a record between tenants).
+- **Reversible** (schema-qualify on the Pg ceiling): `DELETE FROM workwell_spike.person_links;`
+
+The read-time note in §3.25 (identity resolved from the synthetic directory, no table in PR-1) still holds
+for the auto grouping; PR-2 adds only this overrides table.
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
