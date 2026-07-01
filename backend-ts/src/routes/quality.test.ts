@@ -64,15 +64,20 @@ test("from/to bound the range (inclusive)", async () => {
   assert.deepEqual(rows.map((r) => r.period), ["2026-05"]);
 });
 
+test("missing measureId → 400 (bounded read)", async () => {
+  assert.equal((await get(""))?.status, 400);
+  assert.equal((await get("?scopeLevel=all"))?.status, 400);
+});
+
 test("malformed from → 400", async () => {
-  assert.equal((await get("?from=2026-5"))?.status, 400);
-  assert.equal((await get("?to=2026-13"))?.status, 400);
-  assert.equal((await get("?from=not-a-month"))?.status, 400);
-  assert.equal((await get("?from=2026-01&to=2026-12"))?.status, 200);
+  assert.equal((await get("?measureId=audiogram&from=2026-5"))?.status, 400);
+  assert.equal((await get("?measureId=audiogram&to=2026-13"))?.status, 400);
+  assert.equal((await get("?measureId=audiogram&from=not-a-month"))?.status, 400);
+  assert.equal((await get("?measureId=audiogram&from=2026-01&to=2026-12"))?.status, 200);
 });
 
 test("bad scopeLevel → 400", async () => {
-  assert.equal((await get("?scopeLevel=galaxy"))?.status, 400);
+  assert.equal((await get("?measureId=audiogram&scopeLevel=galaxy"))?.status, 400);
 });
 
 test("non-GET and unrelated path → null", async () => {

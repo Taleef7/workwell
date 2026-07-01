@@ -1,15 +1,20 @@
 /**
- * E16 PR-2 — quality-over-time BACKFILL. Materializes REAL evaluated `quality_snapshots` for a range of
- * past calendar months, so the /programs trend has genuine numerator/denominator history instead of the
- * synthetic sine-wave `backfill-trend-history` rates it supersedes. This is Doug's "dump into a table and
- * get the numerators and denominators" for December/October/August — but evaluated, not faked.
+ * E16 PR-2 — quality-over-time BACKFILL. Materializes `quality_snapshots` for a range of past calendar
+ * months, so the /programs trend has real numerator/denominator history instead of the synthetic
+ * sine-wave `backfill-trend-history` rates it supersedes. This is Doug's "dump into a table and get the
+ * numerators and denominators" for December/October/August.
  *
- * For each month it re-evaluates every in-directory employee as-of that month's end (reusing the exact
- * synthetic-bundle anchoring the per-employee Simulate #197 uses: bundle anchored to `today`, evaluated
- * as-of the past date, so RECURRING measures age realistically toward today), reduces the raw CQL
- * outcomes through the shared pure `buildSnapshotRows` core, folds the 120k `mhn` scale tenant in via the
- * bounded `aggregateScaleRun` (never its per-subject rows), and idempotently upserts. Descriptive only —
- * CQL `Outcome Status` is the sole authority (ADR-008/ADR-021).
+ * For each month it re-evaluates every in-directory (live) employee as-of that month's end — genuinely
+ * evaluated, not faked — reusing the exact synthetic-bundle anchoring the per-employee Simulate #197 uses
+ * (bundle anchored to `today`, evaluated as-of the past date, so RECURRING measures age realistically
+ * toward today), reduces the raw CQL outcomes through the shared pure `buildSnapshotRows` core, and
+ * idempotently upserts. The 120k `mhn` scale tenant folds in via the bounded `aggregateScaleRun` (never
+ * its per-subject rows) — but note the scale population is GENERATED demo data with no time dimension, so
+ * its current distribution is folded UNCHANGED into every historical month (there is no per-month history
+ * to recover for it). Only the live `twh`/`ihn` tenants vary month-to-month; at population scale the
+ * `all` aggregate is ~99.9% scale, so the `all` trend is dominated by that time-invariant distribution
+ * (per-tenant scopes show the real evaluated variation). Descriptive only — CQL `Outcome Status` is the
+ * sole authority (ADR-008/ADR-021).
  *
  * Owner-run, on-demand, NOT wired into request-path startup. Idempotent + resumable at the month level.
  * REVERSIBLE — the whole table is a rebuildable cache: `DELETE FROM workwell_spike.quality_snapshots;`
@@ -102,15 +107,17 @@ export async function backfillQualityHistory(
   const computedAt = new Date().toISOString();
 
   // Latest COMPLETED seed:scale run per measure → the bounded mhn fold (same as materialize-run).
-  const latestScaleRunByMeasure = new Map<string, string>();
+  // Compare `startedAt` explicitly (mirrors materialize-run.ts) rather than relying on listRuns'
+  // DESC ordering — robust if the ordering contract ever changes or duplicate scale runs exist.
+  const latestScaleRunByMeasure = new Map<string, { runId: string; startedAt: string }>();
   for (const r of await deps.runStore.listRuns(100_000)) {
     if (r.triggeredBy !== SCALE_TRIGGER || !isCompletedRun(r.status) || !r.scopeId) continue;
     const prev = latestScaleRunByMeasure.get(r.scopeId);
-    if (!prev) latestScaleRunByMeasure.set(r.scopeId, r.id);
+    if (!prev || r.startedAt > prev.startedAt) latestScaleRunByMeasure.set(r.scopeId, { runId: r.id, startedAt: r.startedAt });
   }
   const scaleGroupsByMeasure = new Map<string, ScaleGroup[]>();
-  for (const [measureId, runId] of latestScaleRunByMeasure) {
-    const groups = await deps.outcomeStore.aggregateScaleRun(runId);
+  for (const [measureId, run] of latestScaleRunByMeasure) {
+    const groups = await deps.outcomeStore.aggregateScaleRun(run.runId);
     if (groups.length > 0) scaleGroupsByMeasure.set(measureId, groups);
   }
 

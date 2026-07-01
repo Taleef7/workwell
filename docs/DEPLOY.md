@@ -185,10 +185,14 @@ DATABASE_URL=<neon-pooled> pnpm seed:quality-history --months 12 --as-of 2026-06
 ```
 
 Forward materialization also accrues a snapshot on every completed population run (E16 PR-1), so this CLI
-is only needed to backfill *history* the live runs haven't produced yet. It re-evaluates the in-directory
-workforce per month and folds the 120k `mhn` scale tenant via the bounded `aggregateScaleRun` (never its
-per-subject rows). Audited (`QUALITY_HISTORY_BACKFILLED`, one per month). **Idempotent + resumable** at the
-month level (a rerun skips months that already have snapshots).
+is only needed to backfill *history* the live runs haven't produced yet. The live `twh`/`ihn` employees are genuinely
+re-evaluated per month; the 120k `mhn` scale tenant folds in via the bounded `aggregateScaleRun` (never its
+per-subject rows), but the scale population is **generated demo data with no time dimension**, so its
+current distribution is folded unchanged into every historical month (there is no per-month history to
+recover for it) — so per-tenant scopes (`twh`/`ihn`) show real evaluated month-to-month variation, while
+the `all` aggregate at population scale is dominated by that time-invariant scale distribution. Audited
+(`QUALITY_HISTORY_BACKFILLED`, one per month). **Idempotent + resumable** at the month level (a rerun
+skips months that already have snapshots).
 
 **Rollback (reversible) — the whole table is a rebuildable cache** (schema-qualify on the Pg ceiling):
 
