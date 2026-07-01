@@ -21,6 +21,10 @@ const VOLATILE_TABLES = [
   "case_actions",
   "cases",
   "outcomes",
+  // Quality-over-time snapshots (#E16) are derived from runs (source_run_id) — clear them with the
+  // volatile run data so a demo reset doesn't leave stale compliance history behind. No FK, so the
+  // position is arbitrary; grouped with the run-derived tables.
+  "quality_snapshots",
   "run_logs",
   "runs",
   "audit_events",
