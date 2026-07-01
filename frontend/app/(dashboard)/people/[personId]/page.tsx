@@ -106,11 +106,17 @@ export default function PersonDetailPage() {
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <div className="flex items-center gap-3">
               <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{detail.person.displayName}</h2>
-              {detail.person.crossSystem ? (
-                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-                  Duplicate — {detail.person.sources.length} systems
-                </span>
-              ) : null}
+              {detail.person.crossSystem ? (() => {
+                const moved = detail.person.sources.some((s) => s.status === "PRIOR");
+                const cls = moved
+                  ? "bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300"
+                  : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300";
+                return (
+                  <span className={`rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${cls}`}>
+                    {moved ? "Moved" : "Duplicate"} — {detail.person.sources.length} systems
+                  </span>
+                );
+              })() : null}
             </div>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
               National ID {detail.person.nationalId ?? "—"} · DOB {detail.person.dateOfBirth ?? "—"}

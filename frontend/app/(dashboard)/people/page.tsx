@@ -30,9 +30,24 @@ type Person = {
   sources: SourceLink[];
 };
 
+/**
+ * A cross-system person is either MOVED (has a PRIOR system — one person, continuous history) or a
+ * DUPLICATE (active in >1 system). These are the two distinct E15 stories, so the badge must not
+ * conflate them.
+ */
+function crossSystemBadge(p: Person): { label: string; cls: string } | null {
+  if (!p.crossSystem) return null;
+  if (p.sources.some((s) => s.status === "PRIOR")) {
+    return { label: "Moved", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300" };
+  }
+  return { label: "Duplicate", cls: "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" };
+}
+
 export default function PeoplePage() {
   const api = useApi();
+  const PAGE_SIZE = 50;
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [people, setPeople] = useState<Person[]>([]);
   const [total, setTotal] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -40,7 +55,7 @@ export default function PeoplePage() {
 
   const load = useCallback(async () => {
     try {
-      const qs = new URLSearchParams({ pageSize: "50" });
+      const qs = new URLSearchParams({ pageSize: String(PAGE_SIZE), page: String(page) });
       if (query.trim()) qs.set("q", query.trim());
       const res = await api.getWithHeaders<Person[]>(`/api/identity/people?${qs.toString()}`);
       setPeople(res.data);
@@ -51,13 +66,15 @@ export default function PeoplePage() {
     } finally {
       setLoaded(true);
     }
-  }, [api, query]);
+  }, [api, query, page]);
 
   // Debounce the search a touch so typing doesn't fire a request per keystroke.
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <section className="space-y-4">
@@ -73,7 +90,10 @@ export default function PeoplePage() {
       <input
         type="search"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setPage(1); // reset to the first page when the search changes
+        }}
         placeholder="Search by name, employee id, or national id…"
         aria-label="Search people"
         className="w-full max-w-md rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
@@ -103,11 +123,14 @@ export default function PeoplePage() {
                     <Link href={`/people/${encodeURIComponent(p.personId)}`} className="font-medium text-primary-700 dark:text-primary-400 hover:underline">
                       {p.displayName}
                     </Link>
-                    {p.crossSystem ? (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-                        Duplicate
-                      </span>
-                    ) : null}
+                    {(() => {
+                      const badge = crossSystemBadge(p);
+                      return badge ? (
+                        <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      ) : null;
+                    })()}
                   </td>
                   <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">
                     {p.sources.map((s) => (
@@ -125,6 +148,32 @@ export default function PeoplePage() {
           </table>
         </div>
       )}
+
+      {loaded && people.length > 0 && totalPages > 1 ? (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-neutral-500 dark:text-neutral-400">
+            Page {page} of {totalPages} · {total} people
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1 disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
