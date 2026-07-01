@@ -104,10 +104,11 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     );
   }
 
-  await deps.qualitySnapshots.upsertSnapshots(rows);
-  // Audit AFTER the upsert (not the usual audit-before-action): a snapshot is a descriptive, idempotently
-  // re-materializable aggregate, not an irreversible compliance state change — re-running the run rewrites
-  // it and re-audits. (The hard "audit-before" rule guards irreversible mutations; this isn't one.)
+  // Audit BEFORE the state change (hard rule: every state change writes an audit_event — no exceptions),
+  // mirroring the scheduler's audit-before-create. Writing the audit after the upsert could, on a
+  // transient `appendAudit` failure, leave persisted snapshot rows without their ledger entry. If the
+  // upsert then fails, the best-effort caller (`finishManualRun`) logs it and the next population run
+  // re-materializes idempotently (last-write-wins on the month/scope).
   await deps.events.appendAudit({
     eventType: QUALITY_SNAPSHOT_MATERIALIZED_EVENT,
     entityType: "run",
@@ -118,6 +119,7 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     refMeasureVersionId: null,
     payload: { period, measureCount: liveByMeasure.size, rowCount: rows.length },
   });
+  await deps.qualitySnapshots.upsertSnapshots(rows);
 
   return { materialized: true, rows: rows.length, period };
 }
