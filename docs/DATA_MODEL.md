@@ -514,6 +514,24 @@ quality_snapshots (
   ```
 Descriptive only — CQL `Outcome Status` stays the sole compliance authority (ADR-008/ADR-021).
 
+### 3.25 Cross-system identity (E15 PR-1 / #187) — read-time; no table
+
+Cross-system person identity is resolved **read-time from the synthetic directory** — **no new DB table**
+in PR-1 (mirrors E13/ADR-019). A small set of synthetic people exist in >1 WebChart system, modeled by a
+shared `nationalId` + `dateOfBirth` on a couple of **existing** twh↔ihn `EmployeeProfile` rows (the two
+fields are **new optional columns on the synthetic `EmployeeProfile` type**, §3.6 — not a DB column;
+present only on the cross-system rows, absent ⇒ the record is its own singleton person). No rows are added
+and no existing ids change, so E13 tenant counts and reconciliation (All = Σ tenants) are untouched.
+
+- `resolvePeople`/`duplicateCandidates`/`mergedComplianceTimeline` (`backend-ts/src/identity/`) group and
+  annotate at read-time; the merged timeline reuses the existing per-subject `outcomes` read
+  (`listOutcomesForEmployee`). A `MOBILITY_OVERLAY` seed marks a moved person's PRIOR system + move date.
+- **Production drop-in (documented, not built):** an owner-gated `person_links` table (personId ↔ source
+  `(tenantId, externalId)` + status + move date) — or an audit-backed store like `CampaignStore` (§3.17) —
+  fed by the E15 PR-2 reconcile write path (`POST /api/identity/people/:id/reconcile`, audited
+  `IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`). Until then the resolution layer keeps the data model
+  unchanged. Descriptive only — identity never sets `Outcome Status` (ADR-008/ADR-022).
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 

@@ -12,6 +12,12 @@ export interface EmployeeProfile {
   site: string;        // = location level
   providerId: string;  // attributed provider (an entry in PROVIDERS), at the same `site`
   tenantId: string;    // = WebChart system / employer (an entry in TENANTS), above enterprise (#185 E13)
+  // Cross-system identity fields (E15 PR-1) — present only on the small set of synthetic people who
+  // exist in >1 WebChart system, so the identity layer can resolve "the same person" by a shared
+  // deterministic key (a national/MRN identifier). Absent ⇒ the record is its own singleton person.
+  // Additive + optional — no existing row's identity changes, so E13 tenant counts are untouched.
+  dateOfBirth?: string; // YYYY-MM-DD (synthetic)
+  nationalId?: string;  // shared cross-system identifier (synthetic)
 }
 
 export interface Provider {
@@ -74,8 +80,12 @@ const TWH_BASE_RAW: readonly TenantlessBase[] = [
   { externalId: "emp-003", name: "Demo Case Manager", role: "Case Manager", site: "HQ" },
   { externalId: "emp-004", name: "Demo Admin", role: "Admin", site: "HQ" },
   { externalId: "emp-005", name: "Nadia Anwar", role: "Maintenance Tech", site: "Plant A" },
-  { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A" },
-  { externalId: "emp-007", name: "Sana Imtiaz", role: "Office Staff", site: "Plant A" },
+  // emp-006 / emp-007 are the twh side of two cross-system people (E15 PR-1): emp-006 "Omar Siddiq"
+  // is the MOBILITY subject (moved twh→ihn; his twh link is PRIOR — see identity mobility seed), and
+  // emp-007 "Sana Imtiaz" is a plain cross-system DUPLICATE (active in both systems). Both share a
+  // synthetic nationalId with their ihn record.
+  { externalId: "emp-006", name: "Omar Siddiq", role: "Welder", site: "Plant A", dateOfBirth: "1985-03-12", nationalId: "NID-100-OMAR" },
+  { externalId: "emp-007", name: "Sana Imtiaz", role: "Office Staff", site: "Plant A", dateOfBirth: "1990-07-22", nationalId: "NID-200-SANA" },
   { externalId: "emp-008", name: "Tariq Ilyas", role: "Industrial Hygienist", site: "Plant A" },
   { externalId: "emp-009", name: "Uzma Farooq", role: "Maintenance Tech", site: "Plant A" },
   { externalId: "emp-010", name: "Waleed Noor", role: "Welder", site: "Plant A" },
@@ -177,8 +187,11 @@ const TWH_BASE: readonly EmployeeBase[] = TWH_BASE_RAW.map((e) => ({ ...e, tenan
 /** Tenant 2 (ihn) — Indus Hospital Network: 50 employees across 3 campuses, healthcare roles. */
 const IHN_BASE: readonly EmployeeBase[] = [
   // North Campus (17)
-  { externalId: "ihn-emp-001", name: "Ayesha Noor", role: "Nurse", site: "North Campus", tenantId: "ihn" },
-  { externalId: "ihn-emp-002", name: "Bilal Hashmi", role: "Physician", site: "North Campus", tenantId: "ihn" },
+  // ihn-emp-001 / ihn-emp-002 are the ihn side of the two cross-system people (E15 PR-1): same
+  // synthetic person as twh emp-006 / emp-007 (shared nationalId + DOB + aligned name), system-local
+  // ids differ. ihn-emp-001 is "Omar Siddiq"'s current (ACTIVE) system after the move.
+  { externalId: "ihn-emp-001", name: "Omar Siddiq", role: "Nurse", site: "North Campus", tenantId: "ihn", dateOfBirth: "1985-03-12", nationalId: "NID-100-OMAR" },
+  { externalId: "ihn-emp-002", name: "Sana Imtiaz", role: "Physician", site: "North Campus", tenantId: "ihn", dateOfBirth: "1990-07-22", nationalId: "NID-200-SANA" },
   { externalId: "ihn-emp-003", name: "Caira Sattar", role: "Lab Tech", site: "North Campus", tenantId: "ihn" },
   { externalId: "ihn-emp-004", name: "Daniyal Khan", role: "Front Desk", site: "North Campus", tenantId: "ihn" },
   { externalId: "ihn-emp-005", name: "Erum Pervaiz", role: "Pharmacist", site: "North Campus", tenantId: "ihn" },

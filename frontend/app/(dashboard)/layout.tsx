@@ -14,6 +14,7 @@ import {
   Send,
   Settings,
   Shield,
+  Users,
 } from "lucide-react";
 import {
   AppHeader,
@@ -51,6 +52,7 @@ const nav = [
   { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/compliance", label: "Compliance", icon: ListChecks },
+  { href: "/people", label: "People", icon: Users },
   { href: "/campaigns", label: "Campaigns", icon: Send, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/orders", label: "Orders", icon: ClipboardCheck, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/measures", label: "Measures", icon: BookOpen },
