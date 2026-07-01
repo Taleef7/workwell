@@ -47,6 +47,23 @@ type TrendPoint = {
   excluded: number;
 };
 
+type QualitySnapshot = {
+  measureId: string;
+  period: string;
+  scopeLevel: string;
+  scopeId: string;
+  tenantId: string | null;
+  numerator: number;
+  denominator: number;
+  compliant: number;
+  dueSoon: number;
+  overdue: number;
+  missingData: number;
+  excluded: number;
+};
+
+type Tenant = { id: string; name: string };
+
 type TopDrivers = {
   bySite: Array<{ site: string; overdueCount: number; note: string }>;
   byRole: Array<{ role: string; overdueCount: number }>;
@@ -238,6 +255,8 @@ export default function ProgramDetailPage() {
               )}
             </div>
           </div>
+
+          <QualityOverTime measureId={measureId} measureName={program.measureName} />
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
@@ -466,6 +485,165 @@ export default function ProgramDetailPage() {
         </div>
       )}
     </section>
+  );
+}
+
+const rateOf = (s: QualitySnapshot): number =>
+  s.denominator > 0 ? Math.round((s.numerator / s.denominator) * 1000) / 10 : 0;
+
+const monthLabel = (period: string): string => {
+  const [y, m] = period.split("-").map(Number);
+  if (!y || !m) return period;
+  // Format in UTC — the period is a calendar month, not a wall-clock instant. Without timeZone:"UTC"
+  // a browser west of UTC renders midnight-UTC as the prior local day, showing e.g. "2026-07" as Jun.
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
+};
+
+/**
+ * E16 PR-3 — "Quality over time (source of truth)". Reads the materialized `quality_snapshots` via
+ * GET /api/quality/history: a scope selector (All Systems / per WebChart system), an as-of month
+ * picker, and a "compliance on month M" numerator/denominator KPI. Answers Doug's "were they
+ * compliant in December? October?" from the persisted aggregate, not a live re-scan. Descriptive
+ * only — the numbers are counts of what CQL already decided (ADR-008/ADR-021).
+ */
+function QualityOverTime({ measureId, measureName }: { measureId: string; measureName: string }) {
+  const api = useApi();
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [scope, setScope] = useState<string>("all|ALL"); // "level|id"
+  const [snapshots, setSnapshots] = useState<QualitySnapshot[]>([]);
+  const [asOf, setAsOf] = useState<string>("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    void api.get<Tenant[]>("/api/tenants").then(setTenants).catch(() => setTenants([]));
+  }, [api]);
+
+  const load = useCallback(async () => {
+    const [level, id] = scope.split("|");
+    const qs = new URLSearchParams({ measureId, scopeLevel: level!, scopeId: id! });
+    try {
+      const rows = await api.get<QualitySnapshot[]>(`/api/quality/history?${qs.toString()}`);
+      setSnapshots(rows);
+      setAsOf((prev) => (prev && rows.some((r) => r.period === prev) ? prev : rows.at(-1)?.period ?? ""));
+    } catch {
+      setSnapshots([]);
+    } finally {
+      setLoaded(true);
+    }
+  }, [api, measureId, scope]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [load]);
+
+  // A run triggered from this page materializes a new snapshot for the current month (E16 PR-1),
+  // but neither measureId nor scope changes — so re-load on the global ww:run-complete event
+  // (the parent page fires the same refresh for its trend/drivers).
+  useEffect(() => {
+    const onComplete = () => void load();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [load]);
+
+  const selected = snapshots.find((s) => s.period === asOf) ?? null;
+  const data = snapshots.map((s) => ({ label: monthLabel(s.period), rate: rateOf(s) }));
+  const [lo, hi] = niceDomain(data.map((d) => d.rate));
+
+  return (
+    <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+          Quality over time <span className="normal-case text-neutral-400">(source of truth)</span>
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs text-neutral-500 dark:text-neutral-400">
+            Scope{" "}
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-xs"
+            >
+              <option value="all|ALL">All Systems</option>
+              {tenants.map((t) => (
+                <option key={t.id} value={`tenant|${t.id}`}>{t.name}</option>
+              ))}
+            </select>
+          </label>
+          {snapshots.length > 0 ? (
+            <label className="text-xs text-neutral-500 dark:text-neutral-400">
+              As of{" "}
+              <select
+                value={asOf}
+                onChange={(e) => setAsOf(e.target.value)}
+                className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-xs"
+              >
+                {snapshots.map((s) => (
+                  <option key={s.period} value={s.period}>{monthLabel(s.period)}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      </div>
+
+      {selected ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+            <p className="text-xs text-emerald-800 dark:text-emerald-300">Compliance on {monthLabel(selected.period)}</p>
+            <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">{rateOf(selected).toFixed(1)}%</p>
+          </div>
+          <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">Numerator / Denominator</p>
+            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{selected.numerator} / {selected.denominator}</p>
+          </div>
+          <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">Excluded (not in denominator)</p>
+            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{selected.excluded}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {snapshots.length > 0 ? (
+        <div className="mt-4">
+          {/* aria-hidden — sr-only ChartDataTable below is the accessible alternative. */}
+          <div aria-hidden="true">
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+                <defs>
+                  <linearGradient id="qualityGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
+                <Tooltip
+                  formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
+                  contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+                  labelStyle={{ fontSize: 11, color: "#475569" }}
+                />
+                <Area type="monotone" dataKey="rate" name="Compliance" stroke="#2563eb" strokeWidth={2.5} fill="url(#qualityGrad)" dot={{ r: 3, fill: "#2563eb", strokeWidth: 0 }} activeDot={{ r: 5 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <ChartDataTable
+            caption={`Monthly compliance for ${measureName} (materialized snapshots)`}
+            columns={["Month", "Compliance", "Numerator", "Denominator"]}
+            rows={snapshots.map((s) => [monthLabel(s.period), `${rateOf(s).toFixed(1)}%`, s.numerator, s.denominator])}
+          />
+        </div>
+      ) : (
+        <div className="mt-3 flex h-[120px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 text-center">
+          <span className="max-w-md text-xs text-neutral-500 dark:text-neutral-400">
+            {loaded
+              ? "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."
+              : "Loading quality history…"}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
