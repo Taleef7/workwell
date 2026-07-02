@@ -273,7 +273,9 @@ export default function PersonDetailPage() {
                       value={mergeQuery}
                       onChange={(e) => {
                         setMergeQuery(e.target.value);
-                        if (e.target.value.trim().length < 2) setMergeResults([]);
+                        // Clear on EVERY change so stale candidates from the previous query can't be
+                        // clicked (CONFIRM_LINK'd) under a new query; the debounced effect refetches.
+                        setMergeResults([]);
                       }}
                       placeholder="Search by name, employee id, or national id…"
                       aria-label="Search for a record to link"
