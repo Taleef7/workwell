@@ -150,13 +150,16 @@ export default function PersonDetailPage() {
   // setState in the effect body).
   useEffect(() => {
     if (!mergeOpen || mergeQuery.trim().length < 2) return;
+    // Ignore a fetch that resolves after this effect run is superseded — otherwise a slow earlier
+    // request can overwrite newer results (stale-result race).
+    let active = true;
     const timer = setTimeout(() => {
       void api
         .get<PersonSearchRow[]>(`/api/identity/people?q=${encodeURIComponent(mergeQuery.trim())}&pageSize=10`)
-        .then(setMergeResults)
-        .catch(() => setMergeResults([]));
+        .then((rows) => { if (active) setMergeResults(rows); })
+        .catch(() => { if (active) setMergeResults([]); });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => { active = false; clearTimeout(timer); };
   }, [api, mergeOpen, mergeQuery]);
 
   const confirmLink = useCallback(
@@ -298,7 +301,7 @@ export default function PersonDetailPage() {
                           </li>
                         ))}
                       {mergeQuery.trim().length >= 2 && mergeResults.length === 0 ? (
-                        <li className="text-xs text-neutral-400">No matching records.</li>
+                        <li className="text-xs text-neutral-500 dark:text-neutral-400">No matching records.</li>
                       ) : null}
                     </ul>
                   </div>
