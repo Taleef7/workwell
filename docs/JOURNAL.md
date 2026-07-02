@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-07-02 — Hardening sprint, block 1: audit completeness + case-state integrity (Fable H1/H2/H6/H7/M6)
+
+The Fable deep review (`docs/FABLE_REVIEW_2026-07-02/`, 0 Critical / 14 High) surfaced four themes. This
+branch (`feat/hardening-audit-completeness`) closes the **audit-completeness + robustness** block — the
+one that most threatens the *"every determination auditable"* pitch — with no schema change and no new deps.
+
+- **H1 — population run pipeline now writes audit events.** The highest-volume state change (a nightly
+  `ALL_PROGRAMS` run opening/closing hundreds of cases) previously wrote **nothing** to `audit_events`,
+  violating the "every state change writes audit_event — no exceptions" hard rule. `finishManualRun` now
+  emits `RUN_COMPLETED` (entityType `run`) at finalize and `CASE_CREATED`/`CASE_UPDATED`/`CASE_RESOLVED`/
+  `CASE_EXCLUDED` from the upsert disposition — using the vocabulary the employee-profile timeline already
+  maps. Run-boundary audits are best-effort (never fail an otherwise-complete run).
+- **H2 — state-aware case upsert** (`planCaseUpsert`, a pure decision shared by the SQLite floor +
+  Postgres ceiling). Replaces the blanket `ON CONFLICT DO UPDATE SET status = excluded.status`, which
+  (a) flipped operator-set `IN_PROGRESS` back to `OPEN`, (b) silently reopened human-closed cases, and
+  (c) drifted `closed_at` forward on every compliant run. Now: `IN_PROGRESS` is preserved; a **human**
+  closure (`closed_by` set) is respected (reopen is an explicit operator action — owner decision
+  2026-07-02); only a **system** auto-resolve (`closed_by IS NULL`) reopens when a subject is
+  non-compliant again; an already-terminal case is a no-op (no `closed_at` drift). Idempotent
+  re-confirms of the same open outcome refresh the row **silently** (disposition `UNCHANGED` → no audit),
+  so a nightly run records one `RUN_COMPLETED`, not hundreds of `CASE_UPDATED` noise events.
+- **H6 — `pg.Pool` `'error'` listener.** An unhandled idle-client drop (routine under Neon's pooler /
+  compute-suspend) was a hard worker crash; now logged and recovered (the pool re-dials).
+- **H7 — hierarchy rollup now requires COMPLETED runs** (`isCompletedRun`), like every sibling read model
+  and its own scale branch — so `/programs/hierarchy` no longer counts an in-flight RUNNING run's partial
+  rows and stops disagreeing with `/programs` mid-run. Regression test added.
+- **M6 — admin toggles audited.** `POST /api/admin/scheduler` (enable/disable) and integration `…/sync`
+  now write `SCHEDULER_ENABLED/DISABLED` / `INTEGRATION_SYNCED` audit events.
+
+`upsertFromOutcome` now returns an `UpsertedCase` (a `CaseRecord` **superset** carrying `disposition`), so
+all ~25 existing callers are unaffected. **850 tests / 849 pass / 1 pg-skip / 0 fail** (added: a pure
+`planCaseUpsert` suite, an H1 audit-emission test, an H7 RUNNING-exclusion test); typecheck clean. No
+schema, no new deps. Remaining hardening blocks (scale indexes + endpoint bounding, foreign-data CQL
+fixes, frontend role-fit) are follow-ups; index DDL will land as a separate owner-review PR.
+
 ## 2026-07-01 — E15 reconcile merge-picker (CONFIRM_LINK UI follow-up)
 
 Completed the reconcile UI's other half (branch `feat/e15-merge-picker`) — the CONFIRM_LINK merge-picker

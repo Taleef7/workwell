@@ -63,3 +63,80 @@ export function nextActionFor(outcomeStatus: string, measureId: string): string 
       return "No action required.";
   }
 }
+
+/**
+ * State-aware case-upsert planning (Fable H1/H2). A pure decision shared by the SQLite floor and
+ * Postgres ceiling so the two adapters stay in lockstep and the logic is unit-testable. Replaces the
+ * old blanket `ON CONFLICT DO UPDATE SET status = excluded.status`, which (a) flipped operator-set
+ * IN_PROGRESS cases back to OPEN, (b) silently reopened human-closed cases while leaving stale
+ * closed_* residue, and (c) drifted closed_at forward on every subsequent compliant run.
+ *
+ * Rules:
+ *  - COMPLIANT resolves an OPEN/IN_PROGRESS case (system closure, `closed_by = NULL`); an
+ *    already-terminal case is a no-op (no closed_at drift, no audit).
+ *  - A non-compliant outcome opens a new case, refreshes an existing OPEN/IN_PROGRESS one
+ *    (preserving IN_PROGRESS), and — respecting manual closure — reopens ONLY a case the system
+ *    auto-resolved (`closed_by IS NULL`, status RESOLVED); a human-closed case (`closed_by` set) is
+ *    left closed, so reopening it stays an explicit operator action.
+ *  - EXCLUDED transitions a non-excluded case to EXCLUDED; an already-excluded case is a no-op.
+ *
+ * `disposition` drives the pipeline's audit emission: CREATED/UPDATED/REOPENED/RESOLVED/EXCLUDED
+ * write an audit event; UNCHANGED (an idempotent re-confirm of the same open outcome) refreshes the
+ * row's last_run_id/updated_at but writes NO audit event — so a nightly run re-confirming hundreds of
+ * still-overdue cases records one RUN_COMPLETED, not hundreds of noise events.
+ */
+export type CaseUpsertDisposition = "CREATED" | "UPDATED" | "REOPENED" | "RESOLVED" | "EXCLUDED" | "UNCHANGED";
+
+export interface ExistingCaseState {
+  status: string;
+  currentOutcomeStatus: string;
+  closedBy: string | null;
+}
+
+export interface CaseUpsertPlan {
+  op: "insert" | "update" | "noop";
+  /** Present iff `op !== "noop"`. */
+  disposition?: CaseUpsertDisposition;
+  /** Resulting status for insert/update. */
+  status?: string;
+  closedAt?: string | null;
+  closedReason?: string | null;
+  closedBy?: string | null;
+}
+
+/** Decide how a case should be upserted from one outcome, given the existing row (or null). Pure. */
+export function planCaseUpsert(existing: ExistingCaseState | null, outcomeStatus: string, now: string): CaseUpsertPlan {
+  const disposition = dispositionFor(outcomeStatus);
+
+  if (!existing) {
+    if (disposition === "RESOLVE") return { op: "noop" }; // COMPLIANT with no case → nothing to do
+    if (disposition === "EXCLUDED")
+      return { op: "insert", disposition: "EXCLUDED", status: "EXCLUDED", closedAt: now, closedReason: "EXCLUDED", closedBy: null };
+    return { op: "insert", disposition: "CREATED", status: "OPEN", closedAt: null, closedReason: null, closedBy: null };
+  }
+
+  const s = existing.status;
+
+  if (disposition === "RESOLVE") {
+    if (s === "OPEN" || s === "IN_PROGRESS")
+      return { op: "update", disposition: "RESOLVED", status: "RESOLVED", closedAt: now, closedReason: "AUTO_RESOLVED", closedBy: null };
+    return { op: "noop" }; // already terminal — no closed_at drift, no audit
+  }
+
+  if (disposition === "EXCLUDED") {
+    if (s === "EXCLUDED") return { op: "noop" };
+    return { op: "update", disposition: "EXCLUDED", status: "EXCLUDED", closedAt: now, closedReason: "EXCLUDED", closedBy: null };
+  }
+
+  // Non-compliant (DUE_SOON / OVERDUE / MISSING_DATA)
+  if (s === "OPEN" || s === "IN_PROGRESS") {
+    // Preserve IN_PROGRESS; only audit when the outcome actually changed (e.g. DUE_SOON → OVERDUE).
+    const changed = existing.currentOutcomeStatus !== outcomeStatus;
+    return { op: "update", disposition: changed ? "UPDATED" : "UNCHANGED", status: s, closedAt: null, closedReason: null, closedBy: null };
+  }
+  // Terminal (RESOLVED / EXCLUDED): respect a human closure; reopen only a system auto-resolve.
+  if (existing.closedBy != null) return { op: "noop" };
+  if (s === "RESOLVED")
+    return { op: "update", disposition: "REOPENED", status: "OPEN", closedAt: null, closedReason: null, closedBy: null };
+  return { op: "noop" }; // system EXCLUDED persists within the cycle
+}

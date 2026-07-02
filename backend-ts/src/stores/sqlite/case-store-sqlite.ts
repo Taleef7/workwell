@@ -5,8 +5,8 @@
  * case invariant). COMPLIANT resolves an existing case without inserting a new one.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput } from "../case-store.ts";
-import { dispositionFor, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import { planCaseUpsert, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -50,59 +50,85 @@ const toRecord = (r: CaseRow): CaseRecord => ({
 export class SqliteCaseStore implements CaseStore {
   constructor(private readonly db: CloudDatabase) {}
 
-  async upsertFromOutcome(input: UpsertCaseInput): Promise<CaseRecord | null> {
-    const disposition = dispositionFor(input.outcomeStatus);
+  private async findByKey(subjectId: string, measureId: string, evaluationPeriod: string): Promise<CaseRow | null> {
+    return (
+      (await this.db
+        .prepare(`SELECT ${COLS} FROM cases WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?`)
+        .bind(subjectId, measureId, evaluationPeriod)
+        .first<CaseRow>()) ?? null
+    );
+  }
+
+  async upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null> {
+    // State-aware upsert (Fable H1/H2): read the current row, plan the transition (respecting
+    // IN_PROGRESS + human closures), then insert/update/no-op. Read-then-write is non-atomic, but the
+    // pipeline processes each (subject, measure, period) key once per run, sequentially, so there is
+    // no intra-run race; cross-run same-key concurrency is not a demo scenario (runs are debounced).
     const now = new Date().toISOString();
+    const existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+    const plan = planCaseUpsert(
+      existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
+      input.outcomeStatus,
+      now,
+    );
+    if (plan.op === "noop") return null;
 
-    if (disposition === "RESOLVE") {
-      // COMPLIANT: resolve any existing open/excluded case; never insert a new one.
-      const row = await this.db
-        .prepare(
-          `UPDATE cases SET status = 'RESOLVED', current_outcome_status = ?, last_run_id = ?, updated_at = ?, closed_at = ?
-            WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
-          RETURNING ${COLS}`,
-        )
-        .bind(input.outcomeStatus, input.runId, now, now, input.subjectId, input.measureId, input.evaluationPeriod)
-        .first<CaseRow>();
-      return row ? toRecord(row) : null;
-    }
-
-    const status = disposition === "EXCLUDED" ? "EXCLUDED" : "OPEN";
     const priority = priorityFor(input.outcomeStatus);
     const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
-    const closedAt = disposition === "EXCLUDED" ? now : null;
+
+    if (plan.op === "insert") {
+      const row = await this.db
+        .prepare(
+          `INSERT INTO cases
+             (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
+              next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+           RETURNING ${COLS}`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod,
+          plan.status!,
+          priority,
+          nextAction,
+          input.outcomeStatus,
+          input.runId,
+          now,
+          now,
+          plan.closedAt ?? null,
+          plan.closedReason ?? null,
+          plan.closedBy ?? null,
+        )
+        .first<CaseRow>();
+      return row ? { ...toRecord(row), disposition: plan.disposition! } : null;
+    }
+
+    // update
     const row = await this.db
       .prepare(
-        `INSERT INTO cases
-           (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-            next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (employee_id, measure_id, evaluation_period) DO UPDATE SET
-           status = excluded.status,
-           priority = excluded.priority,
-           next_action = excluded.next_action,
-           current_outcome_status = excluded.current_outcome_status,
-           last_run_id = excluded.last_run_id,
-           updated_at = excluded.updated_at,
-           closed_at = excluded.closed_at
-         RETURNING ${COLS}`,
+        `UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?,
+           last_run_id = ?, updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
+          WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
+        RETURNING ${COLS}`,
       )
       .bind(
-        crypto.randomUUID(),
-        input.subjectId,
-        input.measureId,
-        input.evaluationPeriod,
-        status,
+        plan.status!,
         priority,
         nextAction,
         input.outcomeStatus,
         input.runId,
         now,
-        now,
-        closedAt,
+        plan.closedAt ?? null,
+        plan.closedReason ?? null,
+        plan.closedBy ?? null,
+        input.subjectId,
+        input.measureId,
+        input.evaluationPeriod,
       )
       .first<CaseRow>();
-    return row ? toRecord(row) : null;
+    return row ? { ...toRecord(row), disposition: plan.disposition! } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {

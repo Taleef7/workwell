@@ -51,7 +51,7 @@ before(async () => {
   outcomes = new SqliteOutcomeStore(db);
   cases = new SqliteCaseStore(db);
   const run = await runStore.createRun({
-    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test",
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", status: "COMPLETED",
     requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   });
@@ -200,10 +200,38 @@ const createAudiogramRun = (runStore: SqliteRunStore) =>
     scopeType: "MEASURE",
     scopeId: "audiogram",
     triggeredBy: "test",
+    // COMPLETED: the rollup counts only terminal population runs (Fable H7); a QUEUED/RUNNING run's
+    // partial rows are excluded, matching production.
+    status: "COMPLETED",
     requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z",
     measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   });
+
+test("Fable H7: an in-flight RUNNING run's partial outcomes are excluded from the rollup", async () => {
+  const dbFile = join(tmpdir(), `workwell-hier-running-${crypto.randomUUID()}.sqlite`);
+  try {
+    const { runStore, outcomes: o, cases: c } = await freshStores(dbFile);
+    // An older COMPLETED run is the real latest TERMINAL state (emp-006 OVERDUE) …
+    const done = await createAudiogramRun(runStore);
+    await o.recordOutcome({ runId: done.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    // … while a NEWER RUNNING run (latest by started_at) carries a PARTIAL, misleading COMPLIANT row.
+    const running = await runStore.createRun({
+      scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", status: "RUNNING",
+      requestedScope: { measureId: "audiogram" },
+      measurementPeriodStart: "2026-06-14T00:00:00.000Z", measurementPeriodEnd: "2026-06-14T00:00:00.000Z",
+    });
+    await o.recordOutcome({ runId: running.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+
+    const root = await buildHierarchyRollup({ outcomeStore: o, caseStore: c, runStore }, { measureId: "audiogram" });
+    // The COMPLETED run wins; the RUNNING run's partial COMPLIANT row is not counted.
+    assert.equal(root.totals.evaluated, 1);
+    assert.equal(root.totals.overdue, 1);
+    assert.equal(root.totals.compliant, 0);
+  } finally {
+    try { rmSync(dbFile, { force: true }); } catch { /* best effort */ }
+  }
+});
 
 test("multi-child accumulation: a Plant A location totals 2 providers × 2 differing-status patients", async () => {
   // Verify the synthetic attribution we're relying on (Plant A round-robin prov-001/prov-002).

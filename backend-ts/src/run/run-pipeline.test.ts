@@ -200,10 +200,23 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
   // Two ALL_PROGRAMS runs with NO evaluationDate → today — the nightly-cron shape. Both bucket
   // to the same compliance-cycle anchor, so the second run upserts the same cases (no fresh
   // cohort) and every opened case sits on a cycle anchor (Jan 1 / Jul 1), not a raw run date.
-  const caseStore = deps.caseStore!;
-  const r1 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  //
+  // Isolated stores (own db): the file's shared `deps` accumulates cases from prior tests, which —
+  // now that the H2 fix correctly leaves already-terminal cases untouched (no last_run_id drift) —
+  // would make the lastRunId proxy below unreliable. A fresh db makes this a true from-scratch nightly.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-nightly-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const nightlyDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+  };
+  const r1 = await executeManualRun(nightlyDeps, { scopeType: "ALL_PROGRAMS" });
   const afterFirst = (await caseStore.listCases({})).length;
-  const r2 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  const r2 = await executeManualRun(nightlyDeps, { scopeType: "ALL_PROGRAMS" });
   const all = await caseStore.listCases({});
   assert.equal(all.length, afterFirst, "the second nightly run creates 0 new cases (bucketed → idempotent)");
   const mine = all.filter((c) => c.lastRunId === r1.runId || c.lastRunId === r2.runId);
@@ -211,6 +224,49 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
   assert.ok(
     mine.every((c) => /-(01|07)-01$/.test(c.evaluationPeriod)),
     "evaluation_period is a compliance-cycle anchor (Jan 1 / Jul 1), not the raw run date",
+  );
+});
+
+test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the hard-rule fix)", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-audit-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const captured: { eventType: string; entityType: string; refRunId: string | null }[] = [];
+  const auditDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore: new SqliteCaseStore(db),
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+    events: {
+      async appendAudit(input) {
+        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId });
+      },
+    },
+  };
+  const res = await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler" });
+
+  // The run's terminal state is audited (previously the highest-volume state change wrote nothing).
+  const runEvents = captured.filter((e) => e.eventType === "RUN_COMPLETED" && e.entityType === "run");
+  assert.equal(runEvents.length, 1, "exactly one RUN_COMPLETED");
+  assert.equal(runEvents[0]!.refRunId, res.runId);
+
+  // Non-compliant subjects open cases, and each creation is audited (CASE_CREATED).
+  const caseEvents = captured.filter((e) => e.entityType === "case");
+  assert.ok(caseEvents.length >= 1, "at least one case audit event");
+  assert.ok(
+    caseEvents.every((e) => ["CASE_CREATED", "CASE_UPDATED", "CASE_RESOLVED", "CASE_EXCLUDED"].includes(e.eventType)),
+    "case events use the mapped vocabulary",
+  );
+
+  // Idempotent re-confirm: a second run re-confirms the same OPEN cases → NO new CASE_UPDATED noise,
+  // but the run itself is still audited (a nightly run records one RUN_COMPLETED, not hundreds of events).
+  captured.length = 0;
+  await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler" });
+  assert.equal(captured.filter((e) => e.eventType === "RUN_COMPLETED").length, 1, "second run also audited");
+  assert.equal(
+    captured.filter((e) => e.eventType === "CASE_UPDATED").length,
+    0,
+    "re-confirmed same-outcome cases emit no CASE_UPDATED (UNCHANGED → silent refresh)",
   );
 });
 
