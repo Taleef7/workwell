@@ -171,6 +171,12 @@ DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';
 
 ### Seeding quality-over-time history (E16 PR-2, on-demand, NOT auto-run on deploy)
 
+> **✓ Done on 2026-07-01 (live Neon).** `pnpm seed:quality-history --months 12 --as-of 2026-06` wrote
+> **12 months × ~4,046 rows = 48,552 `quality_snapshots`** (2025-07 → 2026-06; 2026-07 already existed
+> from forward materialization → 13 months total). Verified live: `all` scope ~flat 82.5–82.6% (scale
+> tenant is time-invariant by design), `tenant=twh` shows the real evaluated trend (97.9% → 69.1% as the
+> RECURRING measure ages). Re-run only after a rollback (`DELETE FROM quality_snapshots`).
+
 `pnpm seed:quality-history` materializes **real evaluated** `quality_snapshots` (numerator/denominator +
 the 5 bucket counts per measure × month × scope) for a range of past calendar months, so the
 `/programs/[measureId]` "Quality over time" card has genuine history — Doug's *"how do I know if they were

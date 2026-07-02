@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-07-01 — E15 reconcile merge-picker (CONFIRM_LINK UI follow-up)
+
+Completed the reconcile UI's other half (branch `feat/e15-merge-picker`) — the CONFIRM_LINK merge-picker
+deferred from E15 PR-2. Frontend-only; the API + CM/ADMIN gate already shipped in PR-2.
+
+- On `/people/[personId]`, a CM/ADMIN **"Link another record"** toggle opens a debounced search
+  (over `GET /api/identity/people`, `pageSize=10`) that lists candidate **source records** (flattened
+  from the matched people), excluding the person's own records. Selecting one → confirm dialog →
+  `POST …/reconcile {action:"CONFIRM_LINK"}` → back to `/people` (the id may change on re-grouping).
+- This is the inverse of the existing unlink action — for two separately-resolved people who are
+  actually the same human. Descriptive only (ADR-008); audited by the existing write path.
+- No backend/API/schema change. Frontend lint + build + 107 vitest green.
+
 ## 2026-07-01 — Live verification: E16 + E15 (×2) deployed and correct
 
 Consolidation smoke-test of the live stack (`twh.os.mieweb.org` / `twh-api-ts.os.mieweb.org`) after the
