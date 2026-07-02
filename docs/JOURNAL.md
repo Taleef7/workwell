@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-07-01 — Live verification: E16 + E15 (×2) deployed and correct
+
+Consolidation smoke-test of the live stack (`twh.os.mieweb.org` / `twh-api-ts.os.mieweb.org`) after the
+four merges (E16 PR-2/PR-3 #222, E15 PR-1 #223, E15 PR-2 #224). The deploy for the #224 merge (`fe5cca0`)
+succeeded; both new tables self-created on Neon (no boot error).
+
+- **E16 forward materialization LIVE:** `GET /api/quality/history?measureId=audiogram&scopeLevel=all` →
+  a real snapshot for **2026-07, numerator/denominator 93,717 / 113,547** — the denominator ≈ the full
+  population (mhn ~120k − excluded + twh/ihn), proving the bounded `aggregateScaleRun` scale fold runs on
+  live population runs. Only the current month exists (history awaits the owner backfill CLI).
+- **E15 identity LIVE + correct:** `/api/tenants` → twh/ihn/mhn; `/api/identity/duplicates` → exactly
+  Sana (Omar correctly excluded as *moved*); `/api/identity/people?q=omar` → ihn ACTIVE + twh PRIOR
+  (mobility resolved).
+- **Security gates LIVE:** unauthenticated → 401 on identity/quality/tenants; the public-sandbox
+  **VIEWER → 403** on `/api/identity/duplicates` (the PR-2 PII read-gate holds — national ids + DOB are
+  not publicly enumerable). Frontend `/people`, `/programs`, `/compliance` → 200.
+- Reconcile **write** path not exercised against live (mutates shared demo state; covered by 840 CI tests).
+
+**Verdict:** all four PRs deployed and behaving, incl. at 120k scale; no regressions. **Open owner step:**
+`pnpm seed:quality-history --months 12 --as-of 2026-06` against Neon to backfill the /programs "Quality
+over time" history (forward runs already accrue the current month).
+
 ## 2026-07-01 — E15 PR-2: identity reconcile write path (owner-approved `person_links`)
 
 The confirm/unlink half of E15 (branch `feat/e15-identity-reconcile`, ADR-022). Owner-approved the DDL
