@@ -230,20 +230,23 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
 test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the hard-rule fix)", async () => {
   const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-audit-${crypto.randomUUID()}.sqlite`));
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  const captured: { eventType: string; entityType: string; refRunId: string | null }[] = [];
+  const captured: { eventType: string; entityType: string; refRunId: string | null; actor: string }[] = [];
   const auditDeps: RunPipelineDeps = {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
     caseStore: new SqliteCaseStore(db),
     engine: new CqlExecutionEngine(),
     employees: EMPLOYEES.slice(0, 4),
+    actor: "cm@workwell.dev", // authenticated actor — audit rows must use THIS, not triggeredBy (Codex P1)
     events: {
       async appendAudit(input) {
-        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId });
+        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor });
       },
     },
   };
-  const res = await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler" });
+  // triggeredBy is a spoofable body field / trigger label; the audit actor must ignore it.
+  const res = await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "seed:scale" });
+  assert.ok(captured.length > 0 && captured.every((e) => e.actor === "cm@workwell.dev"), "audit actor is the authenticated actor, never the triggeredBy label");
 
   // The run's terminal state is audited (previously the highest-volume state change wrote nothing).
   const runEvents = captured.filter((e) => e.eventType === "RUN_COMPLETED" && e.entityType === "run");

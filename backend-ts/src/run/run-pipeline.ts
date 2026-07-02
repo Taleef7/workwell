@@ -72,6 +72,14 @@ export interface RunPipelineDeps {
    *  (non-run paths like impact-preview/case-rerun simply don't pass them). */
   qualitySnapshots?: QualitySnapshotStore;
   events?: Pick<CaseEventStore, "appendAudit">;
+  /**
+   * The AUTHENTICATED actor for audit attribution (from the auth middleware), kept SEPARATE from the
+   * run's `triggeredBy` trigger-label. `triggeredBy` is caller-influenced (and a trigger *type*, not a
+   * user), so audit rows must never derive their actor from it — matches the invariant "public API actor
+   * identity always comes from the auth middleware; caller-supplied actor fields are ignored" (Codex P1).
+   * A scheduled run passes `"scheduler"`; absent (tests / offline tools) ⇒ `"system"`.
+   */
+  actor?: string;
 }
 
 /** Thrown for scopes not served by this path (CASE — handled by rerun-to-verify in the cases module). */
@@ -161,8 +169,6 @@ export interface PlannedRun {
   scopeLabel: string;
   scopeType: RunScopeType;
   evalDate: string;
-  /** Actor attribution for the run's audit events (the run's triggered_by). */
-  triggeredBy: string;
 }
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
@@ -185,7 +191,7 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
-  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate, triggeredBy: req.triggeredBy ?? "manual" };
+  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate };
 }
 
 /** Map an upsert disposition to its case audit event type; UNCHANGED (idempotent re-confirm) → no event. */
@@ -217,6 +223,8 @@ export function runningResponse(planned: PlannedRun): ManualRunResponse {
 /** Evaluate the planned work items, persist outcomes + cases, finalize the run — the slow half. */
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
   const { run, items, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  // Audit actor = the authenticated user (never the caller-influenced triggeredBy label; Codex P1).
+  const auditActor = deps.actor ?? "system";
   let compliant = 0;
   let nonCompliant = 0;
   let failures = 0;
@@ -272,7 +280,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             eventType,
             entityType: "case",
             entityId: upserted.id,
-            actor: planned.triggeredBy,
+            actor: auditActor,
             refRunId: run.id,
             refCaseId: upserted.id,
             refMeasureVersionId: item.measureId,
@@ -303,7 +311,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         eventType: "RUN_COMPLETED",
         entityType: "run",
         entityId: run.id,
-        actor: planned.triggeredBy,
+        actor: auditActor,
         refRunId: run.id,
         refCaseId: null,
         refMeasureVersionId: null,
