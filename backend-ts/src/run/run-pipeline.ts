@@ -161,6 +161,8 @@ export interface PlannedRun {
   scopeLabel: string;
   scopeType: RunScopeType;
   evalDate: string;
+  /** Actor attribution for the run's audit events (the run's triggered_by). */
+  triggeredBy: string;
 }
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
@@ -183,8 +185,18 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
-  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate };
+  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate, triggeredBy: req.triggeredBy ?? "manual" };
 }
+
+/** Map an upsert disposition to its case audit event type; UNCHANGED (idempotent re-confirm) → no event. */
+const CASE_EVENT_FOR: Record<string, string | null> = {
+  CREATED: "CASE_CREATED",
+  UPDATED: "CASE_UPDATED",
+  REOPENED: "CASE_UPDATED",
+  RESOLVED: "CASE_RESOLVED",
+  EXCLUDED: "CASE_EXCLUDED",
+  UNCHANGED: null,
+};
 
 /** The immediate RUNNING response for an async (ALL_PROGRAMS/SITE) run — the page polls to terminal. */
 export function runningResponse(planned: PlannedRun): ManualRunResponse {
@@ -242,13 +254,40 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // (subject, measure) does NOT create/upsert a case. The outcome above is ALWAYS persisted
     // (CQL stays the sole compliance authority — ADR-008). Empty/absent segments ⇒ all applicable.
     if (deps.caseStore && isApplicable(item.employee, item.measureId, deps.segments ?? [])) {
-      await deps.caseStore.upsertFromOutcome({
+      const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
         subjectId: item.employee.externalId,
         measureId: item.measureId,
         evaluationPeriod: period,
         outcomeStatus: status,
       });
+      // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
+      // events, violating the "every state change writes audit_event" hard rule). Idempotent
+      // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
+      // nothing, so a nightly run records real transitions only, not one event per still-open case.
+      if (deps.events && upserted) {
+        const eventType = CASE_EVENT_FOR[upserted.disposition];
+        if (eventType) {
+          await deps.events.appendAudit({
+            eventType,
+            entityType: "case",
+            entityId: upserted.id,
+            actor: planned.triggeredBy,
+            refRunId: run.id,
+            refCaseId: upserted.id,
+            refMeasureVersionId: item.measureId,
+            payload: {
+              disposition: upserted.disposition,
+              outcomeStatus: status,
+              status: upserted.status,
+              subjectId: item.employee.externalId,
+              measureId: item.measureId,
+              evaluationPeriod: period,
+              runId: run.id,
+            },
+          });
+        }
+      }
     }
     if (status === "COMPLIANT") compliant++;
     else if (NON_COMPLIANT.has(status)) nonCompliant++;
@@ -256,6 +295,33 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(run.id, terminalStatus);
+  // Audit the run's terminal state (Fable H1). The highest-volume state change in the system now
+  // leaves a ledger record; run audit packets and the run timeline were previously near-empty.
+  if (deps.events) {
+    await deps.events
+      .appendAudit({
+        eventType: "RUN_COMPLETED",
+        entityType: "run",
+        entityId: run.id,
+        actor: planned.triggeredBy,
+        refRunId: run.id,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: {
+          scopeType,
+          scopeLabel,
+          status: terminalStatus,
+          totalEvaluated: items.length,
+          compliant,
+          nonCompliant,
+          failures,
+          measuresExecuted: measureIds,
+        },
+      })
+      .catch(() => {
+        /* audit is best-effort at the run boundary — never fail an otherwise-complete run on a ledger write */
+      });
+  }
   // Materialize the quality-over-time snapshot for this run's month (#E16) — AFTER finalize and
   // best-effort, so a snapshot failure can never fail an otherwise-complete run. materializeRun skips
   // non-population scopes (EMPLOYEE/SITE/CASE) and seed:scale runs internally; the scale tenant folds

@@ -6,8 +6,8 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput } from "../case-store.ts";
-import { dispositionFor, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import { planCaseUpsert, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -53,51 +53,78 @@ const toRecord = (r: CaseRow): CaseRecord => ({
 export class PgCaseStore implements CaseStore {
   constructor(private readonly pool: PgPool) {}
 
-  async upsertFromOutcome(input: UpsertCaseInput): Promise<CaseRecord | null> {
-    const disposition = dispositionFor(input.outcomeStatus);
-    const now = new Date().toISOString();
+  private async findByKey(subjectId: string, measureId: string, evaluationPeriod: string): Promise<CaseRow | null> {
+    const { rows } = await this.pool.query<CaseRow>(
+      `SELECT ${COLS} FROM ${T} WHERE employee_id = $1 AND measure_id = $2 AND evaluation_period = $3`,
+      [subjectId, measureId, evaluationPeriod],
+    );
+    return rows[0] ?? null;
+  }
 
-    if (disposition === "RESOLVE") {
+  async upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null> {
+    // State-aware upsert (Fable H1/H2) — read-then-plan-then-write, mirroring the SQLite floor via the
+    // shared pure `planCaseUpsert`. Preserves IN_PROGRESS, respects human closures, and audits only real
+    // transitions. Read-then-write is non-atomic; the pipeline upserts each key once per run, sequentially.
+    const now = new Date().toISOString();
+    const existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+    const plan = planCaseUpsert(
+      existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
+      input.outcomeStatus,
+      now,
+    );
+    if (plan.op === "noop") return null;
+
+    const priority = priorityFor(input.outcomeStatus);
+    const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
+
+    if (plan.op === "insert") {
       const { rows } = await this.pool.query<CaseRow>(
-        `UPDATE ${T} SET status = 'RESOLVED', current_outcome_status = $1, last_run_id = $2, updated_at = $3, closed_at = $3
-          WHERE employee_id = $4 AND measure_id = $5 AND evaluation_period = $6
-        RETURNING ${COLS}`,
-        [input.outcomeStatus, input.runId, now, input.subjectId, input.measureId, input.evaluationPeriod],
+        `INSERT INTO ${T}
+           (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
+            next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $10, $11, $12, $13)
+         RETURNING ${COLS}`,
+        [
+          crypto.randomUUID(),
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod,
+          plan.status!,
+          priority,
+          nextAction,
+          input.outcomeStatus,
+          input.runId,
+          now,
+          plan.closedAt ?? null,
+          plan.closedReason ?? null,
+          plan.closedBy ?? null,
+        ],
       );
-      return rows[0] ? toRecord(rows[0]) : null;
+      return rows[0] ? { ...toRecord(rows[0]), disposition: plan.disposition! } : null;
     }
 
-    const status = disposition === "EXCLUDED" ? "EXCLUDED" : "OPEN";
-    const closedAt = disposition === "EXCLUDED" ? now : null;
+    // update
     const { rows } = await this.pool.query<CaseRow>(
-      `INSERT INTO ${T}
-         (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-          next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $10, $11)
-       ON CONFLICT (employee_id, measure_id, evaluation_period) DO UPDATE SET
-         status = excluded.status,
-         priority = excluded.priority,
-         next_action = excluded.next_action,
-         current_outcome_status = excluded.current_outcome_status,
-         last_run_id = excluded.last_run_id,
-         updated_at = excluded.updated_at,
-         closed_at = excluded.closed_at
-       RETURNING ${COLS}`,
+      `UPDATE ${T} SET status = $1, priority = $2, next_action = $3, current_outcome_status = $4,
+         last_run_id = $5, updated_at = $6, closed_at = $7, closed_reason = $8, closed_by = $9
+        WHERE employee_id = $10 AND measure_id = $11 AND evaluation_period = $12
+      RETURNING ${COLS}`,
       [
-        crypto.randomUUID(),
-        input.subjectId,
-        input.measureId,
-        input.evaluationPeriod,
-        status,
-        priorityFor(input.outcomeStatus),
-        nextActionFor(input.outcomeStatus, input.measureId),
+        plan.status!,
+        priority,
+        nextAction,
         input.outcomeStatus,
         input.runId,
         now,
-        closedAt,
+        plan.closedAt ?? null,
+        plan.closedReason ?? null,
+        plan.closedBy ?? null,
+        input.subjectId,
+        input.measureId,
+        input.evaluationPeriod,
       ],
     );
-    return rows[0] ? toRecord(rows[0]) : null;
+    return rows[0] ? { ...toRecord(rows[0]), disposition: plan.disposition! } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {

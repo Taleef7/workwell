@@ -31,7 +31,7 @@ before(async () => {
   const outcomes = new SqliteOutcomeStore(db);
   const cases = new SqliteCaseStore(db);
   const run = await runStore.createRun({
-    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", status: "COMPLETED", requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
