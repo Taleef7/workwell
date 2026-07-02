@@ -584,7 +584,24 @@ Run B outcome (same key): `OVERDUE`
 - No duplicate case created.
 
 Run C outcome (same key): `COMPLIANT`
-- Existing row is resolved (`status=RESOLVED`, `closed_at=NOW()`).
+- Existing row is resolved (`status=RESOLVED`, `closed_at=NOW()`, `closed_reason='AUTO_RESOLVED'`,
+  `closed_by=NULL` — a **system** closure).
+
+### State-aware upsert (Fable H1/H2, 2026-07-02)
+`upsertFromOutcome` is no longer a blanket `ON CONFLICT DO UPDATE SET status = excluded.status`. Both the
+SQLite floor and the Pg ceiling read the current row and apply the shared pure `planCaseUpsert`
+(`backend-ts/src/case/case-logic.ts`):
+- **IN_PROGRESS is preserved** on a still-non-compliant run (an operator's "scheduling" state is never
+  clobbered back to OPEN).
+- **Human closures are respected.** A case a person closed (`closed_by` set) is **not** reopened by a
+  later non-compliant run; only a **system** auto-resolve (`closed_by IS NULL`, status `RESOLVED`) reopens.
+  Reopening a human-closed case is left an explicit, audited operator action.
+- **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
+- The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
+  `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
+  `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
+  outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
+  events). Population runs previously wrote **no** case/run audit events at all — the H1 hard-rule fix.
 
 ## 5) `evidence_json` Contract (authoritative)
 
