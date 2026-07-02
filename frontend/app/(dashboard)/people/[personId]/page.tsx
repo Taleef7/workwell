@@ -56,6 +56,13 @@ type TimelineEntry = {
   sourceStatus: "ACTIVE" | "PRIOR";
 };
 
+type PersonSearchRow = {
+  personId: string;
+  displayName: string;
+  crossSystem: boolean;
+  sources: SourceLink[];
+};
+
 type PersonDetail = {
   person: {
     personId: string;
@@ -133,6 +140,49 @@ export default function PersonDetailPage() {
     [api, personId, router],
   );
 
+  // Merge-picker: search for a record that IS this person and link it in (CONFIRM_LINK). The inverse of
+  // unlink — for two separately-resolved people who are actually the same human.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeQuery, setMergeQuery] = useState("");
+  const [mergeResults, setMergeResults] = useState<PersonSearchRow[]>([]);
+
+  // Only FETCH in the effect (results are cleared in the input/toggle handlers, to avoid a synchronous
+  // setState in the effect body).
+  useEffect(() => {
+    if (!mergeOpen || mergeQuery.trim().length < 2) return;
+    const timer = setTimeout(() => {
+      void api
+        .get<PersonSearchRow[]>(`/api/identity/people?q=${encodeURIComponent(mergeQuery.trim())}&pageSize=10`)
+        .then(setMergeResults)
+        .catch(() => setMergeResults([]));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [api, mergeOpen, mergeQuery]);
+
+  const confirmLink = useCallback(
+    async (src: { tenantId: string; tenantName: string; externalId: string; name: string }) => {
+      if (!window.confirm(`Link ${src.name} — ${src.tenantName} (${src.externalId}) — as the same person?`)) return;
+      setBusy(true);
+      try {
+        await api.post(`/api/identity/people/${encodeURIComponent(personId)}/reconcile`, {
+          action: "CONFIRM_LINK", tenantId: src.tenantId, externalId: src.externalId,
+        });
+        emitToast(`Linked ${src.tenantName} record`);
+        setMergeOpen(false);
+        setMergeQuery("");
+        router.push("/people");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, personId, router],
+  );
+
+  // Records already part of this person — excluded from the picker so you can't link a member to itself.
+  const ownRefs = new Set((detail?.person.sources ?? []).map((s) => `${s.tenantId}|${s.externalId}`));
+
   return (
     <section className="space-y-4">
       <Link href="/people" className="text-sm text-neutral-500 dark:text-neutral-400 hover:underline">← Back to People</Link>
@@ -194,10 +244,66 @@ export default function PersonDetailPage() {
                 </li>
               ))}
             </ul>
-            {mayReconcile && detail.person.crossSystem ? (
-              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-                Reconcile: if a linked record is not actually this person, unlink it. Every link change is audited.
-              </p>
+            {mayReconcile ? (
+              <div className="mt-3 border-t border-neutral-100 dark:border-neutral-800 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Reconcile: unlink a record that isn&apos;t this person, or link one that is. Every change is audited.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMergeOpen((v) => !v);
+                      setMergeQuery("");
+                      setMergeResults([]);
+                    }}
+                    className="shrink-0 rounded border border-primary-300 dark:border-primary-800 px-2 py-1 text-xs font-medium text-primary-700 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-950/40"
+                  >
+                    {mergeOpen ? "Cancel" : "Link another record"}
+                  </button>
+                </div>
+                {mergeOpen ? (
+                  <div className="mt-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 p-3">
+                    <input
+                      type="search"
+                      autoFocus
+                      value={mergeQuery}
+                      onChange={(e) => {
+                        setMergeQuery(e.target.value);
+                        if (e.target.value.trim().length < 2) setMergeResults([]);
+                      }}
+                      placeholder="Search by name, employee id, or national id…"
+                      aria-label="Search for a record to link"
+                      className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm"
+                    />
+                    <ul className="mt-2 space-y-1">
+                      {mergeResults
+                        .flatMap((p) => p.sources.map((s) => ({ ...s, personId: p.personId })))
+                        .filter((s) => !ownRefs.has(`${s.tenantId}|${s.externalId}`))
+                        .slice(0, 12)
+                        .map((s) => (
+                          <li key={`${s.tenantId}|${s.externalId}`} className="flex items-center justify-between gap-2 text-sm">
+                            <span>
+                              <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.name}</span>{" "}
+                              <span className="text-neutral-500 dark:text-neutral-400">{s.tenantName} · {s.externalId}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void confirmLink(s)}
+                              disabled={busy}
+                              className="shrink-0 rounded border border-emerald-300 dark:border-emerald-800 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-40"
+                            >
+                              Same person — link
+                            </button>
+                          </li>
+                        ))}
+                      {mergeQuery.trim().length >= 2 && mergeResults.length === 0 ? (
+                        <li className="text-xs text-neutral-400">No matching records.</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
