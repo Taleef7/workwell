@@ -30,9 +30,9 @@ vi.mock("next/navigation", () => ({
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
 
-function buildJwt(exp: number): string {
-  // Minimal 3-part JWT-shaped string with a base64-encoded payload containing exp.
-  const payload = btoa(JSON.stringify({ exp, sub: "admin@workwell.dev" }))
+function buildJwt(exp: number, sub = "admin@workwell.dev"): string {
+  // Minimal 3-part JWT-shaped string with a base64-encoded payload containing exp + sub.
+  const payload = btoa(JSON.stringify({ exp, sub }))
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
@@ -240,5 +240,25 @@ describe("AuthProvider — silent refresh on page load", () => {
 
     expect(refreshCallCount).toBe(0);
     expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("Codex P1: updateToken ignores a refreshed token whose subject != the current session", async () => {
+    // Session for admin@ is active.
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(freshToken)); // sub=admin@workwell.dev
+    localStorage.setItem(USER_KEY, JSON.stringify({ email: "admin@workwell.dev", role: "ADMIN" }));
+    let ctx: ReturnType<typeof useAuth> | null = null;
+    renderProvider((c) => { ctx = c; });
+    await waitFor(() => expect(ctx).not.toBeNull());
+
+    // A late refresh from a DIFFERENT account (a same-tab logout→login-B race) must NOT overwrite the
+    // current session's token.
+    const foreignToken = buildJwt(Math.floor(Date.now() / 1000) + 900, "other@workwell.dev");
+    act(() => ctx!.updateToken(foreignToken));
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(freshToken));
+
+    // A refresh for the CURRENT account IS persisted (the happy path).
+    const sameAcctToken = buildJwt(Math.floor(Date.now() / 1000) + 1800, "admin@workwell.dev");
+    act(() => ctx!.updateToken(sameAcctToken));
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(sameAcctToken));
   });
 });

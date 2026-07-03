@@ -195,6 +195,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // (Fable M24). No-op if there's no current session (a concurrent logout won the race).
         const storedUser = readStorage<AuthUser>(USER_KEY);
         if (!storedUser || logoutInProgress.current) return;
+        // Scope the refreshed token to the session that owns it (Codex P1): after a same-tab
+        // logout-A → login-B, a late refresh from A must not overwrite B's token. The access token's
+        // `sub` claim is the account email; only persist when it matches the current stored user.
+        let subject: string | null = null;
+        try {
+          const payload = decodeJwtPayload(nextToken);
+          subject = typeof payload?.sub === "string" ? payload.sub : null;
+        } catch {
+          return; // undecodable token — never persist
+        }
+        if (subject !== storedUser.email) return;
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         notifySessionChange();
       },
