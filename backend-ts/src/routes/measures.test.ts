@@ -314,18 +314,22 @@ test("POST /api/measures creates a Draft measure persisted to the store", async 
   assert.equal((await post("/api/measures", { name: "x" }))?.status, 400);
 });
 
-test("POST /api/measures/:id/status transitions Draft→Approved, but Approved→Active is gated on fixtures", async () => {
+test("POST /api/measures/:id/status enforces the /approve + /deprecate gates — no back door (Fable M2/M3)", async () => {
   const { id } = (await post("/api/measures", { name: "Lifecycle Demo", policyRef: "CDC", owner: "author@workwell.dev" }).then((r) => r!.json())) as { id: string };
+  // M3: Draft→Approved via /status is now gated on compile+fixtures exactly like the dedicated
+  // /approve route — a fresh Draft has compileStatus ERROR, so the compile gate fires → 400. It is no
+  // longer a way to reach Approved (with a matching audit trail) while never having compiled.
   const approved = await post(`/api/measures/${id}/status`, { targetStatus: "Approved" });
-  assert.equal(approved?.status, 200);
-  assert.equal(((await approved!.json()) as { status: string }).status, "Approved");
-  // Approved→Active is gated: a fresh Draft has compileStatus ERROR, so the compile gate
-  // fires first (and if it passed, the no-fixtures gate would block it next) → 400, faithful to Java.
-  const activate = await post(`/api/measures/${id}/status`, { targetStatus: "Active" });
-  assert.equal(activate?.status, 400);
-  assert.match(((await activate!.json()) as { message: string }).message, /compile status|test fixtures/i);
-  // an invalid jump (Approved→Deprecated) is rejected
+  assert.equal(approved?.status, 400);
+  assert.match(((await approved!.json()) as { message: string }).message, /compile status|test fixtures/i);
+  // an invalid jump (Draft→Deprecated) is rejected
   assert.equal((await post(`/api/measures/${id}/status`, { targetStatus: "Deprecated" }))?.status, 400);
+  // M2: Active→Deprecated is NOT an allowed /status transition (deprecation goes through the
+  // ADMIN-only /deprecate route, reason required). audiogram is Active; the request is rejected
+  // as an invalid transition without mutating it.
+  const dep = await post(`/api/measures/audiogram/status`, { targetStatus: "Deprecated" });
+  assert.equal(dep?.status, 400);
+  assert.match(((await dep!.json()) as { message: string }).message, /invalid transition/i);
 });
 
 test("POST /api/measures/:id/approve is gated; non-Draft → 400", async () => {

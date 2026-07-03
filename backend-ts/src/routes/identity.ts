@@ -51,6 +51,16 @@ function matchesQuery(person: Person, q: string): boolean {
 
 const inTenant = (person: Person, tenant: string): boolean => person.sources.some((s) => s.tenantId === tenant);
 
+/** decodeURIComponent that never throws — a malformed escape (`%zz`) must be a clean 404, not a 500
+ *  (Fable L1: "unknown id → 404, never 500"). */
+function safeDecode(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
 export async function handleIdentity(req: Request, env: IdentityEnv, actor: string): Promise<Response | null> {
   const url = new URL(req.url);
   const path = url.pathname;
@@ -60,7 +70,9 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
   if (req.method === "POST") {
     const rid = /^\/api\/identity\/people\/([^/]+)\/reconcile$/.exec(path)?.[1];
     if (!rid) return null;
-    return reconcile(req, env, actor, decodeURIComponent(rid));
+    const decoded = safeDecode(rid);
+    if (decoded === null) return json({ error: "not_found", message: "person not found" }, 404);
+    return reconcile(req, env, actor, decoded);
   }
   if (req.method !== "GET") return null;
 
@@ -79,7 +91,8 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
   // GET /api/identity/people/:personId
   const detailId = /^\/api\/identity\/people\/([^/]+)$/.exec(path)?.[1];
   if (detailId) {
-    const person = personById(decodeURIComponent(detailId), undefined, links);
+    const decodedId = safeDecode(detailId);
+    const person = decodedId === null ? null : personById(decodedId, undefined, links);
     if (!person) return json({ error: "not_found", message: "person not found" }, 404);
     const outcomesByExternalId = new Map<string, TimelineOutcome[]>();
     for (const src of person.sources) {

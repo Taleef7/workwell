@@ -26,13 +26,25 @@ export interface JwtPrincipal {
   role: string;
 }
 
+/** The revocation-relevant claims carried by a rotated refresh token (Fable M5). */
+export interface RefreshClaims {
+  email: string;
+  /** Per-token id (rotated on every refresh) — the current jti is tracked server-side. */
+  jti?: string;
+  /** Per-login-session family id (stable across rotations) — the revocation key. */
+  fam?: string;
+}
+
 export interface JwtService {
   issueAccessToken(email: string, role: string): string;
-  issueRefreshToken(email: string): string;
+  /** Issue a refresh token; optional `jti`/`fam` claims support server-side rotation tracking (M5). */
+  issueRefreshToken(email: string, extra?: { jti?: string; fam?: string }): string;
   /** Returns the principal for a valid, non-expired, non-refresh access token, else null. */
   verifyAccessToken(token: string): JwtPrincipal | null;
   /** Returns the subject email for a valid, non-expired refresh token, else null. */
   verifyRefreshToken(token: string): string | null;
+  /** Like verifyRefreshToken but also returns the rotation claims (jti/fam) when present. */
+  readRefreshToken(token: string): RefreshClaims | null;
   readonly refreshTtlSeconds: number;
 }
 
@@ -86,8 +98,11 @@ export function createJwt(config: JwtConfig): JwtService {
       return issue({ sub: email, role }, accessTtl);
     },
 
-    issueRefreshToken(email) {
-      return issue({ sub: email, refresh: true }, refreshTtl);
+    issueRefreshToken(email, extra) {
+      const claims: Record<string, unknown> = { sub: email, refresh: true };
+      if (extra?.jti) claims.jti = extra.jti;
+      if (extra?.fam) claims.fam = extra.fam;
+      return issue(claims, refreshTtl);
     },
 
     verifyAccessToken(token) {
@@ -104,6 +119,18 @@ export function createJwt(config: JwtConfig): JwtService {
       if (!claims || claims.refresh !== true) return null;
       const email = typeof claims.sub === "string" ? claims.sub : "";
       return email || null;
+    },
+
+    readRefreshToken(token) {
+      const claims = verify(token);
+      if (!claims || claims.refresh !== true) return null;
+      const email = typeof claims.sub === "string" ? claims.sub : "";
+      if (!email) return null;
+      return {
+        email,
+        jti: typeof claims.jti === "string" ? claims.jti : undefined,
+        fam: typeof claims.fam === "string" ? claims.fam : undefined,
+      };
     },
   };
 }
