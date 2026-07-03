@@ -77,6 +77,17 @@ function whyFlagged(evidence: unknown, measureId: string) {
   };
 }
 
+/** One outcome CSV row (shared by the string + streamed builders). */
+function outcomeRowCells(o: { id: string; runId: string; subjectId: string; measureId: string; evaluationPeriod: string; status: string; evidence: unknown; evaluatedAt: string }): unknown[] {
+  const emp = employeeById(o.subjectId);
+  const wf = whyFlagged(o.evidence, o.measureId);
+  return [
+    o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
+    measureName(o.measureId), measureVersion(o.measureId), o.evaluationPeriod, o.status,
+    wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
+  ];
+}
+
 export async function outcomesCsv(outcomeStore: OutcomeStore, runStore: RunStore, runId?: string): Promise<string> {
   // Java exportOutcomeCsv: an explicit runId, otherwise the LATEST run (not every run's
   // outcomes — that would mix historical duplicate employee rows). Export exactly one run.
@@ -85,16 +96,47 @@ export async function outcomesCsv(outcomeStore: OutcomeStore, runStore: RunStore
   const out = records
     .slice()
     .sort((a, b) => a.subjectId.localeCompare(b.subjectId)) // Java ORDER BY e.external_id ASC
-    .map((o) => {
-      const emp = employeeById(o.subjectId);
-      const wf = whyFlagged(o.evidence, o.measureId);
-      return [
-        o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
-        measureName(o.measureId), measureVersion(o.measureId), o.evaluationPeriod, o.status,
-        wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
-      ];
-    });
+    .map(outcomeRowCells);
   return toCsv(OUTCOME_HEADERS, out);
+}
+
+/** Page size for the streamed outcomes export — the most rows held in memory at a time. */
+const OUTCOME_STREAM_PAGE = 1000;
+
+/**
+ * Stream one run's outcomes as CSV, paged (Fable H4) — bounded memory regardless of run size, so a
+ * `seed:scale` run's 120k rows never materialize at once (the un-paged {@link outcomesCsv} loaded them
+ * all: ~43s to first byte live). Rows stream in the store's (evaluated_at, id) order rather than the
+ * subject_id sort — a single run's outcomes share an evaluation time, so the difference is cosmetic and
+ * every row is still present. The bytes match {@link toCsv}: header then `\r\n`-prefixed rows.
+ */
+export function outcomesCsvStream(outcomeStore: OutcomeStore, runStore: RunStore, runId?: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let resolvedRunId: string | null | undefined;
+  let offset = 0;
+  let wroteHeader = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!wroteHeader) {
+        controller.enqueue(encoder.encode(OUTCOME_HEADERS.join(",")));
+        wroteHeader = true;
+        resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+        if (!resolvedRunId) {
+          controller.close();
+          return;
+        }
+      }
+      const records = await outcomeStore.listOutcomes(resolvedRunId!, { limit: OUTCOME_STREAM_PAGE, offset });
+      if (records.length === 0) {
+        controller.close();
+        return;
+      }
+      offset += records.length;
+      const chunk = records.map((o) => "\r\n" + outcomeRowCells(o).map(csvCell).join(",")).join("");
+      controller.enqueue(encoder.encode(chunk));
+      if (records.length < OUTCOME_STREAM_PAGE) controller.close();
+    },
+  });
 }
 
 // ---- cases (DATA_MODEL §6.3) -------------------------------------------------
