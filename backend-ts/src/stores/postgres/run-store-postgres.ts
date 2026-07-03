@@ -128,6 +128,7 @@ export class PgRunStore implements RunStore {
   }
 
   async appendLog(runId: string, level: string, message: string): Promise<void> {
+    if (!isUuid(runId)) return; // run_id is a uuid column — a non-uuid would 500, not silently no-op (Fable M14)
     await this.pool.query(
       `INSERT INTO ${SPIKE_SCHEMA}.run_logs (run_id, ts, level, message) VALUES ($1, $2, $3, $4)`,
       [runId, new Date().toISOString(), level, message],
@@ -196,29 +197,32 @@ export class PgRunStore implements RunStore {
 
   async finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null> {
     if (!isUuid(runId)) return null;
-    await this.pool.query(`UPDATE ${T} SET status = $2, completed_at = $3 WHERE id = $1`, [
-      runId,
-      status,
-      new Date().toISOString(),
-    ]);
+    // Terminal-status guard (Fable M15): only a QUEUED/RUNNING run may be finalized — otherwise a run
+    // already FAILED by the stuck-run sweep could be silently resurrected to COMPLETED (the M7 double-
+    // seed path), and a late completion could overwrite a legitimate FAILED verdict.
+    await this.pool.query(
+      `UPDATE ${T} SET status = $2, completed_at = $3 WHERE id = $1 AND status IN ('QUEUED', 'RUNNING')`,
+      [runId, status, new Date().toISOString()],
+    );
     return this.getRun(runId);
   }
 
   async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // Target only UNCLAIMED RUNNING runs — i.e. the in-process ctx.waitUntil orphans. `markRunning`
-    // (the async-run path) leaves claimed_by NULL, whereas claimNextQueuedRun stamps claimed_by, so
-    // a legitimately CLAIMED worker job (even one processing past the threshold) is NOT recovered.
-    // QUEUED is also excluded — that is the claim path's "waiting for a worker" state, not an orphan.
-    const stuck = await this.pool.query<{ id: string }>(
-      `SELECT id FROM ${T} WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $1`,
-      [cutoff],
-    );
-    if (stuck.rows.length === 0) return [];
-    await this.pool.query(
-      `UPDATE ${T} SET status = 'FAILED', completed_at = $1 WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $2`,
+    // Single atomic UPDATE … RETURNING (Fable M15) — the prior SELECT-then-UPDATE could fail a run that
+    // crossed the threshold or was finalized between the two statements (an unaudited state change / a
+    // false RUN_RECOVERED). Only UNCLAIMED RUNNING runs — the in-process ctx.waitUntil orphans:
+    // markRunning leaves claimed_by NULL, claimNextQueuedRun stamps it, so a CLAIMED worker job is never
+    // recovered; QUEUED is the claim path's "waiting for a worker", not an orphan. `seed:%` runs are
+    // excluded (Fable M7): the seed CLIs create backdated RUNNING rows whose started_at is far in the
+    // past by design and must not be swept mid-seed (fail → double-seed). A NULL triggered_by is still swept.
+    const res = await this.pool.query<{ id: string }>(
+      `UPDATE ${T} SET status = 'FAILED', completed_at = $1
+         WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $2
+           AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
+         RETURNING id`,
       [new Date().toISOString(), cutoff],
     );
-    return stuck.rows.map((r) => r.id);
+    return res.rows.map((r) => r.id);
   }
 }

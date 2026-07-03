@@ -26,7 +26,12 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   // Deliberately class-agnostic: a documented refusal displays DECLINED for PERMANENT (the vaccine
   // panel) AND for RECURRING `adult_immunization` (which keeps the case open, never excludes — see
   // MEASURES.md). The canonical bucket is unchanged; only the display is.
-  if (refused) return { status: "DECLINED", method: "Declination on file" };
+  //
+  // But DECLINED must NOT mask a canonically COMPLIANT outcome (Fable M12): `Refused` is independent of
+  // `Outcome Status`, so a subject vaccinated AFTER an earlier documented refusal (the CM success story)
+  // is genuinely COMPLIANT — showing DECLINED would misrepresent the authoritative bucket and drop them
+  // from a `?status=COMPLIANT` filter. So apply DECLINED only when the canonical bucket is non-compliant.
+  if (refused && canonicalStatus !== "COMPLIANT") return { status: "DECLINED", method: "Declination on file" };
 
   if (binding?.complianceClass === "PERMANENT") {
     const dc = get(/^dose count$/i);

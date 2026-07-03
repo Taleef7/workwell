@@ -68,7 +68,10 @@ export class PgSegmentStore implements SegmentStore {
     const name = patch.name ?? existing.name;
     const description = patch.description !== undefined ? patch.description : existing.description;
     const enabled = patch.enabled !== undefined ? patch.enabled : existing.enabled;
-    const ruleJson = patch.rule !== undefined ? JSON.stringify(patch.rule) : JSON.stringify(parseRule(existing.rule_json));
+    // Preserve the stored rule verbatim when it isn't being changed (Fable L12) — the prior
+    // `parseRule` round-trip could silently drop a schema-growing rule field on the ceiling only,
+    // diverging from the SQLite floor (which preserves it). Both now keep the untouched JSON as-is.
+    const ruleJson = patch.rule !== undefined ? JSON.stringify(patch.rule) : JSON.stringify(existing.rule_json);
     await this.pool.query(
       `UPDATE ${S}.segments SET name = $1, description = $2, enabled = $3, rule_json = $4::jsonb, updated_at = $5 WHERE id = $6`,
       [name, description, enabled, ruleJson, new Date().toISOString(), id],

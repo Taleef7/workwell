@@ -40,8 +40,18 @@ const renderDefine = (v: unknown): unknown => {
   const obj = v as { value?: unknown; toString?: () => string };
   const inner = obj.value ?? (typeof obj.toString === "function" ? obj.toString() : null);
   if (typeof inner === "string") {
-    const t = Date.parse(inner);
-    return !Number.isNaN(t) && /\d{4}-\d{2}-\d{2}T/.test(inner) ? new Date(t).toISOString() : inner;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(inner)) {
+      // An offset-less CQL DateTime (`2025-03-10T00:00:00`) must NOT round-trip through Date.parse →
+      // toISOString: JS parses a timezone-less datetime as HOST-LOCAL, so `toISOString` then shifts the
+      // day on any non-UTC host (`2025-03-09T19:00:00Z` on UTC+5), making persisted evidence
+      // non-reproducible across environments and weakening the deterministic-rerun/audit guarantee
+      // (Fable M18). Interpret an offset-less value as UTC (append `Z`) so rendering is host-independent;
+      // a value that already carries `Z`/±offset is unambiguous and normalized as-is.
+      const hasTz = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(inner);
+      const t = Date.parse(hasTz ? inner : `${inner}Z`);
+      return Number.isNaN(t) ? inner : new Date(t).toISOString();
+    }
+    return inner;
   }
   if (typeof inner === "number") return inner;
   return null; // non-scalar intermediate (FHIR resource/quantity) — not part of the contract

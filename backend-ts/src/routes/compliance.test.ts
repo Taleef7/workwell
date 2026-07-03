@@ -44,6 +44,14 @@ test("non-roster path returns null (not this route)", async () => {
   assert.equal(await handleCompliance(new Request("http://x/api/other", { method: "GET" }), env as never), null);
 });
 
+test("Fable L24: an unknown panel is a 400, not a silent default to immunizations", async () => {
+  const res = await get("?panel=bogus");
+  assert.equal(res?.status, 400);
+  // a valid panel still works; an omitted panel defaults
+  assert.equal((await get("?panel=osha"))?.status, 200);
+  assert.equal((await get(""))?.status, 200);
+});
+
 test("POST is not handled by this route", async () => {
   assert.equal(await handleCompliance(new Request("http://x/api/compliance/roster", { method: "POST" }), env as never), null);
 });

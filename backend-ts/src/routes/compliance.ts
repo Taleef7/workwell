@@ -9,6 +9,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildRoster } from "../compliance/roster-read-model.ts";
+import { isPanelId } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 
 interface ComplianceEnv {
@@ -30,6 +31,12 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   if (url.pathname !== "/api/compliance/roster") return null;
 
   const q = url.searchParams;
+  // A present-but-unknown panel is a client error (Fable L24) — 400, matching the roster's own 400s on
+  // malformed dates/scopeLevel. An omitted panel still defaults (immunizations) in the read model.
+  const panelParam = q.get("panel");
+  if (panelParam !== null && !isPanelId(panelParam)) {
+    return json({ error: "invalid_request", message: `unknown panel '${panelParam}' (expected immunizations | osha | wellness)` }, 400);
+  }
   await ensureSegmentSeed(env);
   const stores = await getStores(env);
   const segments = await stores.segments.listSegments();
