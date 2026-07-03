@@ -91,6 +91,19 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal((await store.listRuns(1)).length, 1, "respects the limit");
   });
 
+  test(`[${label}] listRunsByTriggeredBy returns only matching runs, newest-first (Fable M16)`, async () => {
+    const store = await freshStore();
+    await store.createRun({ ...sampleRun("audiogram"), triggeredBy: "seed:scale" });
+    await new Promise((r) => setTimeout(r, 5));
+    const scale2 = await store.createRun({ ...sampleRun("hazwoper"), triggeredBy: "seed:scale" });
+    await store.createRun({ ...sampleRun("audiogram"), triggeredBy: "manual" });
+    const scale = await store.listRunsByTriggeredBy("seed:scale");
+    assert.equal(scale.length, 2, "only the seed:scale runs (not the manual one)");
+    assert.equal(scale[0]!.id, scale2.id, "newest first");
+    assert.ok(scale.every((r) => r.triggeredBy === "seed:scale"));
+    assert.deepEqual(await store.listRunsByTriggeredBy("nope"), [], "no match → []");
+  });
+
   test(`[${label}] claimNextQueuedRun atomically flips QUEUED → RUNNING, FIFO, then null`, async () => {
     const store = await freshStore();
     const first = await store.createRun(sampleRun("first"));
@@ -333,6 +346,53 @@ export function outcomeStoreContract(
     assert.ok(rows.every((r) => ["audiogram", "hazwoper"].includes(r.measureId)));
     assert.equal((await outcomeStore.listOutcomesForEmployee("emp-006", 1)).length, 1, "limit honored");
     assert.deepEqual(await outcomeStore.listOutcomesForEmployee("emp-404", 5), [], "unknown employee → []");
+  });
+
+  test(`[${label}] listOutcomes pages with {limit, offset} deterministically (Fable H4)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    for (let i = 0; i < 5; i++) {
+      await outcomeStore.recordOutcome({ runId: run.id, subjectId: `emp-${i}`, measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    }
+    const all = await outcomeStore.listOutcomes(run.id);
+    assert.equal(all.length, 5, "no opts → all rows (back-compat)");
+    const page1 = await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 0 });
+    const page2 = await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 2 });
+    const page3 = await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 4 });
+    assert.equal(page1.length, 2);
+    assert.equal(page2.length, 2);
+    assert.equal(page3.length, 1, "last partial page");
+    const paged = [...page1, ...page2, ...page3].map((o) => o.id);
+    assert.equal(new Set(paged).size, 5, "pages partition the run with no overlap/gap");
+    assert.deepEqual(paged, all.map((o) => o.id), "paged order matches the full (evaluated_at, id) order");
+  });
+
+  test(`[${label}] distinctMeasuresForRun returns the run's distinct measures, capped (Fable H4)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    // one measure, many subjects → single distinct measure without scanning all rows
+    for (let i = 0; i < 4; i++) {
+      await outcomeStore.recordOutcome({ runId: run.id, subjectId: `emp-${i}`, measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    }
+    assert.deepEqual(await outcomeStore.distinctMeasuresForRun(run.id, 2), ["audiogram"], "single-measure run");
+    const multi = await runStore.createRun(sampleRun("multi"));
+    await outcomeStore.recordOutcome({ runId: multi.id, subjectId: "a", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: multi.id, subjectId: "b", measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: multi.id, subjectId: "c", measureId: "tb_surveillance", status: "COMPLIANT", evidence: {} });
+    assert.equal((await outcomeStore.distinctMeasuresForRun(multi.id, 2)).length, 2, "capped at limit (enough to detect multi-measure)");
+    assert.deepEqual(await outcomeStore.distinctMeasuresForRun("run-with-none", 2), [], "no rows → []");
+  });
+
+  test(`[${label}] listOutcomesWithRun excludeTrendHistory drops seed:trend-history rows in SQL (Fable M16)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const real = await runStore.createRun(sampleRun("audiogram"));
+    const trend = await runStore.createRun({ ...sampleRun("audiogram"), triggeredBy: "seed:trend-history" });
+    await outcomeStore.recordOutcome({ runId: real.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    await outcomeStore.recordOutcome({ runId: trend.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+    assert.equal((await outcomeStore.listOutcomesWithRun({})).length, 2, "both runs' rows by default");
+    const kept = await outcomeStore.listOutcomesWithRun({ excludeTrendHistory: true });
+    assert.equal(kept.length, 1, "trend-history row excluded in SQL");
+    assert.equal(kept[0]!.runId, real.id, "only the real run's row survives");
   });
 }
 
