@@ -162,6 +162,20 @@ Public API actions derive audit identity from the authenticated security context
   stays the sole compliance authority (ADR-008).
 - The hierarchy rollup counts only COMPLETED population runs (Fable H7), never an in-flight RUNNING run's
   partial outcomes — matching every sibling read model.
+- Segment applicability gates case **creation** only, never **resolution** (Fable M11): a COMPLIANT/EXCLUDED
+  outcome (which only ever closes an existing case) always runs the upsert, so a subject who leaves a cohort
+  and then becomes compliant does not keep a stranded OPEN case.
+- A population run closes out prior-compliance-cycle OPEN/IN_PROGRESS cases for the (subject, measure) pairs
+  it evaluated (Fable M10, `closed_reason='CYCLE_ROLLED_OVER'`, audited system closure) — a still-non-compliant
+  subject's new-period case no longer leaves the old period's case orphaned in `?status=open`/campaigns/exports.
+- The roster display vocabulary never masks a canonically COMPLIANT outcome as DECLINED (Fable M12): a documented
+  refusal shows DECLINED only when the CQL bucket is non-compliant. Display-only — CQL stays authoritative (ADR-008).
+- `failStuckRuns` is a single atomic `UPDATE … RETURNING` and excludes `seed:%` runs; `finalizeRun` is
+  terminal-status-guarded (`WHERE status IN ('QUEUED','RUNNING')`) so a swept-FAILED run is never resurrected
+  to COMPLETED and a backdated seed run is never swept mid-seed (Fable M7/M15).
+- Persisted `evidence_json` dates are host-timezone-independent (Fable M18): an offset-less CQL DateTime is
+  rendered as UTC, not round-tripped through host-local `Date.parse`, so deterministic-rerun/audit evidence
+  is reproducible across environments.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
 - Scoped runs use the same structured CQL path as rerun-to-verify for CASE verification.
 - Synthetic trend-history seeding is audited (`TREND_HISTORY_SEEDED` per measure) and anchors each measure's newest synthetic week strictly before that measure's latest real run, so the programs overview (latest-run-per-measure) is never hijacked by synthetic data (#180).

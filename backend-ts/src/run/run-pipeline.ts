@@ -16,7 +16,8 @@
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
@@ -258,10 +259,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       status,
       evidence,
     });
-    // Idempotent case upsert — gated by segment applicability (#183 E11.3): an out-of-cohort
-    // (subject, measure) does NOT create/upsert a case. The outcome above is ALWAYS persisted
-    // (CQL stays the sole compliance authority — ADR-008). Empty/absent segments ⇒ all applicable.
-    if (deps.caseStore && isApplicable(item.employee, item.measureId, deps.segments ?? [])) {
+    // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
+    // out-of-cohort (subject, measure) does NOT open a case. But a COMPLIANT/EXCLUDED outcome only ever
+    // CLOSES an existing case (never creates one), so it must run even out-of-cohort — otherwise a
+    // subject who leaves a cohort and then becomes compliant keeps their OPEN case forever, feeding
+    // worklists/campaigns/openCases rollups (Fable M11). The outcome above is ALWAYS persisted (CQL is
+    // the sole compliance authority — ADR-008). Empty/absent segments ⇒ all applicable.
+    const resolvesOnly = !NON_COMPLIANT.has(status); // COMPLIANT or EXCLUDED — close-only, never creates
+    if (deps.caseStore && (resolvesOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
         subjectId: item.employee.externalId,
@@ -318,6 +323,58 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     }
     if (status === "COMPLIANT") compliant++;
     else if (NON_COMPLIANT.has(status)) nonCompliant++;
+  }
+
+  // Close prior-cycle OPEN/IN_PROGRESS cases (Fable M10). At a compliance-cycle rollover a
+  // still-non-compliant subject gets a NEW case under the new period; the previous period's case would
+  // otherwise linger OPEN — hidden from the current-cycle worklist but surfaced by `?status=open`,
+  // campaigns (no period filter → double outreach), CSV exports, and MCP list_noncompliant. Java needed
+  // migration V022 to close ~5,019 of exactly these. Scoped to the (subject, measure) pairs this run
+  // actually evaluated, so a SITE/EMPLOYEE run never touches out-of-scope cases. Best-effort + audited
+  // (system closure, closed_by NULL — a rolled-over cycle, not a human decision); a failure only logs a
+  // ledger-gap WARN and never aborts the run.
+  if (deps.caseStore && deps.events) {
+    const nowIso = new Date().toISOString();
+    for (const measureId of measureIds) {
+      const currentPeriod = bucketPeriodForMeasure(measureId, evalDate);
+      const evaluated = new Set(items.filter((i) => i.measureId === measureId).map((i) => i.employee.externalId));
+      let openCases: CaseRecord[];
+      try {
+        openCases = await deps.caseStore.listCases({ measureId, statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 });
+      } catch {
+        continue; // a read failure here must never abort an otherwise-complete run
+      }
+      for (const c of openCases) {
+        if (c.evaluationPeriod === currentPeriod || !evaluated.has(c.employeeId)) continue;
+        const closed = await deps.caseStore
+          .patchCase(c.id, { status: "RESOLVED", closedAt: nowIso, closedReason: "CYCLE_ROLLED_OVER", closedBy: null })
+          .catch(() => null);
+        if (!closed) continue;
+        await deps.events
+          .appendAudit({
+            eventType: "CASE_RESOLVED",
+            entityType: "case",
+            entityId: c.id,
+            actor: auditActor,
+            refRunId: run.id,
+            refCaseId: c.id,
+            refMeasureVersionId: measureId,
+            payload: {
+              reason: "CYCLE_ROLLED_OVER",
+              priorPeriod: c.evaluationPeriod,
+              currentPeriod,
+              subjectId: c.employeeId,
+              measureId,
+              runId: run.id,
+            },
+          })
+          .catch((err) => {
+            void deps.runStore
+              .appendLog(run.id, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
+              .catch(() => {});
+          });
+      }
+    }
   }
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";

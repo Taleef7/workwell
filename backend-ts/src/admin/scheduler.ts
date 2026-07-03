@@ -146,10 +146,19 @@ export interface SchedulerTickDeps {
 export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Promise<boolean> {
   if (!schedulerEnabled) return false;
 
+  // Debounce (Fable M9 — known limitation): this read-then-write debounce serializes ticks WITHIN a
+  // process (the single in-process setInterval), which is the live deployment (one `twh-api-ts`
+  // container; the self-heal reconciler shares a concurrency group with the deploy so two containers
+  // never run concurrently). It is NOT a cross-process claim: two schedulers ticking in the same window
+  // could both pass this check and double-fire. A fully race-free claim needs an ATOMIC DB mutex — a
+  // unique marker per cycle window (e.g. a `scheduler_claims(cycle_window UNIQUE)` row or a partial
+  // unique index on runs). That is owner-gated schema (CLAUDE.md: migrations are Taleef's), so it is
+  // documented here rather than added by an agent. Given the single-container topology the practical
+  // double-fire risk is low; the worst case is one extra idempotent ALL_PROGRAMS recompute.
   // P2-2 fix: targeted single-row query avoids the listRuns page cap.
   const lastSchedulerRun = await deps.stores.runs.getLastRunByTriggeredBy("scheduler");
   if (lastSchedulerRun) {
-    // Debounce: skip if the last scheduler run is less than (interval - 0.5 h) old.
+    // Skip if the last scheduler run is less than (interval - 0.5 h) old.
     const elapsed = nowMs - new Date(lastSchedulerRun.startedAt).getTime();
     const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
     if (elapsed < minGapMs) return false;
