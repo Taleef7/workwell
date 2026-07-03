@@ -287,6 +287,23 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/measure-report`))!.status, 404);
 });
 
+test("GET /api/runs/:id/outcomes → paged with X-Total-Count (Fable H4)", async () => {
+  const created = (await (await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "audiogram" }))!.json()) as { runId?: string; id?: string };
+  const runId = created.runId ?? created.id;
+
+  const full = (await get(`/api/runs/${runId}/outcomes`))!;
+  const total = ((await full.json()) as unknown[]).length;
+  assert.ok(total >= 2, "the manual MEASURE run produced at least 2 outcomes to page");
+  assert.equal(full.headers.get("X-Total-Count"), String(total), "X-Total-Count carries the full count");
+
+  const page = (await get(`/api/runs/${runId}/outcomes?limit=1&offset=0`))!;
+  assert.equal(((await page.json()) as unknown[]).length, 1, "limit honored");
+  assert.equal(page.headers.get("X-Total-Count"), String(total), "X-Total-Count is the full count, not the page size");
+
+  const beyond = (await get(`/api/runs/${runId}/outcomes?limit=5&offset=${total}`))!;
+  assert.equal(((await beyond.json()) as unknown[]).length, 0, "offset past the end → empty page");
+});
+
 test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS) run", async () => {
   const { res, drain } = await postAsync("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
   await drain(); // let the async ctx.waitUntil task persist outcomes across all measures

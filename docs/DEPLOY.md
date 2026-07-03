@@ -422,6 +422,15 @@ The Java backend was retired in #109 PR4, so rollback is **redeploying an earlie
 Each schema change is additive (`workwell_spike` self-creates via `CREATE … IF NOT EXISTS` on boot;
 no Flyway). Neon branches can still be promoted from the dashboard if a data rollback is needed.
 
+> **Index build on next deploy (Fable H5/M17 hardening, 2026-07-03):** the boot DDL now also creates
+> five indexes via `CREATE INDEX IF NOT EXISTS` — `spike_outcomes_subject_idx`,
+> `spike_outcomes_measure_idx`, `spike_audit_events_occurred_at_idx`,
+> `spike_audit_events_event_type_idx`, `spike_audit_events_ref_run_id_idx`. On the live Neon DB the
+> first deploy after this change builds them **once** over the existing ~1.68M-row `outcomes` table (a
+> one-time index build; the boot query blocks until each completes, then subsequent boots are no-ops).
+> No data migration; reversible with `DROP INDEX … ` in `workwell_spike` if ever needed. Owner-gated
+> DDL — reviewed via the hardening PR.
+
 ## Cost monitoring
 
 Daily check while the stack is live:
