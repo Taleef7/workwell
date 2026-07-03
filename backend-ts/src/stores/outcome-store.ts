@@ -82,6 +82,13 @@ export interface OutcomeMeasureFilter {
    * `.filter()`, is what keeps these surfaces bounded at 120k.
    */
   excludeScale?: boolean;
+  /**
+   * Exclude synthetic trend-history (`triggered_by='seed:trend-history'`) runs IN SQL (Fable M16). The
+   * live read models keep only the latest population run per measure (`latestRunRows`), so the backdated
+   * trend-history outcomes are fetched then discarded in JS — pure overhead that grows unbounded. The
+   * roster/hierarchy/programs-overview reads pass this so those rows never leave the DB.
+   */
+  excludeTrendHistory?: boolean;
 }
 
 /** Options for the per-measure outcome scan; `excludeScale` drops the scale tenant in SQL (E13 PR-2). */
@@ -98,8 +105,20 @@ export interface OutcomeStore {
    * `recordOutcome` per input. A no-op for an empty array.
    */
   recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
-  listOutcomes(runId: string): Promise<OutcomeRecord[]>;
+  /**
+   * Outcomes for one run, oldest-first. Pass `opts.limit`/`opts.offset` to page the scan (Fable H4):
+   * the run-detail grid + the outcomes CSV must never materialize a `seed:scale` run's 120k rows in the
+   * single-replica worker. Omitting `opts` returns every row (back-compat, small runs only).
+   */
+  listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
+  /**
+   * The distinct measure ids present in a run, capped at `limit` (default 2) — a bounded
+   * `SELECT DISTINCT measure_id … LIMIT` used by the QRDA / MeasureReport endpoints to enforce the
+   * single-measure precondition WITHOUT loading the run's outcome rows (Fable H4). Two is enough to
+   * distinguish "single measure" from "multi-measure".
+   */
+  distinctMeasuresForRun(runId: string, limit?: number): Promise<string[]>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —
    * bounds the scan to the selected measure/date range instead of all run history. Used by

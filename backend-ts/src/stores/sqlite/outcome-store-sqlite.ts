@@ -90,15 +90,36 @@ export class SqliteOutcomeStore implements OutcomeStore {
     await this.db.batch(stmts);
   }
 
-  async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
+  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
+    // Optional LIMIT/OFFSET paging (Fable H4); the id tiebreak keeps paging deterministic when many
+    // rows share an evaluated_at. SQLite requires a LIMIT before OFFSET, so emit -1 (all) when only an
+    // offset is given.
+    const binds: unknown[] = [runId];
+    let page = "";
+    if (opts?.limit != null || opts?.offset != null) {
+      page += ` LIMIT ?`;
+      binds.push(opts?.limit != null ? Math.max(0, opts.limit) : -1);
+      if (opts?.offset != null) {
+        page += ` OFFSET ?`;
+        binds.push(Math.max(0, opts.offset));
+      }
+    }
     const { results } = await this.db
       .prepare(
         `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
-           FROM outcomes WHERE run_id = ? ORDER BY evaluated_at ASC`,
+           FROM outcomes WHERE run_id = ? ORDER BY evaluated_at ASC, id ASC${page}`,
       )
-      .bind(runId)
+      .bind(...binds)
       .all<OutcomeRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(`SELECT DISTINCT measure_id FROM outcomes WHERE run_id = ? LIMIT ?`)
+      .bind(runId, Math.max(1, limit))
+      .all<{ measure_id: string }>();
+    return (results ?? []).map((r) => r.measure_id);
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
@@ -160,6 +181,8 @@ export class SqliteOutcomeStore implements OutcomeStore {
     if (filter.to) (where.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));
     // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
     if (filter.excludeScale) where.push("r.triggered_by <> 'seed:scale'");
+    // Fable M16: exclude the backdated synthetic trend-history rows IN SQL (fetched-then-discarded).
+    if (filter.excludeTrendHistory) where.push("r.triggered_by <> 'seed:trend-history'");
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(

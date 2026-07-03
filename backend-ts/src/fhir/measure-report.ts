@@ -5,7 +5,7 @@
  *   IPP = all evaluated · DENEX = EXCLUDED · DENOM = IPP − DENEX · NUMER = COMPLIANT · score = NUMER/DENOM.
  */
 import type { RunRecord } from "../stores/run-store.ts";
-import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
 const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improvement-notation";
@@ -41,6 +41,19 @@ export function countPopulations(outcomes: OutcomeRecord[]): PopulationCounts {
   return { ipp, denom: ipp - denex, denex, numer };
 }
 
+/**
+ * The same proportion counts derived from a bounded `GROUP BY status` histogram instead of the
+ * per-subject rows (Fable H4) — so the summary MeasureReport + QRDA can be built for a 120k `seed:scale`
+ * run without materializing its 1.68M rows. Reconciles 1:1 with {@link countPopulations}.
+ */
+export function populationCountsFromStatus(counts: OutcomeStatusCount[]): PopulationCounts {
+  const by = (status: string) => counts.find((c) => c.status === status)?.count ?? 0;
+  const ipp = counts.reduce((sum, c) => sum + c.count, 0);
+  const denex = by("EXCLUDED");
+  const numer = by("COMPLIANT");
+  return { ipp, denom: ipp - denex, denex, numer };
+}
+
 const measureCanonical = (measureId: string): string => `urn:workwell:measure:${measureId}`;
 
 const pop = (code: string, count: number): Population => ({ code: { coding: [{ system: POP_SYSTEM, code }] }, count });
@@ -53,7 +66,11 @@ const populations = (c: PopulationCounts): Population[] => [
 ];
 
 export function buildSummaryMeasureReport(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): MeasureReport {
-  const c = countPopulations(outcomes);
+  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes));
+}
+
+/** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
+export function buildSummaryMeasureReportFromCounts(run: RunRecord, measureId: string, c: PopulationCounts): MeasureReport {
   const group: MeasureReport["group"][number] = { population: populations(c) };
   if (c.denom > 0) group.measureScore = { value: c.numer / c.denom };
   return {
