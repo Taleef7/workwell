@@ -30,6 +30,7 @@ test("normalizeWebChartBundle: reconciles a Procedure's real CPT (adds the synth
       {
         resource: {
           resourceType: "Procedure",
+          status: "completed",
           code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "92557" }] },
         },
       },
@@ -45,7 +46,7 @@ test("normalizeWebChartBundle: reconciles an Immunization's vaccineCode (CVX)", 
   const raw = {
     resourceType: "Bundle",
     entry: [
-      { resource: { resourceType: "Immunization", vaccineCode: { coding: [{ system: "http://hl7.org/fhir/sid/cvx", code: "141" }] } } },
+      { resource: { resourceType: "Immunization", status: "completed", vaccineCode: { coding: [{ system: "http://hl7.org/fhir/sid/cvx", code: "141" }] } } },
     ],
   };
   const imm = normalizeWebChartBundle(raw).entry[0]!.resource as AnyRec;
@@ -83,6 +84,7 @@ test("normalizeWebChartBundle: a lab Observation for a Procedure-retrieved measu
       {
         resource: {
           resourceType: "Observation",
+          status: "final",
           subject: { reference: "Patient/p1" },
           effectiveDateTime: "2026-05-01T00:00:00Z",
           code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
@@ -104,6 +106,31 @@ test("normalizeWebChartBundle: a lab Observation for a Procedure-retrieved measu
   assert.deepEqual(proc.subject, { reference: "Patient/p1" });
   assert.equal(proc.meta.tag[0].code, "derived-from-observation");
   assert.ok(codings(proc, "code").some((c) => c.code === MEASURE_BINDINGS["diabetes_hba1c"]!.event.code));
+});
+
+test("normalizeWebChartBundle: a non-final / errored event is NOT reconciled (no synthetic coding, no synthesis)", () => {
+  const raw = {
+    resourceType: "Bundle",
+    entry: [
+      // an entered-in-error Procedure with a real audiogram CPT — must not gain the measure coding
+      { resource: { resourceType: "Procedure", status: "entered-in-error", code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "92557" }] } } },
+      // a preliminary lab Observation — must not gain a coding nor synthesize a completed Procedure
+      { resource: { resourceType: "Observation", status: "preliminary", effectiveDateTime: "2026-05-01T00:00:00Z", code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] } } },
+      // a not-done Immunization — must not gain the measure coding
+      { resource: { resourceType: "Immunization", status: "not-done", vaccineCode: { coding: [{ system: "http://hl7.org/fhir/sid/cvx", code: "141" }] } } },
+    ],
+  };
+  const out = normalizeWebChartBundle(raw).entry.map((e) => e.resource as AnyRec);
+  assert.equal(out.length, 3, "no Procedure synthesized from the preliminary lab");
+  assert.equal(codings(out[0]!, "code").length, 1, "errored Procedure coding unchanged");
+  assert.equal(codings(out[1]!, "code").length, 1, "preliminary Observation coding unchanged");
+  assert.equal(codings(out[2]!, "vaccineCode").length, 1, "not-done Immunization coding unchanged");
+});
+
+test("normalizeWebChartBundle: an event with a missing status is treated as non-final (conservative)", () => {
+  const raw = { resourceType: "Bundle", entry: [{ resource: { resourceType: "Procedure", code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "92557" }] } } }] };
+  const proc = normalizeWebChartBundle(raw).entry[0]!.resource as AnyRec;
+  assert.equal(codings(proc, "code").length, 1, "no measure coding appended without a final status");
 });
 
 test("normalizeWebChartBundle: does not mutate its input", () => {

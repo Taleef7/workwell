@@ -103,6 +103,7 @@ test("webChartDataSource: a real LOINC lab Observation evaluates a Procedure-ret
       {
         resource: {
           resourceType: "Observation",
+          status: "final",
           subject: { reference: "Patient/wc-emp-2" },
           effectiveDateTime: "2026-05-01T00:00:00.000Z", // ~42 days before EVAL → within the 180d window
           code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
