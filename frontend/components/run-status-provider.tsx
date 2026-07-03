@@ -116,21 +116,22 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
 
   // Cross-tab sync (Fable L20): a run started in tab A is otherwise invisible to an already-open
   // tab B until B is reloaded. `localStorage` fires a `storage` event in every OTHER tab (never the
-  // tab that made the write) when STORAGE_KEY changes, so use it to adopt a run another tab started,
-  // or clear one another tab finished — without restarting the poll effect (which depends only on
-  // `activeRunId`, set here the same way `startTracking`/the poll do).
+  // tab that made the write) when STORAGE_KEY changes, so use it to adopt a run another tab started —
+  // without restarting the poll effect (which depends only on `activeRunId`, set here the same way
+  // `startTracking`/the poll do).
   useEffect(() => {
     function onStorage(event: StorageEvent) {
       if (event.key !== STORAGE_KEY) return;
-      if (event.newValue) {
-        if (!activeRunIdRef.current) {
-          setActiveRunId(event.newValue);
-          setStatus("RUNNING");
-        }
-      } else if (activeRunIdRef.current) {
-        setActiveRunId(null);
-        setStatus("IDLE");
+      // Adopt a run another tab started (only when this tab has none in flight).
+      if (event.newValue && !activeRunIdRef.current) {
+        setActiveRunId(event.newValue);
+        setStatus("RUNNING");
       }
+      // A REMOVAL (another tab finished/cleared the run) is intentionally NOT handled here (Codex P2):
+      // if this tab adopted the same run it still owns a live poller, which will observe the terminal
+      // status itself and fire its OWN `ww:run-complete` (so pages like /programs refresh their KPIs)
+      // plus the completion toast. Tearing the poller down here would drop the banner but leave stale
+      // data until a manual reload. If this tab had no active run, there is nothing to clear anyway.
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
