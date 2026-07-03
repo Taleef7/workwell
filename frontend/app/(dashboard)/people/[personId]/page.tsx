@@ -228,7 +228,10 @@ export default function PersonDetailPage() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Linked systems</p>
             <ul className="space-y-1 text-sm">
               {detail.person.sources.map((s) => (
-                <li key={s.externalId} className="flex flex-wrap items-center gap-2">
+                // Composite key: with multi-tenant data the same externalId can appear across
+                // systems, so externalId alone doesn't dedupe — tenantId + externalId does (matches
+                // the merge-picker's key below and /people's source-badge list).
+                <li key={`${s.tenantId}|${s.externalId}`} className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.tenantName}</span>
                   <span className="text-neutral-500 dark:text-neutral-400">{s.role} · {s.site} · {s.externalId}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>

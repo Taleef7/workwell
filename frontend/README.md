@@ -21,6 +21,10 @@ pnpm dev
 
 ## Environment variables
 
+Copy `.env.local.example` to `.env.local` to point a fresh clone at a locally-running `backend-ts`
+(`cd backend-ts; pnpm dev`, served on `:8080` by default) — without it, `NEXT_PUBLIC_API_BASE_URL`
+defaults to empty and every API call resolves against the frontend's own origin (404).
+
 - `NEXT_PUBLIC_API_BASE_URL` - backend API base URL
 - `NEXT_PUBLIC_APP_NAME` - display name shown in the UI
 - `NEXT_PUBLIC_DEMO_MODE` - set to `true` only for local demo runs; production builds fail if it is enabled

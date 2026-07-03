@@ -15,7 +15,8 @@ import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
-import { niceDomain } from "@/lib/charts";
+import { niceDomain, chartTooltipStyle } from "@/lib/charts";
+import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 
 type ProgramSummary = {
@@ -121,6 +122,7 @@ export default function ProgramDetailPage() {
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
   const { startTracking } = useRunStatus();
+  const { theme } = useTheme();
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -242,7 +244,7 @@ export default function ProgramDetailPage() {
                         </Pie>
                         <Tooltip
                           formatter={(value, name) => [value, labelFor(OUTCOME_LABELS, String(name))]}
-                          contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+                          {...chartTooltipStyle(theme)}
                         />
                         <Legend
                           formatter={(value) => labelFor(OUTCOME_LABELS, String(value))}
@@ -513,6 +515,7 @@ const monthLabel = (period: string): string => {
  */
 function QualityOverTime({ measureId, measureName }: { measureId: string; measureName: string }) {
   const api = useApi();
+  const { theme } = useTheme();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [scope, setScope] = useState<string>("all|ALL"); // "level|id"
   const [snapshots, setSnapshots] = useState<QualitySnapshot[]>([]);
@@ -632,8 +635,7 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
                 <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
                 <Tooltip
                   formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
-                  contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
-                  labelStyle={{ fontSize: 11, color: "#475569" }}
+                  {...chartTooltipStyle(theme)}
                 />
                 <Area type="monotone" dataKey="rate" name="Compliance" stroke="#2563eb" strokeWidth={2.5} fill="url(#qualityGrad)" dot={{ r: 3, fill: "#2563eb", strokeWidth: 0 }} activeDot={{ r: 5 }} />
               </AreaChart>
@@ -659,6 +661,7 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
 }
 
 function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
+  const { theme } = useTheme();
   if (!points.length) {
     return (
       <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
@@ -694,8 +697,7 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
             <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
             <Tooltip
               formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
-              contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
-              labelStyle={{ fontSize: 11, color: "#475569" }}
+              {...chartTooltipStyle(theme)}
             />
             <Area
               type="monotone"
