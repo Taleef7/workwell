@@ -162,12 +162,16 @@ Public API actions derive audit identity from the authenticated security context
   stays the sole compliance authority (ADR-008).
 - The hierarchy rollup counts only COMPLETED population runs (Fable H7), never an in-flight RUNNING run's
   partial outcomes — matching every sibling read model.
-- Segment applicability gates case **creation** only, never **resolution** (Fable M11): a COMPLIANT/EXCLUDED
-  outcome (which only ever closes an existing case) always runs the upsert, so a subject who leaves a cohort
-  and then becomes compliant does not keep a stranded OPEN case.
-- A population run closes out prior-compliance-cycle OPEN/IN_PROGRESS cases for the (subject, measure) pairs
-  it evaluated (Fable M10, `closed_reason='CYCLE_ROLLED_OVER'`, audited system closure) — a still-non-compliant
-  subject's new-period case no longer leaves the old period's case orphaned in `?status=open`/campaigns/exports.
+- Segment applicability gates case **creation** only, never **resolution** (Fable M11): a **COMPLIANT**
+  outcome (the one status that only ever closes an existing case — with none it is a no-op) always runs the
+  upsert, so a subject who leaves a cohort and then becomes compliant does not keep a stranded OPEN case.
+  EXCLUDED stays applicability-gated (with no existing case it would *insert* an EXCLUDED case, re-polluting
+  the gate; Codex P2).
+- A population run closes out **strictly-older** compliance-cycle OPEN/IN_PROGRESS cases for the
+  (subject, measure) pairs it evaluated (Fable M10, `closed_reason='CYCLE_ROLLED_OVER'`, audited system
+  closure) — a still-non-compliant subject's new-period case no longer leaves the old period's case orphaned
+  in `?status=open`/campaigns/exports. Only periods older than the run's own cycle are closed, so a
+  backdated/historical rerun never resolves today's actionable case (Codex P2).
 - The roster display vocabulary never masks a canonically COMPLIANT outcome as DECLINED (Fable M12): a documented
   refusal shows DECLINED only when the CQL bucket is non-compliant. Display-only — CQL stays authoritative (ADR-008).
 - `failStuckRuns` is a single atomic `UPDATE … RETURNING` and excludes `seed:%` runs; `finalizeRun` is

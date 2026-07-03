@@ -260,13 +260,16 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       evidence,
     });
     // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
-    // out-of-cohort (subject, measure) does NOT open a case. But a COMPLIANT/EXCLUDED outcome only ever
-    // CLOSES an existing case (never creates one), so it must run even out-of-cohort — otherwise a
-    // subject who leaves a cohort and then becomes compliant keeps their OPEN case forever, feeding
-    // worklists/campaigns/openCases rollups (Fable M11). The outcome above is ALWAYS persisted (CQL is
-    // the sole compliance authority — ADR-008). Empty/absent segments ⇒ all applicable.
-    const resolvesOnly = !NON_COMPLIANT.has(status); // COMPLIANT or EXCLUDED — close-only, never creates
-    if (deps.caseStore && (resolvesOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
+    // out-of-cohort (subject, measure) does NOT open a case. A COMPLIANT outcome only ever CLOSES an
+    // existing case (with no existing case it is a no-op — `planCaseUpsert`), so it must run even
+    // out-of-cohort, otherwise a subject who leaves a cohort and then becomes compliant keeps their OPEN
+    // case forever, feeding worklists/campaigns/openCases rollups (Fable M11). EXCLUDED is NOT bypassed:
+    // with no existing case it would INSERT a new EXCLUDED case, re-polluting out-of-cohort subjects into
+    // the closed/excluded lists the gate exists to keep clear (Codex P2) — so it stays applicability-gated.
+    // The outcome above is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent
+    // segments ⇒ all applicable.
+    const closeOnly = status === "COMPLIANT"; // the only status guaranteed never to create a case
+    if (deps.caseStore && (closeOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
         subjectId: item.employee.externalId,
@@ -344,8 +347,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       } catch {
         continue; // a read failure here must never abort an otherwise-complete run
       }
+      const currentPeriodMs = Date.parse(currentPeriod);
       for (const c of openCases) {
-        if (c.evaluationPeriod === currentPeriod || !evaluated.has(c.employeeId)) continue;
+        if (!evaluated.has(c.employeeId)) continue;
+        // Close ONLY strictly-OLDER cycles, never the same or a newer one (Codex P2): a backdated /
+        // historical rerun has an older `currentPeriod`, so a plain `period !== currentPeriod` check
+        // would wrongly resolve today's actionable case as CYCLE_ROLLED_OVER. Compare cycle order; a
+        // non-date-parseable period (defensive) yields NaN and is left untouched.
+        const casePeriodMs = Date.parse(c.evaluationPeriod);
+        if (!(casePeriodMs < currentPeriodMs)) continue;
         const closed = await deps.caseStore
           .patchCase(c.id, { status: "RESOLVED", closedAt: nowIso, closedReason: "CYCLE_ROLLED_OVER", closedBy: null })
           .catch(() => null);
