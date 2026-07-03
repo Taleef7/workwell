@@ -133,6 +133,28 @@ test("UNLINK removes the target fully from a 3-member component (never ejects th
   if (c.sources.length > 1) await post(`/api/identity/people/${encodeURIComponent(c.personId)}/reconcile`, { action: "UNLINK", tenantId: "twh", externalId: "emp-008" });
 });
 
+test("Fable H8: UNLINK the CONFIRM-anchor hub keeps the survivors grouped (no shatter)", async () => {
+  // Build a star with ihn-emp-003 as the CONFIRM anchor/hub between emp-009 and emp-010 (no shared
+  // nationalId — pure CONFIRMED edges). Pre-fix, UNLINK of the hub broke both its edges and the leaves,
+  // never linked to each other, shattered into singletons. The survivor re-assert must keep emp-009 +
+  // emp-010 as one person.
+  const p1 = ((await (await get("/api/identity/people?q=emp-009"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.externalId === "emp-009"))!;
+  await post(`/api/identity/people/${encodeURIComponent(p1.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "ihn", externalId: "ihn-emp-003" });
+  const p2 = ((await (await get("/api/identity/people?q=ihn-emp-003"))!.json()) as Person[])[0]!;
+  const three = ((await (await post(`/api/identity/people/${encodeURIComponent(p2.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "twh", externalId: "emp-010" }))!.json()) as { person: Person }).person;
+  assert.equal(three.sources.length, 3, "three-member component around the hub ihn-emp-003");
+
+  await post(`/api/identity/people/${encodeURIComponent(three.personId)}/reconcile`, { action: "UNLINK", tenantId: "ihn", externalId: "ihn-emp-003" });
+  const hub = ((await (await get("/api/identity/people?q=ihn-emp-003"))!.json()) as Person[])[0]!;
+  assert.equal(hub.sources.length, 1, "the unlinked hub is its own singleton");
+  const emp009 = ((await (await get("/api/identity/people?q=emp-009"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.externalId === "emp-009"))!;
+  assert.ok(emp009.sources.some((s) => s.externalId === "emp-010"), "survivors emp-009 + emp-010 remain ONE person");
+  assert.ok(!emp009.sources.some((s) => s.externalId === "ihn-emp-003"), "the hub is gone from the survivors");
+
+  // cleanup: split the survivors back to singletons for later tests.
+  await post(`/api/identity/people/${encodeURIComponent(emp009.personId)}/reconcile`, { action: "UNLINK", tenantId: "twh", externalId: "emp-010" });
+});
+
 test("CONFIRM_LINK rejects a target that isn't a real directory record", async () => {
   const twhSana = ((await (await get("/api/identity/people?q=Sana"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.tenantId === "twh"))!;
   const res = await post(`/api/identity/people/${encodeURIComponent(twhSana.personId)}/reconcile`, { action: "CONFIRM_LINK", tenantId: "twh", externalId: "does-not-exist" });
