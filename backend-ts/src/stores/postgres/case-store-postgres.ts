@@ -63,19 +63,18 @@ export class PgCaseStore implements CaseStore {
 
   async upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null> {
     // State-aware upsert (Fable H1/H2) — read-then-plan-then-write, mirroring the SQLite floor via the
-    // shared pure `planCaseUpsert`. Preserves IN_PROGRESS, respects human closures, and audits only real
-    // transitions. Read-then-write is non-atomic; the pipeline upserts each key once per run, sequentially.
+    // shared pure `planCaseUpsert`. Preserves IN_PROGRESS, respects human closures, audits real transitions.
+    // Concurrency (Codex P2): two runs can overlap on a new key (runs aren't serialized), so the INSERT is
+    // `ON CONFLICT DO NOTHING`; if a concurrent writer wins, we re-read and fall through to UPDATE instead
+    // of raising a unique violation that would fail one whole run mid-write.
     const now = new Date().toISOString();
-    const existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
-    const plan = planCaseUpsert(
-      existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
-      input.outcomeStatus,
-      now,
-    );
-    if (plan.op === "noop") return null;
-
     const priority = priorityFor(input.outcomeStatus);
     const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
+    const planFrom = (row: CaseRow | null) =>
+      planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now);
+
+    let plan = planFrom(await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod));
+    if (plan.op === "noop") return null;
 
     if (plan.op === "insert") {
       const { rows } = await this.pool.query<CaseRow>(
@@ -83,6 +82,7 @@ export class PgCaseStore implements CaseStore {
            (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
             next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
          VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $10, $11, $12, $13)
+         ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
          RETURNING ${COLS}`,
         [
           crypto.randomUUID(),
@@ -100,7 +100,10 @@ export class PgCaseStore implements CaseStore {
           plan.closedBy ?? null,
         ],
       );
-      return rows[0] ? { ...toRecord(rows[0]), disposition: plan.disposition! } : null;
+      if (rows[0]) return { ...toRecord(rows[0]), disposition: plan.disposition! };
+      // Lost the insert race — re-plan against the now-existing row as an update.
+      plan = planFrom(await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod));
+      if (plan.op !== "update") return null;
     }
 
     // update
