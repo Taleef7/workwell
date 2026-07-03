@@ -149,7 +149,9 @@ Public API actions derive audit identity from the authenticated security context
   `RUN_COMPLETED` event and a `CASE_*` event per real case transition — the "every state change writes
   `audit_event`" hard rule now holds on the highest-volume write path, not just rerun-to-verify.
 - Case upsert is state-aware (Fable H2, `planCaseUpsert`): it preserves operator `IN_PROGRESS` state,
-  respects human closures (only a system auto-resolve reopens), and never drifts `closed_at`; an
+  respects human closures (only a system closure — a prior auto-resolve or a lapsed auto-exclusion —
+  reopens), never drifts `closed_at`, and active-case rollups count `ACTIVE_CASE_STATUSES`
+  (`OPEN` + `IN_PROGRESS`) so a reconfirmed IN_PROGRESS case isn't dropped (Codex P2); an
   idempotent re-confirm is a silent refresh (no audit event). Display/routing only — CQL `Outcome Status`
   stays the sole compliance authority (ADR-008).
 - The hierarchy rollup counts only COMPLETED population runs (Fable H7), never an in-flight RUNNING run's
