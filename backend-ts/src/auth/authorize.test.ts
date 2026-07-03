@@ -146,6 +146,26 @@ test("non-/api routes default to permit", () => {
   assert.equal(authorize("GET", "/", null).ok, true);
 });
 
+test("Fable M4: AI write endpoints (bare + measure-scoped) are AUTHOR/ADMIN, not any authenticated role", () => {
+  assert.equal(authorize("POST", "/api/ai/draft-spec", author).ok, true);
+  assert.equal(authorize("POST", "/api/ai/draft-spec", admin).ok, true);
+  // The bare alias previously fell through to the AUTHENTICATED /api/** fallback → billed-OpenAI abuse.
+  assert.deepEqual(authorize("POST", "/api/ai/draft-spec", cm), { ok: false, status: 403 });
+  assert.deepEqual(authorize("POST", "/api/ai/draft-spec", approver), { ok: false, status: 403 });
+  assert.equal(authorize("POST", "/api/measures/abc/ai/draft-spec", author).ok, true);
+});
+
+test("Fable M23: outreach templates are CM/ADMIN-readable but ADMIN-only to write", () => {
+  assert.equal(authorize("GET", "/api/admin/outreach-templates", cm).ok, true);
+  assert.equal(authorize("GET", "/api/admin/outreach-templates", admin).ok, true);
+  assert.equal(authorize("GET", "/api/admin/outreach-templates/abc/preview", cm).ok, true);
+  assert.deepEqual(authorize("GET", "/api/admin/outreach-templates", author), { ok: false, status: 403 });
+  // writes stay ADMIN via /api/admin/**
+  assert.deepEqual(authorize("POST", "/api/admin/outreach-templates", cm), { ok: false, status: 403 });
+  // an unrelated admin GET is still ADMIN-only (the CM carve-out is scoped to templates)
+  assert.deepEqual(authorize("GET", "/api/admin/integrations", cm), { ok: false, status: 403 });
+});
+
 test("extractPrincipal reads a Bearer access token and ignores refresh/garbage", () => {
   const jwt = createJwt({ secret: "authorize-test-secret" });
   const access = jwt.issueAccessToken("admin@workwell.dev", "ROLE_ADMIN");
