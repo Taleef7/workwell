@@ -331,3 +331,13 @@ test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", asy
   assert.ok(xml.includes('extension="audiogram"'), "measure reference");
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/qrda`))!.status, 404);
 });
+
+test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", async () => {
+  // Untrusted body: `{"triggeredBy":123}` must not throw `raw.trim is not a function`.
+  const res = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: 123 });
+  assert.equal(res?.status, 201);
+  assert.equal(((await res!.json()) as { triggeredBy: string }).triggeredBy, "manual");
+  // and a forged reserved label is still coerced (Fable M1)
+  const seed = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed:scale" });
+  assert.equal(((await seed!.json()) as { triggeredBy: string }).triggeredBy, "manual");
+});

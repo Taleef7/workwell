@@ -62,8 +62,12 @@ const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 // would corrupt quality snapshots (live emp-* ids fed through the `|` decoder) and postpone the real
 // nightly run, so a caller-supplied reserved label is coerced back to a plain operator label (Fable M1).
 const RESERVED_TRIGGER_PREFIXES = ["seed:", "scheduler"];
-function externalTriggeredBy(raw: string | undefined): string {
-  const t = (raw ?? "").trim();
+function externalTriggeredBy(raw: unknown): string {
+  // Untrusted request input: the body is only type-cast, so a malformed `{"triggeredBy":123}` would
+  // reach here as a non-string and throw `raw.trim is not a function` before the route could return a
+  // controlled response (Codex P2). Accept only strings; default everything else to a plain label.
+  if (typeof raw !== "string") return "manual";
+  const t = raw.trim();
   if (!t) return "manual";
   const lower = t.toLowerCase();
   if (RESERVED_TRIGGER_PREFIXES.some((p) => lower.startsWith(p))) return "manual";
