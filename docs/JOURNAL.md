@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-07-03 — E12 PR-2b: WebChart→FHIR adapter core (terminology reconciliation + normalization)
+
+Built on the groundwork below. Owner locked the three forks: **integration path = WebChart HTTP/FHIR
+API** (not direct MariaDB → **no MariaDB driver dependency**, uses global `fetch`); **immunizations via
+ICE** (the E6 seam — not this adapter's concern); **the dev DB is a sample** (map its shapes, don't
+over-fit). The exact API contract comes from a Dave Carlson (MIE) meeting next week, so I built the
+**transport-agnostic core** now and isolated the HTTP transport behind an injectable seam.
+
+**New module `backend-ts/src/engine/ingress/webchart/`:**
+- `terminology.ts` — the WebChart→measure code reconciliation (terminology **option B**): a crosswalk
+  from real LOINC/CVX/CPT/HCPCS codes → the synthetic `urn:workwell:vs:*` measure-event codings the CQL
+  inline filters match. Reuses the E7 order-catalog's real standard codes + LOINC result codes for the
+  lab/vital measures. **Appends** the synthetic coding (preserves the real code for provenance), maps one
+  real code to **all** measures it serves (HbA1c 4548-4 → both `diabetes_hba1c` and `cms122`), tolerates
+  system aliases (URI or OID, case-insensitive; HCPCS letter codes).
+- `normalize.ts` — `normalizeWebChartBundle(raw)`: coerces whatever the API yields (a FHIR searchset/
+  collection Bundle, a bare resource array, or a single resource) into the engine's `Bundle` (type
+  `collection`) shape + applies reconciliation to `code`/`vaccineCode`. Robust to garbage → empty bundle,
+  never throws.
+- `webchart-client.ts` — the `WebChartClient` transport port + `fixtureWebChartClient` (tests) +
+  a **provisional** `httpWebChartClient` (global `fetch`, Bearer auth, FHIR `Accept` — the single place
+  to finalize once Dave Carlson confirms endpoints/auth/pagination).
+- `data-source.ts` — `webChartDataSource(cfg, client?)` now **wired** (client → normalize → bundles),
+  replacing the inert reject stub; transport injectable.
+
+**Proof:** an end-to-end test evaluates a **real-CPT-coded** (92557) WebChart audiogram bundle → COMPLIANT
+via reconciliation; the control (same data un-reconciled through the JSON source) → MISSING_DATA. Two real
+bugs found + fixed during testing: (1) one real code serving multiple measures (single-value Map dropped
+`diabetes_hba1c` for `cms122` on HbA1c) → multi-target crosswalk; (2) a Bundle with no `entry` array fell
+through and wrapped itself as a resource → fixed. **972 tests pass / 0 fail** (+18 new); typecheck green.
+No schema, no new deps. Descriptive only (ADR-008/ADR-017) — reconciliation supplies coded FHIR, never
+decides compliance.
+
+**Found (surfaced in the doc, not a blocker): the enrollment gap.** The measures gate on a program-enrollment
+`Condition` that is *not* WebChart clinical coding — it's occupational-health **program membership** (an OH
+roster). So a WebChart clinical bundle alone reads MISSING_DATA for an enrolled worker; the adapter needs a
+second input (the enrollment roster) to stamp it. Added to the Dave Carlson question list. **Next (PR-2c,
+after the meeting):** finalize the HTTP request shaping, add the OH-enrollment-roster input, extend the
+crosswalk, and (if the API is proprietary rather than FHIR) add the row→FHIR mapping. See
+`docs/WEBCHART_FHIR_MAPPING.md` §6–§8.
+
 ## 2026-07-03 — E12 PR-2 groundwork: real WebChart schema unblocked → WebChart→FHIR mapping reference
 
 **Unblock.** Doug shared MIE's **seeded WebChart dev database** as a Docker image

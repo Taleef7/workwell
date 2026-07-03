@@ -1,9 +1,20 @@
 # WebChart → FHIR R4 Mapping Reference (E12 PR-2 groundwork)
 
-**Status:** Groundwork / design reference. Unblocks **E12 PR-2** (the real WebChart/MariaDB→FHIR
-adapter that today is the inert `webChartDataSource` stub, `backend-ts/src/engine/ingress/data-source.ts`).
-**No code or schema change in this document** — it is the reverse-engineered mapping that a subsequent
-implementation PR builds against.
+**Status:** Active — **PR-2b implemented** (2026-07-03). This is the reverse-engineered mapping +
+the transport-agnostic adapter core that now lives in `backend-ts/src/engine/ingress/webchart/`
+(terminology reconciliation + FHIR normalization, wired into `webChartDataSource`, transport
+injected). The remaining **PR-2c** work (the confirmed live HTTP request shaping) waits on the
+WebChart API contract from Dave Carlson (MIE, meeting week of 2026-07-06).
+
+**Decisions locked (owner, 2026-07-03):**
+- **Integration path = WebChart HTTP/FHIR API** (not a direct MariaDB read). So **no MariaDB driver
+  dependency** — the adapter uses the global `fetch`. The dev DB below is a **schema/shape reference**,
+  not a runtime dependency.
+- **Immunizations are handled by ICE** (the existing E6 `ImmunizationForecast` seam); WorkWell is
+  consolidating them here over time. So the WebChart adapter does **not** need to solve WebChart's
+  missing CVX-immunization store (§3.7) — immunization data flows from ICE, not this adapter.
+- **The dev seed is a *sample*** — representative-ish of production shape but not fully accurate/complete
+  (and not wrong/redundant). So map to its *shapes*, don't over-fit exact fields/volumes.
 
 **Source of truth for this mapping:** MIE's seeded WebChart dev database, shared by Doug on 2026-07-03
 as a Docker image (`ghcr.io/mieweb/dev-wcdb:latest`, MariaDB **10.3.32**). It is pulled locally and
@@ -136,10 +147,12 @@ WHERE oc.loinc_num IS NOT NULL;
 There is no `immunizations` table. The only vaccine-adjacent table is `encounter_order_forecast` (19
 rows). Administered vaccines in WebChart are modeled as **orders** (`encounter_orders`/`order_list`) or
 **procedures** (CPT immunization-administration codes) — but a name/CVX search of `order_list` returned
-**no** vaccine rows in this seed. **This is the biggest gap and blocks the immunization measures**
-(Td/Tdap AIS-E, Hep B series, MMR, varicella, flu — a large share of the runnable catalog). Action:
-ask MIE where administered immunizations + their CVX codes live in a production WebChart, or accept that
-this dev seed cannot exercise the immunization measures end-to-end.
+**no** vaccine rows in this seed. **Resolved (owner, 2026-07-03): immunizations are handled by ICE**
+(the existing E6 `ImmunizationForecast` seam), which WorkWell is consolidating over time — so the
+WebChart adapter does **not** source immunizations, and this gap does not block the immunization
+measures via this path. The adapter maps WebChart's labs/vitals/procedures/encounters; immunization
+data comes from ICE. (If a production WebChart *does* record administered CVX vaccines, wiring them is a
+later additive enhancement, not a blocker.)
 
 ### 3.8 Condition ← `encounters.primary_diagnosis` (ICD) + problem list (confirm)
 Encounter diagnoses are ICD on `encounters.primary_diagnosis`/`diagnosis2..4`. A standalone problem
@@ -156,9 +169,19 @@ bundle from these reads:
 1. **Patient** — `patients` ⋈ `patient_mrns` (`WHERE is_patient=1`).
 2. **Observations** — `observations_current` ⋈ `observation_codes` (LOINC) [+ `observations` for coded/text once confirmed].
 3. **Procedures** — `patient_procedures` [+ completed `encounter_orders` ⋈ `order_list`].
-4. **Immunizations** — TBD (see §3.7).
+4. **Immunizations** — **not sourced here** (ICE, per the locked decision).
 5. **Conditions** — encounter diagnoses [+ problem list once confirmed].
 6. Provider/location joins for hierarchy attribution (§3.2/§3.3).
+
+> **Enrollment gap (found during PR-2b).** The measures gate on a **program-enrollment `Condition`**
+> (e.g. `In Hearing Conservation Program`) which is *not* a WebChart clinical code — it's occupational-health
+> **program membership**, held in an OH program roster, not in encounters/observations/problems. So a
+> WebChart clinical bundle alone evaluates as MISSING_DATA for an enrolled worker (no recognized event
+> *and* no enrollment). The adapter therefore needs a **second input — the OH enrollment roster** — to
+> stamp the enrollment Condition (the synthetic bundle builder does this today from `ExamConfig.programEnrolled`).
+> On the demo synthetic directory that roster is the directory itself; against real WebChart, confirm where
+> program membership lives (a WorkWell-side roster is the likeliest home; ask MIE — §7). This is distinct
+> from the terminology bridge and applies regardless of the transport.
 
 Bounded, paged reads (mirror the E13 `aggregateScaleRun` discipline — never load the whole table into
 memory); the engine already isolates per-item errors via `evaluateBatch` (per-bundle try/catch).
@@ -176,55 +199,65 @@ WebChart events are **LOINC/CPT/CVX/ICD-10/SNOMED**-coded; the WorkWell measures
 | **B. Translate in the adapter** | Adapter maps WebChart codes → the synthetic codes the measures expect, using the existing `terminology_mappings` table | Localizes change to the adapter; measures untouched; but maintains a hand-curated crosswalk and keeps synthetic codes canonical |
 | **C. `ValueSetResolver` expansion** | Feed the engine a real `CodeService` so a CQL value-set retrieve matches real membership | The intended architecture (E3.2 seam exists); still needs real value-set content (VSAC) |
 
-**Recommendation:** start with **B** for the demo-provable slice (adapter-local crosswalk over
-`terminology_mappings`, which already seeds audiogram→CPT 92557, TB→86580, flu→CVX 141), and treat **A/C**
-as the standards-correct destination tied to E14 + the VSAC unblock. This keeps ADR-008 intact
-(CQL stays the sole compliance authority; the adapter only supplies coded FHIR, it never decides
-compliance).
+**Decision (2026-07-03): option B is implemented** — `backend-ts/src/engine/ingress/webchart/terminology.ts`
+is the adapter-local crosswalk. It reuses the same real standard codes as the E7 order catalog
+(audiogram→CPT 92557, TB→86580, flu→CVX 141, …) plus LOINC result codes for the lab/vital measures
+(HbA1c 4548-4, LDL 13457-7, BP 85354-9, BMI 39156-5, mammogram HCPCS G0202/CPT 77067). It **appends** the
+synthetic measure-event coding to a real WebChart coding (preserving the real code for provenance), maps
+one real code to **all** measures it serves (HbA1c → both `diabetes_hba1c` and `cms122`), and tolerates
+system aliases (canonical URI or OID, case-insensitive). **A/C stay the standards-correct destination**
+tied to E14 + the VSAC unblock. ADR-008 intact: reconciliation supplies coded FHIR, it never decides
+compliance.
 
 ---
 
-## 6. Architecture forks to decide (flagged, not decided here)
+## 6. Architecture — decisions (2026-07-03)
 
-1. **MariaDB-direct vs WebChart HTTP API.** The current stub config is `{baseUrl, apiKey}` (HTTP-shaped),
-   but Doug provided a **MariaDB** image. Direct-DB read is the lowest-friction path against this
-   reference and matches "WebChart/MariaDB→FHIR adapter." Confirm whether production integration should
-   go through a WebChart REST/FHIR endpoint instead (in which case the config shape stays HTTP and the
-   adapter maps API responses, not SQL rows). This overlaps the **E9 CQL→SQL-bridge decision memo** (the
-   pending Doug Q2 fork).
-2. **New dependency (hard rule — needs approval).** A direct-DB adapter needs a MariaDB/MySQL driver
-   (`mysql2`/`mariadb`) in `backend-ts`. Per CLAUDE.md, **new dependencies require explicit approval +
-   an ADR**. Do not add it silently. An HTTP adapter avoids a DB driver but needs a WebChart API.
-3. **Where the adapter runs.** `evaluate-bundle.ts`/`data-source.ts` are deliberately `node:fs`-free /
-   DB-free to stay portable across `@mieweb/cloud` targets. A DB driver would live at the ingress **edge**
-   (like the CLI's file I/O), not in the portable core.
+1. **Integration path = WebChart HTTP/FHIR API** (not a direct MariaDB read). The dev MariaDB is the
+   schema/shape reference; production reads go through WebChart's API. (Dave Carlson provides the exact
+   API contract, week of 2026-07-06.) Overlaps the E9 memo but is now decided for E12.
+2. **No new dependency.** The HTTP path uses the global `fetch` — **no MariaDB/MySQL driver**, so the
+   CLAUDE.md new-dependency gate is not triggered. `backend-ts` adds no deps.
+3. **Transport at the edge.** The transport lives in `webchart/webchart-client.ts` (the `WebChartClient`
+   port + a provisional `httpWebChartClient` + a `fixtureWebChartClient` for tests); the reconciliation +
+   normalization core stays I/O-free and portable, matching the `evaluate-bundle.ts` design.
 
 ---
 
-## 7. Confirm-with-Doug / MIE
+## 7. Confirm-with-MIE / Dave Carlson (API discovery for PR-2c)
 
-1. **Is this dev seed representative** of production WebChart shape *and volume*, or a minimal seed? (It
-   is rich in dictionary/config + demographics but **thin on coded clinical events**: 1 real CPT, no
-   CVX immunizations, empty base `observations`/problem-list.)
-2. **Where do administered immunizations + CVX codes live** in production WebChart? (§3.7 — blocks the
-   immunization measures.)
-3. **Which observation table is authoritative** for non-numeric results — base `observations`
-   (`obs_result`/`obs_result_code`) vs `observations_current`? (§3.5.)
-4. **Integration path:** direct MariaDB read vs a WebChart REST/FHIR API? (§6.1; ties to E9 Q2.)
-5. OK to add a **MariaDB driver dependency** to `backend-ts` (ADR), or should PR-2 target an HTTP API?
+**Answered (owner, 2026-07-03):** ~~representativeness~~ (a sample — representative-ish, not fully
+prod-accurate, not wrong); ~~immunization storage~~ (handled by ICE, not this adapter); ~~integration
+path~~ (WebChart HTTP/FHIR API); ~~MariaDB driver~~ (not needed — HTTP/`fetch`).
+
+**Open — bring to the Dave Carlson meeting (drives `httpWebChartClient`):**
+1. **Is it a true FHIR R4 API** (returns FHIR resources) **or a proprietary REST API** over the
+   `wc_miehr_wctroot` schema? (If FHIR, normalization is mostly pass-through + reconciliation; if
+   proprietary, the adapter also maps rows→FHIR per §3.)
+2. **Endpoints + population read:** how to list the worker population and fetch one patient's clinical
+   data — a FHIR `$everything`/search, or per-resource endpoints? Pagination?
+3. **Auth:** Bearer token, API key header, OAuth client-credentials? (drives the `WebChartConfig` shape).
+4. **Which observation representation** the API returns for non-numeric results (the base `observations`
+   `obs_result`/`obs_result_code` model vs the `observations_current` numeric fast-path — §3.5).
+5. **Program enrollment / OH roster:** where does *program membership* live (the enrollment gap in §4)?
+   Is it a WorkWell-side roster, or does WebChart expose occupational-health program enrollment?
+6. **Provider/location** canonical keys for hierarchy attribution (§3.2/§3.3).
 
 ---
 
-## 8. Proposed PR-2 slicing
+## 8. PR-2 slicing (progress)
 
-- **PR-2a (this doc):** the mapping reference + read-query scope + decision forks. **No code.**
-- **PR-2b:** a **read-only, offline** `webchart-fhir` mapping module + fixtures — pure functions
-  `rowsToPatientBundle(...)` with unit tests over rows captured from the dev DB (no live driver, no new
-  dependency; fixtures checked in). Proves the mapping against real shapes.
-- **PR-2c (needs the §6/§7 decisions):** the live `PatientDataSource` — either a MariaDB driver adapter
-  (with the approved dependency + ADR) or a WebChart HTTP adapter — wired behind
-  `resolveDataSource(env)`, replacing the inert stub. Terminology option B crosswalk. Still descriptive
-  only (ADR-008).
+- **PR-2a (done):** this mapping reference + read-query scope + decision forks.
+- **PR-2b (done, 2026-07-03):** the **transport-agnostic adapter core** — `webchart/terminology.ts`
+  (reconciliation, option B), `webchart/normalize.ts` (WebChart FHIR → engine bundle shape),
+  `webchart/webchart-client.ts` (the `WebChartClient` port + fixture + provisional HTTP client), wired
+  into `webChartDataSource(cfg, client?)` (transport injected). Fully unit-tested + an end-to-end test
+  proving a **real-CPT-coded** WebChart bundle evaluates to COMPLIANT via reconciliation (control:
+  un-reconciled → MISSING_DATA). No new deps; no schema. Descriptive only (ADR-008/ADR-017).
+- **PR-2c (waits on §7 answers):** finalize `httpWebChartClient`'s request shaping against the real API,
+  add the OH-enrollment-roster input (§4 enrollment gap), extend the crosswalk as the real code space is
+  confirmed, and (if the API is proprietary) add the row→FHIR mapping per §3. Wire behind
+  `resolveDataSource(env)`; still descriptive only.
 
 Descriptive-only throughout: the adapter supplies coded FHIR; the CQL engine remains the sole source of
 compliance truth (ADR-008/ADR-017).
