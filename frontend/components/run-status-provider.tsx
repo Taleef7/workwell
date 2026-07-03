@@ -27,7 +27,14 @@ const RunStatusContext = createContext<RunStatusValue | null>(null);
 
 function notifyComplete(runId: string, status: string): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    // Only clear the persisted key if it's still pointing at THIS run. A synchronous run (e.g. an
+    // EMPLOYEE "Recalculate") can come back already-terminal while a different, actually-active
+    // ALL_PROGRAMS run is the one persisted — clearing unconditionally would wipe that run's reload
+    // durability out from under it (Fable M22). The poll path passes `activeRunId`, which IS the
+    // stored key, so it still clears correctly.
+    if (localStorage.getItem(STORAGE_KEY) === runId) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
   } catch {
     /* ignore */
   }
@@ -98,6 +105,36 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [token, user]);
+
+  // Read the latest activeRunId without depending on it in the storage-event effect below (that
+  // effect subscribes once; a dependency on activeRunId would tear down + resubscribe on every
+  // run start/stop, which is unnecessary churn for a single global listener).
+  const activeRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeRunIdRef.current = activeRunId;
+  }, [activeRunId]);
+
+  // Cross-tab sync (Fable L20): a run started in tab A is otherwise invisible to an already-open
+  // tab B until B is reloaded. `localStorage` fires a `storage` event in every OTHER tab (never the
+  // tab that made the write) when STORAGE_KEY changes, so use it to adopt a run another tab started,
+  // or clear one another tab finished — without restarting the poll effect (which depends only on
+  // `activeRunId`, set here the same way `startTracking`/the poll do).
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key !== STORAGE_KEY) return;
+      if (event.newValue) {
+        if (!activeRunIdRef.current) {
+          setActiveRunId(event.newValue);
+          setStatus("RUNNING");
+        }
+      } else if (activeRunIdRef.current) {
+        setActiveRunId(null);
+        setStatus("IDLE");
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Poll the active run until terminal. Depends ONLY on activeRunId (api is read via apiRef, status
   // is updated without restarting), so a status change or token refresh never tears down the timer.
