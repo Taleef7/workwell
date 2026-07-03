@@ -4,7 +4,7 @@
  * timeline UNION orders by occurred_at then the IDENTITY id. Schema-qualified to the
  * isolated `workwell_spike` schema (never the canonical `public` tables).
  */
-import type { PgPool } from "./pg-database.ts";
+import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type {
   AppendAuditInput,
@@ -94,6 +94,7 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async hasOutreachSent(caseId: string): Promise<boolean> {
+    if (!isUuid(caseId)) return false; // a non-uuid path param must be a clean miss, not a ::uuid 500 (Fable M14)
     const { rows } = await this.pool.query<{ n: string }>(
       `SELECT COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions WHERE case_id = $1::uuid AND action_type = 'OUTREACH_SENT'`,
       [caseId],
@@ -102,12 +103,13 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async outreachSentCounts(caseIds: string[]): Promise<Record<string, number>> {
-    if (caseIds.length === 0) return {};
+    const ids = caseIds.filter(isUuid); // drop non-uuid ids so ANY($1::uuid[]) can't 500 (Fable M14)
+    if (ids.length === 0) return {};
     const { rows } = await this.pool.query<{ case_id: string; n: string }>(
       `SELECT case_id, COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions
         WHERE action_type = 'OUTREACH_SENT' AND case_id = ANY($1::uuid[])
         GROUP BY case_id`,
-      [caseIds],
+      [ids],
     );
     const out: Record<string, number> = {};
     for (const r of rows) out[r.case_id] = Number(r.n);
@@ -115,6 +117,7 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async latestOutreachDeliveryStatus(caseId: string): Promise<string | null> {
+    if (!isUuid(caseId)) return null; // clean miss for a non-uuid path param, not a ::uuid 500 (Fable M14)
     const { rows } = await this.pool.query<{ delivery_status: string | null }>(
       `SELECT payload_json ->> 'deliveryStatus' AS delivery_status
          FROM ${SPIKE_SCHEMA}.case_actions

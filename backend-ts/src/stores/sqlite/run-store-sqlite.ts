@@ -168,8 +168,11 @@ export class SqliteRunStore implements RunStore {
   }
 
   async finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null> {
+    // Terminal-status guard (Fable M15): only a QUEUED/RUNNING run may be finalized. Without it, a run
+    // already FAILED by the stuck-run sweep could be silently resurrected to COMPLETED (the M7 double-
+    // seed path), and a late completion could overwrite a legitimate FAILED verdict.
     await this.db
-      .prepare(`UPDATE runs SET status = ?, completed_at = ? WHERE id = ?`)
+      .prepare(`UPDATE runs SET status = ?, completed_at = ? WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`)
       .bind(status, new Date().toISOString(), runId)
       .run();
     return this.getRun(runId);
@@ -177,19 +180,23 @@ export class SqliteRunStore implements RunStore {
 
   async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
     const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // Only UNCLAIMED RUNNING runs — see the Postgres adapter: markRunning (the async ctx.waitUntil
-    // path) leaves claimed_by NULL; claimNextQueuedRun stamps claimed_by, so a CLAIMED worker job is
-    // never recovered. QUEUED is excluded too (claim-path "waiting for a worker", not an orphan).
+    // Single atomic UPDATE … RETURNING (Fable M15) — the prior SELECT-then-UPDATE could fail a run that
+    // crossed the threshold or was finalized between the two statements, producing an unaudited state
+    // change or a false RUN_RECOVERED. Only UNCLAIMED RUNNING runs: markRunning (the async ctx.waitUntil
+    // path) leaves claimed_by NULL; claimNextQueuedRun stamps it, so a CLAIMED worker job is never
+    // recovered; QUEUED is the claim-path "waiting for a worker", not an orphan. `seed:%` runs are
+    // excluded (Fable M7): the seed CLIs create backdated RUNNING rows whose started_at is far in the
+    // past by design, so they must not be swept mid-seed (which would fail then double-seed them). A
+    // NULL triggered_by is still swept.
     const { results } = await this.db
-      .prepare(`SELECT id FROM runs WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
-      .bind(cutoff)
-      .all<{ id: string }>();
-    const stuck = results ?? [];
-    if (stuck.length === 0) return [];
-    await this.db
-      .prepare(`UPDATE runs SET status = 'FAILED', completed_at = ? WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?`)
+      .prepare(
+        `UPDATE runs SET status = 'FAILED', completed_at = ?
+           WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?
+             AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
+           RETURNING id`,
+      )
       .bind(new Date().toISOString(), cutoff)
-      .run();
-    return stuck.map((r) => r.id);
+      .all<{ id: string }>();
+    return (results ?? []).map((r) => r.id);
   }
 }

@@ -65,3 +65,51 @@ test("recoverStuckRuns fails stuck RUNNING runs (not QUEUED) AND writes a RUN_RE
     }
   }
 });
+
+test("Fable M7: a backdated RUNNING seed:scale run is NOT swept (its started_at is old by design)", async () => {
+  const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runs = new SqliteRunStore(db);
+  const events = new SqliteCaseEventStore(db);
+  try {
+    // A seed CLI creates a RUNNING run backdated far into the past (started_at = --as-of).
+    const seed = await runs.createRun({ ...sampleRun(), triggeredBy: "seed:scale", status: "RUNNING", startedAt: "2026-06-26T00:00:00.000Z" });
+    // A genuine orphan created RUNNING now.
+    const orphan = await runs.createRun(sampleRun());
+    await runs.markRunning(orphan.id);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const recovered = await recoverStuckRuns({ runs, events }, 0);
+    assert.deepEqual(recovered, [orphan.id], "only the real orphan is recovered; the seed run is skipped");
+    assert.equal((await runs.getRun(seed.id))?.status, "RUNNING", "the seed run is left RUNNING for its CLI to finalize");
+  } finally {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
+test("Fable M15: finalizeRun does not resurrect a run already FAILED by the sweep", async () => {
+  const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runs = new SqliteRunStore(db);
+  try {
+    const r = await runs.createRun(sampleRun());
+    await runs.markRunning(r.id);
+    await new Promise((res) => setTimeout(res, 10));
+    assert.deepEqual(await runs.failStuckRuns(0), [r.id]); // swept → FAILED
+    // A late in-flight completion must NOT overwrite the FAILED verdict (terminal-status guard).
+    await runs.finalizeRun(r.id, "COMPLETED");
+    assert.equal((await runs.getRun(r.id))?.status, "FAILED", "terminal FAILED is preserved");
+  } finally {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});

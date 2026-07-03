@@ -629,6 +629,21 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
   `RUN_COMPLETED` best-effort write).
 
+### Resolution is not segment-gated; cycle rollover is closed out (Fable M10/M11, 2026-07-03)
+- **Resolution is never blocked by segment applicability (M11).** The run pipeline gates case
+  *creation* by `isApplicable`, but a COMPLIANT/EXCLUDED outcome (which only ever *closes* a case) always
+  runs the upsert — so a subject who leaves a cohort and then becomes compliant does not keep a stranded
+  OPEN case. Only non-compliant (case-creating) outcomes are gated.
+- **Prior-cycle cases are closed out at run finish (M10).** After a population run's evaluation loop, any
+  OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period` differs
+  from the current compliance cycle is closed with `status='RESOLVED'`, `closed_reason='CYCLE_ROLLED_OVER'`,
+  `closed_by=NULL` (a **system** closure), and an audited `CASE_RESOLVED` event. This prevents a
+  cycle rollover from orphaning the prior period's OPEN case (surfaced by `?status=open`, campaigns with no
+  period filter, CSV exports, MCP `list_noncompliant`) — the `backend-ts` equivalent of the Java V022
+  migration. Best-effort (a read/audit failure logs a WARN, never aborts the run); scoped to the subjects
+  the run actually evaluated (a SITE/EMPLOYEE run never touches out-of-scope cases). Display/routing only —
+  CQL `Outcome Status` stays authoritative (ADR-008).
+
 ## 5) `evidence_json` Contract (authoritative)
 
 ### Canonical shape
