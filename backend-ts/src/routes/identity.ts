@@ -19,7 +19,13 @@ import { resolvePeople, duplicateCandidates, personById, type Person } from "../
 import { mergedComplianceTimeline, type TimelineOutcome } from "../identity/compliance-timeline.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
-import type { PersonLinkRef } from "../stores/person-link-store.ts";
+import { normalizePair, type PersonLinkRef } from "../stores/person-link-store.ts";
+
+const refKey = (r: PersonLinkRef): string => `${r.tenantId}|${r.externalId}`;
+const pairKeyOf = (a: PersonLinkRef, b: PersonLinkRef): string => {
+  const n = normalizePair(a, b);
+  return `${refKey(n.a)}::${refKey(n.b)}`;
+};
 
 interface IdentityEnv {
   DB: CloudDatabase;
@@ -170,6 +176,35 @@ async function reconcile(req: Request, env: IdentityEnv, actor: string, personId
     brokenIds.push(link.id);
   }
   await audit("IDENTITY_LINK_BROKEN", brokenIds[0]!, { personId, action, target, brokenAgainst: others, linkIds: brokenIds });
+
+  // Re-assert survivor connectivity (Fable H8): if the target was the hub/anchor that transitively held
+  // the survivors together (a star auto-edge OR the CONFIRM anchor — its edges are all now BROKEN),
+  // breaking it can shatter survivors the human never spoke about. CONFIRM every survivor pair that is
+  // NOT already explicitly BROKEN, so the survivors stay one person exactly as their own connectivity
+  // allows — never overriding a split the human actually asserted (a broken survivor pair stays split).
+  // These CONFIRMED writes are state changes, so they get their own audit event (Codex P2 — the
+  // "every state change writes audit_event" hard rule applies to the survivor re-assert too).
+  if (others.length > 1) {
+    const linksNow = await s.personLinks.listLinks();
+    const brokenPairs = new Set(linksNow.filter((l) => l.linkType === "BROKEN").map((l) => pairKeyOf(l.a, l.b)));
+    const reasserted: Array<{ id: string; a: PersonLinkRef; b: PersonLinkRef }> = [];
+    for (let i = 0; i < others.length; i++) {
+      for (let j = i + 1; j < others.length; j++) {
+        const a = { tenantId: others[i]!.tenantId, externalId: others[i]!.externalId };
+        const b = { tenantId: others[j]!.tenantId, externalId: others[j]!.externalId };
+        if (!brokenPairs.has(pairKeyOf(a, b))) {
+          const link = await s.personLinks.upsertLink({ a, b, linkType: "CONFIRMED", createdBy: actor });
+          reasserted.push({ id: link.id, a, b });
+        }
+      }
+    }
+    if (reasserted.length > 0) {
+      await audit("IDENTITY_LINK_CONFIRMED", reasserted[0]!.id, {
+        personId, action, reason: "SURVIVOR_REASSERT", unlinked: target, pairs: reasserted.map(({ a, b }) => ({ a, b })),
+        linkIds: reasserted.map((r) => r.id),
+      });
+    }
+  }
   // The remaining members keep their grouping; return the person the target was split OUT of (located by
   // an untouched member, since the personId may change when grouping changes).
   const after = resolvePeople(undefined, await s.personLinks.listLinks());

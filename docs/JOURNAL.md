@@ -1,5 +1,35 @@
 # Journal
 
+## 2026-07-03 — Hardening sprint, block 3: correctness on the real-data path (Fable H3/H8/M13/M19)
+
+Third Fable block, on `feat/hardening-correctness` — the "latent bugs that are harmless on synthetic
+data but wrong the day real WebChart/EnterpriseHealth data arrives" theme. All backend, no schema.
+
+- **H3 — HAZWOPER + TB CQL matched ANY Condition.** `In Program: exists([Condition])` and `Has Medical
+  Exemption: Count([Condition]) > 1` — the last two runnable measures still on the un-scoped pattern
+  (the other 12 code-scope their Conditions). The synthetic per-measure bundles masked it, but the
+  advertised real-data path (`evaluateBundle`/`evaluateBatch`, `pnpm evaluate`) accepts arbitrary FHIR:
+  a patient with two unrelated Conditions evaluated EXCLUDED for TB, and any one Condition made a
+  patient "In HAZWOPER Program". CQL is the compliance authority (ADR-008) → a real compliance bug.
+  Rewrote both defines with the existing bound codes (mirroring audiogram), recompiled the ELM
+  (`pnpm compile-measures` — only the two libraries changed), added a `foreign-condition-scoping`
+  golden regression. Synthetic outcomes unchanged (golden CLI + engine + ingress + bundle suites green).
+- **H8 — identity UNLINK of a hub shattered a 3+-record component.** Auto match-key edges were a STAR
+  from `records[0]`, and UNLINK writes BROKEN against every member, so breaking a hub/CONFIRM-anchor
+  disconnected survivors that never had an edge to each other. Fixed both ways: auto edges are now a
+  pairwise CLIQUE, and the UNLINK route re-asserts survivor connectivity (CONFIRMs every non-BROKEN
+  survivor pair) — never overriding a split the human actually asserted.
+- **M13 — duplicates worklist dropped a moved-then-duplicated person.** The predicate was "has no PRIOR
+  link anywhere"; now it's "distinct ACTIVE tenants > 1", so a person who moved AND has a second ACTIVE
+  record still surfaces, while pure mobility stays excluded.
+- **M19 — Rule Builder accepted degenerate numerics.** `dueSoonDays > windowDays` (COMPLIANT
+  unreachable) and non-alternatives `requiredDoses: 0` (everyone COMPLIANT with zero doses) compiled
+  clean and `saveRule` persisted them. A new `validateRule()` in `generateCql` throws → 400 at the
+  rule route; valid measures unaffected.
+- **872 tests / 871 pass / 1 pg-skip / 0 fail; typecheck clean. No schema, no new deps.** Commits:
+  H3 (CQL+ELM) · H8/M13 (identity) · M19 (codegen). Descriptive-only invariants preserved (ADR-008);
+  E13 All = Σ tenants untouched.
+
 ## 2026-07-03 — Hardening sprint, block 2: scale/perf — bound the 120k read paths (Fable H4/H5/M16/M17)
 
 Second Fable block, on `feat/hardening-scale-perf` — the theme where the app has a **live production
