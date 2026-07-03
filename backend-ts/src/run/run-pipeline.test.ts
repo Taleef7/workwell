@@ -464,11 +464,38 @@ test("Codex P2: an out-of-cohort EXCLUDED outcome with no existing case creates 
   try {
     const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: excludedEngine, employees: [office], segments: [welderSegment()] };
     const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
-    // The EXCLUDED outcome is still persisted (ADR-008), but no case is inserted — EXCLUDED is not a
-    // close-only status, so the applicability gate is preserved for it (only COMPLIANT bypasses).
+    // The EXCLUDED outcome is still persisted (ADR-008), but no case is inserted — with NO existing case,
+    // EXCLUDED stays applicability-gated (it would otherwise CREATE an EXCLUDED case out-of-cohort).
     assert.equal((await outcomeStore.listOutcomes(res.runId)).length, 1);
     const mine = (await caseStore.listCases({})).filter((c) => c.employeeId === "emp-007" && c.measureId === "audiogram");
     assert.equal(mine.length, 0, "no EXCLUDED case is created for the out-of-cohort subject");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("Codex P2: an out-of-cohort EXCLUDED outcome CLOSES an EXISTING active case (excuses it, creates none)", async () => {
+  const excludedEngine: RunPipelineDeps["engine"] = {
+    async evaluate() {
+      return { subjectId: "ignored", measure: "Audiogram", outcome: "EXCLUDED", evidence: { expressionResults: [{ define: "Outcome Status", result: "EXCLUDED" }] } };
+    },
+  };
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  const office = employeeById("emp-007")!; // out-of-cohort for the Welder audiogram segment
+  try {
+    const period = bucketPeriodForMeasure("audiogram", "2097-03-03");
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2097-01-01T00:00:00.000Z", measurementPeriodEnd: "2097-12-31T00:00:00.000Z" });
+    const open = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    assert.equal(open?.status, "OPEN");
+
+    // A fresh waiver (EXCLUDED) on a now-out-of-cohort subject who already has an OPEN case for this cycle.
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: excludedEngine, employees: [office], segments: [welderSegment()] };
+    await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+
+    const after = await caseStore.getCase(open!.id);
+    assert.equal(after?.status, "EXCLUDED", "the existing active case is excused even though the subject is out-of-cohort");
+    // still no NEW case created — only the pre-existing one was transitioned.
+    assert.equal((await caseStore.listCases({})).filter((c) => c.employeeId === "emp-007" && c.measureId === "audiogram").length, 1);
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }

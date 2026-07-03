@@ -630,12 +630,14 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   `RUN_COMPLETED` best-effort write).
 
 ### Resolution is not segment-gated; cycle rollover is closed out (Fable M10/M11, 2026-07-03)
-- **Resolution is never blocked by segment applicability (M11).** The run pipeline gates case
-  *creation* by `isApplicable`, but a **COMPLIANT** outcome — the one status that only ever *closes* a case
-  (with no existing case it is a `planCaseUpsert` no-op) — always runs the upsert, so a subject who leaves a
-  cohort and then becomes compliant does not keep a stranded OPEN case. **EXCLUDED is NOT bypassed** (it
-  would *insert* an EXCLUDED case when none exists, re-polluting out-of-cohort subjects into the excluded
-  lists the gate keeps clear — Codex P2); it and every non-compliant (case-creating) outcome stay gated.
+- **Resolution is never blocked by segment applicability (M11 / Codex P2).** The run pipeline gates case
+  *creation* by `isApplicable`, but two **close-only** bypasses run the upsert even out-of-cohort so a
+  subject who left a cohort still has their open case resolved: (1) **COMPLIANT** — a `planCaseUpsert` no-op
+  when no case exists, so always safe; (2) **EXCLUDED** — but only when an active case already exists for
+  that `(subject, measure, period)` (a run-start snapshot of active cases keys this check), so a fresh
+  waiver excuses an existing open case. EXCLUDED with *no* existing case stays applicability-gated (it would
+  otherwise *insert* a new EXCLUDED case, re-polluting the excluded lists the gate keeps clear). Every
+  non-compliant (case-creating) outcome stays gated.
 - **Strictly-older-cycle cases are closed out at run finish (M10).** After a population run's evaluation
   loop, any OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period`
   is **strictly older** than the run's own compliance cycle is closed with `status='RESOLVED'`,
