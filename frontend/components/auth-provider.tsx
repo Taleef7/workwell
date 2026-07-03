@@ -23,6 +23,9 @@ type AuthContextValue = {
   user: AuthUser | null;
   login: (token: string, email: string, role: string) => void;
   logout: () => void;
+  /** Propagate a silently-refreshed access token into the session store (Fable M24) — keeps the
+   *  existing user, swaps only the token, and notifies so every `useApi` client rebuilds with it. */
+  updateToken: (token: string) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -184,6 +187,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logoutInProgress.current = false;
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
+        notifySessionChange();
+      },
+      updateToken: (nextToken: string) => {
+        // A silent per-request refresh (client.ts) obtained a fresh access token: persist it under the
+        // existing session so useSyncExternalStore re-emits and every useApi client rebuilds with it
+        // (Fable M24). No-op if there's no current session (a concurrent logout won the race).
+        const storedUser = readStorage<AuthUser>(USER_KEY);
+        if (!storedUser || logoutInProgress.current) return;
+        localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         notifySessionChange();
       },
       logout: () => {

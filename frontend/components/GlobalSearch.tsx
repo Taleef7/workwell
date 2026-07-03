@@ -37,6 +37,9 @@ export function GlobalSearch() {
       setOpen(false);
       return;
     }
+    // Stale-fetch guard (Fable M20): a slow response for an earlier query must not re-open the dropdown
+    // with results for a query the user has since changed/cleared. `active` is flipped by cleanup.
+    let active = true;
     clearTimeout(timeoutRef.current);
     setLoading(true);
     timeoutRef.current = setTimeout(async () => {
@@ -44,15 +47,20 @@ export function GlobalSearch() {
         const data = await api.get<SearchResult[]>(
           `/api/employees/search?q=${encodeURIComponent(query)}`
         );
+        if (!active) return;
         setResults(data);
         setOpen(true);
       } catch {
+        if (!active) return;
         setResults([]);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }, 300);
-    return () => clearTimeout(timeoutRef.current);
+    return () => {
+      active = false;
+      clearTimeout(timeoutRef.current);
+    };
   }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

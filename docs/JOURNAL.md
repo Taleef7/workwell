@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-07-03 — Hardening sprint, block 4a: frontend reliability + case-detail RBAC (Fable M20/M21/M24/H9)
+
+Fourth Fable block (frontend), part A — the "app randomly misbehaves" reliability bugs + the case-detail
+role-fit gap. Frontend only; no backend/schema.
+
+- **M24 — token refresh had no single-flight and didn't propagate.** Parallel 401s each POSTed
+  `/api/auth/refresh` against the *rotating* refresh cookie, so the second racer could fail → a spurious
+  hard logout mid-session; and a successful refresh updated only one `ApiClient` instance while
+  localStorage/AuthProvider kept the stale token (so every request kept re-refreshing). Now a
+  module-level single-flight shares one in-flight refresh, and a new `onTokenRefreshed` callback writes
+  the fresh token back into the AuthProvider (`updateToken`) so every `useApi` client picks it up.
+- **M21 — `RunStatusProvider` polled an orphaned run forever.** Every poll error was treated as
+  transient, so a 404 (run truncated by a demo-reset) or 403 left the "Run running" pill stuck until
+  localStorage was hand-cleared. Now a 404/403 clears the interval + `ww_active_run` and resets to IDLE.
+- **M20 — stale-fetch races in 6 fetch effects** (people, global search, compliance roster, cases
+  worklist, measure-detail, quality-over-time): a slow response for an earlier query/filter/measure
+  could land after a newer one and paint the wrong data. Applied a request-id guard (shared-callback
+  effects) / `let active` cleanup (the single global-search effect) so only the latest result applies.
+- **H9 — `/cases/[id]` was ungated.** Read-only roles saw every write action (outreach/rerun/assign/
+  escalate/delivery/evidence — all guaranteed 403s) and the evidence panel 403'd into a misleading "no
+  evidence." Gated all write controls + the evidence section behind `canManageCases` (mirrors the API +
+  the nav gating #181 already had; the page was just missed).
+- **Frontend lint clean, 107 vitest pass, build green. No backend, no schema.** Studio role-fit (H10) +
+  unsaved-work (H11) follow as block 4b.
+
 ## 2026-07-03 — Hardening sprint, block 3: correctness on the real-data path (Fable H3/H8/M13/M19)
 
 Third Fable block, on `feat/hardening-correctness` — the "latent bugs that are harmless on synthetic
