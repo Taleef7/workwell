@@ -14,6 +14,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { employeeById, EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 export interface MeasureOutcomeSummary {
   measureVersionId: string;
@@ -115,8 +116,6 @@ function humanReadable(eventType: string, actor: string | null, measureName: str
   }
 }
 
-const OPEN_STATUSES = ["OPEN", "IN_PROGRESS"];
-
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
 export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
   const emp = employeeById(externalId);
@@ -127,7 +126,9 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const employeeCases = (await deps.cases.listCases({ limit: 100000, offset: 0 })).filter(
     (c) => c.employeeId === externalId,
   );
-  const openCases = employeeCases.filter((c) => OPEN_STATUSES.includes((c.status ?? "").toUpperCase()));
+  const openCases = employeeCases.filter((c) =>
+    (ACTIVE_CASE_STATUSES as readonly string[]).includes((c.status ?? "").toUpperCase()),
+  );
   const openCaseByMeasure = new Map<string, string>();
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 

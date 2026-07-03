@@ -188,6 +188,7 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     // The scheduled ALL_PROGRAMS run materializes a quality-over-time snapshot for the period (#E16).
     qualitySnapshots: deps.stores.qualitySnapshots,
     events: deps.stores.events,
+    actor: "scheduler", // system-initiated: audit rows attribute to the scheduler, not a user (Codex P1)
   };
 
   const planned = await planManualRun(runDeps, {

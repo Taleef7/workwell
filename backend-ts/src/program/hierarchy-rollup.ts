@@ -15,7 +15,8 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import { employeeById, providerById, tenantById, enterpriseForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { day, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
+import { day, isCompletedRun, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { buildScaleSubtree } from "./scale-rollup.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
@@ -95,7 +96,10 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     // The scale tenant (~120k rows) is excluded IN SQL (excludeScale) — never fetched into memory; it
     // is read only via aggregateScaleRun below. The JS guard stays as defense-in-depth.
     const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true })).filter(
-      (r) => isPopulationRun(r.runScopeType) && r.runTriggeredBy !== SCALE_TRIGGER,
+      // Fable H7: require COMPLETED — every sibling read model (programs overview, roster, orders) does,
+      // and the scale branch below does too. Without it, `latestRunRows` can select an in-flight RUNNING
+      // run's PARTIAL rows, so /programs/hierarchy counts bounce and disagree with /programs mid-run.
+      (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
     );
     const byMeasure = new Map<string, OutcomeWithRun[]>();
     for (const r of allRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -105,7 +109,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
         if (acc) addStatus(acc, r.status);
       }
     }
-    const openCases = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measureId ?? undefined, limit: 100000 });
+    const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
     for (const c of openCases) {
       if (from && day(c.createdAt) < day(from)) continue;
       if (to && day(c.createdAt) > day(to)) continue;

@@ -171,6 +171,40 @@ test("SITE run with an unknown site is an invalid request", async () => {
   await assert.rejects(executeManualRun(deps, { scopeType: "SITE" }), InvalidRunRequestError);
 });
 
+test("Codex P1: a failing case-audit write never fails an otherwise-complete run (logged ledger gap, not FAILED)", async () => {
+  // If deps.events.appendAudit rejects on a CASE_* event (transient audit_events failure), the case is
+  // already mutated; an unhandled reject would abort the loop, skip finalizeRun, and leave the run stuck
+  // RUNNING (sync 500) or FAILED (async) after the mutation. The per-case audit is best-effort: the run
+  // still finalizes and the gap is logged.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-auditfail-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runStore = new SqliteRunStore(db);
+  const failingAuditDeps: RunPipelineDeps = {
+    runStore,
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore: new SqliteCaseStore(db),
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+    actor: "cm@workwell.dev",
+    events: {
+      async appendAudit(input) {
+        if (input.entityType === "case") throw new Error("audit_events insert failed");
+        // RUN_COMPLETED (entityType "run") succeeds — it is independently best-effort.
+      },
+    },
+  };
+  // The default-date ALL_PROGRAMS run produces non-compliant subjects → case upserts → CASE_* audit
+  // attempts (same slice the H1 test relies on for case events).
+  const res = await executeManualRun(failingAuditDeps, { scopeType: "ALL_PROGRAMS" });
+  assert.equal(res.status, "COMPLETED", "the run still finalizes COMPLETED despite the case-audit failures");
+  assert.equal((await runStore.getRun(res.runId))?.status, "COMPLETED", "persisted status is COMPLETED, not FAILED/RUNNING");
+  // The cases were still upserted (the mutation is not rolled back — the outcome/case are authoritative).
+  assert.ok((await failingAuditDeps.caseStore!.listCases({ limit: 1000 })).length > 0, "cases were still created");
+  // The ledger gap is observable via a run WARN log.
+  const logs = await runStore.listLogs(res.runId, 1000);
+  assert.ok(logs.some((l) => l.level === "WARN" && /Case audit.*ledger gap/.test(l.message)), "a WARN log records the audit gap");
+});
+
 test("finishOrFail finalizes the run FAILED when background completion rejects (no stuck RUNNING)", async () => {
   // A failure OUTSIDE the per-subject engine try/catch (here: recordOutcome throws) must not
   // leave an async run stuck RUNNING — finishOrFail catches it and finalizes FAILED.
@@ -200,10 +234,23 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
   // Two ALL_PROGRAMS runs with NO evaluationDate → today — the nightly-cron shape. Both bucket
   // to the same compliance-cycle anchor, so the second run upserts the same cases (no fresh
   // cohort) and every opened case sits on a cycle anchor (Jan 1 / Jul 1), not a raw run date.
-  const caseStore = deps.caseStore!;
-  const r1 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  //
+  // Isolated stores (own db): the file's shared `deps` accumulates cases from prior tests, which —
+  // now that the H2 fix correctly leaves already-terminal cases untouched (no last_run_id drift) —
+  // would make the lastRunId proxy below unreliable. A fresh db makes this a true from-scratch nightly.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-nightly-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const nightlyDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+  };
+  const r1 = await executeManualRun(nightlyDeps, { scopeType: "ALL_PROGRAMS" });
   const afterFirst = (await caseStore.listCases({})).length;
-  const r2 = await executeManualRun(deps, { scopeType: "ALL_PROGRAMS" });
+  const r2 = await executeManualRun(nightlyDeps, { scopeType: "ALL_PROGRAMS" });
   const all = await caseStore.listCases({});
   assert.equal(all.length, afterFirst, "the second nightly run creates 0 new cases (bucketed → idempotent)");
   const mine = all.filter((c) => c.lastRunId === r1.runId || c.lastRunId === r2.runId);
@@ -211,6 +258,52 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
   assert.ok(
     mine.every((c) => /-(01|07)-01$/.test(c.evaluationPeriod)),
     "evaluation_period is a compliance-cycle anchor (Jan 1 / Jul 1), not the raw run date",
+  );
+});
+
+test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the hard-rule fix)", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-audit-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const captured: { eventType: string; entityType: string; refRunId: string | null; actor: string }[] = [];
+  const auditDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore: new SqliteCaseStore(db),
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+    actor: "cm@workwell.dev", // authenticated actor — audit rows must use THIS, not triggeredBy (Codex P1)
+    events: {
+      async appendAudit(input) {
+        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor });
+      },
+    },
+  };
+  // triggeredBy is a spoofable body field / trigger label; the audit actor must ignore it.
+  const res = await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "seed:scale" });
+  assert.ok(captured.length > 0 && captured.every((e) => e.actor === "cm@workwell.dev"), "audit actor is the authenticated actor, never the triggeredBy label");
+
+  // The run's terminal state is audited (previously the highest-volume state change wrote nothing).
+  const runEvents = captured.filter((e) => e.eventType === "RUN_COMPLETED" && e.entityType === "run");
+  assert.equal(runEvents.length, 1, "exactly one RUN_COMPLETED");
+  assert.equal(runEvents[0]!.refRunId, res.runId);
+
+  // Non-compliant subjects open cases, and each creation is audited (CASE_CREATED).
+  const caseEvents = captured.filter((e) => e.entityType === "case");
+  assert.ok(caseEvents.length >= 1, "at least one case audit event");
+  assert.ok(
+    caseEvents.every((e) => ["CASE_CREATED", "CASE_UPDATED", "CASE_RESOLVED", "CASE_EXCLUDED"].includes(e.eventType)),
+    "case events use the mapped vocabulary",
+  );
+
+  // Idempotent re-confirm: a second run re-confirms the same OPEN cases → NO new CASE_UPDATED noise,
+  // but the run itself is still audited (a nightly run records one RUN_COMPLETED, not hundreds of events).
+  captured.length = 0;
+  await executeManualRun(auditDeps, { scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler" });
+  assert.equal(captured.filter((e) => e.eventType === "RUN_COMPLETED").length, 1, "second run also audited");
+  assert.equal(
+    captured.filter((e) => e.eventType === "CASE_UPDATED").length,
+    0,
+    "re-confirmed same-outcome cases emit no CASE_UPDATED (UNCHANGED → silent refresh)",
   );
 });
 

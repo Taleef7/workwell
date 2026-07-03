@@ -357,6 +357,42 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await store.listCases({})).length, 1, "exactly one case, not two");
   });
 
+  test(`[${label}] upsert returns a disposition + is state-aware (Fable H1/H2)`, async () => {
+    const store = await freshStore();
+    assert.equal((await upsert(store, "OVERDUE"))?.disposition, "CREATED", "new non-compliant → CREATED");
+    assert.equal((await upsert(store, "OVERDUE"))?.disposition, "UNCHANGED", "same outcome re-confirm → UNCHANGED (no audit)");
+    assert.equal((await upsert(store, "DUE_SOON"))?.disposition, "UPDATED", "outcome changed → UPDATED");
+    const resolved = await upsert(store, "COMPLIANT");
+    assert.equal(resolved?.disposition, "RESOLVED");
+    assert.equal(resolved?.closedBy, null, "system auto-resolve → closed_by NULL");
+    assert.equal(await upsert(store, "COMPLIANT"), null, "re-resolve of terminal case → no-op (no closed_at drift)");
+    // A system auto-resolved case reopens when non-compliant again (audited REOPENED).
+    assert.equal((await upsert(store, "OVERDUE"))?.disposition, "REOPENED");
+  });
+
+  test(`[${label}] a human-closed case is NOT reopened by a non-compliant run (H2 respect-manual-closure)`, async () => {
+    const store = await freshStore();
+    const c = (await upsert(store, "OVERDUE"))!;
+    await store.patchCase(c.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedReason: "MANUAL", closedBy: "cm@workwell.dev" });
+    assert.equal(await upsert(store, "OVERDUE"), null, "human closure respected — upsert is a no-op");
+    const after = await store.getCase(c.id);
+    assert.equal(after?.status, "RESOLVED", "still closed");
+    assert.equal(after?.closedBy, "cm@workwell.dev", "human closer preserved");
+  });
+
+  test(`[${label}] concurrent upsert of a NEW key never throws a unique violation (Codex P2)`, async () => {
+    const store = await freshStore();
+    // Two runs hitting the same new (subject, measure, period) key at once (manual double-click /
+    // scheduler-manual overlap): the ON CONFLICT DO NOTHING + re-plan fallback must converge to a single
+    // case, never raise a unique-constraint error out of upsertFromOutcome.
+    const results = await Promise.all([
+      store.upsertFromOutcome({ runId: crypto.randomUUID(), subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }),
+      store.upsertFromOutcome({ runId: crypto.randomUUID(), subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }),
+    ]);
+    assert.ok(results.every((r) => r !== null && r.status === "OPEN"), "both calls resolve without throwing");
+    assert.equal((await store.listCases({})).length, 1, "exactly one case row — no duplicate, no violation");
+  });
+
   test(`[${label}] non-compliant priorities + EXCLUDED + COMPLIANT routing`, async () => {
     const store = await freshStore();
     assert.equal((await upsert(store, "DUE_SOON", { subjectId: "emp-007" }))?.priority, "MEDIUM");

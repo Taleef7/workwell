@@ -584,7 +584,35 @@ Run B outcome (same key): `OVERDUE`
 - No duplicate case created.
 
 Run C outcome (same key): `COMPLIANT`
-- Existing row is resolved (`status=RESOLVED`, `closed_at=NOW()`).
+- Existing row is resolved (`status=RESOLVED`, `closed_at=NOW()`, `closed_reason='AUTO_RESOLVED'`,
+  `closed_by=NULL` — a **system** closure).
+
+### State-aware upsert (Fable H1/H2, 2026-07-02)
+`upsertFromOutcome` is no longer a blanket `ON CONFLICT DO UPDATE SET status = excluded.status`. Both the
+SQLite floor and the Pg ceiling read the current row and apply the shared pure `planCaseUpsert`
+(`backend-ts/src/case/case-logic.ts`):
+- **IN_PROGRESS is preserved** on a still-non-compliant run (an operator's "scheduling" state is never
+  clobbered back to OPEN).
+- **Human closures are respected.** A case a person closed (`closed_by` set) is **not** reopened by a
+  later non-compliant run; only a **system** closure (`closed_by IS NULL`) reopens — either a prior
+  auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
+  lapsed so CQL no longer returns EXCLUDED (Codex P2). Reopening a human-closed case is left an
+  explicit, audited operator action.
+- **Active-case counts include `IN_PROGRESS`.** Because the upsert now preserves `IN_PROGRESS` (rather
+  than flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
+  `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the
+  hierarchy/programs open-case count (Codex P2).
+- **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
+- The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
+  `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
+  `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
+  outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
+  events). Population runs previously wrote **no** case/run audit events at all — the H1 hard-rule fix.
+  The per-case audit is **best-effort at the run boundary** (Codex P1): it is written after the upsert
+  (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
+  logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
+  instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
+  `RUN_COMPLETED` best-effort write).
 
 ## 5) `evidence_json` Contract (authoritative)
 

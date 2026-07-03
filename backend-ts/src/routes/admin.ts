@@ -92,6 +92,25 @@ const clampInt = (raw: string | null, def: number, min: number, max: number) => 
   return !Number.isFinite(n) ? def : Math.min(max, Math.max(min, Math.trunc(n)));
 };
 
+/** Append an admin-config audit event (Fable M6) — best-effort, never fails the toggle it records. */
+async function auditAdmin(env: AdminEnv, eventType: string, actor: string, payload: Record<string, unknown>): Promise<void> {
+  try {
+    const s = await getStores(env);
+    await s.events.appendAudit({
+      eventType,
+      entityType: "admin",
+      entityId: null,
+      actor,
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload,
+    });
+  } catch {
+    /* best-effort ledger write */
+  }
+}
+
 export async function handleAdmin(req: Request, env: AdminEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
@@ -102,13 +121,19 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   const syncId = pathname.match(/^\/api\/admin\/integrations\/([^/]+)\/sync$/)?.[1];
   if (syncId && req.method === "POST") {
     const h = syncIntegration(syncId);
-    return h ? json(h) : json({ error: "not_found", integration: syncId }, 404);
+    if (!h) return json({ error: "not_found", integration: syncId }, 404);
+    // Fable M6: a state change (integration re-sync) must leave a ledger record of who/when.
+    await auditAdmin(env, "INTEGRATION_SYNCED", actor, { integration: syncId, status: h.status });
+    return json(h);
   }
 
   // ---- scheduler -----------------------------------------------------------
   if (pathname === "/api/admin/scheduler" && req.method === "GET") return json(await getSchedulerStatus(env));
   if (pathname === "/api/admin/scheduler" && req.method === "POST") {
-    setSchedulerEnabled((q.get("enabled") ?? "false").toLowerCase() === "true");
+    const enabled = (q.get("enabled") ?? "false").toLowerCase() === "true";
+    setSchedulerEnabled(enabled);
+    // Fable M6: flipping the switch that fires the nightly audited runs is itself an audited change.
+    await auditAdmin(env, enabled ? "SCHEDULER_ENABLED" : "SCHEDULER_DISABLED", actor, { enabled });
     return json(await getSchedulerStatus(env));
   }
 

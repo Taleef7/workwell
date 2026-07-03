@@ -29,6 +29,15 @@ export interface UpsertCaseInput {
   outcomeStatus: string;
 }
 
+/**
+ * The result of an idempotent case upsert — the affected case row PLUS what the upsert actually did,
+ * so the run pipeline can emit the matching audit event (Fable H1). A CaseRecord SUPERSET, so every
+ * existing caller that uses the return as a CaseRecord is unaffected.
+ */
+export interface UpsertedCase extends CaseRecord {
+  disposition: import("../case/case-logic.ts").CaseUpsertDisposition;
+}
+
 export interface CaseQuery {
   /** Concrete statuses to include (e.g. ["OPEN"]); omit for all. */
   statuses?: string[];
@@ -66,12 +75,13 @@ export interface CasePatch {
 
 export interface CaseStore {
   /**
-   * Upsert a case from one outcome (idempotent on the unique key):
-   *   DUE_SOON|OVERDUE|MISSING_DATA → OPEN, EXCLUDED → EXCLUDED, COMPLIANT → resolve
-   *   an existing case (no new row). Returns the affected case, or null when COMPLIANT
-   *   with no existing case.
+   * Upsert a case from one outcome (idempotent on the unique key), state-aware (Fable H1/H2 — see
+   * `planCaseUpsert`): a non-compliant outcome opens/refreshes a case (preserving IN_PROGRESS and
+   * respecting human closures); COMPLIANT resolves an OPEN/IN_PROGRESS case; EXCLUDED excludes one.
+   * Returns the affected case tagged with its `disposition`, or null when nothing changed
+   * (COMPLIANT with no case, an idempotent already-terminal row, or a respected human closure).
    */
-  upsertFromOutcome(input: UpsertCaseInput): Promise<CaseRecord | null>;
+  upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null>;
   getCase(id: string): Promise<CaseRecord | null>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
