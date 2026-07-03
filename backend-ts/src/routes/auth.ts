@@ -85,15 +85,20 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
   const revocation = config.revocation;
 
   // Issue a rotated refresh token: mint a fresh jti in the given family and record it as current.
-  // A store error is swallowed (the cookie is still issued) so KV trouble never blocks login/refresh.
+  // If the rotation WRITE fails (KV outage), issue an UNTRACKED, legacy-shaped token (no jti/fam)
+  // instead of a tracked one (Codex P2): a tracked token whose jti was never recorded would be
+  // fail-closed on the next refresh — `currentJti` returns null (login-write failure) or a stale jti
+  // (refresh-write failure), so the fresh cookie would be rejected or (worse) trip reuse detection and
+  // revoke the family — the opposite of the intended stateless degradation. An untracked token skips
+  // the revocation check entirely (the JWT alone still gates on signature + exp) and is upgraded into a
+  // family on the next successful rotation.
   const issueRotatedRefresh = async (email: string, family: string): Promise<string> => {
+    if (!revocation) return jwt.issueRefreshToken(email, { jti: randomUUID(), fam: family });
     const jti = randomUUID();
-    if (revocation) {
-      try {
-        await revocation.rotate(family, jti, jwt.refreshTtlSeconds);
-      } catch {
-        /* KV outage — degrade to stateless (the JWT alone still gates on signature + exp) */
-      }
+    try {
+      await revocation.rotate(family, jti, jwt.refreshTtlSeconds);
+    } catch {
+      return jwt.issueRefreshToken(email); // untracked legacy-shaped token → stateless degrade
     }
     return jwt.issueRefreshToken(email, { jti, fam: family });
   };

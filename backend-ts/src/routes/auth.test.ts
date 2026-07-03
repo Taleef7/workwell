@@ -71,6 +71,37 @@ test("M5: logout revokes the family so the still-unexpired refresh token can't b
   assert.equal((await p("/api/auth/refresh", token))?.status, 401);
 });
 
+test("M5: a rotation-WRITE failure at login issues an untracked token that still refreshes (no fail-closed)", async () => {
+  // Codex P2: if the login rotate() write fails, the token must NOT carry a jti/fam (which would be
+  // fail-closed on the next refresh via a null currentJti). It's issued untracked and upgraded later.
+  let failNextRotate = true;
+  const map = new Map<string, string>();
+  const flaky: RefreshTokenRevocation = {
+    async currentJti(fam) {
+      return map.get(fam) ?? null;
+    },
+    async rotate(fam, jti) {
+      if (failNextRotate) {
+        failNextRotate = false;
+        throw new Error("KV write failed");
+      }
+      map.set(fam, jti);
+    },
+    async revoke(fam) {
+      map.delete(fam);
+    },
+  };
+  const h = createAuthHandler({ secret: SECRET, revocation: flaky });
+  const p = (path: string, cookie?: string) =>
+    h(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: path.endsWith("login") ? JSON.stringify({ email: "cm@workwell.dev", password: "Workwell123!" }) : undefined }));
+  const token = cookieOf(await p("/api/auth/login")); // rotate() threw → untracked token
+  // The untracked token refreshes (skips the revocation check) and now upgrades into a tracked family.
+  const r = await p("/api/auth/refresh", token);
+  assert.equal(r?.status, 200);
+  // The upgraded token is now genuinely tracked (a further refresh still works).
+  assert.equal((await p("/api/auth/refresh", cookieOf(r)))?.status, 200);
+});
+
 test("M5: a store outage (throwing revocation) degrades to stateless — refresh still works", async () => {
   const boom: RefreshTokenRevocation = {
     async currentJti() {
