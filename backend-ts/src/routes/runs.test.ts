@@ -287,17 +287,20 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/measure-report`))!.status, 404);
 });
 
-test("GET /api/runs/:id/outcomes → paged with X-Total-Count (Fable H4)", async () => {
+test("GET /api/runs/:id/outcomes → whole run by default, X-Total-Count + explicit paging (Fable H4 / Codex P2)", async () => {
   const created = (await (await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "audiogram" }))!.json()) as { runId?: string; id?: string };
   const runId = created.runId ?? created.id;
 
+  // Codex P2: a normal run is NOT truncated by default — the /runs grid renders the array directly
+  // without paging, so the default must return every row (X-Total-Count == returned length).
   const full = (await get(`/api/runs/${runId}/outcomes`))!;
-  const total = ((await full.json()) as unknown[]).length;
-  assert.ok(total >= 2, "the manual MEASURE run produced at least 2 outcomes to page");
-  assert.equal(full.headers.get("X-Total-Count"), String(total), "X-Total-Count carries the full count");
+  const rows = (await full.json()) as unknown[];
+  const total = Number(full.headers.get("X-Total-Count"));
+  assert.ok(total >= 2, "the manual MEASURE run produced at least 2 outcomes");
+  assert.equal(rows.length, total, "default returns the whole run (no 500-row truncation)");
 
   const page = (await get(`/api/runs/${runId}/outcomes?limit=1&offset=0`))!;
-  assert.equal(((await page.json()) as unknown[]).length, 1, "limit honored");
+  assert.equal(((await page.json()) as unknown[]).length, 1, "explicit limit pages");
   assert.equal(page.headers.get("X-Total-Count"), String(total), "X-Total-Count is the full count, not the page size");
 
   const beyond = (await get(`/api/runs/${runId}/outcomes?limit=5&offset=${total}`))!;

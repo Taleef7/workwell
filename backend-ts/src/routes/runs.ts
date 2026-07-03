@@ -96,6 +96,11 @@ const json = (data: unknown, status = 200): Response =>
  *  otherwise build a 120k-entry document (Fable H4). The summary report is the aggregate above this. */
 const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
 
+/** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
+ *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
+ *  materializes 120k hydrated rows (Fable H4 / Codex P2). Above this, page with an explicit ?limit. */
+const OUTCOMES_GRID_FULL_CAP = 5000;
+
 /**
  * Run an async-scope (ALL_PROGRAMS/SITE) manual run or rerun: create the run + return RUNNING
  * immediately, finish the fan-out in the background via waitUntil. The background promise gets a
@@ -316,16 +321,27 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     }
   }
 
-  // Per-employee outcome rows for the run detail grid (RunOutcomeRow). Paged (Fable H4): a seed:scale
-  // run has 120k outcomes — never materialize them all in the single-replica worker. Default page 500,
-  // max 2000; X-Total-Count carries the full count via a bounded GROUP BY (not a row scan).
+  // Per-employee outcome rows for the run detail grid (RunOutcomeRow). Bounded for the 120k seed:scale
+  // runs (Fable H4) WITHOUT truncating a normal run (Codex P2): the legacy default returns the whole run
+  // — a live ALL_PROGRAMS run is only ~2,100 rows, and the /runs page renders the array directly without
+  // paging — and only a pathologically large (scale) run is capped to the first page so the single-replica
+  // worker never materializes 120k hydrated rows. An explicit ?limit/?offset always pages. X-Total-Count
+  // carries the true count (a bounded GROUP BY) so a paging client can detect a capped scale run.
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
     const os = await outcomes(env);
-    const limit = clampInt(url.searchParams.get("limit"), 500, 1, 2000);
-    const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
     const total = (await os.countOutcomesByStatus(outcomesId)).reduce((sum, c) => sum + c.count, 0);
-    const rows = await os.listOutcomes(outcomesId, { limit, offset });
+    const hasExplicitPaging = url.searchParams.has("limit") || url.searchParams.has("offset");
+    let rows;
+    if (hasExplicitPaging) {
+      const limit = clampInt(url.searchParams.get("limit"), 500, 1, 2000);
+      const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+      rows = await os.listOutcomes(outcomesId, { limit, offset });
+    } else if (total > OUTCOMES_GRID_FULL_CAP) {
+      rows = await os.listOutcomes(outcomesId, { limit: OUTCOMES_GRID_FULL_CAP }); // oversized (scale) run
+    } else {
+      rows = await os.listOutcomes(outcomesId); // whole run — no truncation for normal runs
+    }
     return new Response(JSON.stringify(toRunOutcomeRows(rows)), {
       status: 200,
       headers: { "content-type": "application/json", "X-Total-Count": String(total) },

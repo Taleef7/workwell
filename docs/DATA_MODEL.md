@@ -201,8 +201,10 @@ INDEX outcomes_run_id_idx(run_id)
 > `listOutcomesForEmployee` / `listOutcomesForMeasure` don't seq-scan the ~1.68M-row live table.
 > Additive `CREATE INDEX IF NOT EXISTS`, reversible (`DROP INDEX`), no data migration.
 > **The four run-detail read paths are bounded (Fable H4):** the outcomes grid (`GET
-> /api/runs/:id/outcomes`) pages via `listOutcomes(runId, {limit, offset})` (default 500 / max 2000) with
-> `X-Total-Count`; QRDA + the summary MeasureReport build from the bounded `countOutcomesByStatus`
+> /api/runs/:id/outcomes`) returns the whole run by default (a live ALL_PROGRAMS run is ~2,100 rows) and
+> caps only a pathologically large (120k `seed:scale`) run to the first 5,000 rows so the worker never
+> materializes them all; an explicit `?limit`/`?offset` pages (max 2,000) and `X-Total-Count` always
+> carries the true count; QRDA + the summary MeasureReport build from the bounded `countOutcomesByStatus`
 > histogram (`populationCountsFromStatus`) + `distinctMeasuresForRun` (no per-subject rows); the
 > individual/bundle MeasureReport caps at 5000 subjects (422 → use `?type=summary`); the outcomes CSV
 > streams in pages (`outcomesCsvStream`). None materializes a `seed:scale` run's 120k rows.
