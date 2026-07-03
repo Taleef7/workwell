@@ -54,6 +54,22 @@ interface RunsEnv {
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
+// Reserved trigger labels are load-bearing IDENTITY, not free-form text: `seed:*` drives SEED
+// classification + scale-run decoding (`aggregateScaleRun` splits `mhn|Lxx|Pxx|n` subject ids) +
+// the seed CLIs' idempotency, and `scheduler` drives SCHEDULED classification + the 24h debounce.
+// They must only ever be set by internal callers (the seed CLIs, the scheduler) that invoke the
+// pipeline directly — never by an HTTP body. An external caller posting `{"triggeredBy":"seed:scale"}`
+// would corrupt quality snapshots (live emp-* ids fed through the `|` decoder) and postpone the real
+// nightly run, so a caller-supplied reserved label is coerced back to a plain operator label (Fable M1).
+const RESERVED_TRIGGER_PREFIXES = ["seed:", "scheduler"];
+function externalTriggeredBy(raw: string | undefined): string {
+  const t = (raw ?? "").trim();
+  if (!t) return "manual";
+  const lower = t.toLowerCase();
+  if (RESERVED_TRIGGER_PREFIXES.some((p) => lower.startsWith(p))) return "manual";
+  return t;
+}
+
 // The store factory selects the SQLite floor or the Postgres ceiling (when DATABASE_URL is set) and
 // runs schema init once per env. CANONICAL schema/migrations stay Taleef-owned (CLAUDE.md).
 //
@@ -195,6 +211,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
   // the run, return RUNNING immediately, and finish in the background (the page polls to terminal).
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
+    body.triggeredBy = externalTriggeredBy(body.triggeredBy); // Fable M1: no forged seed:*/scheduler labels
     const deps = {
       runStore: await store(env),
       outcomeStore: await outcomes(env),
@@ -266,7 +283,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     const run = await (await store(env)).createRun({
       scopeType: body.scopeType ?? "ALL_PROGRAMS",
       scopeId: body.scopeId,
-      triggeredBy: body.triggeredBy ?? "spike",
+      triggeredBy: externalTriggeredBy(body.triggeredBy), // Fable M1: no forged seed:*/scheduler labels
+
       requestedScope: body.requestedScope ?? {},
       measurementPeriodStart: body.measurementPeriodStart ?? now,
       measurementPeriodEnd: body.measurementPeriodEnd ?? now,
