@@ -273,27 +273,46 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // events, violating the "every state change writes audit_event" hard rule). Idempotent
       // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
       // nothing, so a nightly run records real transitions only, not one event per still-open case.
+      //
+      // Best-effort at the run boundary (Codex P1): the disposition is only known AFTER the upsert, so
+      // we cannot write the audit row first (the canonical recordCaseEvent audit-before-mutate order) —
+      // and a pre-read-and-plan in the pipeline would race the store's own re-plan under concurrent
+      // runs, auditing a disposition that didn't happen. So we audit after the mutation but never let a
+      // transient audit_events failure throw: an unhandled reject here would abort the loop, skip
+      // finalizeRun, and leave the run stuck RUNNING (sync path 500) or marked FAILED (async) AFTER the
+      // case was already mutated. Instead we log the ledger gap (mirrors the RUN_COMPLETED + quality
+      // snapshot best-effort writes below) so an otherwise-complete run still finalizes.
       if (deps.events && upserted) {
         const eventType = CASE_EVENT_FOR[upserted.disposition];
         if (eventType) {
-          await deps.events.appendAudit({
-            eventType,
-            entityType: "case",
-            entityId: upserted.id,
-            actor: auditActor,
-            refRunId: run.id,
-            refCaseId: upserted.id,
-            refMeasureVersionId: item.measureId,
-            payload: {
-              disposition: upserted.disposition,
-              outcomeStatus: status,
-              status: upserted.status,
-              subjectId: item.employee.externalId,
-              measureId: item.measureId,
-              evaluationPeriod: period,
-              runId: run.id,
-            },
-          });
+          await deps.events
+            .appendAudit({
+              eventType,
+              entityType: "case",
+              entityId: upserted.id,
+              actor: auditActor,
+              refRunId: run.id,
+              refCaseId: upserted.id,
+              refMeasureVersionId: item.measureId,
+              payload: {
+                disposition: upserted.disposition,
+                outcomeStatus: status,
+                status: upserted.status,
+                subjectId: item.employee.externalId,
+                measureId: item.measureId,
+                evaluationPeriod: period,
+                runId: run.id,
+              },
+            })
+            .catch((err) => {
+              void deps.runStore
+                .appendLog(
+                  run.id,
+                  "WARN",
+                  `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
+                )
+                .catch(() => {});
+            });
         }
       }
     }

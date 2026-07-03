@@ -147,7 +147,13 @@ Public API actions derive audit identity from the authenticated security context
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
 - The population run pipeline is fully audited (Fable H1, 2026-07-02): `finishManualRun` emits a
   `RUN_COMPLETED` event and a `CASE_*` event per real case transition — the "every state change writes
-  `audit_event`" hard rule now holds on the highest-volume write path, not just rerun-to-verify.
+  `audit_event`" hard rule now holds on the highest-volume write path, not just rerun-to-verify. The
+  per-case audit is written AFTER the upsert (the disposition is only known post-mutation, and a
+  pre-read-and-plan would race the store's own re-plan) and is **best-effort at the run boundary**
+  (Codex P1): a transient `audit_events` failure is caught and logged as a run `WARN` (the ledger gap)
+  rather than aborting the loop — which would skip `finalizeRun` and leave the run stuck RUNNING (sync
+  500) or marked FAILED (async) after the case was already mutated. This mirrors the `RUN_COMPLETED`
+  and quality-snapshot best-effort writes.
 - Case upsert is state-aware (Fable H2, `planCaseUpsert`): it preserves operator `IN_PROGRESS` state,
   respects human closures (only a system closure — a prior auto-resolve or a lapsed auto-exclusion —
   reopens), never drifts `closed_at`, and active-case rollups count `ACTIVE_CASE_STATUSES`

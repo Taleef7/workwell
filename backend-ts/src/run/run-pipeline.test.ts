@@ -171,6 +171,40 @@ test("SITE run with an unknown site is an invalid request", async () => {
   await assert.rejects(executeManualRun(deps, { scopeType: "SITE" }), InvalidRunRequestError);
 });
 
+test("Codex P1: a failing case-audit write never fails an otherwise-complete run (logged ledger gap, not FAILED)", async () => {
+  // If deps.events.appendAudit rejects on a CASE_* event (transient audit_events failure), the case is
+  // already mutated; an unhandled reject would abort the loop, skip finalizeRun, and leave the run stuck
+  // RUNNING (sync 500) or FAILED (async) after the mutation. The per-case audit is best-effort: the run
+  // still finalizes and the gap is logged.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-auditfail-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runStore = new SqliteRunStore(db);
+  const failingAuditDeps: RunPipelineDeps = {
+    runStore,
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore: new SqliteCaseStore(db),
+    engine: new CqlExecutionEngine(),
+    employees: EMPLOYEES.slice(0, 4),
+    actor: "cm@workwell.dev",
+    events: {
+      async appendAudit(input) {
+        if (input.entityType === "case") throw new Error("audit_events insert failed");
+        // RUN_COMPLETED (entityType "run") succeeds — it is independently best-effort.
+      },
+    },
+  };
+  // The default-date ALL_PROGRAMS run produces non-compliant subjects → case upserts → CASE_* audit
+  // attempts (same slice the H1 test relies on for case events).
+  const res = await executeManualRun(failingAuditDeps, { scopeType: "ALL_PROGRAMS" });
+  assert.equal(res.status, "COMPLETED", "the run still finalizes COMPLETED despite the case-audit failures");
+  assert.equal((await runStore.getRun(res.runId))?.status, "COMPLETED", "persisted status is COMPLETED, not FAILED/RUNNING");
+  // The cases were still upserted (the mutation is not rolled back — the outcome/case are authoritative).
+  assert.ok((await failingAuditDeps.caseStore!.listCases({ limit: 1000 })).length > 0, "cases were still created");
+  // The ledger gap is observable via a run WARN log.
+  const logs = await runStore.listLogs(res.runId, 1000);
+  assert.ok(logs.some((l) => l.level === "WARN" && /Case audit.*ledger gap/.test(l.message)), "a WARN log records the audit gap");
+});
+
 test("finishOrFail finalizes the run FAILED when background completion rejects (no stuck RUNNING)", async () => {
   // A failure OUTSIDE the per-subject engine try/catch (here: recordOutcome throws) must not
   // leave an async run stuck RUNNING — finishOrFail catches it and finalizes FAILED.

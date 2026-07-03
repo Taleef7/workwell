@@ -608,6 +608,11 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
   outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
   events). Population runs previously wrote **no** case/run audit events at all — the H1 hard-rule fix.
+  The per-case audit is **best-effort at the run boundary** (Codex P1): it is written after the upsert
+  (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
+  logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
+  instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
+  `RUN_COMPLETED` best-effort write).
 
 ## 5) `evidence_json` Contract (authoritative)
 
