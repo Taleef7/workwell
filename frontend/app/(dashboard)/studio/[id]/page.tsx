@@ -92,7 +92,13 @@ export default function StudioMeasurePage() {
   const tabLabels: Record<Tab, string> = { spec: "Spec", cql: "CQL", rules: "Rule Builder", valuesets: "Value Sets", tests: "Tests", release: "Release & Approval", traceability: "Traceability", standards: "Standards" };
   const tablistRef = useRef<HTMLDivElement>(null);
 
-  // Roving-tabindex arrow-key navigation across the tab strip (WCAG ARIA tabs pattern).
+  // Roving-tabindex arrow-key navigation across the tab strip (WCAG ARIA tabs pattern), MANUAL
+  // activation (Fable H11): arrow keys move FOCUS only — they no longer switch the active tab. Switching
+  // tabs unmounts the current tabpanel and discards its unsaved authoring draft (Spec/Rule/Tests state is
+  // component-local), so auto-activating on ArrowLeft/Right meant a single accidental keystroke destroyed
+  // an author's in-progress work with no warning. The user now confirms the switch with Enter/Space/click
+  // (the tab button's onClick), which is the WCAG-recommended manual-activation pattern for tabs whose
+  // panels hold significant/at-risk content.
   function onTabKeyDown(e: React.KeyboardEvent, index: number) {
     let next = index;
     if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
@@ -102,7 +108,6 @@ export default function StudioMeasurePage() {
     else return;
     e.preventDefault();
     const nextTab = tabs[next];
-    setTab(nextTab);
     tablistRef.current?.querySelector<HTMLButtonElement>(`#studio-tab-${nextTab}`)?.focus();
   }
 
@@ -128,7 +133,9 @@ export default function StudioMeasurePage() {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {measure ? (
+          {/* The measure-version audit packet endpoint is [APPROVER,A]; an AUTHOR saw the button and got
+              a guaranteed 403 (Fable H10). Gate it by canApprove. */}
+          {measure && canApprove ? (
             <AuditPacketExportButton
               api={api}
               path={currentMeasureVersionId ? `/api/auditor/measure-versions/${currentMeasureVersionId}/packet` : ""}
@@ -203,6 +210,7 @@ export default function StudioMeasurePage() {
           oshaReferences={oshaReferences}
           onSaved={load}
           onError={(msg) => setError(msg || null)}
+          canAuthor={canClone}
         />
         </div>
       ) : null}
@@ -223,6 +231,7 @@ export default function StudioMeasurePage() {
           onError={(msg) => setError(msg || null)}
           canClone={canClone}
           onCreateNewVersion={createNewVersion}
+          canAuthor={canClone}
           liveCompileStatus={liveCompileStatus}
           onCompileStatusChange={setLiveCompileStatus}
         />
@@ -231,7 +240,7 @@ export default function StudioMeasurePage() {
 
       {measure && tab === "rules" ? (
         <div role="tabpanel" id="studio-tabpanel-rules" aria-labelledby="studio-tab-rules">
-        <RuleBuilderTab measure={measure} measureId={measureId} api={api} onSaved={load} onError={(msg) => setError(msg || null)} />
+        <RuleBuilderTab measure={measure} measureId={measureId} api={api} onSaved={load} onError={(msg) => setError(msg || null)} canAuthor={canClone} />
         </div>
       ) : null}
 
@@ -257,6 +266,7 @@ export default function StudioMeasurePage() {
           initialFixtures={measure.testFixtures ?? []}
           onSaved={load}
           onError={(msg) => setError(msg || null)}
+          canAuthor={canClone}
         />
         </div>
       ) : null}

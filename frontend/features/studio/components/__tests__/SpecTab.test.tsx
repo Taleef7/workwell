@@ -36,7 +36,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function renderSpecTab(api: Partial<ApiClient>) {
+function renderSpecTab(api: Partial<ApiClient>, canAuthor = true) {
   return render(
     <SpecTab
       measure={sampleMeasure}
@@ -45,6 +45,7 @@ function renderSpecTab(api: Partial<ApiClient>) {
       oshaReferences={[]}
       onSaved={() => {}}
       onError={() => {}}
+      canAuthor={canAuthor}
     />
   );
 }
@@ -67,6 +68,12 @@ describe("SpecTab", () => {
       // getByLabelText resolves the control only when a <label htmlFor> is wired to its id.
       expect(screen.getByLabelText(labelText)).toBeInTheDocument();
     }
+  });
+
+  it("Fable H10: a non-author (canAuthor=false) sees the Save + AI Draft controls disabled, not a 403", () => {
+    renderSpecTab({ post: vi.fn(), put: vi.fn() }, false);
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "AI Draft Spec" })).toBeDisabled();
   });
 
   it("shows an in-flight 'Saving…' state on the Save Draft button while the save is pending", async () => {

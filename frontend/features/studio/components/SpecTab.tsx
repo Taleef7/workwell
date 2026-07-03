@@ -14,9 +14,12 @@ type Props = {
   oshaReferences: OshaReference[];
   onSaved: () => void;
   onError: (msg: string) => void;
+  /** AUTHOR/ADMIN — spec save + AI draft are [AUTHOR,A] on the backend; a non-author (e.g. an APPROVER
+   *  landing on this default tab) previously saw the controls and got a guaranteed 403 (Fable H10). */
+  canAuthor: boolean;
 };
 
-export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onError }: Props) {
+export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onError, canAuthor }: Props) {
   const [policyRef, setPolicyRef] = useState(measure.policyRef ?? "");
   const [oshaReferenceId, setOshaReferenceId] = useState<string | null>(measure.oshaReferenceId ?? null);
   const [description, setDescription] = useState(measure.description ?? "");
@@ -112,9 +115,10 @@ export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onEr
           variant="primary"
           size="sm"
           onClick={draftWithAi}
-          disabled={draftingSpec}
+          disabled={draftingSpec || !canAuthor}
           isLoading={draftingSpec}
           loadingText="Drafting…"
+          title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
         >
           AI Draft Spec
         </Button>
@@ -189,9 +193,10 @@ export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onEr
           variant="primary"
           size="sm"
           onClick={save}
-          disabled={savingSpec}
+          disabled={savingSpec || !canAuthor}
           isLoading={savingSpec}
           loadingText="Saving…"
+          title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
         >
           Save Draft
         </Button>

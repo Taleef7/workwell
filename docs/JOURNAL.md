@@ -1,9 +1,9 @@
 # Journal
 
-## 2026-07-03 — Hardening sprint, block 4a: frontend reliability + case-detail RBAC (Fable M20/M21/M24/H9)
+## 2026-07-03 — Hardening sprint, block 4: frontend reliability + role-fit + Studio (Fable H9/H10/H11/M20/M21/M24)
 
-Fourth Fable block (frontend), part A — the "app randomly misbehaves" reliability bugs + the case-detail
-role-fit gap. Frontend only; no backend/schema.
+Fourth (final) Fable block — frontend: the "app randomly misbehaves" reliability bugs, the case-detail +
+Studio role-fit gaps, and the Studio unsaved-work hazard. Frontend only; no backend/schema.
 
 - **M24 — token refresh had no single-flight and didn't propagate.** Parallel 401s each POSTed
   `/api/auth/refresh` against the *rotating* refresh cookie, so the second racer could fail → a spurious
@@ -22,8 +22,18 @@ role-fit gap. Frontend only; no backend/schema.
   escalate/delivery/evidence — all guaranteed 403s) and the evidence panel 403'd into a misleading "no
   evidence." Gated all write controls + the evidence section behind `canManageCases` (mirrors the API +
   the nav gating #181 already had; the page was just missed).
-- **Frontend lint clean, 107 vitest pass, build green. No backend, no schema.** Studio role-fit (H10) +
-  unsaved-work (H11) follow as block 4b.
+- **H10 — Studio showed author-only controls to APPROVERs and the measure-version packet to AUTHORs.**
+  The Spec tab is the default, so an APPROVER's first natural action (edit + Save) was a guaranteed 403.
+  Threaded `canAuthor` (= `canAuthorMeasures`) into the four authoring tabs (Spec/CQL/Rule/Tests) —
+  Save/Compile/AI-draft are disabled with a role hint for non-authors — and gated the measure-version
+  audit-packet button (`[APPROVER,A]`) by `canApprove`.
+- **H11 — a Studio tab switch silently destroyed unsaved authoring work.** Draft state is component-local
+  and switching tabs unmounts the panel, so the ARIA arrow-key nav auto-activating on ArrowLeft/Right
+  meant one accidental keystroke wiped an author's in-progress work. Switched to **manual activation**
+  (WCAG pattern): arrow keys move focus only; the user confirms the switch with Enter/Space/click.
+- **Frontend lint clean, 108 vitest pass (incl. a new H10 guard test), build green. No backend, no
+  schema.** This closes the fourth and final Fable hardening block — all four themes (audit, scale,
+  correctness, frontend) now addressed.
 
 ## 2026-07-03 — Hardening sprint, block 3: correctness on the real-data path (Fable H3/H8/M13/M19)
 
