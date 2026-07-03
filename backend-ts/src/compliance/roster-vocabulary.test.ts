@@ -41,6 +41,20 @@ test("contraindication → EXCLUDED wins over refusal", () => {
   assert.equal(cell.status, "EXCLUDED");
 });
 
+test("Fable M12: a canonically COMPLIANT outcome is never masked as DECLINED by an earlier refusal", () => {
+  // PERMANENT: vaccinated (2 doses) after an earlier documented refusal → COMPLIANT, not DECLINED.
+  const permanent = deriveCell("COMPLIANT", ev([["Dose Count", 2], ["Refused", true]]), "mmr", PERIOD);
+  assert.deepEqual(permanent, { status: "COMPLIANT", method: "2 valid dose(s)" });
+  // RECURRING: current on Td/Tdap despite a prior refusal → COMPLIANT, not DECLINED.
+  const recurring = deriveCell(
+    "COMPLIANT",
+    ev([["Refused", true], ["Most Recent Tdap Date", "2026-01-01T00:00:00Z"], ["Days Since Last Tdap", 160]]),
+    "adult_immunization",
+    PERIOD,
+  );
+  assert.equal(recurring.status, "COMPLIANT");
+});
+
 test("RECURRING OVERDUE → OVERDUE + recency method", () => {
   const cell = deriveCell(
     "OVERDUE",

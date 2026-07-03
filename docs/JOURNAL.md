@@ -1,5 +1,51 @@
 # Journal
 
+## 2026-07-03 — Hardening sprint, blocks 5–7: close out the remaining Fable Mediums + Lows
+
+Three parallel PRs finishing the Fable 2026-07-02 review (all Highs + the top-10 Mediums shipped in blocks
+1–4 / PRs #226–#229). No new deps.
+
+**Backend security & lifecycle (PR #230 — `feat/hardening-backend-security`):** M1 (sanitize caller-supplied
+`triggeredBy` so a CM can't forge `seed:*`/`scheduler` run labels), M2 (`Active→Deprecated` removed from the
+APPROVER-reachable `/status` — deprecation is ADMIN-only `/deprecate`), M3 (`Draft→Approved` via `/status`
+now enforces the compile+fixture gate), M4 (`POST /api/ai/**` gated AUTHOR/ADMIN — the bare draft-spec alias
+no longer lets CM/APPROVER drive billed OpenAI), **M5 (server-side refresh-token family revocation, KV-backed
+— logout + rotated-jti-reuse revoke the family; fail-open on a KV outage; graceful for legacy tokens)**, M8
+(audit packet lists cases with an explicit high limit, was dropping links past 50), M23 (outreach-template
+GET made CM/ADMIN-readable), L1 (identity route `%zz` → 404 not 500), L5 (stale comment). 881 tests / 880 pass
+/ 1 pg-skip.
+
+**Backend correctness & robustness (`feat/hardening-backend-correctness`):** M7 + M15 (atomic
+`failStuckRuns` = `UPDATE … RETURNING`, excludes `seed:%`; `finalizeRun` terminal-status-guarded so a
+swept-FAILED run isn't resurrected and a backdated seed run isn't swept mid-seed → no double-seed), M10
+(a population run closes prior-cycle OPEN cases it evaluated — `CYCLE_ROLLED_OVER`, audited system closure —
+so rolled-over cycles no longer orphan the old case in `?status=open`/campaigns/exports; the Java V022 class),
+M11 (segment gate no longer blocks case **resolution** — a COMPLIANT/EXCLUDED outcome always closes an
+existing case, even out-of-cohort), M12 (roster `deriveCell` shows DECLINED only when the canonical bucket is
+non-compliant, never masking a COMPLIANT outcome), M14 (`isUuid` guards on the Pg `case_actions`/`run_logs`
+methods so a non-uuid path param is a clean miss, not a `::uuid` 500), M18 (offset-less CQL DateTimes rendered
+as UTC — host-timezone-independent evidence). Lows: L8 (Pg run-day filter `AT TIME ZONE 'UTC'`), L12 (segment
+`updateSegment` preserves `rule_json` verbatim on the ceiling too), L24 (roster `panel=bogus` → 400), L15/L16
+(MEASURES.md doc currency — flu OVERDUE, CMS122 recency SIMPLIFIED note). **M9 (scheduler cross-process claim)
+documented as a known limitation** — a fully race-free claim needs an owner-gated unique DB constraint
+(schema is Taleef's); the single-container topology makes the practical double-fire risk low (one extra
+idempotent recompute). New regression tests for M2/M3, M4/M23, M5, M7/M15, M10/M11, M12, L24.
+
+**Frontend reliability + a11y (`feat/hardening-frontend-mediums`):** M22 (run-status key ownership — a sync
+EMPLOYEE recalc no longer wipes an in-flight ALL_PROGRAMS run's persisted state), M25 (Export Run Audit Packet
+gated to CM/ADMIN), M26 (SegmentEditorModal dirty-check confirm on backdrop/Escape), L19 (theme-aware Recharts
+tooltips — no white-on-dark), L20 (cross-tab `storage` adoption of a run), L21 (`/people` access-denied card
+for non-CM), L22 (person source lists keyed by `tenantId|externalId`), L25 (`frontend/.env.local.example` +
+README note). 109 vitest + lint + build green.
+
+**Deferred / accepted Lows (documented, not code):** L2 (authorize default-permit — safe today; all handlers
+traced), L3 (shared demo password — accepted demo posture), L4 (login rate-limit), L6 (campaign counting once
+a real provider is wired), L9 (scale-decode fixed-width — works ≤99 locations; a delimiter-based decode couples
+store→synthetic), L10 (multi-statement write atomicity), L11 (module-level pool pinning), L13 (MCP role
+incoherence), L14 (AI prompt fencing — before E12 PR-2), L17 (out-of-IPP signal), L18 (deprecated-measure scale
+reconcile), L23 (nav read-surface hiding — product decision). Each noted for a future owner-gated or
+epic-scoped pass.
+
 ## 2026-07-03 — Hardening sprint, block 4: frontend reliability + role-fit + Studio (Fable H9/H10/H11/M20/M21/M24)
 
 Fourth (final) Fable block — frontend: the "app randomly misbehaves" reliability bugs, the case-detail +

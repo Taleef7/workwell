@@ -95,8 +95,13 @@ These four measures have complete CQL libraries, are seeded as Active, and run a
 #### Outcome mapping
 - `EXCLUDED` when `Has Valid Exemption = true`
 - `COMPLIANT` when eligible, not exempt, vaccinated this season
-- `MISSING_DATA` when eligible, not exempt, not vaccinated this season
-- `OVERDUE` is hard-coded false in current CQL
+- `DUE_SOON` when eligible, not exempt, not vaccinated this season, last vaccine ≤ 365 days ago
+- `OVERDUE` when eligible, not exempt, not vaccinated this season, last vaccine > 365 days ago
+- `MISSING_DATA` when eligible, not exempt, no flu vaccine record on file
+
+<!-- Fable L16 doc-currency fix (2026-07-03): `flu_vaccine.cql` has a real `Overdue` branch
+(`Days Since Last Flu Vaccine > 365`); the earlier "OVERDUE is hard-coded false" note was stale. -->
+
 
 ---
 
@@ -247,6 +252,11 @@ Outcome mapping:
 - `OVERDUE` when diabetes diagnosis, not excluded, HbA1c value > 9% (poor control — intervention needed)
 - `COMPLIANT` when diabetes diagnosis, not excluded, HbA1c value ≤ 9% (adequate control)
 - `DUE_SOON` — not applicable (hard-coded false; control status drives outcome, not recency)
+
+> **Known simplification (Fable L15):** the `Has Recent HbA1c Result` define does **not** yet apply a
+> recency window, so an old HbA1c can read COMPLIANT. This is the documented **SIMPLIFIED** criterion in
+> the E14 CMS122 fidelity report (a true measurement-period window needs the VSAC-backed value-set
+> resolver, blocked on credentials); the define/label keep the "recent" name pending that wiring.
 
 ---
 

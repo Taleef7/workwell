@@ -184,13 +184,15 @@ export class PgOutcomeStore implements OutcomeStore {
   }
 
   async listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {
-    // Measure + day-granular run-period filter pushed into SQL (bounded scan). started_at::date
-    // is the run's started day; the casts keep a null bind from constraining the predicate.
+    // Measure + day-granular run-period filter pushed into SQL (bounded scan). The run's started day is
+    // taken in UTC (`AT TIME ZONE 'UTC'`) so the boundary matches the SQLite floor's UTC substring and is
+    // independent of the DB session timezone — a session-local `::date` could shift a boundary run by a
+    // day on a non-UTC connection (Fable L8). The casts keep a null bind from constraining the predicate.
     const where: string[] = [];
     const binds: unknown[] = [];
     if (filter.measureId) where.push(`o.measure_id = $${binds.push(filter.measureId)}`);
-    if (filter.from) where.push(`r.started_at::date >= $${binds.push(filter.from)}::date`);
-    if (filter.to) where.push(`r.started_at::date <= $${binds.push(filter.to)}::date`);
+    if (filter.from) where.push(`(r.started_at AT TIME ZONE 'UTC')::date >= $${binds.push(filter.from)}::date`);
+    if (filter.to) where.push(`(r.started_at AT TIME ZONE 'UTC')::date <= $${binds.push(filter.to)}::date`);
     // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
     if (filter.excludeScale) where.push(`r.triggered_by <> 'seed:scale'`);
     // Fable M16: exclude the backdated synthetic trend-history rows IN SQL — the live read models keep
