@@ -216,3 +216,29 @@ test("declination: a windowed rule with a refusal binding emits the Refused defi
   assert.match(cql, /define "Refused":/);
   assert.match(cql, /x\.system = 'urn:workwell:vs:audiogram-refusal' and x\.code = 'audiogram-refusal'/);
 });
+
+// --- Fable M19: reject degenerate numeric params (would compile clean but be silently wrong) --------
+const WINDOWED_CODES: CodegenBindings = {
+  enrollment: { code: "hearing-enrollment", valueSet: "urn:workwell:vs:hearing-enrollment" },
+  waiver: { code: "audiogram-waiver", valueSet: "urn:workwell:vs:audiogram-waiver" },
+  event: { code: "audiogram-procedure", valueSet: "urn:workwell:vs:audiogram-procedures", type: "procedure" },
+};
+
+test("M19: series-completion requiredDoses < 1 throws (was: everyone COMPLIANT with 0 doses)", () => {
+  assert.throws(() => gen({ type: "series-completion", requiredDoses: 0 }, SERIES_CODES), /requiredDoses must be >= 1/);
+  assert.throws(() => gen({ type: "series-completion", requiredDoses: -2 }, SERIES_CODES), /requiredDoses must be >= 1/);
+  assert.throws(() => gen({ type: "series-completion", requiredDoses: 1.5 }, SERIES_CODES), /requiredDoses must be an integer/);
+});
+
+test("M19: windowed-recency dueSoonDays >= windowDays throws (was: COMPLIANT unreachable)", () => {
+  assert.throws(() => gen({ type: "windowed-recency", windowDays: 30, dueSoonDays: 35 }, WINDOWED_CODES), /must be < windowDays/);
+  assert.throws(() => gen({ type: "windowed-recency", windowDays: 365, dueSoonDays: 365 }, WINDOWED_CODES), /must be < windowDays/);
+  assert.throws(() => gen({ type: "windowed-recency", windowDays: 0, dueSoonDays: 0 }, WINDOWED_CODES), /windowDays must be >= 1/);
+  assert.throws(() => gen({ type: "windowed-recency", windowDays: 365, dueSoonDays: -1 }, WINDOWED_CODES), /dueSoonDays must be >= 0/);
+  assert.throws(() => gen({ type: "windowed-recency", windowDays: 365, dueSoonDays: 30, gracePeriodDays: -5 }, WINDOWED_CODES), /gracePeriodDays must be >= 0/);
+});
+
+test("M19: valid params still generate (guard doesn't reject the real measures)", () => {
+  assert.match(gen({ type: "series-completion", requiredDoses: 2 }, SERIES_CODES), /"Dose Count" >= 2/);
+  assert.match(gen({ type: "windowed-recency", windowDays: 365, dueSoonDays: 30 }, WINDOWED_CODES), /define "Outcome Status":/);
+});

@@ -236,7 +236,39 @@ define "Outcome Status":
   );
 }
 
+/**
+ * Validate numeric rule params up front (Fable M19) so a degenerate value throws (→ 400 at the route)
+ * instead of compiling clean but silently-wrong CQL: `dueSoonDays > windowDays` makes `compliantMax`
+ * negative so COMPLIANT is unreachable, and a non-alternatives `requiredDoses: 0` makes `Dose Count >= 0`
+ * always true — everyone COMPLIANT with zero doses. Both previously compiled and `saveRule` persisted
+ * them, mislabeling an entire cohort with nothing flagging it. (Per-alternative requiredDoses/interval
+ * lengths are validated in `seriesCompletion`, where the alternative label is in scope.)
+ */
+export function validateRule(rule: Rule): void {
+  const int = (v: number, label: string): void => {
+    if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${label} must be an integer (got ${JSON.stringify(v)})`);
+  };
+  if (rule.type === "series-completion") {
+    if (!rule.alternatives?.length) {
+      int(rule.requiredDoses, "requiredDoses");
+      if (rule.requiredDoses < 1) throw new Error(`requiredDoses must be >= 1 (got ${rule.requiredDoses})`);
+    }
+  } else if (rule.type === "windowed-recency") {
+    int(rule.windowDays, "windowDays");
+    int(rule.dueSoonDays, "dueSoonDays");
+    if (rule.windowDays < 1) throw new Error(`windowDays must be >= 1 (got ${rule.windowDays})`);
+    if (rule.dueSoonDays < 0) throw new Error(`dueSoonDays must be >= 0 (got ${rule.dueSoonDays})`);
+    if (rule.dueSoonDays >= rule.windowDays)
+      throw new Error(`dueSoonDays (${rule.dueSoonDays}) must be < windowDays (${rule.windowDays}) so a COMPLIANT band exists`);
+    if (rule.gracePeriodDays != null) {
+      int(rule.gracePeriodDays, "gracePeriodDays");
+      if (rule.gracePeriodDays < 0) throw new Error(`gracePeriodDays must be >= 0 (got ${rule.gracePeriodDays})`);
+    }
+  }
+}
+
 export function generateCql(input: GenerateCqlInput): string {
+  validateRule(input.rule);
   switch (input.rule.type) {
     case "series-completion":
       return seriesCompletion(input);
