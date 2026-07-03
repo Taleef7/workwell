@@ -99,16 +99,31 @@ export class PgOutcomeStore implements OutcomeStore {
     }
   }
 
-  async listOutcomes(runId: string): Promise<OutcomeRecord[]> {
+  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
     if (!isUuid(runId)) return [];
+    // Optional LIMIT/OFFSET paging (Fable H4) — the id tiebreak makes paging deterministic when many
+    // rows share an evaluated_at (all of a run's outcomes are stamped within the same run).
+    const binds: unknown[] = [runId];
+    let page = "";
+    if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
+    if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;
     const { rows } = await this.pool.query<OutcomeRow>(
       `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
-         FROM ${T} WHERE run_id = $1 ORDER BY evaluated_at ASC`,
-      [runId],
+         FROM ${T} WHERE run_id = $1 ORDER BY evaluated_at ASC, id ASC${page}`,
+      binds,
     );
     return rows.map(toRecord);
+  }
+
+  async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {
+    if (!isUuid(runId)) return [];
+    const { rows } = await this.pool.query<{ measure_id: string }>(
+      `SELECT DISTINCT measure_id FROM ${T} WHERE run_id = $1 LIMIT $2`,
+      [runId, Math.max(1, limit)],
+    );
+    return rows.map((r) => r.measure_id);
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
@@ -178,6 +193,9 @@ export class PgOutcomeStore implements OutcomeStore {
     if (filter.to) where.push(`r.started_at::date <= $${binds.push(filter.to)}::date`);
     // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
     if (filter.excludeScale) where.push(`r.triggered_by <> 'seed:scale'`);
+    // Fable M16: exclude the backdated synthetic trend-history rows IN SQL — the live read models keep
+    // only the latest run per measure, so these are otherwise fetched then discarded.
+    if (filter.excludeTrendHistory) where.push(`r.triggered_by <> 'seed:trend-history'`);
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { rows } = await this.pool.query<{
       run_id: string;

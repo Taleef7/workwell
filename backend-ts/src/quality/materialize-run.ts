@@ -85,8 +85,10 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   // Latest COMPLETED `seed:scale` run per measure, so the population-scale tenant folds in via the
   // bounded SQL GROUP-BY (`aggregateScaleRun`) — never by materializing its 120k per-subject rows.
   const latestScaleRunByMeasure = new Map<string, { runId: string; startedAt: string }>();
-  for (const r of await deps.runStore.listRuns(100_000)) {
-    if (r.triggeredBy !== SCALE_TRIGGER || !isCompletedRun(r.status) || !r.scopeId) continue;
+  // Fable M16: query only the ~14 seed:scale runs by triggered_by instead of scanning the whole runs
+  // table (listRuns(100_000)) on every run completion.
+  for (const r of await deps.runStore.listRunsByTriggeredBy(SCALE_TRIGGER)) {
+    if (!isCompletedRun(r.status) || !r.scopeId) continue;
     const prev = latestScaleRunByMeasure.get(r.scopeId);
     if (!prev || r.startedAt > prev.startedAt) latestScaleRunByMeasure.set(r.scopeId, { runId: r.id, startedAt: r.startedAt });
   }

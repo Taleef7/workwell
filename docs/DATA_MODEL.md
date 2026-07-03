@@ -194,6 +194,21 @@ INDEX outcomes_employee_measure_period_idx(employee_id, measure_version_id, eval
 INDEX outcomes_run_id_idx(run_id)
 ```
 
+> **Spike-store indexes (Fable H5 hardening, 2026-07-03):** the `backend-ts` `workwell_spike.outcomes`
+> table (floor + ceiling) additionally carries `spike_outcomes_subject_idx (subject_id, evaluated_at
+> DESC)` and `spike_outcomes_measure_idx (measure_id, evaluated_at)` — restoring the per-subject /
+> per-measure coverage the Java-era `outcomes_employee_measure_period_idx` had, so
+> `listOutcomesForEmployee` / `listOutcomesForMeasure` don't seq-scan the ~1.68M-row live table.
+> Additive `CREATE INDEX IF NOT EXISTS`, reversible (`DROP INDEX`), no data migration.
+> **The four run-detail read paths are bounded (Fable H4):** the outcomes grid (`GET
+> /api/runs/:id/outcomes`) returns the whole run by default (a live ALL_PROGRAMS run is ~2,100 rows) and
+> caps only a pathologically large (120k `seed:scale`) run to the first 5,000 rows so the worker never
+> materializes them all; an explicit `?limit`/`?offset` pages (max 2,000) and `X-Total-Count` always
+> carries the true count; QRDA + the summary MeasureReport build from the bounded `countOutcomesByStatus`
+> histogram (`populationCountsFromStatus`) + `distinctMeasuresForRun` (no per-subject rows); the
+> individual/bundle MeasureReport caps at 5000 subjects (422 → use `?type=summary`); the outcomes CSV
+> streams in pages (`outcomesCsvStream`). None materializes a `seed:scale` run's 120k rows.
+
 ### 3.10 `cases`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()

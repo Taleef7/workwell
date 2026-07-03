@@ -44,8 +44,8 @@ import {
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
-import { buildSummaryMeasureReport, buildMeasureReportBundle } from "../fhir/measure-report.ts";
-import { buildQrda3Document } from "../fhir/qrda3-export.ts";
+import { buildMeasureReportBundle, buildSummaryMeasureReportFromCounts, populationCountsFromStatus } from "../fhir/measure-report.ts";
+import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 
 interface RunsEnv {
   DB: CloudDatabase;
@@ -91,6 +91,15 @@ async function enabledSegments(env: RunsEnv): Promise<HydratedSegment[]> {
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+
+/** Cap on subjects for a per-subject (individual/bundle) MeasureReport — a 120k seed:scale run would
+ *  otherwise build a 120k-entry document (Fable H4). The summary report is the aggregate above this. */
+const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
+
+/** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
+ *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
+ *  materializes 120k hydrated rows (Fable H4 / Codex P2). Above this, page with an explicit ?limit. */
+const OUTCOMES_GRID_FULL_CAP = 5000;
 
 /**
  * Run an async-scope (ALL_PROGRAMS/SITE) manual run or rerun: create the run + return RUNNING
@@ -312,19 +321,41 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     }
   }
 
-  // Per-employee outcome rows for the run detail grid (RunOutcomeRow).
+  // Per-employee outcome rows for the run detail grid (RunOutcomeRow). Bounded for the 120k seed:scale
+  // runs (Fable H4) WITHOUT truncating a normal run (Codex P2): the legacy default returns the whole run
+  // — a live ALL_PROGRAMS run is only ~2,100 rows, and the /runs page renders the array directly without
+  // paging — and only a pathologically large (scale) run is capped to the first page so the single-replica
+  // worker never materializes 120k hydrated rows. An explicit ?limit/?offset always pages. X-Total-Count
+  // carries the true count (a bounded GROUP BY) so a paging client can detect a capped scale run.
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
-    return json(toRunOutcomeRows(await (await outcomes(env)).listOutcomes(outcomesId)));
+    const os = await outcomes(env);
+    const total = (await os.countOutcomesByStatus(outcomesId)).reduce((sum, c) => sum + c.count, 0);
+    const hasExplicitPaging = url.searchParams.has("limit") || url.searchParams.has("offset");
+    let rows;
+    if (hasExplicitPaging) {
+      const limit = clampInt(url.searchParams.get("limit"), 500, 1, 2000);
+      const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+      rows = await os.listOutcomes(outcomesId, { limit, offset });
+    } else if (total > OUTCOMES_GRID_FULL_CAP) {
+      rows = await os.listOutcomes(outcomesId, { limit: OUTCOMES_GRID_FULL_CAP }); // oversized (scale) run
+    } else {
+      rows = await os.listOutcomes(outcomesId); // whole run — no truncation for normal runs
+    }
+    return new Response(JSON.stringify(toRunOutcomeRows(rows)), {
+      status: 200,
+      headers: { "content-type": "application/json", "X-Total-Count": String(total) },
+    });
   }
 
-  // QRDA Category III aggregate export (stub) for a completed single-measure run (#91 / E3.3).
+  // QRDA Category III aggregate export (stub) for a completed single-measure run (#91 / E3.3). Built
+  // from the bounded status histogram, not the per-subject rows (Fable H4) — safe at 120k scale.
   const qrdaId = pathname.match(/^\/api\/runs\/([^/]+)\/qrda$/)?.[1];
   if (qrdaId && req.method === "GET") {
     const run = await (await store(env)).getRun(qrdaId);
     if (!run) return json({ error: "not_found", id: qrdaId }, 404);
-    const rows = await (await outcomes(env)).listOutcomes(qrdaId);
-    const measureIds = [...new Set(rows.map((o) => o.measureId))];
+    const os = await outcomes(env);
+    const measureIds = await os.distinctMeasuresForRun(qrdaId, 2);
     if (measureIds.length !== 1) {
       return json(
         { error: "unsupported_run_scope", message: "QRDA III requires a completed single-measure run", measures: measureIds.length },
@@ -333,7 +364,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     }
     const fmt = url.searchParams.get("format") ?? "xml";
     if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
-    return new Response(buildQrda3Document(run, measureIds[0]!, rows), {
+    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId));
+    return new Response(buildQrda3DocumentFromCounts(run, measureIds[0]!, counts), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -347,8 +379,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
   if (mrId && req.method === "GET") {
     const run = await (await store(env)).getRun(mrId);
     if (!run) return json({ error: "not_found", id: mrId }, 404);
-    const rows = await (await outcomes(env)).listOutcomes(mrId);
-    const measureIds = [...new Set(rows.map((o) => o.measureId))];
+    const os = await outcomes(env);
+    const measureIds = await os.distinctMeasuresForRun(mrId, 2);
     if (measureIds.length !== 1) {
       return json(
         { error: "unsupported_run_scope", message: "MeasureReport requires a completed single-measure run", measures: measureIds.length },
@@ -365,8 +397,29 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
           "content-disposition": `attachment; filename="measure-report-${mrId}-${type}.json"`,
         },
       });
-    if (type === "summary") return fhir(buildSummaryMeasureReport(run, measureId, rows));
-    if (type === "individual" || type === "bundle") return fhir(buildMeasureReportBundle(run, measureId, rows));
+    // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
+    if (type === "summary") {
+      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId));
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts));
+    }
+    // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
+    // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.
+    if (type === "individual" || type === "bundle") {
+      const total = (await os.countOutcomesByStatus(mrId)).reduce((sum, c) => sum + c.count, 0);
+      if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
+        return json(
+          {
+            error: "run_too_large",
+            message: `A per-subject ${type} MeasureReport is limited to ${MAX_INDIVIDUAL_REPORT_SUBJECTS} subjects; this run has ${total}. Use ?type=summary for the aggregate.`,
+            subjects: total,
+            limit: MAX_INDIVIDUAL_REPORT_SUBJECTS,
+          },
+          422,
+        );
+      }
+      const rows = await os.listOutcomes(mrId, { limit: MAX_INDIVIDUAL_REPORT_SUBJECTS });
+      return fhir(buildMeasureReportBundle(run, measureId, rows));
+    }
     return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);
   }
 

@@ -8,7 +8,7 @@
  */
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
-import { countPopulations } from "./measure-report.ts";
+import { countPopulations, type PopulationCounts } from "./measure-report.ts";
 
 const LOINC = "2.16.840.1.113883.6.1";
 const ACT = "2.16.840.1.113883.5.4";
@@ -31,7 +31,11 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
 ];
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
-  const c = countPopulations(outcomes);
+  return buildQrda3DocumentFromCounts(run, measureId, countPopulations(outcomes));
+}
+
+/** QRDA III from pre-aggregated proportion counts (the bounded Fable H4 path). */
+export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, c: PopulationCounts): string {
   const counts: Record<string, number> = { IPOP: c.ipp, DENOM: c.denom, DENEX: c.denex, NUMER: c.numer };
   const now = hl7Ts(new Date().toISOString());
   const low = hl7Ts(run.measurementPeriodStart);
