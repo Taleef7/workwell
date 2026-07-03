@@ -162,11 +162,12 @@ Public API actions derive audit identity from the authenticated security context
   stays the sole compliance authority (ADR-008).
 - The hierarchy rollup counts only COMPLETED population runs (Fable H7), never an in-flight RUNNING run's
   partial outcomes — matching every sibling read model.
-- Segment applicability gates case **creation** only, never **resolution** (Fable M11): a **COMPLIANT**
-  outcome (the one status that only ever closes an existing case — with none it is a no-op) always runs the
-  upsert, so a subject who leaves a cohort and then becomes compliant does not keep a stranded OPEN case.
-  EXCLUDED stays applicability-gated (with no existing case it would *insert* an EXCLUDED case, re-polluting
-  the gate; Codex P2).
+- Segment applicability gates case **creation** only, never **resolution** (Fable M11 / Codex P2). Two
+  close-only bypasses run the upsert even out-of-cohort so a subject who left a cohort still has their open
+  case resolved: (1) **COMPLIANT** (a `planCaseUpsert` no-op when no case exists, so always safe); (2)
+  **EXCLUDED** — but only when an active case already exists for that (subject, measure, period) (a fresh
+  waiver excuses an existing open case). EXCLUDED with *no* existing case stays applicability-gated (it would
+  otherwise *insert* a new EXCLUDED case, re-polluting the excluded lists the gate keeps clear).
 - A population run closes out **strictly-older** compliance-cycle OPEN/IN_PROGRESS cases for the
   (subject, measure) pairs it evaluated (Fable M10, `closed_reason='CYCLE_ROLLED_OVER'`, audited system
   closure) — a still-non-compliant subject's new-period case no longer leaves the old period's case orphaned

@@ -229,6 +229,26 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let compliant = 0;
   let nonCompliant = 0;
   let failures = 0;
+
+  // Active cases that exist at run start, keyed `subject|measure|period` (Codex P2). An out-of-cohort
+  // EXCLUDED outcome must be able to CLOSE/UPDATE an EXISTING active case (a fresh waiver on someone who
+  // left the cohort should still excuse their open case) — but must NOT CREATE one (that would re-pollute
+  // the excluded lists the segment gate keeps clear). So EXCLUDED bypasses applicability only when its
+  // (subject, measure, current-period) key is already active here. COMPLIANT needs no such check (it is a
+  // `planCaseUpsert` no-op with no existing case). A read failure just leaves EXCLUDED gated (safe).
+  const activeCaseKeys = new Set<string>();
+  if (deps.caseStore) {
+    for (const measureId of new Set(measureIds)) {
+      try {
+        for (const c of await deps.caseStore.listCases({ measureId, statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 })) {
+          activeCaseKeys.add(`${c.employeeId}|${c.measureId}|${c.evaluationPeriod}`);
+        }
+      } catch {
+        /* a read failure only means EXCLUDED stays applicability-gated — never abort the run */
+      }
+    }
+  }
+
   for (const item of items) {
     const config = deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target);
     const bundle = buildSyntheticBundle(item.employee, config, evalDate);
@@ -260,15 +280,16 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       evidence,
     });
     // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
-    // out-of-cohort (subject, measure) does NOT open a case. A COMPLIANT outcome only ever CLOSES an
-    // existing case (with no existing case it is a no-op — `planCaseUpsert`), so it must run even
-    // out-of-cohort, otherwise a subject who leaves a cohort and then becomes compliant keeps their OPEN
-    // case forever, feeding worklists/campaigns/openCases rollups (Fable M11). EXCLUDED is NOT bypassed:
-    // with no existing case it would INSERT a new EXCLUDED case, re-polluting out-of-cohort subjects into
-    // the closed/excluded lists the gate exists to keep clear (Codex P2) — so it stays applicability-gated.
-    // The outcome above is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent
-    // segments ⇒ all applicable.
-    const closeOnly = status === "COMPLIANT"; // the only status guaranteed never to create a case
+    // out-of-cohort (subject, measure) does NOT open a case. Two bypasses that only ever CLOSE/UPDATE an
+    // existing case (never create) run even out-of-cohort, so a subject who leaves a cohort still has
+    // their open case resolved (Fable M11 / Codex P2): (1) COMPLIANT — a `planCaseUpsert` no-op when no
+    // case exists, so always safe; (2) EXCLUDED — but ONLY when an active case already exists for its
+    // (subject, measure, period) key (a fresh waiver excuses an existing open case), because EXCLUDED
+    // with NO existing case would INSERT a new EXCLUDED case and re-pollute the gate. The outcome above
+    // is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent segments ⇒ all.
+    const closeOnly =
+      status === "COMPLIANT" ||
+      (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
     if (deps.caseStore && (closeOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
