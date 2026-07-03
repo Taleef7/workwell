@@ -137,8 +137,10 @@ class UnionFind {
  * by tenant; `displayName` comes from the ACTIVE source. Pure — pass a directory slice + links for
  * tests; defaults to the full synthetic directory + no links.
  *
- * NOTE (PR-2 scope): BROKEN removes the *direct* edge; two records still connected transitively via a
- * third record stay grouped. Sufficient for the 2-source cases; a fuller split model is future work.
+ * NOTE: BROKEN removes the *direct* edge only; two records still connected transitively via a third
+ * record stay grouped. Auto edges are a clique (not a star) and the UNLINK route re-asserts survivor
+ * connectivity, so removing a hub/anchor from a 3+-record component no longer shatters the survivors
+ * (Fable H8).
  */
 export function resolvePeople(
   directory: readonly EmployeeProfile[] = EMPLOYEES,
@@ -158,7 +160,11 @@ export function resolvePeople(
   const uf = new UnionFind();
   for (const e of directory) uf.find(refKey(recRef(e))); // seed singletons
 
-  // Auto edges: within each match-key group, a star from the first record to the rest (skip BROKEN pairs).
+  // Auto edges: within each match-key group, a pairwise CLIQUE (every pair), skipping BROKEN pairs.
+  // A star from the first record (the old model) meant a BROKEN edge to the hub disconnected the
+  // remaining members from each other — UNLINK of a 3+-record shared-id group shattered survivors the
+  // human never spoke about (Fable H8). A clique keeps survivors connected via their other direct edges;
+  // groups are tiny so O(n²) is trivial.
   const keyGroups = new Map<string, EmployeeProfile[]>();
   for (const e of directory) {
     const k = matchKey(e);
@@ -167,9 +173,11 @@ export function resolvePeople(
     else keyGroups.set(k, [e]);
   }
   for (const records of keyGroups.values()) {
-    for (let i = 1; i < records.length; i++) {
-      const { a, b } = normalizePair(recRef(records[0]!), recRef(records[i]!));
-      if (!broken.has(pairKey(a, b))) uf.union(refKey(a), refKey(b));
+    for (let i = 0; i < records.length; i++) {
+      for (let j = i + 1; j < records.length; j++) {
+        const { a, b } = normalizePair(recRef(records[i]!), recRef(records[j]!));
+        if (!broken.has(pairKey(a, b))) uf.union(refKey(a), refKey(b));
+      }
     }
   }
   // CONFIRMED edges: only between two distinct records that both exist in the directory.
@@ -217,15 +225,20 @@ export function resolvePeople(
 }
 
 /**
- * The DUPLICATE worklist — cross-system people who are **active in >1 system** (a genuine duplicate to
- * reconcile). A person with a PRIOR source is a MOBILITY case (they *moved*, one continuous history),
- * not a duplicate, so they are excluded here — the two E15 stories stay distinct for consumers.
+ * The DUPLICATE worklist — people **active in >1 system** (a genuine duplicate to reconcile). The
+ * predicate counts DISTINCT ACTIVE tenants > 1, not "has no PRIOR source" (Fable M13): a person who
+ * moved (one PRIOR link) AND has a second ACTIVE record in another system (e.g. a duplicate confirmed
+ * onto Omar) is a real duplicate and must still appear — the old "no PRIOR anywhere" test wrongly
+ * dropped them. A pure mobility person (1 ACTIVE + 1 PRIOR = a single active tenant) is not a duplicate
+ * and stays excluded, so the two E15 stories remain distinct for consumers.
  */
 export function duplicateCandidates(
   directory: readonly EmployeeProfile[] = EMPLOYEES,
   links: readonly PersonLink[] = [],
 ): Person[] {
-  return resolvePeople(directory, links).filter((p) => p.crossSystem && !p.sources.some((s) => s.status === "PRIOR"));
+  return resolvePeople(directory, links).filter(
+    (p) => new Set(p.sources.filter((s) => s.status === "ACTIVE").map((s) => s.tenantId)).size > 1,
+  );
 }
 
 /** Resolve a single person by id (over the full or a provided directory + links). */
