@@ -279,6 +279,36 @@ test("multi-child accumulation: a Plant A location totals 2 providers × 2 diffe
   }
 });
 
+test("Codex P2: an IN_PROGRESS case reconfirmed by a run is still counted as active in the rollup", async () => {
+  // The H2 upsert preserves IN_PROGRESS instead of flipping it to OPEN; the active-case count must
+  // include IN_PROGRESS or the reconfirmed case silently drops out of openCases.
+  assert.equal(employeeById("emp-009")?.providerId, "prov-001");
+
+  const dbFile = join(tmpdir(), `workwell-hier-inprogress-${crypto.randomUUID()}.sqlite`);
+  try {
+    const { runStore, outcomes: o, cases: c } = await freshStores(dbFile);
+    const run = await createAudiogramRun(runStore);
+    await o.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+    const created = await c.upsertFromOutcome({
+      runId: run.id, subjectId: "emp-009", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    });
+    assert.ok(created, "emp-009 case seeded");
+    // An operator moves the case to IN_PROGRESS…
+    await c.patchCase(created.id, { status: "IN_PROGRESS" });
+    // …and a later run reconfirms the same OVERDUE outcome — H2 preserves IN_PROGRESS.
+    const reconfirmed = await c.upsertFromOutcome({
+      runId: run.id, subjectId: "emp-009", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    });
+    assert.equal(reconfirmed?.status, "IN_PROGRESS", "IN_PROGRESS preserved by the reconfirm");
+
+    const root = await buildHierarchyRollup({ outcomeStore: o, caseStore: c }, { measureId: "audiogram" });
+    assert.equal(root.totals.openCases, 1, "the IN_PROGRESS case is still counted as active");
+    assertReconciles(root);
+  } finally {
+    try { rmSync(dbFile, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("open-case-only subject (no outcome row in scope) is a leaf with evaluated:0 openCases:1", async () => {
   // emp-009 is Plant A / prov-001 — verify before relying on it.
   assert.equal(employeeById("emp-009")?.providerId, "prov-001");

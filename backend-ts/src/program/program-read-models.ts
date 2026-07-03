@@ -13,6 +13,7 @@ import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow } from "../stores/
 import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 
@@ -162,7 +163,12 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const total = os.length;
     const compliant = n("COMPLIANT");
     const openCaseCount = cases.filter(
-      (c) => c.measureId === m.id && c.status === "OPEN" && siteMatch(c.employeeId) && tenantMatch(c.employeeId) && inPeriod(c.createdAt),
+      (c) =>
+        c.measureId === m.id &&
+        (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) &&
+        siteMatch(c.employeeId) &&
+        tenantMatch(c.employeeId) &&
+        inPeriod(c.createdAt),
     ).length;
     return {
       measureId: m.id,

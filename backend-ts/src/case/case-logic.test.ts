@@ -103,3 +103,18 @@ test("planCaseUpsert H2: COMPLIANT resolves an OPEN case, but is a no-op on an a
 test("planCaseUpsert: an already-EXCLUDED case is a no-op on a repeat EXCLUDED outcome", () => {
   assert.deepEqual(planCaseUpsert(st("EXCLUDED", "EXCLUDED", null), "EXCLUDED", NOW), { op: "noop" });
 });
+
+test("planCaseUpsert (Codex P2): a SYSTEM-EXCLUDED case reopens when the outcome becomes actionable (waiver lapsed)", () => {
+  // A waiver that has since been removed/expired: CQL no longer returns EXCLUDED, the latest outcome is
+  // OVERDUE, so the auto-excluded case must reopen (audited) rather than persist with a stale outcome.
+  const plan = planCaseUpsert(st("EXCLUDED", "EXCLUDED", null), "OVERDUE", NOW);
+  assert.equal(plan.op, "update");
+  assert.equal(plan.status, "OPEN");
+  assert.equal(plan.disposition, "REOPENED");
+  assert.equal(plan.closedAt, null);
+  assert.equal(plan.closedReason, null);
+});
+
+test("planCaseUpsert (Codex P2): a HUMAN-excluded case (closed_by set) stays closed even when actionable again", () => {
+  assert.deepEqual(planCaseUpsert(st("EXCLUDED", "EXCLUDED", "admin@workwell.dev"), "OVERDUE", NOW), { op: "noop" });
+});

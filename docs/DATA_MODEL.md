@@ -594,8 +594,14 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 - **IN_PROGRESS is preserved** on a still-non-compliant run (an operator's "scheduling" state is never
   clobbered back to OPEN).
 - **Human closures are respected.** A case a person closed (`closed_by` set) is **not** reopened by a
-  later non-compliant run; only a **system** auto-resolve (`closed_by IS NULL`, status `RESOLVED`) reopens.
-  Reopening a human-closed case is left an explicit, audited operator action.
+  later non-compliant run; only a **system** closure (`closed_by IS NULL`) reopens — either a prior
+  auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
+  lapsed so CQL no longer returns EXCLUDED (Codex P2). Reopening a human-closed case is left an
+  explicit, audited operator action.
+- **Active-case counts include `IN_PROGRESS`.** Because the upsert now preserves `IN_PROGRESS` (rather
+  than flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
+  `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the
+  hierarchy/programs open-case count (Codex P2).
 - **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
 - The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
   `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching

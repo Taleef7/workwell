@@ -15,6 +15,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import { employeeById, providerById, tenantById, enterpriseForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { day, isCompletedRun, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { buildScaleSubtree } from "./scale-rollup.ts";
@@ -108,7 +109,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
         if (acc) addStatus(acc, r.status);
       }
     }
-    const openCases = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measureId ?? undefined, limit: 100000 });
+    const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
     for (const c of openCases) {
       if (from && day(c.createdAt) < day(from)) continue;
       if (to && day(c.createdAt) > day(to)) continue;

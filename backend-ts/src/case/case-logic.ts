@@ -6,6 +6,14 @@
 
 export type CaseDisposition = "OPEN" | "EXCLUDED" | "RESOLVE";
 
+/**
+ * The non-terminal (unresolved, still-actionable) case statuses. `IN_PROGRESS` counts as active — an
+ * operator working a case does not make it resolved — so every "active/open case" rollup must include
+ * it, or a population run that reconfirms an IN_PROGRESS case (now preserved, not clobbered to OPEN by
+ * the H2 state-aware upsert) would silently drop out of the count.
+ */
+export const ACTIVE_CASE_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
+
 /** EXCLUDED → an excluded case; DUE_SOON/OVERDUE/MISSING_DATA → an open case; else resolve. */
 export function dispositionFor(outcomeStatus: string): CaseDisposition {
   if (outcomeStatus === "EXCLUDED") return "EXCLUDED";
@@ -75,9 +83,10 @@ export function nextActionFor(outcomeStatus: string, measureId: string): string 
  *  - COMPLIANT resolves an OPEN/IN_PROGRESS case (system closure, `closed_by = NULL`); an
  *    already-terminal case is a no-op (no closed_at drift, no audit).
  *  - A non-compliant outcome opens a new case, refreshes an existing OPEN/IN_PROGRESS one
- *    (preserving IN_PROGRESS), and — respecting manual closure — reopens ONLY a case the system
- *    auto-resolved (`closed_by IS NULL`, status RESOLVED); a human-closed case (`closed_by` set) is
- *    left closed, so reopening it stays an explicit operator action.
+ *    (preserving IN_PROGRESS), and — respecting manual closure — reopens a case the system itself
+ *    closed (`closed_by IS NULL`: either a prior auto-resolve, status RESOLVED, or an auto-exclusion,
+ *    status EXCLUDED, whose waiver has since lapsed); a human-closed case (`closed_by` set) is left
+ *    closed, so reopening it stays an explicit operator action.
  *  - EXCLUDED transitions a non-excluded case to EXCLUDED; an already-excluded case is a no-op.
  *
  * `disposition` drives the pipeline's audit emission: CREATED/UPDATED/REOPENED/RESOLVED/EXCLUDED
@@ -134,9 +143,11 @@ export function planCaseUpsert(existing: ExistingCaseState | null, outcomeStatus
     const changed = existing.currentOutcomeStatus !== outcomeStatus;
     return { op: "update", disposition: changed ? "UPDATED" : "UNCHANGED", status: s, closedAt: null, closedReason: null, closedBy: null };
   }
-  // Terminal (RESOLVED / EXCLUDED): respect a human closure; reopen only a system auto-resolve.
+  // Terminal (RESOLVED / EXCLUDED): respect a human closure; reopen any system closure now that CQL
+  // says the subject is actionable again. A system auto-resolve (a prior COMPLIANT run) OR a system
+  // exclusion (a waiver that has since been removed/expired, so CQL no longer returns EXCLUDED) both
+  // reopen — leaving a system-excluded case closed with a stale OVERDUE outcome and no audit event was
+  // the bug (Codex P2). Only a human closure (`closed_by` set) stays closed.
   if (existing.closedBy != null) return { op: "noop" };
-  if (s === "RESOLVED")
-    return { op: "update", disposition: "REOPENED", status: "OPEN", closedAt: null, closedReason: null, closedBy: null };
-  return { op: "noop" }; // system EXCLUDED persists within the cycle
+  return { op: "update", disposition: "REOPENED", status: "OPEN", closedAt: null, closedReason: null, closedBy: null };
 }
