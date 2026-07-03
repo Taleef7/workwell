@@ -111,6 +111,14 @@ export class SqliteRunStore implements RunStore {
     return row ? toRecord(row) : null;
   }
 
+  async listRunsByTriggeredBy(triggeredBy: string, limit = 500): Promise<RunRecord[]> {
+    const { results } = await this.db
+      .prepare(`SELECT ${RUN_COLS} FROM runs WHERE triggered_by = ? ORDER BY started_at DESC, id DESC LIMIT ?`)
+      .bind(triggeredBy, Math.max(1, limit))
+      .all<RunRow>();
+    return (results ?? []).map(toRecord);
+  }
+
   async appendLog(runId: string, level: string, message: string): Promise<void> {
     await this.db
       .prepare(`INSERT INTO run_logs (run_id, ts, level, message) VALUES (?, ?, ?, ?)`)

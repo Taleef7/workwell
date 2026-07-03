@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outcomes (
 CREATE INDEX IF NOT EXISTS spike_outcomes_run_id_idx
   ON ${SPIKE_SCHEMA}.outcomes (run_id);
 
+-- OWNER-APPROVED DDL (Fable H5 hardening, 2026-07-03): the outcomes table was only indexed on
+-- run_id, so the per-subject / per-measure reads (listOutcomesForEmployee — employee profile, MCP
+-- tools, the E15 merged timeline; listOutcomesForMeasure — risk outlook, data readiness) seq-scanned
+-- the full ~1.68M-row table on Neon. These restore the coverage the Java-era schema had
+-- (outcomes_employee_measure_period_idx, DATA_MODEL §3.9) that the spike schema dropped. Additive
+-- (CREATE INDEX IF NOT EXISTS), reversible (DROP INDEX), no data migration.
+CREATE INDEX IF NOT EXISTS spike_outcomes_subject_idx
+  ON ${SPIKE_SCHEMA}.outcomes (subject_id, evaluated_at DESC);
+CREATE INDEX IF NOT EXISTS spike_outcomes_measure_idx
+  ON ${SPIKE_SCHEMA}.outcomes (measure_id, evaluated_at);
+
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   id                     UUID PRIMARY KEY,
   employee_id            TEXT NOT NULL,
@@ -104,6 +115,15 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS spike_audit_events_ref_case_id_idx ON ${SPIKE_SCHEMA}.audit_events (ref_case_id);
+
+-- OWNER-APPROVED DDL (Fable M17 hardening, 2026-07-03): the audit ledger was only indexed on
+-- ref_case_id, so the ordered ledger reads (the CSV export + admin viewer order by occurred_at), the
+-- by-type reads (recentAuditEventsByType — campaigns/outreach), and the by-run reads (auditEventsByRun
+-- — run auditor packets; DATA_MODEL §3.12 specifies ref_run_id_idx) scanned the whole table. Additive,
+-- reversible (DROP INDEX), no data migration.
+CREATE INDEX IF NOT EXISTS spike_audit_events_occurred_at_idx ON ${SPIKE_SCHEMA}.audit_events (occurred_at);
+CREATE INDEX IF NOT EXISTS spike_audit_events_event_type_idx ON ${SPIKE_SCHEMA}.audit_events (event_type, occurred_at);
+CREATE INDEX IF NOT EXISTS spike_audit_events_ref_run_id_idx ON ${SPIKE_SCHEMA}.audit_events (ref_run_id);
 
 -- Backfill columns added after the cases table's initial release. Postgres supports
 -- ADD COLUMN IF NOT EXISTS, so these are idempotent and upgrade an existing spike schema

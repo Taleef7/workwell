@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-07-03 — Hardening sprint, block 2: scale/perf — bound the 120k read paths (Fable H4/H5/M16/M17)
+
+Second Fable block, on `feat/hardening-scale-perf` — the theme where the app has a **live production
+risk**: pages seconds from the 60s gateway timeout on the 120k `mhn` tenant. No behavior change; the
+DDL is owner-gated and isolated for review.
+
+- **H5/M17 — owner-gated indexes (floor + ceiling).** `outcomes` was indexed only on `run_id` and
+  `audit_events` only on `ref_case_id`, so per-subject/per-measure outcome reads seq-scanned the ~1.68M
+  live rows and the ordered/by-type/by-run audit reads scanned the whole ledger. Added (additive `CREATE
+  INDEX IF NOT EXISTS`, reversible): `outcomes (subject_id, evaluated_at DESC)`, `outcomes (measure_id,
+  evaluated_at)`, `audit_events (occurred_at)`, `audit_events (event_type, occurred_at)`, `audit_events
+  (ref_run_id)` — restoring the coverage the Java-era `outcomes_employee_measure_period_idx` had. First
+  deploy builds them once over the live table (DEPLOY note).
+- **H4 — the four unbounded 120k detail endpoints.** The outcomes grid, QRDA, MeasureReport, and
+  outcomes CSV all called `listOutcomes(runId)` with no cap (live: MeasureReport 23s, QRDA 35s, CSV 43s
+  — one cold cache from the gateway timeout). Now: the grid pages (`{limit, offset}`, default 500 / max
+  2000) + `X-Total-Count`; QRDA + summary MeasureReport build from the bounded `countOutcomesByStatus`
+  histogram (`populationCountsFromStatus`) + `distinctMeasuresForRun`; the per-subject individual/bundle
+  MeasureReport caps at 5000 subjects (422 → `?type=summary`); the outcomes CSV streams in pages
+  (`outcomesCsvStream`, mirroring the audit export). No path materializes 120k rows.
+- **M16 — the ever-growing scans behind the hot pages.** The roster/hierarchy/programs-overview read
+  models fetched every non-scale population outcome then kept only the latest run per measure — so the
+  13,200 backdated `seed:trend-history` rows were fetched-then-discarded every render; now excluded in
+  SQL (`excludeTrendHistory`; the trend chart intentionally keeps them). And `materializeRun` +
+  the quality backfill scanned the whole runs table (`listRuns(100_000)`) on every completion to find the
+  ~14 `seed:scale` runs — now a targeted `listRunsByTriggeredBy`.
+- **Commits (atomic, reviewable):** DDL · H4 bounded reads · M16 read-model trims. **~857+ tests, all
+  green; typecheck clean.** No new deps. Owner step post-merge: the first deploy builds the five indexes
+  once on Neon (no manual step). Deferred (documented follow-up): the full latest-run-per-measure SQL
+  pushdown for the roster/hierarchy hot path — a hot-path query redesign that merits its own benchmarked
+  PR; the index + trend-exclusion win lands most of the latency without it.
+
 ## 2026-07-02 — Hardening sprint, block 1: audit completeness + case-state integrity (Fable H1/H2/H6/H7/M6)
 
 The Fable deep review (`docs/FABLE_REVIEW_2026-07-02/`, 0 Critical / 14 High) surfaced four themes. This

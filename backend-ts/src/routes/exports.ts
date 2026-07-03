@@ -11,7 +11,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
-import { runsCsv, outcomesCsv, casesCsv, auditCsvStream } from "../export/export-csv.ts";
+import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 
 interface ExportsEnv {
   DB: CloudDatabase;
@@ -59,10 +59,13 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
   if (pathname === "/api/exports/outcomes") {
     if (!isCsv) return badFormat();
     const s = await getStores(env);
-    return csvResponse(
-      "outcomes.csv",
-      await outcomesCsv(s.outcomes, s.runs, q.get("runId") ?? undefined),
-    );
+    // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
+    // materialize at once (parity with the audit-events streaming export below).
+    const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined);
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="outcomes.csv"` },
+    });
   }
 
   if (pathname === "/api/exports/cases") {

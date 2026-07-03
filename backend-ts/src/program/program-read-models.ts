@@ -142,7 +142,10 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
   // excludeScale drops the scale tenant's ~120k rows IN SQL (the scale KPIs are folded in separately
   // via aggregateScaleRun below). The JS guard stays as defense-in-depth.
-  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true })).filter(
+  // excludeTrendHistory (Fable M16): the synthetic trend rows are always older than each measure's
+  // latest real run, so this overview (latest-run-per-measure) never selects them — dropping them in
+  // SQL avoids the fetch-then-discard. The /programs TREND read model below intentionally keeps them.
+  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true, excludeTrendHistory: true })).filter(
     (r) =>
       siteMatch(r.subjectId) &&
       tenantMatch(r.subjectId) &&
