@@ -61,6 +61,7 @@ function CqlHarness({ api }: { api: Partial<ApiClient> }) {
       onCompiled={() => {}}
       onError={() => {}}
       canClone={false}
+      canAuthor={true}
       onCreateNewVersion={async () => true}
       liveCompileStatus={liveCompileStatus}
       onCompileStatusChange={setLiveCompileStatus}

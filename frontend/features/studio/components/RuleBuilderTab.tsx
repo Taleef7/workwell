@@ -11,6 +11,8 @@ type Props = {
   api: ApiClient;
   onSaved: () => void;
   onError: (msg: string) => void;
+  /** AUTHOR/ADMIN — the rule save is [AUTHOR,A] on the backend (Fable H10). */
+  canAuthor: boolean;
 };
 
 type Shape = "series-completion" | "windowed-recency";
@@ -34,7 +36,7 @@ function readableError(e: unknown): string {
   return raw;
 }
 
-export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Props) {
+export function RuleBuilderTab({ measure, measureId, api, onSaved, onError, canAuthor }: Props) {
   const r = measure.rule;
   const rb = measure.ruleBindings;
   const [shape, setShape] = useState<Shape>(r?.type ?? "series-completion");
@@ -328,7 +330,8 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError }: Pr
         </div>
 
         <div>
-          <button type="button" onClick={save} disabled={saving || previewError != null || !bindingsComplete}
+          <button type="button" onClick={save} disabled={saving || previewError != null || !bindingsComplete || !canAuthor}
+            title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
             {saving ? "Saving…" : "Save Rule"}
           </button>

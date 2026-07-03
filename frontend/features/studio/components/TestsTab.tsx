@@ -33,9 +33,11 @@ type Props = {
   initialFixtures: TestFixture[];
   onSaved: () => void;
   onError: (msg: string) => void;
+  /** AUTHOR/ADMIN — test save + AI fixture generation are [AUTHOR,A] on the backend (Fable H10). */
+  canAuthor: boolean;
 };
 
-export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: Props) {
+export function TestsTab({ measureId, api, initialFixtures, onSaved, onError, canAuthor }: Props) {
   const [fixtures, setFixtures] = useState<TestFixture[]>(initialFixtures);
   const [generatedFixtures, setGeneratedFixtures] = useState<GeneratedFixture[]>([]);
   const [testFailures, setTestFailures] = useState<string[]>([]);
@@ -125,13 +127,14 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError }: 
             variant="outline"
             size="sm"
             onClick={generateFixtures}
-            disabled={isGenerating}
+            disabled={isGenerating || !canAuthor}
             isLoading={isGenerating}
             loadingText="Generating..."
+            title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
           >
             Generate Fixtures
           </Button>
-          <Button variant="primary" size="sm" onClick={save}>Save Tests</Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={!canAuthor} title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}>Save Tests</Button>
           <Button
             variant="primary"
             size="sm"
