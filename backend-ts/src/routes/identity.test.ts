@@ -14,6 +14,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { handleIdentity } from "./identity.ts";
+import { getStores } from "../stores/factory.ts";
 
 const dbPath = join(tmpdir(), `workwell-identity-route-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -150,6 +151,13 @@ test("Fable H8: UNLINK the CONFIRM-anchor hub keeps the survivors grouped (no sh
   const emp009 = ((await (await get("/api/identity/people?q=emp-009"))!.json()) as Person[]).find((p) => p.sources.some((s) => s.externalId === "emp-009"))!;
   assert.ok(emp009.sources.some((s) => s.externalId === "emp-010"), "survivors emp-009 + emp-010 remain ONE person");
   assert.ok(!emp009.sources.some((s) => s.externalId === "ihn-emp-003"), "the hub is gone from the survivors");
+
+  // Codex P2: the survivor re-assert writes CONFIRMED links, so it must emit an audit event.
+  const events = await (await getStores(env as never)).events.recentAuditEventsByType("IDENTITY_LINK_CONFIRMED", 50);
+  assert.ok(
+    events.some((e: { payload: Record<string, unknown> }) => (e.payload as { reason?: string }).reason === "SURVIVOR_REASSERT"),
+    "the survivor re-assert emits an audited IDENTITY_LINK_CONFIRMED (reason SURVIVOR_REASSERT)",
+  );
 
   // cleanup: split the survivors back to singletons for later tests.
   await post(`/api/identity/people/${encodeURIComponent(emp009.personId)}/reconcile`, { action: "UNLINK", tenantId: "twh", externalId: "emp-010" });
