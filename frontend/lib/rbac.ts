@@ -79,3 +79,8 @@ export const canManageSegments = (role: string | null | undefined): boolean => i
  *  backend POST /api/identity/** gate; a wrong merge mis-joins medical records). */
 export const canReconcileIdentity = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
+
+/** View the cross-system People directory (GET /api/identity/**) — CASE_MANAGER/ADMIN (the
+ *  directory exposes national/MRN ids + DOB, mirroring the backend read gate). */
+export const canViewPeople = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);

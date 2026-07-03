@@ -12,7 +12,8 @@ import { canRunMeasures } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { TenantOption } from "@/features/compliance/types";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
-import { niceDomain } from "@/lib/charts";
+import { niceDomain, chartTooltipStyle } from "@/lib/charts";
+import { useTheme } from "@/lib/useTheme";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
@@ -392,6 +393,7 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
 }
 
 function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: boolean; caption: string }) {
+  const { theme } = useTheme();
   const sorted = [...(data ?? [])]
     .filter((t) => t.totalEvaluated > 0)
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
@@ -446,7 +448,7 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
             />
             <Tooltip
               formatter={(v) => [`${v}%`, "Compliance"]}
-              contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e2e8f0" }}
+              {...chartTooltipStyle(theme)}
             />
             <Line
               type="monotone"
