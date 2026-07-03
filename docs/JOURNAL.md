@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-03 — E12 PR-2 groundwork: real WebChart schema unblocked → WebChart→FHIR mapping reference
+
+**Unblock.** Doug shared MIE's **seeded WebChart dev database** as a Docker image
+(`ghcr.io/mieweb/dev-wcdb:latest`, MariaDB 10.3.32, temporarily public — pulled + backed up locally; root
+`pmg2bhok`, port 33306, DB `wc_miehr_wctroot`). This is the real WebChart schema reference that has parked
+**E12 PR-2** (the WebChart/MariaDB→FHIR adapter — today the inert `webChartDataSource` stub in
+`backend-ts/src/engine/ingress/data-source.ts`). Image is stored locally + saved to a verified tarball so
+Doug can re-private the GHCR image.
+
+**What's in it (verified):** 675 tables, real populated data — 72 patients, 105 encounters, 1,887
+observations, 8,230 observation codes (**with real LOINC**), 99 procedures, 69 users, 9 locations.
+Demographics carry **`employer_*` fields** (the Total Worker Health hook). WebChart model: `_current`/`_revisions`
+revisioning; `patients` holds both patients and providers (`is_patient`); observations are EAV over an
+`observation_codes` dictionary (LOINC bridge). Verified the Patient→Observation→LOINC join resolves.
+
+**Deliverable (this PR — docs only, no code/schema/deps):** `docs/WEBCHART_FHIR_MAPPING.md` — the
+reverse-engineered WebChart→FHIR R4 mapping the adapter builds against: the target bundle shape
+(Patient/Condition/Observation/Procedure/Immunization, matched to `fhir-bundle-builder.ts`), a
+resource-by-resource table→field mapping, the **terminology bridge** analysis (WebChart LOINC/CPT/CVX/ICD
+vs the measures' synthetic `urn:workwell:vs:*` codes → three options A/B/C; recommend B via
+`terminology_mappings` for the demo slice, A/C as the standards-correct destination tied to E14 + VSAC),
+the read-query scope, and a proposed PR-2a/b/c slicing.
+
+**Findings that gate PR-2c (surfaced, not decided):** (1) this dev seed is **thin on coded clinical
+events** — only 1 real CPT (mammogram), **no CVX immunizations**, empty base `observations`/problem-list —
+so representativeness needs confirming; (2) **immunizations have no dedicated CVX table** (biggest gap —
+blocks the immunization measures; must trace with MIE); (3) coded/text observation values live on the base
+`observations` table (empty here), not `observations_current` (numeric fast-path); (4) architecture fork:
+MariaDB-direct vs a WebChart HTTP API (the stub config is HTTP-shaped; ties to the E9 Q2 memo); (5) a
+direct-DB adapter needs a **MariaDB driver — a new dependency requiring approval + an ADR** (hard rule, not
+added). Descriptive-only throughout (ADR-008/ADR-017). See `docs/WEBCHART_FHIR_MAPPING.md` §6/§7 for the
+confirm-with-Doug list.
+
 ## 2026-07-03 — Hardening sprint, blocks 5–7: close out the remaining Fable Mediums + Lows
 
 Three parallel PRs finishing the Fable 2026-07-02 review (all Highs + the top-10 Mediums shipped in blocks
