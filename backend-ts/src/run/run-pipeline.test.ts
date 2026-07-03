@@ -408,10 +408,13 @@ test("Fable M10: a still-open PRIOR-cycle case is closed (CYCLE_ROLLED_OVER, aud
   const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
   const office = employeeById("emp-007")!;
   try {
-    // Seed a stale prior-period OPEN case for (emp-007, audiogram).
     const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    // A stale PRIOR-cycle OPEN case (2020) — should be rolled over.
     const stale = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
     assert.equal(stale?.status, "OPEN");
+    // A NEWER-cycle OPEN case (2099) — a backdated run at 2097 must NOT touch it (Codex P2: only older cycles).
+    const future = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2099-01-01", outcomeStatus: "OVERDUE" });
+    assert.equal(future?.status, "OPEN");
 
     const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: overdueEngine, employees: [office], segments: [] };
     const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
@@ -420,10 +423,11 @@ test("Fable M10: a still-open PRIOR-cycle case is closed (CYCLE_ROLLED_OVER, aud
     assert.equal(closed?.status, "RESOLVED", "the prior-cycle case is closed on the new run");
     assert.equal(closed?.closedReason, "CYCLE_ROLLED_OVER");
     assert.equal(closed?.closedBy, null, "system closure (not a human decision)");
+    assert.equal((await caseStore.getCase(future!.id))?.status, "OPEN", "a newer-cycle case is NOT rolled over by an older run");
     const rolled = (await events.auditEventsByRun(res.runId)).filter(
       (a) => a.eventType === "CASE_RESOLVED" && (a.payload as { reason?: string })?.reason === "CYCLE_ROLLED_OVER",
     );
-    assert.equal(rolled.length, 1, "the rollover close is audited");
+    assert.equal(rolled.length, 1, "exactly one (the prior-cycle) rollover close is audited");
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }
@@ -444,6 +448,27 @@ test("Fable M11: an out-of-cohort COMPLIANT outcome still RESOLVES an existing o
 
     const after = await caseStore.getCase(open!.id);
     assert.equal(after?.status, "RESOLVED", "the compliant outcome closes the case even though the subject left the cohort");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("Codex P2: an out-of-cohort EXCLUDED outcome with no existing case creates NO case (the gate holds)", async () => {
+  const excludedEngine: RunPipelineDeps["engine"] = {
+    async evaluate() {
+      return { subjectId: "ignored", measure: "Audiogram", outcome: "EXCLUDED", evidence: { expressionResults: [{ define: "Outcome Status", result: "EXCLUDED" }] } };
+    },
+  };
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  const office = employeeById("emp-007")!; // out-of-cohort for the Welder audiogram segment
+  try {
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: excludedEngine, employees: [office], segments: [welderSegment()] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+    // The EXCLUDED outcome is still persisted (ADR-008), but no case is inserted — EXCLUDED is not a
+    // close-only status, so the applicability gate is preserved for it (only COMPLIANT bypasses).
+    assert.equal((await outcomeStore.listOutcomes(res.runId)).length, 1);
+    const mine = (await caseStore.listCases({})).filter((c) => c.employeeId === "emp-007" && c.measureId === "audiogram");
+    assert.equal(mine.length, 0, "no EXCLUDED case is created for the out-of-cohort subject");
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }

@@ -631,18 +631,22 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 
 ### Resolution is not segment-gated; cycle rollover is closed out (Fable M10/M11, 2026-07-03)
 - **Resolution is never blocked by segment applicability (M11).** The run pipeline gates case
-  *creation* by `isApplicable`, but a COMPLIANT/EXCLUDED outcome (which only ever *closes* a case) always
-  runs the upsert — so a subject who leaves a cohort and then becomes compliant does not keep a stranded
-  OPEN case. Only non-compliant (case-creating) outcomes are gated.
-- **Prior-cycle cases are closed out at run finish (M10).** After a population run's evaluation loop, any
-  OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period` differs
-  from the current compliance cycle is closed with `status='RESOLVED'`, `closed_reason='CYCLE_ROLLED_OVER'`,
-  `closed_by=NULL` (a **system** closure), and an audited `CASE_RESOLVED` event. This prevents a
-  cycle rollover from orphaning the prior period's OPEN case (surfaced by `?status=open`, campaigns with no
-  period filter, CSV exports, MCP `list_noncompliant`) — the `backend-ts` equivalent of the Java V022
-  migration. Best-effort (a read/audit failure logs a WARN, never aborts the run); scoped to the subjects
-  the run actually evaluated (a SITE/EMPLOYEE run never touches out-of-scope cases). Display/routing only —
-  CQL `Outcome Status` stays authoritative (ADR-008).
+  *creation* by `isApplicable`, but a **COMPLIANT** outcome — the one status that only ever *closes* a case
+  (with no existing case it is a `planCaseUpsert` no-op) — always runs the upsert, so a subject who leaves a
+  cohort and then becomes compliant does not keep a stranded OPEN case. **EXCLUDED is NOT bypassed** (it
+  would *insert* an EXCLUDED case when none exists, re-polluting out-of-cohort subjects into the excluded
+  lists the gate keeps clear — Codex P2); it and every non-compliant (case-creating) outcome stay gated.
+- **Strictly-older-cycle cases are closed out at run finish (M10).** After a population run's evaluation
+  loop, any OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period`
+  is **strictly older** than the run's own compliance cycle is closed with `status='RESOLVED'`,
+  `closed_reason='CYCLE_ROLLED_OVER'`, `closed_by=NULL` (a **system** closure), and an audited
+  `CASE_RESOLVED` event. Comparing cycle *order* (not mere inequality) means a backdated/historical rerun
+  never resolves today's actionable case (Codex P2). This prevents a cycle rollover from orphaning the prior
+  period's OPEN case (surfaced by `?status=open`, campaigns with no period filter, CSV exports, MCP
+  `list_noncompliant`) — the `backend-ts` equivalent of the Java V022 migration. Best-effort (a read/audit
+  failure logs a WARN, never aborts the run); scoped to the subjects the run actually evaluated (a
+  SITE/EMPLOYEE run never touches out-of-scope cases). Display/routing only — CQL `Outcome Status` stays
+  authoritative (ADR-008).
 
 ## 5) `evidence_json` Contract (authoritative)
 
