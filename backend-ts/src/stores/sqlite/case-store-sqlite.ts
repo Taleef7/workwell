@@ -61,20 +61,22 @@ export class SqliteCaseStore implements CaseStore {
 
   async upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null> {
     // State-aware upsert (Fable H1/H2): read the current row, plan the transition (respecting
-    // IN_PROGRESS + human closures), then insert/update/no-op. Read-then-write is non-atomic, but the
-    // pipeline processes each (subject, measure, period) key once per run, sequentially, so there is
-    // no intra-run race; cross-run same-key concurrency is not a demo scenario (runs are debounced).
+    // IN_PROGRESS + human closures), then insert/update/no-op.
+    // Concurrency (Codex P2): the pipeline processes each key once per run, sequentially, but two runs
+    // CAN overlap on a new key (a manual double-click, or a scheduler/manual overlap — runs aren't
+    // serialized). So the INSERT is conflict-tolerant (`ON CONFLICT DO NOTHING`): if a concurrent writer
+    // wins the insert, we re-read and fall through to the UPDATE path instead of throwing a unique
+    // violation (which would fail one whole run mid-write, as the old atomic ON CONFLICT never did).
     const now = new Date().toISOString();
-    const existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
-    const plan = planCaseUpsert(
+    const priority = priorityFor(input.outcomeStatus);
+    const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
+    let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+    let plan = planCaseUpsert(
       existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
       input.outcomeStatus,
       now,
     );
     if (plan.op === "noop") return null;
-
-    const priority = priorityFor(input.outcomeStatus);
-    const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
 
     if (plan.op === "insert") {
       const row = await this.db
@@ -83,6 +85,7 @@ export class SqliteCaseStore implements CaseStore {
              (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
               next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
            RETURNING ${COLS}`,
         )
         .bind(
@@ -102,7 +105,15 @@ export class SqliteCaseStore implements CaseStore {
           plan.closedBy ?? null,
         )
         .first<CaseRow>();
-      return row ? { ...toRecord(row), disposition: plan.disposition! } : null;
+      if (row) return { ...toRecord(row), disposition: plan.disposition! };
+      // Lost the insert race — the row now exists; re-plan against it as an update.
+      existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+      plan = planCaseUpsert(
+        existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
+        input.outcomeStatus,
+        now,
+      );
+      if (plan.op !== "update") return null;
     }
 
     // update
