@@ -19,7 +19,7 @@ const base: MeasureDetail = {
 };
 
 function renderTab(api: Partial<ApiClient>, measure = base) {
-  return render(<RuleBuilderTab measure={measure} measureId="mmr" api={api as ApiClient} onSaved={() => {}} onError={() => {}} />);
+  return render(<RuleBuilderTab measure={measure} measureId="mmr" api={api as ApiClient} onSaved={() => {}} onError={() => {}} canAuthor={true} />);
 }
 
 describe("RuleBuilderTab", () => {

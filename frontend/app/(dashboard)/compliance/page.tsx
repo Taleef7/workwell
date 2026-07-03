@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/api/hooks";
 import { useRunStatus } from "@/components/run-status-provider";
@@ -58,7 +58,11 @@ export default function CompliancePage() {
   const [error, setError] = useState<string | null>(null);
   const [recalcBusy, setRecalcBusy] = useState<boolean>(false);
 
+  // Stale-fetch guard (Fable M20): a slow All-Systems response must not land after a fast tenant=ihn
+  // one and paint the wrong rows under the selected filter. Only the latest load applies its result.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -72,15 +76,17 @@ export default function CompliancePage() {
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${params.toString()}`);
+      if (reqId !== reqIdRef.current) return;
       setRoster(data);
       const matchTotal = Number(headers.get("X-Total-Count") ?? data.rows.length);
       setTotal(Number.isFinite(matchTotal) ? matchTotal : data.rows.length);
     } catch (err) {
+      if (reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load the compliance roster.");
       setRoster(null);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (reqId === reqIdRef.current) setLoading(false);
     }
   }, [api, panel, status, siteId, debouncedQ, segment, tenant, page, pageSize]);
 

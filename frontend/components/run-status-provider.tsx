@@ -120,8 +120,23 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
         } else {
           setStatus(run.status);
         }
-      } catch {
-        /* transient polling error — keep going */
+      } catch (err) {
+        // An orphaned run id — 404 (the run was truncated by a demo-reset) or 403 (role changed) — will
+        // never resolve, so stop polling and clear it, otherwise the "Run running" pill sticks forever
+        // until localStorage is hand-cleared (Fable M21). Other errors are treated as transient.
+        const httpStatus = (err as { status?: number })?.status;
+        if (httpStatus === 404 || httpStatus === 403) {
+          finished = true;
+          clearInterval(interval);
+          setActiveRunId(null);
+          setStatus("IDLE");
+          try {
+            localStorage.removeItem(STORAGE_KEY);
+          } catch {
+            /* ignore */
+          }
+        }
+        /* else transient — keep going */
       }
     }, 4000);
     return () => {

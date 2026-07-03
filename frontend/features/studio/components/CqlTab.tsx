@@ -36,6 +36,8 @@ type Props = {
   onError: (msg: string) => void;
   canClone: boolean;
   onCreateNewVersion: (summary: string) => Promise<boolean>;
+  /** AUTHOR/ADMIN — CQL compile-save + AI draft are [AUTHOR,A] on the backend (Fable H10). */
+  canAuthor: boolean;
   /** Live compile status from the most recent compile response; overrides the persisted prop on the badge. */
   liveCompileStatus?: string | null;
   /** Reports the compile response status (COMPILED | WARNINGS | ERROR) up to the parent. */
@@ -56,6 +58,7 @@ export function CqlTab({
   onError,
   canClone,
   onCreateNewVersion,
+  canAuthor,
   liveCompileStatus,
   onCompileStatusChange
 }: Props) {
@@ -233,9 +236,10 @@ export function CqlTab({
           variant="primary"
           size="sm"
           onClick={compile}
-          disabled={compiling}
+          disabled={compiling || !canAuthor}
           isLoading={compiling}
           loadingText="Compiling…"
+          title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
         >
           Compile
         </Button>
@@ -244,6 +248,8 @@ export function CqlTab({
           variant="outline"
           size="sm"
           onClick={() => setShowDraftCqlDialog(true)}
+          disabled={!canAuthor}
+          title={canAuthor ? undefined : "Authoring requires the AUTHOR or ADMIN role"}
         >
           AI Draft CQL
         </Button>
