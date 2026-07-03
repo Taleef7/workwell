@@ -46,6 +46,25 @@ function reconciledHolder(holder: unknown): { holder: unknown; codings: Coding[]
   return { holder: { ...holder, coding: codings }, codings };
 }
 
+// Only clinically-final events drive compliance. A non-final / errored WebChart event — a `not-done`
+// or `entered-in-error` Procedure/Immunization, a `preliminary`/`cancelled`/`entered-in-error`
+// Observation — must NOT be reconciled to a measure coding or synthesized into a `completed` Procedure,
+// or the recency CQL (which matches only code + date, not status) would count it as compliant (Codex P2).
+// A missing/unknown status is treated as NOT final — conservative for a compliance system (worst case a
+// subject reads MISSING_DATA and a human follows up; never falsely compliant). Real-feed status semantics
+// are confirmed against the live contract in PR-2c.
+const FINAL_STATUS: Record<string, ReadonlySet<string>> = {
+  Procedure: new Set(["completed"]),
+  Immunization: new Set(["completed"]),
+  Observation: new Set(["final", "amended", "corrected"]),
+};
+
+function isFinalEvent(resource: Json): boolean {
+  const allowed = FINAL_STATUS[resource.resourceType as string];
+  if (!allowed) return true; // non-event resources aren't status-gated (their codings don't reconcile anyway)
+  return typeof resource.status === "string" && allowed.has(resource.status);
+}
+
 /** The best effective instant for a lab Observation → a synthesized Procedure's `performedDateTime`. */
 function observationEffective(obs: Json): string | undefined {
   if (typeof obs.effectiveDateTime === "string") return obs.effectiveDateTime;
@@ -63,9 +82,13 @@ function observationEffective(obs: Json): string | undefined {
  * `Procedure` carrying that target coding is synthesized so the measure can match. `cms122` retrieves
  * `[Observation]`, so its coding stays on the Observation. Provenance: the real coding is preserved,
  * and a synthesized Procedure is tagged `derived-from-observation`.
+ *
+ * Non-final events (see `isFinalEvent`) pass through untouched — no measure coding is appended and no
+ * Procedure is synthesized — so a cancelled/errored WebChart event can never read as compliant.
  */
 function reconcileResource(resource: unknown): unknown[] {
   if (!isObject(resource)) return [];
+  if (!isFinalEvent(resource)) return [resource]; // don't reconcile a non-final / errored clinical event
   const code = reconciledHolder(resource.code);
   const vaccineCode = reconciledHolder(resource.vaccineCode);
   const out: Json = { ...resource };

@@ -48,9 +48,14 @@ now **rejects** with a clear PR-2c message rather than a best-effort fetch — t
 series whose CQL matches the specific CVX codes (189/08/43/44/45) under `urn:workwell:vs:hepb-vaccines`, not
 the generic `hepb-vaccine`; the crosswalk was stamping the generic code, so a real Heplisav-B/traditional
 series stayed MISSING_DATA. Fixed: for a multi-alternative measure the target preserves the real CVX number
-as the synthetic code (a new e2e proves a real CVX Heplisav-B series → COMPLIANT). **978 tests pass / 0
-fail**; typecheck green. No schema, no new deps. Descriptive only (ADR-008/ADR-017) — reconciliation supplies
-coded FHIR, never decides compliance.
+as the synthetic code (a new e2e proves a real CVX Heplisav-B series → COMPLIANT). A **second Codex round**
+added one more **P2** — status gating: WebChart can return non-final events (a `not-done`/`entered-in-error`
+Procedure, a `preliminary`/`cancelled` Observation), and reconciliation was unconditional, so the recency
+CQL (code + date only) could count a cancelled lab as compliant. Fixed: `normalize.ts` now only reconciles/
+synthesizes **clinically-final** events (`Procedure`/`Immunization` = `completed`; `Observation` =
+`final`/`amended`/`corrected`); a missing/unknown status is treated as non-final (conservative — never
+falsely compliant). **980 tests pass / 0 fail**; typecheck green. No schema, no new deps. Descriptive only
+(ADR-008/ADR-017) — reconciliation supplies coded FHIR, never decides compliance.
 
 **Found (surfaced in the doc, not a blocker): the enrollment gap.** The measures gate on a program-enrollment
 `Condition` that is *not* WebChart clinical coding — it's occupational-health **program membership** (an OH
