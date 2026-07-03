@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS outcomes (
 
 CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
 
+/* Fable H5 hardening (2026-07-03): mirror the ceiling's per-subject / per-measure outcome indexes on
+   the floor so listOutcomesForEmployee / listOutcomesForMeasure don't seq-scan. Additive, reversible. */
+CREATE INDEX IF NOT EXISTS outcomes_subject_idx ON outcomes (subject_id, evaluated_at DESC);
+CREATE INDEX IF NOT EXISTS outcomes_measure_idx ON outcomes (measure_id, evaluated_at);
+
 /* Cases (#107). Floor analogue of the canonical cases table (docs/DATA_MODEL.md):
    measure_id (slug) stands in for the canonical measure_version_id UUID. The
    idempotency invariant is UNIQUE (employee_id, measure_id, evaluation_period) — a
@@ -105,6 +110,12 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS audit_events_ref_case_id_idx ON audit_events (ref_case_id);
+
+/* Fable M17 hardening (2026-07-03): mirror the ceiling's ledger indexes on the floor so the ordered
+   (occurred_at), by-type (event_type), and by-run (ref_run_id) audit reads don't scan the whole table. */
+CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx ON audit_events (occurred_at);
+CREATE INDEX IF NOT EXISTS audit_events_event_type_idx ON audit_events (event_type, occurred_at);
+CREATE INDEX IF NOT EXISTS audit_events_ref_run_id_idx ON audit_events (ref_run_id);
 
 /* Measures + measure_versions (#107 authoring). Floor analogue of the canonical tables
    (docs/DATA_MODEL.md): tags + spec_json are JSON TEXT on the floor (TEXT[]/JSONB on the
