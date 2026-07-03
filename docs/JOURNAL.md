@@ -38,10 +38,19 @@ retrieve `[Procedure]` in their CQL — so appending a coding to the Observation
 **synthesizes a dated `Procedure`** from a lab Observation when the reconciled target is a `[Procedure]`
 measure (via a new `targetEventType` seam) — so real LOINC labs evaluate end-to-end (new test proves it);
 the standards-correct end state (re-point those measures to `[Observation]`) is option A, tracked for PR-2c.
-Also folded: normalizer no longer mutates its input (builds copies), drops resource-less Bundle entries, and
-the provisional HTTP client got a sharper per-patient-fan-out TODO + an `AbortSignal` timeout. **976 tests
-pass / 0 fail** (+22 new); typecheck green. No schema, no new deps. Descriptive only (ADR-008/ADR-017) —
-reconciliation supplies coded FHIR, never decides compliance.
+Also folded: normalizer no longer mutates its input (builds copies) and drops resource-less Bundle entries.
+
+**Two Codex comments (PR #234) resolved.** **P1** — the HTTP client would wrap a `/Patient` searchset as
+one payload → `normalizeWebChartBundle` folds every patient into one bundle → the engine evaluates only the
+first subject (a population silently collapses to one employee). Fixed: the **deferred** `httpWebChartClient`
+now **rejects** with a clear PR-2c message rather than a best-effort fetch — the tested core runs via
+`fixtureWebChartClient`; the real per-patient fan-out lands in PR-2c. **P2** — Hep B is a multi-alternative
+series whose CQL matches the specific CVX codes (189/08/43/44/45) under `urn:workwell:vs:hepb-vaccines`, not
+the generic `hepb-vaccine`; the crosswalk was stamping the generic code, so a real Heplisav-B/traditional
+series stayed MISSING_DATA. Fixed: for a multi-alternative measure the target preserves the real CVX number
+as the synthetic code (a new e2e proves a real CVX Heplisav-B series → COMPLIANT). **978 tests pass / 0
+fail**; typecheck green. No schema, no new deps. Descriptive only (ADR-008/ADR-017) — reconciliation supplies
+coded FHIR, never decides compliance.
 
 **Found (surfaced in the doc, not a blocker): the enrollment gap.** The measures gate on a program-enrollment
 `Condition` that is *not* WebChart clinical coding — it's occupational-health **program membership** (an OH

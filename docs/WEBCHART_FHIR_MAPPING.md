@@ -229,8 +229,9 @@ the VSAC unblock. ADR-008 intact: reconciliation supplies coded FHIR, it never d
 2. **No new dependency.** The HTTP path uses the global `fetch` — **no MariaDB/MySQL driver**, so the
    CLAUDE.md new-dependency gate is not triggered. `backend-ts` adds no deps.
 3. **Transport at the edge.** The transport lives in `webchart/webchart-client.ts` (the `WebChartClient`
-   port + a provisional `httpWebChartClient` + a `fixtureWebChartClient` for tests); the reconciliation +
-   normalization core stays I/O-free and portable, matching the `evaluate-bundle.ts` design.
+   port + a **deferred** `httpWebChartClient` that rejects until the confirmed contract + a
+   `fixtureWebChartClient` for tests); the reconciliation + normalization core stays I/O-free and portable,
+   matching the `evaluate-bundle.ts` design.
 
 ---
 
@@ -261,12 +262,14 @@ path~~ (WebChart HTTP/FHIR API); ~~MariaDB driver~~ (not needed — HTTP/`fetch`
 - **PR-2b (done, 2026-07-03):** the **transport-agnostic adapter core** — `webchart/terminology.ts`
   (reconciliation, option B + the `targetEventType` seam), `webchart/normalize.ts` (WebChart FHIR →
   engine bundle shape, non-mutating, with Observation→Procedure synthesis for `[Procedure]`-retrieved lab
-  measures), `webchart/webchart-client.ts` (the `WebChartClient` port + fixture + provisional HTTP
-  client), wired into `webChartDataSource(cfg, client?)` (transport injected). Fully unit-tested + two
-  end-to-end tests proving a **real-CPT-coded** procedure AND a **real-LOINC-coded** lab Observation each
-  evaluate to COMPLIANT via reconciliation (each with an un-reconciled MISSING_DATA control). Whole-branch
-  code review folded in (resource-type coverage gap, input non-mutation, provisional-client hardening). No
-  new deps; no schema. Descriptive only (ADR-008/ADR-017).
+  measures), `webchart/webchart-client.ts` (the `WebChartClient` port + fixture + a **deferred** HTTP
+  client that rejects until the confirmed contract), wired into `webChartDataSource(cfg, client?)`
+  (transport injected). Fully unit-tested + three end-to-end tests proving a **real-CPT-coded** procedure,
+  a **real-LOINC-coded** lab Observation, AND a **real-CVX Heplisav-B series** each evaluate to COMPLIANT
+  via reconciliation (each with an un-reconciled non-COMPLIANT control). Whole-branch code review + two
+  Codex comments folded in (resource-type coverage gap, input non-mutation; **P1** the deferred HTTP client
+  rejects rather than collapse a population into one bundle; **P2** multi-alternative Hep B preserves the
+  real CVX code so the series matches). No new deps; no schema. Descriptive only (ADR-008/ADR-017).
 - **PR-2c (waits on §7 answers):** finalize `httpWebChartClient`'s request shaping against the real API,
   add the OH-enrollment-roster input (§4 enrollment gap), extend the crosswalk as the real code space is
   confirmed, and (if the API is proprietary) add the row→FHIR mapping per §3. Wire behind
