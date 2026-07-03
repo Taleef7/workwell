@@ -110,8 +110,9 @@ export async function backfillQualityHistory(
   // Compare `startedAt` explicitly (mirrors materialize-run.ts) rather than relying on listRuns'
   // DESC ordering — robust if the ordering contract ever changes or duplicate scale runs exist.
   const latestScaleRunByMeasure = new Map<string, { runId: string; startedAt: string }>();
-  for (const r of await deps.runStore.listRuns(100_000)) {
-    if (r.triggeredBy !== SCALE_TRIGGER || !isCompletedRun(r.status) || !r.scopeId) continue;
+  // Fable M16: query only the seed:scale runs by triggered_by instead of scanning the whole runs table.
+  for (const r of await deps.runStore.listRunsByTriggeredBy(SCALE_TRIGGER)) {
+    if (!isCompletedRun(r.status) || !r.scopeId) continue;
     const prev = latestScaleRunByMeasure.get(r.scopeId);
     if (!prev || r.startedAt > prev.startedAt) latestScaleRunByMeasure.set(r.scopeId, { runId: r.id, startedAt: r.startedAt });
   }

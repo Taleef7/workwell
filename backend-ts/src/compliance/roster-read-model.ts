@@ -81,7 +81,10 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // excludeScale: the population-scale tenant (~120k rows) is excluded IN SQL — the roster is the
   // live directory grid (E13 PR-2 scope excludes scale), and a seed:scale run must never become a
   // measure's "latest population run" here (it would both load 120k rows and show NA for everyone).
-  const popRows = (await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true })).filter(
+  // excludeTrendHistory (Fable M16): the backdated synthetic trend rows are always older than each
+  // measure's latest real run (the seeding invariant), so `latestRunRows` never picks them — dropping
+  // them in SQL just avoids fetching-then-discarding a growing block of rows.
+  const popRows = (await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true })).filter(
     (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
