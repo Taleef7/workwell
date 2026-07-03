@@ -95,7 +95,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   if (scopeMeasures.length > 0) {
     // The scale tenant (~120k rows) is excluded IN SQL (excludeScale) — never fetched into memory; it
     // is read only via aggregateScaleRun below. The JS guard stays as defense-in-depth.
-    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true })).filter(
+    const allRows = (await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
       // Fable H7: require COMPLETED — every sibling read model (programs overview, roster, orders) does,
       // and the scale branch below does too. Without it, `latestRunRows` can select an in-flight RUNNING
       // run's PARTIAL rows, so /programs/hierarchy counts bounce and disagree with /programs mid-run.

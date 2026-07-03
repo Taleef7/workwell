@@ -84,6 +84,12 @@ export interface RunStore {
   listRuns(limit?: number): Promise<RunRecord[]>;
   /** Return the single most-recent run with the given `triggered_by` value, or null if none. */
   getLastRunByTriggeredBy(triggeredBy: string): Promise<RunRecord | null>;
+  /**
+   * All runs with the given `triggered_by`, newest-first, capped at `limit` (Fable M16). Lets the
+   * snapshot materializer + quality backfill find the ~14 `seed:scale` runs without scanning the whole
+   * runs table (`listRuns(100_000)`) on every run completion.
+   */
+  listRunsByTriggeredBy(triggeredBy: string, limit?: number): Promise<RunRecord[]>;
   appendLog(runId: string, level: string, message: string): Promise<void>;
   /** A run's log timeline, oldest-first, capped at `limit` when given. */
   listLogs(runId: string, limit?: number): Promise<RunLogRow[]>;
