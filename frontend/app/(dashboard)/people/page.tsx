@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canViewPeople } from "@/lib/rbac";
 import { SkeletonCard } from "@/components/skeleton-loader";
 
 /**
@@ -45,6 +47,8 @@ function crossSystemBadge(p: Person): { label: string; cls: string } | null {
 
 export default function PeoplePage() {
   const api = useApi();
+  const { user } = useAuth();
+  const mayView = canViewPeople(user?.role);
   const PAGE_SIZE = 50;
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -57,6 +61,9 @@ export default function PeoplePage() {
   // newer one's results. Every load takes the next request id; only the latest applies its result.
   const reqIdRef = useRef(0);
   const load = useCallback(async () => {
+    // /api/identity/** is CASE_MANAGER/ADMIN-gated on the backend — skip the fetch for other roles
+    // so a deep-link never fires a guaranteed 403 (the page renders an access-denied state below).
+    if (!mayView) return;
     const reqId = ++reqIdRef.current;
     try {
       const qs = new URLSearchParams({ pageSize: String(PAGE_SIZE), page: String(page) });
@@ -72,7 +79,7 @@ export default function PeoplePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoaded(true);
     }
-  }, [api, query, page]);
+  }, [api, query, page, mayView]);
 
   // Debounce the search a touch so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -81,6 +88,20 @@ export default function PeoplePage() {
   }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Deep-link guard: the nav already hides People from non-CM roles, but a pasted URL would
+  // otherwise mount the directory and fire a guaranteed 403 fetch. Render a clean access-denied
+  // state instead (mirrors /campaigns and /orders).
+  if (!mayView) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">People</h2>
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          The cross-system People directory is managed by Case Managers and Admins — your role doesn&apos;t have access.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
@@ -140,7 +161,10 @@ export default function PeoplePage() {
                   </td>
                   <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">
                     {p.sources.map((s) => (
-                      <span key={s.externalId} className="mr-1 inline-block">
+                      // Composite key: with multi-tenant data the same externalId can appear across
+                      // systems, so tenantId alone doesn't dedupe — tenantId + externalId is unique
+                      // (matches the merge-picker's composite key on /people/[personId]).
+                      <span key={`${s.tenantId}|${s.externalId}`} className="mr-1 inline-block">
                         {s.tenantName}
                         {s.status === "PRIOR" ? <span className="text-neutral-400"> (prior)</span> : null}
                         {p.sources.indexOf(s) < p.sources.length - 1 ? "," : ""}

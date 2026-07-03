@@ -107,23 +107,60 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Snapshot of the form as seeded on open, used to detect unsaved edits (Fable M26) so a stray
+  // backdrop-click/Escape can't silently discard a multi-condition rule + overrides. Kept in state
+  // (not a ref) so it's safe to read during render for the `dirty` comparison below.
+  const [initialSnapshot, setInitialSnapshot] = useState<string>("");
+
   // Re-seed local form state whenever the modal opens for a different segment. This is the canonical
   // "reset state when a prop changes" case: the seed must run synchronously on open so the fields are
   // populated on first paint (deferring would flash stale/empty inputs). Suppress the rule here only.
   useEffect(() => {
     if (!open) return;
+    const seedName = initial?.name ?? "";
+    const seedDescription = initial?.description ?? "";
+    const seedEnabled = initial?.enabled ?? true;
+    const seedRule = initial?.rule ? { match: initial.rule.match, conditions: seedConditions(initial.rule) } : emptyRule();
+    const seedMeasureIds = initial?.measureIds ? [...initial.measureIds] : [];
+    const seedOverrides = initial?.overrides ? initial.overrides.map((o) => ({ ...o })) : [];
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setName(initial?.name ?? "");
-    setDescription(initial?.description ?? "");
-    setEnabled(initial?.enabled ?? true);
-    setRule(initial?.rule ? { match: initial.rule.match, conditions: seedConditions(initial.rule) } : emptyRule());
-    setMeasureIds(initial?.measureIds ? [...initial.measureIds] : []);
-    setOverrides(initial?.overrides ? initial.overrides.map((o) => ({ ...o })) : []);
+    setName(seedName);
+    setDescription(seedDescription);
+    setEnabled(seedEnabled);
+    setRule(seedRule);
+    setMeasureIds(seedMeasureIds);
+    setOverrides(seedOverrides);
     setNameById({});
     setEmployeeQuery("");
     setSaving(false);
     setFormError(null);
+    setInitialSnapshot(
+      JSON.stringify({
+        name: seedName,
+        description: seedDescription,
+        enabled: seedEnabled,
+        rule: seedRule,
+        measureIds: seedMeasureIds,
+        overrides: seedOverrides,
+      }),
+    );
   }, [open, initial]);
+
+  // True once any field has diverged from the snapshot captured at open. Drives the unsaved-changes
+  // confirm on backdrop-click/Escape/Cancel below.
+  const dirty = useMemo(
+    () => JSON.stringify({ name, description, enabled, rule, measureIds, overrides }) !== initialSnapshot,
+    [name, description, enabled, rule, measureIds, overrides, initialSnapshot],
+  );
+
+  // Guarded close: an in-progress edit (a multi-condition rule + overrides) must not vanish on a stray
+  // backdrop click or Escape press. Both the Modal's overlay-click and Escape handling route through
+  // `onOpenChange(false)`, so guarding here covers both triggers in one place; Cancel routes through it
+  // too for consistency.
+  function requestClose() {
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    onClose();
+  }
 
   const hits = useDirectorySearch(employeeQuery);
 
@@ -179,7 +216,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
   }
 
   return (
-    <Modal open={open} onOpenChange={(o: boolean) => { if (!o) onClose(); }} size="lg">
+    <Modal open={open} onOpenChange={(o: boolean) => { if (!o) requestClose(); }} size="lg">
       <ModalHeader>
         <ModalTitle>{initial ? "Edit Group" : "New Group"}</ModalTitle>
       </ModalHeader>
@@ -364,7 +401,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
         ) : null}
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestClose}
           className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
           Cancel

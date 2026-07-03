@@ -27,7 +27,14 @@ const RunStatusContext = createContext<RunStatusValue | null>(null);
 
 function notifyComplete(runId: string, status: string): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    // Only clear the persisted key if it's still pointing at THIS run. A synchronous run (e.g. an
+    // EMPLOYEE "Recalculate") can come back already-terminal while a different, actually-active
+    // ALL_PROGRAMS run is the one persisted — clearing unconditionally would wipe that run's reload
+    // durability out from under it (Fable M22). The poll path passes `activeRunId`, which IS the
+    // stored key, so it still clears correctly.
+    if (localStorage.getItem(STORAGE_KEY) === runId) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
   } catch {
     /* ignore */
   }
@@ -99,6 +106,40 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token, user]);
 
+  // Read the latest activeRunId without depending on it in the storage-event effect below (that
+  // effect subscribes once; a dependency on activeRunId would tear down + resubscribe on every
+  // run start/stop, which is unnecessary churn for a single global listener).
+  const activeRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeRunIdRef.current = activeRunId;
+  }, [activeRunId]);
+
+  // Cross-tab sync (Fable L20): a run started in tab A is otherwise invisible to an already-open
+  // tab B until B is reloaded. `localStorage` fires a `storage` event in every OTHER tab (never the
+  // tab that made the write) when STORAGE_KEY changes, so use it to adopt a run another tab started —
+  // without restarting the poll effect (which depends only on `activeRunId`, set here the same way
+  // `startTracking`/the poll do).
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key !== STORAGE_KEY) return;
+      // Adopt a run another tab started, but only when this tab has none in flight (we can poll one at a
+      // time). If a newer run starts while we're tracking an earlier one, this event is dropped here —
+      // but the poll's `settleToNextOrIdle` re-reads `ww_active_run` when the current run finishes and
+      // adopts the newer one then, so it isn't lost (Codex P2).
+      if (event.newValue && !activeRunIdRef.current) {
+        setActiveRunId(event.newValue);
+        setStatus("RUNNING");
+      }
+      // A REMOVAL (another tab finished/cleared the run) is intentionally NOT handled here (Codex P2):
+      // if this tab adopted the same run it still owns a live poller, which will observe the terminal
+      // status itself and fire its OWN `ww:run-complete` (so pages like /programs refresh their KPIs)
+      // plus the completion toast. Tearing the poller down here would drop the banner but leave stale
+      // data until a manual reload. If this tab had no active run, there is nothing to clear anyway.
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   // Poll the active run until terminal. Depends ONLY on activeRunId (api is read via apiRef, status
   // is updated without restarting), so a status change or token refresh never tears down the timer.
   // A `finished` latch + an imperative clearInterval guarantee the completion fires exactly once even
@@ -106,6 +147,27 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!activeRunId) return;
     let finished = false;
+    // After the current run finishes (or is abandoned), adopt a NEWER run if `ww_active_run` now holds a
+    // different id — another tab (or the /runs Run Now button, gated only by page-local state) can start
+    // one while we're already tracking an earlier run, and the storage listener drops it because a run is
+    // in flight. Re-reading localStorage on completion picks it up so we don't miss its completion event
+    // (Codex P2). Otherwise go idle.
+    const settleToNextOrIdle = (finishedId: string) => {
+      let next: string | null = null;
+      try {
+        next = localStorage.getItem(STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      if (next && next !== finishedId) {
+        setEvaluated(0);
+        setStatus("RUNNING");
+        setActiveRunId(next); // restarts this effect for the newer run
+      } else {
+        setActiveRunId(null);
+        setStatus("IDLE");
+      }
+    };
     const interval = setInterval(async () => {
       if (finished) return;
       try {
@@ -115,8 +177,8 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
         if (isTerminalRunStatus(run.status)) {
           finished = true;
           clearInterval(interval);
-          setActiveRunId(null);
-          notifyComplete(activeRunId, run.status);
+          notifyComplete(activeRunId, run.status); // removes the key iff it still equals activeRunId (M22)
+          settleToNextOrIdle(activeRunId);
         } else {
           setStatus(run.status);
         }
@@ -128,13 +190,14 @@ export function RunStatusProvider({ children }: { children: React.ReactNode }) {
         if (httpStatus === 404 || httpStatus === 403) {
           finished = true;
           clearInterval(interval);
-          setActiveRunId(null);
-          setStatus("IDLE");
+          // Clear the key only if it still points at THIS bad run — a newer run's key is preserved and
+          // adopted by settleToNextOrIdle below (so a 404 on the old run doesn't drop a newer one).
           try {
-            localStorage.removeItem(STORAGE_KEY);
+            if (localStorage.getItem(STORAGE_KEY) === activeRunId) localStorage.removeItem(STORAGE_KEY);
           } catch {
             /* ignore */
           }
+          settleToNextOrIdle(activeRunId);
         }
         /* else transient — keep going */
       }

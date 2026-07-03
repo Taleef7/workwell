@@ -25,7 +25,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { TERMINAL_RUN_STATUSES } from "@/lib/run-status";
-import { canRunMeasures } from "@/lib/rbac";
+import { canManageCases, canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -159,6 +159,7 @@ export default function RunsPage() {
   const router = useRouter();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  const mayManageCases = canManageCases(user?.role);
   const { startTracking } = useRunStatus();
   const [showRunConfirm, setShowRunConfirm] = useState(false);
   const searchParams = useSearchParams();
@@ -908,15 +909,17 @@ export default function RunsPage() {
                   ))}
                 </ul>
               </div>
-              <div className="mt-1">
-                <AuditPacketExportButton
-                  api={api}
-                  path={`/api/auditor/runs/${selectedRunId}/packet`}
-                  filenamePrefix={`workwell-run-packet-${selectedRunId}`}
-                  label="Export Run Audit Packet"
-                  onError={(message) => setError(message || null)}
-                />
-              </div>
+              {mayManageCases ? (
+                <div className="mt-1">
+                  <AuditPacketExportButton
+                    api={api}
+                    path={`/api/auditor/runs/${selectedRunId}/packet`}
+                    filenamePrefix={`workwell-run-packet-${selectedRunId}`}
+                    label="Export Run Audit Packet"
+                    onError={(message) => setError(message || null)}
+                  />
+                </div>
+              ) : null}
               {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS) */}
               {normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
               TERMINAL_RUN_STATUSES.has(normalizeEnumValue(selectedRun.status)) ? (
