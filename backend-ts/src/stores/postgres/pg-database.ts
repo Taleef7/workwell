@@ -33,5 +33,14 @@ export const isUuid = (id: string): boolean => UUID_RE.test(id);
  * tables. See pg-database.test.ts (the regression guard).
  */
 export function createPgPool(connectionString: string): PgPool {
-  return new pg.Pool({ connectionString });
+  const pool = new pg.Pool({ connectionString });
+  // Fable H6: `pg.Pool` emits 'error' when an IDLE pooled connection is severed — which Neon's pooler
+  // and compute-suspend do routinely. An unhandled 'error' event is a hard process crash (it would take
+  // the whole worker down and orphan any in-flight ctx.waitUntil run mid-write). Swallowing it here is
+  // correct: the dead idle client is removed from the pool automatically; the next query dials a fresh
+  // connection. We only log so the drop is visible.
+  pool.on("error", (err) => {
+    console.error(`[pg] idle client error (recovered, connection dropped from pool): ${err?.message ?? err}`);
+  });
+  return pool;
 }

@@ -194,6 +194,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       segments: await enabledSegments(env),
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
+      actor, // audit attribution from the auth middleware, not the body's triggeredBy (Codex P1)
     };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
@@ -235,6 +236,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       segments: await enabledSegments(env),
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
+      actor, // audit attribution from the auth middleware (Codex P1)
     };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,

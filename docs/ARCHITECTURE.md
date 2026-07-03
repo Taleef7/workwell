@@ -145,6 +145,23 @@ Public API actions derive audit identity from the authenticated security context
 - Cross-system identity (E15 PR-1) is a read-time resolution layer: `resolvePeople`/`mergedComplianceTimeline` group and follow a person across systems but never set or override `Outcome Status` (ADR-008/ADR-022), and never re-aggregate tenant counts — each source record still belongs to exactly one tenant, so All = Σ tenants (ADR-019) holds (guard test). Match-don't-auto-merge: the reconcile write path is owner-gated (E15 PR-2).
 - CQL `Outcome Status` is the only compliance classification source.
 - Case idempotency is enforced by unique constraint: `(employee_id, measure_version_id, evaluation_period)`.
+- The population run pipeline is fully audited (Fable H1, 2026-07-02): `finishManualRun` emits a
+  `RUN_COMPLETED` event and a `CASE_*` event per real case transition — the "every state change writes
+  `audit_event`" hard rule now holds on the highest-volume write path, not just rerun-to-verify. The
+  per-case audit is written AFTER the upsert (the disposition is only known post-mutation, and a
+  pre-read-and-plan would race the store's own re-plan) and is **best-effort at the run boundary**
+  (Codex P1): a transient `audit_events` failure is caught and logged as a run `WARN` (the ledger gap)
+  rather than aborting the loop — which would skip `finalizeRun` and leave the run stuck RUNNING (sync
+  500) or marked FAILED (async) after the case was already mutated. This mirrors the `RUN_COMPLETED`
+  and quality-snapshot best-effort writes.
+- Case upsert is state-aware (Fable H2, `planCaseUpsert`): it preserves operator `IN_PROGRESS` state,
+  respects human closures (only a system closure — a prior auto-resolve or a lapsed auto-exclusion —
+  reopens), never drifts `closed_at`, and active-case rollups count `ACTIVE_CASE_STATUSES`
+  (`OPEN` + `IN_PROGRESS`) so a reconfirmed IN_PROGRESS case isn't dropped (Codex P2); an
+  idempotent re-confirm is a silent refresh (no audit event). Display/routing only — CQL `Outcome Status`
+  stays the sole compliance authority (ADR-008).
+- The hierarchy rollup counts only COMPLETED population runs (Fable H7), never an in-flight RUNNING run's
+  partial outcomes — matching every sibling read model.
 - One employee evaluation failure does not abort whole run; failed employee is persisted as `MISSING_DATA` with evaluation error evidence.
 - Scoped runs use the same structured CQL path as rerun-to-verify for CASE verification.
 - Synthetic trend-history seeding is audited (`TREND_HISTORY_SEEDED` per measure) and anchors each measure's newest synthetic week strictly before that measure's latest real run, so the programs overview (latest-run-per-measure) is never hijacked by synthetic data (#180).
