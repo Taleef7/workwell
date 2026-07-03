@@ -10,10 +10,12 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In HAZWOPER Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:hazwoper-enrollment' and x.code = 'hazwoper-program'))
 
 define "Has Medical Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:hazwoper-exemption' and x.code = 'hazwoper-exemption'))
 
 define "Most Recent Surveillance Exam Date":
   Last(

@@ -10,10 +10,12 @@ parameter "Measurement Period" Interval<DateTime>
 context Patient
 
 define "In TB Screening Program":
-  exists([Condition])
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:tb-eligible-roles' and x.code = 'tb-program'))
 
 define "Has Medical Exemption":
-  Count([Condition]) > 1
+  exists([Condition] C
+    where exists(C.code.coding x where x.system = 'urn:workwell:vs:tb-exemption' and x.code = 'tb-exemption'))
 
 define "Most Recent TB Screen Date":
   Last(

@@ -92,6 +92,47 @@ test("a BROKEN link splits an auto-matched (shared-id) pair", () => {
   assert.ok(split.every((p) => !p.crossSystem));
 });
 
+const rec = (externalId: string, tenantId: string, nationalId: string) => ({
+  externalId, tenantId, nationalId, name: externalId, role: "role", site: "site", providerId: "prov",
+});
+
+test("Fable H8: UNLINK the hub of a 3-record shared-id group keeps the survivors grouped (clique, not star)", () => {
+  const dir = [rec("a", "sysA", "NID-CLIQUE"), rec("b", "sysB", "NID-CLIQUE"), rec("c", "sysC", "NID-CLIQUE")];
+  assert.equal(resolvePeople(dir).length, 1, "shared nationalId auto-groups all three");
+  // Simulate UNLINK of the hub `a`: break it against every other member (what the route writes).
+  const brokenAgainstA = [
+    link("a", "sysA", "b", "sysB", "BROKEN"),
+    link("a", "sysA", "c", "sysC", "BROKEN"),
+  ];
+  const after = resolvePeople(dir, brokenAgainstA);
+  assert.equal(after.length, 2, "a splits out; b+c stay together (the b–c clique edge survives)");
+  assert.equal(after.find((p) => p.sources.length === 1)!.sources[0]!.externalId, "a", "only a is ejected");
+  assert.deepEqual(
+    after.find((p) => p.sources.length === 2)!.sources.map((s) => s.externalId).sort(),
+    ["b", "c"],
+    "survivors b and c remain one person",
+  );
+});
+
+test("Fable M13: a moved person with a SECOND active system is still a duplicate (active in >1 tenant)", () => {
+  const omar = EMPLOYEES.find((e) => e.externalId === "emp-006")!; // PRIOR twh, NID-100-OMAR
+  const omarIhn = EMPLOYEES.find((e) => e.externalId === "ihn-emp-001")!; // ACTIVE ihn, NID-100-OMAR
+  const secondActive = rec("omar-x", "sysx", "NID-100-OMAR"); // a NEW active record in a third system
+  const dir = [omar, omarIhn, secondActive];
+  const dups = duplicateCandidates(dir);
+  assert.equal(dups.length, 1, "Omar is a duplicate — active in ihn AND sysx despite a twh PRIOR link");
+  assert.equal(dups[0]!.nationalId, "NID-100-OMAR");
+  // The old "no PRIOR anywhere" predicate would have wrongly dropped him (he has a PRIOR twh source).
+  assert.ok(dups[0]!.sources.some((s) => s.status === "PRIOR"), "he does have a PRIOR source, yet still surfaces");
+  const activeTenants = new Set(dups[0]!.sources.filter((s) => s.status === "ACTIVE").map((s) => s.tenantId));
+  assert.ok(activeTenants.size > 1, "the predicate is distinct ACTIVE tenants > 1");
+});
+
+test("M13: a pure mobility person (1 active + 1 prior) is NOT a duplicate", () => {
+  const dir = [EMPLOYEES.find((e) => e.externalId === "emp-006")!, EMPLOYEES.find((e) => e.externalId === "ihn-emp-001")!];
+  assert.equal(duplicateCandidates(dir).length, 0, "one active tenant → mobility, not a duplicate");
+});
+
 test("mergedComplianceTimeline unions sources, newest-first, with a move annotation", () => {
   const omar = resolvePeople().find((p) => p.nationalId === "NID-100-OMAR")!;
   const outcomes = new Map<string, TimelineOutcome[]>([
