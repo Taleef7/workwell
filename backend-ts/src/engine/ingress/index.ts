@@ -1,6 +1,6 @@
 /**
  * E12 (#184) pluggable patient-data ingress — public surface.
- * DB-less JSON-bucket evaluation today; WebChart adapter is an inert stub until E12 PR-2.
+ * DB-less JSON-bucket evaluation + the WebChart HTTP/FHIR adapter (E12 PR-2, transport-injected).
  */
 export {
   evaluateBundle,
@@ -18,3 +18,15 @@ export {
   resolveDataSource,
   evaluateSource,
 } from "./data-source.ts";
+export { normalizeWebChartBundle } from "./webchart/normalize.ts";
+export {
+  reconcileCoding,
+  reconcileCodings,
+  crosswalkMeasureIds,
+  type Coding,
+} from "./webchart/terminology.ts";
+export {
+  type WebChartClient,
+  fixtureWebChartClient,
+  httpWebChartClient,
+} from "./webchart/webchart-client.ts";
