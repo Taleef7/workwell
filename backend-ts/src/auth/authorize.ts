@@ -62,6 +62,13 @@ const RULES: Rule[] = [
 
   { pattern: rx("/sse"), access: [A, CM, MCP] },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },
+
+  // Outreach templates: the picker on the case-detail outreach action is the CASE_MANAGER's
+  // primary consumer, so READING the template list/preview is CM/ADMIN (Fable M23). Writes
+  // (create/update/delete) stay ADMIN via the /api/admin/** rule below. First-match-wins, so
+  // these GET rules must precede the generic admin gate.
+  { method: "GET", pattern: rx("/api/admin/outreach-templates"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/admin/outreach-templates/*/preview"), access: [CM, A] },
   { pattern: rx("/api/admin/**"), access: [A] },
 
   { method: "POST", pattern: rx("/api/cases/*/evidence"), access: [CM, A] },
@@ -83,6 +90,12 @@ const RULES: Rule[] = [
   { method: "POST", pattern: rx("/api/value-sets"), access: [AUTHOR, A] },
   { method: "DELETE", pattern: rx("/api/measures/*/value-sets/*"), access: [AUTHOR, A] },
   { method: "POST", pattern: rx("/api/measures/**"), access: [AUTHOR, A] },
+  // AI authoring surfaces (draft-spec/draft-cql/test-fixtures) are author work. The measure-scoped
+  // forms match /api/measures/** above; the BARE POST /api/ai/draft-spec otherwise fell through to
+  // the AUTHENTICATED /api/** fallback, letting any signed-in role (CM/APPROVER) drive billed OpenAI
+  // calls (Fable M4). Gate all /api/ai/** writes to AUTHOR/ADMIN. (Case/run AI live under
+  // /api/cases/** and /api/runs/**, already CM/ADMIN.)
+  { method: "POST", pattern: rx("/api/ai/**"), access: [AUTHOR, A] },
   { method: "POST", pattern: rx("/api/runs/**"), access: [CM, A] },
   { method: "POST", pattern: rx("/api/cases/**"), access: [CM, A] },
   // Batch outreach campaigns (#75 E5) multiply per-case outreach over up to 100k cases —

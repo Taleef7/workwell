@@ -39,7 +39,7 @@ import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAuditor } from "./routes/auditor.ts";
-import { createAuthHandler, type AuthHandler } from "./routes/auth.ts";
+import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
@@ -103,8 +103,31 @@ function rebuildAuthIfNeeded(env: Env): void {
     secret: env.WORKWELL_AUTH_JWT_SECRET!,
     cookieSameSite: env.WORKWELL_AUTH_COOKIE_SAME_SITE,
     cookieSecure: env.WORKWELL_AUTH_COOKIE_SECURE === "true",
+    revocation: kvRefreshRevocation(env.CACHE), // server-side refresh rotation/logout revocation (M5)
   });
   verifier = createJwt({ secret: env.WORKWELL_AUTH_JWT_SECRET! });
+}
+
+/**
+ * Refresh-token revocation backed by the KV binding (Fable M5). Keyed by token family; the value is
+ * the family's current jti. A missing binding (or any op that throws) degrades to stateless auth —
+ * the auth handler treats a throw as "store unavailable" and never hard-logs-out on it.
+ */
+function kvRefreshRevocation(cache: Env["CACHE"] | undefined): RefreshTokenRevocation | undefined {
+  if (!cache) return undefined;
+  const key = (family: string): string => `refresh_fam:${family}`;
+  return {
+    async currentJti(family) {
+      return (await cache.get(key(family))) ?? null;
+    },
+    async rotate(family, jti, ttlSeconds) {
+      // Cloudflare KV requires expirationTtl >= 60s; the refresh TTL (28800) is well above.
+      await cache.put(key(family), jti, { expirationTtl: Math.max(60, Math.floor(ttlSeconds)) });
+    },
+    async revoke(family) {
+      await cache.delete(key(family));
+    },
+  };
 }
 
 // Fail-fast: validate auth/cookie config once. If unsafe, every request 503s with
@@ -211,8 +234,9 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const qualityResponse = await handleQuality(req, env);
   if (qualityResponse) return qualityResponse;
 
-  // Identity — cross-system person resolution / duplicates / mobility (#187 E15). Reconcile writes
-  // (POST) are CASE_MANAGER/ADMIN-gated + audited; reads are all-roles under /api/**.
+  // Identity — cross-system person resolution / duplicates / mobility (#187 E15). ALL /api/identity/**
+  // methods (reads AND the reconcile POST) are CASE_MANAGER/ADMIN-gated (the directory exposes
+  // national/MRN ids + DOB, so it is NOT left to the AUTHENTICATED /api/** fallback); writes are audited.
   const identityResponse = await handleIdentity(req, env, actor);
   if (identityResponse) return identityResponse;
 

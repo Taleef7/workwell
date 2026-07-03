@@ -5,7 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAuthHandler } from "./auth.ts";
+import { createAuthHandler, type RefreshTokenRevocation } from "./auth.ts";
 import { createJwt } from "../auth/jwt.ts";
 
 const SECRET = "auth-route-test-secret";
@@ -14,6 +14,81 @@ const jwt = createJwt({ secret: SECRET });
 
 const post = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
   handle(new Request(`http://x${path}`, { method: "POST", headers, body: body === undefined ? undefined : JSON.stringify(body) }));
+
+// ---- Fable M5: server-side refresh-token revocation ---------------------------------------------
+/** In-memory revocation store mirroring the KV adapter (currentJti/rotate/revoke). */
+function memRevocation() {
+  const map = new Map<string, string>();
+  const revoked: string[] = [];
+  const store: RefreshTokenRevocation = {
+    async currentJti(fam) {
+      return map.get(fam) ?? null;
+    },
+    async rotate(fam, jti) {
+      map.set(fam, jti);
+    },
+    async revoke(fam) {
+      map.delete(fam);
+      revoked.push(fam);
+    },
+  };
+  return { store, map, revoked };
+}
+
+const cookieOf = (res: Response | null): string => res!.headers.get("set-cookie")!.split(";")[0]!.split("=")[1]!;
+
+test("M5: replaying a rotated-away refresh token is reuse → 401 and revokes the whole family", async () => {
+  const rev = memRevocation();
+  const h = createAuthHandler({ secret: SECRET, revocation: rev.store });
+  const p = (path: string, cookie?: string) =>
+    h(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: path.endsWith("login") ? JSON.stringify({ email: "cm@workwell.dev", password: "Workwell123!" }) : undefined }));
+
+  const login = await p("/api/auth/login");
+  const token1 = cookieOf(login);
+  // First refresh rotates → a new token; the family's current jti advances.
+  const r1 = await p("/api/auth/refresh", token1);
+  assert.equal(r1?.status, 200);
+  const token2 = cookieOf(r1);
+  assert.notEqual(token1, token2);
+  // Replaying token1 (its jti was rotated away) is reuse → 401 + family revoked.
+  const reuse = await p("/api/auth/refresh", token1);
+  assert.equal(reuse?.status, 401);
+  assert.equal(rev.revoked.length, 1);
+  // Because the family was revoked, even the legitimately-rotated token2 is now dead.
+  const after = await p("/api/auth/refresh", token2);
+  assert.equal(after?.status, 401);
+});
+
+test("M5: logout revokes the family so the still-unexpired refresh token can't be reused", async () => {
+  const rev = memRevocation();
+  const h = createAuthHandler({ secret: SECRET, revocation: rev.store });
+  const p = (path: string, cookie?: string) =>
+    h(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: path.endsWith("login") ? JSON.stringify({ email: "admin@workwell.dev", password: "Workwell123!" }) : undefined }));
+
+  const token = cookieOf(await p("/api/auth/login"));
+  assert.equal((await p("/api/auth/logout", token))?.status, 204);
+  assert.equal(rev.revoked.length, 1);
+  assert.equal((await p("/api/auth/refresh", token))?.status, 401);
+});
+
+test("M5: a store outage (throwing revocation) degrades to stateless — refresh still works", async () => {
+  const boom: RefreshTokenRevocation = {
+    async currentJti() {
+      throw new Error("KV down");
+    },
+    async rotate() {
+      throw new Error("KV down");
+    },
+    async revoke() {
+      throw new Error("KV down");
+    },
+  };
+  const h = createAuthHandler({ secret: SECRET, revocation: boom });
+  const p = (path: string, cookie?: string) =>
+    h(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: path.endsWith("login") ? JSON.stringify({ email: "cm@workwell.dev", password: "Workwell123!" }) : undefined }));
+  const token = cookieOf(await p("/api/auth/login"));
+  assert.equal((await p("/api/auth/refresh", token))?.status, 200);
+});
 
 test("login with valid demo credentials returns a token + role and sets the refresh cookie", async () => {
   const res = await post("/api/auth/login", { email: "admin@workwell.dev", password: "Workwell123!" });

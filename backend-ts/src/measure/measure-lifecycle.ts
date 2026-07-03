@@ -5,8 +5,12 @@
  *
  * Gate note (faithful to Java): approve + Approved→Active require passing test fixtures
  * (activationReadiness), and no fixtures are ported yet, so those transitions are blocked
- * until the Tests-tab fixtures land — same as a fresh measure in Java. Active→Deprecated has
- * no fixture gate, so it works on the seeded Active measures.
+ * until the Tests-tab fixtures land — same as a fresh measure in Java.
+ *
+ * Deprecation is NOT a `/status` transition (Fable M2): it lives only on the ADMIN-only
+ * `POST /:id/deprecate` route, which requires a reason. Leaving `Active->Deprecated` in the
+ * generic `/status` allow-list let an APPROVER deprecate an Active measure with no reason,
+ * bypassing that gate — so it is deliberately absent from `ALLOWED_TRANSITIONS` below.
  */
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
@@ -20,7 +24,9 @@ export interface MeasureLifecycleDeps {
 /** A bad-request-class lifecycle failure (the route maps this to HTTP 400). */
 export class MeasureError extends Error {}
 
-const ALLOWED_TRANSITIONS = new Set(["Draft->Approved", "Approved->Active", "Active->Deprecated"]);
+// Active->Deprecated is intentionally excluded — deprecation goes through the ADMIN-only
+// `/deprecate` route (reason required), not this APPROVER-reachable `/status` path (Fable M2).
+const ALLOWED_TRANSITIONS = new Set(["Draft->Approved", "Approved->Active"]);
 
 async function audit(deps: MeasureLifecycleDeps, eventType: string, r: MeasureRecord, actor: string, payload: Record<string, unknown>): Promise<void> {
   await deps.events.appendAudit({
@@ -91,6 +97,18 @@ export async function transitionStatus(deps: MeasureLifecycleDeps, measureId: st
     throw new MeasureError(`Invalid transition from ${r.status} to ${targetStatus}`);
   }
   const readiness = toActivationReadiness(r);
+  // Draft→Approved must enforce the same compile + test-fixture gate as the dedicated
+  // `/approve` route (Fable M3) — otherwise `/status` lets a measure reach Approved (with a
+  // matching audit trail) while never having compiled, violating "cannot Approve unless
+  // compile passes". (Activation still blocks later, but the Approved state would be wrong.)
+  if (r.status === "Draft" && targetStatus === "Approved") {
+    if (!compileAllowsActivation(readiness.compileStatus)) {
+      throw new MeasureError("Measure cannot be approved until compile status is COMPILED or WARNINGS.");
+    }
+    if (!readiness.testValidationPassed) {
+      throw new MeasureError("Measure cannot be approved until test fixtures pass validation.");
+    }
+  }
   if (r.status === "Approved" && targetStatus === "Active") {
     if (!compileAllowsActivation(readiness.compileStatus)) {
       throw new MeasureError("Measure cannot be activated until CQL compile status is COMPILED or WARNINGS");
