@@ -4,8 +4,13 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcileCoding, reconcileCodings, crosswalkMeasureIds } from "./terminology.ts";
+import { reconcileCoding, reconcileCodings, crosswalkMeasureIds, targetEventType } from "./terminology.ts";
 import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
+
+const eventOf = (measureId: string) => ({
+  system: MEASURE_BINDINGS[measureId]!.event.valueSet,
+  code: MEASURE_BINDINGS[measureId]!.event.code,
+});
 
 const systems = (cs: { system?: string }[]): string[] => cs.map((c) => c.system ?? "").sort();
 
@@ -63,4 +68,12 @@ test("crosswalk targets only reference real, current measures", () => {
   for (const id of crosswalkMeasureIds()) {
     assert.ok(MEASURE_BINDINGS[id], `crosswalk measure '${id}' exists in the bindings`);
   }
+});
+
+test("targetEventType: reports the retrieve type so the normalizer can synthesize resources", () => {
+  assert.equal(targetEventType(eventOf("audiogram")), "procedure");
+  assert.equal(targetEventType(eventOf("diabetes_hba1c")), "procedure"); // lab recorded as Observation, retrieved as Procedure
+  assert.equal(targetEventType(eventOf("cms122")), "observation"); // value-based, stays an Observation
+  assert.equal(targetEventType(eventOf("flu_vaccine")), "immunization");
+  assert.equal(targetEventType({ system: "urn:nope", code: "x" }), null);
 });

@@ -68,6 +68,50 @@ test("normalizeWebChartBundle: empty / garbage payload → empty bundle, never t
 
 test("normalizeWebChartBundle: a resource with no matchable code passes through untouched", () => {
   const raw = { resourceType: "Bundle", entry: [{ resource: { resourceType: "Observation", code: { coding: [{ system: "http://loinc.org", code: "99999-9" }] } } }] };
-  const obs = normalizeWebChartBundle(raw).entry[0]!.resource as AnyRec;
-  assert.equal(codings(obs, "code").length, 1); // unchanged
+  const out = normalizeWebChartBundle(raw);
+  assert.equal(out.entry.length, 1); // no synthesis for an unmapped code
+  assert.equal(codings(out.entry[0]!.resource as AnyRec, "code").length, 1); // unchanged
+});
+
+test("normalizeWebChartBundle: a lab Observation for a Procedure-retrieved measure → synthesizes a dated Procedure", () => {
+  // WebChart records HbA1c as an Observation; diabetes_hba1c's CQL retrieves [Procedure]. The
+  // normalizer must emit a synthesized Procedure carrying the diabetes_hba1c coding + the lab date, so
+  // the recency measure can match — while cms122 ([Observation]) matches the Observation itself.
+  const raw = {
+    resourceType: "Bundle",
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          subject: { reference: "Patient/p1" },
+          effectiveDateTime: "2026-05-01T00:00:00Z",
+          code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
+          valueQuantity: { value: 6.5, unit: "%" },
+        },
+      },
+    ],
+  };
+  const out = normalizeWebChartBundle(raw).entry.map((e) => e.resource as AnyRec);
+  const obs = out.find((r) => r.resourceType === "Observation")!;
+  const proc = out.find((r) => r.resourceType === "Procedure")!;
+  assert.ok(obs && proc, "both the Observation and a synthesized Procedure are present");
+  // The Observation keeps its value + carries the cms122 ([Observation]) coding.
+  assert.ok(codings(obs, "code").some((c) => c.code === MEASURE_BINDINGS["cms122"]!.event.code));
+  assert.equal(obs.valueQuantity.value, 6.5);
+  // The synthesized Procedure carries the diabetes_hba1c ([Procedure]) coding, the lab date, subject, and provenance.
+  assert.equal(proc.status, "completed");
+  assert.equal(proc.performedDateTime, "2026-05-01T00:00:00Z");
+  assert.deepEqual(proc.subject, { reference: "Patient/p1" });
+  assert.equal(proc.meta.tag[0].code, "derived-from-observation");
+  assert.ok(codings(proc, "code").some((c) => c.code === MEASURE_BINDINGS["diabetes_hba1c"]!.event.code));
+});
+
+test("normalizeWebChartBundle: does not mutate its input", () => {
+  const raw = {
+    resourceType: "Bundle",
+    entry: [{ resource: { resourceType: "Procedure", code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "92557" }] } } }],
+  };
+  const snapshot = JSON.stringify(raw);
+  normalizeWebChartBundle(raw);
+  assert.equal(JSON.stringify(raw), snapshot, "the caller's payload is untouched");
 });
