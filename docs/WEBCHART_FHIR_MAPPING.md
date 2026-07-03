@@ -205,9 +205,19 @@ is the adapter-local crosswalk. It reuses the same real standard codes as the E7
 (HbA1c 4548-4, LDL 13457-7, BP 85354-9, BMI 39156-5, mammogram HCPCS G0202/CPT 77067). It **appends** the
 synthetic measure-event coding to a real WebChart coding (preserving the real code for provenance), maps
 one real code to **all** measures it serves (HbA1c → both `diabetes_hba1c` and `cms122`), and tolerates
-system aliases (canonical URI or OID, case-insensitive). **A/C stay the standards-correct destination**
-tied to E14 + the VSAC unblock. ADR-008 intact: reconciliation supplies coded FHIR, it never decides
-compliance.
+system aliases (canonical URI or OID, case-insensitive).
+
+**Resource-type seam (Observation vs Procedure).** WebChart records labs/vitals (HbA1c, LDL, BP, BMI)
+as `Observation`s, but four of those measures (`diabetes_hba1c`, `cholesterol_ldl`, `hypertension`,
+`obesity_bmi`) retrieve `[Procedure]` in their CQL — a synthetic-data modeling quirk (only `cms122` is
+value-based and retrieves `[Observation]`). So merely appending a coding to the Observation wouldn't let
+those recency measures match. The normalizer therefore **synthesizes a dated `Procedure`** (carrying the
+target coding + the Observation's `effectiveDateTime`, tagged `derived-from-observation`) whenever a lab
+Observation reconciles to a `[Procedure]`-retrieving measure — so a real WebChart LOINC lab evaluates
+end-to-end (proven by a test: an HbA1c `Observation` → `diabetes_hba1c` COMPLIANT). The
+standards-correct end state is **option A** — re-point those measures' `event.type` to `observation` — a
+measure/CQL change tracked for PR-2c / E14. **A/C stay the standards-correct destination** tied to E14 +
+the VSAC unblock. ADR-008 intact: reconciliation supplies coded FHIR, it never decides compliance.
 
 ---
 
@@ -249,11 +259,14 @@ path~~ (WebChart HTTP/FHIR API); ~~MariaDB driver~~ (not needed — HTTP/`fetch`
 
 - **PR-2a (done):** this mapping reference + read-query scope + decision forks.
 - **PR-2b (done, 2026-07-03):** the **transport-agnostic adapter core** — `webchart/terminology.ts`
-  (reconciliation, option B), `webchart/normalize.ts` (WebChart FHIR → engine bundle shape),
-  `webchart/webchart-client.ts` (the `WebChartClient` port + fixture + provisional HTTP client), wired
-  into `webChartDataSource(cfg, client?)` (transport injected). Fully unit-tested + an end-to-end test
-  proving a **real-CPT-coded** WebChart bundle evaluates to COMPLIANT via reconciliation (control:
-  un-reconciled → MISSING_DATA). No new deps; no schema. Descriptive only (ADR-008/ADR-017).
+  (reconciliation, option B + the `targetEventType` seam), `webchart/normalize.ts` (WebChart FHIR →
+  engine bundle shape, non-mutating, with Observation→Procedure synthesis for `[Procedure]`-retrieved lab
+  measures), `webchart/webchart-client.ts` (the `WebChartClient` port + fixture + provisional HTTP
+  client), wired into `webChartDataSource(cfg, client?)` (transport injected). Fully unit-tested + two
+  end-to-end tests proving a **real-CPT-coded** procedure AND a **real-LOINC-coded** lab Observation each
+  evaluate to COMPLIANT via reconciliation (each with an un-reconciled MISSING_DATA control). Whole-branch
+  code review folded in (resource-type coverage gap, input non-mutation, provisional-client hardening). No
+  new deps; no schema. Descriptive only (ADR-008/ADR-017).
 - **PR-2c (waits on §7 answers):** finalize `httpWebChartClient`'s request shaping against the real API,
   add the OH-enrollment-roster input (§4 enrollment gap), extend the crosswalk as the real code space is
   confirmed, and (if the API is proprietary) add the row→FHIR mapping per §3. Wire behind

@@ -33,27 +33,34 @@ export function fixtureWebChartClient(payloads: unknown[]): WebChartClient {
  * contract-independent. Until then this is selected only when the WebChart env vars are set
  * (inert-unless-configured) and is not exercised by the demo stack.
  */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export function httpWebChartClient(cfg: WebChartConfig): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
   return {
     kind: "http",
     async fetchPatientPayloads(): Promise<unknown[]> {
-      // TODO(dave-carlson): confirm endpoint, auth (Bearer vs API key header), pagination, and whether
-      // per-patient bundles are returned inline or need a follow-up $everything call. This default is a
-      // reasonable FHIR-API placeholder, intentionally minimal.
+      // ── PROVISIONAL — do NOT ship as-is ────────────────────────────────────────────────────────
+      // TODO(dave-carlson, PR-2c): the real request shaping is unknown until the API contract is
+      // confirmed. Specifically:
+      //   • endpoint(s) + how to enumerate the WORKER POPULATION (this hits a single `/Patient` and
+      //     returns ONE payload — so `normalizeWebChartBundle` would fold every patient into ONE
+      //     engine bundle, collapsing them to a single subject. The real path must yield ONE payload
+      //     PER PATIENT — e.g. map a searchset Bundle's entries, or a per-patient `$everything`).
+      //   • auth scheme (Bearer vs an API-key header vs OAuth client-credentials).
+      //   • pagination.
+      //   • whether a patient's clinical data comes inline or needs a follow-up call.
+      // Until then this is inert-unless-configured and never runs on the demo stack.
       const res = await fetch(`${base}/Patient`, {
         headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: "application/fhir+json" },
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS), // a hung endpoint must not hang the run
       });
       if (!res.ok) {
         throw new Error(`WebChart API ${res.status} ${res.statusText} for ${base}/Patient`);
       }
-      const body: unknown = await res.json();
-      // A searchset Bundle → its entries are the per-patient payloads; anything else is passed through
-      // as a single payload for the normalizer to interpret.
-      if (body && typeof body === "object" && (body as { resourceType?: string }).resourceType === "Bundle") {
-        return [body];
-      }
-      return [body];
+      // Returned as a single payload for the normalizer; per-patient fan-out lands with the real
+      // contract (see the TODO above).
+      return [await res.json()];
     },
   };
 }

@@ -25,13 +25,23 @@ over-fit). The exact API contract comes from a Dave Carlson (MIE) meeting next w
 - `data-source.ts` — `webChartDataSource(cfg, client?)` now **wired** (client → normalize → bundles),
   replacing the inert reject stub; transport injectable.
 
-**Proof:** an end-to-end test evaluates a **real-CPT-coded** (92557) WebChart audiogram bundle → COMPLIANT
-via reconciliation; the control (same data un-reconciled through the JSON source) → MISSING_DATA. Two real
-bugs found + fixed during testing: (1) one real code serving multiple measures (single-value Map dropped
-`diabetes_hba1c` for `cms122` on HbA1c) → multi-target crosswalk; (2) a Bundle with no `entry` array fell
-through and wrapped itself as a resource → fixed. **972 tests pass / 0 fail** (+18 new); typecheck green.
-No schema, no new deps. Descriptive only (ADR-008/ADR-017) — reconciliation supplies coded FHIR, never
-decides compliance.
+**Proof:** two end-to-end tests — a **real-CPT-coded** (92557) audiogram Procedure and a
+**real-LOINC-coded** (4548-4) HbA1c Observation — each evaluate to COMPLIANT via reconciliation, each with
+an un-reconciled MISSING_DATA control. Two bugs found while testing: multi-measure real codes (single-value
+Map dropped `diabetes_hba1c` for `cms122`) → multi-target crosswalk; a no-`entry` Bundle wrapping itself →
+fixed.
+
+**Whole-branch code review folded in.** The reviewer caught a real coverage gap: WebChart records labs as
+`Observation`s, but four lab/vital measures (`diabetes_hba1c`/`cholesterol_ldl`/`hypertension`/`obesity_bmi`)
+retrieve `[Procedure]` in their CQL — so appending a coding to the Observation never let them match (only
+`cms122`, which retrieves `[Observation]`, worked). Rather than narrow the crosswalk, the normalizer now
+**synthesizes a dated `Procedure`** from a lab Observation when the reconciled target is a `[Procedure]`
+measure (via a new `targetEventType` seam) — so real LOINC labs evaluate end-to-end (new test proves it);
+the standards-correct end state (re-point those measures to `[Observation]`) is option A, tracked for PR-2c.
+Also folded: normalizer no longer mutates its input (builds copies), drops resource-less Bundle entries, and
+the provisional HTTP client got a sharper per-patient-fan-out TODO + an `AbortSignal` timeout. **976 tests
+pass / 0 fail** (+22 new); typecheck green. No schema, no new deps. Descriptive only (ADR-008/ADR-017) —
+reconciliation supplies coded FHIR, never decides compliance.
 
 **Found (surfaced in the doc, not a blocker): the enrollment gap.** The measures gate on a program-enrollment
 `Condition` that is *not* WebChart clinical coding — it's occupational-health **program membership** (an OH

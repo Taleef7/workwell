@@ -81,6 +81,41 @@ test("webChartDataSource: real CPT-coded WebChart data evaluates end-to-end via 
   assert.equal(res.results[0]?.outcome?.outcome, "COMPLIANT");
 });
 
+test("webChartDataSource: a real LOINC lab Observation evaluates a Procedure-retrieved measure (Observation→Procedure synthesis)", async () => {
+  // WebChart records HbA1c as an Observation (LOINC 4548-4); diabetes_hba1c's CQL retrieves [Procedure].
+  // The adapter synthesizes a dated Procedure from the lab so the recency measure matches end-to-end.
+  const wc = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "wc-emp-2" } },
+      {
+        resource: {
+          resourceType: "Condition",
+          subject: { reference: "Patient/wc-emp-2" },
+          code: { coding: [{ system: "urn:workwell:vs:diabetes-program", code: "diabetes-enrolled" }] },
+        },
+      },
+      {
+        resource: {
+          resourceType: "Observation",
+          subject: { reference: "Patient/wc-emp-2" },
+          effectiveDateTime: "2026-05-01T00:00:00.000Z", // ~42 days before EVAL → within the 180d window
+          code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
+          valueQuantity: { value: 6.5, unit: "%" },
+        },
+      },
+    ],
+  };
+  // Control — un-reconciled: the [Procedure] retrieve never sees the LOINC Observation → MISSING_DATA.
+  const control = await evaluateSource(jsonBucketDataSource(structuredClone(wc)), "diabetes_hba1c", { evaluationDate: EVAL });
+  assert.equal(control.results[0]?.outcome?.outcome, "MISSING_DATA");
+  // Treatment — the WebChart source synthesizes the Procedure → recency satisfied → COMPLIANT.
+  const src = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient([wc]));
+  const res = await evaluateSource(src, "diabetes_hba1c", { evaluationDate: EVAL });
+  assert.equal(res.results[0]?.outcome?.outcome, "COMPLIANT");
+});
+
 test("evaluateSource: evaluates every bundle a JSON source yields", async () => {
   const src = jsonBucketDataSource([load("audiogram", "present_recent"), load("audiogram", "missing")]);
   const res = await evaluateSource(src, "audiogram", { evaluationDate: EVAL });

@@ -17,7 +17,7 @@
  * coded FHIR the CQL engine then evaluates. The original real coding is PRESERVED (provenance); the
  * synthetic coding is ADDED alongside it so evidence keeps the real code.
  */
-import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
+import { MEASURE_BINDINGS, type EventType } from "../../synthetic/measure-bindings.ts";
 
 export interface Coding {
   system?: string;
@@ -37,12 +37,15 @@ const SYSTEMS = {
 // LOINC/CVX/CPT/HCPCS coding matches regardless of the exact URI a WebChart feed stamps.
 const SYSTEM_ALIASES: Record<string, string> = {
   "http://loinc.org": SYSTEMS.LOINC,
+  "https://loinc.org": SYSTEMS.LOINC,
   "urn:oid:2.16.840.1.113883.6.1": SYSTEMS.LOINC,
   loinc: SYSTEMS.LOINC,
   "http://hl7.org/fhir/sid/cvx": SYSTEMS.CVX,
+  "https://hl7.org/fhir/sid/cvx": SYSTEMS.CVX,
   "urn:oid:2.16.840.1.113883.12.292": SYSTEMS.CVX,
   cvx: SYSTEMS.CVX,
   "http://www.ama-assn.org/go/cpt": SYSTEMS.CPT,
+  "https://www.ama-assn.org/go/cpt": SYSTEMS.CPT,
   "urn:oid:2.16.840.1.113883.6.12": SYSTEMS.CPT,
   cpt: SYSTEMS.CPT,
   "http://www.cms.gov/medicare/coding/hcpcsreleasecodesets": SYSTEMS.HCPCS,
@@ -87,9 +90,14 @@ const CROSSWALK_ROWS: CrosswalkRow[] = [
   { system: SYSTEMS.CVX, code: "44", measureId: "hepatitis_b_vaccination_series" }, // Hep B, dialysis
   { system: SYSTEMS.CVX, code: "45", measureId: "hepatitis_b_vaccination_series" }, // Hep B, unspecified
   { system: SYSTEMS.CVX, code: "189", measureId: "hepatitis_b_vaccination_series" }, // Hep B (Heplisav-B)
-  // Labs / vitals (LOINC) — WebChart observations carry loinc_num
-  { system: SYSTEMS.LOINC, code: "4548-4", measureId: "diabetes_hba1c" }, // HbA1c
-  { system: SYSTEMS.LOINC, code: "4548-4", measureId: "cms122" }, // HbA1c (poor control > 9%)
+  // Labs / vitals (LOINC) — WebChart records these as Observations (`observation_codes.loinc_num`).
+  // Note the resource-type seam: `cms122` retrieves `[Observation]` (value-based), but the four
+  // recency measures below retrieve `[Procedure]`. The normalizer handles this by synthesizing a dated
+  // Procedure from a reconciled lab Observation (see `normalize.ts`), keyed on `targetEventType` here —
+  // so a real WebChart LOINC lab drives BOTH the Observation- and Procedure-retrieving measures. The
+  // standards-correct end state (re-point those measures to `[Observation]`) is option A (PR-2c / E14).
+  { system: SYSTEMS.LOINC, code: "4548-4", measureId: "diabetes_hba1c" }, // HbA1c (recency, [Procedure])
+  { system: SYSTEMS.LOINC, code: "4548-4", measureId: "cms122" }, // HbA1c (poor control > 9%, [Observation])
   { system: SYSTEMS.LOINC, code: "17856-6", measureId: "cms122" }, // HbA1c (POCT) alias
   { system: SYSTEMS.LOINC, code: "13457-7", measureId: "cholesterol_ldl" }, // LDL cholesterol (calc)
   { system: SYSTEMS.LOINC, code: "18262-6", measureId: "cholesterol_ldl" }, // LDL cholesterol (direct)
@@ -108,13 +116,24 @@ function targetCodingFor(measureId: string): Coding | null {
 // code can satisfy MORE THAN ONE measure — e.g. LOINC 4548-4 (HbA1c) drives both `diabetes_hba1c` and
 // `cms122` — so the value is a LIST of synthetic target codings, not a single one.
 const CROSSWALK = new Map<string, Coding[]>();
+// A synthetic target coding → the retrieve type of the measure that owns it (`procedure` targets from a
+// source Observation are synthesized into a Procedure by the normalizer). Keyed `${valueSet}|${code}`.
+const TARGET_EVENT_TYPE = new Map<string, EventType>();
 for (const row of CROSSWALK_ROWS) {
+  const binding = MEASURE_BINDINGS[row.measureId];
   const target = targetCodingFor(row.measureId);
-  if (!target) continue; // a crosswalk row for an unknown/removed measure is a no-op, never a throw
+  if (!binding || !target) continue; // a crosswalk row for an unknown/removed measure is a no-op, never a throw
   const key = `${normalizeSystem(row.system)}|${row.code.toUpperCase()}`;
   const list = CROSSWALK.get(key) ?? [];
   if (!list.some((t) => t.system === target.system && t.code === target.code)) list.push(target);
   CROSSWALK.set(key, list);
+  TARGET_EVENT_TYPE.set(`${target.system}|${target.code}`, binding.event.type);
+}
+
+/** The retrieve type (`procedure` | `immunization` | `observation`) of the measure a synthetic target
+ * coding belongs to, or null if it isn't a known target — lets the normalizer decide resource synthesis. */
+export function targetEventType(coding: Coding): EventType | null {
+  return TARGET_EVENT_TYPE.get(`${coding.system}|${coding.code}`) ?? null;
 }
 
 /**
