@@ -148,7 +148,11 @@ export default function CasesPage() {
     }
   }, [api, setMeasures]);
 
+  // Stale-fetch guard (Fable M20): a slow response for one filter set must not overwrite a newer one's
+  // rows (or clobber the selection). Only the latest loadCases applies its result.
+  const casesReqIdRef = useRef(0);
   const loadCases = useCallback(async () => {
+    const reqId = ++casesReqIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -172,15 +176,17 @@ export default function CasesPage() {
       // #150 M10: X-Total-Count carries the full filtered match count, so paging is driven by the real
       // total (not the brittle "page was full" heuristic, which mis-signals when total is an exact multiple).
       const { data, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
+      if (reqId !== casesReqIdRef.current) return;
       const matchTotal = Number(headers.get("X-Total-Count") ?? data.length);
       setCases(data);
       setTotal(Number.isFinite(matchTotal) ? matchTotal : data.length);
       setHasMore(data.length < (Number.isFinite(matchTotal) ? matchTotal : data.length));
       setSelectedCaseIds((existing) => existing.filter((id) => data.some((item) => item.caseId === id)));
     } catch (err) {
+      if (reqId !== casesReqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (reqId === casesReqIdRef.current) setLoading(false);
     }
   }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, outcomeFilter, pageSize, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
 

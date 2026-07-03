@@ -7,6 +7,8 @@ import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, 
 import { emitToast } from "@/lib/toast";
 import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, formatStatusLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canManageCases } from "@/lib/rbac";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
@@ -132,6 +134,11 @@ export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
   const caseId = params.id;
   const api = useApi();
+  const { user } = useAuth();
+  // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER/ADMIN on the
+  // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
+  // the API gate so those controls simply don't render for read roles.
+  const canManage = canManageCases(user?.role);
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"outreach" | "rerun" | "delivery" | null>(null);
@@ -500,6 +507,7 @@ export default function CaseDetailPage() {
             </div>
           </details>
 
+          {canManage && (
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Actions</summary>
             <div className="mt-3 space-y-3">
@@ -584,6 +592,7 @@ export default function CaseDetailPage() {
               </div>
             </div>
           </details>
+          )}
 
           <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Why Flagged Evidence</summary>
@@ -671,7 +680,7 @@ export default function CaseDetailPage() {
                 </div>
                 {/* Actionable CTA for the recommended next step (the action buttons below are generic;
                     this makes the *recommended* one a single click from the next-action panel). */}
-                {caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
+                {canManage && caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
                   <div className="mt-3">
                     {caseDetail.latestOutreachDeliveryStatus ? (
                       <Button
@@ -716,6 +725,8 @@ export default function CaseDetailPage() {
                     </p>
                   </div>
                 ) : null}
+                {canManage && (
+                <>
                 <div className="mt-4 grid gap-2">
                   <Select
                     label="Outreach template"
@@ -817,6 +828,8 @@ export default function CaseDetailPage() {
                     Schedule Appointment
                   </Button>
                 </div>
+                </>
+                )}
                 <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
                   <ModalHeader>
                     <ModalTitle>Schedule Appointment</ModalTitle>
@@ -908,6 +921,7 @@ export default function CaseDetailPage() {
                 ) : (
                   <p className="mt-3 text-xs text-amber-800">Preview the outreach message before sending.</p>
                 )}
+                {canManage && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("QUEUED")} disabled={acting !== null}>
                     Mark queued
@@ -919,6 +933,7 @@ export default function CaseDetailPage() {
                     Mark failed
                   </Button>
                 </div>
+                )}
               </div>
             </div>
 
@@ -1061,6 +1076,9 @@ export default function CaseDetailPage() {
               </div>
             </div>
 
+            {/* Evidence list + upload is CASE_MANAGER/ADMIN on the backend; a read role 403s on the list
+                and would see a misleading "No evidence uploaded" (Fable H9). Gate the whole section. */}
+            {canManage && (
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
@@ -1118,6 +1136,7 @@ export default function CaseDetailPage() {
                 ))}
               </div>
             </div>
+            )}
 
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Audit timeline</p>

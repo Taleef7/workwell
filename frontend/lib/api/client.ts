@@ -15,18 +15,50 @@ function bustGetCache(): void {
   getCache.clear();
 }
 
+/**
+ * Module-level single-flight for the silent access-token refresh (Fable M24). Parallel 401s (several
+ * components fetching at once) must NOT each POST /api/auth/refresh: the refresh ROTATES the HttpOnly
+ * cookie, so a second concurrent call races the first's rotation and can fail → a spurious hard logout
+ * mid-session. All callers now share one in-flight refresh; the slot is cleared once it settles so a
+ * later token expiry starts a fresh one.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  const p = (async (): Promise<string | null> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+      if (!res.ok) return null;
+      const payload = (await res.json()) as { token?: string };
+      return payload.token ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  refreshInFlight = p;
+  void p.finally(() => {
+    if (refreshInFlight === p) refreshInFlight = null;
+  });
+  return p;
+}
+
 export type ApiClientOptions = {
   token?: string | null;
   onUnauthorized?: () => void;
+  /** Propagate a silently-refreshed access token back to the session store (Fable M24) so every
+   *  client — not just this instance — uses the fresh token and stops re-refreshing on each request. */
+  onTokenRefreshed?: (token: string) => void;
 };
 
 export class ApiClient {
   private token: string | null;
   private readonly onUnauthorized: (() => void) | undefined;
+  private readonly onTokenRefreshed: ((token: string) => void) | undefined;
 
-  constructor({ token, onUnauthorized }: ApiClientOptions = {}) {
+  constructor({ token, onUnauthorized, onTokenRefreshed }: ApiClientOptions = {}) {
     this.token = token ?? null;
     this.onUnauthorized = onUnauthorized;
+    this.onTokenRefreshed = onTokenRefreshed;
   }
 
   private buildHeaders(extra?: HeadersInit): Headers {
@@ -38,27 +70,16 @@ export class ApiClient {
   }
 
   /**
-   * Attempts one silent access-token refresh against /api/auth/refresh using the
-   * HttpOnly refresh cookie. Returns true if a fresh access token was obtained.
+   * Attempts one silent access-token refresh against /api/auth/refresh using the HttpOnly refresh
+   * cookie, via the module-level single-flight (Fable M24). Returns true if a fresh access token was
+   * obtained; the token is also propagated to the session store so every client picks it up.
    */
   private async tryRefresh(): Promise<boolean> {
-    try {
-      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: "POST",
-        credentials: "include"
-      });
-      if (!refreshRes.ok) {
-        return false;
-      }
-      const payload = (await refreshRes.json()) as { token?: string };
-      if (!payload.token) {
-        return false;
-      }
-      this.token = payload.token;
-      return true;
-    } catch {
-      return false;
-    }
+    const token = await refreshAccessToken();
+    if (!token) return false;
+    this.token = token;
+    this.onTokenRefreshed?.(token);
+    return true;
   }
 
   /**

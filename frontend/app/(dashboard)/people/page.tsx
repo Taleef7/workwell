@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonCard } from "@/components/skeleton-loader";
 
@@ -53,18 +53,24 @@ export default function PeoplePage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stale-fetch guard (Fable M20): a slow response for an earlier query/page must not overwrite a
+  // newer one's results. Every load takes the next request id; only the latest applies its result.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
     try {
       const qs = new URLSearchParams({ pageSize: String(PAGE_SIZE), page: String(page) });
       if (query.trim()) qs.set("q", query.trim());
       const res = await api.getWithHeaders<Person[]>(`/api/identity/people?${qs.toString()}`);
+      if (reqId !== reqIdRef.current) return;
       setPeople(res.data);
       setTotal(Number(res.headers.get("X-Total-Count") ?? res.data.length));
       setError(null);
     } catch (err) {
+      if (reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoaded(true);
+      if (reqId === reqIdRef.current) setLoaded(true);
     }
   }, [api, query, page]);
 

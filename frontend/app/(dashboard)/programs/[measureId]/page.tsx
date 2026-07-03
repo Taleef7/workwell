@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -128,8 +128,12 @@ export default function ProgramDetailPage() {
   const [riskOutlook, setRiskOutlook] = useState<RiskOutlook | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Stale-fetch guard (Fable M20): navigating measure A → B must not let A's slow response paint under
+  // B. Only the latest load applies its result.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!measureId) return;
+    const reqId = ++reqIdRef.current;
     // The four reads are independent of each other — fire them concurrently instead of
     // as a 4-step waterfall (the previous serial chain was the main "view detail is slow"
     // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
@@ -141,6 +145,7 @@ export default function ProgramDetailPage() {
       api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
       api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
     ]);
+    if (reqId !== reqIdRef.current) return;
     if (programsRes.status === "fulfilled") {
       setProgram(programsRes.value.find((p) => p.measureId === measureId) ?? null);
     } else {
@@ -518,17 +523,23 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
     void api.get<Tenant[]>("/api/tenants").then(setTenants).catch(() => setTenants([]));
   }, [api]);
 
+  // Stale-fetch guard (Fable M20): changing the scope selector (or navigating measures) must not let an
+  // earlier scope's slow response paint under the current one. Only the latest load applies.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
     const [level, id] = scope.split("|");
     const qs = new URLSearchParams({ measureId, scopeLevel: level!, scopeId: id! });
     try {
       const rows = await api.get<QualitySnapshot[]>(`/api/quality/history?${qs.toString()}`);
+      if (reqId !== reqIdRef.current) return;
       setSnapshots(rows);
       setAsOf((prev) => (prev && rows.some((r) => r.period === prev) ? prev : rows.at(-1)?.period ?? ""));
     } catch {
+      if (reqId !== reqIdRef.current) return;
       setSnapshots([]);
     } finally {
-      setLoaded(true);
+      if (reqId === reqIdRef.current) setLoaded(true);
     }
   }, [api, measureId, scope]);
 
