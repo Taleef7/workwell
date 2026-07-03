@@ -105,11 +105,23 @@ const CROSSWALK_ROWS: CrosswalkRow[] = [
   { system: SYSTEMS.LOINC, code: "39156-5", measureId: "obesity_bmi" }, // BMI
 ];
 
-/** The synthetic event coding a measure's CQL matches (from the generated measure bindings). */
-function targetCodingFor(measureId: string): Coding | null {
+/**
+ * The synthetic event coding a measure's CQL matches (from the generated measure bindings), for the
+ * given real code.
+ *
+ * Multi-alternative series (Hep B Heplisav-vs-traditional) are special: the CQL matches the SPECIFIC
+ * alternative codes under the event value set (e.g. `urn:workwell:vs:hepb-vaccines` code `189`/`08`/…,
+ * which the synthetic bundle builder stamps from `alt.codes`), NOT the generic `event.code`
+ * (`hepb-vaccine`). Those synthetic codes ARE the real CVX numbers, so when the real code is one of the
+ * alternative codes, preserve it verbatim — otherwise a real Heplisav-B/traditional dose would reconcile
+ * to a code the CQL never matches and stay MISSING_DATA (Codex P2).
+ */
+function targetCodingFor(measureId: string, realCode: string): Coding | null {
   const b = MEASURE_BINDINGS[measureId];
   if (!b) return null;
-  return { system: b.event.valueSet, code: b.event.code, display: b.event.code };
+  const altCodes = b.alternatives?.flatMap((a) => a.codes) ?? [];
+  const code = altCodes.includes(realCode) ? realCode : b.event.code;
+  return { system: b.event.valueSet, code, display: code };
 }
 
 // Lookup keyed by `${normalizedSystem}|${code}` (code upper-cased so HCPCS letters match). One real
@@ -121,7 +133,7 @@ const CROSSWALK = new Map<string, Coding[]>();
 const TARGET_EVENT_TYPE = new Map<string, EventType>();
 for (const row of CROSSWALK_ROWS) {
   const binding = MEASURE_BINDINGS[row.measureId];
-  const target = targetCodingFor(row.measureId);
+  const target = targetCodingFor(row.measureId, row.code);
   if (!binding || !target) continue; // a crosswalk row for an unknown/removed measure is a no-op, never a throw
   const key = `${normalizeSystem(row.system)}|${row.code.toUpperCase()}`;
   const list = CROSSWALK.get(key) ?? [];

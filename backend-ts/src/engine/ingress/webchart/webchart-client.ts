@@ -4,11 +4,11 @@
  * The integration path is WebChart's HTTP/FHIR API. The exact endpoints, auth scheme, pagination, and
  * response envelope are being confirmed with Dave Carlson (MIE) — so the transport is isolated behind
  * this small port. The value-carrying core (terminology reconciliation + bundle normalization) is
- * transport-agnostic and fully tested via the fixture client; swapping in the confirmed real request
- * shaping is then a localized change to `httpWebChartClient` only.
+ * transport-agnostic and fully tested via the fixture client; the confirmed live HTTP client (PR-2c) is
+ * then a localized change to `httpWebChartClient` only.
  *
- * No new dependency: the HTTP client uses the global `fetch` (available on the node-24 host and every
- * @mieweb/cloud target). Transport lives here at the ingress edge, keeping `evaluate-bundle.ts` /
+ * No new dependency: the live HTTP client will use the global `fetch` (available on the node-24 host and
+ * every @mieweb/cloud target). Transport lives here at the ingress edge, keeping `evaluate-bundle.ts` /
  * `normalize.ts` I/O-free and portable.
  */
 import type { WebChartConfig } from "../data-source.ts";
@@ -25,42 +25,30 @@ export function fixtureWebChartClient(payloads: unknown[]): WebChartClient {
 }
 
 /**
- * PROVISIONAL HTTP client — pending the confirmed WebChart API contract (Dave Carlson).
+ * DEFERRED HTTP client (E12 PR-2c) — the live transport is NOT implemented until MIE confirms the
+ * WebChart API contract (Dave Carlson).
  *
- * Working assumption: a FHIR R4 endpoint that returns a searchset `Bundle` of the population's
- * patients, then per-patient clinical data. The concrete request shaping below (path, auth header,
- * pagination) is the single place to update once the real API is known; the rest of the adapter is
- * contract-independent. Until then this is selected only when the WebChart env vars are set
- * (inert-unless-configured) and is not exercised by the demo stack.
+ * It intentionally REJECTS rather than doing a best-effort fetch, because the crucial unknown is how to
+ * fan out to ONE payload PER PATIENT: a naive `/Patient` searchset handed to `normalizeWebChartBundle`
+ * as a single payload would fold every patient's resources into ONE collection bundle — and
+ * `CqlExecutionEngine` evaluates only the first subject of a bundle, so a real WebChart run would
+ * silently report a single employee and drop/cross-contaminate the rest (Codex P1). Rather than ship
+ * that footgun, the default HTTP client fails loudly; the transport-agnostic core (normalize + reconcile)
+ * is fully exercised via `fixtureWebChartClient`. PR-2c implements this against the confirmed contract
+ * (endpoints, auth, pagination, per-patient fan-out).
  */
-const DEFAULT_TIMEOUT_MS = 30_000;
-
 export function httpWebChartClient(cfg: WebChartConfig): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
   return {
     kind: "http",
-    async fetchPatientPayloads(): Promise<unknown[]> {
-      // ── PROVISIONAL — do NOT ship as-is ────────────────────────────────────────────────────────
-      // TODO(dave-carlson, PR-2c): the real request shaping is unknown until the API contract is
-      // confirmed. Specifically:
-      //   • endpoint(s) + how to enumerate the WORKER POPULATION (this hits a single `/Patient` and
-      //     returns ONE payload — so `normalizeWebChartBundle` would fold every patient into ONE
-      //     engine bundle, collapsing them to a single subject. The real path must yield ONE payload
-      //     PER PATIENT — e.g. map a searchset Bundle's entries, or a per-patient `$everything`).
-      //   • auth scheme (Bearer vs an API-key header vs OAuth client-credentials).
-      //   • pagination.
-      //   • whether a patient's clinical data comes inline or needs a follow-up call.
-      // Until then this is inert-unless-configured and never runs on the demo stack.
-      const res = await fetch(`${base}/Patient`, {
-        headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: "application/fhir+json" },
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS), // a hung endpoint must not hang the run
-      });
-      if (!res.ok) {
-        throw new Error(`WebChart API ${res.status} ${res.statusText} for ${base}/Patient`);
-      }
-      // Returned as a single payload for the normalizer; per-patient fan-out lands with the real
-      // contract (see the TODO above).
-      return [await res.json()];
+    fetchPatientPayloads(): Promise<unknown[]> {
+      return Promise.reject(
+        new Error(
+          `WebChart HTTP transport not yet implemented (E12 PR-2c) — pending the confirmed WebChart API ` +
+            `contract for ${base} (endpoints/auth/pagination + one-payload-per-patient fan-out). Inject a ` +
+            `WebChartClient (e.g. fixtureWebChartClient) until then.`,
+        ),
+      );
     },
   };
 }

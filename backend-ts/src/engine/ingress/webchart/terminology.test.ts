@@ -33,6 +33,17 @@ test("reconcileCoding: one real code can satisfy several measures (HbA1c → dia
   assert.deepEqual(both, [MEASURE_BINDINGS["cms122"]!.event.valueSet, MEASURE_BINDINGS["diabetes_hba1c"]!.event.valueSet].sort());
 });
 
+test("reconcileCoding: multi-alternative series (Hep B) preserves the real CVX code, not the generic event code", () => {
+  // Hep B's CQL matches the specific alternative codes (189 Heplisav-B, 08/43/44/45 traditional) under
+  // urn:workwell:vs:hepb-vaccines — NOT the generic `hepb-vaccine`. Reconciliation must keep the CVX
+  // number as the synthetic code or the series never matches (Codex P2).
+  const vs = MEASURE_BINDINGS["hepatitis_b_vaccination_series"]!.event.valueSet;
+  assert.deepEqual(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code: "189" }), [{ system: vs, code: "189", display: "189" }]);
+  assert.deepEqual(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code: "08" }), [{ system: vs, code: "08", display: "08" }]);
+  // ...while a non-alternative immunization measure (MMR) still uses its generic event code.
+  assert.equal(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code: "03" })[0]?.code, MEASURE_BINDINGS["mmr"]!.event.code);
+});
+
 test("reconcileCoding: tolerates system aliases (OID + case) and HCPCS letter codes", () => {
   // CVX by OID instead of the canonical URI still resolves.
   assert.ok(reconcileCoding({ system: "urn:oid:2.16.840.1.113883.12.292", code: "115" }).length);

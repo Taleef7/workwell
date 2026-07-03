@@ -59,8 +59,12 @@ test("resolveDataSource: defaults to JSON; selects WebChart only when BOTH env v
   assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_API_KEY: "k" }).kind, "webchart");
 });
 
-test("webChartDataSource: constructs the (provisional) HTTP client by default without throwing", () => {
-  assert.equal(webChartDataSource({ baseUrl: "x", apiKey: "k" }).kind, "webchart");
+test("webChartDataSource: the default HTTP transport is deferred (rejects) until the confirmed API contract", async () => {
+  // Constructing is fine; loading rejects — the live HTTP client is PR-2c (per-patient fan-out unknown),
+  // so it fails loudly rather than collapsing a population into one bundle (Codex P1).
+  const src = webChartDataSource({ baseUrl: "x", apiKey: "k" });
+  assert.equal(src.kind, "webchart");
+  await assert.rejects(() => src.loadBundles(), /not yet implemented \(E12 PR-2c\)/);
 });
 
 test("webChartDataSource: real CPT-coded WebChart data evaluates end-to-end via terminology reconciliation", async () => {
@@ -113,6 +117,44 @@ test("webChartDataSource: a real LOINC lab Observation evaluates a Procedure-ret
   // Treatment — the WebChart source synthesizes the Procedure → recency satisfied → COMPLIANT.
   const src = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient([wc]));
   const res = await evaluateSource(src, "diabetes_hba1c", { evaluationDate: EVAL });
+  assert.equal(res.results[0]?.outcome?.outcome, "COMPLIANT");
+});
+
+test("webChartDataSource: a real CVX Heplisav-B series (multi-alternative measure) evaluates to COMPLIANT", async () => {
+  // Hep B is a multi-alternative series measure — the CQL matches CVX 189 under the synthetic value set,
+  // not the generic event code. A complete Heplisav-B series (2 doses, ≥28d apart) must reconcile and
+  // evaluate COMPLIANT (Codex P2 regression guard).
+  const dose = (when: string) => ({
+    resource: {
+      resourceType: "Immunization",
+      status: "completed",
+      patient: { reference: "Patient/wc-emp-3" },
+      vaccineCode: { coding: [{ system: "http://hl7.org/fhir/sid/cvx", code: "189" }] },
+      occurrenceDateTime: when,
+    },
+  });
+  const wc = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "wc-emp-3" } },
+      {
+        resource: {
+          resourceType: "Condition",
+          subject: { reference: "Patient/wc-emp-3" },
+          code: { coding: [{ system: "urn:workwell:vs:immz-enrollment", code: "immz-enrolled" }] },
+        },
+      },
+      dose("2026-01-01T00:00:00.000Z"),
+      dose("2026-03-01T00:00:00.000Z"), // ~59 days later, ≥28d ACIP interval
+    ],
+  };
+  // Control — un-reconciled real CVX 189 isn't in urn:workwell:vs:hepb-vaccines → series incomplete.
+  const control = await evaluateSource(jsonBucketDataSource(structuredClone(wc)), "hepatitis_b_vaccination_series", { evaluationDate: EVAL });
+  assert.notEqual(control.results[0]?.outcome?.outcome, "COMPLIANT");
+  // Treatment — reconciled to {hepb-vaccines, 189} → Heplisav-B Complete → COMPLIANT.
+  const src = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient([wc]));
+  const res = await evaluateSource(src, "hepatitis_b_vaccination_series", { evaluationDate: EVAL });
   assert.equal(res.results[0]?.outcome?.outcome, "COMPLIANT");
 });
 
