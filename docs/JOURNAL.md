@@ -1,5 +1,103 @@
 # Journal
 
+## 2026-07-03 — E12 PR-2b: WebChart→FHIR adapter core (terminology reconciliation + normalization)
+
+Built on the groundwork below. Owner locked the three forks: **integration path = WebChart HTTP/FHIR
+API** (not direct MariaDB → **no MariaDB driver dependency**, uses global `fetch`); **immunizations via
+ICE** (the E6 seam — not this adapter's concern); **the dev DB is a sample** (map its shapes, don't
+over-fit). The exact API contract comes from a Dave Carlson (MIE) meeting next week, so I built the
+**transport-agnostic core** now and isolated the HTTP transport behind an injectable seam.
+
+**New module `backend-ts/src/engine/ingress/webchart/`:**
+- `terminology.ts` — the WebChart→measure code reconciliation (terminology **option B**): a crosswalk
+  from real LOINC/CVX/CPT/HCPCS codes → the synthetic `urn:workwell:vs:*` measure-event codings the CQL
+  inline filters match. Reuses the E7 order-catalog's real standard codes + LOINC result codes for the
+  lab/vital measures. **Appends** the synthetic coding (preserves the real code for provenance), maps one
+  real code to **all** measures it serves (HbA1c 4548-4 → both `diabetes_hba1c` and `cms122`), tolerates
+  system aliases (URI or OID, case-insensitive; HCPCS letter codes).
+- `normalize.ts` — `normalizeWebChartBundle(raw)`: coerces whatever the API yields (a FHIR searchset/
+  collection Bundle, a bare resource array, or a single resource) into the engine's `Bundle` (type
+  `collection`) shape + applies reconciliation to `code`/`vaccineCode`. Robust to garbage → empty bundle,
+  never throws.
+- `webchart-client.ts` — the `WebChartClient` transport port + `fixtureWebChartClient` (tests) +
+  a **provisional** `httpWebChartClient` (global `fetch`, Bearer auth, FHIR `Accept` — the single place
+  to finalize once Dave Carlson confirms endpoints/auth/pagination).
+- `data-source.ts` — `webChartDataSource(cfg, client?)` now **wired** (client → normalize → bundles),
+  replacing the inert reject stub; transport injectable.
+
+**Proof:** two end-to-end tests — a **real-CPT-coded** (92557) audiogram Procedure and a
+**real-LOINC-coded** (4548-4) HbA1c Observation — each evaluate to COMPLIANT via reconciliation, each with
+an un-reconciled MISSING_DATA control. Two bugs found while testing: multi-measure real codes (single-value
+Map dropped `diabetes_hba1c` for `cms122`) → multi-target crosswalk; a no-`entry` Bundle wrapping itself →
+fixed.
+
+**Whole-branch code review folded in.** The reviewer caught a real coverage gap: WebChart records labs as
+`Observation`s, but four lab/vital measures (`diabetes_hba1c`/`cholesterol_ldl`/`hypertension`/`obesity_bmi`)
+retrieve `[Procedure]` in their CQL — so appending a coding to the Observation never let them match (only
+`cms122`, which retrieves `[Observation]`, worked). Rather than narrow the crosswalk, the normalizer now
+**synthesizes a dated `Procedure`** from a lab Observation when the reconciled target is a `[Procedure]`
+measure (via a new `targetEventType` seam) — so real LOINC labs evaluate end-to-end (new test proves it);
+the standards-correct end state (re-point those measures to `[Observation]`) is option A, tracked for PR-2c.
+Also folded: normalizer no longer mutates its input (builds copies) and drops resource-less Bundle entries.
+
+**Two Codex comments (PR #234) resolved.** **P1** — the HTTP client would wrap a `/Patient` searchset as
+one payload → `normalizeWebChartBundle` folds every patient into one bundle → the engine evaluates only the
+first subject (a population silently collapses to one employee). Fixed: the **deferred** `httpWebChartClient`
+now **rejects** with a clear PR-2c message rather than a best-effort fetch — the tested core runs via
+`fixtureWebChartClient`; the real per-patient fan-out lands in PR-2c. **P2** — Hep B is a multi-alternative
+series whose CQL matches the specific CVX codes (189/08/43/44/45) under `urn:workwell:vs:hepb-vaccines`, not
+the generic `hepb-vaccine`; the crosswalk was stamping the generic code, so a real Heplisav-B/traditional
+series stayed MISSING_DATA. Fixed: for a multi-alternative measure the target preserves the real CVX number
+as the synthetic code (a new e2e proves a real CVX Heplisav-B series → COMPLIANT). A **second Codex round**
+added one more **P2** — status gating: WebChart can return non-final events (a `not-done`/`entered-in-error`
+Procedure, a `preliminary`/`cancelled` Observation), and reconciliation was unconditional, so the recency
+CQL (code + date only) could count a cancelled lab as compliant. Fixed: `normalize.ts` now only reconciles/
+synthesizes **clinically-final** events (`Procedure`/`Immunization` = `completed`; `Observation` =
+`final`/`amended`/`corrected`); a missing/unknown status is treated as non-final (conservative — never
+falsely compliant). **980 tests pass / 0 fail**; typecheck green. No schema, no new deps. Descriptive only
+(ADR-008/ADR-017) — reconciliation supplies coded FHIR, never decides compliance.
+
+**Found (surfaced in the doc, not a blocker): the enrollment gap.** The measures gate on a program-enrollment
+`Condition` that is *not* WebChart clinical coding — it's occupational-health **program membership** (an OH
+roster). So a WebChart clinical bundle alone reads MISSING_DATA for an enrolled worker; the adapter needs a
+second input (the enrollment roster) to stamp it. Added to the Dave Carlson question list. **Next (PR-2c,
+after the meeting):** finalize the HTTP request shaping, add the OH-enrollment-roster input, extend the
+crosswalk, and (if the API is proprietary rather than FHIR) add the row→FHIR mapping. See
+`docs/WEBCHART_FHIR_MAPPING.md` §6–§8.
+
+## 2026-07-03 — E12 PR-2 groundwork: real WebChart schema unblocked → WebChart→FHIR mapping reference
+
+**Unblock.** Doug shared MIE's **seeded WebChart dev database** as a Docker image
+(`ghcr.io/mieweb/dev-wcdb:latest`, MariaDB 10.3.32, temporarily public — pulled + backed up locally; root
+`pmg2bhok`, port 33306, DB `wc_miehr_wctroot`). This is the real WebChart schema reference that has parked
+**E12 PR-2** (the WebChart/MariaDB→FHIR adapter — today the inert `webChartDataSource` stub in
+`backend-ts/src/engine/ingress/data-source.ts`). Image is stored locally + saved to a verified tarball so
+Doug can re-private the GHCR image.
+
+**What's in it (verified):** 675 tables, real populated data — 72 patients, 105 encounters, 1,887
+observations, 8,230 observation codes (**with real LOINC**), 99 procedures, 69 users, 9 locations.
+Demographics carry **`employer_*` fields** (the Total Worker Health hook). WebChart model: `_current`/`_revisions`
+revisioning; `patients` holds both patients and providers (`is_patient`); observations are EAV over an
+`observation_codes` dictionary (LOINC bridge). Verified the Patient→Observation→LOINC join resolves.
+
+**Deliverable (this PR — docs only, no code/schema/deps):** `docs/WEBCHART_FHIR_MAPPING.md` — the
+reverse-engineered WebChart→FHIR R4 mapping the adapter builds against: the target bundle shape
+(Patient/Condition/Observation/Procedure/Immunization, matched to `fhir-bundle-builder.ts`), a
+resource-by-resource table→field mapping, the **terminology bridge** analysis (WebChart LOINC/CPT/CVX/ICD
+vs the measures' synthetic `urn:workwell:vs:*` codes → three options A/B/C; recommend B via
+`terminology_mappings` for the demo slice, A/C as the standards-correct destination tied to E14 + VSAC),
+the read-query scope, and a proposed PR-2a/b/c slicing.
+
+**Findings that gate PR-2c (surfaced, not decided):** (1) this dev seed is **thin on coded clinical
+events** — only 1 real CPT (mammogram), **no CVX immunizations**, empty base `observations`/problem-list —
+so representativeness needs confirming; (2) **immunizations have no dedicated CVX table** (biggest gap —
+blocks the immunization measures; must trace with MIE); (3) coded/text observation values live on the base
+`observations` table (empty here), not `observations_current` (numeric fast-path); (4) architecture fork:
+MariaDB-direct vs a WebChart HTTP API (the stub config is HTTP-shaped; ties to the E9 Q2 memo); (5) a
+direct-DB adapter needs a **MariaDB driver — a new dependency requiring approval + an ADR** (hard rule, not
+added). Descriptive-only throughout (ADR-008/ADR-017). See `docs/WEBCHART_FHIR_MAPPING.md` §6/§7 for the
+confirm-with-Doug list.
+
 ## 2026-07-03 — Hardening sprint, blocks 5–7: close out the remaining Fable Mediums + Lows
 
 Three parallel PRs finishing the Fable 2026-07-02 review (all Highs + the top-10 Mediums shipped in blocks

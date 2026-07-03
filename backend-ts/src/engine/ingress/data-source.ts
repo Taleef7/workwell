@@ -6,6 +6,8 @@
  * NO DB, NO node:fs here — this stays portable across every @mieweb/cloud target.
  */
 import { evaluateBatch, type BatchResult, type EvaluateBundleOptions } from "./evaluate-bundle.ts";
+import { normalizeWebChartBundle } from "./webchart/normalize.ts";
+import { httpWebChartClient, type WebChartClient } from "./webchart/webchart-client.ts";
 
 export interface PatientDataSource {
   /** Diagnostic tag — "json" | "webchart". */
@@ -25,11 +27,22 @@ export interface WebChartConfig {
   apiKey: string;
 }
 
-/** Inert WebChart stub — wired in E12 PR-2. Selected only when its env vars are set. */
-export function webChartDataSource(_cfg: WebChartConfig): PatientDataSource {
+/**
+ * WebChart data source (E12 PR-2): fetch per-patient payloads from WebChart's HTTP/FHIR API, then
+ * normalize + terminology-reconcile each into an engine bundle. The transport is injectable — the
+ * default HTTP client is provisional pending the confirmed API contract (Dave Carlson); tests inject a
+ * `fixtureWebChartClient`. Selected only when its env vars are set (inert-unless-configured). The real
+ * request shaping lives in `webchart/webchart-client.ts`; the reconciliation/normalization core is
+ * transport-agnostic and tested. Descriptive only (ADR-008/ADR-017).
+ */
+export function webChartDataSource(cfg: WebChartConfig, client?: WebChartClient): PatientDataSource {
+  const c = client ?? httpWebChartClient(cfg);
   return {
     kind: "webchart",
-    loadBundles: () => Promise.reject(new Error("WebChart data source not yet wired (E12 PR-2)")),
+    async loadBundles() {
+      const payloads = await c.fetchPatientPayloads();
+      return payloads.map(normalizeWebChartBundle);
+    },
   };
 }
 
