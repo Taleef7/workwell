@@ -187,6 +187,7 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runInsight, setRunInsight] = useState<RunInsightResponse | null>(null);
   const [insightDismissed, setInsightDismissed] = useState(false);
+  const [insightLoading, setInsightLoading] = useState(false);
   const [isRunTriggering, setIsRunTriggering] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<Date | null>(null);
@@ -287,12 +288,20 @@ export default function RunsPage() {
   }, [api, router, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
-    if (!selectedRunId) return;
+    const forRunId = selectedRunId;
+    if (!forRunId) return;
+    setInsightLoading(true);
     try {
-      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${selectedRunId}/ai/insight`);
+      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${forRunId}/ai/insight`);
+      // Ignore a stale result: the user may have selected a different run while this was in flight, or
+      // it would render run A's insight under run B's detail (and leave B's button stuck "Generating…").
+      if (selectedRunIdRef.current !== forRunId) return;
       setRunInsight(data);
+      setInsightDismissed(false);
     } catch {
-      setRunInsight(null);
+      if (selectedRunIdRef.current === forRunId) setRunInsight(null);
+    } finally {
+      if (selectedRunIdRef.current === forRunId) setInsightLoading(false);
     }
   }, [api, selectedRunId]);
 
@@ -371,10 +380,16 @@ export default function RunsPage() {
   useEffect(() => {
     if (selectedRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRunInsight(null); // clear the prior run's insight; the AI insight is now on-demand (UX-19)
+      setInsightDismissed(false);
+      // Reset loading on every run switch so a stale in-flight request (whose finally is guarded to skip
+      // the now-different run) can't leave the new run's button stuck disabled as "Generating…" (Codex P2).
+      setInsightLoading(false);
       void loadSelectedRun();
-      void loadRunInsight();
+      // NOTE: loadRunInsight is intentionally NOT auto-fired here — merely viewing a run detail used to
+      // trigger a billed OpenAI call per selected run (UX-19). It now runs only on an explicit button.
     }
-  }, [selectedRunId, loadSelectedRun, loadRunInsight]);
+  }, [selectedRunId, loadSelectedRun]);
 
   async function runManualScope() {
     setError(null);
@@ -855,6 +870,15 @@ export default function RunsPage() {
 
         <div className="space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Detail</h3>
+          {/* AI insight is on-demand (UX-19): viewing a run no longer auto-fires a billed OpenAI call. */}
+          {selectedRun && !runInsight ? (
+            <Button variant="secondary" size="sm" onClick={() => void loadRunInsight()} disabled={insightLoading}>
+              {insightLoading ? "Generating AI insight…" : "Generate AI insight"}
+            </Button>
+          ) : null}
+          {runInsight && (runInsight.fallback || runInsight.insights.length === 0) ? (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">AI insight is unavailable for this run.</p>
+          ) : null}
           {runInsight && !runInsight.fallback && runInsight.insights.length > 0 && !insightDismissed ? (
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
               <div className="mb-2 flex items-center justify-between">
