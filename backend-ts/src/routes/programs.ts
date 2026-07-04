@@ -65,7 +65,7 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
 
   const trendId = pathname.match(/^\/api\/programs\/([^/]+)\/trend$/)?.[1];
   if (trendId) {
-    return json(await programTrend(await deps(env), trendId, filters));
+    return json(await programTrend(await deps(env), trendId, filters, { monthly: q.get("granularity") === "month" }));
   }
 
   const driversId = pathname.match(/^\/api\/programs\/([^/]+)\/top-drivers$/)?.[1];
