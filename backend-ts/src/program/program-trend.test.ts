@@ -53,24 +53,40 @@ const snap = (period: string, num: number, den: number): QualitySnapshotRow => (
   computedAt: `${period}-28T00:00:00.000Z`,
 });
 
-test("monthlyTrendPoints — maps rows chronologically, stamps period, rate = round1(num,den)", () => {
+test("monthlyTrendPoints — newest-first order, stamps period, rate = round1(compliant,total)", () => {
   const pts = monthlyTrendPoints([snap("2026-06", 8, 10), snap("2026-04", 5, 10), snap("2026-05", 9, 10)]);
-  assert.deepEqual(pts.map((p) => p.period), ["2026-04", "2026-05", "2026-06"]);
-  assert.equal(pts[2]!.complianceRate, 80); // 8/10
-  assert.equal(pts[2]!.totalEvaluated, 10); // denominator
-  assert.equal(pts[2]!.startedAt, "2026-06-28T00:00:00.000Z"); // periodEnd
-  assert.equal(pts[0]!.overdue, 5); // bucket carried through
+  assert.deepEqual(pts.map((p) => p.period), ["2026-06", "2026-05", "2026-04"]); // newest-first
+  assert.equal(pts[0]!.complianceRate, 80); // 8/10 (newest = 2026-06)
+  assert.equal(pts[0]!.totalEvaluated, 10); // total-including-excluded
+  assert.equal(pts[0]!.startedAt, "2026-06-28T00:00:00.000Z"); // periodEnd
+  assert.equal(pts[2]!.overdue, 5); // bucket carried through (oldest = 2026-04)
 });
 
-test("monthlyTrendPoints — caps to the newest 12 months", () => {
+test("monthlyTrendPoints — caps to the newest 12 months (newest-first)", () => {
   // 15 distinct months 2025-01 … 2026-03; expect only the newest 12 (2025-04 … 2026-03).
   const many = Array.from({ length: 15 }, (_, i) =>
     snap(`20${25 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`, 1, 2),
   );
   const pts = monthlyTrendPoints(many);
   assert.equal(pts.length, 12);
-  assert.equal(pts[0]!.period, "2025-04");
-  assert.equal(pts[11]!.period, "2026-03");
+  assert.equal(pts[0]!.period, "2026-03"); // newest
+  assert.equal(pts[11]!.period, "2025-04"); // oldest kept
+});
+
+test("monthlyTrendPoints — rate uses total-including-excluded, not the E16 denominator", () => {
+  // compliant=8, dueSoon=0, overdue=1, missingData=0, excluded=1 → numerator=8, denominator=9, total=10.
+  // The per-run path + /programs headline use compliant/total (=80%), NOT numerator/denominator (~88.9%).
+  const withExcluded: QualitySnapshotRow = {
+    ...snap("2026-06", 8, 9), // numerator=8, denominator=9 (deliberately != total)
+    compliant: 8,
+    dueSoon: 0,
+    overdue: 1,
+    missingData: 0,
+    excluded: 1,
+  };
+  const [pt] = monthlyTrendPoints([withExcluded]);
+  assert.equal(pt!.totalEvaluated, 10); // 8+0+1+0+1, not the denominator 9
+  assert.equal(pt!.complianceRate, 80); // 8/10, not 8/9
 });
 
 // Minimal fakes: programTrend only touches outcomeStore.listOutcomesWithRun (per-run path) and
@@ -96,8 +112,8 @@ test("programTrend — ≥2 monthly snapshots → monthly points (period stamped
   const deps = fakeDeps({ snaps: [snap("2026-05", 9, 10), snap("2026-06", 8, 10)] });
   const pts = await programTrend(deps, "audiogram", {});
   assert.equal(pts.length, 2);
-  assert.equal(pts[0]!.period, "2026-05");
-  assert.equal(pts[1]!.complianceRate, 80);
+  assert.equal(pts[0]!.period, "2026-06"); // newest-first
+  assert.equal(pts[0]!.complianceRate, 80); // 8/10 (2026-06)
 });
 
 test("programTrend — <2 monthly snapshots → per-run fallback (no period)", async () => {
