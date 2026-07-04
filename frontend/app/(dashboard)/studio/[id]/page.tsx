@@ -181,8 +181,8 @@ export default function StudioMeasurePage() {
         ))}
       </div>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {!measureId ? <p className="text-sm text-red-700">Invalid measure route ID.</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+      {!measureId ? <p role="alert" className="text-sm text-red-700">Invalid measure route ID.</p> : null}
       {loading ? <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading...</p> : null}
 
       {normalizeEnumValue(measure?.status ?? "") === "APPROVED" && activationReadiness ? (

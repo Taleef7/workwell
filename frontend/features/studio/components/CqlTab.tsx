@@ -198,13 +198,13 @@ export function CqlTab({
   return (
     <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       {draftBanner ? (
-        <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <div role="status" aria-live="polite" className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <span className="mt-0.5 font-semibold uppercase tracking-wider text-amber-700">AI draft</span>
           <span className="flex-1">{draftBanner}</span>
           <button
             type="button"
             onClick={() => setDraftBanner(null)}
-            className="text-amber-700 hover:text-amber-900"
+            className="inline-flex min-h-6 min-w-6 items-center justify-center p-1 text-amber-700 hover:text-amber-900"
             aria-label="Dismiss AI draft banner"
           >
             {/* bespoke inline ✕ dismiss affordance — not a standard Button surface */}
@@ -322,7 +322,7 @@ export function CqlTab({
         </p>
       ) : null}
       {compileWarnings.length > 0 ? (
-        <div className="rounded border border-amber-300 bg-amber-50 p-3">
+        <div role="status" aria-live="polite" className="rounded border border-amber-300 bg-amber-50 p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-800">Warnings</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
             {compileWarnings.map((entry) => <li key={entry}>{formatIssue(entry)}</li>)}
@@ -330,7 +330,7 @@ export function CqlTab({
         </div>
       ) : null}
       {compileErrors.length > 0 ? (
-        <div className="rounded border border-red-300 bg-red-50 p-3">
+        <div role="alert" aria-live="assertive" className="rounded border border-red-300 bg-red-50 p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-red-800">Errors</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800">
             {compileErrors.map((entry) => <li key={entry}>{formatIssue(entry)}</li>)}

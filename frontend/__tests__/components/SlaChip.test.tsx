@@ -40,7 +40,7 @@ describe("SlaChip", () => {
 
   it("applies yellow class when slaRemainingDays is 5 (≤7)", () => {
     render(<SlaChip slaRemainingDays={5} />);
-    expect(screen.getByTestId("sla-chip")).toHaveClass("text-yellow-600");
+    expect(screen.getByTestId("sla-chip")).toHaveClass("text-yellow-700");
   });
 
   it("applies red class when slaRemainingDays is ≤2", () => {

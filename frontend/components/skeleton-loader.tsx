@@ -4,7 +4,7 @@ import { Skeleton } from "@mieweb/ui";
 
 export function SkeletonCard() {
   return (
-    <div className="rounded-md border border-neutral-200 bg-white p-4 space-y-3 dark:border-neutral-800 dark:bg-neutral-900">
+    <div aria-hidden="true" className="rounded-md border border-neutral-200 bg-white p-4 space-y-3 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex items-start justify-between">
         <div className="space-y-1.5">
           <Skeleton width={144} height={16} />
@@ -34,7 +34,7 @@ export function SkeletonCard() {
 export function SkeletonRow({ cols = 6 }: { cols?: number }) {
   const widths = [120, 80, 60, 72, 96, 56, 80, 64];
   return (
-    <tr className="border-t border-neutral-200 dark:border-neutral-800">
+    <tr aria-hidden="true" className="border-t border-neutral-200 dark:border-neutral-800">
       {Array.from({ length: cols }, (_, i) => (
         <td key={i} className="px-3 py-3">
           <Skeleton variant="text" height={14} width={widths[i % widths.length]} />

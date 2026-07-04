@@ -21,7 +21,7 @@ export function ComplianceSummaryBar({ outcomes }: { outcomes: MeasureOutcomeSum
         </a>
       ))}
       {outcomes.length === 0 && (
-        <span className="text-xs text-neutral-400">No outcome data</span>
+        <span className="text-xs text-neutral-600 dark:text-neutral-400">No outcome data</span>
       )}
     </div>
   );

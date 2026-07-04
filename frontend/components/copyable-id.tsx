@@ -57,7 +57,7 @@ export function CopyableId({
         onClick={copy}
         aria-label={copied ? `${label} copied` : `Copy ${label}`}
         title={copied ? "Copied" : "Copy full id"}
-        className="text-neutral-400 transition-colors hover:text-neutral-700 dark:hover:text-neutral-200"
+        className="inline-flex min-h-6 min-w-6 items-center justify-center p-1 text-neutral-600 transition-colors hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
       >
         {copied ? (
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
@@ -70,6 +70,9 @@ export function CopyableId({
           </svg>
         )}
       </button>
+      <span role="status" aria-live="polite" className="sr-only">
+        {copied ? "Copied" : ""}
+      </span>
     </span>
   );
 }

@@ -35,7 +35,7 @@ export function ThemeBrandSwitcher({ showBrand = true }: { showBrand?: boolean }
         title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 transition hover:bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
-        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        {theme === "dark" ? <Sun aria-hidden="true" className="h-4 w-4" /> : <Moon aria-hidden="true" className="h-4 w-4" />}
       </button>
     </div>
   );

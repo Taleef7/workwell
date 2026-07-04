@@ -228,6 +228,8 @@ export function ElmExplorer({
       {/* status bar */}
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <span
+          role="status"
+          aria-live="polite"
           className={`rounded-full px-2 py-0.5 font-medium ${
             status === "compiling"
               ? "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
@@ -253,7 +255,7 @@ export function ElmExplorer({
             onChange={(e) => setCql(e.target.value)}
             spellCheck={false}
             rows={22}
-            className="w-full resize-y rounded border border-neutral-200 bg-neutral-50 p-2 font-mono text-xs leading-relaxed text-neutral-800 outline-none focus:border-sky-400 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-200"
+            className="w-full resize-y rounded border border-neutral-200 bg-neutral-50 p-2 font-mono text-xs leading-relaxed text-neutral-800 outline-none focus:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-200"
           />
         </div>
 
