@@ -280,6 +280,16 @@ function assignProviders(base: readonly EmployeeBase[]): EmployeeProfile[] {
 
 export const EMPLOYEES: readonly EmployeeProfile[] = assignProviders(EMPLOYEE_BASE);
 
+/**
+ * The four hardcoded demo-login personas (`emp-001..004`, the system roles Author/Approver/Case
+ * Manager/Admin). They carry no occupational measures, so the compliance roster floats them to the
+ * BOTTOM (UX-1) — by this explicit marker rather than a has-data heuristic: an `All Employees` segment
+ * can hand a persona a single Compliant cell, which would un-sink a has-data check and lead the flagship
+ * roster with four fake users.
+ */
+export const DEMO_PERSONA_EXTERNAL_IDS: ReadonlySet<string> = new Set(["emp-001", "emp-002", "emp-003", "emp-004"]);
+export const isDemoPersona = (externalId: string): boolean => DEMO_PERSONA_EXTERNAL_IDS.has(externalId);
+
 const BY_ID = new Map<string, EmployeeProfile>(EMPLOYEES.map((e) => [e.externalId, e]));
 const PROVIDER_BY_ID = new Map<string, Provider>(PROVIDERS.map((p) => [p.id, p]));
 

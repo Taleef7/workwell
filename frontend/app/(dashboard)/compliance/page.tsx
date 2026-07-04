@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/api/hooks";
+import { fmtCount } from "@/lib/format";
 import { useRunStatus } from "@/components/run-status-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
@@ -286,7 +287,7 @@ export default function CompliancePage() {
       </div>
 
       <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
-        <span>{total} employee{total === 1 ? "" : "s"}</span>
+        <span>{fmtCount(total)} employee{total === 1 ? "" : "s"}</span>
         <div className="flex items-center gap-2">
           <button
             type="button"

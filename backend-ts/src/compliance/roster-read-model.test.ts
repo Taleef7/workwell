@@ -1,13 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
 import { buildRoster } from "./roster-read-model.ts";
 
-const EMP = EMPLOYEES[0]!.externalId; // a real directory subject (emp-001, role "Author", site "HQ")
-const EMP_ROLE = EMPLOYEES[0]!.role;
+// The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
+// bottom of the roster regardless of data (UX-1), so they'd fall off page 1 — use a real employee here.
+const FIRST_REAL = EMPLOYEES.find((e) => !isDemoPersona(e.externalId))!;
+const EMP = FIRST_REAL.externalId;
+const EMP_ROLE = FIRST_REAL.role;
 
 /** A segment whose cohort matches the first directory subject by role. */
 function segmentFor(measureIds: string[], opts: { enabled?: boolean } = {}): HydratedSegment {
@@ -80,11 +83,31 @@ test("buildRoster — subjects with real compliance data sort above all-NA rows 
       { id: "o-1", runId: "run-1", subjectId: REAL, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
     ],
   };
-  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations", pageSize: 200 });
   const idxReal = roster.rows.findIndex((r) => r.subject.externalId === REAL);
   const idxDemo = roster.rows.findIndex((r) => r.subject.externalId === "emp-001"); // Demo Author — all NA
   assert.equal(idxReal, 0, "the only subject with a real cell floats to the top");
   assert.ok(idxReal < idxDemo, "all-NA demo persona sinks below the subject with data");
+});
+
+test("buildRoster — a demo persona WITH a compliant cell STILL sinks below a real all-NA employee (UX-1)", async () => {
+  // The regression the marker fixes: an All-Employees segment can give a demo persona a Compliant cell.
+  // A has-data heuristic would then float emp-001 to the top; the explicit demo marker must still sink it
+  // below a real employee that has NO data in this panel.
+  const DEMO = "emp-001"; // Demo Author
+  const REAL = "emp-005"; // Nadia Anwar — no cell seeded here
+  const withRun: OutcomeWithRun[] = [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: DEMO, measureId: "mmr", status: "COMPLIANT" },
+  ];
+  const byRun: Record<string, OutcomeRecord[]> = {
+    "run-1": [
+      { id: "o-1", runId: "run-1", subjectId: DEMO, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" },
+    ],
+  };
+  const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations", pageSize: 200 });
+  const idxDemo = roster.rows.findIndex((r) => r.subject.externalId === DEMO);
+  const idxReal = roster.rows.findIndex((r) => r.subject.externalId === REAL);
+  assert.ok(idxReal < idxDemo, "the demo persona sinks below the real all-NA employee despite having a compliant cell");
 });
 
 test("buildRoster — a newer in-flight RUNNING run is ignored; the last COMPLETED roster stands", async () => {

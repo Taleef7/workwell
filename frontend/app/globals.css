@@ -154,3 +154,16 @@ body {
 .wcdv-thead-shadow {
   box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
 }
+
+/* Respect users who prefer reduced motion (WCAG 2.3.3 / vestibular safety): collapse animations,
+   transitions, and smooth scrolling to near-instant across the app (incl. chart + drawer transitions). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
