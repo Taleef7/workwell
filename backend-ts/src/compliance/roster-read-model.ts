@@ -141,7 +141,11 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     const cells = new Map<string, RosterCell>();
     for (const o of await loadRun(runId)) {
       if (o.measureId !== m) continue;
-      cells.set(o.subjectId, { ...deriveCell(o.status, o.evidence, m, o.evaluationPeriod), evidenceRef: { runId, outcomeId: o.id } });
+      // Freeze the cell: cached cells are shared BY REFERENCE across requests (and assembled by
+      // reference into each response's rows), so any accidental post-build mutation would silently
+      // corrupt another request's view. Freezing makes that a loud throw instead — enforcing the
+      // read-only invariant this cache relies on.
+      cells.set(o.subjectId, Object.freeze({ ...deriveCell(o.status, o.evidence, m, o.evaluationPeriod), evidenceRef: { runId, outcomeId: o.id } }));
     }
     deps.cellCache?.set(m, { runId, cells }); // supersedes any older run's entry for this measure (bounded to #measures)
     cellByMeasureSubject.set(m, cells);
