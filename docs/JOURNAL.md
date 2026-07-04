@@ -1,5 +1,44 @@
 # Journal
 
+## 2026-07-03 — UI/UX + accessibility pass (Fable Pass-3 quick-wins + a11y fundamentals)
+
+With the backend Fable findings (Pass-1: all H/M/L) closed in the hardening sprint, this takes the first
+cut of the untouched **Pass-3 UI/UX inspection** (`docs/FABLE_REVIEW_2026-07-02/03-ui-ux-inspection.md`) —
+the high-ROI quick-wins + accessibility fundamentals. Branch `feat/uiux-a11y-fable-pass3`.
+
+**Shipped:**
+- **UX-1** — the compliance roster floated the 4 fake "Demo …" login personas to the top (an `All Employees`
+  segment gives each a Compliant cell, so the old has-data sink no longer demoted them). Now demoted by an
+  **explicit** marker (`DEMO_PERSONA_EXTERNAL_IDS` = `emp-001..004`, `employee-catalog.ts`); real employees
+  still sort data-first. Regression test: a demo persona with a Compliant cell still sinks below a real all-NA
+  employee.
+- **UX-9** — scale-tenant providers were named "Clinic 1-1 · PROVIDER" (two nouns); renamed to
+  "Dr. Provider 1-1" (`scale-structure.ts`).
+- **UX-12** — KPI counts now group thousands (`1682100` → `1,682,100`) via a shared `fmtCount` (fixed
+  `en-US` locale to avoid SSR hydration mismatch), applied to the hierarchy rollup, programs cards, and the
+  compliance total.
+- **UX-18** — `/runs` Trigger filter gained a **Scheduled** option (SCHEDULED runs dominate the history but
+  couldn't be isolated/excluded; backend `matchesRunFilters` already supported it).
+- **UX-4** — NA / Not-applicable roster cells (the majority on many panels) de-emphasized from full gray
+  pills + two-line text to a single dim dash, with the label + method preserved in `title` + `aria-label`
+  (so the signal cells stand out; AT still gets the meaning — not color/shape alone).
+- **UX-2** — `/worklist` was a dead-end signpost (with a low-contrast hero heading) in a first-class nav
+  slot; it now **redirects** to `/cases?status=open` (the real worklist), eliminating the signpost + contrast
+  issue.
+- **A11y** — a **skip-to-content** link (visually hidden until focused → `#main-content`; WCAG 2.4.1) in the
+  dashboard shell, and global **`prefers-reduced-motion`** handling (WCAG 2.3.3) collapsing animations/
+  transitions.
+
+**Verified:** frontend lint + 110 vitest + build green; backend 981 tests / 0 fail (+1) + typecheck green.
+No schema, no new deps.
+
+**Deferred (tracked, next UI/UX PR):** UX-6 (link run/case UUIDs + copy raw ids), UX-19 (make the run-detail
+AI insight on-demand, not auto-fire a billed call on view), a unified `<AccessDenied>`/`<EmptyState>`
+component (UX-16), and the larger design-pass items — UX-8 (program-card trends onto `quality_snapshots`),
+UX-5 (segment editor modal overflow), UX-7 (styled evidence dropzone), UX-11 (roster mobile cards), UX-3
+(progressive feedback at 120k), and the filter-architecture / operator-home / density-toggle proposals. Plus
+the full WCAG 2.2 AA audit (NVDA + keyboard-only walk) — still the largest UX debt.
+
 ## 2026-07-03 — E12 PR-2b: WebChart→FHIR adapter core (terminology reconciliation + normalization)
 
 Built on the groundwork below. Owner locked the three forks: **integration path = WebChart HTTP/FHIR

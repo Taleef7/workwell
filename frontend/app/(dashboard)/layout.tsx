@@ -174,6 +174,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider>
+      {/* Skip-to-content: the first focusable element, visually hidden until focused, lets keyboard users
+          jump past the 12-item nav on every page (WCAG 2.4.1). */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-neutral-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg dark:focus:bg-white dark:focus:text-neutral-900"
+      >
+        Skip to content
+      </a>
       <div className="flex h-dvh overflow-hidden bg-neutral-50 dark:bg-neutral-950">
         {/* ── Sidebar (handles its own mobile drawer + backdrop) ───────── */}
         <Sidebar>
@@ -291,7 +299,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             />
           </div>
 
-          <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+          {/* tabIndex=-1 so the skip link actually MOVES keyboard focus here (a non-focusable target
+              only scrolls in some browsers, leaving focus back in the nav — defeating WCAG 2.4.1). */}
+          <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 focus:outline-none">{children}</main>
         </div>
       </div>
     </SidebarProvider>

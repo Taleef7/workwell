@@ -6,7 +6,7 @@
  * `latestRunRows`) and loads evidence per run via `listOutcomes` (cached by run id).
  */
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
-import { EMPLOYEES, employeeById, tenantById } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, employeeById, tenantById, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -158,14 +158,22 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     rows = rows.filter((r) => Object.values(r.cells).some((c) => c.status === s));
   }
 
-  // E10 polish: subjects with no applicable/evaluated cell in this panel (e.g. the demo login personas —
-  // system roles "Author"/"Approver"/… with no occupational measures) sink below employees with real
-  // compliance data, so the top of the roster isn't a wall of "Not applicable". Stable: a paired-index
-  // tiebreaker preserves directory order within each group.
+  // Roster ordering (UX-1): the four demo-login personas (emp-001..004 — system roles, no occupational
+  // measures) sink to the BOTTOM by an EXPLICIT demo-persona marker, not a has-data heuristic — an
+  // `All Employees` segment can give a persona one Compliant cell, which a has-data check would treat as
+  // "real data" and float four fake users to the top of the flagship roster. Secondary: real employees
+  // with evaluated data still sort above real all-NA rows. Stable: a paired-index tiebreaker preserves
+  // directory order within each group.
+  const isDemo = (r: RosterRow) => isDemoPersona(r.subject.externalId);
   const hasData = (r: RosterRow) => Object.values(r.cells).some((c) => c.status !== "NA" && c.status !== "NOT_APPLICABLE");
   rows = rows
     .map((r, i) => ({ r, i }))
-    .sort((a, b) => Number(hasData(b.r)) - Number(hasData(a.r)) || a.i - b.i)
+    .sort(
+      (a, b) =>
+        Number(isDemo(a.r)) - Number(isDemo(b.r)) || // demo personas last
+        Number(hasData(b.r)) - Number(hasData(a.r)) || // then real-data before all-NA
+        a.i - b.i,
+    )
     .map((x) => x.r);
 
   const total = rows.length;

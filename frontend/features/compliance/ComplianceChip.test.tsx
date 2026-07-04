@@ -10,10 +10,18 @@ describe("ComplianceChip", () => {
     expect(screen.getByText("2 valid dose(s)")).toBeInTheDocument();
   });
 
-  it("applies the display-state class and stays readable for NA", () => {
-    const { container } = render(<ComplianceChip cell={{ status: "NA", method: "Not evaluated" }} />);
-    expect(screen.getByText("N/A")).toBeInTheDocument();
-    expect(container.querySelector("span")?.className).toContain("neutral");
+  it("de-emphasizes NA to a dash but keeps the label + method accessible (UX-4)", () => {
+    render(<ComplianceChip cell={{ status: "NA", method: "Not evaluated" }} />);
+    // No full "N/A" pill; a dim dash carries the meaning via title + aria-label instead.
+    expect(screen.queryByText("N/A")).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByLabelText("N/A — Not evaluated")).toBeInTheDocument();
+  });
+
+  it("de-emphasizes NOT_APPLICABLE the same way (segment overlay)", () => {
+    render(<ComplianceChip cell={{ status: "NOT_APPLICABLE", method: "Outside cohort" }} />);
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Outside cohort/)).toBeInTheDocument();
   });
 
   it("renders IN_PROGRESS with its blue chip", () => {

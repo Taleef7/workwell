@@ -10,6 +10,7 @@ import {
 import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
+import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
@@ -609,7 +610,7 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Numerator / Denominator</p>
-            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{selected.numerator} / {selected.denominator}</p>
+            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{fmtCount(selected.numerator)} / {fmtCount(selected.denominator)}</p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Excluded (not in denominator)</p>
@@ -644,7 +645,7 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
           <ChartDataTable
             caption={`Monthly compliance for ${measureName} (materialized snapshots)`}
             columns={["Month", "Compliance", "Numerator", "Denominator"]}
-            rows={snapshots.map((s) => [monthLabel(s.period), `${rateOf(s).toFixed(1)}%`, s.numerator, s.denominator])}
+            rows={snapshots.map((s) => [monthLabel(s.period), `${rateOf(s).toFixed(1)}%`, fmtCount(s.numerator), fmtCount(s.denominator)])}
           />
         </div>
       ) : (
