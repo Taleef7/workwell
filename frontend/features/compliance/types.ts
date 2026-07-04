@@ -10,7 +10,10 @@ export type DisplayState =
   | "EXCLUDED"
   | "DECLINED"
   | "IN_PROGRESS"
-  | "NA";
+  | "NA"
+  // The E11.3 segment-applicability overlay (backend roster-read-model): a measure that doesn't apply to
+  // a subject's cohort. Distinct from NA ("not evaluated"); rendered de-emphasized like NA (ComplianceChip).
+  | "NOT_APPLICABLE";
 
 export interface RosterColumn {
   measureId: string;
