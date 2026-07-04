@@ -42,6 +42,16 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 export class SqliteOutcomeStore implements OutcomeStore {
   constructor(private readonly db: CloudDatabase) {}
 
+  /**
+   * In-process memo of `aggregateScaleRun` (perf #233). A COMPLETED `seed:scale` run is written once
+   * and never re-evaluated, so its (location, provider, status) aggregation is a pure function of an
+   * immutable runId — cached so the hierarchy/programs reads don't repeat a 120k-row GROUP BY per
+   * request. Bounded by the number of distinct COMPLETED scale runs ever queried (~one per runnable
+   * measure; grows only on a re-seed, which mints new runIds). The store is a long-lived singleton
+   * (one per env, see stores/factory.ts), so the cache persists across requests.
+   */
+  private readonly scaleCache = new Map<string, ScaleGroupCount[]>();
+
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
     const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
@@ -179,10 +189,18 @@ export class SqliteOutcomeStore implements OutcomeStore {
     if (filter.measureId) (where.push("o.measure_id = ?"), binds.push(filter.measureId));
     if (filter.from) (where.push("substr(r.started_at, 1, 10) >= ?"), binds.push(filter.from));
     if (filter.to) (where.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));
-    // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
-    if (filter.excludeScale) where.push("r.triggered_by <> 'seed:scale'");
-    // Fable M16: exclude the backdated synthetic trend-history rows IN SQL (fetched-then-discarded).
-    if (filter.excludeTrendHistory) where.push("r.triggered_by <> 'seed:trend-history'");
+    // E13 PR-2 (excludeScale, mhn ~120k rows) + Fable M16 (excludeTrendHistory) — both exclude runs by
+    // `triggered_by`. Constrain `o.run_id` to the qualifying run set (a subquery over the tiny runs
+    // table) instead of filtering the joined `r.triggered_by`: on the Pg ceiling this is what lets the
+    // planner use the run_id index instead of seq-scanning every outcome row to drop the excluded ones
+    // (perf #233). Same result set as the old `<>` chain (a NULL triggered_by is excluded either way).
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      where.push(`o.run_id IN (SELECT id FROM runs WHERE triggered_by NOT IN (${excludedTriggers.map(() => "?").join(", ")}))`);
+      binds.push(...excludedTriggers);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
@@ -204,6 +222,8 @@ export class SqliteOutcomeStore implements OutcomeStore {
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
+    const cached = this.scaleCache.get(runId);
+    if (cached) return cached;
     // Group by (location, provider, status) parsed from the fixed-width encoded subject_id
     // (`mhn|Lxx|Pxx|nnnnnnn`): substr 5..7 = location, 9..11 = provider. The GROUP BY returns
     // O(locations×providers×statuses) rows, never the per-subject rows.
@@ -215,7 +235,11 @@ export class SqliteOutcomeStore implements OutcomeStore {
       )
       .bind(runId)
       .all<{ location_id: string; provider_id: string; status: string; count: number }>();
-    return (results ?? []).map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+    const groups = (results ?? []).map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+    // Cache only non-empty results: an invalid/not-yet-seeded runId returns [] (cheap to recompute)
+    // and must not be pinned to empty if it later becomes a real scale run mid-seed.
+    if (groups.length) this.scaleCache.set(runId, groups);
+    return groups;
   }
 
   async countOutcomesByStatus(runId: string): Promise<OutcomeStatusCount[]> {

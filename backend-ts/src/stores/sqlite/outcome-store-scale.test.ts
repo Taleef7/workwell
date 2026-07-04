@@ -76,6 +76,40 @@ test("excludeScale drops seed:scale rows IN SQL (bounded-memory guard for the li
   assert.ok(!measOnly.some((r) => r.subjectId.startsWith("mhn|")), "listOutcomesForMeasure excludeScale drops scale");
 });
 
+test("excludeTrendHistory + combined scale/trend filter keep only live rows (Fix A refactor guard)", async () => {
+  // Pin the exact result set of the run-scoped exclusion so the perf rewrite (run_id = ANY(<live runs>)
+  // instead of a joined `triggered_by <> …`) can't silently change which rows survive.
+  const period = { measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z" };
+  const trend = await runs.createRun({ scopeType: "MEASURE", scopeId: "hazwoper", triggeredBy: "seed:trend-history", status: "COMPLETED", requestedScope: { measureId: "hazwoper" }, ...period });
+  await outcomes.recordOutcome({ runId: trend.id, subjectId: "emp-010", measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+  const liveRun = await runs.createRun({ scopeType: "MEASURE", scopeId: "hazwoper", triggeredBy: "manual", status: "COMPLETED", requestedScope: { measureId: "hazwoper" }, ...period });
+  await outcomes.recordOutcome({ runId: liveRun.id, subjectId: "emp-011", measureId: "hazwoper", status: "OVERDUE", evidence: {} });
+  const scale = await runs.createRun({ scopeType: "MEASURE", scopeId: "hazwoper", triggeredBy: "seed:scale", status: "COMPLETED", requestedScope: { measureId: "hazwoper" }, ...period });
+  await outcomes.recordOutcome({ runId: scale.id, subjectId: encodeScaleSubject(0, 0, 1), measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+
+  const noTrend = await outcomes.listOutcomesWithRun({ measureId: "hazwoper", excludeTrendHistory: true });
+  assert.ok(!noTrend.some((r) => r.subjectId === "emp-010"), "excludeTrendHistory drops trend rows");
+  assert.ok(noTrend.some((r) => r.subjectId === "emp-011"), "excludeTrendHistory keeps live rows");
+
+  const both = await outcomes.listOutcomesWithRun({ measureId: "hazwoper", excludeScale: true, excludeTrendHistory: true });
+  assert.ok(!both.some((r) => r.subjectId.startsWith("mhn|")), "combined filter drops scale");
+  assert.ok(!both.some((r) => r.subjectId === "emp-010"), "combined filter drops trend");
+  assert.deepEqual(both.map((r) => r.subjectId).sort(), ["emp-011"], "combined filter keeps only the live row");
+});
+
+test("aggregateScaleRun memoizes per runId (COMPLETED seed:scale runs are immutable)", async () => {
+  // A COMPLETED seed:scale run is written once and never re-evaluated, so its aggregation is a pure
+  // function of an immutable runId — memoized in-process to keep the hierarchy/overview reads off a
+  // repeated 120k-row GROUP BY. The cache must serve the first result even if the rows later change.
+  const rid = await scaleRun();
+  await outcomes.recordOutcome({ runId: rid, subjectId: encodeScaleSubject(0, 0, 1), measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+  const first = await outcomes.aggregateScaleRun(rid);
+  assert.equal(first.reduce((s, g) => s + g.count, 0), 1);
+  await outcomes.recordOutcome({ runId: rid, subjectId: encodeScaleSubject(0, 0, 2), measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+  const second = await outcomes.aggregateScaleRun(rid);
+  assert.equal(second.reduce((s, g) => s + g.count, 0), 1, "cached result is unchanged (run treated as immutable)");
+});
+
 test("group count is bounded by structure, not by subject count", async () => {
   const small = await scaleRun();
   const big = await scaleRun();
