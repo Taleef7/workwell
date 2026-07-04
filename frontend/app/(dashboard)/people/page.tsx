@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { AccessDenied } from "@/components/access-denied";
 import { canViewPeople } from "@/lib/rbac";
 import { SkeletonCard } from "@/components/skeleton-loader";
 
@@ -94,12 +95,10 @@ export default function PeoplePage() {
   // state instead (mirrors /campaigns and /orders).
   if (!mayView) {
     return (
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">People</h2>
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          The cross-system People directory is managed by Case Managers and Admins — your role doesn&apos;t have access.
-        </div>
-      </section>
+      <AccessDenied
+        title="People"
+        message="The cross-system People directory is managed by Case Managers and Admins — your role doesn’t have access."
+      />
     );
   }
 
