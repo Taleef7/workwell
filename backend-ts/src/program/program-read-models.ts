@@ -91,6 +91,8 @@ export interface ProgramDeps {
   outcomeStore: OutcomeStore;
   caseStore: CaseStore;
   employees?: readonly EmployeeProfile[];
+  /** Optional — the monthly (quality_snapshots) trend source (UX-8). Absent ⇒ per-run trend only. */
+  qualitySnapshots?: QualitySnapshotStore;
 }
 
 /** Per-run trend point (Java ProgramTrendPoint). The chart reads runId/startedAt/complianceRate/totalEvaluated. */
@@ -316,6 +318,23 @@ export async function programTrend(
   measureId: string,
   filters: ProgramFilters,
 ): Promise<ProgramTrendPoint[]> {
+  // UX-8: prefer the monthly quality_snapshots series (the E16 source of truth) when the scope
+  // resolves and has ≥2 months; otherwise fall back to the per-run trend below (unchanged).
+  const scope = deps.qualitySnapshots ? snapshotScopeFor(filters) : null;
+  if (deps.qualitySnapshots && scope) {
+    const monthFrom = filters.from?.trim() ? filters.from.trim().slice(0, 7) : undefined;
+    const monthTo = filters.to?.trim() ? filters.to.trim().slice(0, 7) : undefined;
+    const snaps = await deps.qualitySnapshots.querySnapshots({
+      measureId,
+      scopeLevel: scope.scopeLevel,
+      scopeId: scope.scopeId,
+      from: monthFrom,
+      to: monthTo,
+    });
+    const monthly = monthlyTrendPoints(snaps);
+    if (monthly.length >= 2) return monthly;
+  }
+
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.

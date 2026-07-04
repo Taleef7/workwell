@@ -7,8 +7,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Task 2 adds `monthlyTrendPoints` and Task 3 adds `programDeps`/`ProgramDeps` + `programTrend` to this
 // import as those tasks are implemented. Task 1 uses only `snapshotScopeFor`.
-import { snapshotScopeFor, monthlyTrendPoints } from "./program-read-models.ts";
+import { snapshotScopeFor, monthlyTrendPoints, programTrend } from "./program-read-models.ts";
+import type { ProgramDeps } from "./program-read-models.ts";
 import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
+import type { OutcomeWithRun } from "../stores/outcome-store.ts";
 
 test("snapshotScopeFor — no tenant/site → all/ALL", () => {
   assert.deepEqual(snapshotScopeFor({}), { scopeLevel: "all", scopeId: "ALL" });
@@ -69,4 +71,47 @@ test("monthlyTrendPoints — caps to the newest 12 months", () => {
   assert.equal(pts.length, 12);
   assert.equal(pts[0]!.period, "2025-04");
   assert.equal(pts[11]!.period, "2026-03");
+});
+
+// Minimal fakes: programTrend only touches outcomeStore.listOutcomesWithRun (per-run path) and
+// qualitySnapshots.querySnapshots (monthly path). runStore/caseStore are unused by programTrend.
+function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[]; withSnapshots?: boolean }): ProgramDeps {
+  const deps = {
+    runStore: {} as ProgramDeps["runStore"],
+    caseStore: {} as ProgramDeps["caseStore"],
+    outcomeStore: { listOutcomesWithRun: async () => opts.perRun ?? [] } as unknown as ProgramDeps["outcomeStore"],
+  } as ProgramDeps;
+  if (opts.withSnapshots !== false) {
+    deps.qualitySnapshots = { querySnapshots: async () => opts.snaps ?? [], upsertSnapshots: async () => {} };
+  }
+  return deps;
+}
+
+const perRunRow = (runId: string, startedAt: string, status: string): OutcomeWithRun => ({
+  runId, runStartedAt: startedAt, runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual",
+  subjectId: "emp-006", measureId: "audiogram", status,
+});
+
+test("programTrend — ≥2 monthly snapshots → monthly points (period stamped)", async () => {
+  const deps = fakeDeps({ snaps: [snap("2026-05", 9, 10), snap("2026-06", 8, 10)] });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.equal(pts.length, 2);
+  assert.equal(pts[0]!.period, "2026-05");
+  assert.equal(pts[1]!.complianceRate, 80);
+});
+
+test("programTrend — <2 monthly snapshots → per-run fallback (no period)", async () => {
+  const deps = fakeDeps({
+    snaps: [snap("2026-06", 8, 10)], // only 1 month
+    perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT"), perRunRow("run-b", "2026-06-02T00:00:00Z", "OVERDUE")],
+  });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.ok(pts.every((p) => p.period === undefined), "fallback points carry no period");
+  assert.deepEqual(new Set(pts.map((p) => p.runId)), new Set(["run-a", "run-b"]));
+});
+
+test("programTrend — no qualitySnapshots dep → per-run (back-compat)", async () => {
+  const deps = fakeDeps({ withSnapshots: false, perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT")] });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.ok(pts.every((p) => p.period === undefined));
 });
