@@ -382,6 +382,9 @@ export default function RunsPage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRunInsight(null); // clear the prior run's insight; the AI insight is now on-demand (UX-19)
       setInsightDismissed(false);
+      // Reset loading on every run switch so a stale in-flight request (whose finally is guarded to skip
+      // the now-different run) can't leave the new run's button stuck disabled as "Generating…" (Codex P2).
+      setInsightLoading(false);
       void loadSelectedRun();
       // NOTE: loadRunInsight is intentionally NOT auto-fired here — merely viewing a run detail used to
       // trigger a billed OpenAI call per selected run (UX-19). It now runs only on an explicit button.
