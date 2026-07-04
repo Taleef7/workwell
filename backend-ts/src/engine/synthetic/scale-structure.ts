@@ -28,7 +28,9 @@ for (let li = 0; li < LOCATION_COUNT; li++) {
     locId,
     Array.from({ length: PROVIDERS_PER_LOCATION }, (_, pi) => ({
       id: `P${pad2(pi)}`,
-      name: `Clinic ${li + 1}-${pi + 1}`,
+      // Name providers like clinicians, not clinics (UX-9): the rollup renders these on a PROVIDER-badged
+      // row, so "Clinic 1-1 · PROVIDER" read as two contradictory nouns.
+      name: `Dr. Provider ${li + 1}-${pi + 1}`,
       locationId: locId,
     })),
   );
