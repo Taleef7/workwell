@@ -288,16 +288,20 @@ export default function RunsPage() {
   }, [api, router, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
-    if (!selectedRunId) return;
+    const forRunId = selectedRunId;
+    if (!forRunId) return;
     setInsightLoading(true);
     try {
-      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${selectedRunId}/ai/insight`);
+      const data = await api.post<undefined, RunInsightResponse>(`/api/runs/${forRunId}/ai/insight`);
+      // Ignore a stale result: the user may have selected a different run while this was in flight, or
+      // it would render run A's insight under run B's detail (and leave B's button stuck "Generating…").
+      if (selectedRunIdRef.current !== forRunId) return;
       setRunInsight(data);
       setInsightDismissed(false);
     } catch {
-      setRunInsight(null);
+      if (selectedRunIdRef.current === forRunId) setRunInsight(null);
     } finally {
-      setInsightLoading(false);
+      if (selectedRunIdRef.current === forRunId) setInsightLoading(false);
     }
   }, [api, selectedRunId]);
 
