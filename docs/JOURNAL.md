@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-07-03 — UI/UX Pass-3 follow-up: on-demand AI insight, UUID linking, unified AccessDenied
+
+Second UI/UX PR (`feat/uiux-pass3-followup`) picking up the medium-effort Fable Pass-3 items deferred from
+the first pass.
+
+- **UX-19** — viewing a run detail auto-fired a **billed** OpenAI run-insight call per selected run
+  (`/api/runs/:id/ai/insight` in a `selectedRunId` effect). Now **on-demand**: a "Generate AI insight"
+  button (with a loading state); the effect clears the prior run's insight instead of fetching. Removes the
+  read-a-page-costs-money smell (the sprint plan's own hard AI-spend rule).
+- **UX-6** — raw UUIDs as primary content. New reusable `CopyableId` (`components/copyable-id.tsx`) — a
+  shortened monospace token + a copy button, optionally linked to the id's surface. Wired the case-detail
+  "Last run" to link to `/runs?runId=…` (which already auto-selects) + copy. 4 unit tests.
+- **UX-16** — inconsistent access-denied treatments (purpose-built cards on /campaigns + /orders, a card on
+  /people) unified into one `AccessDenied` (`components/access-denied.tsx`, `role="status"`), adopted on all
+  three.
+
+**Verified:** frontend tsc --noEmit clean, lint clean, 114 vitest (+4), build green. No schema, no new deps,
+display-only (ADR-008 untouched).
+
+**Still deferred:** the larger design-pass items (UX-8 program-card trends → `quality_snapshots`, UX-5 modal
+overflow, UX-7 evidence dropzone, UX-11 roster mobile cards, UX-3 progressive feedback, filter-architecture
+/ operator-home / density) and the full WCAG 2.2 AA audit.
+
 ## 2026-07-03 — UI/UX + accessibility pass (Fable Pass-3 quick-wins + a11y fundamentals)
 
 With the backend Fable findings (Pass-1: all H/M/L) closed in the hardening sprint, this takes the first

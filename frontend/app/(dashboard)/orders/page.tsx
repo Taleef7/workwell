@@ -6,6 +6,7 @@ import { Button, Select } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { AccessDenied } from "@/components/access-denied";
 import { canViewOrders } from "@/lib/rbac";
 import { OUTCOME_LABELS, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 
@@ -123,13 +124,10 @@ export default function OrdersPage() {
 
   if (!mayView) {
     return (
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Order Proposals</h2>
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          Order proposals are clinical decision support, managed by Case Managers and Admins — your role doesn&apos;t have
-          access.
-        </div>
-      </section>
+      <AccessDenied
+        title="Order Proposals"
+        message="Order proposals are clinical decision support, managed by Case Managers and Admins — your role doesn’t have access."
+      />
     );
   }
 

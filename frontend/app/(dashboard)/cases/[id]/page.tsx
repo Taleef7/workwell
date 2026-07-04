@@ -10,6 +10,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
+import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
 
@@ -666,7 +667,10 @@ export default function CaseDetailPage() {
                 />
                 <Info label="Evaluation period" value={caseDetail.evaluationPeriod} />
                 <Info label="Outcome summary" value={caseDetail.outcomeSummary} />
-                <Info label="Last run" value={caseDetail.lastRunId} />
+                <Info
+                  label="Last run"
+                  value={<CopyableId id={caseDetail.lastRunId} href={`/runs?runId=${encodeURIComponent(caseDetail.lastRunId)}`} label="run id" />}
+                />
               </dl>
 
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
