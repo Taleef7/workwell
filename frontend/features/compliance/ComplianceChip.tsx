@@ -18,7 +18,7 @@ export function ComplianceChip({ cell, className = "" }: { cell: RosterCell; cla
     const detail = `${label}${cell.method ? ` — ${cell.method}` : ""}`;
     return (
       <span
-        className={`inline-block text-neutral-300 dark:text-neutral-600 ${className}`}
+        className={`inline-block text-neutral-400 dark:text-neutral-500 ${className}`}
         title={detail}
         aria-label={detail}
       >
