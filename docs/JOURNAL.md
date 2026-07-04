@@ -17,8 +17,19 @@ loads — the 1.3MB fetch + derive is skipped entirely.
 
 Same immutable-run pattern as #238's `aggregateScaleRun` memo. **No schema, no new deps, descriptive-only
 (ADR-008).** TDD: a call-counting-store test proves the second same-run build reloads nothing and a newer
-run supersedes → recompute. **Backend typecheck clean, 918 tests (917 pass / 1 pg-skip). Live re-measure
-after deploy is the confirmation step.**
+run supersedes → recompute.
+
+**Codex P2 folded in (the invariant the cache rests on):** `POST /api/runs/:id/evaluate` appended an outcome
+via `recordOutcome` with no run-status guard, and `markRunning` is a QUEUED-only no-op — so a **terminal**
+population run could keep its status + runId while gaining rows, which the runId-keyed cache would miss
+(stale). The async worker only ever evaluates QUEUED/RUNNING runs (the pipeline records via `recordOutcome`
+directly in a linear `markRunning → record → finalize` flow, never via this HTTP slice), so the endpoint now
+**rejects a terminal run with 409** — enforcing "terminal run = immutable," the invariant the roster cache,
+the scale memo, `latestRunRows`, and the quality snapshots all rely on. A colocated test drives a run to
+COMPLETED and asserts 409 + no appended outcome. Cached cells are also `Object.freeze`d (earlier P3).
+
+**Backend typecheck clean, 919 tests (918 pass / 1 pg-skip). Live re-measure after deploy is the
+confirmation step.**
 
 ## 2026-07-04 — perf(#233): roster + hierarchy latency (5–13s → sub-second)
 
