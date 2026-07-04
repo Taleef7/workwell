@@ -208,8 +208,13 @@ INDEX outcomes_run_id_idx(run_id)
 > `spike_outcomes_run_id_idx` (a bitmap index scan of just the ~20k live rows; measured ~3.2s → ~40ms on
 > the live stack, identical result set). Separately, `aggregateScaleRun(runId)` is **memoized in-process**
 > on the store singleton — a COMPLETED `seed:scale` run is immutable, so its GROUP-BY aggregation is
-> cached (bounded to ~one entry per runnable measure; a re-seed mints new runIds ⇒ cache miss). Both are
-> read-path only — no schema, descriptive (ADR-008).
+> cached (bounded to ~one entry per runnable measure; a re-seed mints new runIds ⇒ cache miss). The
+> **roster** additionally caches its derived cells per measure's latest run (`rosterCellCache` in
+> `compliance/roster-read-model.ts`): a COMPLETED population run's outcomes are immutable and
+> `deriveCell`/`deriveWhyFlagged` are pure over them (recency/overdue come from the CQL defines baked
+> into evidence at evaluation time, not from "today"), so the ~1.3MB `evidence_json` load + derive is
+> skipped on repeat requests (keyed by `measureId`, superseded when a newer run appears ⇒ bounded to one
+> entry per measure). All are read-path only — no schema, descriptive (ADR-008).
 
 > **The four run-detail read paths are bounded (Fable H4):** the outcomes grid (`GET
 > /api/runs/:id/outcomes`) returns the whole run by default (a live ALL_PROGRAMS run is ~2,100 rows) and
