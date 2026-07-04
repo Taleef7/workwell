@@ -46,6 +46,16 @@ const T = `${SPIKE_SCHEMA}.outcomes`;
 export class PgOutcomeStore implements OutcomeStore {
   constructor(private readonly pool: PgPool) {}
 
+  /**
+   * In-process memo of `aggregateScaleRun` (perf #233). A COMPLETED `seed:scale` run is written once
+   * and never re-evaluated, so its (location, provider, status) aggregation is a pure function of an
+   * immutable runId — cached so the hierarchy/programs reads don't repeat the 120k-row GROUP BY per
+   * request. Bounded by the number of distinct COMPLETED scale runs ever queried (~one per runnable
+   * measure; grows only on a re-seed, which mints new runIds). The store is a long-lived singleton
+   * (one per env, see stores/factory.ts), so the cache persists across requests.
+   */
+  private readonly scaleCache = new Map<string, ScaleGroupCount[]>();
+
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     const id = crypto.randomUUID();
     const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
@@ -193,11 +203,20 @@ export class PgOutcomeStore implements OutcomeStore {
     if (filter.measureId) where.push(`o.measure_id = $${binds.push(filter.measureId)}`);
     if (filter.from) where.push(`(r.started_at AT TIME ZONE 'UTC')::date >= $${binds.push(filter.from)}::date`);
     if (filter.to) where.push(`(r.started_at AT TIME ZONE 'UTC')::date <= $${binds.push(filter.to)}::date`);
-    // E13 PR-2: exclude the population-scale tenant's ~120k rows IN SQL — never materialized in memory.
-    if (filter.excludeScale) where.push(`r.triggered_by <> 'seed:scale'`);
-    // Fable M16: exclude the backdated synthetic trend-history rows IN SQL — the live read models keep
-    // only the latest run per measure, so these are otherwise fetched then discarded.
-    if (filter.excludeTrendHistory) where.push(`r.triggered_by <> 'seed:trend-history'`);
+    // E13 PR-2 (excludeScale, mhn ~120k rows) + Fable M16 (excludeTrendHistory) — both exclude runs by
+    // `triggered_by`. Constrain `o.run_id` to the qualifying run set (a subquery over the tiny runs
+    // table) rather than filtering the joined `r.triggered_by`: a predicate on the joined table can't
+    // prune the outcomes scan, so the planner seq-scans all ~1.7M rows to drop the excluded ones. The
+    // `run_id = ANY(<qualifying ids>)` form drives the run_id index instead — a bitmap index scan of
+    // just the live rows (perf #233: ~3.2s → ~40ms on the live stack; identical result set — a NULL
+    // triggered_by is excluded either way).
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      const ph = excludedTriggers.map((v) => `$${binds.push(v)}`).join(", ");
+      where.push(`o.run_id = ANY (ARRAY(SELECT id FROM ${SPIKE_SCHEMA}.runs WHERE triggered_by NOT IN (${ph})))`);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { rows } = await this.pool.query<{
       run_id: string;
@@ -227,6 +246,8 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
     if (!isUuid(runId)) return []; // guard like the sibling reads (avoid invalid-uuid-syntax errors)
+    const cached = this.scaleCache.get(runId);
+    if (cached) return cached;
     // Single GROUP BY over the encoded subject_id (`mhn|Lxx|Pxx|n`) — returns
     // O(locations×providers×statuses) rows, never the 120k per-subject rows.
     const { rows } = await this.pool.query<{ location_id: string; provider_id: string; status: string; count: string }>(
@@ -238,7 +259,11 @@ export class PgOutcomeStore implements OutcomeStore {
         GROUP BY 1, 2, 3`,
       [runId],
     );
-    return rows.map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+    const groups = rows.map((r) => ({ locationId: r.location_id, providerId: r.provider_id, status: r.status, count: Number(r.count) }));
+    // Cache only non-empty results: a not-yet-seeded runId returns [] (cheap to recompute) and must
+    // not be pinned to empty if it later becomes a real scale run.
+    if (groups.length) this.scaleCache.set(runId, groups);
+    return groups;
   }
 
   async countOutcomesByStatus(runId: string): Promise<OutcomeStatusCount[]> {
