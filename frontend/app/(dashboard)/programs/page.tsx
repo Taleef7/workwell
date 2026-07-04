@@ -216,9 +216,9 @@ export default function ProgramsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <KpiCard label="Evaluations (latest runs)" value={initialLoad ? "—" : String(totalEvaluations)} />
+        <KpiCard label="Evaluations (latest runs)" value={initialLoad ? "—" : fmtCount(totalEvaluations)} />
         <KpiCard label="Overall compliance" value={initialLoad ? "—" : `${overallComplianceRate.toFixed(1)}%`} />
-        <KpiCard label="Open cases" value={initialLoad ? "—" : String(openCases)} />
+        <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard label="Last run" value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
 
