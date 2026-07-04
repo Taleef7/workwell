@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-07-04 — UX-8: program-card trends onto quality_snapshots (monthly)
+
+The `/programs` per-card trend drew from per-run history, which flat-lines under the daily scheduled
+runs ("↑ 0% from last run" read like a bug). Rewired it to the monthly `quality_snapshots` series (the
+E16 source of truth), scoped by the page's tenant/site filters, with a per-run fallback when a scope has
+<2 monthly snapshots. Branch `feat/ux8-monthly-trend`.
+
+Additive only: `snapshotScopeFor` (filters → snapshot scope, directory-resolved site→tenant; null ⇒
+fallback) + `monthlyTrendPoints` (pure, exported) in `program-read-models.ts`; `period?` on
+`ProgramTrendPoint`; an optional `qualitySnapshots` on `ProgramDeps` (route wires
+`stores.qualitySnapshots`); and a frontend `trend-meta.ts` helper that swaps the labels to months +
+"from last month" (UTC-stamped, Fable M18). No schema, no new endpoint, no new deps; descriptive-only
+(ADR-008).
+
+Code review caught two P2s (the `/trend` endpoint is **also** consumed by the measure page's delta
+badge, which reads raw `trend[1]` vs the headline `program.complianceRate`): (1) monthly points must be
+**newest-first** like the per-run branch, else `trend[1]` is the second-oldest month; (2) the monthly
+rate must use `compliant / total-including-excluded` (matching the per-run branch + the `programOverview`
+headline), not the E16 `numerator/denominator` proportion — otherwise the trend never reconciles with the
+card's big % and the delta subtracts two different metrics. Both fixed with regression tests. **Backend
+930 tests (929 pass / 1 pg-skip); frontend tsc + lint + 123 vitest + build green.**
+
 ## 2026-07-04 — perf(#233 follow-up): roster derived-cell cache
 
 Post-deploy live re-measure of #238 (PR #238, merged) showed the warm path ~5× better
