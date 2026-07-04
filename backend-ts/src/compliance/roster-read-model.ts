@@ -35,10 +35,30 @@ export interface Roster {
   total: number;
 }
 
+/**
+ * Per-measure cache of a run's derived cells (perf #233 follow-up). A COMPLETED population run's
+ * outcomes are immutable and `deriveCell`/`deriveWhyFlagged` are pure over them (no "today"
+ * dependence — the recency/overdue numbers come from the CQL defines baked into evidence at
+ * evaluation time), so the derived cell map for a measure's latest run is stable. Keyed by
+ * `measureId` and superseded when a newer run appears (a Recalculate mints a new runId), so it holds
+ * one entry per measure — the repeat roster load then skips the ~1.3MB `evidence_json` fetch +
+ * derive entirely.
+ */
+export type RosterCellCache = Map<string, { runId: string; cells: Map<string, RosterCell> }>;
+
+/**
+ * Process-lifetime roster cell cache (the route passes this shared instance; the worker is a
+ * long-lived singleton, so it persists across requests). Tests that omit `cellCache` derive fresh
+ * each call, preserving isolation.
+ */
+export const rosterCellCache: RosterCellCache = new Map();
+
 export interface RosterDeps {
   outcomeStore: OutcomeStore;
   /** Configured risk-group segments (E11.3). Drives the N/A applicability overlay + `segment` filter. */
   segments?: HydratedSegment[];
+  /** Optional persistent derived-cell cache (perf #233). Omit in tests for per-call isolation. */
+  cellCache?: RosterCellCache;
 }
 export interface RosterFilters {
   panel?: string | null;
@@ -105,14 +125,30 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const cellByMeasureSubject = new Map<string, Map<string, RosterCell>>();
   for (const m of measureIds) {
     const latest = latestRunRows(byMeasure.get(m) ?? []);
-    const cells = new Map<string, RosterCell>();
-    cellByMeasureSubject.set(m, cells);
-    if (latest.length === 0) continue;
+    if (latest.length === 0) {
+      cellByMeasureSubject.set(m, new Map());
+      continue;
+    }
     const runId = latest[0]!.runId;
+    // Reuse the derived cells for this measure's latest (immutable) run — skips the ~1.3MB evidence
+    // load + derive on repeat requests. The cached cells are read-only downstream (assembled by
+    // reference into rows, never mutated), so sharing the map across requests is safe.
+    const cached = deps.cellCache?.get(m);
+    if (cached && cached.runId === runId) {
+      cellByMeasureSubject.set(m, cached.cells);
+      continue;
+    }
+    const cells = new Map<string, RosterCell>();
     for (const o of await loadRun(runId)) {
       if (o.measureId !== m) continue;
-      cells.set(o.subjectId, { ...deriveCell(o.status, o.evidence, m, o.evaluationPeriod), evidenceRef: { runId, outcomeId: o.id } });
+      // Freeze the cell: cached cells are shared BY REFERENCE across requests (and assembled by
+      // reference into each response's rows), so any accidental post-build mutation would silently
+      // corrupt another request's view. Freezing makes that a loud throw instead — enforcing the
+      // read-only invariant this cache relies on.
+      cells.set(o.subjectId, Object.freeze({ ...deriveCell(o.status, o.evidence, m, o.evaluationPeriod), evidenceRef: { runId, outcomeId: o.id } }));
     }
+    deps.cellCache?.set(m, { runId, cells }); // supersedes any older run's entry for this measure (bounded to #measures)
+    cellByMeasureSubject.set(m, cells);
   }
 
   // 3) assemble rows over the whole directory; NA where a measure has no cell for the subject.

@@ -4,7 +4,7 @@ import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outc
 import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
-import { buildRoster } from "./roster-read-model.ts";
+import { buildRoster, type RosterCellCache } from "./roster-read-model.ts";
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
 // bottom of the roster regardless of data (UX-1), so they'd fall off page 1 — use a real employee here.
@@ -63,6 +63,42 @@ test("buildRoster — columns reflect the panel; a COMPLIANT mmr cell carries th
   assert.equal(row.cells["mmr"]!.method, "2 valid dose(s)");
   assert.equal(row.cells["flu_vaccine"]!.status, "NA");
   assert.equal(roster.total, EMPLOYEES.length);
+});
+
+test("buildRoster — caches derived cells per measure's latest run; a newer run supersedes (perf #233)", async () => {
+  let loadCount = 0;
+  const counting = (withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecord[]>): OutcomeStore => ({
+    ...fakeStore(withRun, byRun),
+    listOutcomes: async (runId: string) => { loadCount++; return byRun[runId] ?? []; },
+  }) as OutcomeStore;
+  const cache: RosterCellCache = new Map();
+
+  const withRunV1: OutcomeWithRun[] = [
+    { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
+  ];
+  const byRunV1: Record<string, OutcomeRecord[]> = {
+    "run-1": [{ id: "o-1", runId: "run-1", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-06-12T00:00:00Z" }],
+  };
+
+  const first = await buildRoster({ outcomeStore: counting(withRunV1, byRunV1), segments: [], cellCache: cache }, { panel: "immunizations" });
+  assert.equal(loadCount, 1, "first build loads the run's outcomes");
+  assert.equal(first.rows.find((r) => r.subject.externalId === EMP)!.cells["mmr"]!.method, "2 valid dose(s)");
+
+  // Same latest run + same cache → served from cache, no reload.
+  const second = await buildRoster({ outcomeStore: counting(withRunV1, byRunV1), segments: [], cellCache: cache }, { panel: "immunizations" });
+  assert.equal(loadCount, 1, "cache hit for the same latest run — no second load");
+  assert.equal(second.rows.find((r) => r.subject.externalId === EMP)!.cells["mmr"]!.status, "COMPLIANT");
+
+  // A newer run for mmr supersedes the cached entry → recompute with the new evidence.
+  const withRunV2: OutcomeWithRun[] = [
+    { runId: "run-2", runStartedAt: "2026-06-20T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "MISSING_DATA" },
+  ];
+  const byRunV2: Record<string, OutcomeRecord[]> = {
+    "run-2": [{ id: "o-2", runId: "run-2", subjectId: EMP, measureId: "mmr", evaluationPeriod: "2026-06-20", status: "MISSING_DATA", evidence: ev([["Dose Count", 1]]), evaluatedAt: "2026-06-20T00:00:00Z" }],
+  };
+  const third = await buildRoster({ outcomeStore: counting(withRunV2, byRunV2), segments: [], cellCache: cache }, { panel: "immunizations" });
+  assert.equal(loadCount, 2, "a newer run supersedes the cache → recompute");
+  assert.equal(third.rows.find((r) => r.subject.externalId === EMP)!.cells["mmr"]!.status, "IN_PROGRESS", "recomputed from the new run's evidence (1 of 2 doses)");
 });
 
 test("buildRoster — status filter keeps only subjects with >=1 matching cell; page-size bounds rows", async () => {

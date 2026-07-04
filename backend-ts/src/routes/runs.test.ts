@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-runs-route-${crypto.randomUUID()}.sqlite`);
 const bundle = JSON.parse(
@@ -116,6 +117,25 @@ test("evaluate without evaluationDate persists the engine's effective period (to
   const run2 = (await r2!.json()) as { id: string };
   const e2 = await post(`/api/runs/${run2.id}/evaluate`, { measureId: "audiogram", patientBundle: bundle });
   assert.equal(((await e2!.json()) as { evaluationPeriod: string }).evaluationPeriod, "2025-01-15");
+});
+
+test("evaluate refuses a terminal run (409) — a finished run's outcomes stay immutable (#233)", async () => {
+  // Guards the read-model caches that key on runId (roster cell cache, scale memo): appending into a
+  // COMPLETED run would keep its runId while changing its outcomes, so those caches would serve stale rows.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const runStore = new SqliteRunStore(env.DB as never);
+  await runStore.markRunning(run.id); // QUEUED → RUNNING (finalizeRun requires QUEUED/RUNNING)
+  await runStore.finalizeRun(run.id, "COMPLETED");
+
+  const res = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", patientBundle: bundle, evaluationDate: "2026-06-12" });
+  assert.equal(res?.status, 409, "cannot evaluate into a terminal run");
+  const body = (await res!.json()) as { error: string; status: string };
+  assert.equal(body.error, "run_not_open");
+  assert.equal(body.status, "COMPLETED");
+  // and no outcome was appended
+  const listed = await get(`/api/runs/${run.id}/outcomes`);
+  assert.equal(((await listed!.json()) as unknown[]).length, 0, "terminal run gained no outcome");
 });
 
 test("run summary totalCases counts cases whose last_run_id is the run", async () => {

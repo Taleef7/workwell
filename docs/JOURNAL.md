@@ -1,5 +1,36 @@
 # Journal
 
+## 2026-07-04 — perf(#233 follow-up): roster derived-cell cache
+
+Post-deploy live re-measure of #238 (PR #238, merged) showed the warm path ~5× better
+(hierarchy 5.0s → ~1.1s; roster 6.4s → ~1.2s) but the **roster still floored at ~1.2s warm** because it
+re-loads the latest ALL_PROGRAMS run's **~1.3MB of `evidence_json`** and re-derives every cell on each
+request (Fix A removed the scan; this was the next layer). Branch `perf/roster-cell-cache`.
+
+**Fix:** the roster's derived cell map for a measure's latest run is immutable (a COMPLETED population
+run's outcomes don't change, and `deriveCell`/`deriveWhyFlagged` are pure over them — recency/overdue
+read the CQL defines baked into evidence at evaluation time, not "today"). So memoize it —
+`rosterCellCache` (`compliance/roster-read-model.ts`), keyed by `measureId`, superseded when a newer run
+appears (a Recalculate mints a new runId), bounded to one entry per measure. The route passes the shared
+instance; tests omit it for per-call isolation. On a warm cache the roster does **zero** `listOutcomes`
+loads — the 1.3MB fetch + derive is skipped entirely.
+
+Same immutable-run pattern as #238's `aggregateScaleRun` memo. **No schema, no new deps, descriptive-only
+(ADR-008).** TDD: a call-counting-store test proves the second same-run build reloads nothing and a newer
+run supersedes → recompute.
+
+**Codex P2 folded in (the invariant the cache rests on):** `POST /api/runs/:id/evaluate` appended an outcome
+via `recordOutcome` with no run-status guard, and `markRunning` is a QUEUED-only no-op — so a **terminal**
+population run could keep its status + runId while gaining rows, which the runId-keyed cache would miss
+(stale). The async worker only ever evaluates QUEUED/RUNNING runs (the pipeline records via `recordOutcome`
+directly in a linear `markRunning → record → finalize` flow, never via this HTTP slice), so the endpoint now
+**rejects a terminal run with 409** — enforcing "terminal run = immutable," the invariant the roster cache,
+the scale memo, `latestRunRows`, and the quality snapshots all rely on. A colocated test drives a run to
+COMPLETED and asserts 409 + no appended outcome. Cached cells are also `Object.freeze`d (earlier P3).
+
+**Backend typecheck clean, 919 tests (918 pass / 1 pg-skip). Live re-measure after deploy is the
+confirmation step.**
+
 ## 2026-07-04 — perf(#233): roster + hierarchy latency (5–13s → sub-second)
 
 Fixed the one open item from the post-merge live verification: `/api/compliance/roster` and
