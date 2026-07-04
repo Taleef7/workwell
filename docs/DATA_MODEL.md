@@ -200,6 +200,17 @@ INDEX outcomes_run_id_idx(run_id)
 > per-measure coverage the Java-era `outcomes_employee_measure_period_idx` had, so
 > `listOutcomesForEmployee` / `listOutcomesForMeasure` don't seq-scan the ~1.68M-row live table.
 > Additive `CREATE INDEX IF NOT EXISTS`, reversible (`DROP INDEX`), no data migration.
+> **Aggregate read-path perf (#233, 2026-07-04):** the shared `listOutcomesWithRun(excludeScale,
+> excludeTrendHistory)` (roster / hierarchy / programs-overview) excludes the `seed:scale` +
+> `seed:trend-history` runs by constraining `o.run_id = ANY(<qualifying run ids>)` (a subquery over the
+> tiny `runs` table), **not** by a predicate on the joined `runs.triggered_by` — the latter forced a full
+> seq scan of all ~1.7M `outcomes` rows to drop the excluded ones; the run-id form drives
+> `spike_outcomes_run_id_idx` (a bitmap index scan of just the ~20k live rows; measured ~3.2s → ~40ms on
+> the live stack, identical result set). Separately, `aggregateScaleRun(runId)` is **memoized in-process**
+> on the store singleton — a COMPLETED `seed:scale` run is immutable, so its GROUP-BY aggregation is
+> cached (bounded to ~one entry per runnable measure; a re-seed mints new runIds ⇒ cache miss). Both are
+> read-path only — no schema, descriptive (ADR-008).
+
 > **The four run-detail read paths are bounded (Fable H4):** the outcomes grid (`GET
 > /api/runs/:id/outcomes`) returns the whole run by default (a live ALL_PROGRAMS run is ~2,100 rows) and
 > caps only a pathologically large (120k `seed:scale`) run to the first 5,000 rows so the worker never
