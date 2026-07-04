@@ -12,6 +12,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -39,6 +40,30 @@ export interface ProgramFilters {
   from?: string | null; // inclusive lower bound (day-granular) on run started / case created
   to?: string | null; // inclusive upper bound
   tenant?: string | null; // scope the population to one tenant/system (E13 PR-1)
+}
+
+/**
+ * Map the page's tenant/site filters to a `quality_snapshots` scope (UX-8). Mirrors how
+ * `buildSnapshotRows` keys scope_id: `"ALL"` | tenantId | `${tenantId}|${site}`. A site is
+ * resolved to its tenant from the directory when no tenant filter narrows it; an unknown or
+ * multi-tenant site returns null → the caller falls back to the per-run trend.
+ */
+export function snapshotScopeFor(
+  filters: ProgramFilters,
+): { scopeLevel: QualityScopeLevel; scopeId: string } | null {
+  const site = filters.site?.trim() || null;
+  const tenant = filters.tenant?.trim() || null;
+  if (site) {
+    let tenantId = tenant;
+    if (!tenantId) {
+      const tenants = [...new Set(EMPLOYEES.filter((e) => e.site === site).map((e) => e.tenantId))];
+      if (tenants.length !== 1) return null; // 0 (unknown) or >1 (ambiguous) → per-run fallback
+      tenantId = tenants[0]!;
+    }
+    return { scopeLevel: "site", scopeId: `${tenantId}|${site}` };
+  }
+  if (tenant) return { scopeLevel: "tenant", scopeId: tenant };
+  return { scopeLevel: "all", scopeId: "ALL" };
 }
 
 export interface ProgramDeps {
