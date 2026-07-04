@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-07-04 — perf(#233): roster + hierarchy latency (5–13s → sub-second)
+
+Fixed the one open item from the post-merge live verification: `/api/compliance/roster` and
+`/api/hierarchy/rollup` were taking ~5–13s steady-state on the live stack. Branch
+`perf/roster-hierarchy-latency`. **Profiled first** — `EXPLAIN ANALYZE` against live Neon
+(`workwell-twh`, 1.71M `outcomes` rows, 0.25–2 CU) surfaced two independent cost centers, both from the
+1.68M-row `seed:scale` tenant sharing the `outcomes` table with the ~20k live rows:
+
+- **Cost A — the shared `listOutcomesWithRun` scan (3,242 ms).** It excluded the scale/trend runs with a
+  predicate on the *joined* `runs.triggered_by` (`<> 'seed:scale'`), which the planner can't use to prune
+  the `outcomes` scan — so it **Seq Scanned all 1.71M rows** every request to keep the ~20,100 live ones.
+  This is why the roster was slow *despite never touching the scale aggregation*. Shared by the roster,
+  hierarchy, and programs-overview reads.
+- **Cost B — the scale fold (~3,700 ms).** The hierarchy/overview call `aggregateScaleRun(runId)` (a
+  120k-row `GROUP BY`, ~267 ms each) **once per active measure, serialized** — up to 14× per request.
+
+**Fix A (validated live):** rewrote the exclusion as `o.run_id = ANY(ARRAY(SELECT id FROM runs WHERE
+triggered_by NOT IN (…)))` so the planner drives the `spike_outcomes_run_id_idx` bitmap index scan
+instead of a full seq scan. `EXPLAIN ANALYZE` on the live DB: **3,242 ms → 41 ms (~79×)**, identical
+20,100 rows (verified old-form vs new-form COUNT parity, incl. measure-scoped). Applied to both the Pg
+ceiling and the SQLite floor (parity + same result set; a NULL `triggered_by` is excluded either way).
+
+**Fix B:** memoized `aggregateScaleRun(runId)` in-process on the store instance (a long-lived
+singleton — one per env, `stores/factory.ts`). A COMPLETED `seed:scale` run is written once and never
+re-evaluated, so its aggregation is a pure function of an immutable runId; a re-seed mints new runIds
+(cache miss). Bounded to ~one entry per runnable measure. Removes the ~3.7s scale fold from the
+hierarchy/overview warm path.
+
+Both fixes are the shared read path, so `/compliance/roster`, `/programs/hierarchy`, and `/programs`
+all benefit. **No schema, no new deps, descriptive-only (ADR-008 untouched).** TDD: extended
+`outcome-store-scale.test.ts` — a Fix-A result-set guard (excludeTrendHistory + combined filter keep
+only live rows) and a Fix-B memoization characterization (red→green: a post-first-call insert doesn't
+change the cached aggregate). **Backend typecheck clean, 916 tests (915 pass / 1 pg-skip / 0 fail).**
+Live re-measure after deploy is the confirmation step.
+
 ## 2026-07-03 — Full WCAG 2.2 AA audit + remediation (the largest UX-debt item)
 
 Closed the "full WCAG 2.2 AA audit" that every prior review (06-20 QA, Fable Pass-3) named as the project's
