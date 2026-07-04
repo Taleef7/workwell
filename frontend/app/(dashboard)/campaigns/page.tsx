@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
+import { AccessDenied } from "@/components/access-denied";
 import { canRunCampaigns } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -256,12 +257,10 @@ export default function CampaignsPage() {
   // otherwise mount the launcher and fire a 403 history fetch. Render a clean access-denied state.
   if (!mayManage) {
     return (
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Outreach Campaigns</h2>
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          Outreach campaigns are managed by Case Managers and Admins — your role doesn&apos;t have access to launch or view campaigns.
-        </div>
-      </section>
+      <AccessDenied
+        title="Outreach Campaigns"
+        message="Outreach campaigns are managed by Case Managers and Admins — your role doesn’t have access to launch or view campaigns."
+      />
     );
   }
 
