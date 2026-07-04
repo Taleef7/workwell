@@ -54,6 +54,13 @@ interface RunsEnv {
 
 const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
+// A run in one of these statuses has finished — its outcomes are final. Read models treat a terminal
+// run as immutable and key on its (unchanged) runId: the roster cell cache (#233), the scale-run memo,
+// `latestRunRows`, and the quality snapshots. So the `/evaluate` write path must refuse to append into
+// a terminal run (a `markRunning` no-op would otherwise leave it terminal while gaining rows, silently
+// changing a finished run under those caches). The async worker only ever evaluates QUEUED/RUNNING runs.
+const TERMINAL_RUN_STATUSES = new Set(["COMPLETED", "PARTIAL_FAILURE", "FAILED", "CANCELLED"]);
+
 // Reserved trigger labels are load-bearing IDENTITY, not free-form text: `seed:*` drives SEED
 // classification + scale-run decoding (`aggregateScaleRun` splits `mhn|Lxx|Pxx|n` subject ids) +
 // the seed CLIs' idempotency, and `scheduler` drives SCHEDULED classification + the 24h debounce.
@@ -308,6 +315,11 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     const runStore = await store(env);
     const run = await runStore.getRun(evalId);
     if (!run) return json({ error: "not_found", id: evalId }, 404);
+    // Refuse to append into a finished run — keeps a terminal run's outcomes immutable so the read-model
+    // caches that key on runId (roster #233, scale memo, quality snapshots) can't serve stale rows.
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      return json({ error: "run_not_open", id: evalId, status: run.status, hint: "cannot evaluate into a terminal run" }, 409);
+    }
     const body = (await req.json().catch(() => null)) as
       | { measureId?: string; patientBundle?: unknown; evaluationDate?: string }
       | null;
