@@ -1,5 +1,60 @@
 # Journal
 
+## 2026-07-03 — Full WCAG 2.2 AA audit + remediation (the largest UX-debt item)
+
+Closed the "full WCAG 2.2 AA audit" that every prior review (06-20 QA, Fable Pass-3) named as the project's
+**largest remaining UX debt**. Branch `feat/wcag-2.2-aa-remediation`.
+
+**Audit** (`docs/WCAG_AUDIT_2026-07-03.md`) — a systematic code-level pass over the whole `frontend/` surface
+(82 tsx across `app/`/`components/`/`features/`) against WCAG 2.2 AA + the Web Interface Guidelines, run as 5
+parallel auditors (shell/auth · programs/compliance/runs+charts · operator surfaces · Studio/admin/segments ·
+shared primitives). **Result: 0 critical, 1 High, ~40 findings — all mechanical.** The audit also *verified in
+code* that several items prior reviews left "open" are **already fixed**: dark-mode white chart tooltips (all
+charts use the theme-aware `chartTooltipStyle`), the H11 tab-switch data-loss hazard (Studio tabs use manual
+activation with a documented rationale), the UX-5 segment-modal overflow + M26 dirty-check, and the skip
+link/reduced-motion/ChartDataTable/confirm-dialog foundations. A live NVDA + keyboard-only walk of the 5 core
+flows remains the recommended final human acceptance step (can't be done from code).
+
+**Remediation shipped:**
+- **A11Y-H1 (High)** — the OSHA reference combobox (Studio Spec authoring) was **keyboard-inaccessible**
+  (options only wired `onMouseDown`, which never fires on Enter/Space; the input's `onBlur` closed the list on
+  tab-out). Rewrote it as a real **ARIA combobox** (`role=combobox`/`listbox`/`option`, `aria-expanded`,
+  `aria-activedescendant`, arrow/Enter/Escape/Home/End, `relatedTarget`-aware blur, `onMouseDown`-preventDefault
+  + `onClick` so mouse selection is preserved) + a focus-visible ring. **TDD** — 7 new colocated tests
+  (`osha-reference-combobox.test.tsx`) covering keyboard select, active-descendant tracking, Escape, mouse
+  click, filtering.
+- **`aria-live`/`role=alert` sweep (~19 sites)** — the dominant gap: async error `<p>`s got `role="alert"`;
+  load/skeleton/result/compile/AI-draft regions got `role="status" aria-live="polite"` (or an `sr-only` count
+  announcer) across GlobalSearch, sandbox, compliance/programs/hierarchy/[measureId] loads, runs error + AI
+  insight, campaigns launch result, cases/people/admin/studio errors, CqlTab/SpecTab/ElmExplorer/TestsTab
+  compile+draft results, SegmentEditorModal preview, CopyableId "Copied".
+- **Contrast token sweep (~15 sites, WCAG 1.4.3)** — meaningful `text-neutral-400`/`text-slate-400`-on-light
+  (≈2.6:1) bumped to `-500/-600` with `dark:` variants preserved; dark-panel text (sandbox) bumped the other
+  way; `SlaChip` yellow-600→700; added missing `dark:` variants on red/amber/blue callouts.
+- **Focus rings** — 3 removed outlines (GlobalSearch, ElmExplorer textarea, combobox) → `focus-visible:ring-2`.
+- **Target size (WCAG 2.5.8)** — sub-24px icon/inline buttons padded (CopyableId copy, hierarchy caret,
+  people unlink/link, CqlTab dismiss, RuleBuilder add/remove).
+- **Semantics** — decorative icons/dots/skeletons `aria-hidden`; admin tabs upgraded to the **full ARIA tab
+  pattern** (ids/`aria-controls`/`role=tabpanel`/roving tabIndex/Arrow-Home-End, automatic activation — no
+  unsaved state, unlike Studio); orphan `<label>`→`<span>` (cases/[id], admin); mobile now has an `<h1>` (login
+  hero tagline → `<p>`, form heading is the single always-present `h1`); orders "Suppressed" table got a
+  `<thead>`/`scope="col"`; campaigns history `<tr role="button">` → real row with a first-cell `<button>`;
+  IndividualComplianceStatus expander got `aria-expanded`/`aria-controls`; ComplianceChip NA cell got an
+  `sr-only` accessible name; SqlPreviewPanel disclosure got `aria-controls`.
+
+**Whole-branch code review** (superpowers:code-reviewer) confirmed the three larger rewrites (combobox, admin
+tabs, campaigns row) are behavior-preserving; 3 minor announcement/heading nuances it flagged were fixed
+(GlobalSearch results list was itself the live region → replaced with an `sr-only` count node; login double-h1
+→ single form h1; campaigns live region wrapped the whole `RecipientTable` → scoped to the summary line).
+
+**Verified:** frontend tsc clean, lint clean, **121 vitest pass (+7)**, build green. **36 files, +~280/−140.**
+No schema, no new deps, display-only (ADR-008 untouched — nothing here touches compliance).
+
+**Next (remaining UX debt, tracked):** UX-8 (program-card trends → `quality_snapshots`), UX-5 (already not
+present in code — re-confirm on the live modal), UX-7 (styled evidence dropzone), UX-11 (roster mobile cards),
+UX-3 (progressive-load feedback beyond the `aria-live` announcements added here), plus the filter-architecture /
+operator-home / density-toggle design proposals.
+
 ## 2026-07-03 — UI/UX Pass-3 follow-up: on-demand AI insight, UUID linking, unified AccessDenied
 
 Second UI/UX PR (`feat/uiux-pass3-followup`) picking up the medium-effort Fable Pass-3 items deferred from

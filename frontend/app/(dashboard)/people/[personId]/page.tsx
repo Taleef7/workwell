@@ -242,7 +242,7 @@ export default function PersonDetailPage() {
                       type="button"
                       onClick={() => void unlink(s)}
                       disabled={busy}
-                      className="rounded border border-rose-300 dark:border-rose-800 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40"
+                      className="rounded border border-rose-300 dark:border-rose-800 px-2 py-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40"
                     >
                       Not this person — unlink
                     </button>
@@ -299,7 +299,7 @@ export default function PersonDetailPage() {
                               type="button"
                               onClick={() => void confirmLink(s)}
                               disabled={busy}
-                              className="shrink-0 rounded border border-emerald-300 dark:border-emerald-800 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-40"
+                              className="shrink-0 rounded border border-emerald-300 dark:border-emerald-800 px-2 py-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-40"
                             >
                               Same person — link
                             </button>

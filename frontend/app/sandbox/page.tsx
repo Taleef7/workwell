@@ -83,8 +83,8 @@ export default function SandboxPage() {
         {/* Status panel */}
         <div className="mt-10 rounded-[1.5rem] border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
           {status === "loading" ? (
-            <div className="flex items-start gap-4">
-              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-sky-400" />
+            <div role="status" className="flex items-start gap-4">
+              <Loader2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-sky-400" />
               <div>
                 <p className="text-sm font-semibold text-white">Signing in automatically…</p>
                 <p className="mt-1 text-sm leading-5 text-slate-400">
@@ -94,7 +94,7 @@ export default function SandboxPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div>
+              <div role="alert">
                 <p className="text-sm font-semibold text-white">Sandbox entry failed</p>
                 <p className="mt-1 text-sm leading-5 text-slate-400">{error}</p>
               </div>
@@ -123,11 +123,11 @@ export default function SandboxPage() {
             {steps.map((step, i) => (
               <div key={step} className="flex items-center gap-3">
                 {i === 0 ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-sky-400" />
+                  <Loader2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin text-sky-400" />
                 ) : (
-                  <Circle className="h-3.5 w-3.5 shrink-0 text-slate-700" />
+                  <Circle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-500" />
                 )}
-                <span className={`text-sm ${i === 0 ? "text-slate-200" : "text-slate-600"}`}>
+                <span className={`text-sm ${i === 0 ? "text-slate-200" : "text-slate-400"}`}>
                   {step}
                 </span>
               </div>
@@ -136,7 +136,7 @@ export default function SandboxPage() {
         )}
 
         {/* Footer links */}
-        <p className="mt-10 text-center text-xs text-slate-600">
+        <p className="mt-10 text-center text-xs text-slate-400">
           Prefer a manual login?{" "}
           <Link
             href="/login"

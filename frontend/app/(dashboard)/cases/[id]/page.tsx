@@ -481,7 +481,7 @@ export default function CaseDetailPage() {
       </div>
 
       {loading ? <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading case...</p> : null}
-      {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">Error: {error}</p> : null}
 
       {caseDetail ? (
         <>
@@ -746,7 +746,7 @@ export default function CaseDetailPage() {
                   />
                 </div>
                 <div className="mt-4 grid gap-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</label>
+                  <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
                   <datalist id="case-assignees">
                     {ASSIGNEE_SUGGESTIONS.map((a) => (
                       <option key={a} value={a} />
@@ -923,7 +923,7 @@ export default function CaseDetailPage() {
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
                 ) : (
-                  <p className="mt-3 text-xs text-amber-800">Preview the outreach message before sending.</p>
+                  <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
                 )}
                 {canManage && (
                 <div className="mt-3 flex flex-wrap gap-2">

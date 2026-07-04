@@ -93,6 +93,7 @@ export function SqlPreviewPanel({ measure }: Props) {
         onClick={() => setOpen((prev) => !prev)}
         className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
         aria-expanded={open}
+        aria-controls="sql-preview-region"
       >
         <span className="select-none text-[10px]">{open ? "▼" : "▶"}</span>
         SQL Analogy
@@ -100,7 +101,7 @@ export function SqlPreviewPanel({ measure }: Props) {
       </button>
 
       {open && (
-        <div className="border-t border-neutral-200 dark:border-neutral-800">
+        <div id="sql-preview-region" className="border-t border-neutral-200 dark:border-neutral-800">
           <div className="flex items-start gap-2 rounded-none border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
             <span className="mt-0.5 shrink-0 font-semibold uppercase tracking-wider text-amber-700">Illustrative only</span>
             <span>Not executed. CQL is the compliance source of truth. Column names and table structure are analogical.</span>

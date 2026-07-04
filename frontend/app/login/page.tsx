@@ -99,9 +99,9 @@ export default function LoginPage() {
 
         {/* Headline */}
         <div className="max-w-md space-y-5">
-          <h1 className={`${fraunces.className} text-5xl leading-[0.95] tracking-tight text-white xl:text-6xl`}>
+          <p className={`${fraunces.className} text-5xl leading-[0.95] tracking-tight text-white xl:text-6xl`}>
             Compliance ops, fully in view.
-          </h1>
+          </p>
           <p className="text-base leading-7 text-slate-400">
             OSHA safety and clinical wellness measures, deterministic CQL evaluation, and a complete audit trail — one reviewable workspace.
           </p>
@@ -158,9 +158,9 @@ export default function LoginPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500 lg:text-slate-500">
               Secure sign in
             </p>
-            <h2 className={`${fraunces.className} mt-2 text-3xl text-slate-950 lg:text-slate-950`}>
+            <h1 className={`${fraunces.className} mt-2 text-3xl text-slate-950 lg:text-slate-950`}>
               Access the dashboard
-            </h2>
+            </h1>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4">
@@ -170,7 +170,7 @@ export default function LoginPage() {
                 Email
               </label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Mail aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   id="email"
                   type="email"
@@ -189,7 +189,7 @@ export default function LoginPage() {
                 Password
               </label>
               <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Lock aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
@@ -205,7 +205,7 @@ export default function LoginPage() {
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-slate-400 transition hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -231,7 +231,7 @@ export default function LoginPage() {
               ) : (
                 <>
                   Sign in
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </>
               )}
             </button>
@@ -242,13 +242,13 @@ export default function LoginPage() {
               onClick={fillDemoCredentials}
               className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
             >
-              <Zap className="h-3.5 w-3.5 text-amber-500" />
+              <Zap aria-hidden="true" className="h-3.5 w-3.5 text-amber-500" />
               Fill demo credentials
             </button>
           </form>
 
           {/* Divider + sandbox link */}
-          <div className="mt-6 flex items-center gap-3 text-xs text-slate-400">
+          <div className="mt-6 flex items-center gap-3 text-xs text-slate-600">
             <div className="h-px flex-1 bg-slate-200" />
             or
             <div className="h-px flex-1 bg-slate-200" />
@@ -258,13 +258,13 @@ export default function LoginPage() {
             href="/sandbox"
             className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-300"
           >
-            <BadgeCheck className="h-4 w-4 text-emerald-600" />
+            <BadgeCheck aria-hidden="true" className="h-4 w-4 text-emerald-600" />
             Skip login — open public sandbox
           </Link>
 
-          <div className="mt-6 flex items-center justify-between gap-2 text-xs text-slate-400">
+          <div className="mt-6 flex items-center justify-between gap-2 text-xs text-slate-600">
             <span className="flex items-center gap-1.5">
-              <KeyRound className="h-3.5 w-3.5" />
+              <KeyRound aria-hidden="true" className="h-3.5 w-3.5" />
               Demo: <span className="text-slate-600">{DEMO_EMAIL}</span>
             </span>
             <Link href="/" className="text-slate-500 transition hover:text-slate-950">

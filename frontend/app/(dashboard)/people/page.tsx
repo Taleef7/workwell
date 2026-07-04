@@ -125,7 +125,7 @@ export default function PeoplePage() {
         className="w-full max-w-md rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
       />
 
-      {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
 
       {!loaded ? (
         <div className="grid gap-3 md:grid-cols-2">{[0, 1].map((i) => <SkeletonCard key={i} />)}</div>

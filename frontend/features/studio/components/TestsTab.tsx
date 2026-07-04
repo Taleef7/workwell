@@ -149,7 +149,7 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError, ca
       </div>
 
       {generatedFixtures.length > 0 ? (
-        <div className="rounded border border-amber-300 bg-amber-50 p-3">
+        <div role="status" aria-live="polite" className="rounded border border-amber-300 bg-amber-50 p-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">AI-generated fixtures</p>
             <Button type="button" variant="outline" size="sm" onClick={addAllGeneratedFixtures}>
@@ -206,7 +206,7 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError, ca
         </div>
       ))}
       {testFailures.length > 0 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm text-red-700">
+        <ul role="alert" className="list-disc space-y-1 pl-5 text-sm text-red-700">
           {testFailures.map((entry) => <li key={entry}>{entry}</li>)}
         </ul>
       ) : null}

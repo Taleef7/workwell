@@ -261,17 +261,17 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError, canA
                     {alts.length > 1 ? (
                       <button type="button" aria-label={`Remove alternative ${i + 1}`}
                         onClick={() => setAlts((prev) => prev.filter((_, j) => j !== i))}
-                        className="justify-self-start rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
+                        className="justify-self-start rounded border border-neutral-300 px-2 py-1.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
                         Remove
                       </button>
                     ) : null}
                   </div>
                 ))}
                 <button type="button" onClick={() => setAlts((prev) => [...prev, emptyAlt()])}
-                  className="justify-self-start rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
+                  className="justify-self-start rounded border border-neutral-300 px-2 py-1.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800">
                   Add alternative
                 </button>
-                <p className="text-[11px] text-neutral-400">Each alternative&apos;s codes inherit the vaccine value set below.</p>
+                <p className="text-[11px] text-neutral-600 dark:text-neutral-400">Each alternative&apos;s codes inherit the vaccine value set below.</p>
               </div>
             ) : null}
             <label className="flex items-center gap-2 text-xs">
@@ -344,7 +344,7 @@ export function RuleBuilderTab({ measure, measureId, api, onSaved, onError, canA
           <p role="alert" className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">{previewError}</p>
         ) : null}
         <pre className="max-h-[28rem] overflow-auto rounded border border-neutral-200 bg-neutral-50 p-3 text-[11px] leading-snug dark:border-neutral-800 dark:bg-neutral-950">{cql || "…"}</pre>
-        <p className="text-[11px] text-neutral-400">CQL stays canonical (ADR-015) — this generated CQL is saved to the version and compiled on save.</p>
+        <p className="text-[11px] text-neutral-600 dark:text-neutral-400">CQL stays canonical (ADR-015) — this generated CQL is saved to the version and compiled on save.</p>
       </div>
     </div>
   );
