@@ -16,7 +16,7 @@ export function SlaChip({ slaRemainingDays, slaBreached }: Props) {
     : slaRemainingDays <= 2
       ? "font-medium text-red-600 dark:text-red-400"
       : slaRemainingDays <= 7
-        ? "text-yellow-600 dark:text-yellow-400"
+        ? "text-yellow-700 dark:text-yellow-400"
         : "text-neutral-500 dark:text-neutral-400";
 
   return (

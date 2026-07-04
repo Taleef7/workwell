@@ -56,7 +56,7 @@ export default function EmployeeProfilePage() {
             {profile.site ? ` · ${profile.site}` : ''}
             {profile.supervisorName ? ` · Supervisor: ${profile.supervisorName}` : ''}
           </p>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
             ID: {profile.externalId}
             {profile.fhirPatientId ? ` · FHIR: ${profile.fhirPatientId}` : ''}
             {startDate ? ` · Started: ${startDate}` : ''}
@@ -131,7 +131,7 @@ export default function EmployeeProfilePage() {
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Measure Details</h2>
         {profile.measureOutcomes.length === 0 && (
-          <p className="text-sm text-neutral-400">No evaluation data yet.</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No evaluation data yet.</p>
         )}
         <div className="space-y-3">
           {profile.measureOutcomes.map((o) => (
@@ -143,7 +143,7 @@ export default function EmployeeProfilePage() {
               <div className="flex items-center justify-between">
                 <span className="font-medium text-neutral-900 dark:text-neutral-100">
                   {o.measureName}{' '}
-                  <span className="text-xs font-normal text-neutral-400">{o.measureVersion}</span>
+                  <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
                 </span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(o.outcomeStatus)}`}>
                   {labelFor(OUTCOME_LABELS, o.outcomeStatus)}
@@ -184,12 +184,12 @@ export default function EmployeeProfilePage() {
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Recent Activity</h2>
         {profile.recentAuditEvents.length === 0 && (
-          <p className="text-sm text-neutral-400">No activity yet.</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No activity yet.</p>
         )}
         <div className="space-y-3">
           {profile.recentAuditEvents.map((ev, i) => (
             <div key={`${ev.occurredAt}-${ev.eventType}-${ev.actor}-${i}`} className="flex gap-3 text-sm">
-              <span className="w-36 shrink-0 text-xs text-neutral-400">
+              <span className="w-36 shrink-0 text-xs text-neutral-600 dark:text-neutral-400">
                 {new Date(ev.occurredAt).toLocaleString()}
               </span>
               <span className="text-neutral-600 dark:text-neutral-400">{ev.summary}</span>

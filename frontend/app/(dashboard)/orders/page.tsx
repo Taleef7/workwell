@@ -243,13 +243,21 @@ export default function OrdersPage() {
               </p>
               <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
                 <table className="min-w-full text-sm">
+                  <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+                    <tr>
+                      <th scope="col" className="px-3 py-2">Subject</th>
+                      <th scope="col" className="px-3 py-2">Measure</th>
+                      <th scope="col" className="px-3 py-2">Order</th>
+                      <th scope="col" className="px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {suppressed.map((o) => (
                       <tr key={o.dedupeKey} className="border-b border-neutral-100 last:border-0 dark:border-neutral-800/60">
                         <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{o.subjectId}</td>
                         <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabel(o.measureId)}</td>
                         <td className="px-3 py-2 text-neutral-500 dark:text-neutral-400">{o.order.display}</td>
-                        <td className="px-3 py-2 text-xs text-neutral-400">standing order on file</td>
+                        <td className="px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">standing order on file</td>
                       </tr>
                     ))}
                   </tbody>

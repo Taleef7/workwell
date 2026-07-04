@@ -171,13 +171,13 @@ export function StandardsTab({ measureId, api }: Props) {
                   <td className="px-3 py-2 text-neutral-500 dark:text-neutral-400">{c.note}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {impact == null ? (
-                      <span className="text-neutral-400">—</span>
+                      <span className="text-neutral-600 dark:text-neutral-400">—</span>
                     ) : impact.verifiable ? (
                       <span className={impact.subjectsAffected > 0 ? "font-semibold text-red-700 dark:text-red-400" : "text-neutral-500 dark:text-neutral-400"}>
                         {impact.subjectsAffected}
                       </span>
                     ) : (
-                      <span className="text-[10px] text-neutral-400" title={impact.reason ?? "Not verifiable against synthetic data"}>not verifiable</span>
+                      <span className="text-[10px] text-neutral-600 dark:text-neutral-400" title={impact.reason ?? "Not verifiable against synthetic data"}>not verifiable</span>
                     )}
                   </td>
                 </tr>
@@ -215,15 +215,15 @@ export function StandardsTab({ measureId, api }: Props) {
                 {vs.workwellRepresented ? "represented" : "missing"}
               </span>
               <span className="text-neutral-700 dark:text-neutral-300">
-                {vs.name} <code className="text-[10px] text-neutral-400">{vs.oid}</code>
-                {vs.note ? <span className="ml-1 text-neutral-400">— {vs.note}</span> : null}
+                {vs.name} <code className="text-[10px] text-neutral-600 dark:text-neutral-400">{vs.oid}</code>
+                {vs.note ? <span className="ml-1 text-neutral-600 dark:text-neutral-400">— {vs.note}</span> : null}
               </span>
             </li>
           ))}
         </ul>
       </details>
 
-      <p className="text-[11px] leading-5 text-neutral-400 dark:text-neutral-500">{f.disclaimer}</p>
+      <p className="text-[11px] leading-5 text-neutral-600 dark:text-neutral-500">{f.disclaimer}</p>
     </div>
   );
 }

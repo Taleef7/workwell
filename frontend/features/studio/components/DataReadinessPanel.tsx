@@ -129,7 +129,7 @@ export function DataReadinessPanel({ measureId, api }: Props) {
                     <tr key={i} className="border-t border-neutral-100 dark:border-neutral-800 align-top">
                       <td className="px-3 py-2">
                         <p className="font-medium text-neutral-800 dark:text-neutral-200">{el.label}</p>
-                        <p className="text-[10px] text-neutral-400">{el.canonicalElement}</p>
+                        <p className="text-[10px] text-neutral-600 dark:text-neutral-400">{el.canonicalElement}</p>
                       </td>
                       <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{el.sourceId ?? "—"}</td>
                       <td className="px-3 py-2">
@@ -147,7 +147,7 @@ export function DataReadinessPanel({ measureId, api }: Props) {
                           <span className="text-neutral-400">0%</span>
                         )}
                         {el.sampleMissingEmployees.length > 0 ? (
-                          <p className="mt-0.5 text-[10px] text-neutral-400">
+                          <p className="mt-0.5 text-[10px] text-neutral-600 dark:text-neutral-400">
                             e.g. {el.sampleMissingEmployees.join(", ")}
                           </p>
                         ) : null}

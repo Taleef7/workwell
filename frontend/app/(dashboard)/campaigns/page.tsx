@@ -410,6 +410,7 @@ export default function CampaignsPage() {
         {/* ── Launch result ──────────────────────────────────────── */}
         {result ? (
           <div className="mt-4 space-y-3">
+            <div role="status" aria-live="polite" className="space-y-3">
             {result.dryRun ? (
               <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                 Dry run preview — {result.total} recipient{result.total === 1 ? "" : "s"} ({result.channel}). No messages
@@ -442,6 +443,7 @@ export default function CampaignsPage() {
                 </span>
               </div>
             )}
+            </div>
 
             {result.recipients.length > 0 ? (
               <RecipientTable recipients={result.recipients} />
@@ -488,20 +490,20 @@ export default function CampaignsPage() {
                 {history.map((c) => (
                   <tr
                     key={c.id}
-                    tabIndex={0}
-                    role="button"
-                    onClick={() => void loadDetail(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        void loadDetail(c.id);
-                      }
-                    }}
-                    className={`cursor-pointer border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50 ${
+                    className={`border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50 ${
                       selectedId === c.id ? "bg-neutral-50 dark:bg-neutral-800/50" : ""
                     }`}
                   >
-                    <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{formatDateTime(c.createdAt)}</td>
+                    <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">
+                      <button
+                        type="button"
+                        onClick={() => void loadDetail(c.id)}
+                        className="cursor-pointer text-left hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                      >
+                        <span className="sr-only">View campaign from </span>
+                        {formatDateTime(c.createdAt)}
+                      </button>
+                    </td>
                     <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{c.channel}</td>
                     <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">{measureLabel(c.measureId)}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">{c.total}</td>

@@ -83,6 +83,7 @@ export function GlobalSearch() {
     <div ref={containerRef} className="relative hidden sm:block">
       <div className="relative">
         <svg
+          aria-hidden="true"
           className="absolute left-2.5 top-2 h-3.5 w-3.5 text-neutral-400"
           fill="none"
           viewBox="0 0 24 24"
@@ -101,9 +102,19 @@ export function GlobalSearch() {
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder="Search employees…"
-          className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+          className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         />
       </div>
+
+      <span role="status" aria-live="polite" className="sr-only">
+        {open
+          ? results.length > 0
+            ? `${results.length} employee${results.length === 1 ? "" : "s"} found`
+            : query.length >= 2 && !loading
+              ? "No employees found"
+              : ""
+          : ""}
+      </span>
 
       {open && (results.length > 0 || (query.length >= 2 && !loading)) && (
         <div className="absolute top-full mt-1 w-72 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
@@ -118,7 +129,7 @@ export function GlobalSearch() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{r.name}</p>
-                      <p className="text-xs text-neutral-400 truncate">
+                      <p className="text-xs text-neutral-600 dark:text-neutral-400 truncate">
                         {r.role} · {r.site}
                       </p>
                     </div>
@@ -134,7 +145,7 @@ export function GlobalSearch() {
               ))}
             </ul>
           ) : (
-            <div className="px-3 py-4 text-center text-xs text-neutral-400">No employees found</div>
+            <div className="px-3 py-4 text-center text-xs text-neutral-600 dark:text-neutral-400">No employees found</div>
           )}
         </div>
       )}
