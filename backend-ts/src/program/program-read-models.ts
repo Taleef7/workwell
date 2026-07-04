@@ -326,11 +326,14 @@ export async function programTrend(
   deps: ProgramDeps,
   measureId: string,
   filters: ProgramFilters,
+  opts?: { monthly?: boolean },
 ): Promise<ProgramTrendPoint[]> {
-  // UX-8: prefer the monthly quality_snapshots series (the E16 source of truth) when the scope
-  // resolves and has ≥2 months; otherwise fall back to the per-run trend below (unchanged).
-  const scope = deps.qualitySnapshots ? snapshotScopeFor(filters) : null;
-  if (deps.qualitySnapshots && scope) {
+  // UX-8: the monthly quality_snapshots series is OPT-IN (only the /programs card requests it via
+  // ?granularity=month). Other consumers (the measure page, which has its own E16 "Quality over
+  // time" card) keep the per-run trend unchanged. When opted in and the scope resolves with ≥2
+  // months, return the monthly series; otherwise fall back to the per-run trend below.
+  const scope = opts?.monthly && deps.qualitySnapshots ? snapshotScopeFor(filters) : null;
+  if (opts?.monthly && deps.qualitySnapshots && scope) {
     const monthFrom = filters.from?.trim() ? filters.from.trim().slice(0, 7) : undefined;
     const monthTo = filters.to?.trim() ? filters.to.trim().slice(0, 7) : undefined;
     const snaps = await deps.qualitySnapshots.querySnapshots({

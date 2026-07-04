@@ -110,10 +110,21 @@ const perRunRow = (runId: string, startedAt: string, status: string): OutcomeWit
 
 test("programTrend — ≥2 monthly snapshots → monthly points (period stamped)", async () => {
   const deps = fakeDeps({ snaps: [snap("2026-05", 9, 10), snap("2026-06", 8, 10)] });
-  const pts = await programTrend(deps, "audiogram", {});
+  const pts = await programTrend(deps, "audiogram", {}, { monthly: true });
   assert.equal(pts.length, 2);
   assert.equal(pts[0]!.period, "2026-06"); // newest-first
   assert.equal(pts[0]!.complianceRate, 80); // 8/10 (2026-06)
+});
+
+test("programTrend — monthly opt-out (default) → per-run even with snapshots present", async () => {
+  // ≥2 snapshots available, but no { monthly: true } → the measure-page consumer stays per-run.
+  const deps = fakeDeps({
+    snaps: [snap("2026-05", 9, 10), snap("2026-06", 8, 10)],
+    perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT")],
+  });
+  const pts = await programTrend(deps, "audiogram", {}); // opt-in not requested
+  assert.ok(pts.every((p) => p.period === undefined), "opt-out points carry no period");
+  assert.deepEqual(new Set(pts.map((p) => p.runId)), new Set(["run-a"]));
 });
 
 test("programTrend — <2 monthly snapshots → per-run fallback (no period)", async () => {
@@ -121,13 +132,13 @@ test("programTrend — <2 monthly snapshots → per-run fallback (no period)", a
     snaps: [snap("2026-06", 8, 10)], // only 1 month
     perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT"), perRunRow("run-b", "2026-06-02T00:00:00Z", "OVERDUE")],
   });
-  const pts = await programTrend(deps, "audiogram", {});
+  const pts = await programTrend(deps, "audiogram", {}, { monthly: true });
   assert.ok(pts.every((p) => p.period === undefined), "fallback points carry no period");
   assert.deepEqual(new Set(pts.map((p) => p.runId)), new Set(["run-a", "run-b"]));
 });
 
 test("programTrend — no qualitySnapshots dep → per-run (back-compat)", async () => {
   const deps = fakeDeps({ withSnapshots: false, perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT")] });
-  const pts = await programTrend(deps, "audiogram", {});
+  const pts = await programTrend(deps, "audiogram", {}, { monthly: true });
   assert.ok(pts.every((p) => p.period === undefined));
 });
