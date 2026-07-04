@@ -14,13 +14,17 @@ fallback) + `monthlyTrendPoints` (pure, exported) in `program-read-models.ts`; `
 "from last month" (UTC-stamped, Fable M18). No schema, no new endpoint, no new deps; descriptive-only
 (ADR-008).
 
-Code review caught two P2s (the `/trend` endpoint is **also** consumed by the measure page's delta
-badge, which reads raw `trend[1]` vs the headline `program.complianceRate`): (1) monthly points must be
-**newest-first** like the per-run branch, else `trend[1]` is the second-oldest month; (2) the monthly
-rate must use `compliant / total-including-excluded` (matching the per-run branch + the `programOverview`
-headline), not the E16 `numerator/denominator` proportion — otherwise the trend never reconciles with the
-card's big % and the delta subtracts two different metrics. Both fixed with regression tests. **Backend
-930 tests (929 pass / 1 pg-skip); frontend tsc + lint + 123 vitest + build green.**
+Code review caught two P2s + a cohesion gap (the `/trend` endpoint is **also** consumed by the measure
+page, which reads raw `trend[1]` for a delta vs the headline `program.complianceRate` AND renders its own
+per-run `ComplianceTrendChart`): (1) monthly points must be **newest-first** like the per-run branch, else
+`trend[1]` is the second-oldest month; (2) the monthly rate must use `compliant / total-including-excluded`
+(matching the per-run branch + the `programOverview` headline), not the E16 `numerator/denominator`
+proportion — otherwise the trend never reconciles with the card's big % and the delta subtracts two
+different metrics; and (3) the monthly series is made **opt-in via `?granularity=month`** — only the
+`/programs` card requests it, so the measure page (no param) keeps its per-run chart unchanged (it already
+has the E16 "Quality over time" card, so a second monthly chart would be redundant). All fixed with
+regression tests. **Backend 931 tests (930 pass / 1 pg-skip); frontend tsc + lint + 123 vitest + build
+green.**
 
 ## 2026-07-04 — perf(#233 follow-up): roster derived-cell cache
 
