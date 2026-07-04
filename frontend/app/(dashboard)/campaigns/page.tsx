@@ -490,14 +490,21 @@ export default function CampaignsPage() {
                 {history.map((c) => (
                   <tr
                     key={c.id}
-                    className={`border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50 ${
+                    // The whole-row onClick is a mouse-only convenience (the row stays a real table
+                    // row for assistive tech); the first cell carries a real <button> so keyboard +
+                    // screen-reader users get the same access. Matches the /runs row pattern.
+                    onClick={() => void loadDetail(c.id)}
+                    className={`cursor-pointer border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50 ${
                       selectedId === c.id ? "bg-neutral-50 dark:bg-neutral-800/50" : ""
                     }`}
                   >
                     <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">
                       <button
                         type="button"
-                        onClick={() => void loadDetail(c.id)}
+                        onClick={(e) => {
+                          e.stopPropagation(); // the row onClick already handles selection
+                          void loadDetail(c.id);
+                        }}
                         className="cursor-pointer text-left hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                       >
                         <span className="sr-only">View campaign from </span>
