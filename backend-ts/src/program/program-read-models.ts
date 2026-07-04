@@ -66,24 +66,33 @@ export function snapshotScopeFor(
   return { scopeLevel: "all", scopeId: "ALL" };
 }
 
-/** Map monthly snapshot rows → chronological trend points (last 12 months), stamped with `period` (UX-8). */
+/**
+ * Map monthly snapshot rows → trend points for the newest 12 months (UX-8). Returned NEWEST-FIRST
+ * to match the per-run branch's contract (the measure page reads `trend[1]` as the previous point).
+ * `complianceRate`/`totalEvaluated` use total-INCLUDING-excluded (the sum of all five buckets) so the
+ * monthly series reconciles with the per-run branch and the `/programs` headline KPI — not the E16
+ * proportion denominator (`total − excluded`).
+ */
 export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoint[] {
   return rows
     .slice()
-    .sort((a, b) => a.period.localeCompare(b.period))
-    .slice(-12)
-    .map((r): ProgramTrendPoint => ({
-      runId: r.sourceRunId ?? r.id,
-      startedAt: r.periodEnd,
-      period: r.period,
-      complianceRate: round1(r.numerator, r.denominator),
-      totalEvaluated: r.denominator,
-      compliant: r.compliant,
-      dueSoon: r.dueSoon,
-      overdue: r.overdue,
-      missingData: r.missingData,
-      excluded: r.excluded,
-    }));
+    .sort((a, b) => b.period.localeCompare(a.period)) // newest-first, matching the per-run path's contract
+    .slice(0, 12)
+    .map((r): ProgramTrendPoint => {
+      const total = r.compliant + r.dueSoon + r.overdue + r.missingData + r.excluded;
+      return {
+        runId: r.sourceRunId ?? r.id,
+        startedAt: r.periodEnd,
+        period: r.period,
+        complianceRate: round1(r.compliant, total),
+        totalEvaluated: total,
+        compliant: r.compliant,
+        dueSoon: r.dueSoon,
+        overdue: r.overdue,
+        missingData: r.missingData,
+        excluded: r.excluded,
+      };
+    });
 }
 
 export interface ProgramDeps {
