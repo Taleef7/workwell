@@ -92,7 +92,7 @@ export default function ProgramsPage() {
     const loadTrends = Promise.all(
       data.map(async (program) => {
         try {
-          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}`);
+          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}${suffix ? "&" : "?"}granularity=month`);
           return [program.measureId, trend] as const;
         } catch {
           return [program.measureId, [] as TrendPoint[]] as const;
