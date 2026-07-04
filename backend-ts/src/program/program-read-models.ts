@@ -66,6 +66,26 @@ export function snapshotScopeFor(
   return { scopeLevel: "all", scopeId: "ALL" };
 }
 
+/** Map monthly snapshot rows → chronological trend points (last 12 months), stamped with `period` (UX-8). */
+export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoint[] {
+  return rows
+    .slice()
+    .sort((a, b) => a.period.localeCompare(b.period))
+    .slice(-12)
+    .map((r): ProgramTrendPoint => ({
+      runId: r.sourceRunId ?? r.id,
+      startedAt: r.periodEnd,
+      period: r.period,
+      complianceRate: round1(r.numerator, r.denominator),
+      totalEvaluated: r.denominator,
+      compliant: r.compliant,
+      dueSoon: r.dueSoon,
+      overdue: r.overdue,
+      missingData: r.missingData,
+      excluded: r.excluded,
+    }));
+}
+
 export interface ProgramDeps {
   runStore: RunStore;
   outcomeStore: OutcomeStore;
@@ -77,6 +97,8 @@ export interface ProgramDeps {
 export interface ProgramTrendPoint {
   runId: string;
   startedAt: string;
+  /** Present only for monthly (quality_snapshots) points — `YYYY-MM` (UX-8). Absent ⇒ per-run point. */
+  period?: string;
   complianceRate: number;
   totalEvaluated: number;
   compliant: number;
