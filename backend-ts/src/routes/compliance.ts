@@ -8,7 +8,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
-import { buildRoster } from "../compliance/roster-read-model.ts";
+import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
 import { isPanelId } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 
@@ -41,7 +41,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   const stores = await getStores(env);
   const segments = await stores.segments.listSegments();
   const roster = await buildRoster(
-    { outcomeStore: stores.outcomes, segments },
+    { outcomeStore: stores.outcomes, segments, cellCache: rosterCellCache },
     {
       panel: q.get("panel"),
       status: q.get("status"),

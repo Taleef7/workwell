@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-07-04 — perf(#233 follow-up): roster derived-cell cache
+
+Post-deploy live re-measure of #238 (PR #238, merged) showed the warm path ~5× better
+(hierarchy 5.0s → ~1.1s; roster 6.4s → ~1.2s) but the **roster still floored at ~1.2s warm** because it
+re-loads the latest ALL_PROGRAMS run's **~1.3MB of `evidence_json`** and re-derives every cell on each
+request (Fix A removed the scan; this was the next layer). Branch `perf/roster-cell-cache`.
+
+**Fix:** the roster's derived cell map for a measure's latest run is immutable (a COMPLETED population
+run's outcomes don't change, and `deriveCell`/`deriveWhyFlagged` are pure over them — recency/overdue
+read the CQL defines baked into evidence at evaluation time, not "today"). So memoize it —
+`rosterCellCache` (`compliance/roster-read-model.ts`), keyed by `measureId`, superseded when a newer run
+appears (a Recalculate mints a new runId), bounded to one entry per measure. The route passes the shared
+instance; tests omit it for per-call isolation. On a warm cache the roster does **zero** `listOutcomes`
+loads — the 1.3MB fetch + derive is skipped entirely.
+
+Same immutable-run pattern as #238's `aggregateScaleRun` memo. **No schema, no new deps, descriptive-only
+(ADR-008).** TDD: a call-counting-store test proves the second same-run build reloads nothing and a newer
+run supersedes → recompute. **Backend typecheck clean, 918 tests (917 pass / 1 pg-skip). Live re-measure
+after deploy is the confirmation step.**
+
 ## 2026-07-04 — perf(#233): roster + hierarchy latency (5–13s → sub-second)
 
 Fixed the one open item from the post-merge live verification: `/api/compliance/roster` and
