@@ -33,6 +33,7 @@ async function deps(env: ProgramsEnv): Promise<ProgramDeps> {
     runStore: s.runs,
     outcomeStore: s.outcomes,
     caseStore: s.cases,
+    qualitySnapshots: s.qualitySnapshots,
   };
 }
 
