@@ -6,6 +6,7 @@ import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
+import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
@@ -271,11 +272,11 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${program.compliant}`} tone="green" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${program.dueSoon}`} tone="amber" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${program.overdue}`} tone="red" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${program.missingData}`} tone="violet" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${program.excluded}`} tone="slate" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${fmtCount(program.compliant)}`} tone="green" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${fmtCount(program.dueSoon)}`} tone="amber" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${fmtCount(program.overdue)}`} tone="red" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${fmtCount(program.missingData)}`} tone="violet" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${fmtCount(program.excluded)}`} tone="slate" />
               </div>
 
               <div className="relative z-10 mt-4">
@@ -332,7 +333,7 @@ export default function ProgramsPage() {
                         }`}>
                           {labelFor(OUTCOME_LABELS, r.reason)}
                         </span>
-                        <span className="text-neutral-500 dark:text-neutral-400">{r.count} cases ({r.pct}%)</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">{fmtCount(r.count)} cases ({r.pct}%)</span>
                       </div>
                     ))}
                   </div>

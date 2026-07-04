@@ -575,6 +575,9 @@ export default function RunsPage() {
     () => [
       { value: "", label: "All Trigger Types" },
       { value: "MANUAL", label: labelFor(TRIGGER_LABELS, "MANUAL") },
+      // Scheduled (E13 PR-3) now dominates the history and carries a "Scheduled" badge — it must be
+      // selectable/excludable (UX-18). Backend matchesRunFilters supports triggerType=SCHEDULED.
+      { value: "SCHEDULED", label: labelFor(TRIGGER_LABELS, "SCHEDULED") },
       { value: "SEED", label: labelFor(TRIGGER_LABELS, "SEED") },
     ],
     [],

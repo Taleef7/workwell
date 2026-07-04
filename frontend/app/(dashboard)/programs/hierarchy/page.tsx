@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
+import { fmtCount } from "@/lib/format";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -261,16 +262,16 @@ export default function HierarchyPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
-                      {node.totals.evaluated}
+                      {fmtCount(node.totals.evaluated)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
-                      {node.totals.compliant}
+                      {fmtCount(node.totals.compliant)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-900 dark:text-neutral-100">
                       {node.totals.complianceRate}%
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
-                      {node.totals.openCases}
+                      {fmtCount(node.totals.openCases)}
                     </td>
                   </tr>
                 );
