@@ -50,6 +50,13 @@ tabs, campaigns row) are behavior-preserving; 3 minor announcement/heading nuanc
 **Verified:** frontend tsc clean, lint clean, **121 vitest pass (+7)**, build green. **36 files, +~280/−140.**
 No schema, no new deps, display-only (ADR-008 untouched — nothing here touches compliance).
 
+**Merged as PR #237** (2026-07-04). One Codex P3 folded in before merge: the campaigns-history row remediation
+had moved click/keyboard handling into the first-cell `<button>` but dropped the row-level `onClick` entirely,
+leaving every cell with hover/selected styling that implied the whole row was clickable when only the Created
+cell was. Restored the `/runs` row convention — a mouse-only whole-row `onClick` (the `<tr>` stays a real table
+row for AT) plus the first-cell `<button>` carrying the keyboard/screen-reader affordance and
+`stopPropagation()`ing so it can't double-fire. tsc/lint/121 vitest green.
+
 **Next (remaining UX debt, tracked):** UX-8 (program-card trends → `quality_snapshots`), UX-5 (already not
 present in code — re-confirm on the live modal), UX-7 (styled evidence dropzone), UX-11 (roster mobile cards),
 UX-3 (progressive-load feedback beyond the `aria-live` announcements added here), plus the filter-architecture /
