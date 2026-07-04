@@ -765,7 +765,7 @@ export default function RunsPage() {
       </div>
       ) : null}
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
         <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, site-scoped, employee-scoped, or case-scoped runs.</p>
       ) : null}
@@ -840,7 +840,7 @@ export default function RunsPage() {
                   <td className="px-3 py-2 align-top">
                     {run.runId === activeRunId ? (
                       <span className="tabular-nums">
-                        {runElapsedSec}s <span className="animate-pulse text-neutral-400">●</span>
+                        {runElapsedSec}s <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                       </span>
                     ) : (
                       formatRunDuration(run.durationMs, run.status)
@@ -880,14 +880,14 @@ export default function RunsPage() {
             <p className="text-xs text-neutral-500 dark:text-neutral-400">AI insight is unavailable for this run.</p>
           ) : null}
           {runInsight && !runInsight.fallback && runInsight.insights.length > 0 && !insightDismissed ? (
-            <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+            <div role="status" aria-live="polite" className="rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">AI-generated operational insight - verify before acting</p>
                 <Button variant="link" size="sm" onClick={() => setInsightDismissed(true)}>
                   Dismiss
                 </Button>
               </div>
-              <ul className="list-disc space-y-1 pl-4 text-xs text-blue-900">
+              <ul className="list-disc space-y-1 pl-4 text-xs text-blue-900 dark:text-blue-100">
                 {runInsight.insights.map((item, idx) => (
                   <li key={`${idx}-${item}`}>{item}</li>
                 ))}
@@ -911,7 +911,7 @@ export default function RunsPage() {
                 Duration:{" "}
                 {selectedRunId === activeRunId ? (
                   <span className="tabular-nums">
-                    {runElapsedSec}s <span className="animate-pulse text-neutral-400">●</span>
+                    {runElapsedSec}s <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                   </span>
                 ) : (
                   formatRunDuration(selectedRun.durationMs, selectedRun.status)

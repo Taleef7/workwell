@@ -242,6 +242,10 @@ export default function CompliancePage() {
         </p>
       ) : null}
 
+      <span className="sr-only" role="status" aria-live="polite">
+        {loading ? "Loading roster…" : `${rows.length} employees loaded`}
+      </span>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
         <table className="min-w-full border-collapse text-sm">
           <thead className="bg-neutral-50 dark:bg-neutral-900/60">

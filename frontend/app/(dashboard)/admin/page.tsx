@@ -165,6 +165,23 @@ export default function AdminPage() {
   const [deliveryLog, setDeliveryLog] = useState<DeliveryLogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<AdminTab>("operations");
   const loadedTabs = useRef(new Set<AdminTab>());
+  const adminTablistRef = useRef<HTMLDivElement>(null);
+
+  // Roving-tabindex arrow-key navigation across the admin tab strip (WCAG ARIA tabs pattern).
+  // Automatic activation: arrow/Home/End move both selection and focus (the panels hold no at-risk
+  // authoring drafts, unlike Studio's manual-activation tabs).
+  function onAdminTabKeyDown(e: React.KeyboardEvent, index: number) {
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % ADMIN_TABS.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + ADMIN_TABS.length) % ADMIN_TABS.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = ADMIN_TABS.length - 1;
+    else return;
+    e.preventDefault();
+    const nextId = ADMIN_TABS[next].id;
+    setActiveTab(nextId);
+    adminTablistRef.current?.querySelector<HTMLButtonElement>(`#admin-tab-${nextId}`)?.focus();
+  }
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDisableSchedulerConfirm, setShowDisableSchedulerConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -681,15 +698,19 @@ export default function AdminPage() {
         </p>
       </div>
 
-      {error ? <p className="text-sm text-red-700">Error: {error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">Error: {error}</p> : null}
 
-      <div className="flex gap-1 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Admin sections">
-        {ADMIN_TABS.map((t) => (
+      <div ref={adminTablistRef} className="flex gap-1 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Admin sections">
+        {ADMIN_TABS.map((t, i) => (
           <button
             key={t.id}
             type="button"
             role="tab"
+            id={`admin-tab-${t.id}`}
             aria-selected={activeTab === t.id}
+            aria-controls={`admin-tabpanel-${t.id}`}
+            tabIndex={activeTab === t.id ? 0 : -1}
+            onKeyDown={(e) => onAdminTabKeyDown(e, i)}
             onClick={() => setActiveTab(t.id)}
             className={`shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === t.id
@@ -703,6 +724,7 @@ export default function AdminPage() {
       </div>
 
       {activeTab === "operations" && (
+      <div role="tabpanel" id="admin-tabpanel-operations" aria-labelledby="admin-tab-operations" tabIndex={0}>
       <div className="grid gap-6 xl:grid-cols-2">
         <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">scheduler</p>
@@ -799,9 +821,11 @@ export default function AdminPage() {
           </div>
         </article>
       </div>
+      </div>
       )}
 
-      {activeTab === "governance" && (<>
+      {activeTab === "governance" && (
+      <div role="tabpanel" id="admin-tabpanel-governance" aria-labelledby="admin-tab-governance" tabIndex={0} className="space-y-6">
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -925,12 +949,12 @@ export default function AdminPage() {
                 onChange={(e) => setMappingForm((prev) => ({ ...prev, standardSystem: e.target.value }))}
                 placeholder="e.g. http://www.ama-assn.org/go/cpt"
               />
-              <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Status
+              <div className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                <span>Status</span>
                 <div className="mt-1 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-600 dark:text-neutral-400">
                   PROPOSED — new mappings always start as PROPOSED and require review before promotion
                 </div>
-              </label>
+              </div>
               <Input
                 label="Confidence (0.0 – 1.0)"
                 type="number"
@@ -994,9 +1018,11 @@ export default function AdminPage() {
           </div>
         )}
       </article>
-      </>)}
+      </div>
+      )}
 
-      {activeTab === "outreach" && (<>
+      {activeTab === "outreach" && (
+      <div role="tabpanel" id="admin-tabpanel-outreach" aria-labelledby="admin-tab-outreach" tabIndex={0} className="space-y-6">
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -1278,11 +1304,17 @@ export default function AdminPage() {
           </div>
         )}
       </article>
-      </>)}
+      </div>
+      )}
 
-      {activeTab === "groups" && <SegmentsAdmin />}
+      {activeTab === "groups" && (
+      <div role="tabpanel" id="admin-tabpanel-groups" aria-labelledby="admin-tab-groups" tabIndex={0}>
+        <SegmentsAdmin />
+      </div>
+      )}
 
-      {activeTab === "audit" && (<>
+      {activeTab === "audit" && (
+      <div role="tabpanel" id="admin-tabpanel-audit" aria-labelledby="admin-tab-audit" tabIndex={0} className="space-y-6">
       {demoResetVisible ? (
       <article className="rounded-3xl border border-red-200 bg-white dark:bg-neutral-900 p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
@@ -1400,7 +1432,8 @@ export default function AdminPage() {
           ))}
         </div>
       </article>
-      </>)}
+      </div>
+      )}
     </section>
   );
 }

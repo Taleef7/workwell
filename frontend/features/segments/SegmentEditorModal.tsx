@@ -379,7 +379,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
           </div>
 
           {/* Live preview */}
-          <div className="grid gap-1 rounded border border-neutral-200 bg-neutral-50 p-3 text-xs dark:border-neutral-800 dark:bg-neutral-950">
+          <div role="status" aria-live="polite" className="grid gap-1 rounded border border-neutral-200 bg-neutral-50 p-3 text-xs dark:border-neutral-800 dark:bg-neutral-950">
             {preview ? (
               <>
                 <p className="font-medium">{preview.count} employees match</p>

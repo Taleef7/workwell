@@ -100,7 +100,7 @@ export function SpecTab({ measure, measureId, api, oshaReferences, onSaved, onEr
   return (
     <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       {aiDraftBanner ? (
-        <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">{aiDraftBanner}</p>
+        <p role="status" aria-live="polite" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">{aiDraftBanner}</p>
       ) : null}
       <Textarea
         label="Policy text for AI draft"

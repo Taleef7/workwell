@@ -577,7 +577,7 @@ export default function CasesPage() {
           </table>
         </div>
       ) : null}
-      {error ? <p className="text-sm text-red-700 dark:text-red-400">Error: {error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">Error: {error}</p> : null}
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">

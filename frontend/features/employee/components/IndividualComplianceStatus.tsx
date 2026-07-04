@@ -181,6 +181,8 @@ export function IndividualComplianceStatus({
                       <button
                         type="button"
                         aria-label={`Info: ${row.name}`}
+                        aria-expanded={isOpen}
+                        aria-controls={`compliance-detail-${row.measureId}`}
                         onClick={() => void toggle(row.measureId, row.cell)}
                         className="rounded border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700"
                       >
@@ -189,7 +191,7 @@ export function IndividualComplianceStatus({
                     </td>
                   </tr>
                   {isOpen ? (
-                    <tr className="bg-neutral-50 dark:bg-neutral-900/40">
+                    <tr id={`compliance-detail-${row.measureId}`} className="bg-neutral-50 dark:bg-neutral-900/40">
                       <td colSpan={3} className="px-3 py-2 text-xs text-neutral-600 dark:text-neutral-300">
                         <div>Method: {row.cell.method}</div>
                         <div>Compliance class: {row.complianceClass}</div>

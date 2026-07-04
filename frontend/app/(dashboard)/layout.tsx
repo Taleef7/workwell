@@ -235,10 +235,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={logout}
-                  className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                  className="rounded-lg p-1.5 text-neutral-500 transition hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
                   aria-label="Log out"
                 >
-                  <LogOut className="h-3.5 w-3.5" />
+                  <LogOut aria-hidden="true" className="h-3.5 w-3.5" />
                 </button>
               </div>
             </SidebarFooter>

@@ -202,8 +202,8 @@ export default function ProgramsPage() {
           </Link>
           {mayRun ? (
             runActive ? (
-              <span className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+              <span role="status" className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
                 Run in progress…
               </span>
             ) : (
@@ -240,7 +240,8 @@ export default function ProgramsPage() {
         </p>
       ) : null}
       {loading ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2" role="status" aria-live="polite">
+          <span className="sr-only">Loading programs…</span>
           {Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : null}
@@ -338,7 +339,7 @@ export default function ProgramsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-neutral-400">No non-compliance reasons for the latest run.</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">No non-compliance reasons for the latest run.</p>
                 )}
               </div>
 
@@ -406,7 +407,7 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
   if (sorted.length < 2) {
     return (
       <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50">
-        <span className="text-xs text-neutral-400">Not enough run history for trend</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">Not enough run history for trend</span>
       </div>
     );
   }

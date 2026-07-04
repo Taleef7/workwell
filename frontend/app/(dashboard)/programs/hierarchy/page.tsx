@@ -190,6 +190,10 @@ export default function HierarchyPage() {
         </p>
       ) : null}
 
+      <span className="sr-only" role="status" aria-live="polite">
+        {loading ? "Loading compliance hierarchy…" : root ? "Compliance hierarchy loaded" : ""}
+      </span>
+
       {loading ? (
         <div className="overflow-hidden rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
           <table className="min-w-full text-sm">
@@ -239,12 +243,12 @@ export default function HierarchyPage() {
                             onClick={() => toggle(key)}
                             aria-expanded={isOpen}
                             aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
-                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
                           >
                             {isOpen ? "▾" : "▸"}
                           </button>
                         ) : (
-                          <span className="inline-block h-5 w-5 shrink-0" aria-hidden="true" />
+                          <span className="inline-block h-6 w-6 shrink-0" aria-hidden="true" />
                         )}
                         {node.level === "patient" ? (
                           <Link
