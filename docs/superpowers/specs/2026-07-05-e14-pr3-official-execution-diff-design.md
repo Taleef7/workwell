@@ -78,14 +78,23 @@ resolver** — **not** a live VSAC `$expand` at read time. Rationale: (a) closes
 (the imported rows are exactly what the diff consumes), (b) offline/robust — no per-request network
 dependency or VSAC-uptime coupling on a read path, (c) still exercises the real imported expansions.
 
-Implementation note for the plan: confirm `StoreValueSetResolver.expand(ref)` matches a **bare-OID**
-value-set reference (`'2.16.840…'`) to the imported row's `oid` column. If it currently matches only on
-`canonical_url`/`name`, add OID matching (read-path only, no schema).
+Confirmed during design: `StoreValueSetResolver.expand(ref)` already matches a **bare-OID** reference
+(`'2.16.840…'`) to the imported row's `oid` column (`v.oid === valueSetUrl || v.canonicalUrl === valueSetUrl`),
+so **no resolver change is needed** — the official CQL's `valueset "Diabetes": '2.16.840…'` resolves directly
+from the imported row. Because the resolver is store-backed, the diff needs **no VSAC API key at runtime** —
+only the imported `value_sets` rows (`source='VSAC'`). The key was only ever needed by the one-time
+`pnpm resolve-valuesets` import.
 
-### 3.3 Synthetic enrichment — `engine/synthetic/fhir-bundle-builder.ts` (cms122 cohort only)
+### 3.3 Synthetic enrichment — a diff-harness-local transform (cms122 cohort only)
 
-Additively enrich the cms122 subjects' synthetic bundles with **real VSAC-member codes sampled from the
-imported expansions** so the official gates fire and a deterministic set of subjects diverges:
+Enrichment is a **standards-module-local transform** applied to an already-built synthetic bundle inside
+the diff harness — **not** a change to the shared `engine/synthetic/fhir-bundle-builder.ts`. This keeps
+enrichment entirely out of the live run path: live cms122 runs keep evaluating the un-enriched bundle, so
+WorkWell's authored outcomes are structurally untouched (the ADR-008 guarantee holds by construction, not
+only by test). The harness builds the normal bundle via `buildSyntheticBundle`, then applies
+`enrichForOfficialCms122(bundle, employee, expansions)` which additively adds **real VSAC-member codes
+sampled from the imported expansions** so the official gates fire and a deterministic set of subjects
+diverges:
 
 - **Encounter** resources coded from the qualifying-visit expansions (most subjects get one; a
   deterministic few get none → age/visit divergence).
@@ -131,10 +140,11 @@ Bounded, read-path compute: only the diabetes cohort, only on the Standards tab 
 
 - **ADR-008** — enrichment cannot change WorkWell outcomes (golden guard); the diff writes nothing
   (no runs/outcomes/cases/audit rows from the diff itself; reads only).
-- **Inert-unless-configured (ADR-023)** — real execution runs only when VSAC is available: the key is
-  set **and** the imported OID value sets are present in the store. When unavailable (local dev / CI with
-  no key, or an unseeded store), the harness **degrades to the PR-2 criteria-impact estimate** — that code
-  path is preserved, not deleted. The demo stack now has the key + imported rows, so it runs the real diff.
+- **Degrade signal = imported rows present** (not the key). Because resolution is store-backed, the diff
+  needs **no VSAC key at runtime** — real execution runs when the official OID value sets resolve non-empty
+  from the store (probe a representative OID, e.g. Diabetes). When absent (local dev / CI with no
+  `resolve-valuesets` import), the harness **degrades to the PR-2 criteria-impact estimate** — that code
+  path is preserved, not deleted. Prod Neon already has the 21 imported OIDs, so it runs the real diff.
 - **No schema change, no new dependency.** All read-time; VSAC value sets already imported; enrichment is
   synthetic app data; committed ELM is a build artifact.
 
@@ -159,23 +169,34 @@ Bounded, read-path compute: only the diabetes cohort, only on the Standards tab 
 
 ## 7. File-level change map
 
-- `measures/cms122_official.cql` (new) + `measures/cms122_official.yaml` (binding, if the loader needs it)
-  + committed ELM under `src/engine/cql/elm/` (via `pnpm compile-measures`).
-- `src/engine/cql/*` — store-backed OID resolution for the diff (a resolver/env helper reusing the
-  composite/store resolvers; confirm bare-OID store matching).
-- `src/engine/synthetic/fhir-bundle-builder.ts` — additive cms122 enrichment.
-- `src/standards/outcome-diff.ts` (+ `.test.ts`) — real-execution path + degrade fallback + memoization.
-- `src/routes/measures.ts` — richer `/fidelity/diff` response (additive).
+- `measures/cms122_official.cql` (new) — auto-compiled by `pnpm compile-measures` into
+  `src/engine/cql/elm/DiabetesHbA1cPoorControlOfficialCQL-1.0.0.elm.json` + auto-added to the generated
+  `elm/index.ts` (no hand edit; the compiler throws on error-severity, guaranteeing a clean compile).
+- `src/engine/cql/cql-execution-engine.ts` — add a backward-compatible `metaOverride?: MeasureMeta` to
+  `evaluate()` so the official measure evaluates with an inline meta **without** being added to the
+  `MEASURES` registry (which is iterated by seed:scale, quality backfill, segment/order tests — must not
+  be polluted). No change to `StoreValueSetResolver` (bare-OID match already works).
+- `src/standards/cms122-official.ts` (new) — the official measure's inline `MeasureMeta` (value-set OID
+  list + `DiabetesHbA1cPoorControlOfficialCQL-1.0.0` library) + `enrichForOfficialCms122(...)` transform.
+- `src/standards/execution-diff.ts` (new, + `.test.ts`) — the real-execution harness (build → enrich →
+  evaluate both fresh → diff), memoized per run-id; the route falls back to `outcome-diff.ts`'s PR-2
+  estimate when the store lacks the imported OIDs.
+- `src/routes/measures.ts` — richer `/fidelity/diff` response: execution diff when imported rows present,
+  else the existing PR-2 estimate (additive shape).
 - `frontend/…/Standards` tab — render per-subject execution divergence.
 - Docs: `MEASURES.md` (subset transcription note), `ARCHITECTURE.md` (standards module), `DATA_MODEL.md`
   (no schema — note the read-time diff), `DECISIONS.md` (ADR entry if non-obvious), `JOURNAL.md`.
 
 ## 8. Staging (task order for the plan)
 
-1. **Official-subset CQL + ELM + golden** — author, compile, prove it evaluates against hand-built
-   bundles. De-risks the CQL authoring first.
-2. **Synthetic enrichment + ADR-008 guard** — enrich the cms122 cohort; prove WorkWell outcomes unchanged.
-3. **Store-backed OID resolution** — the diff's VSAC-from-store resolver (+ bare-OID match if needed).
-4. **Execution diff harness** — real-execution path, degrade fallback, memoization, diff-correctness test.
-5. **Route + Standards-tab UI** — surface the richer report.
+1. **Official-subset CQL + ELM + `metaOverride` engine seam + golden** — author `cms122_official.cql`,
+   compile, add the backward-compatible `metaOverride` to `evaluate()`, and prove the official measure
+   evaluates against hand-built bundles via a store resolver. De-risks the CQL authoring + engine seam first.
+2. **`enrichForOfficialCms122` transform + ADR-008 guard** — the harness-local enrichment; prove WorkWell's
+   cms122 outcomes are byte-identical on enriched vs un-enriched bundles.
+3. **Execution diff harness** (`execution-diff.ts`) — build → enrich → evaluate both fresh → diff;
+   per-subject rows + per-gate attribution; memoized per run-id; diff-correctness test.
+4. **Route wiring + degrade fallback** — `/fidelity/diff` runs the execution diff when the imported OIDs
+   resolve, else the PR-2 estimate; degrade-path test.
+5. **Standards-tab UI** — surface the richer per-subject report.
 6. **Docs + verification pass.**
