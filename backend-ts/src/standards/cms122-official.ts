@@ -57,7 +57,8 @@ const isType = (r: { resourceType?: string }, t: string) => r.resourceType === t
  * Additively enrich a subject's synthetic bundle so the official-subset CMS122 gates fire. Real
  * VSAC-member codings sampled from `expansions` (the same sets the official measure resolves) are
  * APPENDED — never replacing existing `urn:workwell:*` codings — so WorkWell's cms122 outcome is
- * unchanged (ADR-008 guard test). Deterministic per externalId. Mutates + returns `bundle`.
+ * unchanged (ADR-008 guard test). The sole in-place field override is `Patient.birthDate` (age-out),
+ * safe because WorkWell's cms122 CQL ignores age. Deterministic per externalId. Mutates + returns `bundle`.
  */
 export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeeProfile, expansions: Expansions): FhirBundle {
   const h = hash(employee.externalId);

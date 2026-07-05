@@ -98,9 +98,8 @@ test("enrichment appends the diabetes VSAC coding without removing the urn:workw
   const conds = (enriched.entry as Array<{ resource: { resourceType: string; code?: { coding: Array<{ system: string; code: string }> } } }>)
     .filter((e) => e.resource.resourceType === "Condition");
   const diabetes = conds.find((c) => c.resource.code?.coding.some((x) => x.system === "urn:workwell:vs:cms122-diabetes"));
-  if (diabetes) {
-    assert.ok(diabetes.resource.code!.coding.some((x) => x.system === DIABETES_CODE.system && x.code === DIABETES_CODE.code));
-  }
+  assert.ok(diabetes, "cms122 base bundle must carry the urn:workwell diabetes Condition");
+  assert.ok(diabetes.resource.code!.coding.some((x) => x.system === DIABETES_CODE.system && x.code === DIABETES_CODE.code));
 });
 
 test("ADR-008 guard: WorkWell cms122 outcome is byte-identical on enriched vs un-enriched bundle", async () => {
