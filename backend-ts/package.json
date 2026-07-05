@@ -17,6 +17,7 @@
     "seed:trend-history": "tsx src/run/cli/seed-trend-history-bin.ts",
     "seed:scale": "tsx src/run/cli/seed-scale-bin.ts",
     "seed:quality-history": "tsx src/run/cli/seed-quality-history-bin.ts",
+    "resolve-valuesets": "tsx src/run/cli/resolve-valuesets-bin.ts",
     "compile-measures": "node scripts/compile-measures.mjs",
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
