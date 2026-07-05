@@ -261,7 +261,7 @@ export function StandardsTab({ measureId, api }: Props) {
                 {execution.subjects.map((s) => (
                   <tr
                     key={s.subjectId}
-                    className={`border-t border-neutral-100 dark:border-neutral-800 align-top hover:bg-neutral-50 dark:hover:bg-neutral-800/50 ${s.diverged ? "font-semibold text-red-700 dark:text-red-400" : ""}`}
+                    className={`border-t border-neutral-100 dark:border-neutral-800 align-top hover:bg-neutral-50 dark:hover:bg-neutral-800/50 ${s.diverged ? "font-semibold text-red-700 dark:text-red-400" : "text-neutral-700 dark:text-neutral-300"}`}
                   >
                     <td className="px-3 py-2 font-mono">{s.subjectId}</td>
                     <td className="px-3 py-2">{s.workwellOutcome}</td>

@@ -77,7 +77,10 @@ function attributeGate(
 }
 
 // Keyed on runId (only the latest run is ever queried). Assumes the imported VSAC `value_sets` don't
-// churn between run completions — the official side's expansion depends on them.
+// churn between run completions — the official side's expansion depends on them. Not keyed on `today`
+// (which anchors the synthetic bundles): a report cached before a day boundary is reused after it, but
+// the run is immutable and cms122 is value-based (not recency-based), so the delta is negligible and a
+// worker redeploy clears the cache anyway.
 const cache = new Map<string, ExecutionDiffReport>();
 /** @internal test hook */
 export function __clearExecutionDiffCache(): void {
