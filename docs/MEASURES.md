@@ -316,7 +316,18 @@ Each outcome evidence payload includes:
   can run in an expansion mode (an optional resolver → a populated `cql.CodeService`) where a CQL
   value-set retrieve (`[Procedure: "Audiogram Procedures"]`) filters by real membership. Audiogram
   ships a value-set-retrieve ELM variant proven byte-equal to the inline path (cross-mode golden
-  parity); the inline path remains the default. Live VSAC resolution is a future drop-in behind the port.
+  parity); the inline path remains the default.
+  **(ADR-023 update, 2026-07-05)** The **live VSAC (NLM UMLS) adapter is now real behind the port**,
+  superseding the "future drop-in" language above: a `CompositeValueSetResolver` routes dotted-numeric
+  VSAC OIDs → a live `VsacValueSetResolver` (`GET {base}/ValueSet/{oid}/$expand`) and `urn:workwell:*`
+  references → the local store, selected only when `WORKWELL_VSAC_API_KEY` is set (inert-unless-configured;
+  `engineForEnv` is key-gated so the unkeyed path is byte-identical to today). The owner-run
+  `pnpm resolve-valuesets` CLI imports official VSAC expansions into `value_sets` (`source="VSAC"`, no
+  DDL; DEPLOY.md). **Descriptive only (ADR-008)** — expansion feeds the `CodeService`, never `Outcome
+  Status` (guarded by the audiogram cross-mode VSAC parity test). The official-CQL *execution* outcome
+  diff (executing the official CMS122 CQL and diffing subject-by-subject) remains the **E14 PR-3
+  follow-on** — it additionally needs the official CQL→ELM and synthetic-data enrichment
+  (encounters/hospice/frailty).
 - All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
