@@ -19,7 +19,11 @@ export class VsacValueSetResolver implements ValueSetResolver {
         .expand(valueSetUrl)
         .then((e) => e.contains.map((c) => ({ code: c.code, system: c.system })));
       // Do not cache a rejected expand — a transient failure should be retryable on the next call.
-      hit.catch(() => this.cache.delete(valueSetUrl));
+      // Identity-guarded: only evict if this exact promise is still the cached one (mirrors
+      // engine-factory.ts), so a concurrent successful re-populate is never clobbered.
+      hit.catch(() => {
+        if (this.cache.get(valueSetUrl) === hit) this.cache.delete(valueSetUrl);
+      });
       this.cache.set(valueSetUrl, hit);
     }
     return hit;

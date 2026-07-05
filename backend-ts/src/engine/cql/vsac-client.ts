@@ -49,19 +49,29 @@ export function fixtureVsacClient(fixtures: Record<string, VsacExpansion>): Vsac
 
 /**
  * Live VSAC transport over the NLM FHIR terminology service. Pages `expansion.contains` until complete.
- * Throws on any non-2xx (the resolver turns a throw into a hard failure — never a silent empty set).
+ * Throws on any non-2xx (the resolver turns a throw into a hard failure — never a silent empty set), and
+ * also throws on a malformed response (no `expansion` object — e.g. an OperationOutcome), on a
+ * claimed-but-empty expansion (`total > 0` but zero members returned — the ADR-008 silent-drift case),
+ * and if paging exceeds the max-iteration guard (a server that ignores `offset` and never terminates).
+ * A legitimately-empty value set (`total === 0` with no members) is VALID → returns `{ contains: [] }`.
  */
 export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
   const auth = "Basic " + Buffer.from(`apikey:${cfg.apiKey}`).toString("base64");
   const PAGE = 1000;
+  const MAX_PAGES = 2000;
   return {
     kind: "http",
     async expand(oid: string): Promise<VsacExpansion> {
       const contains: VsacCode[] = [];
       let offset = 0;
       let total = 0;
+      let pages = 0;
+      let sawExpansion = false;
       for (;;) {
+        if (++pages > MAX_PAGES) {
+          throw new Error(`VSAC $expand for oid '${oid}': exceeded max pages (offset not advancing?)`);
+        }
         const url = `${base}/ValueSet/${encodeURIComponent(oid)}/$expand?offset=${offset}&count=${PAGE}`;
         const res = await fetch(url, { headers: { Authorization: auth, Accept: "application/fhir+json" } });
         if (!res.ok) {
@@ -70,6 +80,7 @@ export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
         const body = (await res.json()) as {
           expansion?: { total?: number; contains?: Array<{ code?: string; system?: string; display?: string }> };
         };
+        if (body.expansion) sawExpansion = true;
         const page = body.expansion?.contains ?? [];
         total = body.expansion?.total ?? total;
         for (const c of page) {
@@ -77,6 +88,14 @@ export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
         }
         offset += page.length;
         if (page.length === 0 || (total > 0 && contains.length >= total)) break;
+      }
+      if (!sawExpansion) {
+        throw new Error(
+          `VSAC $expand for oid '${oid}': response contained no expansion (malformed response or OperationOutcome)`,
+        );
+      }
+      if (total > 0 && contains.length === 0) {
+        throw new Error(`VSAC $expand for oid '${oid}': server reported total=${total} but returned no members`);
       }
       return { oid, total: total || contains.length, contains };
     },
