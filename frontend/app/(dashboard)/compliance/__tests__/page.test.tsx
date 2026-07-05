@@ -68,7 +68,7 @@ describe("CompliancePage", () => {
     await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
     expect(screen.getByRole("columnheader", { name: /MMR/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Varicella/ })).toBeInTheDocument();
-    const row = screen.getByText("Ada Lovelace").closest("tr")!;
+    const row = within(screen.getByRole("table")).getByText("Ada Lovelace").closest("tr")!;
     expect(within(row).getByText("Compliant")).toBeInTheDocument();
     expect(within(row).getByText("In Progress")).toBeInTheDocument();
     expect(within(row).getByText("1 of 2 doses on file")).toBeInTheDocument();
@@ -160,6 +160,9 @@ describe("CompliancePage", () => {
       headers: new Headers({ "X-Total-Count": "0" })
     });
     render(<CompliancePage />);
-    expect(await screen.findByText("No employees match these filters.")).toBeInTheDocument();
+    // The empty-state string now renders in both the table and the mobile cards (UX-11), so scope the
+    // assertion to the table row this test is about.
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("No employees match these filters.")).toBeInTheDocument();
   });
 });
