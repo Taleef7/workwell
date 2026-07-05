@@ -62,6 +62,11 @@ import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
+import { computeExecutionDiff } from "../standards/execution-diff.ts";
+import { CMS122_DIABETES_OID } from "../standards/cms122-official.ts";
+import { StoreValueSetResolver, type ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -73,6 +78,12 @@ function measureCql(measureId: string): string {
   const meta = MEASURES[measureId];
   const elm = meta ? ELM_LIBRARIES[meta.library] : undefined;
   return elm ? reconstructCql(elm) : "";
+}
+
+/** Execution diff only when the official VSAC value sets are importable from the store (probe Diabetes). */
+export async function chooseDiffMode(resolver: ValueSetResolver): Promise<"execution" | "estimate"> {
+  const codes = await resolver.expand(CMS122_DIABETES_OID);
+  return codes.length > 0 ? "execution" : "estimate";
 }
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
@@ -443,10 +454,21 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (diffId && req.method === "GET") {
     const ref = referenceFor(diffId);
     if (!ref) return json({ available: false });
-    const allOutcomes = await (await getStores(env)).outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
+    const stores = await getStores(env);
+    const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
     const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
-    const report = computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear());
-    return json(report);
+    const resolver = new StoreValueSetResolver(stores.valueSets);
+    // Execution diff only for cms122 and only when the imported VSAC rows are present; else the PR-2 estimate.
+    if (diffId === "cms122" && (await chooseDiffMode(resolver)) === "execution") {
+      const today = new Date().toISOString().slice(0, 10);
+      const asOf = latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
+      const report = await computeExecutionDiff(ref, latestRows, {
+        engine: new CqlExecutionEngine({ valueSetResolver: resolver }),
+        resolver, employees: EMPLOYEES, today, asOf,
+      });
+      return json(report);
+    }
+    return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
   }
 
   // Standards fidelity: a documented structural diff of WorkWell's authored measure vs the official
