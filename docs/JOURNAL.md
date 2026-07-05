@@ -22,9 +22,12 @@ per-run `ComplianceTrendChart`): (1) monthly points must be **newest-first** lik
 proportion — otherwise the trend never reconciles with the card's big % and the delta subtracts two
 different metrics; and (3) the monthly series is made **opt-in via `?granularity=month`** — only the
 `/programs` card requests it, so the measure page (no param) keeps its per-run chart unchanged (it already
-has the E16 "Quality over time" card, so a second monthly chart would be redundant). All fixed with
-regression tests. **Backend 931 tests (930 pass / 1 pg-skip); frontend tsc + lint + 123 vitest + build
-green.**
+has the E16 "Quality over time" card, so a second monthly chart would be redundant). A post-PR Codex P2
+added a fourth guard: the dashboard's `from`/`to` are day-granular, so a partial-month range (e.g.
+`2026-06-27..2026-07-04`) would widen the monthly query to whole June+July while the KPIs honor the exact
+range — the monthly path now runs only for whole-month-aligned (or unbounded) ranges (`isWholeMonthRange`),
+falling back to the day-granular per-run path otherwise. All fixed with regression tests. **Backend 933
+tests (932 pass / 1 pg-skip); frontend tsc + lint + 123 vitest + build green.**
 
 ## 2026-07-04 — perf(#233 follow-up): roster derived-cell cache
 
