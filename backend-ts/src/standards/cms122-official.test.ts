@@ -33,11 +33,13 @@ const fixtureResolver: ValueSetResolver = {
 
 function bundle(parts: {
   birthDate: string; visit?: boolean; diabetes?: boolean; hba1c?: number | "missing" | null;
+  visitDate?: string; // YYYY-MM-DD for the qualifying-visit Encounter's single-day period (default in-period)
 }): unknown {
   const entry: Array<{ resource: unknown }> = [
     { resource: { resourceType: "Patient", id: "p1", birthDate: parts.birthDate } },
   ];
-  if (parts.visit) entry.push({ resource: { resourceType: "Encounter", id: "e1", status: "finished", subject: { reference: "Patient/p1" }, type: [{ coding: [OFFICE_VISIT_CODE] }], period: { start: "2026-03-01T00:00:00" } } });
+  const vd = parts.visitDate ?? "2026-03-01";
+  if (parts.visit) entry.push({ resource: { resourceType: "Encounter", id: "e1", status: "finished", subject: { reference: "Patient/p1" }, type: [{ coding: [OFFICE_VISIT_CODE] }], period: { start: `${vd}T00:00:00`, end: `${vd}T01:00:00` } } });
   if (parts.diabetes) entry.push({ resource: { resourceType: "Condition", id: "c1", subject: { reference: "Patient/p1" }, code: { coding: [DIABETES_CODE] } } });
   if (parts.hba1c != null && parts.hba1c !== "missing") entry.push({ resource: { resourceType: "Observation", id: "o1", status: "final", subject: { reference: "Patient/p1" }, code: { coding: [HBA1C_CODE] }, effectiveDateTime: "2026-04-01T00:00:00", valueQuantity: { value: parts.hba1c, unit: "%", system: "http://unitsofmeasure.org", code: "%" } } });
   return { resourceType: "Bundle", type: "collection", entry };
@@ -75,6 +77,18 @@ test("official CMS122: age 80 → NOT in IPP", async () => {
   assert.equal(define(o, "Age 18 To 75"), false);
   assert.equal(define(o, "Initial Population"), false);
 });
+// Codex P2: the qualifying visit must occur DURING the measurement period. Eval date 2026-06-30 →
+// MP = [2025-06-30, 2026-06-30]. An in-period visit qualifies; an out-of-period FUTURE visit does not.
+test("official CMS122: in-period qualifying visit → Has Qualifying Visit true / in IPP", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: 7, visitDate: "2026-04-01" }));
+  assert.equal(define(o, "Has Qualifying Visit"), true);
+  assert.equal(define(o, "Initial Population"), true);
+});
+test("official CMS122: out-of-period (future) qualifying visit → Has Qualifying Visit false / NOT in IPP", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: 7, visitDate: "2027-04-01" }));
+  assert.equal(define(o, "Has Qualifying Visit"), false);
+  assert.equal(define(o, "Initial Population"), false);
+});
 
 const EXPANSIONS: Expansions = new Map([
   [CMS122_DIABETES_OID, [DIABETES_CODE]],
@@ -94,7 +108,7 @@ function cms122Bundle(externalId: string, today = "2026-06-30") {
 
 test("enrichment appends the diabetes VSAC coding without removing the urn:workwell coding", () => {
   const { employee, base } = cms122Bundle(EMPLOYEES[0]!.externalId);
-  const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS);
+  const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS, "2026-06-30");
   const conds = (enriched.entry as Array<{ resource: { resourceType: string; code?: { coding: Array<{ system: string; code: string }> } } }>)
     .filter((e) => e.resource.resourceType === "Condition");
   const diabetes = conds.find((c) => c.resource.code?.coding.some((x) => x.system === "urn:workwell:vs:cms122-diabetes"));
@@ -106,7 +120,7 @@ test("ADR-008 guard: WorkWell cms122 outcome is byte-identical on enriched vs un
   const engine = new CqlExecutionEngine();
   for (const emp of EMPLOYEES.slice(0, 30)) {
     const { employee, base } = cms122Bundle(emp.externalId);
-    const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS);
+    const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS, "2026-06-30");
     const a = await engine.evaluate({ measureId: "cms122", patientBundle: base, evaluationDate: "2026-06-30" });
     const b = await engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: "2026-06-30" });
     assert.equal(b.outcome, a.outcome, `WorkWell cms122 outcome changed by enrichment for ${emp.externalId}`);

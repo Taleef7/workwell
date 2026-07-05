@@ -53,14 +53,25 @@ const first = (ex: Expansions, oid: string): CqlCode | null => ex.get(oid)?.[0] 
 
 const isType = (r: { resourceType?: string }, t: string) => r.resourceType === t;
 
+/** anchorDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it (mirrors fhir-bundle-builder). */
+function dateMinusDays(anchorDate: string, daysAgo: number): string {
+  const d = new Date(`${anchorDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - daysAgo);
+  return `${d.toISOString().slice(0, 10)}T00:00:00`;
+}
+
 /**
  * Additively enrich a subject's synthetic bundle so the official-subset CMS122 gates fire. Real
  * VSAC-member codings sampled from `expansions` (the same sets the official measure resolves) are
  * APPENDED — never replacing existing `urn:workwell:*` codings — so WorkWell's cms122 outcome is
  * unchanged (ADR-008 guard test). The sole in-place field override is `Patient.birthDate` (age-out),
- * safe because WorkWell's cms122 CQL ignores age. Deterministic per externalId. Mutates + returns `bundle`.
+ * safe because WorkWell's cms122 CQL ignores age. `anchorDate` (YYYY-MM-DD, the run's eval date) anchors
+ * the qualifying-visit + hospice Encounter periods so they fall WITHIN the measurement period
+ * ([anchor−12mo, anchor]) by construction — the official CQL now period-filters those retrieves, so a
+ * hardcoded/stale Encounter date would otherwise drop out and understate official eligibility (Codex P2).
+ * Deterministic per externalId. Mutates + returns `bundle`.
  */
-export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeeProfile, expansions: Expansions): FhirBundle {
+export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeeProfile, expansions: Expansions, anchorDate: string): FhirBundle {
   const h = hash(employee.externalId);
   const entries = bundle.entry as Array<{ resource: Record<string, unknown> }>;
 
@@ -87,11 +98,12 @@ export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeePr
   // 3) Qualifying visit: most subjects get one; a deterministic ~1/6 get NONE → age/visit divergence.
   const visitCode = first(expansions, CMS122_QUALIFYING_VISIT_OIDS[0]!);
   if (visitCode && h % 6 !== 0) {
+    const visitDay = dateMinusDays(anchorDate, 90); // ~90d before anchor → inside [anchor−12mo, anchor]
     entries.push({ resource: {
       resourceType: "Encounter", id: `${employee.externalId}-enc-visit`, status: "finished",
       subject: { reference: `Patient/${employee.externalId}` },
       type: [{ coding: [{ ...visitCode }] }],
-      period: { start: "2026-03-01T00:00:00", end: "2026-03-01T01:00:00" },
+      period: { start: visitDay, end: visitDay },
     } });
   }
   // 4) Age-out a deterministic ~1/10 (birthDate override is outcome-neutral for WorkWell → ADR-008 safe).
@@ -102,11 +114,12 @@ export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeePr
   // 5) Hospice exclusion for a deterministic ~1/12; palliative for a different ~1/12.
   const hospiceCode = first(expansions, CMS122_HOSPICE_OID);
   if (hospiceCode && h % 12 === 1) {
+    const hospiceDay = dateMinusDays(anchorDate, 120); // ~120d before anchor → inside the measurement period
     entries.push({ resource: {
       resourceType: "Encounter", id: `${employee.externalId}-enc-hospice`, status: "finished",
       subject: { reference: `Patient/${employee.externalId}` },
       type: [{ coding: [{ ...hospiceCode }] }],
-      period: { start: "2026-02-01T00:00:00", end: "2026-02-05T00:00:00" },
+      period: { start: hospiceDay, end: hospiceDay },
     } });
   }
   const palliativeCode = first(expansions, CMS122_PALLIATIVE_OID);
