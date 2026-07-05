@@ -21,8 +21,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
@@ -78,7 +77,6 @@ function measureCql(measureId: string): string {
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
 const MAX_CQL_BYTES = 64 * 1024;
-const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
 // One-shot catalog + value-set demo seed, run once per env over the factory's stores (SQLite floor
 // or Postgres ceiling — the factory has already run schema init). The seed uses non-idempotent
@@ -270,6 +268,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       const body = (await req.json().catch(() => ({}))) as ImpactPreviewRequest;
       try {
         const s = await getStores(env);
+        const engine = await engineForEnv(env);
         const deps = { cases: s.cases, events: s.events, engine };
         return json(await previewImpact(deps, measure, body, actor));
       } catch (err) {
@@ -313,6 +312,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       const bundle = (await req.json().catch(() => null)) as unknown;
       if (!bundle || typeof bundle !== "object") return json({ error: "invalid_bundle" }, 400);
       try {
+        const engine = await engineForEnv(env);
         const outcome = await engine.evaluate({ measureId: evalId, patientBundle: bundle, evaluationDate: url.searchParams.get("date") ?? undefined });
         return json(outcome);
       } catch (err) {
