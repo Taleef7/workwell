@@ -8,4 +8,9 @@
  */
 import { main } from "./resolve-valuesets.ts";
 
-main(process.argv.slice(2)).then((code) => process.exit(code));
+main(process.argv.slice(2))
+  .then((code) => process.exit(code))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

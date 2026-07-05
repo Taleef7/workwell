@@ -21,7 +21,7 @@ An owner-run `pnpm resolve-valuesets` CLI (`run/cli/resolve-valuesets.ts`) `$exp
 ERROR row + continue), audited `VALUE_SETS_RESOLVED` per OID — **no DDL**. **Descriptive only (ADR-008):**
 the ADR-008 guard is `audiogram-vsac-parity.test.ts` (audiogram inline == composite-with-VSAC-key-on ==
 expected across all scenarios) — enabling the key changes no current measure's `Outcome Status` because
-the composite still falls back to the local store for `urn:workwell:*`. Full backend suite green — **948
+the composite still falls back to the local store for `urn:workwell:*`. Full backend suite green — **958
 pass / 1 pg-skip / 0 fail; no new deps.** New env vars: `WORKWELL_VSAC_API_KEY` (UMLS key; the demo stack
 leaves it **unset**) + `WORKWELL_VSAC_BASE_URL` (default `https://cts.nlm.nih.gov/fhir`). Reversible: unset
 the key → plain store resolver; `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` removes
