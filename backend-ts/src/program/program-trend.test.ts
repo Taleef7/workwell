@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Task 2 adds `monthlyTrendPoints` and Task 3 adds `programDeps`/`ProgramDeps` + `programTrend` to this
 // import as those tasks are implemented. Task 1 uses only `snapshotScopeFor`.
-import { snapshotScopeFor, monthlyTrendPoints, programTrend } from "./program-read-models.ts";
+import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange } from "./program-read-models.ts";
 import type { ProgramDeps } from "./program-read-models.ts";
 import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
 import type { OutcomeWithRun } from "../stores/outcome-store.ts";
@@ -141,4 +141,28 @@ test("programTrend — no qualitySnapshots dep → per-run (back-compat)", async
   const deps = fakeDeps({ withSnapshots: false, perRun: [perRunRow("run-a", "2026-06-01T00:00:00Z", "COMPLIANT")] });
   const pts = await programTrend(deps, "audiogram", {}, { monthly: true });
   assert.ok(pts.every((p) => p.period === undefined));
+});
+
+test("isWholeMonthRange — unbounded / month-aligned true; partial-month false", () => {
+  assert.equal(isWholeMonthRange(undefined, undefined), true); // no range
+  assert.equal(isWholeMonthRange("2026-06-01", "2026-07-31"), true); // whole June+July
+  assert.equal(isWholeMonthRange("2026-02-01", "2026-02-28"), true); // Feb (28-day month) last day
+  assert.equal(isWholeMonthRange("2026-06-01", undefined), true); // open-ended from a month start
+  assert.equal(isWholeMonthRange(undefined, "2026-06-30"), true); // open-ended to a month end
+  assert.equal(isWholeMonthRange("2026-06-27", "2026-07-04"), false); // partial both ends
+  assert.equal(isWholeMonthRange("2026-06-01", "2026-07-15"), false); // partial upper (July not full)
+  assert.equal(isWholeMonthRange("2026-06-15", "2026-07-31"), false); // partial lower (June not full)
+  assert.equal(isWholeMonthRange("2026-02-01", "2026-02-27"), false); // Feb 27 is not the last day
+});
+
+test("programTrend — partial-month range → per-run fallback even with ≥2 snapshots (Codex P2)", async () => {
+  // A range that cuts through month boundaries can't be honored by a month-granular series, so the
+  // trend must fall back to the day-granular per-run path rather than widen to whole months.
+  const deps = fakeDeps({
+    snaps: [snap("2026-06", 9, 10), snap("2026-07", 8, 10)],
+    perRun: [perRunRow("run-a", "2026-06-28T00:00:00Z", "COMPLIANT"), perRunRow("run-b", "2026-06-30T00:00:00Z", "OVERDUE")],
+  });
+  const pts = await programTrend(deps, "audiogram", { from: "2026-06-27", to: "2026-07-04" }, { monthly: true });
+  assert.ok(pts.every((p) => p.period === undefined), "partial-month range falls back to per-run");
+  assert.deepEqual(new Set(pts.map((p) => p.runId)), new Set(["run-a", "run-b"]));
 });
