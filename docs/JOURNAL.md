@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-07-05 — Day closeout + docs sync
+
+End-of-day: five PRs merged + deployed over 2026-07-04→05 (WCAG #237, perf #233 ×2 #238/#239, UX-8 #240,
+UX-11 #241) — see the entries below. Synced the living docs to `main`: README **Status** (added #224→#241;
+E15 marked complete), CLAUDE.md **Current Focus** (bumped to 2026-07-05 with the 07-02→07-05 arc + backlog
+status), CHANGELOG (the E10–E16 roadmap arc + today's UX/a11y/perf); ARCHITECTURE/DATA_MODEL were already
+updated in the feature PRs. **No open PRs; tree clean.**
+
+**Backlog verified 2026-07-05:** most Fable [M]/[L] UX-debt is already closed (UX-9 scale-provider naming,
+UX-12 count formatting, UX-16 unified AccessDenied, UX-18 Scheduled trigger filter). Genuinely open: **UX-7**
+(styled evidence dropzone — case detail is still a plain `<input type=file>`), the #233 perf residual (a
+`DISTINCT(measure,run)` query for the last ~1s + the Neon 0.25-CU cold-start), and design-y [L]s (UX-13/14/15,
+UX-3). Blocked: E12 PR-2c (MIE API contract), E14 PR-3 (VSAC), E15 PR-3 (WebChart), E9 (Doug Q2).
+
 ## 2026-07-05 — UX-11: compliance roster mobile card layout
 
 The `/compliance` roster is a wide table (sticky Employee column + N measure columns) that shows only
