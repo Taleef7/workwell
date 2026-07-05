@@ -28,15 +28,21 @@ define "Age At End":
 define "Age 18 To 75":
   "Age At End" >= 18 and "Age At End" <= 75
 
+// Official CMS122 requires the qualifying visit to occur DURING the measurement period, so the
+// Encounter retrieves are period-filtered (FHIRHelpers.ToInterval(E.period) during "Measurement Period").
+// A stale/future Encounter in a replayed run's bundle therefore no longer overstates official eligibility.
 define "Has Qualifying Visit":
-  exists([Encounter: "Office Visit"])
-    or exists([Encounter: "Annual Wellness Visit"])
-    or exists([Encounter: "Preventive Care Established Office Visit 18+"])
-    or exists([Encounter: "Preventive Care Initial Office Visit 18+"])
-    or exists([Encounter: "Home Healthcare Services"])
-    or exists([Encounter: "Telephone Visits"])
-    or exists([Encounter: "Nutrition Services"])
+  exists([Encounter: "Office Visit"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Annual Wellness Visit"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Preventive Care Established Office Visit 18+"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Preventive Care Initial Office Visit 18+"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Home Healthcare Services"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Telephone Visits"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
+    or exists([Encounter: "Nutrition Services"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
 
+// Condition retrieves stay presence-based: the synthetic Diabetes/Palliative Conditions carry no
+// onset/period dates, so a measurement-period filter would wrongly exclude them (known synthetic-data
+// simplification). Only the Encounter retrieves above/below are period-constrained.
 define "Has Diabetes":
   exists([Condition: "Diabetes"])
 
@@ -44,7 +50,7 @@ define "Initial Population":
   "Age 18 To 75" and "Has Qualifying Visit" and "Has Diabetes"
 
 define "Has Hospice":
-  exists([Encounter: "Hospice Encounter"])
+  exists([Encounter: "Hospice Encounter"] E where FHIRHelpers.ToInterval(E.period) during "Measurement Period")
 
 define "Has Palliative":
   exists([Condition: "Palliative Care Diagnosis"])

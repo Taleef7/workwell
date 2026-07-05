@@ -109,7 +109,7 @@ export async function computeExecutionDiff(
       const target = seededTargetFor(deps.employees, binding.rateKey, row.subjectId) ?? "MISSING_DATA";
       const config = deriveExamConfig(binding, target);
       const base = buildSyntheticBundle(employee, config, deps.today);
-      const enriched = enrichForOfficialCms122(base, employee, expansions);
+      const enriched = enrichForOfficialCms122(base, employee, expansions, deps.today);
       const workwell = await deps.engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: deps.asOf });
       const official = await deps.engine.evaluate({ measureId: "cms122_official", metaOverride: CMS122_OFFICIAL_META, patientBundle: enriched, evaluationDate: deps.asOf });
       const diverged = official.outcome !== workwell.outcome;
