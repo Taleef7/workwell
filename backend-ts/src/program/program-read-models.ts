@@ -321,6 +321,27 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
   return groupByRun(rows);
 }
 
+/** Last day of the (1-indexed) month in `YYYY-MM-DD`? `Date.UTC(y, m, 0)` = day 0 of month m's successor = last day of month m. */
+function isLastDayOfMonth(ymd: string): boolean {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return false;
+  return d === new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/**
+ * True when a `[from, to]` range is whole-month-aligned (or unbounded) — the only ranges a month-
+ * granular snapshot series can honor faithfully (`from` = a month's first day, `to` = a month's last
+ * day). A partial-month range (e.g. a `2026-06-27..2026-07-04` preset) would otherwise pull in the
+ * whole June + July snapshots while the day-granular overview/KPIs on the same card honor the exact
+ * range — so `programTrend` falls back to the per-run path (which honors days) for partial ranges
+ * (Codex P2).
+ */
+export function isWholeMonthRange(from?: string, to?: string): boolean {
+  const firstDayOk = !from || Number(from.slice(8, 10)) === 1;
+  const lastDayOk = !to || isLastDayOfMonth(to);
+  return firstDayOk && lastDayOk;
+}
+
 /** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity). */
 export async function programTrend(
   deps: ProgramDeps,
@@ -330,18 +351,19 @@ export async function programTrend(
 ): Promise<ProgramTrendPoint[]> {
   // UX-8: the monthly quality_snapshots series is OPT-IN (only the /programs card requests it via
   // ?granularity=month). Other consumers (the measure page, which has its own E16 "Quality over
-  // time" card) keep the per-run trend unchanged. When opted in and the scope resolves with ≥2
-  // months, return the monthly series; otherwise fall back to the per-run trend below.
-  const scope = opts?.monthly && deps.qualitySnapshots ? snapshotScopeFor(filters) : null;
+  // time" card) keep the per-run trend unchanged. When opted in, the scope resolves, the range is
+  // whole-month-aligned, and ≥2 months exist, return the monthly series; otherwise fall back to the
+  // per-run trend below (which honors day-granular from/to).
+  const from = filters.from?.trim() || undefined;
+  const to = filters.to?.trim() || undefined;
+  const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to) ? snapshotScopeFor(filters) : null;
   if (opts?.monthly && deps.qualitySnapshots && scope) {
-    const monthFrom = filters.from?.trim() ? filters.from.trim().slice(0, 7) : undefined;
-    const monthTo = filters.to?.trim() ? filters.to.trim().slice(0, 7) : undefined;
     const snaps = await deps.qualitySnapshots.querySnapshots({
       measureId,
       scopeLevel: scope.scopeLevel,
       scopeId: scope.scopeId,
-      from: monthFrom,
-      to: monthTo,
+      from: from?.slice(0, 7),
+      to: to?.slice(0, 7),
     });
     const monthly = monthlyTrendPoints(snaps);
     if (monthly.length >= 2) return monthly;
