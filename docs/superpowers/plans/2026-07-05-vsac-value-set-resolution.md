@@ -630,6 +630,15 @@ git commit -m "feat(vsac): upsertResolvedValueSet store method (floor + ceiling,
 
 ## Task 6: Audiogram cross-mode parity guard (the ADR-008 test)
 
+> **IMPLEMENTATION CORRECTION (2026-07-05):** an existing cross-mode parity test already lives in
+> `backend-ts/src/engine/cql/value-set-resolver.test.ts` (lines 70–97) and proves `inline == store-expansion
+> == expected` for audiogram using real fixtures in `spike/synthetic/audiogram/*.json` and the real seeded
+> value set (`code: "audiogram-procedure"`, system = `urn:workwell:vs:audiogram-procedures`). The plan's
+> hand-rolled `audiogramStore()`/`buildSyntheticBundle` code below used the WRONG code (`AUDIOGRAM`) — do
+> NOT use it. Instead, mirror the existing test's setup and ADD the composite (VSAC-key-on) comparison,
+> asserting `inline == composite(keyed) == expected` across the 4 scenarios. This directly proves the keyed
+> path matches today's inline production path. See the dispatched Task 6 prompt for the exact code.
+
 **Files:**
 - Create: `backend-ts/src/engine/cql/audiogram-vsac-parity.test.ts`
 
@@ -707,7 +716,15 @@ git commit -m "test(vsac): audiogram cross-mode parity guard (ADR-008 — VSAC o
 - Create: `backend-ts/src/engine/cql/engine-factory.test.ts`
 - Modify: `backend-ts/src/routes/runs.ts`, `src/routes/cases.ts`, `src/routes/measures.ts`, `src/routes/compliance-simulation.ts`
 
-**Design:** a memoized-per-env engine factory. Each route currently holds `const engine = new CqlExecutionEngine()` (module singleton, no resolver). Replace usages with `await engineForEnv(env)`, which builds a `CqlExecutionEngine` wired with `resolveValueSetResolver(env, (await getStores(env)).valueSets)`, cached per env object. Do **not** touch `evaluate-bundle.ts` (the DB-less ingress library stays env/store-free by design) or `scheduler.ts`'s unused `_engine`.
+**Design:** a memoized-per-env engine factory. Each route currently holds `const engine = new CqlExecutionEngine()` (module singleton, no resolver). Replace usages with `await engineForEnv(env)`, which builds a `CqlExecutionEngine` cached per env object. Do **not** touch `evaluate-bundle.ts` (the DB-less ingress library stays env/store-free by design) or `scheduler.ts`'s unused `_engine`.
+
+> **IMPLEMENTATION CORRECTION (2026-07-05) — safer wiring:** production today runs `new CqlExecutionEngine()`
+> with **no resolver** (audiogram → inline path). To change **nothing** on the unkeyed demo, `engineForEnv`
+> must pass **no `valueSetResolver` when `WORKWELL_VSAC_API_KEY` is unset** (byte-identical to today), and the
+> composite resolver **only when the key is set**. So the factory branches on the key rather than always
+> attaching `resolveValueSetResolver`'s store-fallback. (The existing parity test already proves
+> store-expansion == inline, so attaching-always would also be safe — but not-attaching is strictly the
+> smaller change and keeps the default path untouched.)
 
 - [ ] **Step 1: Write the failing test**
 
