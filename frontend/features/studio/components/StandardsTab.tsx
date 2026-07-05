@@ -67,8 +67,30 @@ interface OutcomeDiffReport {
   headline: string;
   disclaimer: string;
 }
+interface ExecutionSubject {
+  subjectId: string;
+  workwellOutcome: string;
+  officialOutcome: string;
+  diverged: boolean;
+  divergenceGate: string;
+}
+interface ExecutionDiffReport {
+  mode: "execution";
+  measureId: string;
+  ecqmId: string;
+  runId: string | null;
+  asOf: string | null;
+  totalSubjectsEvaluated: number;
+  totalDivergent: number;
+  byGate: Record<string, number>;
+  subjects: ExecutionSubject[];
+  headline: string;
+  disclaimer: string;
+}
 type FidelityResponse = { available: false } | FidelityReport;
-type DiffResponse = { available: false } | OutcomeDiffReport;
+// Discriminated on `mode`: the PR-3 execution report carries mode:"execution"; the PR-2
+// estimate (criterion-impact) report has no `mode` field.
+type DiffResponse = { available: false } | OutcomeDiffReport | ExecutionDiffReport;
 
 type Props = { measureId: string; api: ApiClient };
 
@@ -122,6 +144,7 @@ export function StandardsTab({ measureId, api }: Props) {
   }
 
   const f = fidelity;
+  const execution = diff && "mode" in diff && diff.mode === "execution" ? diff : null;
   const divergent = diff && "criterionImpacts" in diff ? diff : null;
   const impactByKey = new Map((divergent?.criterionImpacts ?? []).map((c) => [c.key, c]));
 
@@ -200,6 +223,57 @@ export function StandardsTab({ measureId, api }: Props) {
           ) : (
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">No population run yet — run this measure to populate the outcome diff.</p>
           )}
+        </div>
+      ) : null}
+
+      {/* Per-subject execution divergence (PR-3, cms122 with imported VSAC value sets) */}
+      {execution ? (
+        <div className="space-y-3">
+          <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Official-CQL execution diff</p>
+            <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">{execution.headline}</p>
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              {execution.asOf ? `Based on the latest population run (${execution.asOf}); ` : ""}
+              <span className="font-semibold text-red-700 dark:text-red-400">{execution.totalDivergent} of {execution.totalSubjectsEvaluated}</span> subjects diverge from the official-subset CQL execution.
+            </p>
+            {Object.keys(execution.byGate).length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                {Object.entries(execution.byGate).map(([gate, count]) => (
+                  <span key={gate} className="rounded border border-neutral-300 px-2 py-0.5 text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
+                    <span className="font-mono text-[11px]">{gate}</span>: {count}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+            <table className="min-w-full text-left text-xs">
+              <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
+                <tr>
+                  <th scope="col" className="px-3 py-2 font-medium">Subject</th>
+                  <th scope="col" className="px-3 py-2 font-medium">WorkWell outcome</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Official outcome</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Gate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {execution.subjects.map((s) => (
+                  <tr
+                    key={s.subjectId}
+                    className={`border-t border-neutral-100 dark:border-neutral-800 align-top hover:bg-neutral-50 dark:hover:bg-neutral-800/50 ${s.diverged ? "font-semibold text-red-700 dark:text-red-400" : ""}`}
+                  >
+                    <td className="px-3 py-2 font-mono">{s.subjectId}</td>
+                    <td className="px-3 py-2">{s.workwellOutcome}</td>
+                    <td className="px-3 py-2">{s.officialOutcome}</td>
+                    <td className="px-3 py-2 font-mono text-[11px]">{s.divergenceGate || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[11px] leading-5 text-neutral-600 dark:text-neutral-500">{execution.disclaimer}</p>
         </div>
       ) : null}
 
