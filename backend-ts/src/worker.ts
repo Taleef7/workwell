@@ -257,7 +257,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (immunizationResponse) return immunizationResponse;
 
   // Advisory as-of-date compliance simulation for one employee (#197) — read-only, no writes.
-  const simulationResponse = await handleComplianceSimulation(req);
+  const simulationResponse = await handleComplianceSimulation(req, env);
   if (simulationResponse) return simulationResponse;
 
   // Order proposals — advisory "Action Evaluators → orders" over latest population runs (#77 E7).

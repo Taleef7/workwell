@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-07-05 — Live VSAC value-set resolution behind the `ValueSetResolver` port (ADR-023)
+
+Built the **live VSAC (NLM UMLS) value-set resolution** capability behind the existing `ValueSetResolver`
+seam — the E14 official-CQL on-ramp, done without a schema change or a new dependency. Layered strictly
+additively: a `VsacClient` transport seam (`vsac-client.ts` — `fixtureVsacClient` + `httpVsacClient` over
+the live NLM FHIR `GET {base}/ValueSet/{oid}/$expand`, Basic `apikey`:key, global `fetch`, throws on
+non-2xx); `VsacValueSetResolver` (per-OID memoized, **propagates errors — never a silent empty set**); a
+`CompositeValueSetResolver` + `isVsacOid` routing dotted-numeric OIDs → VSAC and `urn:workwell:*`/URLs →
+the local `StoreValueSetResolver`; `resolveValueSetResolver(env, store)` selecting the composite **only**
+when `WORKWELL_VSAC_API_KEY` is set (inert-unless-configured, mirroring `resolveForecaster`/`resolveChannel`/
+`resolveDataSource`); and `engineForEnv(env)` — the memoized per-env engine builder, **key-gated** so the
+unkeyed path returns a resolver-less `CqlExecutionEngine` byte-identical to today. Wired into every runtime
+eval path — the `runs`/`cases`/`measures` routes, `compliance-simulation`, and the nightly `schedulerTick`
+— but deliberately **not** the DB-less `evaluate-bundle.ts` ingress or the seed CLIs.
+
+An owner-run `pnpm resolve-valuesets` CLI (`run/cli/resolve-valuesets.ts`) `$expand`s each target OID
+(default = the 21 CMS122v14 reference OIDs; `--oid`/`--measure` override) and upserts real codes into the
+**existing** `value_sets` columns via `upsertResolvedValueSet` (`source="VSAC"`, RESOLVED; a failed OID →
+ERROR row + continue), audited `VALUE_SETS_RESOLVED` per OID — **no DDL**. **Descriptive only (ADR-008):**
+the ADR-008 guard is `audiogram-vsac-parity.test.ts` (audiogram inline == composite-with-VSAC-key-on ==
+expected across all scenarios) — enabling the key changes no current measure's `Outcome Status` because
+the composite still falls back to the local store for `urn:workwell:*`. Full backend suite green — **958
+pass / 1 pg-skip / 0 fail; no new deps.** New env vars: `WORKWELL_VSAC_API_KEY` (UMLS key; the demo stack
+leaves it **unset**) + `WORKWELL_VSAC_BASE_URL` (default `https://cts.nlm.nih.gov/fhir`). Reversible: unset
+the key → plain store resolver; `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` removes
+imports.
+
+**Follow-on (out of scope, not done):** the rest of E14 PR-3 — executing the official CMS122 CQL and
+diffing outcomes subject-by-subject — needs the official CQL→ELM plus synthetic-data enrichment
+(encounters/hospice/frailty) so the official denominator populations resolve. **Owner post-deploy step if
+enabling VSAC:** run `pnpm resolve-valuesets` against Neon with `WORKWELL_VSAC_API_KEY` set. Spec/plan:
+`docs/superpowers/specs/2026-07-05-vsac-value-set-resolution-design.md`,
+`docs/superpowers/plans/2026-07-05-vsac-value-set-resolution.md`.
+
 ## 2026-07-05 — Day closeout + docs sync
 
 End-of-day: five PRs merged + deployed over 2026-07-04→05 (WCAG #237, perf #233 ×2 #238/#239, UX-8 #240,

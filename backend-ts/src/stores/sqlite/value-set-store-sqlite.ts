@@ -9,6 +9,7 @@ import type {
   CreateTerminologyMappingInput,
   SeedValueSetInput,
   TerminologyMappingRecord,
+  UpsertResolvedValueSetInput,
   ValueSetRecord,
   ValueSetStore,
 } from "../value-set-store.ts";
@@ -141,6 +142,45 @@ export class SqliteValueSetStore implements ValueSetStore {
     await this.db
       .prepare("UPDATE value_sets SET codes_json = ?, code_systems = ? WHERE id = ?")
       .bind(codesJson, systems, id)
+      .run();
+  }
+
+  async upsertResolvedValueSet(input: UpsertResolvedValueSetInput): Promise<void> {
+    const codesJson = JSON.stringify(input.codes);
+    const systems = JSON.stringify([...new Set(input.codes.map((c) => c.system).filter(Boolean))].sort());
+    // Idempotent by OID: reuse the existing row's id (stable across re-resolves) and drop any other
+    // rows sharing this OID, then upsert on id — the same OID-dedup mechanism seedValueSet uses
+    // (DELETE-by-oid + ON CONFLICT(id)). Keying by OID means a null version still dedupes (the
+    // UNIQUE(oid,version) index would treat NULLs as distinct, so we never rely on it here).
+    const existing = await this.db.prepare("SELECT id FROM value_sets WHERE oid = ?").bind(input.oid).first<{ id: string }>();
+    const id = existing?.id ?? crypto.randomUUID();
+    await this.db.prepare("DELETE FROM value_sets WHERE oid = ? AND id <> ?").bind(input.oid, id).run();
+    await this.db
+      .prepare(
+        `INSERT INTO value_sets
+           (id, oid, name, version, codes_json, code_systems, source, status,
+            resolution_status, resolution_error, expansion_hash, last_resolved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           oid = excluded.oid, name = excluded.name, version = excluded.version,
+           codes_json = excluded.codes_json, code_systems = excluded.code_systems,
+           source = excluded.source, status = 'ACTIVE', resolution_status = excluded.resolution_status,
+           resolution_error = excluded.resolution_error, expansion_hash = excluded.expansion_hash,
+           last_resolved_at = excluded.last_resolved_at`,
+      )
+      .bind(
+        id,
+        input.oid,
+        input.name,
+        input.version,
+        codesJson,
+        systems,
+        input.source,
+        input.resolutionStatus,
+        input.resolutionError,
+        input.expansionHash,
+        input.lastResolvedAt,
+      )
       .run();
   }
 

@@ -6,7 +6,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { handleComplianceSimulation } from "./compliance-simulation.ts";
 
 const ID = EMPLOYEES[0]!.externalId;
-const call = (path: string, method = "GET") => handleComplianceSimulation(new Request(`http://x${path}`, { method }));
+const call = (path: string, method = "GET") => handleComplianceSimulation(new Request(`http://x${path}`, { method }), {});
 
 test("non-matching path / method returns null", async () => {
   assert.equal(await call("/api/employees/x/profile"), null);

@@ -5,19 +5,15 @@
  * (all roles, like the immunization forecast). Writes nothing; no schema. handleEmployees only matches
  * `/profile` + `/search`, so this `/simulate` path is not intercepted.
  */
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import type { StoresEnv } from "../stores/factory.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { simulateComplianceAsOf } from "../run/employee-compliance-snapshot.ts";
-
-// The engine is stateless after construction (loaded ELM) — build once, reuse across requests
-// (matches the singletons in cases.ts / runs.ts).
-const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-export async function handleComplianceSimulation(req: Request): Promise<Response | null> {
+export async function handleComplianceSimulation(req: Request, env: StoresEnv): Promise<Response | null> {
   if (req.method !== "GET") return null;
   const url = new URL(req.url);
   const match = url.pathname.match(/^\/api\/employees\/([^/]+)\/simulate$/);
@@ -39,6 +35,7 @@ export async function handleComplianceSimulation(req: Request): Promise<Response
   }
 
   const today = new Date().toISOString().slice(0, 10);
+  const engine = await engineForEnv(env);
   const snapshot = await simulateComplianceAsOf(externalId, asOf ?? today, { engine, today });
   if (!snapshot) return json({ error: "not_found", externalId }, 404);
   return json(snapshot);
