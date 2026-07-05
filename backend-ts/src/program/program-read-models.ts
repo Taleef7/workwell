@@ -12,6 +12,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -41,17 +42,74 @@ export interface ProgramFilters {
   tenant?: string | null; // scope the population to one tenant/system (E13 PR-1)
 }
 
+/**
+ * Map the page's tenant/site filters to a `quality_snapshots` scope (UX-8). Mirrors how
+ * `buildSnapshotRows` keys scope_id: `"ALL"` | tenantId | `${tenantId}|${site}`. A site is
+ * resolved to its tenant from the directory when no tenant filter narrows it; an unknown or
+ * multi-tenant site returns null → the caller falls back to the per-run trend.
+ */
+export function snapshotScopeFor(
+  filters: ProgramFilters,
+): { scopeLevel: QualityScopeLevel; scopeId: string } | null {
+  const site = filters.site?.trim() || null;
+  const tenant = filters.tenant?.trim() || null;
+  if (site) {
+    let tenantId = tenant;
+    if (!tenantId) {
+      const tenants = [...new Set(EMPLOYEES.filter((e) => e.site === site).map((e) => e.tenantId))];
+      if (tenants.length !== 1) return null; // 0 (unknown) or >1 (ambiguous) → per-run fallback
+      tenantId = tenants[0]!;
+    }
+    return { scopeLevel: "site", scopeId: `${tenantId}|${site}` };
+  }
+  if (tenant) return { scopeLevel: "tenant", scopeId: tenant };
+  return { scopeLevel: "all", scopeId: "ALL" };
+}
+
+/**
+ * Map monthly snapshot rows → trend points for the newest 12 months (UX-8). Returned NEWEST-FIRST
+ * to match the per-run branch's contract (the measure page reads `trend[1]` as the previous point).
+ * `complianceRate`/`totalEvaluated` use total-INCLUDING-excluded (the sum of all five buckets) so the
+ * monthly series reconciles with the per-run branch and the `/programs` headline KPI — not the E16
+ * proportion denominator (`total − excluded`).
+ */
+export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoint[] {
+  return rows
+    .slice()
+    .sort((a, b) => b.period.localeCompare(a.period)) // newest-first, matching the per-run path's contract
+    .slice(0, 12)
+    .map((r): ProgramTrendPoint => {
+      const total = r.compliant + r.dueSoon + r.overdue + r.missingData + r.excluded;
+      return {
+        runId: r.sourceRunId ?? r.id,
+        startedAt: r.periodEnd,
+        period: r.period,
+        complianceRate: round1(r.compliant, total),
+        totalEvaluated: total,
+        compliant: r.compliant,
+        dueSoon: r.dueSoon,
+        overdue: r.overdue,
+        missingData: r.missingData,
+        excluded: r.excluded,
+      };
+    });
+}
+
 export interface ProgramDeps {
   runStore: RunStore;
   outcomeStore: OutcomeStore;
   caseStore: CaseStore;
   employees?: readonly EmployeeProfile[];
+  /** Optional — the monthly (quality_snapshots) trend source (UX-8). Absent ⇒ per-run trend only. */
+  qualitySnapshots?: QualitySnapshotStore;
 }
 
 /** Per-run trend point (Java ProgramTrendPoint). The chart reads runId/startedAt/complianceRate/totalEvaluated. */
 export interface ProgramTrendPoint {
   runId: string;
   startedAt: string;
+  /** Present only for monthly (quality_snapshots) points — `YYYY-MM` (UX-8). Absent ⇒ per-run point. */
+  period?: string;
   complianceRate: number;
   totalEvaluated: number;
   compliant: number;
@@ -263,12 +321,54 @@ async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: P
   return groupByRun(rows);
 }
 
+/** Last day of the (1-indexed) month in `YYYY-MM-DD`? `Date.UTC(y, m, 0)` = day 0 of month m's successor = last day of month m. */
+function isLastDayOfMonth(ymd: string): boolean {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return false;
+  return d === new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/**
+ * True when a `[from, to]` range is whole-month-aligned (or unbounded) — the only ranges a month-
+ * granular snapshot series can honor faithfully (`from` = a month's first day, `to` = a month's last
+ * day). A partial-month range (e.g. a `2026-06-27..2026-07-04` preset) would otherwise pull in the
+ * whole June + July snapshots while the day-granular overview/KPIs on the same card honor the exact
+ * range — so `programTrend` falls back to the per-run path (which honors days) for partial ranges
+ * (Codex P2).
+ */
+export function isWholeMonthRange(from?: string, to?: string): boolean {
+  const firstDayOk = !from || Number(from.slice(8, 10)) === 1;
+  const lastDayOk = !to || isLastDayOfMonth(to);
+  return firstDayOk && lastDayOk;
+}
+
 /** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity). */
 export async function programTrend(
   deps: ProgramDeps,
   measureId: string,
   filters: ProgramFilters,
+  opts?: { monthly?: boolean },
 ): Promise<ProgramTrendPoint[]> {
+  // UX-8: the monthly quality_snapshots series is OPT-IN (only the /programs card requests it via
+  // ?granularity=month). Other consumers (the measure page, which has its own E16 "Quality over
+  // time" card) keep the per-run trend unchanged. When opted in, the scope resolves, the range is
+  // whole-month-aligned, and ≥2 months exist, return the monthly series; otherwise fall back to the
+  // per-run trend below (which honors day-granular from/to).
+  const from = filters.from?.trim() || undefined;
+  const to = filters.to?.trim() || undefined;
+  const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to) ? snapshotScopeFor(filters) : null;
+  if (opts?.monthly && deps.qualitySnapshots && scope) {
+    const snaps = await deps.qualitySnapshots.querySnapshots({
+      measureId,
+      scopeLevel: scope.scopeLevel,
+      scopeId: scope.scopeId,
+      from: from?.slice(0, 7),
+      to: to?.slice(0, 7),
+    });
+    const monthly = monthlyTrendPoints(snaps);
+    if (monthly.length >= 2) return monthly;
+  }
+
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.

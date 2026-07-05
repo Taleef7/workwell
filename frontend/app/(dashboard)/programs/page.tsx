@@ -21,6 +21,7 @@ import {
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { trendMeta, type TrendPoint } from "./trend-meta";
 
 type ProgramSummary = {
   measureId: string;
@@ -37,13 +38,6 @@ type ProgramSummary = {
   excluded: number;
   complianceRate: number;
   openCaseCount: number;
-};
-
-type TrendPoint = {
-  runId: string;
-  startedAt: string;
-  complianceRate: number;
-  totalEvaluated: number;
 };
 
 type TopDrivers = {
@@ -98,7 +92,7 @@ export default function ProgramsPage() {
     const loadTrends = Promise.all(
       data.map(async (program) => {
         try {
-          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}`);
+          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}${suffix ? "&" : "?"}granularity=month`);
           return [program.measureId, trend] as const;
         } catch {
           return [program.measureId, [] as TrendPoint[]] as const;
@@ -282,7 +276,7 @@ export default function ProgramsPage() {
 
               <div className="relative z-10 mt-4">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
-                <TrendChart data={trend} loading={detailsLoading} caption={`${program.measureName} compliance trend by run`} />
+                <TrendChart data={trend} loading={detailsLoading} caption={`${program.measureName} compliance trend`} />
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
@@ -412,22 +406,16 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
     );
   }
 
-  const chartData = sorted.map((t) => ({
-    label: new Date(t.startedAt).toLocaleDateString("en", { month: "short", day: "numeric" }),
-    rate: Math.round(t.complianceRate * 10) / 10,
-  }));
+  const meta = trendMeta(sorted);
+  const { chartData, delta, deltaLabel, dateHeader } = meta;
   const [domainLo, domainHi] = niceDomain(chartData.map((d) => d.rate));
-
-  const last = chartData[chartData.length - 1].rate;
-  const prev = chartData[chartData.length - 2].rate;
-  const delta = (last - prev).toFixed(1);
-  const deltaPositive = parseFloat(delta) >= 0;
+  const deltaPositive = delta >= 0;
 
   return (
     <div className="space-y-1 text-primary-600 dark:text-primary-400">
       <div className="flex items-center gap-1">
         <span className={`text-xs font-medium ${deltaPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-          {deltaPositive ? "↑" : "↓"} {Math.abs(parseFloat(delta))}% from last run
+          {deltaPositive ? "↑" : "↓"} {Math.abs(Math.round(delta * 10) / 10)}% {deltaLabel}
         </span>
       </div>
       {/* The sr-only ChartDataTable below is the accessible alternative, so the chart is
@@ -464,8 +452,8 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
         </ResponsiveContainer>
       </div>
       <ChartDataTable
-        caption={caption}
-        columns={["Run date", "Compliance"]}
+        caption={`${caption} by ${meta.monthly ? "month" : "run"}`}
+        columns={[dateHeader, "Compliance"]}
         rows={chartData.map((d) => [d.label, `${d.rate}%`])}
       />
     </div>
