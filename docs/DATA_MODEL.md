@@ -83,6 +83,13 @@ UNIQUE(oid, version)
 Resolution status values: `RESOLVED`, `UNRESOLVED`, `EMPTY`, `ERROR`, `UNKNOWN`.
 Demo value sets are seeded with fixed UUIDs (`a0000001-0000-0000-0000-00000000000{1-4}`) and `resolution_status = 'RESOLVED'` for stable cross-migration references.
 
+> **VSAC-sourced rows (ADR-023, 2026-07-05):** the owner-run `pnpm resolve-valuesets` CLI writes real
+> VSAC (NLM UMLS) expansions into this table via `upsertResolvedValueSet` — `source='VSAC'`, real codes,
+> `status='ACTIVE'`, `resolution_status` RESOLVED (or ERROR + `resolution_error` on a failed OID),
+> `expansion_hash`, `last_resolved_at`. **Existing columns only — NO DDL** (idempotent per-OID). Descriptive
+> only (ADR-008): membership feeds the CQL `CodeService`, never `Outcome Status`. Rollback:
+> `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` (schema-qualify on the Pg ceiling).
+
 ### 3.4a `terminology_mappings`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
