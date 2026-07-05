@@ -467,8 +467,10 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
     const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
     const resolver = new StoreValueSetResolver(stores.valueSets);
-    // Execution diff only for cms122 and only when the imported VSAC rows are present; else the PR-2 estimate.
-    if (diffId === "cms122" && (await chooseDiffMode(resolver)) === "execution") {
+    // Execution diff only for cms122, only when there IS a completed population run (an empty latestRows
+    // must fall through to the estimate's no-run response, not render a misleading "0 of 0 diverge"
+    // execution report — Codex P2), and only when the imported VSAC rows are present; else the PR-2 estimate.
+    if (diffId === "cms122" && latestRows.length > 0 && (await chooseDiffMode(resolver)) === "execution") {
       // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
       // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
       // date (WorkWell's value-based cms122 is date-insensitive, but the official subset's age gate is
