@@ -90,6 +90,15 @@ Demo value sets are seeded with fixed UUIDs (`a0000001-0000-0000-0000-0000000000
 > only (ADR-008): membership feeds the CQL `CodeService`, never `Outcome Status`. Rollback:
 > `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` (schema-qualify on the Pg ceiling).
 
+> **CMS122 execution outcome diff (E14 PR-3, 2026-07-05 — NO schema change):** `GET
+> /api/measures/cms122/fidelity/diff` runs a **read-time**, subject-by-subject execution diff. It reads
+> these imported `value_sets` (`source='VSAC'`) rows — the official-subset measure resolves its VSAC OID
+> value sets from the store via `StoreValueSetResolver`, so **no runtime VSAC key is needed** and the route
+> degrades to the PR-2 estimate when the rows are absent. The bundle **enrichment** it feeds the diff
+> (`enrichForOfficialCms122`) is **harness-local synthetic data** — real VSAC-member codings appended to the
+> diff harness's own bundle copy, never persisted and never a change to `outcomes`/`cases`/the live run
+> path. Writes nothing; descriptive only (ADR-008/ADR-024).
+
 ### 3.4a `terminology_mappings`
 ```sql
 id UUID PK DEFAULT gen_random_uuid()
