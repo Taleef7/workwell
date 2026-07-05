@@ -21,7 +21,7 @@ import type {
   MeasureOutcome,
   OutcomeStatus,
 } from "../evaluate-measure.ts";
-import { MEASURES } from "./measure-registry.ts";
+import { MEASURES, type MeasureMeta } from "./measure-registry.ts";
 import { ELM_LIBRARIES } from "./elm/index.ts";
 import { buildCodeService, type ValueSetResolver } from "./value-set-resolver.ts";
 
@@ -70,8 +70,8 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
     return elm;
   }
 
-  async evaluate(input: EvaluateMeasureInput & { elm?: unknown }): Promise<MeasureOutcome> {
-    const meta = MEASURES[input.measureId];
+  async evaluate(input: EvaluateMeasureInput & { elm?: unknown; metaOverride?: MeasureMeta }): Promise<MeasureOutcome> {
+    const meta = input.metaOverride ?? MEASURES[input.measureId];
     if (!meta) throw new Error(`unknown measure '${input.measureId}'`);
     const evalDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
 
