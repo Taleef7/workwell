@@ -1022,6 +1022,99 @@ export function valueSetStoreContract(label: string, freshStore: () => Promise<V
     await store.setCodes("nope", [{ code: "Z", display: "Z", system: "urn:demo" }]); // unknown id → no-op, no throw
   });
 
+  test(`[${label}] upsertResolvedValueSet: VSAC import, idempotent by oid (incl. null version), ERROR row`, async () => {
+    const store = await freshStore();
+    const oid = "2.16.840.1.113883.3.464.1003.103.12.1001";
+
+    // (a) insert a resolved row, then re-resolve the same oid → in-place update (no duplicate).
+    await store.upsertResolvedValueSet({
+      oid,
+      name: "Diabetes",
+      version: "20240101",
+      source: "VSAC",
+      codes: [{ code: "44054006", display: "T2DM", system: "http://snomed.info/sct" }],
+      resolutionStatus: "RESOLVED",
+      resolutionError: null,
+      expansionHash: "h1",
+      lastResolvedAt: "2026-07-05T00:00:00.000Z",
+    });
+    let row = (await store.listAll()).find((v) => v.oid === oid)!;
+    assert.ok(row, "row inserted");
+    assert.equal(row.source, "VSAC");
+    assert.equal(row.resolutionStatus, "RESOLVED");
+    assert.equal(row.governanceStatus, "ACTIVE");
+    assert.equal(row.expansionHash, "h1");
+    assert.equal(row.codes.length, 1);
+    assert.equal(row.codes[0]!.code, "44054006");
+
+    await store.upsertResolvedValueSet({
+      oid,
+      name: "Diabetes",
+      version: "20240101",
+      source: "VSAC",
+      codes: [
+        { code: "44054006", display: "T2DM", system: "http://snomed.info/sct" },
+        { code: "E11.9", display: "T2DM", system: "http://hl7.org/fhir/sid/icd-10-cm" },
+      ],
+      resolutionStatus: "RESOLVED",
+      resolutionError: null,
+      expansionHash: "h2",
+      lastResolvedAt: "2026-07-05T01:00:00.000Z",
+    });
+    assert.equal((await store.listAll()).filter((v) => v.oid === oid).length, 1, "re-resolve did not duplicate");
+    assert.equal((await store.listAll()).find((v) => v.oid === oid)!.codes.length, 2, "re-resolve replaced codes");
+
+    // (b) an ERROR row records the error with no codes.
+    const errOid = "2.16.840.1.113883.3.464.1003.1003";
+    await store.upsertResolvedValueSet({
+      oid: errOid,
+      name: errOid,
+      version: null,
+      source: "VSAC",
+      codes: [],
+      resolutionStatus: "ERROR",
+      resolutionError: "500 Server Error",
+      expansionHash: null,
+      lastResolvedAt: "2026-07-05T00:00:00.000Z",
+    });
+    const errRow = (await store.listAll()).find((v) => v.oid === errOid)!;
+    assert.ok(errRow);
+    assert.equal(errRow.resolutionStatus, "ERROR");
+    assert.equal(errRow.resolutionError, "500 Server Error");
+    assert.equal(errRow.codes.length, 0);
+
+    // (c) null version (what the resolve-valuesets CLI passes) still dedupes by oid.
+    const nullOid = "2.16.840.1.113883.3.464.1003.198.12.1012";
+    await store.upsertResolvedValueSet({
+      oid: nullOid,
+      name: "Null-version set",
+      version: null,
+      source: "VSAC",
+      codes: [{ code: "1", display: "one", system: "http://snomed.info/sct" }],
+      resolutionStatus: "RESOLVED",
+      resolutionError: null,
+      expansionHash: "hn",
+      lastResolvedAt: "2026-07-05T00:00:00.000Z",
+    });
+    await store.upsertResolvedValueSet({
+      oid: nullOid,
+      name: "Null-version set",
+      version: null,
+      source: "VSAC",
+      codes: [
+        { code: "1", display: "one", system: "http://snomed.info/sct" },
+        { code: "2", display: "two", system: "http://snomed.info/sct" },
+      ],
+      resolutionStatus: "RESOLVED",
+      resolutionError: null,
+      expansionHash: "hn",
+      lastResolvedAt: "2026-07-05T01:00:00.000Z",
+    });
+    const nullMatches = (await store.listAll()).filter((v) => v.oid === nullOid);
+    assert.equal(nullMatches.length, 1, "null-version re-resolve dedupes by oid");
+    assert.equal(nullMatches[0]!.codes.length, 2);
+  });
+
   test(`[${label}] create + links: create is DRAFT/empty, link/unlink drive listByVersion`, async () => {
     const store = await freshStore();
     const id = await store.create("urn:workwell:vs:new", "New Set", null);
