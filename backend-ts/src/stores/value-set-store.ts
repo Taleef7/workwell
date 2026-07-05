@@ -48,6 +48,20 @@ export interface SeedValueSetInput {
   /** Defaults applied by the seed: resolution_status=RESOLVED, status=ACTIVE, source="WorkWell Demo". */
 }
 
+/** Input for an owner-run VSAC expansion import (resolve-valuesets CLI). Writes existing value_sets
+ *  columns only — no DDL. Idempotent by OID (matching seedValueSet's OID-dedup mechanism). */
+export interface UpsertResolvedValueSetInput {
+  oid: string;
+  name: string;
+  version: string | null;
+  source: string;
+  codes: CodeEntry[];
+  resolutionStatus: string; // "RESOLVED" | "ERROR"
+  resolutionError: string | null;
+  expansionHash: string | null;
+  lastResolvedAt: string; // ISO
+}
+
 export interface TerminologyMappingRecord {
   id: string;
   localCode: string;
@@ -86,6 +100,10 @@ export interface ValueSetStore {
    * (status, version, name, resolution_status, last_resolved_at). No-op if the id is unknown. Used by the
    * additive immunization-code backfill so it never resets operator-managed metadata. */
   setCodes(id: string, codes: CodeEntry[]): Promise<void>;
+  /** Upsert a VSAC-sourced value set by OID with real codes + resolution metadata (resolve-valuesets
+   *  CLI). Sets source/status/resolution_status/last_resolved_at/expansion_hash; status is ACTIVE.
+   *  No DDL — existing columns only. Idempotent by OID (one row per OID; a re-resolve replaces in place). */
+  upsertResolvedValueSet(input: UpsertResolvedValueSetInput): Promise<void>;
   /** Link a measure version to a value set; no-op if already linked (ON CONFLICT DO NOTHING). */
   link(measureVersionId: string, valueSetId: string): Promise<void>;
   /** Remove a measure-version↔value-set link (detach). */
