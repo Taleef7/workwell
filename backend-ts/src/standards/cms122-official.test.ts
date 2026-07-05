@@ -1,8 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import { CMS122_OFFICIAL_META, CMS122_DIABETES_OID, CMS122_HBA1C_OID } from "./cms122-official.ts";
+import {
+  CMS122_OFFICIAL_META,
+  CMS122_DIABETES_OID,
+  CMS122_HBA1C_OID,
+  CMS122_QUALIFYING_VISIT_OIDS,
+  CMS122_HOSPICE_OID,
+  CMS122_PALLIATIVE_OID,
+  enrichForOfficialCms122,
+  type Expansions,
+} from "./cms122-official.ts";
 import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { seededTargetFor } from "../run/distribution.ts";
 
 const DIABETES_CODE = { code: "44054006", system: "http://snomed.info/sct" };
 const HBA1C_CODE = { code: "4548-4", system: "http://loinc.org" };
@@ -60,4 +74,42 @@ test("official CMS122: age 80 → NOT in IPP", async () => {
   const o = await evalOfficial(bundle({ birthDate: "1944-01-01", visit: true, diabetes: true, hba1c: 7 }));
   assert.equal(define(o, "Age 18 To 75"), false);
   assert.equal(define(o, "Initial Population"), false);
+});
+
+const EXPANSIONS: Expansions = new Map([
+  [CMS122_DIABETES_OID, [DIABETES_CODE]],
+  [CMS122_HBA1C_OID, [HBA1C_CODE]],
+  [CMS122_QUALIFYING_VISIT_OIDS[0]!, [OFFICE_VISIT_CODE]],
+  [CMS122_HOSPICE_OID, [{ code: "183919006", system: "http://snomed.info/sct" }]],
+  [CMS122_PALLIATIVE_OID, [{ code: "103735009", system: "http://snomed.info/sct" }]],
+]);
+
+function cms122Bundle(externalId: string, today = "2026-06-30") {
+  const employee = EMPLOYEES.find((e) => e.externalId === externalId)!;
+  const binding = MEASURE_BINDINGS["cms122"]!;
+  const target = seededTargetFor(EMPLOYEES, binding.rateKey, externalId) ?? "MISSING_DATA";
+  const config = deriveExamConfig(binding, target);
+  return { employee, base: buildSyntheticBundle(employee, config, today) };
+}
+
+test("enrichment appends the diabetes VSAC coding without removing the urn:workwell coding", () => {
+  const { employee, base } = cms122Bundle(EMPLOYEES[0]!.externalId);
+  const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS);
+  const conds = (enriched.entry as Array<{ resource: { resourceType: string; code?: { coding: Array<{ system: string; code: string }> } } }>)
+    .filter((e) => e.resource.resourceType === "Condition");
+  const diabetes = conds.find((c) => c.resource.code?.coding.some((x) => x.system === "urn:workwell:vs:cms122-diabetes"));
+  if (diabetes) {
+    assert.ok(diabetes.resource.code!.coding.some((x) => x.system === DIABETES_CODE.system && x.code === DIABETES_CODE.code));
+  }
+});
+
+test("ADR-008 guard: WorkWell cms122 outcome is byte-identical on enriched vs un-enriched bundle", async () => {
+  const engine = new CqlExecutionEngine();
+  for (const emp of EMPLOYEES.slice(0, 30)) {
+    const { employee, base } = cms122Bundle(emp.externalId);
+    const enriched = enrichForOfficialCms122(structuredClone(base), employee, EXPANSIONS);
+    const a = await engine.evaluate({ measureId: "cms122", patientBundle: base, evaluationDate: "2026-06-30" });
+    const b = await engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: "2026-06-30" });
+    assert.equal(b.outcome, a.outcome, `WorkWell cms122 outcome changed by enrichment for ${emp.externalId}`);
+  }
 });
