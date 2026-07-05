@@ -10,6 +10,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
+import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
@@ -246,7 +247,7 @@ export default function CompliancePage() {
         {loading ? "Loading roster…" : `${rows.length} employees loaded`}
       </span>
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
+      <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
         <table className="min-w-full border-collapse text-sm">
           <thead className="bg-neutral-50 dark:bg-neutral-900/60">
             <tr>
@@ -289,6 +290,8 @@ export default function CompliancePage() {
           </tbody>
         </table>
       </div>
+
+      <RosterMobileCards columns={columns} rows={rows} loading={loading} />
 
       <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
         <span>{fmtCount(total)} employee{total === 1 ? "" : "s"}</span>

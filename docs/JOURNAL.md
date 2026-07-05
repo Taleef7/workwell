@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-07-05 — UX-11: compliance roster mobile card layout
+
+The `/compliance` roster is a wide table (sticky Employee column + N measure columns) that shows only
+~1.5 columns per phone screen. Added a per-employee **card** layout (`RosterMobileCards`) shown below the
+`md` breakpoint; the existing table stays at `md`+. CSS-only responsive switch (`hidden md:block` table +
+`md:hidden` cards) — `display:none` keeps the hidden layout out of the a11y tree, so AT + sighted users
+each see exactly one. Each card is an employee header (name link + tenant · site · role) over a `<dl>` of
+measure → `ComplianceChip`, giving an explicit measure→status pairing on mobile. Same data/filters/paging;
+chips still come verbatim from the read model (ADR-008). New component + 3 unit tests; one existing page
+test scoped to `getByRole("table")` for the now-duplicated name. No schema, no new deps; frontend tsc +
+lint + vitest + build green.
+
 ## 2026-07-04 — UX-8: program-card trends onto quality_snapshots (monthly)
 
 The `/programs` per-card trend drew from per-run history, which flat-lines under the daily scheduled
