@@ -57,16 +57,27 @@ const def = (evidence: { expressionResults: Array<{ define: string; result: unkn
   evidence.expressionResults.find((e) => e.define === name)?.result;
 
 /** Which official gate removed / reclassified this subject relative to WorkWell (first that applies). */
-function attributeGate(ev: { expressionResults: Array<{ define: string; result: unknown }> }): string {
+function attributeGate(
+  ev: { expressionResults: Array<{ define: string; result: unknown }> },
+  workwellOutcome: string,
+  officialOutcome: string,
+): string {
   if (def(ev, "Age 18 To 75") === false) return "age-18-75";
   if (def(ev, "Has Qualifying Visit") === false) return "qualifying-visit";
   if (def(ev, "Has Diabetes") === false) return "diabetes-diagnosis";
   if (def(ev, "Has Hospice") === true) return "hospice";
   if (def(ev, "Has Palliative") === true) return "palliative-care";
   if (def(ev, "HbA1c Missing") === true) return "hba1c-missing-counts-numerator";
-  return "numerator-threshold";
+  // The numerator can't diverge via the shared HbA1c observation: enrichment APPENDS the VSAC coding
+  // onto the same Observation WorkWell reads, so both sides see the same value. A fallthrough almost
+  // always means the divergence originates on the WorkWell side — e.g. a urn:workwell:* waiver the
+  // official subset doesn't model (WorkWell EXCLUDED, official not).
+  if (workwellOutcome === "EXCLUDED" && officialOutcome !== "EXCLUDED") return "workwell-exclusion";
+  return "workwell-side";
 }
 
+// Keyed on runId (only the latest run is ever queried). Assumes the imported VSAC `value_sets` don't
+// churn between run completions — the official side's expansion depends on them.
 const cache = new Map<string, ExecutionDiffReport>();
 /** @internal test hook */
 export function __clearExecutionDiffCache(): void {
@@ -79,7 +90,6 @@ export async function computeExecutionDiff(
   deps: ExecutionDiffDeps,
 ): Promise<ExecutionDiffReport> {
   const runId = rows[0]?.runId ?? null;
-  const asOf = rows[0]?.runStartedAt?.slice(0, 10) ?? deps.asOf;
   if (runId && cache.has(runId)) return cache.get(runId)!;
 
   const expansions: Expansions = new Map<string, CqlCode[]>();
@@ -100,7 +110,7 @@ export async function computeExecutionDiff(
       const workwell = await deps.engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: deps.asOf });
       const official = await deps.engine.evaluate({ measureId: "cms122_official", metaOverride: CMS122_OFFICIAL_META, patientBundle: enriched, evaluationDate: deps.asOf });
       const diverged = official.outcome !== workwell.outcome;
-      const gate = diverged ? attributeGate(official.evidence) : "";
+      const gate = diverged ? attributeGate(official.evidence, workwell.outcome, official.outcome) : "";
       if (diverged) byGate[gate] = (byGate[gate] ?? 0) + 1;
       subjects.push({ subjectId: row.subjectId, workwellOutcome: workwell.outcome, officialOutcome: official.outcome, diverged, divergenceGate: gate });
     } catch {
@@ -114,7 +124,7 @@ export async function computeExecutionDiff(
     measureId: ref.measureId,
     ecqmId: ref.ecqmId,
     runId,
-    asOf,
+    asOf: deps.asOf,
     totalSubjectsEvaluated: subjects.length,
     totalDivergent,
     byGate,
@@ -125,6 +135,9 @@ export async function computeExecutionDiff(
       `age/visit/exclusion/numerator criteria.`,
     disclaimer: DISCLAIMER,
   };
-  if (runId) cache.set(runId, report);
+  if (runId) {
+    if (cache.size >= 16) cache.clear();
+    cache.set(runId, report);
+  }
   return report;
 }
