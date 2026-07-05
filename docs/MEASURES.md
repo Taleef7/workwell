@@ -324,10 +324,28 @@ Each outcome evidence payload includes:
   `engineForEnv` is key-gated so the unkeyed path is byte-identical to today). The owner-run
   `pnpm resolve-valuesets` CLI imports official VSAC expansions into `value_sets` (`source="VSAC"`, no
   DDL; DEPLOY.md). **Descriptive only (ADR-008)** — expansion feeds the `CodeService`, never `Outcome
-  Status` (guarded by the audiogram cross-mode VSAC parity test). The official-CQL *execution* outcome
-  diff (executing the official CMS122 CQL and diffing subject-by-subject) remains the **E14 PR-3
-  follow-on** — it additionally needs the official CQL→ELM and synthetic-data enrichment
-  (encounters/hospice/frailty).
+  Status` (guarded by the audiogram cross-mode VSAC parity test).
+  **(E14 PR-3, 2026-07-05 — SHIPPED)** `GET /api/measures/cms122/fidelity/diff` now runs a **real,
+  subject-by-subject execution outcome diff** for CMS122: for each subject in the latest cms122
+  population run it builds the synthetic bundle, additively enriches it with real VSAC-member codes,
+  evaluates **both** WorkWell's authored `cms122` **and** an official-subset CMS122 measure fresh, and
+  diffs — attributing each divergence to the first differing official gate (age 18–75 / qualifying visit
+  / diabetes diagnosis / hospice / palliative / HbA1c-missing / WorkWell-side exclusion). It resolves the
+  imported VSAC `value_sets` (`source="VSAC"`) rows from the store, so **no runtime VSAC key is needed**
+  (the key was only for the one-time `pnpm resolve-valuesets` import); when those rows are absent (e.g.
+  local/dev), the route degrades to the unchanged PR-2 criteria-impact **estimate**.
+  The official measure is a **faithful official-SUBSET** — `measures/cms122_official.cql`,
+  `using FHIR '4.0.1'` in the proven value-set-retrieve style, driven by the VSAC OID value sets and
+  compiled to committed ELM (`DiabetesHbA1cPoorControlOfficialCQL-1.0.0`) — **not** the literal
+  multi-library QICore artifact. A **compile-feasibility spike (2026-07-05)** proved the literal CMS122v14
+  QICore CQL is un-compilable under the pinned JVM-free translator `@cqframework/cql` 4.0.0-beta.1 (its
+  modelinfo loader can't resolve the cross-model `FHIR.*`/`USCore.*` type refs, so the whole QICore model
+  fails to load) and that the runtime engine links no multi-library include graph; the literal path is to
+  be revisited when the translator ships a stable multi-model release. The diff is **descriptive only
+  (ADR-008)** — it writes nothing and never sets an `Outcome Status`; WorkWell's cms122 outcomes stay
+  byte-identical (the enrichment is harness-local — it appends codings to a copy for the diff harness, it
+  is not a change to the live `fhir-bundle-builder`). The **GMI numerator alternative** remains a
+  documented gap and the diff is **CMS122-only**.
 - All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
