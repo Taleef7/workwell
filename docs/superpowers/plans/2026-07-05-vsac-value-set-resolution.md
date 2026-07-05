@@ -1123,7 +1123,7 @@ git commit -m "docs(vsac): ADR + ARCHITECTURE/DATA_MODEL/DEPLOY/MEASURES/JOURNAL
 - [ ] `cd backend-ts && pnpm typecheck` — clean.
 - [ ] `cd backend-ts && pnpm test` — all pass (prior count + new VSAC tests; 1 pg-skip expected).
 - [ ] `grep -rn "WORKWELL_VSAC" backend-ts/.env.example docs/DEPLOY.md` — documented.
-- [ ] No secret committed: `git log -p | grep -i "REDACTED-KEY-PREFIX" || echo "clean"` → prints `clean`.
+- [ ] No secret committed: grep the branch diff for the UMLS API key prefix → no match. (Never write any part of the key into a tracked file.)
 - [ ] Confirm audiogram parity test present + passing (the ADR-008 gate).
 
 ## Self-review notes (traceability to spec)
