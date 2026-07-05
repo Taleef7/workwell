@@ -1,0 +1,28 @@
+/**
+ * Config-driven ValueSetResolver selection (mirrors resolveDataSource/resolveForecaster): the plain
+ * local StoreValueSetResolver by default (today's behavior — inert), and the CompositeValueSetResolver
+ * (VSAC for real OIDs, local fallback for urn:workwell:*) only when WORKWELL_VSAC_API_KEY is set.
+ * Inert-unless-configured: setting the key never changes a current measure's outcome (parity-tested).
+ */
+import type { ValueSetResolver } from "./value-set-resolver.ts";
+import { StoreValueSetResolver } from "./value-set-resolver.ts";
+import { VsacValueSetResolver } from "./vsac-value-set-resolver.ts";
+import { CompositeValueSetResolver } from "./composite-value-set-resolver.ts";
+import { httpVsacClient } from "./vsac-client.ts";
+import type { ValueSetStore } from "../../stores/value-set-store.ts";
+
+export interface VsacEnv {
+  WORKWELL_VSAC_API_KEY?: string;
+  WORKWELL_VSAC_BASE_URL?: string;
+}
+
+const DEFAULT_BASE = "https://cts.nlm.nih.gov/fhir";
+
+export function resolveValueSetResolver(env: VsacEnv, store: ValueSetStore): ValueSetResolver {
+  const apiKey = (env.WORKWELL_VSAC_API_KEY ?? "").trim();
+  const storeResolver = new StoreValueSetResolver(store);
+  if (!apiKey) return storeResolver;
+  const baseUrl = (env.WORKWELL_VSAC_BASE_URL ?? "").trim() || DEFAULT_BASE;
+  const vsac = new VsacValueSetResolver(httpVsacClient({ baseUrl, apiKey }));
+  return new CompositeValueSetResolver(vsac, storeResolver);
+}
