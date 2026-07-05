@@ -206,6 +206,37 @@ skips months that already have snapshots).
 DELETE FROM workwell_spike.quality_snapshots;
 ```
 
+### Resolving VSAC value sets (ADR-023, on-demand, NOT auto-run on deploy)
+
+`pnpm resolve-valuesets` imports **real VSAC (NLM UMLS) value-set expansions** into `value_sets` so the
+CQL engine can resolve official eCQM value sets against authoritative terminology instead of only the
+locally-seeded codes — the on-ramp for the E14 official-CQL work. It `$expand`s each target OID via the
+live NLM FHIR terminology service and upserts the codes (`source="VSAC"`, RESOLVED; a failed OID → an
+ERROR row + continue), audited `VALUE_SETS_RESOLVED` per OID (existing `value_sets` columns only — **no
+DDL**; DATA_MODEL §3.4). Default target = the 21 CMS122v14 reference OIDs; `--oid <oid>` (repeatable) /
+`--measure cms122` override. On-demand, owner-run, **not** auto-run on deploy. Run against Neon from
+`backend-ts/` (honors `DATABASE_URL`; requires the VSAC key):
+
+```bash
+cd backend-ts
+DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm resolve-valuesets
+```
+
+**Descriptive only — changes no current outcome.** The runtime composite resolver still falls back to the
+local store for the synthetic measures' `urn:workwell:*` references, so importing VSAC codes does not shift
+any measure's `Outcome Status` (ADR-008/ADR-023; audiogram cross-mode parity test). VSAC is **inert on the
+demo stack unless the key is set** — `resolveValueSetResolver`/`engineForEnv` are key-gated, so with no
+`WORKWELL_VSAC_API_KEY` the evaluation path is byte-identical to today. **If VSAC is enabled in the deployed
+env,** add the UMLS API key as a GitHub secret `WORKWELL_VSAC_API_KEY_TWH` and map it onto the backend
+container env in `deploy-twh-mieweb.yml` (analogous to `DATABASE_URL_TWH` → `DATABASE_URL`,
+`WORKWELL_AUTH_JWT_SECRET_TWH` → `WORKWELL_AUTH_JWT_SECRET`); the **demo stack leaves the key unset**.
+
+**Rollback (reversible) — remove the imported rows** (schema-qualify on the Pg ceiling):
+
+```sql
+DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';
+```
+
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
@@ -298,6 +329,8 @@ shows all services `Up`).
 | `WORKWELL_EMAIL_SENDGRID_API_KEY` | Backend | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
 | `WORKWELL_EMAIL_FROM_ADDRESS` | Backend | From address for outreach (default `noreply@workwell-demo.dev`). |
 | `WORKWELL_EMAIL_FROM_NAME` | Backend | From display name (default `WorkWell Measure Studio`). |
+| `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
+| `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
 
 `Where = Backend` vars are container environment on the MIE backend container (mapped from the
 `*_TWH` GitHub secrets where applicable); `Where = Frontend` vars are build-args/env baked into

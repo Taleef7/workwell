@@ -10,6 +10,7 @@ import type {
   CreateTerminologyMappingInput,
   SeedValueSetInput,
   TerminologyMappingRecord,
+  UpsertResolvedValueSetInput,
   ValueSetRecord,
   ValueSetStore,
 } from "../value-set-store.ts";
@@ -129,6 +130,44 @@ export class PgValueSetStore implements ValueSetStore {
     await this.pool.query(
       `UPDATE ${SPIKE_SCHEMA}.value_sets SET codes_json = $1::jsonb, code_systems = $2 WHERE id = $3`,
       [JSON.stringify(codes), systems, id],
+    );
+  }
+
+  async upsertResolvedValueSet(input: UpsertResolvedValueSetInput): Promise<void> {
+    const systems = [...new Set(input.codes.map((c) => c.system).filter(Boolean))].sort();
+    // Idempotent by OID: reuse the existing row's id (stable across re-resolves) and drop any other
+    // rows sharing this OID, then upsert on id — the same OID-dedup mechanism seedValueSet uses
+    // (DELETE-by-oid + ON CONFLICT(id)). Keying by OID means a null version still dedupes.
+    const { rows: existing } = await this.pool.query<{ id: string }>(
+      `SELECT id FROM ${SPIKE_SCHEMA}.value_sets WHERE oid = $1 LIMIT 1`,
+      [input.oid],
+    );
+    const id = existing[0]?.id ?? crypto.randomUUID();
+    await this.pool.query(`DELETE FROM ${SPIKE_SCHEMA}.value_sets WHERE oid = $1 AND id <> $2`, [input.oid, id]);
+    await this.pool.query(
+      `INSERT INTO ${SPIKE_SCHEMA}.value_sets
+         (id, oid, name, version, codes_json, code_systems, source, status,
+          resolution_status, resolution_error, expansion_hash, last_resolved_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, 'ACTIVE', $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET
+         oid = EXCLUDED.oid, name = EXCLUDED.name, version = EXCLUDED.version,
+         codes_json = EXCLUDED.codes_json, code_systems = EXCLUDED.code_systems,
+         source = EXCLUDED.source, status = 'ACTIVE', resolution_status = EXCLUDED.resolution_status,
+         resolution_error = EXCLUDED.resolution_error, expansion_hash = EXCLUDED.expansion_hash,
+         last_resolved_at = EXCLUDED.last_resolved_at`,
+      [
+        id,
+        input.oid,
+        input.name,
+        input.version,
+        JSON.stringify(input.codes),
+        systems,
+        input.source,
+        input.resolutionStatus,
+        input.resolutionError,
+        input.expansionHash,
+        input.lastResolvedAt,
+      ],
     );
   }
 

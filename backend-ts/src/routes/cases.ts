@@ -20,8 +20,7 @@ import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
@@ -55,8 +54,6 @@ interface CasesEnv {
   WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
 }
 
-const engine: EvaluateMeasureBinding = new CqlExecutionEngine();
-
 async function caseStore(env: CasesEnv): Promise<CaseStore> {
   return (await getStores(env)).cases;
 }
@@ -71,6 +68,7 @@ async function actionDeps(env: CasesEnv): Promise<CaseActionDeps & { channels: (
 }
 async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
   const s = await getStores(env);
+  const engine = await engineForEnv(env);
   return { cases: s.cases, events: s.events, outcomes: s.outcomes, runStore: s.runs, engine };
 }
 async function evidenceDeps(env: CasesEnv): Promise<EvidenceDeps> {
