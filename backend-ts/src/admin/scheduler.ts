@@ -17,7 +17,7 @@ import type { Stores, StoresEnv } from "../stores/factory.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { planManualRun, finishOrFail } from "../run/run-pipeline.ts";
@@ -210,22 +210,23 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Shared process-level engine instance (production use)
+// Production wrapper
 // ---------------------------------------------------------------------------
 
-const _engine = new CqlExecutionEngine();
-
 /**
- * Production wrapper: resolve stores + segments, then call runTick.
+ * Production wrapper: resolve stores + segments + the env-selected engine, then call runTick.
+ * The engine carries the VSAC ValueSetResolver when WORKWELL_VSAC_API_KEY is set (key-gated;
+ * inline path otherwise) — so the nightly ALL_PROGRAMS run honors the same resolver as the routes.
  * Errors are logged but never rethrown — safe to hand to ctx.waitUntil.
  */
 export async function schedulerTick(env: StoresEnv): Promise<void> {
   try {
     await ensureSegmentSeed(env);
     const stores = await getStores(env);
+    const engine = await engineForEnv(env);
     const allSegments = await stores.segments.listSegments();
     const enabledSegments = allSegments.filter((s) => s.enabled);
-    await runTick({ stores, engine: _engine, segments: enabledSegments });
+    await runTick({ stores, engine, segments: enabledSegments });
   } catch (err) {
     console.error("[scheduler] tick error:", err);
   }

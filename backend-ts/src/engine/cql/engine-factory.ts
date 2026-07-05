@@ -25,6 +25,12 @@ export function engineForEnv(env: StoresEnv): Promise<CqlExecutionEngine> {
       return new CqlExecutionEngine({ valueSetResolver: resolveValueSetResolver(vsacEnv, stores.valueSets) });
     })();
     cache.set(env as object, hit);
+    // If the keyed build rejects (e.g. a transient ceiling blip in getStores), evict the rejected
+    // promise so the next request retries a fresh build instead of replaying the failure (mirrors
+    // getStores' eviction in factory.ts). The unkeyed branch resolves synchronously and never rejects.
+    void hit.catch(() => {
+      if (cache.get(env as object) === hit) cache.delete(env as object);
+    });
   }
   return hit;
 }
