@@ -221,6 +221,57 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }));
   }
 
+  async listLatestPopulationOutcomes(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {
+    // Floor mirror of the Pg ceiling (perf #233 residual). SQLite has no DISTINCT ON, so a
+    // ROW_NUMBER() window (SQLite ≥ 3.25) partitions the qualifying (measure, run) pairs by measure,
+    // newest run first (started_at DESC, run_id DESC), and rn = 1 selects each measure's winning run;
+    // the outer join then fetches only that run's outcomes for that measure. Same completed/population
+    // (case-insensitive) + measure/date/exclude predicates as the ceiling, so the two stores return
+    // the same result set (asserted by the store contract).
+    const inner: string[] = [
+      "UPPER(r2.scope_type) NOT IN ('CASE','EMPLOYEE')",
+      "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+    ];
+    const binds: unknown[] = [];
+    if (filter.measureId) (inner.push("o2.measure_id = ?"), binds.push(filter.measureId));
+    if (filter.from) (inner.push("substr(r2.started_at, 1, 10) >= ?"), binds.push(filter.from));
+    if (filter.to) (inner.push("substr(r2.started_at, 1, 10) <= ?"), binds.push(filter.to));
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      inner.push(`o2.run_id IN (SELECT id FROM runs WHERE triggered_by NOT IN (${excludedTriggers.map(() => "?").join(", ")}))`);
+      binds.push(...excludedTriggers);
+    }
+    const { results } = await this.db
+      .prepare(
+        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+           FROM outcomes o
+           JOIN runs r ON r.id = o.run_id
+           JOIN (
+             SELECT measure_id, run_id FROM (
+               SELECT o2.measure_id AS measure_id, o2.run_id AS run_id,
+                      ROW_NUMBER() OVER (PARTITION BY o2.measure_id ORDER BY r2.started_at DESC, o2.run_id DESC) AS rn
+                 FROM outcomes o2
+                 JOIN runs r2 ON r2.id = o2.run_id
+                WHERE ${inner.join(" AND ")}
+             ) ranked WHERE rn = 1
+           ) latest ON latest.measure_id = o.measure_id AND latest.run_id = o.run_id`,
+      )
+      .bind(...binds)
+      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string }>();
+    return (results ?? []).map((r) => ({
+      runId: r.run_id,
+      runStartedAt: r.run_started_at,
+      runScopeType: r.run_scope_type,
+      runStatus: r.run_status,
+      runTriggeredBy: r.run_triggered_by ?? "manual",
+      subjectId: r.subject_id,
+      measureId: r.measure_id,
+      status: r.status,
+    }));
+  }
+
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
     const cached = this.scaleCache.get(runId);
     if (cached) return cached;

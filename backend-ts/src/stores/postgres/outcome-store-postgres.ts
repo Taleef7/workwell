@@ -244,6 +244,64 @@ export class PgOutcomeStore implements OutcomeStore {
     }));
   }
 
+  async listLatestPopulationOutcomes(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> {
+    // perf #233 residual: reduce "latest terminal population run per measure" IN SQL instead of
+    // shipping every population run's rows across history and reducing in JS (`latestRunRows`). A
+    // `DISTINCT ON (measure_id) … ORDER BY started_at DESC, run_id DESC` inner query resolves each
+    // measure's winning (measure, run) pair (O(measures) rows), then the outer join fetches only that
+    // run's outcomes for that measure. The excludeScale/excludeTrendHistory exclusion uses the same
+    // `run_id = ANY(<qualifying ids>)` index form as listOutcomesWithRun; the completed/population
+    // predicates mirror the JS `isCompletedRun`/`isPopulationRun` (both case-insensitive — the Java
+    // era persisted some scope/status values lowercase).
+    const inner: string[] = [
+      "UPPER(r2.scope_type) NOT IN ('CASE','EMPLOYEE')",
+      "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+    ];
+    const binds: unknown[] = [];
+    if (filter.measureId) inner.push(`o2.measure_id = $${binds.push(filter.measureId)}`);
+    if (filter.from) inner.push(`(r2.started_at AT TIME ZONE 'UTC')::date >= $${binds.push(filter.from)}::date`);
+    if (filter.to) inner.push(`(r2.started_at AT TIME ZONE 'UTC')::date <= $${binds.push(filter.to)}::date`);
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      const ph = excludedTriggers.map((v) => `$${binds.push(v)}`).join(", ");
+      inner.push(`o2.run_id = ANY (ARRAY(SELECT id FROM ${SPIKE_SCHEMA}.runs WHERE triggered_by NOT IN (${ph})))`);
+    }
+    const { rows } = await this.pool.query<{
+      run_id: string;
+      run_started_at: Date | string;
+      run_scope_type: string;
+      run_status: string;
+      run_triggered_by: string | null;
+      subject_id: string;
+      measure_id: string;
+      status: string;
+    }>(
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+         FROM ${SPIKE_SCHEMA}.outcomes o
+         JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
+         JOIN (
+           SELECT DISTINCT ON (o2.measure_id) o2.measure_id AS measure_id, o2.run_id AS run_id
+             FROM ${SPIKE_SCHEMA}.outcomes o2
+             JOIN ${SPIKE_SCHEMA}.runs r2 ON r2.id = o2.run_id
+            WHERE ${inner.join(" AND ")}
+            ORDER BY o2.measure_id, r2.started_at DESC, o2.run_id DESC
+         ) latest ON latest.measure_id = o.measure_id AND latest.run_id = o.run_id`,
+      binds,
+    );
+    return rows.map((r) => ({
+      runId: r.run_id,
+      runStartedAt: r.run_started_at instanceof Date ? r.run_started_at.toISOString() : r.run_started_at,
+      runScopeType: r.run_scope_type,
+      runStatus: r.run_status,
+      runTriggeredBy: r.run_triggered_by ?? "manual",
+      subjectId: r.subject_id,
+      measureId: r.measure_id,
+      status: r.status,
+    }));
+  }
+
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {
     if (!isUuid(runId)) return []; // guard like the sibling reads (avoid invalid-uuid-syntax errors)
     const cached = this.scaleCache.get(runId);

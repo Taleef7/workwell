@@ -20,6 +20,7 @@ import { seededTargetFor } from "../run/distribution.ts";
 
 const DIABETES_CODE = { code: "44054006", system: "http://snomed.info/sct" };
 const HBA1C_CODE = { code: "4548-4", system: "http://loinc.org" };
+const GMI_CODE = { code: "97506-0", system: "http://loinc.org" };
 const OFFICE_VISIT_CODE = { code: "99213", system: "http://www.ama-assn.org/go/cpt" };
 const fixtureResolver: ValueSetResolver = {
   expand: (oid) =>
@@ -33,6 +34,9 @@ const fixtureResolver: ValueSetResolver = {
 
 function bundle(parts: {
   birthDate: string; visit?: boolean; diabetes?: boolean; hba1c?: number | "missing" | null;
+  hba1cDate?: string; // YYYY-MM-DD for the HbA1c Observation effective date (default in-period)
+  gmi?: number | null; // a Glucose Management Indicator (LOINC 97506-0) result value
+  gmiDate?: string; // YYYY-MM-DD for the GMI Observation effective date (default in-period, newer than the HbA1c default)
   visitDate?: string; // YYYY-MM-DD for the qualifying-visit Encounter's single-day period (default in-period)
 }): unknown {
   const entry: Array<{ resource: unknown }> = [
@@ -41,7 +45,10 @@ function bundle(parts: {
   const vd = parts.visitDate ?? "2026-03-01";
   if (parts.visit) entry.push({ resource: { resourceType: "Encounter", id: "e1", status: "finished", subject: { reference: "Patient/p1" }, type: [{ coding: [OFFICE_VISIT_CODE] }], period: { start: `${vd}T00:00:00`, end: `${vd}T01:00:00` } } });
   if (parts.diabetes) entry.push({ resource: { resourceType: "Condition", id: "c1", subject: { reference: "Patient/p1" }, code: { coding: [DIABETES_CODE] } } });
-  if (parts.hba1c != null && parts.hba1c !== "missing") entry.push({ resource: { resourceType: "Observation", id: "o1", status: "final", subject: { reference: "Patient/p1" }, code: { coding: [HBA1C_CODE] }, effectiveDateTime: "2026-04-01T00:00:00", valueQuantity: { value: parts.hba1c, unit: "%", system: "http://unitsofmeasure.org", code: "%" } } });
+  const hd = parts.hba1cDate ?? "2026-04-01";
+  if (parts.hba1c != null && parts.hba1c !== "missing") entry.push({ resource: { resourceType: "Observation", id: "o1", status: "final", subject: { reference: "Patient/p1" }, code: { coding: [HBA1C_CODE] }, effectiveDateTime: `${hd}T00:00:00`, valueQuantity: { value: parts.hba1c, unit: "%", system: "http://unitsofmeasure.org", code: "%" } } });
+  const gd = parts.gmiDate ?? "2026-05-01";
+  if (parts.gmi != null) entry.push({ resource: { resourceType: "Observation", id: "gmi1", status: "final", subject: { reference: "Patient/p1" }, code: { coding: [GMI_CODE] }, effectiveDateTime: `${gd}T00:00:00`, valueQuantity: { value: parts.gmi, unit: "%", system: "http://unitsofmeasure.org", code: "%" } } });
   return { resourceType: "Bundle", type: "collection", entry };
 }
 
@@ -62,10 +69,33 @@ test("official CMS122: in-IPP, HbA1c 10 → OVERDUE (numerator)", async () => {
   const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: 10 }));
   assert.equal(o.outcome, "OVERDUE");
 });
-test("official CMS122: in-IPP, HbA1c missing → OVERDUE (missing counts as numerator)", async () => {
+test("official CMS122: in-IPP, no glycemic assessment (HbA1c or GMI) → OVERDUE (missing counts as numerator)", async () => {
   const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: "missing" }));
-  assert.equal(define(o, "HbA1c Missing"), true);
+  assert.equal(define(o, "Glycemic Assessment Missing"), true);
   assert.equal(o.outcome, "OVERDUE");
+});
+// GMI (Glucose Management Indicator, LOINC 97506-0) is the official numerator's HbA1c-equivalent
+// glycemic-status assessment. The numerator uses the most recent of HbA1c OR GMI within the period.
+test("official CMS122: in-IPP, GMI > 9 and no HbA1c → OVERDUE (numerator via GMI)", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, gmi: 10 }));
+  assert.equal(define(o, "Glycemic Assessment Missing"), false);
+  assert.equal(define(o, "Most Recent Glycemic Value"), 10);
+  assert.equal(o.outcome, "OVERDUE");
+});
+test("official CMS122: in-IPP, GMI ≤ 9 and no HbA1c → COMPLIANT (not numerator)", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, gmi: 7 }));
+  assert.equal(define(o, "Glycemic Assessment Missing"), false);
+  assert.equal(o.outcome, "COMPLIANT");
+});
+test("official CMS122: older HbA1c ≤ 9 and newer GMI > 9 → OVERDUE (most-recent glycemic assessment wins)", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: 7, hba1cDate: "2026-01-01", gmi: 10, gmiDate: "2026-05-01" }));
+  assert.equal(define(o, "Most Recent Glycemic Value"), 10);
+  assert.equal(o.outcome, "OVERDUE");
+});
+test("official CMS122: newer HbA1c ≤ 9 and older GMI > 9 → COMPLIANT (most-recent glycemic assessment wins)", async () => {
+  const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: true, diabetes: true, hba1c: 7, hba1cDate: "2026-05-01", gmi: 10, gmiDate: "2026-01-01" }));
+  assert.equal(define(o, "Most Recent Glycemic Value"), 7);
+  assert.equal(o.outcome, "COMPLIANT");
 });
 test("official CMS122: no qualifying visit → NOT in IPP", async () => {
   const o = await evalOfficial(bundle({ birthDate: "1980-01-01", visit: false, diabetes: true, hba1c: 7 }));

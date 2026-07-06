@@ -69,12 +69,17 @@ function attributeGate(
   if (def(ev, "Has Diabetes") === false) return "diabetes-diagnosis";
   if (def(ev, "Has Hospice") === true) return "hospice";
   if (def(ev, "Has Palliative") === true) return "palliative-care";
-  if (def(ev, "HbA1c Missing") === true) return "hba1c-missing-counts-numerator";
-  // The numerator can't diverge via the shared HbA1c observation: enrichment APPENDS the VSAC coding
-  // onto the same Observation WorkWell reads, so both sides see the same value. A fallthrough almost
-  // always means the divergence originates on the WorkWell side — e.g. a urn:workwell:* waiver the
-  // official subset doesn't model (WorkWell EXCLUDED, official not).
+  if (def(ev, "Glycemic Assessment Missing") === true) return "glycemic-assessment-missing-counts-numerator";
+  // WorkWell excludes the subject (a urn:workwell:* waiver the official subset doesn't model) while the
+  // official measure keeps them — attribute to the WorkWell-side exclusion, not to whatever numerator the
+  // official then computes.
   if (workwellOutcome === "EXCLUDED" && officialOutcome !== "EXCLUDED") return "workwell-exclusion";
+  // A poor GMI (LOINC 97506-0, > 9%) drove the official numerator. WorkWell can't see the GMI observation
+  // (it reads only the urn:workwell HbA1c), and the shared HbA1c can't diverge this way (both sides read
+  // the same observation + value), so a value-driven official OVERDUE reaching here is GMI-driven — the
+  // GMI alternative this diff is meant to surface (Codex P2; was previously mislabeled "workwell-side").
+  if (officialOutcome === "OVERDUE") return "gmi-poor-control";
+  // Any remaining divergence originates on the WorkWell side (a urn:workwell define the subset omits).
   return "workwell-side";
 }
 

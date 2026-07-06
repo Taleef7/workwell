@@ -126,6 +126,25 @@ export interface OutcomeStore {
    */
   listOutcomesWithRun(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]>;
   /**
+   * The outcomes of ONLY the latest terminal population run per measure (perf #233 residual). Same
+   * `OutcomeWithRun` projection as {@link listOutcomesWithRun} and the same measure/date/exclude
+   * filters, but the "latest completed population run per measure" reduction is pushed INTO SQL
+   * instead of fetching every population run's rows across all history and reducing in JS via
+   * `latestRunRows`. "Population" = a non-`CASE`/`EMPLOYEE` scope (case-insensitive); "terminal" =
+   * `COMPLETED`/`PARTIAL_FAILURE` (case-insensitive) — the exact predicates the roster + hierarchy
+   * read models already apply after `listOutcomesWithRun`. Per measure the newest run wins by
+   * `started_at DESC`, tie-broken by `run_id DESC`.
+   *
+   * The result is a strict subset of `listOutcomesWithRun(filter).filter(pop && completed)` — exactly
+   * the rows that survive that filter → group-by-measure → `latestRunRows` — so a caller that feeds
+   * this through the same downstream reduction gets a byte-identical result while shipping
+   * O(measures × subjects-of-one-run) rows over the wire instead of O(all population runs × subjects).
+   * (On a true `started_at` tie the JS reference's insertion-order tiebreak and this method's
+   * `run_id DESC` tiebreak could pick different runs; sequential run creation makes exact ties
+   * unreachable in practice.)
+   */
+  listLatestPopulationOutcomes(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]>;
+  /**
    * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence —
    * the per-subject history the risk-outlook analytics group in the app.
    */
