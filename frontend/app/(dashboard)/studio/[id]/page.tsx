@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Button, Input } from "@mieweb/ui";
 import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass, normalizeEnumValue } from "@/lib/status";
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
@@ -13,6 +12,7 @@ import { useMeasureDetail } from "@/features/studio/hooks/useMeasureDetail";
 import { useValueSets } from "@/features/studio/hooks/useValueSets";
 import { useOshaReferences } from "@/features/studio/hooks/useOshaReferences";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
+import { VersionActions } from "@/features/studio/components/VersionActions";
 import { SpecTab } from "@/features/studio/components/SpecTab";
 import { CqlTab } from "@/features/studio/components/CqlTab";
 import { RuleBuilderTab } from "@/features/studio/components/RuleBuilderTab";
@@ -145,20 +145,18 @@ export default function StudioMeasurePage() {
               onError={(message) => setError(message || null)}
             />
           ) : null}
-          {canClone ? (
-            <>
-            <Input
-              label="Change summary"
-              hideLabel
-              placeholder="Change summary (required)"
-              value={changeSummary}
-              onChange={(e) => setChangeSummary(e.target.value)}
-            />
-            <Button type="button" variant="outline" size="sm" onClick={() => void createNewVersion()}>
-              New Version
-            </Button>
-            </>
-          ) : null}
+          {/* UX-15: the version-related controls (change summary + New Version clone) are grouped into
+              a single "Version actions" dropdown menu so they read as one unit instead of scattered
+              header items. Behaviour, validation ("required" lives in createNewVersion), and role-gating
+              (canClone) are unchanged. */}
+          <VersionActions
+            version={measure?.version}
+            statusLabel={measure ? labelFor(MEASURE_STATUS_LABELS, measure.status) : undefined}
+            canClone={canClone}
+            changeSummary={changeSummary}
+            onChangeSummaryChange={setChangeSummary}
+            onCreateNewVersion={createNewVersion}
+          />
         </div>
       </div>
 
