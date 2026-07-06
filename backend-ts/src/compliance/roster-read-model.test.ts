@@ -5,6 +5,16 @@ import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.t
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
 import { buildRoster, type RosterCellCache } from "./roster-read-model.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+
+/** The store's latest-terminal-population-run-per-measure reduction, applied to fixture rows so the
+ *  fake mirrors production semantics (perf #233). */
+function reduceLatest(withRun: OutcomeWithRun[]): OutcomeWithRun[] {
+  const pop = withRun.filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
+  const byMeasure = new Map<string, OutcomeWithRun[]>();
+  for (const r of pop) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+  return [...byMeasure.values()].flatMap((rows) => latestRunRows(rows));
+}
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
 // bottom of the roster regardless of data (UX-1), so they'd fall off page 1 — use a real employee here.
@@ -31,6 +41,7 @@ function segmentFor(measureIds: string[], opts: { enabled?: boolean } = {}): Hyd
 function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecord[]>): OutcomeStore {
   return {
     listOutcomesWithRun: async () => withRun,
+    listLatestPopulationOutcomes: async () => reduceLatest(withRun),
     listOutcomes: async (runId: string) => byRun[runId] ?? [],
     recordOutcome: async () => { throw new Error("unused"); },
     recordOutcomes: async () => { throw new Error("unused"); },

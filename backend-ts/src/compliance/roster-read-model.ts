@@ -104,8 +104,13 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // excludeTrendHistory (Fable M16): the backdated synthetic trend rows are always older than each
   // measure's latest real run (the seeding invariant), so `latestRunRows` never picks them — dropping
   // them in SQL just avoids fetching-then-discarding a growing block of rows.
-  const popRows = (await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true })).filter(
-    (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+  // perf #233 residual: reduce to the latest terminal population run per measure IN SQL rather than
+  // fetching every population run's rows across all history and reducing in JS. The returned set is
+  // exactly `listOutcomesWithRun(...).filter(pop && completed)` → group-by-measure → `latestRunRows`
+  // (store-contract asserts the equivalence), so the downstream grouping + `latestRunRows` below stay
+  // unchanged (now a passthrough — one run per measure) and the output is byte-identical.
+  const popRows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
+    (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus), // redundant guard: the store already applies both (defense-in-depth)
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of popRows) {
