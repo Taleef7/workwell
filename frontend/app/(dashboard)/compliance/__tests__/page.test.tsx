@@ -1,7 +1,8 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
@@ -152,6 +153,77 @@ describe("CompliancePage", () => {
       const lastUrl = String(getWithHeaders.mock.calls.at(-1)?.[0] ?? "");
       expect(lastUrl).toContain("segment=s1");
     });
+  });
+
+  it("UX-3: optimistic panel caching — switching A→B→A serves A from cache (no third fetch, no skeleton)", async () => {
+    // Panel-aware mock: each panel returns a distinct employee so we can tell which data is on screen.
+    const rosterFor = (panel: string) => ({
+      data: {
+        panel,
+        columns: [{ measureId: "m1", name: "Measure One", complianceClass: "RECURRING" }],
+        rows: [
+          {
+            subject: { externalId: `emp-${panel}`, name: `Person ${panel}`, role: "Nurse", site: "HQ" },
+            cells: { m1: { status: "COMPLIANT", method: "ok" } }
+          }
+        ]
+      },
+      headers: new Headers({ "X-Total-Count": "1" })
+    });
+    getWithHeaders.mockReset().mockImplementation((url: string) => {
+      const panel = /panel=(\w+)/.exec(String(url))?.[1] ?? "immunizations";
+      return Promise.resolve(rosterFor(panel));
+    });
+    const immFetches = () =>
+      getWithHeaders.mock.calls.filter((c) => String(c[0]).includes("panel=immunizations")).length;
+
+    render(<CompliancePage />);
+    const table = () => screen.getByRole("table");
+    await waitFor(() => expect(within(table()).getByText("Person immunizations")).toBeInTheDocument());
+    expect(immFetches()).toBe(1);
+
+    // A → B
+    await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "osha");
+    await waitFor(() => expect(within(table()).getByText("Person osha")).toBeInTheDocument());
+
+    // B → A: cached, so no third fetch for immunizations and A's rows paint immediately (no "Loading…").
+    await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "immunizations");
+    await waitFor(() => expect(within(table()).getByText("Person immunizations")).toBeInTheDocument());
+    expect(within(table()).queryByText("Loading…")).not.toBeInTheDocument();
+    expect(immFetches()).toBe(1); // still one — the return trip was served from the session cache
+  });
+
+  it("UX-3: shows the >3s 'Crunching…' hint while a slow load is in flight, then clears it", async () => {
+    vi.useFakeTimers();
+    try {
+      // A load that never resolves keeps `loading` true so the >3s timer can fire.
+      getWithHeaders.mockReset().mockReturnValue(new Promise<never>(() => {}));
+      render(<CompliancePage />);
+      // Flush the load-defer setTimeout(0) so the fetch starts and `loading` flips true.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.queryByText(SLOW_LOAD_HINT)).not.toBeInTheDocument();
+
+      // Cross the ~3s threshold → the honest hint appears (visible + announced via aria-live).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100);
+      });
+      expect(screen.getByText(SLOW_LOAD_HINT)).toBeInTheDocument();
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent(/Crunching/);
+
+      // Resolve the load → the hint clears.
+      await act(async () => {
+        getWithHeaders.mockReset().mockResolvedValue(rosterImmun);
+        // Trigger a re-fetch resolution by advancing past the debounce so a fresh load can settle.
+        window.dispatchEvent(new Event("ww:run-complete"));
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.queryByText(SLOW_LOAD_HINT)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows an empty-state row when no employees match", async () => {
