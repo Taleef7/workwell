@@ -22,6 +22,8 @@ import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
 import type { PersonLinkStore } from "./person-link-store.ts";
+import type { OutcomeMeasureFilter, OutcomeWithRun } from "./outcome-store.ts";
+import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
   scopeType: "MEASURE",
@@ -393,6 +395,66 @@ export function outcomeStoreContract(
     const kept = await outcomeStore.listOutcomesWithRun({ excludeTrendHistory: true });
     assert.equal(kept.length, 1, "trend-history row excluded in SQL");
     assert.equal(kept[0]!.runId, real.id, "only the real run's row survives");
+  });
+
+  test(`[${label}] listLatestPopulationOutcomes == JS reduction of listOutcomesWithRun (perf #233)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    // The production reference: the exact reduction the roster + hierarchy read models apply after
+    // listOutcomesWithRun — filter to terminal population runs, group by measure, keep the latest run.
+    const jsReference = async (filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]> => {
+      const pop = (await outcomeStore.listOutcomesWithRun(filter)).filter(
+        (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus),
+      );
+      const byMeasure = new Map<string, OutcomeWithRun[]>();
+      for (const r of pop) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+      const out: OutcomeWithRun[] = [];
+      for (const rows of byMeasure.values()) out.push(...latestRunRows(rows));
+      return out;
+    };
+    const key = (r: OutcomeWithRun) => `${r.measureId}|${r.runId}|${r.subjectId}|${r.status}`;
+    const norm = (rows: OutcomeWithRun[]) => rows.map(key).sort();
+
+    // Multiple historical runs per measure (distinct started_at so "latest" is unambiguous), plus the
+    // runs the reduction must reject: an in-flight RUNNING run, a CASE rerun, a scale run, a trend run.
+    const mkRun = (scopeId: string, startedAt: string, over: Partial<CreateRunInput> = {}) =>
+      runStore.createRun({ ...sampleRun(scopeId), status: "COMPLETED", startedAt, ...over });
+    const aOld = await mkRun("audiogram", "2026-03-01T00:00:00.000Z");
+    const aNew = await mkRun("audiogram", "2026-04-01T00:00:00.000Z"); // latest COMPLETED population run
+    const aRunning = await mkRun("audiogram", "2026-05-01T00:00:00.000Z", { status: "RUNNING" });
+    const aCase = await mkRun("audiogram", "2026-06-01T00:00:00.000Z", { scopeType: "CASE" });
+    const haz = await mkRun("hazwoper", "2026-03-15T00:00:00.000Z");
+    const scale = await mkRun("audiogram", "2026-07-01T00:00:00.000Z", { triggeredBy: "seed:scale" });
+    const trend = await mkRun("audiogram", "2026-07-02T00:00:00.000Z", { triggeredBy: "seed:trend-history" });
+
+    await outcomeStore.recordOutcomes([
+      { runId: aOld.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: aOld.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: aNew.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: aNew.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: aRunning.id, subjectId: "emp-006", measureId: "audiogram", status: "MISSING_DATA", evidence: {} },
+      { runId: aCase.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: haz.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} },
+      { runId: scale.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: trend.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+    ]);
+
+    for (const filter of [
+      { excludeScale: true, excludeTrendHistory: true }, // the roster/hierarchy filter
+      {}, // no exclusions → scale/trend runs become the latest and are kept by both paths identically
+      { measureId: "audiogram", excludeScale: true, excludeTrendHistory: true },
+      { from: "2026-03-20", to: "2026-06-30", excludeScale: true, excludeTrendHistory: true }, // drops aOld + haz
+    ] satisfies OutcomeMeasureFilter[]) {
+      const got = await outcomeStore.listLatestPopulationOutcomes(filter);
+      assert.deepEqual(norm(got), norm(await jsReference(filter)), `filter ${JSON.stringify(filter)}`);
+    }
+
+    // Spot-check the headline case: the roster/hierarchy filter picks aNew for audiogram + haz for hazwoper.
+    const rosterLike = await outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true });
+    assert.deepEqual(
+      new Set(rosterLike.map((r) => r.runId)),
+      new Set([aNew.id, haz.id]),
+      "latest terminal population run per measure (RUNNING/CASE/scale/trend rejected)",
+    );
   });
 }
 
