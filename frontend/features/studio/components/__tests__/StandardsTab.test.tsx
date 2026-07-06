@@ -40,6 +40,7 @@ const executionDiff = {
   asOf: "2026-06-30",
   totalSubjectsEvaluated: 3,
   totalDivergent: 2,
+  totalErrors: 0,
   byGate: { "qualifying-visit": 1, "hba1c-missing-counts-numerator": 1 },
   subjects: [
     { subjectId: "emp-001", workwellOutcome: "COMPLIANT", officialOutcome: "MISSING_DATA", diverged: true, divergenceGate: "qualifying-visit" },
@@ -93,6 +94,20 @@ describe("StandardsTab", () => {
     expect(within(row as HTMLElement).getByText("COMPLIANT")).toBeInTheDocument();
     expect(within(row as HTMLElement).getByText("MISSING_DATA")).toBeInTheDocument();
     expect(within(row as HTMLElement).getByText("qualifying-visit")).toBeInTheDocument();
+  });
+
+  it("surfaces failed evaluations when the execution diff reports errors", async () => {
+    render(
+      <StandardsTab
+        measureId="cms122"
+        api={mockApi({
+          "/api/measures/cms122/fidelity": fidelity,
+          "/api/measures/cms122/fidelity/diff": { ...executionDiff, totalErrors: 2 },
+        }) as ApiClient}
+      />,
+    );
+    expect(await screen.findByText(/Executed the official-subset/)).toBeInTheDocument();
+    expect(screen.getByText(/2 subjects failed to evaluate/)).toBeInTheDocument();
   });
 
   it("shows a clean message when no official reference is registered", async () => {

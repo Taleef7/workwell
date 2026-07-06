@@ -39,6 +39,8 @@ export interface ExecutionDiffReport {
   asOf: string | null;
   totalSubjectsEvaluated: number;
   totalDivergent: number;
+  /** Subjects whose WorkWell or official evaluation threw — recorded as ERROR rows, NOT counted as divergent. */
+  totalErrors: number;
   byGate: Record<string, number>;
   subjects: SubjectDiff[];
   headline: string;
@@ -122,6 +124,10 @@ export async function computeExecutionDiff(
   }
 
   const totalDivergent = subjects.filter((s) => s.diverged).length;
+  // ERROR rows (a subject whose WorkWell or official evaluation threw) are isolated as non-divergent so
+  // one failure can't abort the run — but they must be SURFACED, not silently folded into a clean count,
+  // or a broken evaluation would read as "no divergence" (Codex P2).
+  const totalErrors = subjects.filter((s) => s.officialOutcome === "ERROR").length;
   const report: ExecutionDiffReport = {
     mode: "execution",
     measureId: ref.measureId,
@@ -130,12 +136,14 @@ export async function computeExecutionDiff(
     asOf: deps.asOf,
     totalSubjectsEvaluated: subjects.length,
     totalDivergent,
+    totalErrors,
     byGate,
     subjects,
     headline:
       `Executed the official-subset ${ref.ecqmId} against ${subjects.length} subjects of the latest ` +
       `${ref.measureId} run: ${totalDivergent} would have a different outcome under the official ` +
-      `age/visit/exclusion/numerator criteria.`,
+      `age/visit/exclusion/numerator criteria` +
+      (totalErrors > 0 ? `; ${totalErrors} failed to evaluate (excluded from the divergence count).` : "."),
     disclaimer: DISCLAIMER,
   };
   if (runId) {

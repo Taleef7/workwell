@@ -82,6 +82,7 @@ interface ExecutionDiffReport {
   asOf: string | null;
   totalSubjectsEvaluated: number;
   totalDivergent: number;
+  totalErrors: number;
   byGate: Record<string, number>;
   subjects: ExecutionSubject[];
   headline: string;
@@ -236,6 +237,11 @@ export function StandardsTab({ measureId, api }: Props) {
               {execution.asOf ? `Based on the latest population run (${execution.asOf}); ` : ""}
               <span className="font-semibold text-red-700 dark:text-red-400">{execution.totalDivergent} of {execution.totalSubjectsEvaluated}</span> subjects diverge from the official-subset CQL execution.
             </p>
+            {execution.totalErrors > 0 ? (
+              <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-500" role="alert">
+                {execution.totalErrors} subject{execution.totalErrors === 1 ? "" : "s"} failed to evaluate and are excluded from the divergence count.
+              </p>
+            ) : null}
             {Object.keys(execution.byGate).length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
                 {Object.entries(execution.byGate).map(([gate, count]) => (

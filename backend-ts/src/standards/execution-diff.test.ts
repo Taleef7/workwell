@@ -37,6 +37,28 @@ test("execution diff: produces per-subject rows and a divergent count tied to th
   for (const s of report.subjects.filter((x) => x.diverged)) assert.ok(s.divergenceGate.length > 0);
 });
 
+test("execution diff: per-subject evaluation failures surface in totalErrors, not divergence (Codex P2)", async () => {
+  __clearExecutionDiffCache();
+  // An engine that throws for the official measure on every subject → all rows are ERROR/non-divergent.
+  const throwingEngine = {
+    evaluate: (input: { measureId: string }) =>
+      input.measureId === "cms122_official"
+        ? Promise.reject(new Error("official CQL evaluation failed"))
+        : Promise.resolve({ outcome: "COMPLIANT", evidence: { expressionResults: [] } }),
+  };
+  const report = await computeExecutionDiff(CMS122V14, rows, {
+    engine: throwingEngine,
+    resolver: RESOLVER,
+    employees: EMPLOYEES,
+    today: "2026-06-30",
+    asOf: "2026-06-30",
+  });
+  assert.equal(report.totalErrors, rows.length, "every failed subject is counted as an error");
+  assert.equal(report.totalDivergent, 0, "failed subjects are never counted as divergent");
+  assert.ok(report.subjects.every((s) => s.officialOutcome === "ERROR" && !s.diverged));
+  assert.match(report.headline, /failed to evaluate/);
+});
+
 test("execution diff: memoized per run-id (second call reuses the cached report)", async () => {
   __clearExecutionDiffCache();
   const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };
