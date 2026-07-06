@@ -344,8 +344,14 @@ Each outcome evidence payload includes:
   be revisited when the translator ships a stable multi-model release. The diff is **descriptive only
   (ADR-008)** — it writes nothing and never sets an `Outcome Status`; WorkWell's cms122 outcomes stay
   byte-identical (the enrichment is harness-local — it appends codings to a copy for the diff harness, it
-  is not a change to the live `fhir-bundle-builder`). The **GMI numerator alternative** remains a
-  documented gap and the diff is **CMS122-only**.
+  is not a change to the live `fhir-bundle-builder`). The **GMI numerator alternative is now modeled**
+  in the official-subset CQL (2026-07-05): the numerator takes the most recent of an HbA1c (VSAC HbA1c
+  Laboratory Test set) **OR** a Glucose Management Indicator (GMI, LOINC 97506-0) within the period, so a
+  newer GMI supersedes an older HbA1c. GMI uses a direct LOINC-97506-0 code filter (the synthetic corpus
+  ships no GMI value set, so no VSAC OID is invented) — the remaining simplification for that criterion is
+  terminology-only (this code filter vs the official combined "Glycemic Status Assessment" VSAC set), and
+  WorkWell's own **authored** cms122 still models neither GMI nor a recency window (see Fable L15 above).
+  The diff is **CMS122-only**.
 - All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
