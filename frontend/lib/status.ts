@@ -169,8 +169,9 @@ export function metaChipClass(status: string | null | undefined): string {
     return `${base} border-amber-200 bg-amber-50/60 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300`;
   if (normalized === "SIMULATED")
     return `${base} border-sky-200 bg-sky-50/60 text-sky-700 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-300`;
-  // NOT SENT / unknown — the most passive: neutral outline, no fill.
-  return `${base} border-neutral-200 bg-transparent text-neutral-500 dark:border-neutral-700 dark:text-neutral-400`;
+  // NOT SENT / unknown — the most passive: neutral outline, no fill. text-neutral-600 (not 500) keeps
+  // the 12px label ≥ WCAG AA 4.5:1 on tinted panels (e.g. the amber next-action card).
+  return `${base} border-neutral-200 bg-transparent text-neutral-600 dark:border-neutral-700 dark:text-neutral-300`;
 }
 
 // Color + text for every roster display state (E10.5). Reuses the 5 canonical-bucket hues from
