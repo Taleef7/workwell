@@ -24,23 +24,36 @@ function Harness({
 }
 
 describe("VersionActions (UX-15)", () => {
-  it("keeps the change-summary input and New Version action hidden until the Version menu is opened", () => {
+  it("is an accessible disclosure: trigger uses aria-expanded/aria-controls (not a menu) and stays collapsed by default", () => {
     render(<Harness />);
     const trigger = screen.getByRole("button", { name: "Version actions" });
-    // The grouped menu exposes the proper ARIA disclosure contract and stays collapsed by default.
-    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    // Disclosure semantics — NOT role=menu (a menu cannot legitimately hold a textbox).
+    expect(trigger).not.toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("aria-controls");
+    // Controls hidden until opened.
     expect(screen.queryByLabelText("Change summary")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New Version" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Version actions" })).not.toBeInTheDocument();
   });
 
-  it("reveals the grouped change-summary input + New Version action together when the menu opens", () => {
+  it("reveals a role=group panel with the change-summary input + New Version action together when opened", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Version actions" }));
     expect(screen.getByRole("button", { name: "Version actions" })).toHaveAttribute("aria-expanded", "true");
-    // Both version controls are now present as one grouped unit.
+    // The panel is a group/region, not a menu.
+    expect(screen.getByRole("group", { name: "Version actions" })).toBeInTheDocument();
     expect(screen.getByLabelText("Change summary")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New Version" })).toBeInTheDocument();
+  });
+
+  it("closes on Escape", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Version actions" }));
+    expect(screen.getByRole("group", { name: "Version actions" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Change summary"), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Version actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Version actions" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("passes the typed change summary through to the New Version handler (wiring intact)", async () => {
