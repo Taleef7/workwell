@@ -4,17 +4,18 @@ import lib1 from "./AnnualAudiogramCompleted-1.0.0.elm.json" with { type: "json"
 import lib2 from "./AnnualAudiogramCompletedVS-1.0.0.elm.json" with { type: "json" };
 import lib3 from "./CholesterolLDLScreeningCQL-1.0.0.elm.json" with { type: "json" };
 import lib4 from "./DiabetesHbA1cPoorControlCQL-1.0.0.elm.json" with { type: "json" };
-import lib5 from "./BreastCancerScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib6 from "./DiabetesHbA1cMonitoringCQL-1.0.0.elm.json" with { type: "json" };
-import lib7 from "./FluVaccineSeasonal-1.0.0.elm.json" with { type: "json" };
-import lib8 from "./HazwoperSurveillance-1.0.0.elm.json" with { type: "json" };
-import lib9 from "./HepatitisBSeries-1.0.0.elm.json" with { type: "json" };
-import lib10 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib11 from "./MmrSeries-1.0.0.elm.json" with { type: "json" };
-import lib12 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib13 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
-import lib14 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
-import lib15 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
+import lib5 from "./DiabetesHbA1cPoorControlOfficialCQL-1.0.0.elm.json" with { type: "json" };
+import lib6 from "./BreastCancerScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib7 from "./DiabetesHbA1cMonitoringCQL-1.0.0.elm.json" with { type: "json" };
+import lib8 from "./FluVaccineSeasonal-1.0.0.elm.json" with { type: "json" };
+import lib9 from "./HazwoperSurveillance-1.0.0.elm.json" with { type: "json" };
+import lib10 from "./HepatitisBSeries-1.0.0.elm.json" with { type: "json" };
+import lib11 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib12 from "./MmrSeries-1.0.0.elm.json" with { type: "json" };
+import lib13 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib14 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
+import lib15 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
+import lib16 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
 
 export const ELM_LIBRARIES: Record<string, unknown> = {
   "AdultImmunizationTdap-1.0.0": lib0,
@@ -22,15 +23,16 @@ export const ELM_LIBRARIES: Record<string, unknown> = {
   "AnnualAudiogramCompletedVS-1.0.0": lib2,
   "CholesterolLDLScreeningCQL-1.0.0": lib3,
   "DiabetesHbA1cPoorControlCQL-1.0.0": lib4,
-  "BreastCancerScreeningCQL-1.0.0": lib5,
-  "DiabetesHbA1cMonitoringCQL-1.0.0": lib6,
-  "FluVaccineSeasonal-1.0.0": lib7,
-  "HazwoperSurveillance-1.0.0": lib8,
-  "HepatitisBSeries-1.0.0": lib9,
-  "HypertensionBPScreeningCQL-1.0.0": lib10,
-  "MmrSeries-1.0.0": lib11,
-  "ObesityBMIScreeningCQL-1.0.0": lib12,
-  "TbSurveillance-1.3.0": lib13,
-  "VaricellaSeries-1.0.0": lib14,
-  "FHIRHelpers-4.0.1": lib15,
+  "DiabetesHbA1cPoorControlOfficialCQL-1.0.0": lib5,
+  "BreastCancerScreeningCQL-1.0.0": lib6,
+  "DiabetesHbA1cMonitoringCQL-1.0.0": lib7,
+  "FluVaccineSeasonal-1.0.0": lib8,
+  "HazwoperSurveillance-1.0.0": lib9,
+  "HepatitisBSeries-1.0.0": lib10,
+  "HypertensionBPScreeningCQL-1.0.0": lib11,
+  "MmrSeries-1.0.0": lib12,
+  "ObesityBMIScreeningCQL-1.0.0": lib13,
+  "TbSurveillance-1.3.0": lib14,
+  "VaricellaSeries-1.0.0": lib15,
+  "FHIRHelpers-4.0.1": lib16,
 };
