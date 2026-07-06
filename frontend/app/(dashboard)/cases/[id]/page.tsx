@@ -5,7 +5,7 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } 
 import { useParams } from "next/navigation";
 import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Select, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
-import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, formatStatusLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
+import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
@@ -13,6 +13,8 @@ import { AuditPacketExportButton } from "@/components/audit-packet-export-button
 import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
+import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
+import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 
 // Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
 // The input still accepts any free-text handle; this only offers quick picks.
@@ -678,9 +680,7 @@ export default function CaseDetailPage() {
                 <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{caseDetail.nextAction}</p>
                 <div className="mt-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
                   <span>Outreach delivery:</span>
-                  <span className={deliveryBadgeClass(caseDetail.latestOutreachDeliveryStatus)}>
-                    {formatStatusLabel(caseDetail.latestOutreachDeliveryStatus ?? "NOT_SENT")}
-                  </span>
+                  <DeliveryChip status={caseDetail.latestOutreachDeliveryStatus} />
                 </div>
                 {/* Actionable CTA for the recommended next step (the action buttons below are generic;
                     this makes the *recommended* one a single click from the next-action panel). */}
@@ -1086,7 +1086,7 @@ export default function CaseDetailPage() {
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
-                <input type="file" aria-label="Evidence file" accept=".pdf,.png,.jpg,.jpeg" onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)} />
+                <EvidenceDropzone file={evidenceFile} onFileChange={setEvidenceFile} disabled={uploadingEvidence} />
                 <Input
                   label="Evidence description"
                   hideLabel
@@ -1291,19 +1291,3 @@ function formatForecastStatus(status: string) {
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function deliveryBadgeClass(status: string | null) {
-  const normalized = normalizeEnumValue(status ?? "");
-  if (normalized === "SENT") {
-    return "rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-900";
-  }
-  if (normalized === "FAILED") {
-    return "rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 font-semibold text-rose-900";
-  }
-  if (normalized === "QUEUED") {
-    return "rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-semibold text-amber-900";
-  }
-  if (normalized === "SIMULATED") {
-    return "rounded-full border border-sky-300 bg-sky-100 px-2 py-0.5 font-semibold text-sky-900";
-  }
-  return "rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 font-semibold text-neutral-700 dark:text-neutral-300";
-}

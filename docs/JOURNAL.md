@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-07-05 (cont.) — backlog sweep: #233 perf, E14 GMI, UX-3/7/13/14/15
+
+Closed out the genuinely-open, non-blocked backlog in two PRs (descriptive/presentational only; no schema, no new deps).
+
+**Backend (PR #244) — `feat/backlog-backend`:**
+- **perf(#233):** the roster + hierarchy read paths over-fetched — `listOutcomesWithRun` shipped ~20k rows
+  for every live population run, reduced to latest-run-per-measure in JS. New
+  `OutcomeStore.listLatestPopulationOutcomes` pushes that reduction into SQL (Pg `DISTINCT ON (measure_id)`;
+  SQLite `ROW_NUMBER() OVER (PARTITION BY measure_id …)`), cutting rows shipped to ~2,100; output
+  byte-identical (store-contract equivalence test); no owner-gated DDL. Live warm-latency validation is a
+  post-deploy step.
+- **feat(e14, GMI):** the official-subset CMS122 numerator now takes the most-recent of **HbA1c OR GMI**
+  (LOINC 97506-0, inline filter — no standalone VSAC OID), closing the Fable L15 gap. Avoids a
+  cql-execution `union` de-dup pitfall; ADR-008 byte-identical guard holds.
+
+**Frontend UX (PR TBD) — `feat/backlog-frontend-ux`:**
+- **UX-7:** styled evidence dropzone (`features/evidence/EvidenceDropzone.tsx`) replacing the bare native
+  file input on case detail; drag-drop + selected-file readout + "storage is temporary on this demo" note;
+  upload handler + role-gate + `aria-label` preserved.
+- **UX-14:** a passive-metadata chip tier (`metaChipClass` + shared `DeliveryChip`) applied only to the
+  outreach-delivery chips (NOT SENT/SENT/SIMULATED) so they read lighter than actionable status chips
+  (labels unchanged; `text-neutral-600` keeps AA on tinted panels).
+- **UX-15:** the Studio change-summary input + New Version grouped into an **accessible disclosure**
+  (`features/studio/components/VersionActions.tsx`, `role="group"` + `aria-expanded`, Escape/outside-click);
+  validation + role-gate preserved.
+- **UX-3:** optimistic panel caching (`features/compliance/usePanelCache.ts`, keyed by the full query
+  signature — /compliance panel A→B→A serves from cache) + a `>3s` "Crunching ~1.68M outcomes…" hint
+  (`lib/useSlowLoadHint.ts`) on /compliance + /programs/hierarchy, announced via the existing `aria-live`.
+- **UX-13:** labelled the global header site/time selectors "Global" (`components/global-filter-group.tsx`,
+  `role="group"`) so it's discoverable they're app-wide vs page filters — a low-risk fix; the fuller
+  "migrate site/time per-page" refactor is deferred to a design call (the global filters feed 6 pages).
+
 ## 2026-07-05 — E14 PR-3: official-subset CMS122 execution outcome diff (ADR-024)
 
 Turned `GET /api/measures/cms122/fidelity/diff` from PR-2's **criteria-impact estimate** into a **real,

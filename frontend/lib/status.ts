@@ -151,6 +151,29 @@ export const COMPLIANCE_STATUS_LABELS: Record<string, string> = {
   NA: "N/A"
 };
 
+// UX-14: passive/metadata chips get a lighter visual tier than actionable worklist status chips.
+// An outreach-delivery status (NOT SENT / SIMULATED / SENT / QUEUED / FAILED) is informational
+// delivery metadata, not an actionable state like OVERDUE/DUE_SOON — so it should not read as
+// equally loud. The meta tier is a subtle outline + muted fill + normal (font-medium) weight, versus
+// the actionable tier's saturated *-100 fill + font-semibold. Color + text pairing is preserved
+// (WCAG — no info by color alone); only weight/fill/emphasis change. No text-size token here so call
+// sites (e.g. the compact admin grid) can set their own. Dark-mode aware.
+export function metaChipClass(status: string | null | undefined): string {
+  const base = "inline-flex items-center rounded-full border px-2 py-0.5 font-medium";
+  const normalized = normalizeEnumValue(status ?? "");
+  if (normalized === "SENT")
+    return `${base} border-emerald-200 bg-emerald-50/60 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300`;
+  if (normalized === "FAILED")
+    return `${base} border-rose-200 bg-rose-50/60 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300`;
+  if (normalized === "QUEUED")
+    return `${base} border-amber-200 bg-amber-50/60 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300`;
+  if (normalized === "SIMULATED")
+    return `${base} border-sky-200 bg-sky-50/60 text-sky-700 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-300`;
+  // NOT SENT / unknown — the most passive: neutral outline, no fill. text-neutral-600 (not 500) keeps
+  // the 12px label ≥ WCAG AA 4.5:1 on tinted panels (e.g. the amber next-action card).
+  return `${base} border-neutral-200 bg-transparent text-neutral-600 dark:border-neutral-700 dark:text-neutral-300`;
+}
+
 // Color + text for every roster display state (E10.5). Reuses the 5 canonical-bucket hues from
 // outcomeStatusClass and adds DECLINED (orange), IN_PROGRESS (blue), NA (faint). Dark-mode-aware.
 export function complianceStatusClass(status: string): string {
