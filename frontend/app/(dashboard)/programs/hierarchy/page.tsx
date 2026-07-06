@@ -7,6 +7,7 @@ import { fmtCount } from "@/lib/format";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
+import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
 const ALL_SYSTEMS_ROOT_KEY = "all:all";
@@ -61,6 +62,10 @@ export default function HierarchyPage() {
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
   const [open, setOpen] = useState<Set<string>>(new Set([ALL_SYSTEMS_ROOT_KEY]));
+
+  // UX-3 — at 120k scale this rollup is a genuine ~5–7s crunch; after ~3s show an honest hint instead
+  // of a bare skeleton so the wait reads as working, not broken.
+  const slow = useSlowLoadHint(loading);
 
   // Measure dropdown is sourced the same way /programs sources its measures.
   useEffect(() => {
@@ -191,8 +196,17 @@ export default function HierarchyPage() {
       ) : null}
 
       <span className="sr-only" role="status" aria-live="polite">
-        {loading ? "Loading compliance hierarchy…" : root ? "Compliance hierarchy loaded" : ""}
+        {loading
+          ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading compliance hierarchy…")
+          : root ? "Compliance hierarchy loaded" : ""}
       </span>
+
+      {slow && loading ? (
+        <p className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+          {SLOW_LOAD_HINT}
+        </p>
+      ) : null}
 
       {loading ? (
         <div className="overflow-hidden rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
