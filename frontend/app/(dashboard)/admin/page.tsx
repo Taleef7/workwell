@@ -10,6 +10,7 @@ import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn } from "datavis/src/components/table/types";
 import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
+import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 
 type IntegrationHealth = {
   integration: string;
@@ -661,11 +662,9 @@ export default function AdminPage() {
       );
     }
     if (column.field === "status") {
-      return (
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${deliveryStatusBadgeClass(String(value ?? ""))}`}>
-          {String(value ?? "")}
-        </span>
-      );
+      // Delivery status is passive metadata → the lighter meta chip tier (UX-14). Keep the raw
+      // uppercase label the log has always shown.
+      return <DeliveryChip status={String(value ?? "")} label={String(value ?? "")} size="xs" />;
     }
     return value as React.ReactNode;
   }, []);
@@ -1452,14 +1451,6 @@ function mappingStatusBadgeClass(status: string) {
   if (s === "MAPPED") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
   if (s === "STALE" || s === "PARTIAL") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
   if (s === "UNMAPPED" || s === "ERROR") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
-  return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
-}
-
-function deliveryStatusBadgeClass(status: string) {
-  const s = (status ?? "").toUpperCase();
-  if (s === "SENT") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
-  if (s === "SIMULATED") return "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300";
-  if (s === "FAILED") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   return "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
 }
 
