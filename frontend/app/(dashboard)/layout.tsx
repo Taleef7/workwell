@@ -34,6 +34,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
+import { GlobalFilterGroup } from "@/components/global-filter-group";
 import { RunStatusProvider, useRunStatus } from "@/components/run-status-provider";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -256,7 +257,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               </div>
             </AppHeaderSection>
             <AppHeaderSection align="right" className="gap-2">
-              <div className="hidden items-center gap-2 lg:flex">
+              <GlobalFilterGroup className="hidden lg:flex">
                 <Select
                   aria-label="Filter by site"
                   value={siteId}
@@ -273,30 +274,32 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   size="sm"
                   className="w-36"
                 />
-              </div>
+              </GlobalFilterGroup>
               <RunStatusIndicator />
               <ThemeBrandSwitcher />
             </AppHeaderSection>
           </AppHeader>
 
           {/* Mobile filters bar (header filters are lg-only) */}
-          <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 lg:hidden dark:border-neutral-800 dark:bg-neutral-900">
-            <Select
-              aria-label="Filter by site"
-              value={siteId}
-              onValueChange={setSiteId}
-              options={siteOptions}
-              size="sm"
-              className="flex-1"
-            />
-            <Select
-              aria-label="Date range"
-              value={datePreset}
-              onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-              options={[...DATE_PRESETS]}
-              size="sm"
-              className="flex-1"
-            />
+          <div className="border-b border-neutral-200 bg-white px-4 py-2 lg:hidden dark:border-neutral-800 dark:bg-neutral-900">
+            <GlobalFilterGroup className="w-full">
+              <Select
+                aria-label="Filter by site"
+                value={siteId}
+                onValueChange={setSiteId}
+                options={siteOptions}
+                size="sm"
+                className="flex-1"
+              />
+              <Select
+                aria-label="Date range"
+                value={datePreset}
+                onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
+                options={[...DATE_PRESETS]}
+                size="sm"
+                className="flex-1"
+              />
+            </GlobalFilterGroup>
           </div>
 
           {/* tabIndex=-1 so the skip link actually MOVES keyboard focus here (a non-focusable target
