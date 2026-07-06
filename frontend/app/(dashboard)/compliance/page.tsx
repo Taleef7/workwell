@@ -11,6 +11,8 @@ import { canRunMeasures } from "@/lib/rbac";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
+import { usePanelCache } from "@/features/compliance/usePanelCache";
+import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
@@ -60,28 +62,51 @@ export default function CompliancePage() {
   const [error, setError] = useState<string | null>(null);
   const [recalcBusy, setRecalcBusy] = useState<boolean>(false);
 
+  // UX-3 — optimistic panel/filter caching: keep each fetched (panel + filters + page) result in memory
+  // for the session, keyed by its full query signature. Switching a panel/filter — or switching *back*
+  // to one already loaded — renders instantly from cache instead of re-paying the cold roster fetch and
+  // re-showing a blank skeleton. Session-scoped (unmounts with the page); a recompute clears it below.
+  const cache = usePanelCache<{ roster: Roster; total: number }>();
+  const slow = useSlowLoadHint(loading);
+
   // Stale-fetch guard (Fable M20): a slow All-Systems response must not land after a fast tenant=ihn
   // one and paint the wrong rows under the selected filter. Only the latest load applies its result.
   const reqIdRef = useRef(0);
   const load = useCallback(async () => {
+    const params = new URLSearchParams();
+    params.set("panel", panel);
+    if (status) params.set("status", status);
+    if (siteId.trim()) params.set("site", siteId.trim());
+    if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
+    if (segment) params.set("segment", segment);
+    if (tenant) params.set("tenant", tenant);
+    params.set("page", String(page));
+    params.set("pageSize", String(pageSize));
+    const query = params.toString();
+
+    // Cache hit → paint instantly, never a blank skeleton for data already fetched this session. Bump
+    // the request id so any in-flight fetch for a prior key can't land on top of the cached result.
+    const cached = cache.read(query);
+    if (cached) {
+      reqIdRef.current++;
+      setRoster(cached.roster);
+      setTotal(cached.total);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      params.set("panel", panel);
-      if (status) params.set("status", status);
-      if (siteId.trim()) params.set("site", siteId.trim());
-      if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
-      if (segment) params.set("segment", segment);
-      if (tenant) params.set("tenant", tenant);
-      params.set("page", String(page));
-      params.set("pageSize", String(pageSize));
-      const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${params.toString()}`);
+      const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${query}`);
       if (reqId !== reqIdRef.current) return;
       setRoster(data);
       const matchTotal = Number(headers.get("X-Total-Count") ?? data.rows.length);
-      setTotal(Number.isFinite(matchTotal) ? matchTotal : data.rows.length);
+      const resolvedTotal = Number.isFinite(matchTotal) ? matchTotal : data.rows.length;
+      setTotal(resolvedTotal);
+      cache.write(query, { roster: data, total: resolvedTotal });
     } catch (err) {
       if (reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load the compliance roster.");
@@ -90,7 +115,7 @@ export default function CompliancePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [api, panel, status, siteId, debouncedQ, segment, tenant, page, pageSize]);
+  }, [api, cache, panel, status, siteId, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -102,10 +127,15 @@ export default function CompliancePage() {
   }, [load]);
 
   useEffect(() => {
-    const onComplete = () => void load();
+    // A recompute makes every cached panel/filter stale — drop the whole cache so the reload actually
+    // re-fetches the current key (and future switches re-fetch too) instead of serving pre-run data.
+    const onComplete = () => {
+      cache.clear();
+      void load();
+    };
     window.addEventListener("ww:run-complete", onComplete);
     return () => window.removeEventListener("ww:run-complete", onComplete);
-  }, [load]);
+  }, [load, cache]);
 
   // Load the enabled segments once for the optional Segment filter. Best-effort: the filter is
   // optional and must never break the roster, so swallow errors and leave the options empty. The
@@ -244,8 +274,15 @@ export default function CompliancePage() {
       ) : null}
 
       <span className="sr-only" role="status" aria-live="polite">
-        {loading ? "Loading roster…" : `${rows.length} employees loaded`}
+        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} employees loaded`}
       </span>
+
+      {slow && loading ? (
+        <p className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+          {SLOW_LOAD_HINT}
+        </p>
+      ) : null}
 
       <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
         <table className="min-w-full border-collapse text-sm">
