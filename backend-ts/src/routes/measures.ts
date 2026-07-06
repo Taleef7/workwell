@@ -62,6 +62,11 @@ import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
+import { computeExecutionDiff } from "../standards/execution-diff.ts";
+import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
+import { StoreValueSetResolver, type ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -73,6 +78,21 @@ function measureCql(measureId: string): string {
   const meta = MEASURES[measureId];
   const elm = meta ? ELM_LIBRARIES[meta.library] : undefined;
   return elm ? reconstructCql(elm) : "";
+}
+
+/**
+ * Execution diff only when EVERY VSAC value set the official-subset CMS122 measure retrieves resolves
+ * non-empty from the store. Probing a single OID would let a PARTIAL `resolve-valuesets` import enter
+ * execution mode: the importer records a failed OID as an empty-code ERROR row and can still exit
+ * non-fatally when at least one OID resolved, so the HbA1c or qualifying-visit sets could be `[]` while
+ * Diabetes has codes — the official subset would then run with empty retrieves and report fabricated
+ * missing-visit / missing-HbA1c divergences instead of degrading to the PR-2 estimate (Codex P2).
+ */
+export async function chooseDiffMode(resolver: ValueSetResolver): Promise<"execution" | "estimate"> {
+  const oids = CMS122_OFFICIAL_META.valueSets ?? [];
+  if (oids.length === 0) return "estimate";
+  const expansions = await Promise.all(oids.map((oid) => resolver.expand(oid)));
+  return expansions.every((codes) => codes.length > 0) ? "execution" : "estimate";
 }
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
@@ -443,10 +463,29 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (diffId && req.method === "GET") {
     const ref = referenceFor(diffId);
     if (!ref) return json({ available: false });
-    const allOutcomes = await (await getStores(env)).outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
+    const stores = await getStores(env);
+    const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
     const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
-    const report = computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear());
-    return json(report);
+    const resolver = new StoreValueSetResolver(stores.valueSets);
+    // Execution diff only for cms122, only when there IS a completed population run (an empty latestRows
+    // must fall through to the estimate's no-run response, not render a misleading "0 of 0 diverge"
+    // execution report — Codex P2), and only when the imported VSAC rows are present; else the PR-2 estimate.
+    if (diffId === "cms122" && latestRows.length > 0 && (await chooseDiffMode(resolver)) === "execution") {
+      // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
+      // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
+      // date (WorkWell's value-based cms122 is date-insensitive, but the official subset's age gate is
+      // not) — Codex P2. Anchor the synthetic bundles to the same date so the diff mirrors the run.
+      const today = new Date().toISOString().slice(0, 10);
+      const runId = latestRows[0]?.runId;
+      const run = runId ? await stores.runs.getRun(runId) : null;
+      const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
+      const report = await computeExecutionDiff(ref, latestRows, {
+        engine: new CqlExecutionEngine({ valueSetResolver: resolver }),
+        resolver, employees: EMPLOYEES, today: asOf, asOf,
+      });
+      return json(report);
+    }
+    return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
   }
 
   // Standards fidelity: a documented structural diff of WorkWell's authored measure vs the official

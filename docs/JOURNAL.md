@@ -1,5 +1,48 @@
 # Journal
 
+## 2026-07-05 — E14 PR-3: official-subset CMS122 execution outcome diff (ADR-024)
+
+Turned `GET /api/measures/cms122/fidelity/diff` from PR-2's **criteria-impact estimate** into a **real,
+subject-by-subject execution outcome diff** for CMS122 — built on top of the ADR-023 live-VSAC on-ramp.
+
+**Spike → fallback decision.** The obvious plan was to compile and run the *literal* official CMS122v14
+QICore CQL. A compile-feasibility spike (2026-07-05) proved that is un-compilable under the pinned
+JVM-free translator `@cqframework/cql` 4.0.0-beta.1: its modelinfo loader can't resolve the cross-model
+`FHIR.*`/`USCore.*` type refs, so the whole QICore model fails to load (804 errors / 0 retrieves; a
+hand-crafted minimal QICore modelinfo *did* load, isolating the blocker to the real cross-model
+modelinfo), and the runtime engine links no multi-library include graph. So the deliverable is a
+**faithful official-SUBSET** measure (`measures/cms122_official.cql`, `using FHIR '4.0.1'`,
+value-set-retrieve style, committed ELM `DiabetesHbA1cPoorControlOfficialCQL-1.0.0`), driven by the
+imported VSAC OID value sets — documented as a subset, not the literal artifact. Revisit the literal
+path on a stable multi-model translator release (ADR-024).
+
+**What shipped.**
+- `backend-ts/src/standards/cms122-official.ts` — the inline `CMS122_OFFICIAL_META` (kept **out** of the
+  `MEASURES` registry) + OID constants + `enrichForOfficialCms122`, a **harness-local** additive
+  enrichment (appends real VSAC-member codings to the diff harness's bundle copy; not a change to the
+  shared `fhir-bundle-builder.ts`, never on the live run path).
+- `backend-ts/src/standards/execution-diff.ts` — `computeExecutionDiff`: per subject in the latest cms122
+  run, build → enrich → evaluate **both** WorkWell's `cms122` and the official-subset measure fresh →
+  diff, attributing each divergence to the first differing gate (age/visit/diabetes/hospice/palliative/
+  hba1c-missing/workwell-side). Memoized per run-id.
+- Engine `metaOverride?: MeasureMeta` seam on `CqlExecutionEngine.evaluate` so the official measure
+  evaluates without being registered.
+- Route `GET /api/measures/cms122/fidelity/diff` runs the execution diff when the imported VSAC
+  `value_sets` (`source='VSAC'`) rows are present — store-backed resolution via `StoreValueSetResolver`,
+  **no runtime VSAC key needed** — else degrades to the unchanged PR-2 estimate (`chooseDiffMode`).
+- Frontend Studio **Standards** tab renders the per-subject execution divergence in execution mode, else
+  the estimate.
+
+**Descriptive only (ADR-008):** the diff writes nothing, WorkWell's cms122 outcomes stay byte-identical,
+**no schema change, no new dependency**. Known gaps: GMI numerator alternative; the execution diff is
+CMS122-only. Live execution-mode verification happens post-deploy on the stack that has the imported VSAC
+rows (locally there are none, so the route correctly serves the estimate — covered by automated tests).
+
+Verification (full suite): backend typecheck clean + **973 pass / 1 pg-skip / 0 fail** (974 tests);
+frontend lint clean + **vitest 127 pass / 26 files** + **build succeeds**. Docs updated in this PR
+(MEASURES, ARCHITECTURE §3 `standards` + §6 invariants + §7 interfaces, DATA_MODEL §3.4 note, DECISIONS
+ADR-024).
+
 ## 2026-07-05 — Live VSAC value-set resolution behind the `ValueSetResolver` port (ADR-023)
 
 Built the **live VSAC (NLM UMLS) value-set resolution** capability behind the existing `ValueSetResolver`
