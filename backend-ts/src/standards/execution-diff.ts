@@ -69,7 +69,7 @@ function attributeGate(
   if (def(ev, "Has Diabetes") === false) return "diabetes-diagnosis";
   if (def(ev, "Has Hospice") === true) return "hospice";
   if (def(ev, "Has Palliative") === true) return "palliative-care";
-  if (def(ev, "HbA1c Missing") === true) return "hba1c-missing-counts-numerator";
+  if (def(ev, "Glycemic Assessment Missing") === true) return "glycemic-assessment-missing-counts-numerator";
   // The numerator can't diverge via the shared HbA1c observation: enrichment APPENDS the VSAC coding
   // onto the same Observation WorkWell reads, so both sides see the same value. A fallthrough almost
   // always means the divergence originates on the WorkWell side — e.g. a urn:workwell:* waiver the
