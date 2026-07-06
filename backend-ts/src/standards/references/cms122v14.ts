@@ -116,7 +116,7 @@ export const CMS122V14: OfficialMeasureReference = {
       description: "Most recent glycemic status assessment (HbA1c or GMI) during the period is > 9.0%, OR is missing / not performed during the period (missing counts as numerator).",
       valueSetOids: ["2.16.840.1.113883.3.464.1003.198.12.1013"],
       coverage: "SIMPLIFIED",
-      note: "WorkWell covers the > 9% poor-control numerator (Overdue) and the missing-result case (Missing Data) using the local HbA1c value set, but does not model the GMI alternative and uses a demo value set rather than the official VSAC HbA1c Laboratory Test set.",
+      note: "The official-subset CMS122 CQL now models both glycemic-assessment types — the numerator takes the most recent of an HbA1c (official VSAC HbA1c Laboratory Test set) OR a GMI (Glucose Management Indicator, LOINC 97506-0) within the period, > 9% or missing. The remaining simplification is terminology-only: HbA1c resolves via the imported VSAC set while GMI is modeled with a direct LOINC-97506-0 code filter rather than the official combined 'Glycemic Status Assessment' VSAC value set (WorkWell's own authored cms122 still uses the local urn:workwell:vs:cms122-hba1c demo set and does not model GMI at all).",
     },
     {
       population: "NUMEX",

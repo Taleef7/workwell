@@ -58,21 +58,45 @@ define "Has Palliative":
 define "Denominator Exclusions":
   "Initial Population" and ("Has Hospice" or "Has Palliative")
 
+// Official v14 numerator is the most recent GLYCEMIC STATUS ASSESSMENT during the period — an HbA1c
+// laboratory test OR a Glucose Management Indicator (GMI). VSAC ships both inside one combined
+// "Glycemic Status Assessment" value set; here HbA1c stays the VSAC-resolved value-set retrieve and GMI
+// is modeled with a direct LOINC 97506-0 code filter (the synthetic corpus carries no GMI value set, so
+// no dedicated/VSAC OID is invented — mirrors WorkWell's coding-filter idiom). Each assessment type's
+// most-recent-in-period is computed separately, then the later of the two by effective date wins — so a
+// newer GMI supersedes an older HbA1c (and vice versa). A list `union` is avoided deliberately: cql-execution
+// de-duplicates FHIR resources across a union, which drops one assessment type when both are present.
 define "Most Recent HbA1c":
   Last([Observation: "HbA1c Laboratory Test"] O
     where O.status.value in {'final', 'amended', 'corrected'}
+      and FHIRHelpers.ToDateTime(O.effective as FHIR.dateTime) in "Measurement Period"
     sort by (effective as FHIR.dateTime))
 
-define "Most Recent HbA1c Value":
-  ("Most Recent HbA1c".value as FHIR.Quantity).value
+define "Most Recent GMI":
+  Last([Observation] O
+    where exists(O.code.coding c where c.system = 'http://loinc.org' and c.code = '97506-0')
+      and O.status.value in {'final', 'amended', 'corrected'}
+      and FHIRHelpers.ToDateTime(O.effective as FHIR.dateTime) in "Measurement Period"
+    sort by (effective as FHIR.dateTime))
 
-define "HbA1c Missing":
-  "Most Recent HbA1c" is null
+define "Most Recent Glycemic Assessment":
+  if "Most Recent HbA1c" is null then "Most Recent GMI"
+  else if "Most Recent GMI" is null then "Most Recent HbA1c"
+  else if FHIRHelpers.ToDateTime("Most Recent GMI".effective as FHIR.dateTime)
+        >= FHIRHelpers.ToDateTime("Most Recent HbA1c".effective as FHIR.dateTime)
+    then "Most Recent GMI"
+  else "Most Recent HbA1c"
+
+define "Most Recent Glycemic Value":
+  ("Most Recent Glycemic Assessment".value as FHIR.Quantity).value
+
+define "Glycemic Assessment Missing":
+  "Most Recent Glycemic Assessment" is null
 
 define "Numerator":
   "Initial Population"
     and not "Denominator Exclusions"
-    and ("HbA1c Missing" or "Most Recent HbA1c Value" > 9.0)
+    and ("Glycemic Assessment Missing" or "Most Recent Glycemic Value" > 9.0)
 
 define "Outcome Status":
   if not "Initial Population" then 'MISSING_DATA'
