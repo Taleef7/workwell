@@ -59,6 +59,37 @@ test("execution diff: per-subject evaluation failures surface in totalErrors, no
   assert.match(report.headline, /failed to evaluate/);
 });
 
+test("execution diff: a GMI-driven official numerator attributes to gmi-poor-control, not workwell-side (Codex P2)", async () => {
+  __clearExecutionDiffCache();
+  // Official OVERDUE via a poor GMI (all gates pass, glycemic assessment NOT missing); WorkWell can't see
+  // the GMI so it buckets the subject COMPLIANT → divergence must be labeled gmi-poor-control.
+  const gmiEngine = {
+    evaluate: (input: { measureId: string }) =>
+      input.measureId === "cms122_official"
+        ? Promise.resolve({
+            outcome: "OVERDUE",
+            evidence: {
+              expressionResults: [
+                { define: "Age 18 To 75", result: true },
+                { define: "Has Qualifying Visit", result: true },
+                { define: "Has Diabetes", result: true },
+                { define: "Has Hospice", result: false },
+                { define: "Has Palliative", result: false },
+                { define: "Glycemic Assessment Missing", result: false },
+              ],
+            },
+          })
+        : Promise.resolve({ outcome: "COMPLIANT", evidence: { expressionResults: [] } }),
+  };
+  const report = await computeExecutionDiff(CMS122V14, rows, {
+    engine: gmiEngine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30",
+  });
+  assert.ok(report.totalDivergent >= 1);
+  assert.ok(report.subjects.every((s) => s.diverged && s.divergenceGate === "gmi-poor-control"));
+  assert.equal(report.byGate["gmi-poor-control"], report.totalDivergent);
+  assert.equal(report.byGate["workwell-side"], undefined, "GMI numerator is no longer mislabeled workwell-side");
+});
+
 test("execution diff: memoized per run-id (second call reuses the cached report)", async () => {
   __clearExecutionDiffCache();
   const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };

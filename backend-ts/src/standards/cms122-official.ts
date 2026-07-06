@@ -131,14 +131,16 @@ export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeePr
     } });
   }
   // 6) GMI (Glucose Management Indicator, LOINC 97506-0): the official numerator's HbA1c-equivalent
-  //    glycemic-status assessment. A deterministic subset gets a GMI observation effective ~30d before
-  //    anchor — NEWER than the synthetic HbA1c — so the "most recent of HbA1c OR GMI" numerator resolves
-  //    via the GMI. ~1/8 get a poor-control GMI (> 9 → numerator via GMI) and a different ~1/8 get an
-  //    at-goal GMI (≤ 9 → not numerator via GMI). Inline LOINC coding (no VSAC OID) — invisible to
-  //    WorkWell's cms122 (which reads only urn:workwell:vs:cms122-hba1c), so ADR-008 parity holds.
+  //    glycemic-status assessment. A deterministic subset gets a GMI observation effective 29d before
+  //    anchor — one day STRICTLY NEWER than the synthetic HbA1c (which `deriveExamConfig` places 30d
+  //    before anchor) — so "most recent of HbA1c OR GMI" resolves via the GMI on genuine recency, not on
+  //    a same-timestamp tie (the `>=` tie-break would otherwise reclassify on an artificial tie; Codex P2).
+  //    ~1/8 get a poor-control GMI (> 9 → numerator via GMI) and a different ~1/8 get an at-goal GMI
+  //    (≤ 9 → not numerator via GMI). Inline LOINC coding (no VSAC OID) — invisible to WorkWell's cms122
+  //    (which reads only urn:workwell:vs:cms122-hba1c), so ADR-008 parity holds.
   const gmiValue = h % 8 === 3 ? 9.8 : h % 8 === 5 ? 6.5 : null;
   if (gmiValue != null) {
-    const gmiDay = dateMinusDays(anchorDate, 30);
+    const gmiDay = dateMinusDays(anchorDate, 29);
     entries.push({ resource: {
       resourceType: "Observation", id: `${employee.externalId}-obs-gmi`, status: "final",
       subject: { reference: `Patient/${employee.externalId}` },
