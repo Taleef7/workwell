@@ -25,21 +25,13 @@ import type { OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource, evaluateSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
+// Single source of truth for the whitelist/excluded sets (the CLI module is import-safe — no side effects).
+import { DEVDB_WHITELIST as WHITELIST, DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
 
 const DIR = fileURLToPath(new URL("../../../../spike/webchart/", import.meta.url));
 const payloads = JSON.parse(readFileSync(path.join(DIR, "devdb-patients.json"), "utf8")) as unknown[];
 const roster = parseEnrollmentRoster(JSON.parse(readFileSync(path.join(DIR, "enrollment-roster.json"), "utf8")));
 const EVAL = "2024-06-01";
-
-/** Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled). */
-const WHITELIST = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension", "cms125"] as const;
-/** Named-excluded: not in the OH roster (so no enrollment is stamped) and/or the seed carries no matching
- * coded event — OSHA CPTs, CVX vaccines (ICE's domain), and cms122 (value-based + needs a diabetes dx the
- * seed lacks). NOT silently dropped — asserted to stay MISSING_DATA. Full parity with the doc's §8.1 list. */
-const EXCLUDED = [
-  "audiogram", "tb_surveillance", "hazwoper", "flu_vaccine", "adult_immunization",
-  "mmr", "varicella", "hepatitis_b_vaccination_series", "cms122",
-] as const;
 
 const source = () => webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
 
