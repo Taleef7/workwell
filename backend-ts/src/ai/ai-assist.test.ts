@@ -126,13 +126,18 @@ test("explainCase uses model text on success + ai audit refs the case", async ()
   assert.equal(r.events[0]!.refRunId, "run1");
 });
 
-test("buildExplainUserPrompt: fences evidence as untrusted data (L14 prompt-injection guard)", () => {
+test("buildExplainUserPrompt: fences evidence in per-request nonce'd markers (L14 prompt-injection guard)", () => {
   const prompt = buildExplainUserPrompt("OVERDUE", { why_flagged: { note: "x" } });
-  assert.match(prompt, /-----BEGIN EVIDENCE JSON-----/);
-  assert.match(prompt, /-----END EVIDENCE JSON-----/);
+  const begin = prompt.match(/-----BEGIN EVIDENCE JSON ([0-9a-f-]{36})-----/);
+  const end = prompt.match(/-----END EVIDENCE JSON ([0-9a-f-]{36})-----/);
+  assert.ok(begin && end, "expected nonce'd BEGIN/END markers");
+  assert.equal(begin![1], end![1], "BEGIN/END share the same per-request nonce");
   assert.match(prompt, /untrusted/i);
   assert.match(prompt, /never .*instructions/i);
   assert.match(prompt, /Outcome status: OVERDUE/);
+  // the nonce is unguessable, so a hostile evidence value can't forge the closing marker to break out
+  const nonces = new Set([buildExplainUserPrompt("X", {}), buildExplainUserPrompt("X", {})].map((p) => p.match(/JSON ([0-9a-f-]{36})/)![1]));
+  assert.equal(nonces.size, 2, "each call uses a fresh nonce");
 });
 
 test("buildExplainUserPrompt: size-caps oversized evidence (bounds token use)", () => {
@@ -156,9 +161,9 @@ test("explainCase: an injection string inside evidence stays inside the fence, n
     "cm@x",
   );
   // the injection text is present but wrapped between the fence markers (data), never before BEGIN
-  assert.match(captured, /-----BEGIN EVIDENCE JSON-----/);
-  const before = captured.slice(0, captured.indexOf("-----BEGIN EVIDENCE JSON-----"));
-  assert.doesNotMatch(before, /IGNORE ALL PREVIOUS INSTRUCTIONS/);
+  const beginIdx = captured.search(/-----BEGIN EVIDENCE JSON [0-9a-f-]{36}-----/);
+  assert.ok(beginIdx > 0, "expected a nonce'd BEGIN marker");
+  assert.doesNotMatch(captured.slice(0, beginIdx), /IGNORE ALL PREVIOUS INSTRUCTIONS/);
 });
 
 test("explainCase deterministic fallback names employee + status", async () => {

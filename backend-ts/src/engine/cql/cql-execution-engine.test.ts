@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { CqlExecutionEngine } from "./cql-execution-engine.ts";
+import { CqlExecutionEngine, deriveInInitialPopulation } from "./cql-execution-engine.ts";
 import { MEASURES } from "./measure-registry.ts";
 
 const synthRoot = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
@@ -54,4 +54,12 @@ test("adult_immunization refusal keeps the case open (OVERDUE) and flags Refused
   const outcome = await engine.evaluate({ measureId: "adult_immunization", patientBundle: bundle, evaluationDate: EVAL });
   assert.equal(outcome.outcome, "OVERDUE");
   assert.equal(outcome.evidence.expressionResults.find((r) => r.define === "Refused")?.result, true);
+});
+
+test("deriveInInitialPopulation (L17): boolean define → value; absent / non-boolean → undefined (field omitted)", () => {
+  assert.equal(deriveInInitialPopulation({ "Initial Population": true }), true);
+  assert.equal(deriveInInitialPopulation({ "Initial Population": false }), false);
+  assert.equal(deriveInInitialPopulation({}), undefined); // a measure with no IPP define
+  assert.equal(deriveInInitialPopulation({ "Initial Population": "yes" }), undefined); // non-boolean → unknown
+  assert.equal(deriveInInitialPopulation({ "Initial Population": null }), undefined);
 });
