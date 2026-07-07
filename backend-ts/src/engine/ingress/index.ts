@@ -30,3 +30,10 @@ export {
   fixtureWebChartClient,
   httpWebChartClient,
 } from "./webchart/webchart-client.ts";
+export {
+  type EnrollmentRoster,
+  parseEnrollmentRoster,
+  isEnrolled,
+  stampEnrollment,
+  evaluateSourceWithRoster,
+} from "./enrollment/roster.ts";
