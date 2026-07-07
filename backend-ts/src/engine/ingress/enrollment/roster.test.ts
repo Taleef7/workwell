@@ -141,6 +141,15 @@ test("stampEnrollment: no-ops when the subject is not enrolled in that measure",
   assert.equal(conditions(out).length, 0);
 });
 
+test("stampEnrollment: no-ops for a clinical-enrollment measure — never fabricates cms122's diabetes dx", () => {
+  // cms122's enrollment maps to a diabetes DIAGNOSIS (urn:workwell:vs:cms122-diabetes), not OH program
+  // membership. Even if a roster lists it, stampEnrollment must not synthesize that clinical fact (which
+  // would move the subject into the denominator from a lab alone). Fail-closed allowlist (#247 Codex P2).
+  const roster = parseEnrollmentRoster({ "wc-1": ["cms122"] });
+  const out = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "cms122", roster);
+  assert.equal(conditions(out).length, 0);
+});
+
 test("stampEnrollment: no-ops on an unknown measure or a bundle with no Patient", () => {
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
   assert.equal(conditions(stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "not_a_measure", roster)).length, 0);
