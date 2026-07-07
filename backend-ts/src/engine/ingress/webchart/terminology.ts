@@ -101,7 +101,9 @@ const CROSSWALK_ROWS: CrosswalkRow[] = [
   { system: SYSTEMS.LOINC, code: "17856-6", measureId: "cms122" }, // HbA1c (POCT) alias
   { system: SYSTEMS.LOINC, code: "13457-7", measureId: "cholesterol_ldl" }, // LDL cholesterol (calc)
   { system: SYSTEMS.LOINC, code: "18262-6", measureId: "cholesterol_ldl" }, // LDL cholesterol (direct)
+  { system: SYSTEMS.LOINC, code: "2089-1", measureId: "cholesterol_ldl" }, // LDL cholesterol (serum) — the code MIE's WebChart dev DB actually uses (#246)
   { system: SYSTEMS.LOINC, code: "85354-9", measureId: "hypertension" }, // BP panel
+  { system: SYSTEMS.LOINC, code: "8480-6", measureId: "hypertension" }, // systolic BP — the BP component MIE's WebChart dev DB actually records (#246)
   { system: SYSTEMS.LOINC, code: "39156-5", measureId: "obesity_bmi" }, // BMI
 ];
 

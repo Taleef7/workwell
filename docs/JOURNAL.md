@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-07 (cont.) — WebChart dev-DB proof, PR-2: export tool + committed fixtures + e2e proof (#246)
+
+**Proved the WebChart→FHIR pipeline end-to-end on MIE's real dev-DB sample — offline, no live API, no
+MariaDB driver.** Brought up the seeded `wcdb` MariaDB (56 patients, 1,887 observations) and inventoried
+it: rich on lab observations (real LOINC), sparse on procedures (1 coded — a G0202 mammogram), no CVX.
+`obs_result_dec` is null (no numeric values) but the recency measures only need the **date** (`obs_ts`),
+which spans 2015–2024.
+
+**Real-code finding, folded into the crosswalk.** The dev DB records **LDL as LOINC `2089-1`** (serum) and
+**BP as component `8480-6`** (systolic) — not our synthetic assumptions (`13457-7`/`18262-6`, panel
+`85354-9`). Added those two rows to `webchart/terminology.ts` (option B; descriptive) so MIE's actual codes
+reconcile; terminology test added.
+
+**What shipped (`feat/webchart-devdb-fixtures`, stacked on PR-1):**
+- `scripts/webchart-devdb-export.ts` — dev-only, **driver-free** export: shells `docker exec wcdb mysql
+  --batch --raw -N` with `JSON_OBJECT` (MariaDB 10.3 JSON) and **serializes the FHIR in Node**
+  (`JSON.stringify` + validate) so NULLs/encoding/newlines are handled by a real serializer, not brittle DB
+  line-output (Codex P2). `pnpm webchart:export-devdb`.
+- Committed fixtures: `spike/webchart/devdb-patients.json` (26 patient bundles with codeable data) +
+  `spike/webchart/enrollment-roster.json` (deterministic OH roster — the wellness panel for all, `cms125`
+  for female patients). Runtime/CI read these; they never touch Docker or the DB.
+- `webchart/devdb-eval.test.ts` — the committed offline proof: runs the sample through the **unchanged**
+  ingress + engine at a data-contemporaneous eval date (2024-06-01) and asserts **deterministic per-patient
+  outcomes** — HbA1c-2015 → OVERDUE, BMI/BP-2024 → COMPLIANT, enrolled-but-no-lab → MISSING_DATA, G0202
+  mammogram → OVERDUE, the two new-crosswalk codes evaluate — plus a distribution assertion (**NOT all
+  MISSING_DATA**, the proof) and an **excluded-measures** assertion (OSHA/CVX/cms122 stay MISSING_DATA —
+  named, not silently dropped).
+
+**Demonstrable whitelist:** `diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `hypertension`, `cms125`.
+**Descriptive only (ADR-008)** — reconciliation + roster supply coded FHIR; CQL decides every outcome. **No
+schema, no new deps.** Verified: typecheck clean; full suite **1074 pass / 0 fail** (Pg ceiling contract
+ran too — local postgres up). Docs: WEBCHART_FHIR_MAPPING §5 + §8.1.
+
 ## 2026-07-07 — WebChart dev-DB proof, PR-1: OH enrollment roster + enrollment-Condition stamping (#246)
 
 Opened a new follow-up to the closed E12 epic (#184): prove the WebChart→FHIR adapter **end-to-end on
