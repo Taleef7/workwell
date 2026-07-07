@@ -36,6 +36,15 @@ export interface MeasureOutcome {
   subjectId: string;
   measure: string;
   outcome: OutcomeStatus;
+  /**
+   * L17: whether the subject is in the measure's **Initial Population** (read from the CQL "Initial
+   * Population" define). `false` means the subject is out of scope for this measure — not enrolled / not
+   * eligible — which is distinct from an in-population `MISSING_DATA` (enrolled but no qualifying data).
+   * On the real-data path this lets a consumer show "not applicable" instead of reading an out-of-program
+   * patient as non-compliance. `undefined` when the measure emits no boolean "Initial Population" define.
+   * Descriptive only (ADR-008): it never changes `outcome`.
+   */
+  inInitialPopulation?: boolean;
   evidence: { expressionResults: ExpressionResult[] };
 }
 
