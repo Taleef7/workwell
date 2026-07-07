@@ -33,9 +33,13 @@ const EVAL = "2024-06-01";
 
 /** Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled). */
 const WHITELIST = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension", "cms125"] as const;
-/** Named-excluded: the seed has no matching data (OSHA CPTs, CVX vaccines) or the gate needs data it lacks
- * (cms122 is value-based + needs a diabetes dx). NOT silently dropped — asserted to stay MISSING_DATA. */
-const EXCLUDED = ["audiogram", "tb_surveillance", "flu_vaccine", "adult_immunization", "cms122"] as const;
+/** Named-excluded: not in the OH roster (so no enrollment is stamped) and/or the seed carries no matching
+ * coded event — OSHA CPTs, CVX vaccines (ICE's domain), and cms122 (value-based + needs a diabetes dx the
+ * seed lacks). NOT silently dropped — asserted to stay MISSING_DATA. Full parity with the doc's §8.1 list. */
+const EXCLUDED = [
+  "audiogram", "tb_surveillance", "hazwoper", "flu_vaccine", "adult_immunization",
+  "mmr", "varicella", "hepatitis_b_vaccination_series", "cms122",
+] as const;
 
 const source = () => webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
 
@@ -96,6 +100,6 @@ test("excluded measures stay MISSING_DATA (honest boundary — named, not silent
   for (const m of EXCLUDED) {
     const byId = await runWithRoster(m);
     const outcomes = new Set(byId.values());
-    assert.deepEqual([...outcomes], ["MISSING_DATA"], `${m}: the seed has no data for it → all MISSING_DATA`);
+    assert.deepEqual([...outcomes], ["MISSING_DATA"], `${m}: not roster-enrolled and/or no matching coded event → all MISSING_DATA`);
   }
 });

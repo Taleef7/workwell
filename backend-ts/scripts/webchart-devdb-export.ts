@@ -43,10 +43,12 @@ type Row = Record<string, unknown>;
 
 /** Run one JSON_OBJECT query and parse the `--batch --raw -N` output as NDJSON (one object per line). */
 function queryJson(sql: string): Row[] {
+  // Pass the password via MYSQL_PWD (piped into the container with `docker exec -e`) rather than `-p` on
+  // argv — keeps it out of the container process list and silences mysql's "password insecure" warning.
   const stdout = execFileSync(
     "docker",
-    ["exec", CONTAINER, "mysql", `-u${USER}`, `-p${PASS}`, "--batch", "--raw", "-N", "-e", sql, DB],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    ["exec", "-e", "MYSQL_PWD", CONTAINER, "mysql", `-u${USER}`, "--batch", "--raw", "-N", "-e", sql, DB],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...process.env, MYSQL_PWD: PASS } },
   );
   const rows: Row[] = [];
   let bad = 0;
@@ -65,6 +67,18 @@ function queryJson(sql: string): Row[] {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 const cptSystem = (cpt: string): string => (/^\d{5}$/.test(cpt) ? SYS.CPT : SYS.HCPCS); // G-codes etc. → HCPCS
+
+/** Group rows by their `pat_id`. */
+function groupByPat(rows: Row[]): Map<string, Row[]> {
+  const m = new Map<string, Row[]>();
+  for (const r of rows) {
+    const k = String(r.pat_id);
+    let arr = m.get(k);
+    if (!arr) m.set(k, (arr = []));
+    arr.push(r);
+  }
+  return m;
+}
 
 function main(): void {
   console.log(`Exporting WebChart dev-DB fixtures from container '${CONTAINER}' (db ${DB})…`);
@@ -85,10 +99,8 @@ function main(): void {
   );
   console.log(`  patients=${patients.length} loinc-observations=${observations.length} coded-procedures=${procedures.length}`);
 
-  const obsByPat = new Map<string, Row[]>();
-  for (const o of observations) (obsByPat.get(String(o.pat_id)) ?? obsByPat.set(String(o.pat_id), []).get(String(o.pat_id))!).push(o);
-  const procByPat = new Map<string, Row[]>();
-  for (const p of procedures) (procByPat.get(String(p.pat_id)) ?? procByPat.set(String(p.pat_id), []).get(String(p.pat_id))!).push(p);
+  const obsByPat = groupByPat(observations);
+  const procByPat = groupByPat(procedures);
 
   const bundles: unknown[] = [];
   const roster: Record<string, string[]> = {};
