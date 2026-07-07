@@ -33,6 +33,16 @@ test("reconcileCoding: one real code can satisfy several measures (HbA1c → dia
   assert.deepEqual(both, [MEASURE_BINDINGS["cms122"]!.event.valueSet, MEASURE_BINDINGS["diabetes_hba1c"]!.event.valueSet].sort());
 });
 
+test("reconcileCoding: MIE's actual dev-DB LOINC codes reconcile (LDL 2089-1, systolic BP 8480-6) (#246)", () => {
+  // The dev DB records LDL as LOINC 2089-1 and BP as component 8480-6 (systolic), not the synthetic
+  // assumptions (13457-7/18262-6, panel 85354-9) — crosswalk rows added after confirming the real codes.
+  assert.deepEqual(systems(reconcileCoding({ system: "http://loinc.org", code: "2089-1" })), [MEASURE_BINDINGS["cholesterol_ldl"]!.event.valueSet]);
+  assert.deepEqual(systems(reconcileCoding({ system: "http://loinc.org", code: "8480-6" })), [MEASURE_BINDINGS["hypertension"]!.event.valueSet]);
+  // Both are [Procedure]-retrieved recency measures → the normalizer synthesizes a Procedure from the lab.
+  assert.equal(targetEventType(reconcileCoding({ system: "http://loinc.org", code: "2089-1" })[0]!), "procedure");
+  assert.equal(targetEventType(reconcileCoding({ system: "http://loinc.org", code: "8480-6" })[0]!), "procedure");
+});
+
 test("reconcileCoding: multi-alternative series (Hep B) preserves the real CVX code, not the generic event code", () => {
   // Hep B's CQL matches the specific alternative codes (189 Heplisav-B, 08/43/44/45 traditional) under
   // urn:workwell:vs:hepb-vaccines — NOT the generic `hepb-vaccine`. Reconciliation must keep the CVX
