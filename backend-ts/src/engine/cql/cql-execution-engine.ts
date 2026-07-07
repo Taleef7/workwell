@@ -27,6 +27,16 @@ import { buildCodeService, type ValueSetResolver } from "./value-set-resolver.ts
 
 const OUTCOMES: ReadonlySet<string> = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
+/**
+ * L17: Initial Population membership from the raw CQL define results — `true`/`false` only when the
+ * measure emits a boolean "Initial Population" define (every runnable measure does), else `undefined`
+ * (unknown; the field is then omitted from the outcome). Descriptive only (ADR-008): read, never derived.
+ */
+export function deriveInInitialPopulation(defines: Record<string, unknown>): boolean | undefined {
+  const ipp = defines["Initial Population"];
+  return typeof ipp === "boolean" ? ipp : undefined;
+}
+
 const subtractMonths = (isoDate: string, months: number): string => {
   const d = new Date(`${isoDate}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() - months);
@@ -108,9 +118,8 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
       .map(([define, value]) => ({ define, result: renderDefine(value) }));
 
     // L17: surface the Initial Population membership so an out-of-scope subject is distinguishable from an
-    // in-population MISSING_DATA. Only when the define is a real boolean (else leave undefined = unknown).
-    const ipp = defines["Initial Population"];
-    const inInitialPopulation = typeof ipp === "boolean" ? ipp : undefined;
+    // in-population MISSING_DATA.
+    const inInitialPopulation = deriveInInitialPopulation(defines);
 
     return {
       subjectId,
