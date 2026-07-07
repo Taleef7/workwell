@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-07-07 — WebChart dev-DB proof, PR-1: OH enrollment roster + enrollment-Condition stamping (#246)
+
+Opened a new follow-up to the closed E12 epic (#184): prove the WebChart→FHIR adapter **end-to-end on
+MIE's real dev-DB sample, offline**, while the live-API PR-2c stays blocked on the WebChart API contract.
+Issue **#246** (backend/webchart-convergence/cql-engine), on the roadmap board; sliced PR-1 (roster core)
+→ PR-2 (dev-DB export + committed fixtures + e2e) → PR-3 (demo CLI). Plan reviewed by Codex (folded in:
+pure measure-scoped seam, deterministic per-measure e2e assertions, Node-side JSON serialization for the
+export, honest lab/vital scoping).
+
+**PR-1 (`feat/webchart-devdb-enrollment`) — the one blocking gap, closed.** The measures gate on a
+program-enrollment `Condition` (`urn:workwell:vs:*`) that WebChart doesn't carry — it's OH program
+membership, held WorkWell-side, not clinical coding — so a real WebChart clinical bundle alone evaluates
+MISSING_DATA. The PR-2b tests had hand-baked that Condition into each fixture; PR-1 turns it into a real,
+reusable mechanism. New `backend-ts/src/engine/ingress/enrollment/roster.ts`: an `EnrollmentRoster`
+(subject → enrolled measure-ids) + `parseEnrollmentRoster` (junk-tolerant, from plain JSON) + the pure,
+measure-scoped `stampEnrollment(bundle, measureId, roster)` (appends the enrollment `Condition` from
+`MEASURE_BINDINGS[id].enrollment` — identical to `fhir-bundle-builder.ts`'s `condition()` — idempotent,
+no-op on unknown-measure/absent-subject/already-present, never mutates input) + `evaluateSourceWithRoster`
+(thin pre-evaluation seam: load → stamp → `evaluateBatch`). Kept OUT of `normalize`/a generic decorator so
+roster assumptions never leak into every evaluation (Codex P1). TDD (`node:test`, inline fixtures): the
+enrolled + real-LOINC-HbA1c path evaluates COMPLIANT while the no-roster control stays MISSING_DATA, plus
+structural + idempotency + fail-fast tests. **Descriptive only (ADR-008)** — it adds a Condition the CQL
+reads, never an `Outcome Status`. **No schema, no new deps.** Verified: typecheck clean; full suite
+**991 pass / 1 pg-skip / 0 fail** (+8). Docs: ARCHITECTURE `engine.ingress.enrollment`.
+
 ## 2026-07-05 (cont.) — backlog sweep: #233 perf, E14 GMI, UX-3/7/13/14/15
 
 Closed out the genuinely-open, non-blocked backlog in two PRs (descriptive/presentational only; no schema, no new deps).
