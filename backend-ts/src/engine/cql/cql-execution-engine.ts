@@ -107,6 +107,17 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
       .filter(([name]) => name !== "Patient")
       .map(([define, value]) => ({ define, result: renderDefine(value) }));
 
-    return { subjectId, measure: meta.name, outcome, evidence: { expressionResults } };
+    // L17: surface the Initial Population membership so an out-of-scope subject is distinguishable from an
+    // in-population MISSING_DATA. Only when the define is a real boolean (else leave undefined = unknown).
+    const ipp = defines["Initial Population"];
+    const inInitialPopulation = typeof ipp === "boolean" ? ipp : undefined;
+
+    return {
+      subjectId,
+      measure: meta.name,
+      outcome,
+      ...(inInitialPopulation !== undefined ? { inInitialPopulation } : {}),
+      evidence: { expressionResults },
+    };
   }
 }

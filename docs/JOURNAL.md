@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-07-07 (cont.) — foreign-data correctness pre-E12: AI prompt fencing (L14) + out-of-population signal (L17)
+
+Closed out two of the Fable "foreign-data correctness pre-E12" items — the ones that become *wrong answers /
+attack surface the day real WebChart data arrives* (the class we just enabled with the dev-DB proof). Verified
+first that **M19 (codegen degenerate-numeric validation) was already fixed** (`validateRule` in
+`generate-cql.ts`), so this PR is L14 + L17.
+
+**L14 — AI explain prompt fencing.** `explainCase` interpolated raw `JSON.stringify(evidenceJson)` straight
+into the model prompt — a prompt-injection surface once E12 feeds real WebChart-derived strings (patient
+names, free-text). Added a pure, exported `buildExplainUserPrompt(status, evidenceJson)` that wraps the
+evidence in explicit `BEGIN/END EVIDENCE JSON` markers labelled untrusted-data-not-instructions and
+size-caps it (8000 chars, truncation-marked); hardened `EXPLAIN_SYSTEM_PROMPT` to match. 3 tests (fencing,
+size-cap, an injection string stays inside the fence — never a bare instruction before the marker). Docs:
+AI_GUARDRAILS §2.2.
+
+**L17 — out-of-population signal on `MeasureOutcome`.** An out-of-program subject (not enrolled/not eligible)
+evaluated MISSING_DATA via the CLI/ingress — indistinguishable from an enrolled-but-no-data subject, so on
+the real-data path a patient simply not in the program reads as non-compliance. Added an additive
+`inInitialPopulation?: boolean` to `MeasureOutcome`, derived in `CqlExecutionEngine` from the CQL "Initial
+Population" define (every runnable measure emits it); it flows through `evaluateBundle`/`evaluateBatch`/
+`evaluateSource` for any consumer. 1 ingress test (enrolled → `true` on a MISSING_DATA; not-enrolled →
+`false`). Descriptive only (ADR-008) — it never changes `outcome`. Docs: ARCHITECTURE §7.
+
+**No schema, no new deps.** Full suite **1082 pass / 0 fail**; typecheck clean.
+
 ## 2026-07-07 (cont.) — WebChart dev-DB proof, PR-3: demo CLI + writeup (#246 — proof complete)
 
 Added the showable artifact: `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
