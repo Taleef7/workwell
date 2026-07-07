@@ -24,6 +24,33 @@ test("evaluateBundle: a single JSON bundle → MeasureOutcome, identical to the 
   assert.deepEqual(got, direct); // the library entry adds no behavior
 });
 
+test("evaluateBundle: surfaces Initial Population membership — out-of-population ≠ in-population MISSING_DATA (L17)", async () => {
+  // An enrolled subject is in the Initial Population (even when COMPLIANT / MISSING_DATA for lack of data).
+  const enrolled = await evaluateBundle(load("audiogram", "missing"), "audiogram", { evaluationDate: EVAL });
+  assert.equal(enrolled.outcome, "MISSING_DATA");
+  assert.equal(enrolled.inInitialPopulation, true); // enrolled but no exam → genuinely missing data
+
+  // A subject NOT enrolled (no program Condition) is OUT of the population — same MISSING_DATA bucket,
+  // but the signal distinguishes "not in the program" from "in the program, missing data".
+  const outOfPop = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "wc-x" } },
+      {
+        resource: {
+          resourceType: "Procedure", status: "completed", subject: { reference: "Patient/wc-x" },
+          code: { coding: [{ system: "urn:workwell:vs:audiogram-procedures", code: "audiogram-procedure" }] },
+          performedDateTime: "2026-03-01",
+        },
+      },
+    ],
+  };
+  const got = await evaluateBundle(outOfPop, "audiogram", { evaluationDate: EVAL });
+  assert.equal(got.outcome, "MISSING_DATA");
+  assert.equal(got.inInitialPopulation, false);
+});
+
 test("evaluateBundle: unknown measure propagates the engine error", async () => {
   await assert.rejects(() => evaluateBundle(load("audiogram", "present_recent"), "nope", { evaluationDate: EVAL }), /unknown measure 'nope'/);
 });
