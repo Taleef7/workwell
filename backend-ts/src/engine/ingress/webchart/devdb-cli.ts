@@ -10,7 +10,7 @@
  * every outcome. `--date YYYY-MM-DD` overrides the (data-contemporaneous) default eval date.
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource } from "../data-source.ts";
@@ -26,6 +26,13 @@ export const DEVDB_EXCLUDED = [
 ];
 const DEFAULT_EVAL = "2024-06-01"; // the sample spans 2015–2024; a contemporaneous date yields a real mix
 const BUCKETS: OutcomeStatus[] = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
+const BUCKET_LABEL: Record<OutcomeStatus, string> = {
+  COMPLIANT: "COMPL",
+  DUE_SOON: "DUE",
+  OVERDUE: "OVERDUE",
+  MISSING_DATA: "MISSING",
+  EXCLUDED: "EXCL",
+};
 
 export interface MeasureSummary {
   measureId: string;
@@ -71,7 +78,7 @@ export function renderReport(r: DevDbReport): string {
   lines.push(`WebChart dev-DB evaluation proof — ${r.population} patients, as-of ${r.evaluationDate}`);
   lines.push("(real MIE WebChart-shaped data → the unchanged CQL engine; descriptive only, ADR-008)");
   lines.push("");
-  lines.push(`  ${pad("measure", 22)}${BUCKETS.map((b) => padL(b === "MISSING_DATA" ? "MISSING" : b === "COMPLIANT" ? "COMPL" : b === "DUE_SOON" ? "DUE" : b === "OVERDUE" ? "OVERDUE" : "EXCL", 9)).join("")}${padL("total", 8)}`);
+  lines.push(`  ${pad("measure", 22)}${BUCKETS.map((b) => padL(BUCKET_LABEL[b], 9)).join("")}${padL("total", 8)}`);
   lines.push(`  ${"-".repeat(22 + 9 * BUCKETS.length + 8)}`);
   let nonMissing = 0;
   for (const m of r.whitelist) {
@@ -84,24 +91,32 @@ export function renderReport(r: DevDbReport): string {
   return lines.join("\n");
 }
 
+const USAGE = "usage: evaluate:webchart-devdb [--date YYYY-MM-DD]\n";
+
+/** A real calendar date in YYYY-MM-DD (rejects e.g. 2024-13-45, which a format regex alone would pass). */
+function isValidDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 export async function main(argv: string[]): Promise<number> {
   let evaluationDate: string | undefined;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--date") {
+    const arg = argv[i];
+    if (arg === "--date") {
       const v = argv[++i];
-      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-        process.stderr.write("usage: evaluate:webchart-devdb [--date YYYY-MM-DD]\n");
+      if (!v || !isValidDate(v)) {
+        process.stderr.write(USAGE);
         return 2;
       }
       evaluationDate = v;
+    } else {
+      process.stderr.write(`unrecognized argument: ${arg}\n${USAGE}`);
+      return 2;
     }
   }
   const report = await evaluateDevDb({ evaluationDate });
   process.stdout.write(renderReport(report) + "\n");
   return 0;
-}
-
-// Run only when invoked directly (not when imported by a test).
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  main(process.argv.slice(2)).then((code) => process.exit(code));
 }
