@@ -28,6 +28,23 @@ export type EnrollmentRoster = ReadonlyMap<string, ReadonlySet<string>>;
 
 const QICORE_CONDITION = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition";
 
+/**
+ * Measures whose `enrollment` Condition is genuine OH-program / screening-eligibility membership the
+ * roster may legitimately assert. **Fail-closed allowlist** (Codex P2, #247): a measure absent here is
+ * NEVER stamped, so `stampEnrollment` can't fabricate a clinical fact from the roster.
+ *
+ * Excludes **`cms122`**, whose "enrollment" maps to a diabetes *diagnosis*
+ * (`urn:workwell:vs:cms122-diabetes`) — a clinical inclusion condition, not program membership. Stamping
+ * it would move a subject into the denominator from a lab result alone, so a real diabetes diagnosis must
+ * come from the WebChart clinical data, never the roster. Any future diagnosis-gated measure is likewise
+ * excluded until explicitly added here.
+ */
+const ROSTER_ELIGIBLE_MEASURES: ReadonlySet<string> = new Set([
+  "audiogram", "hazwoper", "tb_surveillance", "adult_immunization", "flu_vaccine",
+  "diabetes_hba1c", "cholesterol_ldl", "hypertension", "obesity_bmi",
+  "mmr", "varicella", "hepatitis_b_vaccination_series", "cms125",
+]);
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -106,12 +123,15 @@ function enrollmentCondition(subjectId: string, code: string, valueSet: string):
 /**
  * Pure, measure-scoped transform: if the bundle's subject is enrolled in `measureId` per the roster,
  * append the measure's enrollment `Condition`. No-op (returns the input bundle) when the measure is
- * unknown, the bundle has no Patient, the subject isn't enrolled, or the Condition is already present
- * (byte-identical idempotency). Never mutates the input — a stamp returns a new bundle.
+ * unknown or not a roster-eligible OH-program measure (see `ROSTER_ELIGIBLE_MEASURES` — e.g. cms122's
+ * diabetes-diagnosis enrollment is never fabricated), the bundle has no Patient, the subject isn't
+ * enrolled, or the Condition is already present (byte-identical idempotency). Never mutates the input.
  */
 export function stampEnrollment(bundle: FhirBundle, measureId: string, roster: EnrollmentRoster): FhirBundle {
   const binding = MEASURE_BINDINGS[measureId];
-  if (!binding) return bundle;
+  // Only stamp measures whose enrollment is true program/eligibility membership — never a clinical
+  // diagnosis (e.g. cms122's diabetes dx). Fail-closed: an unknown or non-eligible measure is a no-op.
+  if (!binding || !ROSTER_ELIGIBLE_MEASURES.has(measureId)) return bundle;
   const subjectId = subjectIdOf(bundle);
   if (!subjectId || !isEnrolled(roster, subjectId, measureId)) return bundle;
   const { code, valueSet } = binding.enrollment;
