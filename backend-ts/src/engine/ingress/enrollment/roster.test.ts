@@ -10,7 +10,10 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { FhirBundle } from "../../synthetic/fhir-bundle-builder.ts";
+import { buildSyntheticBundle, type FhirBundle } from "../../synthetic/fhir-bundle-builder.ts";
+import { deriveExamConfig } from "../../synthetic/exam-config.ts";
+import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
+import type { EmployeeProfile } from "../../synthetic/employee-catalog.ts";
 import { webChartDataSource, jsonBucketDataSource, evaluateSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "../webchart/webchart-client.ts";
 import { parseEnrollmentRoster, isEnrolled, stampEnrollment, evaluateSourceWithRoster } from "./roster.ts";
@@ -59,15 +62,21 @@ function webchartHba1c(subjectId: string, effectiveDateTime: string): unknown {
 }
 
 const conditions = (b: FhirBundle) =>
-  b.entry.map((e) => e.resource as Record<string, unknown>).filter((r) => r.resourceType === "Condition");
+  b.entry
+    .filter((e): e is { resource: unknown } => typeof e === "object" && e !== null)
+    .map((e) => e.resource as Record<string, unknown>)
+    .filter((r) => r != null && r.resourceType === "Condition");
 
-test("stampEnrollment: adds the measure's enrollment Condition for an enrolled subject", () => {
+test("stampEnrollment: adds the measure's enrollment Condition for an enrolled subject, without mutating input", () => {
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
-  const stamped = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster);
+  const input = bundleWithProcedure("wc-1", "2026-03-01T00:00:00");
+  const stamped = stampEnrollment(input, "audiogram", roster);
+  assert.equal(conditions(input).length, 0, "input bundle must not be mutated");
   const conds = conditions(stamped);
   assert.equal(conds.length, 1);
   const cond = conds[0]!;
   assert.equal(cond.id, "wc-1-hearing-enrollment");
+  assert.deepEqual(cond.meta, { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition"] });
   assert.deepEqual(cond.subject, { reference: "Patient/wc-1" });
   assert.deepEqual(cond.clinicalStatus, { coding: [{ code: "active" }] });
   assert.deepEqual(cond.verificationStatus, {
@@ -78,12 +87,51 @@ test("stampEnrollment: adds the measure's enrollment Condition for an enrolled s
   });
 });
 
+test("stampEnrollment: the stamped Condition is byte-identical to the synthetic builder's (drift guard)", () => {
+  // If fhir-bundle-builder.ts's condition() shape ever drifts, this fails — the whole point is that a
+  // roster-stamped bundle is indistinguishable from a synthetic enrolled bundle to the CQL engine.
+  const emp: EmployeeProfile = { externalId: "wc-1", name: "N", role: "r", site: "s", providerId: "p", tenantId: "twh" };
+  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), "2026-06-12");
+  const builtCond = conditions(built).find((c) => c.id === "wc-1-hearing-enrollment");
+  const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
+  const stampedCond = conditions(stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster))[0];
+  assert.deepEqual(stampedCond, builtCond);
+});
+
+test("stampEnrollment: no-op (no duplicate) on an already-enrolled synthetic bundle", () => {
+  const emp: EmployeeProfile = { externalId: "wc-1", name: "N", role: "r", site: "s", providerId: "p", tenantId: "twh" };
+  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), "2026-06-12");
+  const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
+  const out = stampEnrollment(built, "audiogram", roster);
+  assert.deepEqual(out, built); // enrollment already present → unchanged
+  assert.equal(conditions(out).length, 1);
+});
+
+test("stampEnrollment: applies independently per measure for a multi-enrolled subject", () => {
+  const roster = parseEnrollmentRoster({ "wc-1": ["audiogram", "hazwoper"] });
+  const base = bundleWithProcedure("wc-1", "2026-03-01T00:00:00");
+  const both = stampEnrollment(stampEnrollment(base, "audiogram", roster), "hazwoper", roster);
+  const ids = conditions(both).map((c) => c.id).sort();
+  assert.deepEqual(ids, ["wc-1-hazwoper-program", "wc-1-hearing-enrollment"]);
+});
+
 test("stampEnrollment: is idempotent — stamping twice equals stamping once", () => {
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
   const once = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster);
   const twice = stampEnrollment(once, "audiogram", roster);
   assert.deepEqual(twice, once);
   assert.equal(conditions(twice).length, 1);
+});
+
+test("stampEnrollment: tolerates junk entries without throwing (per-item isolation preserved)", () => {
+  const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
+  const junky = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [null, { resource: { resourceType: "Patient", id: "wc-1" } }],
+  } as unknown as FhirBundle;
+  const out = stampEnrollment(junky, "audiogram", roster); // must not throw on the null entry
+  assert.equal(conditions(out).length, 1);
 });
 
 test("stampEnrollment: no-ops when the subject is not enrolled in that measure", () => {

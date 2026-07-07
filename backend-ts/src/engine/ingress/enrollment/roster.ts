@@ -57,9 +57,16 @@ function isFhirBundle(v: unknown): v is FhirBundle {
   return isObject(v) && v.resourceType === "Bundle" && Array.isArray(v.entry);
 }
 
-/** The subject external id — the id of the bundle's Patient resource (the engine keys on it). */
+/**
+ * The subject external id — the id of the bundle's (first) Patient resource, which the engine keys on.
+ * WebChart payloads are one-patient-per-bundle (matching `normalizeWebChartBundle`), so the first Patient
+ * is the subject. Entry items are guarded (`isObject`) so a junk item (`entry:[null]`) can't throw here —
+ * it degrades to "no subject" and stamping no-ops, keeping per-item isolation with `evaluateBatch`.
+ */
 function subjectIdOf(bundle: FhirBundle): string | undefined {
-  for (const { resource } of bundle.entry) {
+  for (const entry of bundle.entry) {
+    if (!isObject(entry)) continue;
+    const { resource } = entry;
     if (isObject(resource) && resource.resourceType === "Patient" && typeof resource.id === "string") {
       return resource.id;
     }
@@ -69,7 +76,9 @@ function subjectIdOf(bundle: FhirBundle): string | undefined {
 
 /** True when an enrollment Condition with this exact (system, code) coding is already present. */
 function hasEnrollmentCondition(bundle: FhirBundle, valueSet: string, code: string): boolean {
-  return bundle.entry.some(({ resource }) => {
+  return bundle.entry.some((entry) => {
+    if (!isObject(entry)) return false;
+    const { resource } = entry;
     if (!isObject(resource) || resource.resourceType !== "Condition") return false;
     const coding = isObject(resource.code) ? resource.code.coding : undefined;
     return (
