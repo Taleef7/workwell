@@ -87,14 +87,17 @@ function main(): void {
     `SELECT JSON_OBJECT('pat_id',pat_id,'first_name',first_name,'last_name',last_name,'sex',sex,` +
       `'birth_date',DATE_FORMAT(birth_date,'%Y-%m-%d')) FROM patients WHERE is_patient=1 ORDER BY pat_id`,
   );
+  // Dates are emitted date-only (YYYY-MM-DD) — a valid FHIR `dateTime` value that needs no timezone
+  // offset (an offset is required only when a time-of-day is present). The recency measures use the day,
+  // and the dev-DB timestamps carry no reliable zone, so date-only is both FHIR-valid and honest.
   const observations = queryJson(
     `SELECT JSON_OBJECT('pat_id',o.pat_id,'loinc',oc.loinc_num,'name',oc.obs_name,'value',o.obs_result_dec,` +
-      `'dt',DATE_FORMAT(COALESCE(o.obs_result_dt,o.obs_ts),'%Y-%m-%dT%H:%i:%s')) ` +
+      `'dt',DATE_FORMAT(COALESCE(o.obs_result_dt,o.obs_ts),'%Y-%m-%d')) ` +
       `FROM observations_current o JOIN observation_codes oc ON oc.obs_code=o.obs_code ` +
       `WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' ORDER BY o.pat_id`,
   );
   const procedures = queryJson(
-    `SELECT JSON_OBJECT('pat_id',pat_id,'cpt',cpt_code,'dt',DATE_FORMAT(service_date,'%Y-%m-%dT%H:%i:%s')) ` +
+    `SELECT JSON_OBJECT('pat_id',pat_id,'cpt',cpt_code,'dt',DATE_FORMAT(service_date,'%Y-%m-%d')) ` +
       `FROM patient_procedures WHERE cpt_code IS NOT NULL AND cpt_code<>'' ORDER BY pat_id`,
   );
   console.log(`  patients=${patients.length} loinc-observations=${observations.length} coded-procedures=${procedures.length}`);
