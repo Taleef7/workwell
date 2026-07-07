@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-07-07 (cont.) — WebChart dev-DB proof, PR-3: demo CLI + writeup (#246 — proof complete)
+
+Added the showable artifact: `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
+(`webchart/devdb-cli.ts`) loads the committed dev-DB sample, runs it through the unchanged ingress + engine,
+and prints a per-measure outcome table + the excluded-measure list (no silent caps). Reuses
+`evaluateSourceWithRoster`; reads committed fixtures only (no Docker/DB). 3 structured-output tests
+(bucket counts reconcile; non-degenerate proof; every excluded measure named). Live output:
+
+```
+WebChart dev-DB evaluation proof — 26 patients, as-of 2024-06-01
+  measure                   COMPL      DUE  OVERDUE  MISSING     EXCL   total
+  diabetes_hba1c                0        0        4       22        0      26
+  obesity_bmi                   5        0        8       13        0      26
+  cholesterol_ldl               0        0        1       25        0      26
+  hypertension                  3        0        6       17        0      26
+  cms125                        0        0        1       25        0      26
+  → 28 real (non-MISSING_DATA) outcomes across the whitelist — the pipeline works end-to-end.
+```
+
+**#246 complete (PR-1/2/3).** The WebChart→FHIR adapter is now proven end-to-end on MIE's real dev-DB
+sample — offline, no live API, no MariaDB driver — while PR-2c (live HTTP transport) stays deferred behind
+its `WebChartClient` seam. Descriptive only (ADR-008); no schema, no new deps. Full suite **1077 pass / 0
+fail**. Docs: WEBCHART_FHIR_MAPPING §8.1.
+
 ## 2026-07-07 (cont.) — WebChart dev-DB proof, PR-2: export tool + committed fixtures + e2e proof (#246)
 
 **Proved the WebChart→FHIR pipeline end-to-end on MIE's real dev-DB sample — offline, no live API, no
