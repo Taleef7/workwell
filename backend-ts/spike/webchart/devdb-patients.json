@@ -1,0 +1,4998 @@
+[
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-5",
+          "name": [
+            {
+              "text": "Jane Doe"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1947-05-09"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-5"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-5"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-6",
+          "name": [
+            {
+              "text": "John Doe"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1949-01-01"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2085-9",
+                "display": "HDL Cholesterol"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2571-8",
+                "display": "Triglycerides"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2345-7",
+                "display": "Glucose"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "10230-1",
+                "display": "LVEF (Echo)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-6"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2093-3",
+                "display": "Total Cholesterol"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-8",
+          "name": [
+            {
+              "text": "Ellen Thompson"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1970-07-04"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-8"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4548-4",
+                "display": "HgbA1C"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-9",
+          "name": [
+            {
+              "text": "Joe Smith"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "2018-07-01"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-9"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-9"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-9"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-9"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-10",
+          "name": [
+            {
+              "text": "Emily Jones"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "2023-11-01"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-10"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-10"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-10"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:17:38"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-10"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:17:26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-10"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:17:48"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-11",
+          "name": [
+            {
+              "text": "Will Haynes"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "2022-11-04"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-11"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-11"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-11"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:19:31"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-11"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:19:52"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-11"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2023-07-12T12:20:06"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-12",
+          "name": [
+            {
+              "text": "Jennifer Thompson"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1992-04-10"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "18684-1",
+                "display": "Blood Pressure"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4548-4",
+                "display": "HgbA1C"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-12"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-13",
+          "name": [
+            {
+              "text": "Theodore Smith"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1951-11-08"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2089-1",
+                "display": "LDL Cholesterol"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2085-9",
+                "display": "HDL Cholesterol"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2345-7",
+                "display": "Glucose"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26464-8",
+                "display": "WBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26453-1",
+                "display": "RBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30428-7",
+                "display": "MCV"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28540-3",
+                "display": "MCHC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28539-5",
+                "display": "MCH"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4544-3",
+                "display": "HCT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4548-4",
+                "display": "HgbA1C"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26449-9",
+                "display": "Eosinophils"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-13"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2093-3",
+                "display": "Total Cholesterol"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-18",
+          "name": [
+            {
+              "text": "William Hart"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1954-11-30"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "33051-4",
+                "display": "Erythrocytes [Presence] in Urine"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T13:07:26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11342-3",
+                "display": "Drug Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T11:43:11"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "5811-5",
+                "display": "Specific Gravity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T13:07:26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "20454-5",
+                "display": "Protein [Presence] in Urine by Test strip"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T13:07:26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "25428-4",
+                "display": "Glucose [Presence] in Urine by Test strip"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T13:07:26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11331-6",
+                "display": "Alcohol Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-10-02T11:43:11"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "59408-5",
+                "display": "Oxygen saturation in Arterial blood by Pulse oximetry"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2022-12-05T13:37:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2022-12-05T13:37:41"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "76691-5",
+                "display": "Gender Identity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2022-12-05T13:36:59"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "76689-9",
+                "display": "Birth Sex"
+              }
+            ]
+          },
+          "effectiveDateTime": "2022-12-05T13:36:59"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2075-0",
+                "display": "Chloride"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2028-9",
+                "display": "CO2"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "14937-7",
+                "display": "BUN"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "14682-9",
+                "display": "Creatinine"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2345-7",
+                "display": "Glucose"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "1920-8",
+                "display": "AST (SGOT)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "1742-6",
+                "display": "ALT (SGPT)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2823-3",
+                "display": "Potassium"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2951-2",
+                "display": "Sodium"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "10230-1",
+                "display": "LVEF (Echo)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4544-3",
+                "display": "HCT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28539-5",
+                "display": "MCH"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28540-3",
+                "display": "MCHC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30428-7",
+                "display": "MCV"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26453-1",
+                "display": "RBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30384-2",
+                "display": "RDW"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26464-8",
+                "display": "WBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-02-29T08:13:20"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26449-9",
+                "display": "Eosinophils"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-18"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6301-6",
+                "display": "INR"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-24",
+          "name": [
+            {
+              "text": "Willaim Heart"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1956-02-22"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-24"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6301-6",
+                "display": "INR"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-26",
+          "name": [
+            {
+              "text": "Willaim Heart"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1954-11-30"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-26"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6301-6",
+                "display": "INR"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-27",
+          "name": [
+            {
+              "text": "Joseph Growing"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "2022-06-17"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-27"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-28",
+          "name": [
+            {
+              "text": "Jennifer Pregnant"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1994-04-10"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-28"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-36",
+          "name": [
+            {
+              "text": "Esther Johnson"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1974-05-26"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-36"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-36"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-36"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6301-6",
+                "display": "INR"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-36"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4548-4",
+                "display": "HgbA1C"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-40",
+          "name": [
+            {
+              "text": "Christine Harris"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1995-03-11"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "14937-7",
+                "display": "BUN"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2028-9",
+                "display": "CO2"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2075-0",
+                "display": "Chloride"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2823-3",
+                "display": "Potassium"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2951-2",
+                "display": "Sodium"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26464-8",
+                "display": "WBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30384-2",
+                "display": "RDW"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26453-1",
+                "display": "RBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30428-7",
+                "display": "MCV"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28540-3",
+                "display": "MCHC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4544-3",
+                "display": "HCT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "14682-9",
+                "display": "Creatinine"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2345-7",
+                "display": "Glucose"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "1920-8",
+                "display": "AST (SGOT)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6301-6",
+                "display": "INR"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26449-9",
+                "display": "Eosinophils"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "1742-6",
+                "display": "ALT (SGPT)"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:57"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28539-5",
+                "display": "MCH"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-08-16T15:15:56"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29343-1",
+                "display": "Rubella Titer, Qual"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:21:25"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "17763-4",
+                "display": "Varicella Titer, Qual"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:21:34"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "6476-6",
+                "display": "Mumps Titer, Qual"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:21:18"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "53536-9",
+                "display": "Measles Titer, Qual"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:21:08"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "22322-2",
+                "display": "Hepatitis B Surface Antibody Titer, Qual"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:21:01"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "59408-5",
+                "display": "Oxygen saturation in Arterial blood by Pulse oximetry"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11342-3",
+                "display": "Drug Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:19:09"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:41:33"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "72166-2",
+                "display": "Smoking Status"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11331-6",
+                "display": "Alcohol Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-40"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-42",
+          "name": [
+            {
+              "text": "Frederick Anderson"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1983-02-08"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-11-12T12:39:49"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "4544-3",
+                "display": "HCT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "718-7",
+                "display": "HGB"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26453-1",
+                "display": "RBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26464-8",
+                "display": "WBC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "2345-7",
+                "display": "Glucose"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30428-7",
+                "display": "MCV"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28539-5",
+                "display": "MCH"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "28540-3",
+                "display": "MCHC"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "26449-9",
+                "display": "Eosinophils"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "30384-2",
+                "display": "RDW"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11342-3",
+                "display": "Drug Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-11-12T12:37:32"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "72166-2",
+                "display": "Smoking Status"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-11-12T12:37:32"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11331-6",
+                "display": "Alcohol Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-11-12T12:37:32"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-42"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "59408-5",
+                "display": "Oxygen saturation in Arterial blood by Pulse oximetry"
+              }
+            ]
+          },
+          "effectiveDateTime": "2024-03-01T15:57:24"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-45",
+          "name": [
+            {
+              "text": "Catherine Morrison"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1975-06-11"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-45"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:10:00"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-46",
+          "name": [
+            {
+              "text": "Sergio Acardi"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1985-04-02"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-11-07T12:14:07"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-46"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-47",
+          "name": [
+            {
+              "text": "Inez Garza"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1980-10-13"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-47"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-47"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-48",
+          "name": [
+            {
+              "text": "Eleanor Washburn"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1985-11-03"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-48"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-48"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-49",
+          "name": [
+            {
+              "text": "Nicole Simmons"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1990-12-18"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "61144-2",
+                "display": "Diet"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8302-2",
+                "display": "BODY HEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11342-3",
+                "display": "Drug Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "29463-7",
+                "display": "BODY WEIGHT"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "39156-5",
+                "display": "BMI"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "9279-1",
+                "display": "RESPIRATION RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "59408-5",
+                "display": "Oxygen saturation in Arterial blood by Pulse oximetry"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8310-5",
+                "display": "BODY TEMPERATURE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8867-4",
+                "display": "HEART RATE"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic BP"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "72166-2",
+                "display": "Smoking Status"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "11331-6",
+                "display": "Alcohol Use"
+              }
+            ]
+          },
+          "effectiveDateTime": "2016-02-02T00:00:00"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+                "code": "G0202"
+              }
+            ]
+          },
+          "performedDateTime": "2015-07-05T00:00:00"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-50",
+          "name": [
+            {
+              "text": "Ashish Patel"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1965-05-11"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-50"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-50"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-51",
+          "name": [
+            {
+              "text": "Cory Rogers"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1990-07-02"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-51"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-51"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-52",
+          "name": [
+            {
+              "text": "Allison Thomas"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1985-08-09"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "90778-2",
+                "display": "Personal Pronouns"
+              }
+            ]
+          },
+          "effectiveDateTime": "2025-01-21T10:37:06"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "76689-9",
+                "display": "Birth Sex"
+              }
+            ]
+          },
+          "effectiveDateTime": "2025-01-21T10:37:06"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "76691-5",
+                "display": "Gender Identity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2025-01-21T10:37:06"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-52"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "76690-7",
+                "display": "Sexual Orientation"
+              }
+            ]
+          },
+          "effectiveDateTime": "2025-01-21T10:37:06"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-55",
+          "name": [
+            {
+              "text": "Selenium Selenium"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1969-04-06"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-55"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-55"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "Patient",
+          "id": "wc-60",
+          "name": [
+            {
+              "text": "Internist Butler"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1970-01-28"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-60"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "32624-9",
+                "display": "CDC Race"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-60"
+          },
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "80908-7",
+                "display": "CDC Ethnicity"
+              }
+            ]
+          },
+          "effectiveDateTime": "2018-01-30T21:26:05"
+        }
+      }
+    ]
+  }
+]
