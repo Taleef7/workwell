@@ -202,7 +202,9 @@ WebChart events are **LOINC/CPT/CVX/ICD-10/SNOMED**-coded; the WorkWell measures
 **Decision (2026-07-03): option B is implemented** — `backend-ts/src/engine/ingress/webchart/terminology.ts`
 is the adapter-local crosswalk. It reuses the same real standard codes as the E7 order catalog
 (audiogram→CPT 92557, TB→86580, flu→CVX 141, …) plus LOINC result codes for the lab/vital measures
-(HbA1c 4548-4, LDL 13457-7, BP 85354-9, BMI 39156-5, mammogram HCPCS G0202/CPT 77067). It **appends** the
+(HbA1c 4548-4, LDL 13457-7/**2089-1**, BP 85354-9/**8480-6**, BMI 39156-5, mammogram HCPCS G0202/CPT 77067;
+the **bold** codes — LDL `2089-1` serum and systolic BP `8480-6` — are MIE's *actual* dev-DB codes, added
+after confirming the seed, #246 §8.1). It **appends** the
 synthetic measure-event coding to a real WebChart coding (preserving the real code for provenance), maps
 one real code to **all** measures it serves (HbA1c → both `diabetes_hba1c` and `cms122`), and tolerates
 system aliases (canonical URI or OID, case-insensitive).
@@ -271,9 +273,35 @@ path~~ (WebChart HTTP/FHIR API); ~~MariaDB driver~~ (not needed — HTTP/`fetch`
   rejects rather than collapse a population into one bundle; **P2** multi-alternative Hep B preserves the
   real CVX code so the series matches). No new deps; no schema. Descriptive only (ADR-008/ADR-017).
 - **PR-2c (waits on §7 answers):** finalize `httpWebChartClient`'s request shaping against the real API,
-  add the OH-enrollment-roster input (§4 enrollment gap), extend the crosswalk as the real code space is
-  confirmed, and (if the API is proprietary) add the row→FHIR mapping per §3. Wire behind
-  `resolveDataSource(env)`; still descriptive only.
+  and (if the API is proprietary) add the row→FHIR mapping per §3. Wire behind `resolveDataSource(env)`;
+  still descriptive only.
+
+### 8.1 Offline dev-DB evaluation proof (#246 — done, PR-1/PR-2, 2026-07-07)
+
+While PR-2c waits on the live API, the pipeline is proven **end-to-end offline on the real dev-DB sample**,
+with no live API and **no MariaDB driver**:
+
+- **PR-1 — OH enrollment roster** (`engine/ingress/enrollment/roster.ts`): closes the §4 enrollment gap.
+  `stampEnrollment(bundle, measureId, roster)` appends the `urn:workwell:vs:*` enrollment `Condition` from
+  `MEASURE_BINDINGS[id].enrollment` (identical to the synthetic builder's `condition()`), and
+  `evaluateSourceWithRoster` wires it into the ingress. So a WebChart clinical bundle (which lacks OH
+  enrollment) evaluates to a real bucket instead of MISSING_DATA.
+- **PR-2 — export tool + committed fixtures + e2e proof.** `scripts/webchart-devdb-export.ts` (dev-only,
+  driver-free: shells `docker exec … mysql --batch --raw -N` with `JSON_OBJECT` and **serializes the FHIR
+  in Node**) emits `spike/webchart/devdb-patients.json` (26 patient bundles with codeable data) +
+  `spike/webchart/enrollment-roster.json`. `webchart/devdb-eval.test.ts` runs them through the unchanged
+  ingress + engine and asserts **deterministic, per-patient outcomes** at a data-contemporaneous eval date
+  (2024-06-01) — a real COMPLIANT/OVERDUE/MISSING_DATA mix. Regenerate with
+  `pnpm webchart:export-devdb` (Docker + the `wcdb` container up; never at runtime/CI).
+
+**Crosswalk firmed to MIE's actual codes.** The dev DB records **LDL as LOINC `2089-1`** and **BP as the
+component `8480-6` (systolic)** — not the synthetic assumptions (`13457-7`/`18262-6`, panel `85354-9`).
+Those two rows were added to `webchart/terminology.ts` (§5, option B). **Demonstrable whitelist** (real
+LOINC/HCPCS present): `diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `hypertension`, and `cms125`
+(one HCPCS `G0202` mammogram). **Named-excluded** (no matching seed data — asserted to stay MISSING_DATA,
+never silently dropped): the OSHA CPTs (`audiogram`/`tb_surveillance`/`hazwoper`), the CVX vaccine measures
+(`flu_vaccine`/`adult_immunization`/`mmr`/`varicella`/`hepatitis_b_vaccination_series` — ICE's domain), and
+`cms122` (value-based; the seed's `obs_result_dec` is null and it needs a diabetes dx the seed lacks).
 
 Descriptive-only throughout: the adapter supplies coded FHIR; the CQL engine remains the sole source of
 compliance truth (ADR-008/ADR-017).
