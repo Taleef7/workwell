@@ -293,6 +293,11 @@ with no live API and **no MariaDB driver**:
   ingress + engine and asserts **deterministic, per-patient outcomes** at a data-contemporaneous eval date
   (2024-06-01) — a real COMPLIANT/OVERDUE/MISSING_DATA mix. Regenerate with
   `pnpm webchart:export-devdb` (Docker + the `wcdb` container up; never at runtime/CI).
+- **PR-3 — demo CLI.** `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
+  (`webchart/devdb-cli.ts`) evaluates the committed sample across the whitelist and prints a per-measure
+  outcome summary (naming the excluded measures — no silent caps) — the showable artifact. On the sample it
+  reports **28 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 13
+  MISSING_DATA over 26 patients).
 
 **Crosswalk firmed to MIE's actual codes.** The dev DB records **LDL as LOINC `2089-1`** and **BP as the
 component `8480-6` (systolic)** — not the synthetic assumptions (`13457-7`/`18262-6`, panel `85354-9`).
