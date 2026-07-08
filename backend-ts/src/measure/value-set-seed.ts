@@ -48,9 +48,12 @@ const VALUE_SETS: SeedVs[] = [
     c("LOCAL-HAZ-002", "Annual fitness-for-duty evaluation", DEMO),
     c("hazwoper-exam", "HAZWOPER Surveillance Exams", "urn:workwell:vs:hazwoper-exams"),
   ] },
+  // Governance/display set only — the CQL matches the synthetic `flu-vaccine` code (flu_vaccine.cql). The
+  // full ACTIVE seasonal-flu CVX membership + the VSAC "Influenza Vaccine" OID (2.16.840.1.113883.3.526.3.1254)
+  // live in the WebChart crosswalk (engine/ingress/webchart/terminology.ts). Deprecated CVX 88 ("unspecified")
+  // removed for 2026 currency; 141 kept as a representative active code.
   { id: "a0000001-0000-0000-0000-000000000004", oid: "urn:workwell:vs:flu-vaccines", name: "Influenza Vaccines", codes: [
-    c("88", "Influenza virus vaccine unspecified", CVX),
-    c("141", "Influenza seasonal injectable", CVX),
+    c("141", "Influenza, seasonal, injectable", CVX),
     c("flu-vaccine", "Influenza Vaccines", "urn:workwell:vs:flu-vaccines"),
     c("LOCAL-FLU-001", "Flu vaccine administered", DEMO),
   ] },

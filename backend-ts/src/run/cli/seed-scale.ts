@@ -4,7 +4,11 @@
  * SQL (no live CQL evaluation). Owner-run ON DEMAND, NOT on deploy. Local (SQLite floor) or Neon
  * (export DATABASE_URL). Builds the store bundle from `env` via the SAME factory the worker uses.
  *
- *   pnpm seed:scale [--subjects 120000] [--as-of YYYY-MM-DD]
+ *   pnpm seed:scale [--subjects 120000] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence]
+ *
+ * --mode defaults to `evaluate` (real batch CQL engine via the WebChart-realistic generator); `fabricated`
+ * keeps the legacy index-fabricated path one more release. --trim-evidence (evaluate mode) persists minimal
+ * `{scale:true}` evidence to protect Neon storage at 120k.
  *
  * ROLLBACK (reversible) — delete tagged OUTCOMES first, then runs (schema-qualify on Postgres):
  *   DELETE FROM workwell_spike.outcomes
@@ -15,8 +19,11 @@
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
 import { backfillScalePopulation } from "../backfill-scale.ts";
+import { batchEvaluateScalePopulation } from "../batch-evaluate-scale.ts";
+import { webChartRealisticGenerator } from "../scale-generator.ts";
 
-export const USAGE = "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD]";
+export const USAGE =
+  "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence]";
 const DEFAULT_SUBJECTS = 120_000;
 
 /** Bad invocation (unknown/invalid flags) — exit code 2. */
@@ -27,6 +34,11 @@ export class SeedCliUsageError extends Error {
 export interface SeedScaleArgs {
   subjects?: number;
   asOf?: string;
+  /** Evaluation strategy. `evaluate` (default) runs the real batch CQL engine; `fabricated` keeps the
+   *  legacy index-fabricated `backfillScalePopulation` (reachable one more release). */
+  mode?: "fabricated" | "evaluate";
+  /** Persist minimal `{scale:true}` evidence (evaluate mode only) — protects Neon storage at 120k. */
+  trimEvidence?: boolean;
 }
 
 export function parseArgs(args: string[]): SeedScaleArgs {
@@ -41,6 +53,12 @@ export function parseArgs(args: string[]): SeedScaleArgs {
       const d = args[++i];
       if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new SeedCliUsageError(`--as-of must be YYYY-MM-DD\n${USAGE}`);
       out.asOf = d;
+    } else if (a === "--mode") {
+      const m = args[++i];
+      if (m !== "fabricated" && m !== "evaluate") throw new SeedCliUsageError(`--mode must be fabricated|evaluate\n${USAGE}`);
+      out.mode = m;
+    } else if (a === "--trim-evidence") {
+      out.trimEvidence = true;
     } else if (a === "--help" || a === "-h") {
       throw new SeedCliUsageError(USAGE);
     } else {
@@ -62,7 +80,7 @@ async function buildEnv(): Promise<StoresEnv> {
   return { DB };
 }
 
-/** Parse → build stores → backfill → print a summary line. Returns the process exit code. */
+/** Parse → build stores → seed (evaluate|fabricated) → print a summary line. Returns the exit code. */
 export async function main(argv: string[]): Promise<number> {
   let parsed: SeedScaleArgs;
   try {
@@ -75,15 +93,28 @@ export async function main(argv: string[]): Promise<number> {
     const env = await buildEnv();
     const stores = await getStores(env);
     const asOf = parsed.asOf ?? new Date().toISOString().slice(0, 10);
-    const summary = await backfillScalePopulation(
-      { runStore: stores.runs, outcomeStore: stores.outcomes, auditStore: stores.events },
-      { subjects: parsed.subjects ?? DEFAULT_SUBJECTS, asOf },
-    );
+    const mode = parsed.mode ?? "evaluate";
+    const subjects = parsed.subjects ?? DEFAULT_SUBJECTS;
+    const summary =
+      mode === "fabricated"
+        ? await backfillScalePopulation(
+            { runStore: stores.runs, outcomeStore: stores.outcomes, auditStore: stores.events },
+            { subjects, asOf },
+          )
+        : await batchEvaluateScalePopulation(
+            {
+              runStore: stores.runs,
+              outcomeStore: stores.outcomes,
+              auditStore: stores.events,
+              generator: webChartRealisticGenerator(),
+            },
+            { subjects, asOf, trimEvidence: parsed.trimEvidence },
+          );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";
     process.stdout.write(
       summary.skipped
-        ? `[seed:scale] already seeded (${backend}) — no-op. Rollback (delete tagged outcomes THEN runs) — see this CLI's header.\n`
-        : `[seed:scale] ${backend}: ${summary.runsCreated} runs × ${summary.subjects} subjects = ${summary.outcomesCreated} outcomes.\n`,
+        ? `[seed:scale] already seeded (${backend} ${mode}) — no-op. Rollback (delete tagged outcomes THEN runs) — see this CLI's header.\n`
+        : `[seed:scale] ${backend} ${mode}: ${summary.runsCreated} runs × ${summary.subjects} subjects = ${summary.outcomesCreated} outcomes.\n`,
     );
     return 0;
   } catch (e) {

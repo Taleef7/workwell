@@ -1,5 +1,132 @@
 # Journal
 
+## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
+
+The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality
+review per unit), then opened as **PR #252** (`feat/scale-batch-eval` → `main`) and put through **two
+Codex passes** at the owner's request (a Sonnet subagent invoking the local Codex CLI):
+
+- **Codex (default model, low effort)** — 2 findings, both fixed: guard non-positive `chunkSize`/`subjects`
+  on the exported engine (a `chunkSize` of 0 would dead-loop the chunk stream); documented the
+  `listRuns(100_000)` idempotency scan cap as a known limitation.
+- **Codex (`gpt-5.5`, high effort, full access)** — caught a genuine **P1** the earlier passes missed:
+  `--mode evaluate` treated any COMPLETED `seed:scale` run as "done," so on a DB that already carries the
+  **fabricated** seed (the live Neon 2026-06-29 1.68M-row seed) it would **silently no-op** and never
+  produce real outcomes. Fixed: batch-evaluated runs now carry a `requestedScope.batchEvaluated` marker
+  (idempotency counts only those; `listRuns` already projects `requested_scope_json`, so no store change),
+  and evaluate mode **refuses with a rollback-required error** over legacy fabricated runs (owner-gated —
+  never auto-deletes). Also made the finalize→audit write **best-effort** (WARN, don't abort — matches the
+  run pipeline's Fable-H1 pattern). The concurrent-invocation race it flagged is accepted for a manual,
+  single-operator offline tool (documented).
+
+The code-reviewer skill passed across all three parts of the arc (E9 seam, terminology currency, scale),
+with findings applied. **Full suite 1057 pass / 1 pg-skip / 0 fail.** PR #252 is **open — not merged**
+(merge to `main` = deploy, owner's call). Owner operational step before the first live real-eval run: roll
+back the fabricated `seed:scale` seed (DEPLOY.md), then `pnpm seed:scale --subjects 5000 --mode evaluate`
+to prove + profile (plan Phase 4).
+
+## 2026-07-08 — Option A at scale: real batch live-evaluation of the mhn tenant
+
+Replaced the **fabricated** `mhn` (~120k) population-scale seed with **real batch CQL evaluation** — the
+scale tenant's outcomes are now genuinely evaluated, not a synthesized compliance distribution
+(`feat/scale-batch-eval`; ADR-020 update).
+
+- **Engine — `batchEvaluateScalePopulation` (`backend-ts/src/run/batch-evaluate-scale.ts`).** Chunked and
+  **subject-major**: generate each subject's FHIR bundle once, evaluate it against all runnable measures,
+  fan the results out to the per-measure `seed:scale` runs. **Bounded memory** (one chunk buffered),
+  **whole-batch resumable** (per-measure idempotency on COMPLETED `seed:scale` runs; a crash before the
+  finalize loop re-seeds all measures), and **per-subject error-isolated** (an evaluation failure persists
+  MISSING_DATA with `{evaluationError, message}` evidence and never aborts the run). Audited via the new
+  **`SCALE_POPULATION_EVALUATED`** event (the fabricated path used `SCALE_POPULATION_SEEDED`).
+- **Generators — `backend-ts/src/run/scale-generator.ts`.** A `ScaleSubjectGenerator` seam:
+  `webChartRealisticGenerator()` (the default) emits **real LOINC/CVX/CPT codes** routed through the
+  WebChart terminology crosswalk (`normalizeWebChartBundle`), genuinely exercising the real-world WebChart
+  adapter at scale; `directSyntheticGenerator()` is the simpler `urn:workwell` path.
+- **Encoding + read path unchanged.** The `mhn|Lxx|Pxx|n` `subject_id` encoding and
+  `OutcomeStore.aggregateScaleRun` are **untouched** — `aggregateScaleRun` groups by encoded `subject_id` +
+  status (content-agnostic), so the entire rollup / hierarchy / programs read path is unaffected. Only the
+  outcomes' provenance changed (fabricated distribution → real CQL evaluation).
+- **CLI.** `pnpm seed:scale --mode evaluate` (the **default**) runs the real batch eval; `--mode fabricated`
+  keeps the legacy instant path reachable one more release; `--trim-evidence` persists minimal
+  `{scale:true}` evidence (for a large 120k run, to protect Neon storage) — otherwise **full real
+  `evidence_json`** (expressionResults) is stored. **Warning:** `--mode evaluate` at the default 120k is a
+  long, single-threaded batch job (potentially hours — ~1.68M CQL evaluations, one log line per chunk); use
+  a small `--subjects` (e.g. 5000) for proofs and `--trim-evidence` for a full run.
+- **No schema change; no new dependencies; descriptive only (ADR-008 — the CQL engine is the sole
+  `Outcome Status` authority); reversible via the same rollback SQL** (`triggered_by='seed:scale'` — delete
+  tagged outcomes then runs). Full suite green: **1054 pass / 1 pg-skip / 0 fail.** Spec/plan:
+  `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+  `docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+
+## 2026-07-08 (cont.) — terminology & standards currency audit + vaccine-CVX fix (2026)
+
+Before building the realistic-population generator (Option A), verified that every medical/clinical code
+and standard we use is correct and current — a three-way check (our implementation vs MIE's WebChart dev DB
+vs the 2026 authorities: CMS eCQI, CDC CVX, LOINC, VSAC, AMA CPT, eCFR/OSHA), run as six parallel research
+agents. Full write-up: **`docs/TERMINOLOGY_AUDIT_2026-07-08.md`**.
+
+**Verdict: correct and current on everything load-bearing.** Verified clean, no change: all **49** CMS
+catalog entries' versions/MIPS IDs/titles for 2026 (**v14 = 2026** confirmed — 2024=v12→2025=v13→2026=v14;
+do *not* advance to v15), all OSHA CFR citations (TB correctly = CDC), all runnable LOINC (`4548-4`,
+`2089-1`, `8480-6`, `39156-5`, `97506-0`) and CPT (`92557`, `86580`, `86480`, `83036`, `83721`, `77067`).
+
+**The one defect class — vaccine-CVX currency on the WebChart crosswalk — fixed:**
+- **Influenza:** `141`/`140`-only missed the high-dose/recombinant/adjuvanted/quadrivalent/cell-based codes
+  (most real records). Expanded to the full active seasonal CVX set; dropped deprecated `88` from the
+  governance display. Compliance-grade grouping = VSAC "Influenza Vaccine" OID `2.16.840.1.113883.3.526.3.1254`
+  (the earlier-floated `…1010.6` is the *all-vaccines* US Core set — corrected).
+- **Td/Tdap:** CVX `139` (Td) is **INACTIVE** and was the only Td code — added active `09`/`113`/`196`
+  (Tdap `115` was already right); `138`/`139` kept read-only for legacy.
+- **MMRV → varicella:** CVX `94` now counts toward varicella immunity (already counted for MMR).
+- **`G0202`** (mammography HCPCS) was deleted in 2018 (→ CPT `77067`) — marked read-only.
+
+All fixes are **additive rows on the WebChart read path** (`engine/ingress/webchart/terminology.ts`), the
+enforceable real-data surface — the synthetic evaluation path matches synthetic `urn:workwell:*` codes, not
+CVX numbers, so **no synthetic outcome changed** (verified: **1020 pass / 1 pg-skip / 0 fail**, +3 new
+currency-guard tests). Inactive codes are matched on read for legacy records, never emitted. Durable
+follow-up: resolve flu membership from the VSAC value set via the ADR-023 resolver rather than the hardcoded
+active list. No schema, no new deps. Docs: TERMINOLOGY_AUDIT (new), MEASURES.md, this entry.
+
+## 2026-07-08 — E9 (#78) decision + the `MeasureExecutor` seam (Option A default, Option C architecture, Option B stubbed)
+
+Took Doug's **Q2** (the "CQL → SQL" fork) off the blocked list and decided it **on our own**, since the
+decision has to be robust to either answer he could give and E9's charter says it ships *"a decision, not
+a build."* Recorded **ADR-025** and shipped the seam.
+
+**The fork, resolved:** measure execution is now **pluggable behind a `MeasureExecutor` port**, with
+FHIR-native as the default + correctness oracle and CQL→SQL as a parity-gated *future* executor (the
+hybrid — Option C — as the architecture; Option A built; Option B stubbed).
+
+- **`backend-ts/src/engine/measure-executor.ts`** — the port **extends `EvaluateMeasureBinding`**, so an
+  executor drops into `evaluateBundle`/`evaluateBatch` (`opts.engine`) and the run pipeline with **no new
+  plumbing**. `fhirNativeExecutor` (default) delegates to the existing CQL→ELM engine — **no second
+  evaluation path**, and a test proves it produces the byte-same outcome as the direct engine path.
+  `sqlPushdownExecutor` is an **inert stub** (constructs, but `evaluate` rejects loudly — general CQL→SQL
+  is research-grade and not built), mirroring the inert `webChartDataSource`. `resolveMeasureExecutor(env)`
+  selects config-driven (mirrors `resolveDataSource`/`resolveForecaster`); the SQL executor is chosen only
+  on an explicit `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in, so the **deployed default is
+  byte-identical to today**.
+- **Guardrail:** any future SQL executor must pass **golden parity** vs `fhirNativeExecutor`, per measure,
+  before it may serve. B can never be the correctness authority — only a scoped optimization for the narrow
+  measure subset (existence/recency/simple counts) where SQL is tractable.
+- **Why decide it solo:** it can't be wrong either way. If Doug requires in-WebChart execution → the seam
+  is ready for a scoped SQL executor; if "CQL→SQL" meant "replace hand-written SQL reports with a measure
+  engine" → that's Option A, already being built. A's weakness (scale — E13 PR-2 had to *generate* the
+  120k tenant's outcomes rather than live-evaluate 1.68M/run) is ordinary batch/incremental engineering;
+  B's weakness (fidelity on complex CQL) is research-grade and maybe unsolvable. Prefer the solvable
+  problem. Standards exports (MeasureReport/QRDA/QI-Core) and ADR-008 all depend on the real CQL engine.
+
+Descriptive only (ADR-008): the executor decides *how* a measure is computed, never that anything but CQL
+sets `Outcome Status`. **No schema, no new deps, no engine change** (additive seam; default delegates to
+the existing engine). ADR-014 marked **superseded by ADR-025**; ADR-017's parked "opt-in second executor"
+is now the concrete seam. B is deferred as its own research-grade epic (revisit when a concrete high-volume
+WebChart measure shows A can't serve it, and once the WebChart schema is confirmed — same gate as E12
+PR-2c). Verified: **backend typecheck clean; 1017 pass / 1 pg-skip / 0 fail** (4 new
+`measure-executor.test.ts` cases: default selection, FHIR-native parity, SQL stub inert on use, opted-in
+stub inert on use).
+
+Docs: DECISIONS (ADR-025 + ADR-014 status), ARCHITECTURE (§3 engine bullet + §6 invariant), this entry.
+
 ## 2026-07-07 (cont.) — housekeeping + doc-currency reconciliation
 
 Post-#250 merge cleanup and a docs reconciliation pass. Deleted the merged local branch
