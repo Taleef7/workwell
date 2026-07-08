@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-07-08 (cont.) — terminology & standards currency audit + vaccine-CVX fix (2026)
+
+Before building the realistic-population generator (Option A), verified that every medical/clinical code
+and standard we use is correct and current — a three-way check (our implementation vs MIE's WebChart dev DB
+vs the 2026 authorities: CMS eCQI, CDC CVX, LOINC, VSAC, AMA CPT, eCFR/OSHA), run as six parallel research
+agents. Full write-up: **`docs/TERMINOLOGY_AUDIT_2026-07-08.md`**.
+
+**Verdict: correct and current on everything load-bearing.** Verified clean, no change: all **49** CMS
+catalog entries' versions/MIPS IDs/titles for 2026 (**v14 = 2026** confirmed — 2024=v12→2025=v13→2026=v14;
+do *not* advance to v15), all OSHA CFR citations (TB correctly = CDC), all runnable LOINC (`4548-4`,
+`2089-1`, `8480-6`, `39156-5`, `97506-0`) and CPT (`92557`, `86580`, `86480`, `83036`, `83721`, `77067`).
+
+**The one defect class — vaccine-CVX currency on the WebChart crosswalk — fixed:**
+- **Influenza:** `141`/`140`-only missed the high-dose/recombinant/adjuvanted/quadrivalent/cell-based codes
+  (most real records). Expanded to the full active seasonal CVX set; dropped deprecated `88` from the
+  governance display. Compliance-grade grouping = VSAC "Influenza Vaccine" OID `2.16.840.1.113883.3.526.3.1254`
+  (the earlier-floated `…1010.6` is the *all-vaccines* US Core set — corrected).
+- **Td/Tdap:** CVX `139` (Td) is **INACTIVE** and was the only Td code — added active `09`/`113`/`196`
+  (Tdap `115` was already right); `138`/`139` kept read-only for legacy.
+- **MMRV → varicella:** CVX `94` now counts toward varicella immunity (already counted for MMR).
+- **`G0202`** (mammography HCPCS) was deleted in 2018 (→ CPT `77067`) — marked read-only.
+
+All fixes are **additive rows on the WebChart read path** (`engine/ingress/webchart/terminology.ts`), the
+enforceable real-data surface — the synthetic evaluation path matches synthetic `urn:workwell:*` codes, not
+CVX numbers, so **no synthetic outcome changed** (verified: **1020 pass / 1 pg-skip / 0 fail**, +3 new
+currency-guard tests). Inactive codes are matched on read for legacy records, never emitted. Durable
+follow-up: resolve flu membership from the VSAC value set via the ADR-023 resolver rather than the hardcoded
+active list. No schema, no new deps. Docs: TERMINOLOGY_AUDIT (new), MEASURES.md, this entry.
+
 ## 2026-07-08 — E9 (#78) decision + the `MeasureExecutor` seam (Option A default, Option C architecture, Option B stubbed)
 
 Took Doug's **Q2** (the "CQL → SQL" fork) off the blocked list and decided it **on our own**, since the

@@ -75,20 +75,30 @@ const CROSSWALK_ROWS: CrosswalkRow[] = [
   // Procedures (CPT / HCPCS)
   { system: SYSTEMS.CPT, code: "92557", measureId: "audiogram" }, // comprehensive audiometry
   { system: SYSTEMS.CPT, code: "86580", measureId: "tb_surveillance" }, // TB intradermal skin test
-  { system: SYSTEMS.CPT, code: "77067", measureId: "cms125" }, // screening mammography, bilateral
-  { system: SYSTEMS.HCPCS, code: "G0202", measureId: "cms125" }, // screening mammography (HCPCS; present in the dev DB)
-  // Vaccines (CVX)
-  { system: SYSTEMS.CVX, code: "141", measureId: "flu_vaccine" }, // influenza, seasonal
-  { system: SYSTEMS.CVX, code: "140", measureId: "flu_vaccine" }, // influenza, preservative-free
-  { system: SYSTEMS.CVX, code: "115", measureId: "adult_immunization" }, // Tdap
-  { system: SYSTEMS.CVX, code: "139", measureId: "adult_immunization" }, // Td (adult)
+  { system: SYSTEMS.CPT, code: "77067", measureId: "cms125" }, // screening mammography, bilateral (the active code)
+  { system: SYSTEMS.HCPCS, code: "G0202", measureId: "cms125" }, // screening mammography — HCPCS G0202 was DELETED in 2018 (replaced by CPT 77067); matched on READ only for legacy dev-DB records
+  // Vaccines (CVX) — codes verified Active against the CDC CVX code set (2026-07-08). The compliance-grade
+  // groupings are VSAC value sets (Influenza Vaccine 2.16.840.1.113883.3.526.3.1254; MMR / Varicella /
+  // Tdap groupings); resolve from those once the VSAC resolver is wired — until then these ARE the active
+  // memberships. This is a real→synthetic READ map and emits nothing. A few INACTIVE codes are kept here
+  // as read-only rows so legacy records still match: Td 139, Hep B 45, HCPCS G0202. Other inactive codes
+  // (flu 88/15/16/144/151; Td 138; Hep B 220 PreHevbrio) are intentionally absent — neither matched nor emitted.
+  // Influenza — was 141/140 only, which missed the high-dose / recombinant / adjuvanted / quadrivalent /
+  // cell-based codes that make up the majority of real records. Full active seasonal set:
+  ...["141", "140", "111", "135", "149", "150", "153", "155", "158", "168", "171", "185", "186", "197", "205", "231", "320", "333", "337"].map(
+    (code): CrosswalkRow => ({ system: SYSTEMS.CVX, code, measureId: "flu_vaccine" }),
+  ),
+  // Td/Tdap (adult, HEDIS AIS-E) — Tdap 115 + the ACTIVE adult Td codes 09/113/196. 139 (Td unspecified)
+  // is INACTIVE but kept as a read-only row so legacy Td records still match (it was previously the ONLY Td code — a real currency bug).
+  ...["115", "09", "113", "196", "139"].map((code): CrosswalkRow => ({ system: SYSTEMS.CVX, code, measureId: "adult_immunization" })),
   { system: SYSTEMS.CVX, code: "03", measureId: "mmr" }, // MMR
-  { system: SYSTEMS.CVX, code: "94", measureId: "mmr" }, // MMRV
+  { system: SYSTEMS.CVX, code: "94", measureId: "mmr" }, // MMRV (confers measles+mumps+rubella+varicella)
   { system: SYSTEMS.CVX, code: "21", measureId: "varicella" }, // varicella
+  { system: SYSTEMS.CVX, code: "94", measureId: "varicella" }, // MMRV also confers varicella immunity → counts toward the varicella series
   { system: SYSTEMS.CVX, code: "08", measureId: "hepatitis_b_vaccination_series" }, // Hep B, adolescent/pediatric
   { system: SYSTEMS.CVX, code: "43", measureId: "hepatitis_b_vaccination_series" }, // Hep B, adult
   { system: SYSTEMS.CVX, code: "44", measureId: "hepatitis_b_vaccination_series" }, // Hep B, dialysis
-  { system: SYSTEMS.CVX, code: "45", measureId: "hepatitis_b_vaccination_series" }, // Hep B, unspecified
+  { system: SYSTEMS.CVX, code: "45", measureId: "hepatitis_b_vaccination_series" }, // Hep B, unspecified — INACTIVE (read-only, legacy records)
   { system: SYSTEMS.CVX, code: "189", measureId: "hepatitis_b_vaccination_series" }, // Hep B (Heplisav-B)
   // Labs / vitals (LOINC) — WebChart records these as Observations (`observation_codes.loinc_num`).
   // Note the resource-type seam: `cms122` retrieves `[Observation]` (value-based), but the four
