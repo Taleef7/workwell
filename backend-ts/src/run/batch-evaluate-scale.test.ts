@@ -15,7 +15,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { batchEvaluateScalePopulation, SCALE_TRIGGER } from "./batch-evaluate-scale.ts";
-import { directSyntheticGenerator, type ScaleSubjectGenerator } from "./scale-generator.ts";
+import { directSyntheticGenerator, webChartRealisticGenerator, type ScaleSubjectGenerator } from "./scale-generator.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -176,6 +176,34 @@ test("batchEvaluateScalePopulation default (no trimEvidence) persists the real e
     const ev = rows[0]!.evidence as { expressionResults?: unknown };
     assert.ok(Array.isArray(ev.expressionResults), "default evidence has expressionResults");
     assert.notDeepEqual(rows[0]!.evidence, { scale: true });
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation with webChartRealisticGenerator produces a real status spread (crosswalk works at scale)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // The WebChart-real-coded generator routes REAL LOINC/CVX/CPT codes through the terminology
+    // crosswalk. If reconciliation failed, every outcome would collapse to a uniform MISSING_DATA;
+    // a real spread (≥2 distinct statuses) proves the real codes actually matched the CQL at scale.
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: webChartRealisticGenerator() };
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 24, asOf: "2026-06-26", chunkSize: 8 });
+    assert.equal(r.skipped, false, "the batch is not skipped");
+    assert.equal(r.outcomesCreated, Object.keys(MEASURES).length * 24);
+
+    // Pick a measure's run and assert its outcomes span >1 distinct status.
+    const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
+    const rows = await outcomes.listOutcomes(scaleRun.id);
+    assert.ok(rows.length > 0, "the run has outcomes");
+    for (const row of rows) {
+      assert.ok(VALID_BUCKETS.has(row.status), `written status is a valid bucket, got '${row.status}'`);
+    }
+    const distinct = new Set(rows.map((row) => row.status));
+    assert.ok(
+      distinct.size >= 2,
+      `webchart-generated run has a real status spread, not uniform MISSING_DATA — saw ${[...distinct].join(",")}`,
+    );
   } finally {
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
   }
