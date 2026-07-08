@@ -71,8 +71,12 @@ export async function batchEvaluateScalePopulation(
   // Whole-batch idempotency (resumable): skip any measure that ALREADY has a COMPLETED seed:scale run.
   // Runs are finalized only in the trailing loop AFTER the whole evaluation phase, so a crash during
   // the bulk evaluation leaves NO COMPLETED runs — a resume then re-seeds every measure (not per-measure
-  // like backfill-scale.ts, which finalized inside its per-measure loop). Only COMPLETED counts; a
-  // stranded RUNNING run from a crashed prior invocation is re-seeded (and swept FAILED by failStuckRuns).
+  // like backfill-scale.ts, which finalized inside its per-measure loop). Only COMPLETED counts.
+  // NOTE: a stranded RUNNING run from a crashed prior invocation is NOT auto-swept — `failStuckRuns`
+  // deliberately excludes `seed:%` runs (Fable M7) — so its already-written outcomes linger under a dead
+  // run id (a resume mints new run ids and re-writes everything, latest-wins in the COMPLETED-only rollup).
+  // At 120k a late crash can orphan up to |measures| × N rows; roll the crashed run back (the
+  // delete-tagged-outcomes-then-runs SQL in DEPLOY.md) before resuming to avoid storage bloat.
   const seededMeasures = new Set(
     (await deps.runStore.listRuns(100_000))
       .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && r.scopeId)
