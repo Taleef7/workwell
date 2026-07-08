@@ -17,3 +17,24 @@ test("parseArgs reads --subjects/--as-of and rejects bad input", () => {
 test("defaults: no args parse to empty (caller applies the 120k default)", () => {
   assert.deepEqual(parseArgs([]), {});
 });
+
+test("parseArgs reads --mode and rejects bad values (default resolves to evaluate)", () => {
+  assert.equal(parseArgs(["--mode", "evaluate"]).mode, "evaluate");
+  assert.equal(parseArgs(["--mode", "fabricated"]).mode, "fabricated");
+  assert.equal(parseArgs([]).mode ?? "evaluate", "evaluate");
+  assert.throws(() => parseArgs(["--mode", "bogus"]), /--mode/);
+  assert.throws(() => parseArgs(["--mode", "bogus"]), SeedCliUsageError);
+});
+
+test("parseArgs reads --trim-evidence (boolean, default falsy)", () => {
+  assert.equal(parseArgs(["--trim-evidence"]).trimEvidence, true);
+  assert.ok(!parseArgs([]).trimEvidence);
+});
+
+test("new flags compose with --subjects/--as-of", () => {
+  assert.deepEqual(parseArgs(["--subjects", "5000", "--mode", "evaluate", "--trim-evidence"]), {
+    subjects: 5000,
+    mode: "evaluate",
+    trimEvidence: true,
+  });
+});
