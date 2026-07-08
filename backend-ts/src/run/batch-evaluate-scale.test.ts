@@ -15,10 +15,25 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { batchEvaluateScalePopulation, SCALE_TRIGGER } from "./batch-evaluate-scale.ts";
-import { directSyntheticGenerator } from "./scale-generator.ts";
+import { directSyntheticGenerator, type ScaleSubjectGenerator } from "./scale-generator.ts";
+import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 
 const VALID_BUCKETS = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
+
+/** A generator that returns a deliberately-malformed bundle for one subjectId (the real engine then
+ *  throws on it), delegating every other subject to the real synthetic generator. */
+function failingGenerator(failSubjectId: string): ScaleSubjectGenerator {
+  const base = directSyntheticGenerator();
+  return {
+    kind: "failing-test",
+    bundleFor(subjectId, measureId, target, evaluationDate): FhirBundle {
+      if (subjectId === failSubjectId) return {} as unknown as FhirBundle; // engine throws → per-item isolation
+      return base.bundleFor(subjectId, measureId, target, evaluationDate);
+    },
+  };
+}
 
 async function fresh() {
   const dbPath = join(tmpdir(), `workwell-batchscale-${crypto.randomUUID()}.sqlite`);
@@ -72,6 +87,95 @@ test("batchEvaluateScalePopulation is resumable — a second identical call is a
     const r2 = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 5 });
     assert.equal(r2.skipped, true);
     assert.equal(r2.runsCreated, 0);
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation isolates a per-subject evaluation failure (MISSING_DATA, run still COMPLETED)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // subject index 0 → provider pair {li:0,pi:0} → this encoded id (see PROVIDER_PAIRS ordering).
+    const failSubjectId = encodeScaleSubject(0, 0, 0);
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: failingGenerator(failSubjectId) };
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: 4 });
+    const measures = Object.keys(MEASURES).length;
+    // The batch continues past the failure: every subject×measure row is still persisted.
+    assert.equal(r.outcomesCreated, measures * 10, "failed subjects are still persisted, batch not aborted");
+
+    const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+    assert.ok(scaleRuns.every((x) => x.status === "COMPLETED"), "the run finalizes COMPLETED despite a failure");
+
+    // The failed subject's rows are MISSING_DATA with evaluation-error evidence (DATA_MODEL §5 shape).
+    let sawFail = false;
+    let sawRealOutcome = false;
+    for (const run of scaleRuns) {
+      for (const row of await outcomes.listOutcomes(run.id)) {
+        if (row.subjectId === failSubjectId) {
+          assert.equal(row.status, "MISSING_DATA", "failed subject is MISSING_DATA");
+          const ev = row.evidence as { evaluationError?: string; message?: string };
+          assert.ok(ev.evaluationError, "failed subject carries evidenceJson.evaluationError");
+          assert.ok(typeof ev.message === "string", "failed subject carries an error message");
+          sawFail = true;
+        } else {
+          sawRealOutcome = true;
+        }
+      }
+    }
+    assert.ok(sawFail, "the failing subject produced error rows");
+    assert.ok(sawRealOutcome, "other subjects still produced outcomes");
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation handles a remainder chunk (subjects not divisible by chunkSize)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    // 20 / 7 = chunks of 7, 7, 6 — the trailing remainder chunk must still flush.
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 7 });
+    const measures = Object.keys(MEASURES).length;
+    assert.equal(r.runsCreated, measures);
+    assert.equal(r.outcomesCreated, measures * 20, "outcomesCreated === runsCreated * subjects across the remainder");
+
+    // Each measure's run holds exactly `subjects` rows (no drops, no dupes at the chunk boundary).
+    const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
+    assert.equal((await outcomes.listOutcomes(scaleRun.id)).length, 20);
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation trimEvidence writes {scale:true}; default writes real engine evidence", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // trimEvidence:true → minimal evidence on every (successfully-evaluated) row.
+    const trimDeps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    await batchEvaluateScalePopulation(trimDeps, { subjects: 8, asOf: "2026-06-26", chunkSize: 8, trimEvidence: true });
+    const trimRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
+    const trimRows = await outcomes.listOutcomes(trimRun.id);
+    assert.ok(trimRows.length > 0);
+    for (const row of trimRows) {
+      assert.deepEqual(row.evidence, { scale: true }, "trimEvidence writes minimal {scale:true}");
+    }
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation default (no trimEvidence) persists the real engine evidence", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    await batchEvaluateScalePopulation(deps, { subjects: 8, asOf: "2026-06-26", chunkSize: 8 });
+    const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
+    const rows = await outcomes.listOutcomes(scaleRun.id);
+    assert.ok(rows.length > 0);
+    // Real evidence carries the CQL define results — not the minimal {scale:true} sentinel.
+    const ev = rows[0]!.evidence as { expressionResults?: unknown };
+    assert.ok(Array.isArray(ev.expressionResults), "default evidence has expressionResults");
+    assert.notDeepEqual(rows[0]!.evidence, { scale: true });
   } finally {
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
   }
