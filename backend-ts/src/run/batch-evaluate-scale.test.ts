@@ -108,6 +108,60 @@ test("batchEvaluateScalePopulation is resumable — a second identical call is a
   }
 });
 
+test("batchEvaluateScalePopulation REFUSES over legacy FABRICATED seed:scale runs (rollback-required)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // Simulate the legacy fabricated path (backfill-scale.ts): a COMPLETED seed:scale run WITHOUT the
+    // batchEvaluated marker. --mode evaluate must fail loudly over it rather than silently no-op.
+    await runs.createRun({
+      scopeType: "MEASURE",
+      scopeId: "audiogram",
+      triggeredBy: SCALE_TRIGGER,
+      status: "COMPLETED",
+      startedAt: "2026-06-26T00:00:00.000Z",
+      completedAt: "2026-06-26T00:01:00.000Z",
+      requestedScope: { measureId: "audiogram", scalePopulation: true }, // fabricated: no batchEvaluated
+      measurementPeriodStart: "2025-06-26T00:00:00.000Z",
+      measurementPeriodEnd: "2026-06-26T00:00:00.000Z",
+    });
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    await assert.rejects(
+      () => batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: 5 }),
+      /legacy FABRICATED seed:scale runs exist/,
+    );
+    // It refused BEFORE creating any evaluate run — still only the one fabricated run present.
+    assert.equal((await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER).length, 1);
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("batchEvaluateScalePopulation tolerates a failing audit store (best-effort audit, still finalizes)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // An audit store whose appendAudit always throws. finalizeRun runs before appendAudit, so a failed
+    // audit must NOT strand the remaining runs unfinalized — the batch logs a WARN and continues.
+    const throwingAudit = new Proxy(events, {
+      get(target, prop, recv) {
+        if (prop === "appendAudit") return async () => { throw new Error("audit ledger down"); };
+        const v = Reflect.get(target, prop, recv);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    }) as typeof events;
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: throwingAudit, generator: directSyntheticGenerator() };
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: 5 });
+    const measures = Object.keys(MEASURES).length;
+    assert.equal(r.skipped, false, "the batch is not skipped");
+    assert.equal(r.runsCreated, measures);
+
+    const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+    assert.equal(scaleRuns.length, measures);
+    assert.ok(scaleRuns.every((x) => x.status === "COMPLETED"), "all runs finalize COMPLETED despite the audit failure");
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("batchEvaluateScalePopulation isolates a per-subject evaluation failure (MISSING_DATA, run still COMPLETED)", async () => {
   const { dbPath, runs, outcomes, events } = await fresh();
   try {

@@ -6,9 +6,11 @@
  * `ScaleSubjectGenerator`), evaluates it, and writes the engine's actual `Outcome Status`.
  *
  * The outcomes are still keyed by the existing `mhn|Lxx|Pxx|n` subject_id encoding, so the rollup's
- * bounded `aggregateScaleRun` SQL is untouched. Per-measure MEASURE runs, `triggered_by='seed:scale'`,
- * RUNNING→finalize, chunked `recordOutcomes`, per-measure idempotency (skip measures with an existing
- * COMPLETED seed:scale run), audited (SCALE_POPULATION_EVALUATED). Owner-run on-demand — NOT on deploy.
+ * bounded `aggregateScaleRun` SQL is untouched. Per-measure MEASURE runs, `triggered_by='seed:scale'`
+ * with a durable `requestedScope.batchEvaluated=true` marker (distinguishes these from legacy fabricated
+ * seed:scale runs, which share the trigger), RUNNING→finalize, chunked `recordOutcomes`, whole-batch
+ * idempotency (skip measures with an existing batch-evaluated COMPLETED run; REFUSE over legacy
+ * fabricated runs), best-effort audit (SCALE_POPULATION_EVALUATED). Owner-run on-demand — NOT on deploy.
  *
  * Bounded memory: the loop is SUBJECT-MAJOR and buffers only ONE chunk of outcomes at a time (across
  * all measures for the chunk's subjects), flushing per chunk. All per-measure runs are created UP FRONT
@@ -72,23 +74,47 @@ export async function batchEvaluateScalePopulation(
   if (!Number.isInteger(chunk) || chunk < 1) throw new Error(`chunkSize must be a positive integer, got ${args.chunkSize}`);
   if (!Number.isInteger(args.subjects) || args.subjects < 1) throw new Error(`subjects must be a positive integer, got ${args.subjects}`);
 
-  // Whole-batch idempotency (resumable): skip any measure that ALREADY has a COMPLETED seed:scale run.
+  // Both the fabricated backfill (backfill-scale.ts) and this evaluate path write
+  // triggered_by='seed:scale' (the rollup + rollback SQL key on that value — left UNCHANGED). To tell
+  // the two apart, evaluate runs carry a durable `requestedScope.batchEvaluated=true` marker (listRuns
+  // projects requested_scope_json on both the floor + ceiling, so it survives the round-trip). We must
+  // NOT mix them: a legacy FABRICATED COMPLETED seed:scale run would otherwise (a) be silently treated
+  // as "already seeded" here — so `--mode evaluate` would no-op on the live DB, which HAS fabricated
+  // runs — and (b) leave the rollup an ambiguous latest run per measure.
+  //
   // Scan cap: `listRuns(100_000)` — ample for any realistic instance (runs number in the hundreds/low
   // thousands), and the same window backfill-scale.ts uses. Known limitation at extreme run-history
   // volumes (a COMPLETED seed:scale run older than the newest 100k would be missed → re-seed); the future
   // fix is a targeted "exists COMPLETED seed:scale run for measure X" store query rather than a full scan.
-  // Runs are finalized only in the trailing loop AFTER the whole evaluation phase, so a crash during
-  // the bulk evaluation leaves NO COMPLETED runs — a resume then re-seeds every measure (not per-measure
-  // like backfill-scale.ts, which finalized inside its per-measure loop). Only COMPLETED counts.
+  const completedScaleRuns = (await deps.runStore.listRuns(100_000)).filter(
+    (r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && r.scopeId,
+  );
+  // Refuse LOUDLY over legacy fabricated data (owner-gated — this NEVER auto-deletes): a COMPLETED
+  // seed:scale run WITHOUT the batchEvaluated marker is fabricated. Fail so the owner rolls it back
+  // first, rather than silently no-opping (or leaving fabricated + evaluated runs ambiguously mixed).
+  const legacyFabricated = completedScaleRuns.filter((r) => r.requestedScope?.batchEvaluated !== true);
+  if (legacyFabricated.length > 0) {
+    throw new Error(
+      "Refusing to batch-evaluate the scale tenant: legacy FABRICATED seed:scale runs exist " +
+        `(${legacyFabricated.length}). Roll them back first (owner-gated — this never auto-deletes): ` +
+        "delete the tagged outcomes, then the runs —\n" +
+        "  DELETE FROM workwell_spike.outcomes WHERE run_id IN " +
+        "(SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:scale');\n" +
+        "  DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';",
+    );
+  }
+  // Whole-batch idempotency (resumable): skip any measure that ALREADY has a BATCH-EVALUATED COMPLETED
+  // seed:scale run. Runs are finalized only in the trailing loop AFTER the whole evaluation phase, so a
+  // crash during the bulk evaluation leaves NO COMPLETED runs — a resume then re-seeds every measure
+  // (not per-measure like backfill-scale.ts, which finalized inside its per-measure loop). Counting only
+  // batch-evaluated runs is what makes a crashed evaluate run resume correctly.
   // NOTE: a stranded RUNNING run from a crashed prior invocation is NOT auto-swept — `failStuckRuns`
   // deliberately excludes `seed:%` runs (Fable M7) — so its already-written outcomes linger under a dead
   // run id (a resume mints new run ids and re-writes everything, latest-wins in the COMPLETED-only rollup).
   // At 120k a late crash can orphan up to |measures| × N rows; roll the crashed run back (the
-  // delete-tagged-outcomes-then-runs SQL in DEPLOY.md) before resuming to avoid storage bloat.
+  // delete-tagged-outcomes-then-runs SQL above) before resuming to avoid storage bloat.
   const seededMeasures = new Set(
-    (await deps.runStore.listRuns(100_000))
-      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && r.scopeId)
-      .map((r) => r.scopeId as string),
+    completedScaleRuns.filter((r) => r.requestedScope?.batchEvaluated === true).map((r) => r.scopeId as string),
   );
   const todo = measureIds.filter((m) => !seededMeasures.has(m));
   if (todo.length === 0) return { skipped: true, runsCreated: 0, outcomesCreated: 0, subjects: args.subjects };
@@ -111,7 +137,9 @@ export async function batchEvaluateScalePopulation(
       triggeredBy: SCALE_TRIGGER,
       status: "RUNNING",
       startedAt,
-      requestedScope: { measureId, evaluationDate: args.asOf, scalePopulation: true },
+      // batchEvaluated:true is the durable marker that distinguishes a REAL evaluated run from a legacy
+      // fabricated one (both share triggered_by='seed:scale'); the idempotency + legacy-refusal above key on it.
+      requestedScope: { measureId, evaluationDate: args.asOf, scalePopulation: true, batchEvaluated: true },
       measurementPeriodStart: periodStart,
       measurementPeriodEnd: periodEnd,
     });
@@ -160,21 +188,27 @@ export async function batchEvaluateScalePopulation(
     console.log(`[batch:scale] evaluated ${end}/${args.subjects} subjects`);
   }
 
-  // Finalize + audit each run (every state change is audited, CLAUDE.md). COMPLETED status and the
-  // audit event are written together so the idempotency source (COMPLETED runs) is always in sync.
+  // Finalize + audit each run (every state change is audited, CLAUDE.md). Finalize-before-audit, and
+  // the audit is BEST-EFFORT — mirrors the run pipeline's Fable-H1 pattern: if `appendAudit` throws, the
+  // run is already COMPLETED (so a resume would skip it), so aborting here would strand the remaining
+  // runs unfinalized. Instead log a WARN (the audit-ledger gap) and CONTINUE finalizing/auditing the rest.
   for (const measureId of todo) {
     const runId = runIdByMeasure.get(measureId)!;
     await deps.runStore.finalizeRun(runId, "COMPLETED");
-    await deps.auditStore.appendAudit({
-      eventType: SCALE_EVALUATED_EVENT,
-      entityType: "run",
-      entityId: runId,
-      actor: SCALE_TRIGGER,
-      refRunId: runId,
-      refCaseId: null,
-      refMeasureVersionId: null,
-      payload: { measureId, subjects: args.subjects, asOf: args.asOf, generator: deps.generator.kind },
-    });
+    try {
+      await deps.auditStore.appendAudit({
+        eventType: SCALE_EVALUATED_EVENT,
+        entityType: "run",
+        entityId: runId,
+        actor: SCALE_TRIGGER,
+        refRunId: runId,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { measureId, subjects: args.subjects, asOf: args.asOf, generator: deps.generator.kind },
+      });
+    } catch (e) {
+      console.warn(`[batch:scale] audit append failed for run ${runId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   return { skipped: false, runsCreated: todo.length, outcomesCreated, subjects: args.subjects };
