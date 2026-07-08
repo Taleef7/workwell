@@ -160,6 +160,38 @@ fast at 120k — app memory never holds the per-subject rows. **Storage note:** 
 measures ≈ **1.68M `outcomes` rows** on Neon (minimal evidence keeps each row small); size accordingly
 or seed fewer `--subjects`.
 
+> **Now real batch CQL evaluation (2026-07-08, this branch — supersedes the fabricated path).**
+> `seed:scale` now defaults to **`--mode evaluate`**: the `mhn` outcomes are produced by **real batch
+> CQL evaluation** (engine `batchEvaluateScalePopulation`), not the previous fabricated compliance
+> distribution. It is **subject-major** — each subject's FHIR bundle is generated once (default the
+> `webChartRealisticGenerator`, emitting real LOINC/CVX/CPT codes routed through the WebChart terminology
+> crosswalk, so the real WebChart adapter is genuinely exercised at scale), evaluated against all
+> runnable measures, then fanned out to the per-measure `seed:scale` runs. It is bounded-memory (one
+> chunk buffered), whole-batch resumable (per-measure idempotency on COMPLETED `seed:scale` runs; a crash
+> before the finalize loop re-seeds all measures), and per-subject error-isolated (an evaluation failure
+> persists `MISSING_DATA` with `{evaluationError, message}` evidence and never aborts the run). Each real
+> run is audited with the new **`SCALE_POPULATION_EVALUATED`** event (the fabricated path used
+> `SCALE_POPULATION_SEEDED`). The **`mhn|Lxx|Pxx|n` `subject_id` encoding, `aggregateScaleRun`, and the
+> rollback SQL below are all unchanged** — only the outcomes' provenance changed (fabricated → real CQL).
+>
+> **⚠ Long-run warning.** `--mode evaluate` at the default 120k subjects is a long, single-threaded batch
+> job (potentially **hours** — ~1.68M CQL evaluations); progress is logged one line per chunk. For a
+> proof/dev run use a small `--subjects` (e.g. 5000). For a full 120k run add **`--trim-evidence`** to
+> persist minimal `{scale:true}` evidence (protects Neon storage); otherwise full real `evidence_json`
+> (expressionResults) is stored per outcome. `--mode fabricated` keeps the legacy instant path reachable
+> for one more release.
+>
+> ```bash
+> cd backend-ts
+> # proof/dev run: real batch eval over a small population
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate
+> # full 120k real run: trim evidence to protect Neon storage
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --trim-evidence
+> ```
+>
+> Spec/plan: `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+> `docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+
 **Rollback (reversible, synthetic data only) — delete tagged outcomes first, then runs**
 (schema-qualify on the Pg ceiling):
 
