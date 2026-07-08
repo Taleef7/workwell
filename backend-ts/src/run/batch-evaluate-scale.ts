@@ -68,9 +68,11 @@ export async function batchEvaluateScalePopulation(
   const measureIds = Object.keys(MEASURES);
   const chunk = args.chunkSize ?? DEFAULT_CHUNK;
 
-  // Per-measure idempotency (resumable): skip any measure that ALREADY has a COMPLETED seed:scale run,
-  // so a re-run fills only missing measures (e.g. resuming after a crash) and never double-writes. Only
-  // COMPLETED counts — a RUNNING/FAILED run means a prior invocation crashed mid-seed and must re-seed.
+  // Whole-batch idempotency (resumable): skip any measure that ALREADY has a COMPLETED seed:scale run.
+  // Runs are finalized only in the trailing loop AFTER the whole evaluation phase, so a crash during
+  // the bulk evaluation leaves NO COMPLETED runs — a resume then re-seeds every measure (not per-measure
+  // like backfill-scale.ts, which finalized inside its per-measure loop). Only COMPLETED counts; a
+  // stranded RUNNING run from a crashed prior invocation is re-seeded (and swept FAILED by failStuckRuns).
   const seededMeasures = new Set(
     (await deps.runStore.listRuns(100_000))
       .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && r.scopeId)
@@ -115,21 +117,35 @@ export async function batchEvaluateScalePopulation(
       const subjectId = encodeScaleSubject(pair.li, pair.pi, i);
       for (const measureId of todo) {
         const target = targetForIndex(i, args.subjects, rateByMeasure.get(measureId)!);
-        const bundle = deps.generator.bundleFor(subjectId, measureId, target, args.asOf);
-        const outcome = await evaluateBundle(bundle, measureId, { evaluationDate: args.asOf });
+        // Per-(subject, measure) error isolation (ARCHITECTURE §6 / DATA_MODEL §5): one evaluation
+        // failure must NOT abort the batch — the failed subject is persisted as MISSING_DATA with
+        // evaluation-error evidence and the run still finalizes COMPLETED, mirroring the run pipeline.
+        let status: string;
+        let evidence: unknown;
+        try {
+          const bundle = deps.generator.bundleFor(subjectId, measureId, target, args.asOf);
+          const outcome = await evaluateBundle(bundle, measureId, { evaluationDate: args.asOf });
+          status = outcome.outcome;
+          evidence = args.trimEvidence ? { scale: true } : outcome.evidence;
+        } catch (e) {
+          status = "MISSING_DATA";
+          evidence = { evaluationError: "CQL engine failure", message: e instanceof Error ? e.message : String(e) };
+        }
         buffer.push({
           runId: runIdByMeasure.get(measureId)!,
           subjectId,
           measureId,
           evaluationPeriod: args.asOf,
-          status: outcome.outcome,
+          status,
           evaluatedAt: completedAt,
-          evidence: args.trimEvidence ? { scale: true } : outcome.evidence,
+          evidence,
         });
       }
     }
     await deps.outcomeStore.recordOutcomes(buffer);
     outcomesCreated += buffer.length;
+    // One progress line per chunk (~1.68M sequential evals at 120k otherwise runs silently).
+    console.log(`[batch:scale] evaluated ${end}/${args.subjects} subjects`);
   }
 
   // Finalize + audit each run (every state change is audited, CLAUDE.md). COMPLETED status and the
