@@ -115,6 +115,23 @@ live-evaluated subjects (ADR-008) — the scale tenant is generated demo data an
 subject's status. **Deferred:** the scale tenant in the roster / per-patient drill-down /
 trend·top-drivers; live CQL evaluation of the scale tenant; PR-3 scheduled cron recompute.
 
+**Update (2026-07-08, `feat/scale-batch-eval`) — the fabricated-outcome path is superseded by real
+batch evaluation.** The formerly-deferred "live CQL evaluation of the scale tenant" is now the
+default: `batchEvaluateScalePopulation` (`backend-ts/src/run/batch-evaluate-scale.ts`) produces the
+`mhn` outcomes by **real CQL evaluation** — subject-major (each subject's bundle generated once via a
+`ScaleSubjectGenerator`, default `webChartRealisticGenerator` emitting real LOINC/CVX/CPT codes routed
+through the WebChart terminology crosswalk, evaluated against all runnable measures, fanned out to the
+per-measure runs), bounded-memory, whole-batch resumable, per-subject error-isolated (failure ⇒
+MISSING_DATA), audited `SCALE_POPULATION_EVALUATED`. **What ADR-020 keeps unchanged:** the
+`mhn|Lxx|Pxx|n` `subject_id` encoding, `aggregateScaleRun`'s content-agnostic SQL `GROUP BY`, the
+provider-leaf rollup, and the reversibility (same `triggered_by='seed:scale'` rollback SQL) — so only
+the outcomes' provenance changed (fabricated distribution → real evaluation). `pnpm seed:scale`
+defaults to `--mode evaluate`; `--mode fabricated` keeps the legacy instant path one more release;
+`--trim-evidence` stores minimal `{scale:true}` evidence for a large run. No schema, no new deps;
+descriptive (ADR-008 preserved). Spec/plan:
+`docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+`docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+
 ## ADR-019: Multi-tenant rollup modeled in the read-time synthetic directory; cross-system aggregate root — E13 PR-1 (#185)
 
 Date: 2026-06-26

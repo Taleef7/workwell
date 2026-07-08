@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-08 — Option A at scale: real batch live-evaluation of the mhn tenant
+
+Replaced the **fabricated** `mhn` (~120k) population-scale seed with **real batch CQL evaluation** — the
+scale tenant's outcomes are now genuinely evaluated, not a synthesized compliance distribution
+(`feat/scale-batch-eval`; ADR-020 update).
+
+- **Engine — `batchEvaluateScalePopulation` (`backend-ts/src/run/batch-evaluate-scale.ts`).** Chunked and
+  **subject-major**: generate each subject's FHIR bundle once, evaluate it against all runnable measures,
+  fan the results out to the per-measure `seed:scale` runs. **Bounded memory** (one chunk buffered),
+  **whole-batch resumable** (per-measure idempotency on COMPLETED `seed:scale` runs; a crash before the
+  finalize loop re-seeds all measures), and **per-subject error-isolated** (an evaluation failure persists
+  MISSING_DATA with `{evaluationError, message}` evidence and never aborts the run). Audited via the new
+  **`SCALE_POPULATION_EVALUATED`** event (the fabricated path used `SCALE_POPULATION_SEEDED`).
+- **Generators — `backend-ts/src/run/scale-generator.ts`.** A `ScaleSubjectGenerator` seam:
+  `webChartRealisticGenerator()` (the default) emits **real LOINC/CVX/CPT codes** routed through the
+  WebChart terminology crosswalk (`normalizeWebChartBundle`), genuinely exercising the real-world WebChart
+  adapter at scale; `directSyntheticGenerator()` is the simpler `urn:workwell` path.
+- **Encoding + read path unchanged.** The `mhn|Lxx|Pxx|n` `subject_id` encoding and
+  `OutcomeStore.aggregateScaleRun` are **untouched** — `aggregateScaleRun` groups by encoded `subject_id` +
+  status (content-agnostic), so the entire rollup / hierarchy / programs read path is unaffected. Only the
+  outcomes' provenance changed (fabricated distribution → real CQL evaluation).
+- **CLI.** `pnpm seed:scale --mode evaluate` (the **default**) runs the real batch eval; `--mode fabricated`
+  keeps the legacy instant path reachable one more release; `--trim-evidence` persists minimal
+  `{scale:true}` evidence (for a large 120k run, to protect Neon storage) — otherwise **full real
+  `evidence_json`** (expressionResults) is stored. **Warning:** `--mode evaluate` at the default 120k is a
+  long, single-threaded batch job (potentially hours — ~1.68M CQL evaluations, one log line per chunk); use
+  a small `--subjects` (e.g. 5000) for proofs and `--trim-evidence` for a full run.
+- **No schema change; no new dependencies; descriptive only (ADR-008 — the CQL engine is the sole
+  `Outcome Status` authority); reversible via the same rollback SQL** (`triggered_by='seed:scale'` — delete
+  tagged outcomes then runs). Full suite green: **1054 pass / 1 pg-skip / 0 fail.** Spec/plan:
+  `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+  `docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+
 ## 2026-07-08 (cont.) — terminology & standards currency audit + vaccine-CVX fix (2026)
 
 Before building the realistic-population generator (Option A), verified that every medical/clinical code
