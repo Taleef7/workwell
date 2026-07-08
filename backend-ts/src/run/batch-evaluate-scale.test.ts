@@ -42,6 +42,22 @@ async function fresh() {
   return { dbPath, runs: new SqliteRunStore(db), outcomes: new SqliteOutcomeStore(db), events: new SqliteCaseEventStore(db) };
 }
 
+test("batchEvaluateScalePopulation rejects a non-positive chunkSize or subjects (exported-API guard)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    // chunkSize 0 would dead-loop `off += chunk`; negative goes backward. Both must reject up front.
+    await assert.rejects(() => batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: 0 }), /chunkSize must be a positive integer/);
+    await assert.rejects(() => batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: -5 }), /chunkSize must be a positive integer/);
+    await assert.rejects(() => batchEvaluateScalePopulation(deps, { subjects: 0, asOf: "2026-06-26", chunkSize: 5 }), /subjects must be a positive integer/);
+    // The guard fires before any run is created (no side effects on a bad call).
+    assert.equal((await runs.listRuns(1000)).length, 0);
+  } finally {
+    // Best-effort: on Windows the open SQLite handle can EPERM an immediate delete; a temp file is harmless.
+    try { rmSync(dbPath, { force: true }); } catch { /* leftover temp sqlite is harmless */ }
+  }
+});
+
 test("batchEvaluateScalePopulation writes one COMPLETED run + N real outcomes per runnable measure", async () => {
   const { dbPath, runs, outcomes, events } = await fresh();
   try {

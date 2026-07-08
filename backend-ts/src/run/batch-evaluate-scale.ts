@@ -67,8 +67,16 @@ export async function batchEvaluateScalePopulation(
 ): Promise<ScaleBatchSummary> {
   const measureIds = Object.keys(MEASURES);
   const chunk = args.chunkSize ?? DEFAULT_CHUNK;
+  // Guard the exported API: a non-positive chunk would dead-loop the `off += chunk` stream (off never
+  // advances at 0, goes backward when negative), and a non-positive subject count is a caller error.
+  if (!Number.isInteger(chunk) || chunk < 1) throw new Error(`chunkSize must be a positive integer, got ${args.chunkSize}`);
+  if (!Number.isInteger(args.subjects) || args.subjects < 1) throw new Error(`subjects must be a positive integer, got ${args.subjects}`);
 
   // Whole-batch idempotency (resumable): skip any measure that ALREADY has a COMPLETED seed:scale run.
+  // Scan cap: `listRuns(100_000)` — ample for any realistic instance (runs number in the hundreds/low
+  // thousands), and the same window backfill-scale.ts uses. Known limitation at extreme run-history
+  // volumes (a COMPLETED seed:scale run older than the newest 100k would be missed → re-seed); the future
+  // fix is a targeted "exists COMPLETED seed:scale run for measure X" store query rather than a full scan.
   // Runs are finalized only in the trailing loop AFTER the whole evaluation phase, so a crash during
   // the bulk evaluation leaves NO COMPLETED runs — a resume then re-seeds every measure (not per-measure
   // like backfill-scale.ts, which finalized inside its per-measure loop). Only COMPLETED counts.
