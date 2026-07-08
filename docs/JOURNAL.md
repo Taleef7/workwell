@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-07-08 — E9 (#78) decision + the `MeasureExecutor` seam (Option A default, Option C architecture, Option B stubbed)
+
+Took Doug's **Q2** (the "CQL → SQL" fork) off the blocked list and decided it **on our own**, since the
+decision has to be robust to either answer he could give and E9's charter says it ships *"a decision, not
+a build."* Recorded **ADR-025** and shipped the seam.
+
+**The fork, resolved:** measure execution is now **pluggable behind a `MeasureExecutor` port**, with
+FHIR-native as the default + correctness oracle and CQL→SQL as a parity-gated *future* executor (the
+hybrid — Option C — as the architecture; Option A built; Option B stubbed).
+
+- **`backend-ts/src/engine/measure-executor.ts`** — the port **extends `EvaluateMeasureBinding`**, so an
+  executor drops into `evaluateBundle`/`evaluateBatch` (`opts.engine`) and the run pipeline with **no new
+  plumbing**. `fhirNativeExecutor` (default) delegates to the existing CQL→ELM engine — **no second
+  evaluation path**, and a test proves it produces the byte-same outcome as the direct engine path.
+  `sqlPushdownExecutor` is an **inert stub** (constructs, but `evaluate` rejects loudly — general CQL→SQL
+  is research-grade and not built), mirroring the inert `webChartDataSource`. `resolveMeasureExecutor(env)`
+  selects config-driven (mirrors `resolveDataSource`/`resolveForecaster`); the SQL executor is chosen only
+  on an explicit `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in, so the **deployed default is
+  byte-identical to today**.
+- **Guardrail:** any future SQL executor must pass **golden parity** vs `fhirNativeExecutor`, per measure,
+  before it may serve. B can never be the correctness authority — only a scoped optimization for the narrow
+  measure subset (existence/recency/simple counts) where SQL is tractable.
+- **Why decide it solo:** it can't be wrong either way. If Doug requires in-WebChart execution → the seam
+  is ready for a scoped SQL executor; if "CQL→SQL" meant "replace hand-written SQL reports with a measure
+  engine" → that's Option A, already being built. A's weakness (scale — E13 PR-2 had to *generate* the
+  120k tenant's outcomes rather than live-evaluate 1.68M/run) is ordinary batch/incremental engineering;
+  B's weakness (fidelity on complex CQL) is research-grade and maybe unsolvable. Prefer the solvable
+  problem. Standards exports (MeasureReport/QRDA/QI-Core) and ADR-008 all depend on the real CQL engine.
+
+Descriptive only (ADR-008): the executor decides *how* a measure is computed, never that anything but CQL
+sets `Outcome Status`. **No schema, no new deps, no engine change** (additive seam; default delegates to
+the existing engine). ADR-014 marked **superseded by ADR-025**; ADR-017's parked "opt-in second executor"
+is now the concrete seam. B is deferred as its own research-grade epic (revisit when a concrete high-volume
+WebChart measure shows A can't serve it, and once the WebChart schema is confirmed — same gate as E12
+PR-2c). Verified: **backend typecheck clean; 1017 pass / 1 pg-skip / 0 fail** (4 new
+`measure-executor.test.ts` cases: default selection, FHIR-native parity, SQL stub inert on use, opted-in
+stub inert on use).
+
+Docs: DECISIONS (ADR-025 + ADR-014 status), ARCHITECTURE (§3 engine bullet + §6 invariant), this entry.
+
 ## 2026-07-07 (cont.) — housekeeping + doc-currency reconciliation
 
 Post-#250 merge cleanup and a docs reconciliation pass. Deleted the merged local branch
