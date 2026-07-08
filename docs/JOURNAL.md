@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-07-07 (cont.) — housekeeping + doc-currency reconciliation
+
+Post-#250 merge cleanup and a docs reconciliation pass. Deleted the merged local branch
+`feat/foreign-data-correctness` (PR #250; remote already pruned) and fast-forwarded `main` to
+`c9a7106` — `main` is now the only local branch, clean. No open PRs.
+
+Reconciled the **summary** docs against the actual merged-PR / closed-issue state, because the
+CLAUDE.md "Current Focus" block (dated 2026-07-05) had fallen behind by ~9 PRs and was pointing the
+next session at already-shipped work (it listed UX-7 + the UX-3/13/14/15 [L]s as open and E14 PR-3 as
+blocked-on-VSAC — all in fact merged). The deep-dive docs (ARCHITECTURE, DATA_MODEL, MEASURES,
+AI_GUARDRAILS, DEPLOY, WEBCHART_FHIR_MAPPING) were already current — the in-PR DoD held for those; only
+the two roll-up surfaces had drifted. Changes:
+- **CLAUDE.md** — rewrote the Current Focus block (now "as of 2026-07-07"): added the 07-05→07-07 arc
+  (VSAC + E14 PR-3 #242/#243, the backlog sweep #244/#245, the WebChart dev-DB proof #246 CLOSED via
+  #247–#249, foreign-data #250), and corrected the backlog status — the actionable polish backlog is
+  **drained**; the 5 remaining open issues (#167 bucket, #168 onboot, #186 E14-literal-CQL, #187 E15
+  PR-3, #78 E9) are all blocked or owner-gated.
+- **README.md** — added the 5 missing Status bullets (#242/#243, #244/#245, #250).
+- **JOURNAL.md** — fixed a stale "PR TBD" → #245 in the backlog-sweep entry; this entry.
+
+**Decision logged:** the evidence S3/R2 BUCKET (#167) is **deferred** — evidence *metadata* + audit +
+outcomes all persist in Neon; only uploaded *byte* content is ephemeral across container recreates, the
+`CloudBucket` port already abstracts the swap, and provisioning a bucket + secrets is owner-gated infra
+with no demo-blocking need. Flip it when a real pilot needs uploaded files to survive a redeploy.
+
+No code, no schema, no deps — docs only.
+
 ## 2026-07-07 (cont.) — foreign-data correctness pre-E12: AI prompt fencing (L14) + out-of-population signal (L17)
 
 Closed out two of the Fable "foreign-data correctness pre-E12" items — the ones that become *wrong answers /
@@ -122,7 +149,7 @@ Closed out the genuinely-open, non-blocked backlog in two PRs (descriptive/prese
   (LOINC 97506-0, inline filter — no standalone VSAC OID), closing the Fable L15 gap. Avoids a
   cql-execution `union` de-dup pitfall; ADR-008 byte-identical guard holds.
 
-**Frontend UX (PR TBD) — `feat/backlog-frontend-ux`:**
+**Frontend UX (PR #245) — `feat/backlog-frontend-ux`:**
 - **UX-7:** styled evidence dropzone (`features/evidence/EvidenceDropzone.tsx`) replacing the bare native
   file input on case detail; drag-drop + selected-file readout + "storage is temporary on this demo" note;
   upload handler + role-gate + `aria-label` preserved.
