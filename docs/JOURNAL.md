@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
+
+The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality
+review per unit), then opened as **PR #252** (`feat/scale-batch-eval` → `main`) and put through **two
+Codex passes** at the owner's request (a Sonnet subagent invoking the local Codex CLI):
+
+- **Codex (default model, low effort)** — 2 findings, both fixed: guard non-positive `chunkSize`/`subjects`
+  on the exported engine (a `chunkSize` of 0 would dead-loop the chunk stream); documented the
+  `listRuns(100_000)` idempotency scan cap as a known limitation.
+- **Codex (`gpt-5.5`, high effort, full access)** — caught a genuine **P1** the earlier passes missed:
+  `--mode evaluate` treated any COMPLETED `seed:scale` run as "done," so on a DB that already carries the
+  **fabricated** seed (the live Neon 2026-06-29 1.68M-row seed) it would **silently no-op** and never
+  produce real outcomes. Fixed: batch-evaluated runs now carry a `requestedScope.batchEvaluated` marker
+  (idempotency counts only those; `listRuns` already projects `requested_scope_json`, so no store change),
+  and evaluate mode **refuses with a rollback-required error** over legacy fabricated runs (owner-gated —
+  never auto-deletes). Also made the finalize→audit write **best-effort** (WARN, don't abort — matches the
+  run pipeline's Fable-H1 pattern). The concurrent-invocation race it flagged is accepted for a manual,
+  single-operator offline tool (documented).
+
+The code-reviewer skill passed across all three parts of the arc (E9 seam, terminology currency, scale),
+with findings applied. **Full suite 1057 pass / 1 pg-skip / 0 fail.** PR #252 is **open — not merged**
+(merge to `main` = deploy, owner's call). Owner operational step before the first live real-eval run: roll
+back the fabricated `seed:scale` seed (DEPLOY.md), then `pnpm seed:scale --subjects 5000 --mode evaluate`
+to prove + profile (plan Phase 4).
+
 ## 2026-07-08 — Option A at scale: real batch live-evaluation of the mhn tenant
 
 Replaced the **fabricated** `mhn` (~120k) population-scale seed with **real batch CQL evaluation** — the
