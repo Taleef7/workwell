@@ -500,10 +500,17 @@ change**: they exist **only** as `outcomes` rows whose `subject_id` **encodes th
 structure are in `backend-ts/src/engine/synthetic/scale-structure.ts`). No employees, no new columns,
 no new tables.
 
-- **Seeded** by `pnpm seed:scale [--subjects 120000]` (`backend-ts/src/run/cli/`) — owner-run on-demand,
-  **not** on deploy. One COMPLETED `MEASURE` run per runnable measure with `triggered_by='seed:scale'`,
-  backdated, `evidence_json` minimal (`{scale:true}` — generated rows need no `expressionResults`).
-  Idempotent (a single `seed:scale` run ⇒ no-op rerun); audited (`SCALE_POPULATION_SEEDED` per measure).
+- **Seeded** by `pnpm seed:scale [--subjects 120000] [--mode evaluate|fabricated] [--trim-evidence]`
+  (`backend-ts/src/run/cli/`) — owner-run on-demand, **not** on deploy. One COMPLETED `MEASURE` run per
+  runnable measure with `triggered_by='seed:scale'`, backdated. Idempotent (a single `seed:scale` run ⇒
+  no-op rerun).
+- **Now real CQL evaluation (2026-07-08, this branch — supersedes the fabricated seed).** `--mode evaluate`
+  (the default) writes **real batch-evaluated** outcomes — `evidence_json` is the **full CQL
+  `expressionResults`** per subject (or minimal `{scale:true}` only with `--trim-evidence`, recommended for a
+  full 120k run to protect Neon storage) — audited with the new **`SCALE_POPULATION_EVALUATED`** event per
+  measure. `--mode fabricated` is the legacy instant path (minimal `{scale:true}` evidence, audited
+  `SCALE_POPULATION_SEEDED`), kept one more release. The `subject_id` encoding and rollback SQL below are
+  **unchanged** — only the outcomes' provenance changed.
 - **Read** via `OutcomeStore.aggregateScaleRun(runId)` — a single `GROUP BY` over the encoded
   `subject_id` (Postgres `split_part(subject_id,'|',…)`; SQLite `substr` over the fixed-width id),
   returning per (location, provider, status) counts — **O(providers)** rows, never the per-subject rows.
