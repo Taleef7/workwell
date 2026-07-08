@@ -85,6 +85,41 @@ test("reconcileCodings: no matches → returns the same array reference (cheap n
   assert.deepEqual(reconcileCodings(undefined), []);
 });
 
+test("code currency (2026): active seasonal flu CVX codes reconcile to flu_vaccine, not just 141/140", () => {
+  // Real WebChart flu records overwhelmingly carry modern CVX codes (high-dose 135/197, recombinant
+  // 155/185, adjuvanted 168/205, quadrivalent 150/158, cell-based 171/186, trivalent 140/141/320/333).
+  // Matching only 141/140 missed the vast majority — regression guard for the currency fix.
+  const fluVs = MEASURE_BINDINGS["flu_vaccine"]!.event.valueSet;
+  for (const code of ["141", "140", "150", "158", "171", "185", "197", "205", "168", "135", "155", "231", "320", "333", "337"]) {
+    assert.deepEqual(
+      systems(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code })),
+      [fluVs],
+      `active flu CVX ${code} should reconcile to flu_vaccine`,
+    );
+  }
+});
+
+test("code currency (2026): active adult Td CVX codes (09/113/196) reconcile — the inactive 139 is no longer the only Td code", () => {
+  const immzVs = MEASURE_BINDINGS["adult_immunization"]!.event.valueSet;
+  // 115 (Tdap) was already covered; the fix adds the ACTIVE Td codes (09/113/196). 139 (Td unspecified)
+  // is INACTIVE — kept as a read-only crosswalk row for legacy records, but no longer the sole Td path.
+  for (const code of ["115", "09", "113", "196", "139"]) {
+    assert.deepEqual(
+      systems(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code })),
+      [immzVs],
+      `Td/Tdap CVX ${code} should reconcile to adult_immunization`,
+    );
+  }
+});
+
+test("code currency: an MMRV dose (CVX 94) counts toward BOTH mmr AND varicella immunity", () => {
+  const mmrVs = MEASURE_BINDINGS["mmr"]!.event.valueSet;
+  const varVs = MEASURE_BINDINGS["varicella"]!.event.valueSet;
+  assert.deepEqual(systems(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code: "94" })), [mmrVs, varVs].sort());
+  // Plain varicella (CVX 21) still reconciles to varicella only.
+  assert.deepEqual(systems(reconcileCoding({ system: "http://hl7.org/fhir/sid/cvx", code: "21" })), [varVs]);
+});
+
 test("crosswalk targets only reference real, current measures", () => {
   for (const id of crosswalkMeasureIds()) {
     assert.ok(MEASURE_BINDINGS[id], `crosswalk measure '${id}' exists in the bindings`);
