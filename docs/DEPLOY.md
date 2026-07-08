@@ -186,6 +186,13 @@ or seed fewer `--subjects`.
 > storage); otherwise full real `evidence_json` (expressionResults) is stored per outcome. `--mode fabricated`
 > keeps the legacy instant path reachable for one more release.
 >
+> **First run on a DB that already has the OLD fabricated seed (⚠ applies to live Neon).** `--mode evaluate`
+> **refuses to run** if any COMPLETED *fabricated* `seed:scale` run exists (it will not silently no-op, and
+> it will not auto-delete). The live Neon DB carries the 2026-06-29 fabricated 1.68M-row seed, so the first
+> real-eval run there must **roll that back first** (the SQL below), then run `--mode evaluate`. Real
+> (batch-evaluated) runs carry a `requestedScope.batchEvaluated` marker so they are distinguished from
+> fabricated ones — a resumed evaluate run correctly skips already-evaluated measures.
+>
 > **Crash recovery.** A crashed `--mode evaluate` run leaves orphaned RUNNING `seed:scale` runs (up to one
 > per measure, each holding its already-written outcomes) — these are **not** auto-swept (`failStuckRuns`
 > excludes `seed:%` runs). A resume re-seeds every measure under new run ids (correct: the rollup is
