@@ -108,6 +108,48 @@ test("batchEvaluateScalePopulation is resumable — a second identical call is a
   }
 });
 
+test("RESUME (#256): a killed-mid-run batch (stranded RUNNING runs) re-runs to completion without duplicate COMPLETED runs", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // Simulate a prior invocation killed mid-batch: it created its per-measure runs RUNNING (as the
+    // real batch does up front) and wrote some outcomes, but never reached the finalize loop — so NO
+    // COMPLETED batch-evaluated run exists. This is exactly the crash state a process kill leaves.
+    const stranded = await runs.createRun({
+      scopeType: "MEASURE",
+      scopeId: "audiogram",
+      triggeredBy: SCALE_TRIGGER,
+      status: "RUNNING",
+      startedAt: "2026-06-26T00:00:00.000Z",
+      requestedScope: { measureId: "audiogram", scalePopulation: true, batchEvaluated: true },
+      measurementPeriodStart: "2025-06-26T00:00:00.000Z",
+      measurementPeriodEnd: "2026-06-26T00:00:00.000Z",
+    });
+    await outcomes.recordOutcomes([
+      { runId: stranded.id, subjectId: encodeScaleSubject(0, 0, 0), measureId: "audiogram", evaluationPeriod: "2026-06-26", status: "COMPLIANT", evidence: { scale: true } },
+    ]);
+
+    // Re-run (the resume): the idempotency check counts only COMPLETED batch-evaluated runs, so ALL
+    // measures are re-seeded under fresh run ids and finalize COMPLETED (works identically with the
+    // worker pool — the DB-write/finalize side is main-thread on both paths).
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 6, asOf: "2026-06-26", chunkSize: 3, workers: 2 });
+    const measures = Object.keys(MEASURES).length;
+    assert.equal(r.skipped, false, "a crashed batch is resumed, not skipped");
+    assert.equal(r.runsCreated, measures, "every measure re-seeded");
+    assert.equal(r.outcomesCreated, measures * 6);
+
+    const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+    const completed = scaleRuns.filter((x) => x.status === "COMPLETED");
+    assert.equal(completed.length, measures, "exactly ONE COMPLETED run per measure — no duplicates");
+    assert.equal(new Set(completed.map((x) => x.scopeId)).size, measures, "COMPLETED runs cover distinct measures");
+    // The stranded RUNNING run is left as-is (failStuckRuns excludes seed:% — documented; rollup is
+    // COMPLETED-only latest-wins, so it never double-counts).
+    assert.ok(scaleRuns.some((x) => x.id === stranded.id && x.status === "RUNNING"), "the stranded run is not resurrected");
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("batchEvaluateScalePopulation REFUSES over legacy FABRICATED seed:scale runs (rollback-required)", async () => {
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
