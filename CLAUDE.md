@@ -83,9 +83,27 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-08)
+## Current Focus (as of 2026-07-09)
 
-**Latest (2026-07-08): the full "Option A" arc is on OPEN PR #252 (`feat/scale-batch-eval`) — committed + pushed but NOT yet merged/deployed.** Merge to `main` = deploy, and is the owner's call. Three parts (newest first):
+**PR #252 is MERGED + deployed (2026-07-08).** The Option A real-batch-eval arc is live code. The live
+Neon DB still carries the OLD fabricated 1.68M-row seed — the first owner step is the rollback + N=5000
+`--mode evaluate` proof (issue #253; runbook in the issue + DEPLOY.md).
+
+**The active plan is now the GitHub roadmap (2026-07-09):** milestones M1 (Integration Readiness,
+pre-contract — issues #253–#261), M2 (WebChart Live Integration, contract-gated — #262, #263, + #187),
+M3 (Production Readiness — #264, #265, + #167, #168). Full strategy + decision positions:
+`docs/ROADMAP_2026-07-09.md`. The MIE question package to send: `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
+
+**Key recorded positions:** Option B permanently inert behind a triple trigger (see #78); E14 literal
+diff unblocked via fqm-execution + pre-shipped official ELM (spike #258 — supersedes ADR-024's
+wait-for-translator clause); worker-pool parallelism approved as a bounded 1–2 day build (#256); evidence
+tiered-by-actionability with auto-trim >20k (#257); incremental eval deliberately deferred until MIE
+answers the change-signal question (Q A6).
+
+**#251 is closed** (superseded). The "5 remaining open issues are all blocked" paragraph from the
+07-08 block below is superseded by this roadmap — M1 is all actionable now.
+
+**Latest (2026-07-08): the full "Option A" arc — PR #252 (`feat/scale-batch-eval`), since MERGED + deployed 2026-07-08 (see the 2026-07-09 block above).** Three parts (newest first):
 
 - **Real batch live-evaluation of the `mhn` (~120k) scale tenant — the headline.** Replaces the *fabricated* scale outcomes with real, chunked, **subject-major** CQL evaluation (`batchEvaluateScalePopulation`, `backend-ts/src/run/batch-evaluate-scale.ts`) behind a pluggable `ScaleSubjectGenerator` seam (`backend-ts/src/run/scale-generator.ts`). The default `webChartRealisticGenerator` emits **real LOINC/CVX/CPT codes routed through the WebChart terminology crosswalk** (13/14 measures; `hazwoper` has no real code and passes through), so the real adapter is exercised at scale. Bounded-memory (one chunk buffered), whole-batch resumable, per-subject error-isolated (failure ⇒ MISSING_DATA + error evidence), audited `SCALE_POPULATION_EVALUATED`. CLI: `pnpm seed:scale --mode evaluate` (**default**; `--mode fabricated` legacy one release; `--trim-evidence` for 120k). **The `mhn|Lxx|Pxx|n` encoding + `aggregateScaleRun` are UNCHANGED** (content-agnostic aggregation) → the rollup/hierarchy/programs read path is untouched; only outcome provenance changed (ADR-020 note; ADR-008). **Evaluate mode REFUSES over legacy fabricated `seed:scale` runs** (distinguished by a `requestedScope.batchEvaluated` marker) — so the **live Neon DB (which carries the 2026-06-29 fabricated 1.68M-row seed) must be rolled back before the first real-eval run** (DEPLOY.md). Reviewed: code-reviewer skill + Codex (default/low) + **Codex gpt-5.5 high** (which caught the evaluate-no-op-over-fabricated P1). **1057 pass / 1 pg-skip / 0 fail.** Spec/plan: `docs/superpowers/{specs,plans}/2026-07-08-option-a-scale-batch-eval*`. **Owner next step (plan Phase 4):** roll back the fabricated seed, then `pnpm seed:scale --subjects 5000 --mode evaluate` to prove + profile before any 120k run. **Deferred non-goals:** worker_threads parallelism, incremental/delta eval, live WebChart HTTP (E12 PR-2c), Option B (CQL→SQL).
 - **E9 (#78) — the `MeasureExecutor` seam (ADR-025).** The charter's biggest fork (Doug's Q2, "CQL→SQL") decided on our own: measure execution is pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`) extending `EvaluateMeasureBinding`; `fhirNativeExecutor` = default + correctness oracle (existing CQL→ELM engine, parity-tested), `sqlPushdownExecutor` = inert stub (Option B research-grade, not built), `resolveMeasureExecutor(env)` config-selects (SQL only on `WORKWELL_MEASURE_EXECUTOR=sql-pushdown`; deployed default byte-identical). Guardrail: a future SQL executor must pass golden parity per measure. ADR-014 superseded; ADR-017's parked second-executor now concrete. Descriptive only (ADR-008); no schema/deps/engine change.

@@ -1,5 +1,50 @@
 # Journal
 
+## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
+
+**PR #252 merged 2026-07-08T20:36Z** → deployed on push to `main`. With it, the Option A real-batch-eval
+arc is live code, not just an open PR.
+
+Held a Fable strategy session: a full review of the ADR-025/scale/terminology arc plus external
+research — `worker_threads` viability for the scale batch CLI (cql-execution is stateless pure JS, safe
+under worker threads; `ScaleSubjectGenerator` is deterministic-on-subject-index, so work units can be
+index ranges with near-zero transfer cost); the `fqm-execution`/pre-shipped-ELM path for the literal
+official CMS122 diff (npm-verified `@cqframework/cql` has only ever published `4.0.0-beta.1` — ADR-024's
+"wait for a stable multi-model translator" is a dead end; official MADiE bundles ship pre-compiled ELM
+that MITRE's `fqm-execution` can execute directly, no translation needed); and incremental-eval CDC
+(change-data-capture) patterns for a future delta batch run. All positions recorded in
+**`docs/ROADMAP_2026-07-09.md`**.
+
+Roadmap materialized on GitHub:
+- **3 milestones:** M1 — Integration Readiness (pre-contract); M2 — WebChart Live Integration
+  (contract-gated); M3 — Production Readiness.
+- **13 new issues:**
+  - #253 [owner-ops] Roll back fabricated scale seed + N=5000 real-eval proof run + profile
+  - #254 Send the MIE unblock package (WebChart API contract questions) + record answers
+  - #255 Mock-contract WebChart HTTP transport pre-build
+  - #256 worker_threads pool for `seed:scale --mode evaluate`
+  - #257 Tiered evidence policy at scale + auto-trim above N threshold
+  - #258 [spike] E14 literal official-CQL execution diff via fqm-execution + pre-shipped ELM
+  - #259 Expand the WebChart dev-DB fixture corpus to all patients
+  - #260 Inert-seam inventory + boot-time active-seam log line
+  - #261 Production-readiness memo: PHI/HIPAA posture, environment split, auth fork, tenancy
+  - #262 E12 PR-2c: live WebChart HTTP transport (finalize against the real API contract)
+  - #263 Incremental/delta batch evaluation (design gated on MIE change-signal answer)
+  - #264 Observability minimum: failed-run alerting + run metrics
+  - #265 Auth for production: resolve the SSO fork (blocked on MIE)
+- **Updates to existing issues:** #78 commented (Option B's concrete trigger conditions + the
+  rule→SQL-codegen reframe if it's ever built); #167 assigned M3; #168 assigned M3; #187 assigned M2;
+  **#251 closed as superseded** by the fqm-execution spike (#258).
+
+The MIE unblock package was authored: **`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`** — 18 questions
+in A/B/C/D sections (API contract, domain/data model, environment & governance, strategic) — for the
+owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output and
+`docs/TERMINOLOGY_AUDIT_2026-07-08.md`.
+
+**Next:** owner ops — roll back the fabricated scale seed and run the N=5000 `--mode evaluate` proof
+(#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
+in `docs/ROADMAP_2026-07-09.md`.
+
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 
 The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality
