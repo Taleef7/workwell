@@ -310,3 +310,24 @@ never silently dropped): the OSHA CPTs (`audiogram`/`tb_surveillance`/`hazwoper`
 
 Descriptive-only throughout: the adapter supplies coded FHIR; the CQL engine remains the sole source of
 compliance truth (ADR-008/ADR-017).
+
+### 8.2 PR-2c pre-build — mock-contract HTTP transport (#255, 2026-07-09)
+
+While the final MIE answers in `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` are still pending,
+`httpWebChartClient` has been pre-built against the assumed **true FHIR R4** contract documented in
+`docs/WEBCHART_API_ASSUMPTIONS_2026-07.md`: `GET /fhir/Patient?_count=...` for paged population
+listing, FHIR searchset `link[relation=next]` pagination, and `GET /fhir/Patient/{id}/$everything` for
+one-patient clinical payloads. It sends `Authorization: Bearer <WORKWELL_WEBCHART_API_KEY>`, uses global
+`fetch`, bounds every request with an AbortController timeout, retries 429/5xx with short bounded
+backoff, and preserves the one-payload-per-patient invariant so the engine never evaluates a collapsed
+multi-patient bundle.
+
+The local conformance suite serves the committed dev-DB fixtures through an in-test mock `fetch` shim and
+asserts that the mock-HTTP path produces the same per-subject outcomes as the fixture-client path for the
+dev-DB goldens, plus timeout, 429-then-success, partial-page, malformed-resource, and empty-population
+failure modes. A malformed or failed per-patient `$everything` response degrades to a Patient-only
+collection bundle with an `OperationOutcome` marker, so the existing CQL evaluation path reports that
+known subject as missing data without aborting the rest of the batch. This is still **not** the final live
+transport: PR-2c must adjust request shaping, auth, pagination, and (if A1 says proprietary) add the
+row→FHIR mapper once MIE confirms the real contract. Inert-unless-configured remains unchanged:
+`resolveDataSource(env)` still selects WebChart only when both WebChart env vars are non-blank.
