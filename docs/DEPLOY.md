@@ -179,9 +179,11 @@ or seed fewer `--subjects`.
 > rollback SQL below are all unchanged** — only the outcomes' provenance changed (fabricated → real CQL).
 >
 > **⚠ Long-run warning.** `--mode evaluate` at the default 120k subjects is a **very** long, single-threaded
-> batch job. Measured cost is ~60 ms per evaluation, so a full 120k × 14 ≈ 1.68M evaluations is on the order
-> of **many hours to ~a day** single-threaded (parallelism is a deferred non-goal — see the plan's Phase 5);
-> progress is logged one line per chunk. For a proof/dev run use a small `--subjects` (e.g. 5000, ~minutes).
+> batch job. **Measured cost (#253 N=5000 live-Neon proof, 2026-07-09): ≈68 ms per evaluation overall**
+> (70,000 evaluations in ~79.5 min wall-clock; ~63 ms/eval once host CPU contention eased — the first chunks
+> ran at 86–88 ms/eval under 4 concurrent build agents), so a full 120k × 14 ≈ 1.68M evaluations is on the
+> order of **~30 hours** single-threaded (parallelism is a deferred non-goal — the worker-pool issue #256);
+> progress is logged one line per chunk. For a proof/dev run use a small `--subjects` (e.g. 5000, ~80 min).
 > For a full 120k run add **`--trim-evidence`** to persist minimal `{scale:true}` evidence (protects Neon
 > storage); otherwise full real `evidence_json` (expressionResults) is stored per outcome. `--mode fabricated`
 > keeps the legacy instant path reachable for one more release.

@@ -2,6 +2,34 @@
 
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
+### #253 — N=5000 real-eval proof (2026-07-09)
+
+The Phase-4 proof of the Option A batch engine, run live on Neon (owner-authorized #253). Precondition
+verified first: the 2026-06-29 fabricated 1.68M-row seed was rolled back — 0 `seed:scale` runs before
+the run. `pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate` (full evidence, no trim):
+
+- **Completed: 14 runs × 5,000 subjects = 70,000 real CQL evaluations** — all 14 runs COMPLETED with
+  the `requestedScope.batchEvaluated` marker; 14 `SCALE_POPULATION_EVALUATED` audit events; 70,000
+  outcomes verified on Neon.
+- **Wall-clock ~79.5 min; ≈68 ms/evaluation overall.** The first two 500-subject chunks ran under
+  heavy host CPU contention (4 parallel build agents + their test suites): ~604 s / ~619 s per chunk
+  ≈ 86–88 ms/eval; the remaining eight chunks averaged ~443 s ≈ **63 ms/eval** once contention eased —
+  so the plan's ~60 ms estimate holds on a quiet machine.
+- **Distribution is multi-bucket and per-measure realistic** (e.g. audiogram 3,900/275/275/275/275
+  across COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED; PERMANENT measures mmr/varicella/hep-B
+  correctly emit no DUE_SOON/OVERDUE — partial series land MISSING_DATA; cms122 emits no DUE_SOON by
+  design). mhn COMPLIANT = 54,850 (78.4%), exactly Σ of the per-measure COMPLIANT counts. Full table
+  on issue #253.
+- **Live rollup reconciles:** All Systems = 72,100 = ihn 700 + twh 1,400 + mhn 70,000; mhn = Σ 24
+  locations = Σ 240 providers = 70,000; `?tenant=mhn` isolates the subtree; the roster still excludes
+  mhn.
+- Storage: full (untrimmed) evidence averaged ~630 bytes/outcome — `workwell_spike.outcomes` is now
+  80 MB (DB 202 MB total).
+- **Decision: a full 120k run on Neon is NOT planned.** ~30+ h single-threaded, and the storage cost
+  (~1 GB+ of evidence even before indexes) against the project's ~512 MB Neon branch headroom makes it
+  a bad trade. The worker-thread pool (#256) and the tiered evidence policy (#257) are the
+  prerequisites if it is ever done.
+
 **PR #252 merged 2026-07-08T20:36Z** → deployed on push to `main`. With it, the Option A real-batch-eval
 arc is live code, not just an open PR.
 
