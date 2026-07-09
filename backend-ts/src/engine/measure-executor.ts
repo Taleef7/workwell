@@ -81,13 +81,21 @@ export interface MeasureExecutorEnv {
 }
 
 /**
+ * Pure predicate for whether the SQL-pushdown executor is selected — an explicit opt-in (single var,
+ * no "both required" pairing since it's a mode switch, not a credential pair). The single source of
+ * truth for `resolveMeasureExecutor` and the boot-time seam inventory (#260).
+ */
+export function isSqlPushdownSelected(env: MeasureExecutorEnv): boolean {
+  return (env.WORKWELL_MEASURE_EXECUTOR ?? "").trim() === "sql-pushdown";
+}
+
+/**
  * Config-driven executor selection (mirrors resolveDataSource/resolveForecaster/resolveChannel): FHIR-native
  * is the default and the correctness oracle; the SQL-pushdown executor is selected only on an explicit
  * `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in — and, being an inert stub, it rejects on use (not on
  * resolve), failing loudly rather than silently. So the deployed default is byte-identical to today.
  */
 export function resolveMeasureExecutor(env: MeasureExecutorEnv, engine?: EvaluateMeasureBinding): MeasureExecutor {
-  const choice = (env.WORKWELL_MEASURE_EXECUTOR ?? "").trim();
-  if (choice === "sql-pushdown") return sqlPushdownExecutor();
+  if (isSqlPushdownSelected(env)) return sqlPushdownExecutor();
   return fhirNativeExecutor(engine);
 }

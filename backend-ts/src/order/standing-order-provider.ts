@@ -48,9 +48,21 @@ export function ehStandingOrderProvider(_config: { apiKey: string; baseUrl: stri
   return { activeOrdersFor: () => [] };
 }
 
-export function resolveStandingOrderProvider(env: StandingOrderEnv): StandingOrderProvider {
+/**
+ * Pure predicate for whether the EH FHIR stub is selected — both BASE_URL and API_KEY required. The
+ * single source of truth for `resolveStandingOrderProvider` and the boot-time seam inventory (#260).
+ */
+export function isEhFhirConfigured(env: StandingOrderEnv): boolean {
   const apiKey = (env.WORKWELL_EH_FHIR_API_KEY ?? "").trim();
   const baseUrl = (env.WORKWELL_EH_FHIR_BASE_URL ?? "").trim();
-  if (apiKey && baseUrl) return ehStandingOrderProvider({ apiKey, baseUrl });
+  return Boolean(apiKey && baseUrl);
+}
+
+export function resolveStandingOrderProvider(env: StandingOrderEnv): StandingOrderProvider {
+  if (isEhFhirConfigured(env)) {
+    const apiKey = (env.WORKWELL_EH_FHIR_API_KEY ?? "").trim();
+    const baseUrl = (env.WORKWELL_EH_FHIR_BASE_URL ?? "").trim();
+    return ehStandingOrderProvider({ apiKey, baseUrl });
+  }
   return simulatedStandingOrderProvider;
 }
