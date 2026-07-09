@@ -81,6 +81,7 @@
 - @docs/DATA_MODEL.md — schema invariants
 - @docs/AI_GUARDRAILS.md — AI usage policy
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
+- @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
 ## Current Focus (as of 2026-07-09)
@@ -99,6 +100,13 @@ diff unblocked via fqm-execution + pre-shipped official ELM (spike #258 — supe
 wait-for-translator clause); worker-pool parallelism approved as a bounded 1–2 day build (#256); evidence
 tiered-by-actionability with auto-trim >20k (#257); incremental eval deliberately deferred until MIE
 answers the change-signal question (Q A6).
+
+**#261 — production-readiness memo, done:** `docs/PRODUCTION_READINESS_2026-07.md` covers the PHI/HIPAA
+posture (hard rule: **the demo stack never receives PHI**; BAA chain gated on MIE Q C14), the auth fork
+(3 options; do-not-build recommendation until MIE answers Q C15), tenancy (today's read-time synthetic
+tenancy is demo-grade, not isolation; real multi-employer isolation is a design-with-MIE item), and the
+ordered M3 gap list — 4 new M3 stub issues created: **#267** PHI-capable environment split, **#268**
+durable scheduler, **#269** real tenant isolation, **#270** backup/DR runbook.
 
 **#251 is closed** (superseded). The "5 remaining open issues are all blocked" paragraph from the
 07-08 block below is superseded by this roadmap — M1 is all actionable now.
