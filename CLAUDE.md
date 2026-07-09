@@ -83,7 +83,25 @@
 - @docs/CQF_FHIR_CR_REFERENCE.md — proven library wiring from spike
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-08)
+## Current Focus (as of 2026-07-09)
+
+**PR #252 is MERGED + deployed (2026-07-08).** The Option A real-batch-eval arc is live code. The live
+Neon DB still carries the OLD fabricated 1.68M-row seed — the first owner step is the rollback + N=5000
+`--mode evaluate` proof (issue #253; runbook in the issue + DEPLOY.md).
+
+**The active plan is now the GitHub roadmap (2026-07-09):** milestones M1 (Integration Readiness,
+pre-contract — issues #253–#261), M2 (WebChart Live Integration, contract-gated — #262, #263, + #187),
+M3 (Production Readiness — #264, #265, + #167, #168). Full strategy + decision positions:
+`docs/ROADMAP_2026-07-09.md`. The MIE question package to send: `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
+
+**Key recorded positions:** Option B permanently inert behind a triple trigger (see #78); E14 literal
+diff unblocked via fqm-execution + pre-shipped official ELM (spike #258 — supersedes ADR-024's
+wait-for-translator clause); worker-pool parallelism approved as a bounded 1–2 day build (#256); evidence
+tiered-by-actionability with auto-trim >20k (#257); incremental eval deliberately deferred until MIE
+answers the change-signal question (Q A6).
+
+**#251 is closed** (superseded). The "5 remaining open issues are all blocked" paragraph from the
+07-08 block below is superseded by this roadmap — M1 is all actionable now.
 
 **Latest (2026-07-08): the full "Option A" arc is on OPEN PR #252 (`feat/scale-batch-eval`) — committed + pushed but NOT yet merged/deployed.** Merge to `main` = deploy, and is the owner's call. Three parts (newest first):
 
