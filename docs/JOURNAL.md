@@ -69,6 +69,26 @@ orchestration, fake-worker unit-tested: exactly-once, retry-once, soft-fallback,
 CQL stays the sole `Outcome Status` authority (ADR-008). Docs: DEPLOY.md long-run warning, ARCHITECTURE
 seed:scale bullet. Branch `feat/issue-256-worker-pool`.
 
+### #257 — tiered evidence policy + auto-trim (2026-07-09)
+
+`seed:scale --mode evaluate` evidence persistence is now **tiered by actionability** (#257, stacked on
+the #256 worker-pool branch — same file). Full `evidence_json` (~1–3 KB/outcome) at 120k×14 is GB-scale
+on the cost-capped Neon, and the old all-or-nothing `--trim-evidence` was OPT-IN — a forgotten flag on a
+big run was the predictable failure mode. Now: (1) **auto-trim** engages when `--subjects > 20000` and
+`--trim-evidence` was not explicitly passed (notice printed); **`--full-evidence`** explicitly overrides
+(the two flags together are a usage error); the pure `resolveTrimEvidence` in `run/cli/seed-scale.ts` is
+unit-tested at the exact threshold (20,000 → no trim; 20,001 → auto-trim). (2) **Tiered trim** replaces
+all-or-nothing (`applyEvidenceTier` in `run/batch-evaluate-scale.ts`, applied identically by the
+sequential loop and the #256 worker): OVERDUE / DUE_SOON / MISSING_DATA keep FULL evidence (load-bearing
+for cases/worklists; an evaluation-error MISSING_DATA keeps its `{evaluationError}` payload), COMPLIANT /
+EXCLUDED get minimal `{scale:true}`, and a deterministic ~1% subject-index sample (`idx % 100 === 0`)
+keeps full evidence across ALL buckets for audit spot-checks. Guard test proves a trimmed run's
+`aggregateScaleRun` groups are identical to an untrimmed run's (status-only reads — the rollup provably
+unchanged). Descriptive only (ADR-008): the tier reads the CQL-decided status, never sets it. No new
+deps; no schema (existing `evidence_json` column). Long-term home for large evidence payloads is the
+#167 managed-bucket work (noted in DEPLOY/DATA_MODEL). Docs: DEPLOY.md scale-seed section, DATA_MODEL
+§3.23. Branch `feat/issue-257-tiered-evidence` (stacked on `feat/issue-256-worker-pool`).
+
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 
 The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality

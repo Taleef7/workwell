@@ -14,7 +14,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { batchEvaluateScalePopulation, SCALE_TRIGGER } from "./batch-evaluate-scale.ts";
+import { batchEvaluateScalePopulation, applyEvidenceTier, SCALE_TRIGGER } from "./batch-evaluate-scale.ts";
 import { directSyntheticGenerator, webChartRealisticGenerator, type ScaleSubjectGenerator } from "./scale-generator.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
@@ -217,20 +217,98 @@ test("batchEvaluateScalePopulation handles a remainder chunk (subjects not divis
   }
 });
 
-test("batchEvaluateScalePopulation trimEvidence writes {scale:true}; default writes real engine evidence", async () => {
+test("batchEvaluateScalePopulation trimEvidence applies the TIERED policy (#257): actionable + ~1%-sample rows keep full evidence, other COMPLIANT/EXCLUDED get {scale:true}", async () => {
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
-    // trimEvidence:true → minimal evidence on every (successfully-evaluated) row.
     const trimDeps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
     await batchEvaluateScalePopulation(trimDeps, { subjects: 8, asOf: "2026-06-26", chunkSize: 8, trimEvidence: true });
-    const trimRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
-    const trimRows = await outcomes.listOutcomes(trimRun.id);
-    assert.ok(trimRows.length > 0);
-    for (const row of trimRows) {
-      assert.deepEqual(row.evidence, { scale: true }, "trimEvidence writes minimal {scale:true}");
+    const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+    const subjectIndexOf = (subjectId: string) => Number(subjectId.split("|")[3]);
+    let sawTrimmed = false;
+    let sawActionableFull = false;
+    for (const run of scaleRuns) {
+      for (const row of await outcomes.listOutcomes(run.id)) {
+        const idx = subjectIndexOf(row.subjectId);
+        const isSample = idx % 100 === 0; // subject index 0 in this 8-subject run
+        const isActionable = ["OVERDUE", "DUE_SOON", "MISSING_DATA"].includes(row.status);
+        if (isSample || isActionable) {
+          assert.notDeepEqual(row.evidence, { scale: true }, `full-tier row (idx ${idx}, ${row.status}) keeps full evidence`);
+          if (isActionable && !isSample) sawActionableFull = true;
+        } else {
+          assert.deepEqual(row.evidence, { scale: true }, `COMPLIANT/EXCLUDED non-sample row (idx ${idx}, ${row.status}) is trimmed`);
+          sawTrimmed = true;
+        }
+      }
     }
+    assert.ok(sawTrimmed, "at least one row was trimmed to {scale:true}");
+    assert.ok(sawActionableFull, "at least one actionable non-sample row kept full evidence");
   } finally {
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("applyEvidenceTier (#257): pure tier assignment per status + deterministic ~1% sample + no-trim passthrough", () => {
+  const full = { expressionResults: [{ define: "Outcome Status", result: "COMPLIANT" }] };
+  // trim=false → passthrough for every status and index.
+  for (const s of ["COMPLIANT", "EXCLUDED", "OVERDUE", "DUE_SOON", "MISSING_DATA"]) {
+    assert.equal(applyEvidenceTier(7, s, full, false), full, `no-trim passes through (${s})`);
+  }
+  // Actionable statuses keep FULL evidence when trimming (they feed cases/worklists).
+  for (const s of ["OVERDUE", "DUE_SOON", "MISSING_DATA"]) {
+    assert.equal(applyEvidenceTier(7, s, full, true), full, `${s} keeps full evidence under trim`);
+  }
+  // COMPLIANT / EXCLUDED are trimmed to the minimal sentinel (non-sample index).
+  for (const s of ["COMPLIANT", "EXCLUDED"]) {
+    assert.deepEqual(applyEvidenceTier(7, s, full, true), { scale: true }, `${s} trims to {scale:true}`);
+  }
+  // Deterministic ~1% audit sample: idx % 100 === 0 keeps full evidence across ALL buckets.
+  for (const s of ["COMPLIANT", "EXCLUDED", "OVERDUE", "DUE_SOON", "MISSING_DATA"]) {
+    assert.equal(applyEvidenceTier(0, s, full, true), full, `sample idx 0 keeps full (${s})`);
+    assert.equal(applyEvidenceTier(100, s, full, true), full, `sample idx 100 keeps full (${s})`);
+    assert.equal(applyEvidenceTier(119900, s, full, true), full, `sample idx 119900 keeps full (${s})`);
+  }
+  // Determinism: same inputs → same decision every call (pure function of (idx, status, trim)).
+  assert.deepEqual(applyEvidenceTier(42, "COMPLIANT", full, true), applyEvidenceTier(42, "COMPLIANT", full, true), "non-sample compliant rows trim identically");
+  assert.deepEqual(applyEvidenceTier(42, "COMPLIANT", full, true), { scale: true });
+  assert.deepEqual(applyEvidenceTier(101, "EXCLUDED", full, true), { scale: true }, "idx 101 is not in the sample");
+  // An evaluation-error MISSING_DATA keeps its {evaluationError} payload (full tier).
+  const err = { evaluationError: "CQL engine failure", message: "boom" };
+  assert.equal(applyEvidenceTier(55, "MISSING_DATA", err, true), err);
+});
+
+test("TRIMMED run's aggregation is UNCHANGED (#257): aggregateScaleRun reads status only — trim vs full produce identical groups", async () => {
+  const trimmed = await fresh();
+  const untrimmed = await fresh();
+  try {
+    const args = { subjects: 8, asOf: "2026-06-26", chunkSize: 4 };
+    await batchEvaluateScalePopulation(
+      { runStore: trimmed.runs, outcomeStore: trimmed.outcomes, auditStore: trimmed.events, generator: directSyntheticGenerator() },
+      { ...args, trimEvidence: true },
+    );
+    await batchEvaluateScalePopulation(
+      { runStore: untrimmed.runs, outcomeStore: untrimmed.outcomes, auditStore: untrimmed.events, generator: directSyntheticGenerator() },
+      { ...args },
+    );
+    // Per measure, the (location, provider, status, count) groups must be identical — the rollup read
+    // path never touches evidence_json, so the tier provably cannot change it.
+    const groupsByMeasure = async (runs: SqliteRunStore, outcomes: SqliteOutcomeStore) => {
+      const out = new Map<string, string[]>();
+      for (const run of (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER)) {
+        const groups = await outcomes.aggregateScaleRun(run.id);
+        out.set(run.scopeId as string, groups.map((g) => `${g.locationId}|${g.providerId}|${g.status}|${g.count}`).sort());
+      }
+      return out;
+    };
+    const a = await groupsByMeasure(trimmed.runs, trimmed.outcomes);
+    const b = await groupsByMeasure(untrimmed.runs, untrimmed.outcomes);
+    assert.ok(a.size > 0, "trimmed run produced aggregations");
+    assert.deepEqual([...a.keys()].sort(), [...b.keys()].sort(), "same measures aggregated");
+    for (const [measureId, groups] of a) {
+      assert.deepEqual(groups, b.get(measureId), `aggregateScaleRun groups identical for ${measureId} (trim vs full)`);
+    }
+  } finally {
+    try { rmSync(trimmed.dbPath, { force: true }); } catch { /* best effort */ }
+    try { rmSync(untrimmed.dbPath, { force: true }); } catch { /* best effort */ }
   }
 });
 

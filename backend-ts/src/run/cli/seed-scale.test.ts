@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs, SeedCliUsageError } from "./seed-scale.ts";
+import { parseArgs, resolveTrimEvidence, AUTO_TRIM_THRESHOLD, SeedCliUsageError } from "./seed-scale.ts";
 
 test("parseArgs reads --subjects/--as-of and rejects bad input", () => {
   assert.deepEqual(parseArgs(["--subjects", "120000", "--as-of", "2026-06-26"]), { subjects: 120000, asOf: "2026-06-26" });
@@ -56,4 +56,29 @@ test("--workers composes with the other evaluate flags (#256)", () => {
     trimEvidence: true,
     workers: 8,
   });
+});
+
+test("parseArgs reads --full-evidence and rejects it combined with --trim-evidence (#257)", () => {
+  assert.equal(parseArgs(["--full-evidence"]).fullEvidence, true);
+  assert.ok(!parseArgs([]).fullEvidence);
+  assert.throws(() => parseArgs(["--trim-evidence", "--full-evidence"]), SeedCliUsageError);
+  assert.throws(() => parseArgs(["--full-evidence", "--trim-evidence"]), /mutually exclusive/);
+});
+
+test("resolveTrimEvidence: auto-trim engages STRICTLY above the 20000 threshold (#257)", () => {
+  assert.equal(AUTO_TRIM_THRESHOLD, 20_000);
+  // At the threshold exactly → NO auto-trim; one above → auto-trim.
+  assert.deepEqual(resolveTrimEvidence({ subjects: 20_000 }), { trim: false, auto: false });
+  assert.deepEqual(resolveTrimEvidence({ subjects: 20_001 }), { trim: true, auto: true });
+  assert.deepEqual(resolveTrimEvidence({ subjects: 120_000 }), { trim: true, auto: true });
+  assert.deepEqual(resolveTrimEvidence({ subjects: 500 }), { trim: false, auto: false });
+});
+
+test("resolveTrimEvidence: --full-evidence overrides the auto-trim; --trim-evidence forces trim at any N (#257)", () => {
+  // Explicit full-evidence wins even far above the threshold (the override the notice points at).
+  assert.deepEqual(resolveTrimEvidence({ subjects: 120_000, fullEvidence: true }), { trim: false, auto: false });
+  // Explicit trim below the threshold is honored (not auto — no notice).
+  assert.deepEqual(resolveTrimEvidence({ subjects: 500, trimEvidence: true }), { trim: true, auto: false });
+  // Explicit trim above the threshold is explicit, not auto.
+  assert.deepEqual(resolveTrimEvidence({ subjects: 120_000, trimEvidence: true }), { trim: true, auto: false });
 });

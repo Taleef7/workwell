@@ -14,7 +14,7 @@
  */
 import { parentPort, workerData } from "node:worker_threads";
 import { targetForIndex, reconstructGenerator } from "./scale-generator.ts";
-import { evaluateScaleSubjectMeasure, subjectIdForIndex } from "./batch-evaluate-scale.ts";
+import { evaluateScaleSubjectMeasure, applyEvidenceTier, subjectIdForIndex } from "./batch-evaluate-scale.ts";
 import type { ChunkRequest, ChunkResponse, WorkerOutcomeRow } from "./scale-eval-pool.ts";
 
 interface ScaleWorkerData {
@@ -38,15 +38,11 @@ port.on("message", (req: ChunkRequest) => {
       const subjectId = subjectIdForIndex(i);
       for (const measureId of data.measureIds) {
         const target = targetForIndex(i, data.totalSubjects, data.rateByMeasure[measureId]!);
-        const { status, evidence } = await evaluateScaleSubjectMeasure(
-          generator,
-          subjectId,
-          measureId,
-          target,
-          data.asOf,
-          data.trimEvidence,
-        );
-        rows.push({ subjectId, measureId, status, evidence });
+        const { status, evidence } = await evaluateScaleSubjectMeasure(generator, subjectId, measureId, target, data.asOf);
+        // Tiered evidence (#257): applied IN-worker on the same (index, status) inputs as the
+        // sequential path — identical trim output regardless of parallelism, and trimmed rows
+        // cross the thread boundary small.
+        rows.push({ subjectId, measureId, status, evidence: applyEvidenceTier(i, status, evidence, data.trimEvidence) });
       }
     }
     const res: ChunkResponse = { chunkId: req.chunkId, rows };

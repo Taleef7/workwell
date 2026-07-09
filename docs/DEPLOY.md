@@ -189,9 +189,22 @@ or seed fewer `--subjects`.
 > `aggregateScaleRun` read path is byte-for-byte the same (status-only). `--workers 1` (or `0`) forces the
 > single-threaded path unchanged. The pool is confined to this batch CLI — never the request path.
 > Progress is logged one line per chunk. For a proof/dev run use a small `--subjects` (e.g. 5000, ~minutes).
-> For a full 120k run add **`--trim-evidence`** to persist minimal `{scale:true}` evidence (protects Neon
-> storage); otherwise full real `evidence_json` (expressionResults) is stored per outcome. `--mode fabricated`
-> keeps the legacy instant path reachable for one more release (it ignores `--workers`).
+> `--mode fabricated` keeps the legacy instant path reachable for one more release (it ignores `--workers`
+> and the evidence policy below).
+>
+> **Tiered evidence policy (#257) — evidence value follows ACTIONABILITY.** Full `evidence_json` (~1–3
+> KB/outcome) at 120k × 14 is GB-scale on the cost-capped Neon, so trimming is now **tiered**, not
+> all-or-nothing: when trimming, outcomes with status **OVERDUE / DUE_SOON / MISSING_DATA keep FULL
+> evidence** (they feed cases/worklists — load-bearing; an evaluation-error MISSING_DATA keeps its
+> `{evaluationError}` payload), **COMPLIANT / EXCLUDED get minimal `{scale:true}`**, and a
+> **deterministic ~1% subject-index sample** (`idx % 100 === 0`) keeps full evidence across ALL buckets
+> for audit spot-checks. **Auto-trim:** the trim engages automatically when `--subjects > 20000` and
+> `--trim-evidence` was not explicitly passed (a notice is printed) — the "forgotten flag on a big run"
+> failure mode is closed; pass **`--full-evidence`** to explicitly keep full evidence on every row
+> (the two flags together are a usage error). `--trim-evidence` still forces the tiered trim at any N.
+> The trim never touches `outcomes.status`, so `aggregateScaleRun` + the rollup (status-only reads) are
+> provably unchanged (guard test). **Long-term home** for large evidence payloads is the #167 managed
+> S3/R2 bucket — once that lands, Neon keeps status + hash only.
 >
 > **First run on a DB that already has the OLD fabricated seed (⚠ applies to live Neon).** `--mode evaluate`
 > **refuses to run** if any COMPLETED *fabricated* `seed:scale` run exists (it will not silently no-op, and
@@ -210,8 +223,10 @@ or seed fewer `--subjects`.
 > cd backend-ts
 > # proof/dev run: real batch eval over a small population (default 4 workers, core-clamped)
 > DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate
-> # full 120k real run: trim evidence to protect Neon storage; scale workers to the host's cores
-> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --trim-evidence --workers 8
+> # full 120k real run: tiered trim AUTO-ENGAGES above 20k subjects; scale workers to the host's cores
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --workers 8
+> # explicitly keep FULL evidence on every row despite >20k (overrides the auto-trim)
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --full-evidence --workers 8
 > # force the single-threaded path (escape hatch / parity baseline)
 > DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate --workers 1
 > ```
