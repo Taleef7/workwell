@@ -75,7 +75,9 @@ interface ExecutionSubject {
   divergenceGate: string;
 }
 interface ExecutionDiffReport {
-  mode: "execution";
+  // Real subject-by-subject execution diff (#258 ladder): "literal" = the official multi-library QICore
+  // artifact via fqm-execution; "subset" = the ADR-024 faithful official-subset. Same report shape.
+  mode: "subset" | "literal";
   measureId: string;
   ecqmId: string;
   runId: string | null;
@@ -87,10 +89,11 @@ interface ExecutionDiffReport {
   subjects: ExecutionSubject[];
   headline: string;
   disclaimer: string;
+  officialMeasure?: { name: string; version: string; url: string };
 }
 type FidelityResponse = { available: false } | FidelityReport;
-// Discriminated on `mode`: the PR-3 execution report carries mode:"execution"; the PR-2
-// estimate (criterion-impact) report has no `mode` field.
+// Discriminated on `mode`: the execution reports carry mode "literal"|"subset"; the
+// estimate (criterion-impact) report carries mode:"estimate" (+ criterionImpacts).
 type DiffResponse = { available: false } | OutcomeDiffReport | ExecutionDiffReport;
 
 type Props = { measureId: string; api: ApiClient };
@@ -145,7 +148,7 @@ export function StandardsTab({ measureId, api }: Props) {
   }
 
   const f = fidelity;
-  const execution = diff && "mode" in diff && diff.mode === "execution" ? diff : null;
+  const execution = diff && "mode" in diff && (diff.mode === "subset" || diff.mode === "literal") ? diff : null;
   const divergent = diff && "criterionImpacts" in diff ? diff : null;
   const impactByKey = new Map((divergent?.criterionImpacts ?? []).map((c) => [c.key, c]));
 
@@ -235,7 +238,7 @@ export function StandardsTab({ measureId, api }: Props) {
             <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">{execution.headline}</p>
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               {execution.asOf ? `Based on the latest population run (${execution.asOf}); ` : ""}
-              <span className="font-semibold text-red-700 dark:text-red-400">{execution.totalDivergent} of {execution.totalSubjectsEvaluated}</span> subjects diverge from the official-subset CQL execution.
+              <span className="font-semibold text-red-700 dark:text-red-400">{execution.totalDivergent} of {execution.totalSubjectsEvaluated}</span> subjects diverge from the {execution.mode === "literal" ? "literal official" : "official-subset"} CQL execution.
             </p>
             {execution.totalErrors > 0 ? (
               <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-500" role="alert">

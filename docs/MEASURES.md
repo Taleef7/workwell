@@ -353,6 +353,21 @@ Each outcome evidence payload includes:
   terminology-only (this code filter vs the official combined "Glycemic Status Assessment" VSAC set), and
   WorkWell's own **authored** cms122 still models neither GMI nor a recency window (see Fable L15 above).
   The diff is **CMS122-only**.
+  **(#258, 2026-07-09 — LITERAL tier SHIPPED; supersedes ADR-024's "revisit on a stable translator"
+  clause — ADR-026)** The fidelity diff now has a **three-tier ladder** — `literal → subset → estimate` —
+  surfaced by an additive `mode` field in the response. The **literal** tier executes the *actual official
+  multi-library QICore CMS122v14 artifact* (MADiE FHIR export `CMS122FHIRDiabetesAssessGreaterThan9Percent`
+  v0.5.000, `using QICore '6.0.0'`, 8 included libraries — the exact CQL ADR-024 proved un-compilable under
+  the pinned JS translator) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the
+  bundle's `Library.content` (`application/elm+json`) — **no translation happens**. The bundle is vendored
+  with provenance under `backend-ts/measures/official/cms122v14/`; value sets are supplied from the imported
+  VSAC `value_sets` rows via a `valueSetCache` (no runtime VSAC key). `fqm-execution` is a **diagnostic-only**
+  dependency — imported solely by `standards/literal-diff.ts`, never the run pipeline / ingress / worker
+  (arch-tested by `fqm-isolation.test.ts`). Per-subject population membership (IPP/DENEX/NUMER) maps to the
+  outcome vocabulary with population-level gate attribution; a harness-local `stampQiCoreStructure`
+  normalizes the synthetic Conditions to QICore active/confirmed + in-past onset (fields WorkWell's cms122
+  ignores — its outcomes stay byte-identical, ADR-008 guard test). The subset tier remains the fallback when
+  the vendored bundle is absent or the literal execution fails at runtime; the estimate remains the floor.
 - All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not

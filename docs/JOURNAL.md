@@ -2,6 +2,29 @@
 
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
+### #258 — literal official-CQL diff spike (2026-07-09)
+
+**Gate PASSED (posted to #258 before any code):** the official CMS122v14 MADiE FHIR bundle
+(`cqframework/ecqm-content-cms-2025` @ `30a62701`, measure `CMS122FHIRDiabetesAssessGreaterThan9Percent`
+v0.5.000, QICore 6.0.0) carries base64 `application/elm+json` for the Measure + **all 9 chained
+libraries** — `MISSING ELM: NONE`. A feasibility probe then ran the literal artifact end-to-end via
+`fqm-execution` against a plain-FHIR patient (IPP/DENOM/DENEX/NUMER all computed) — the ADR-024
+translator blocker is irrelevant because **no translation happens**; the pre-compiled ELM executes on
+the `cql-execution`/`cql-exec-fhir` stack the repo already uses. Shipped: **`fqm-execution@1.8.5`
+pinned, diagnostic-only (ADR-026** — imported solely by `standards/literal-diff.ts`, arch-tested by
+`fqm-isolation.test.ts`); the vendored bundle (`backend-ts/measures/official/cms122v14/`, provenance
+README; redundant `elm+xml` blobs stripped 13.4→8.9 MB); `computeLiteralDiff` (valueSetCache from the
+imported VSAC rows — no runtime key; `trustMetaProfile:false`; a harness-local `stampQiCoreStructure`
+normalizing Conditions to QICore active/confirmed + in-past onset — fields WorkWell's cms122 ignores,
+byte-identical guard test; population-level gate attribution; memoized per run-id); and the
+**three-tier `chooseDiffMode` ladder** `literal → subset → estimate` with an additive `mode` response
+field (the old subset report's `mode:"execution"` renamed `"subset"`; runtime literal failure degrades
+to subset). Empirical finding worth recording: the literal QICore retrieves require
+`clinicalStatus`/`verificationStatus` with proper system URIs + a prevalence-period onset — without the
+stamp every subject reads out-of-population. Verified: backend **1065 pass / 1 pg-skip / 0 fail**;
+frontend lint + vitest + build green (StandardsTab now discriminates `subset|literal`). Closes #251 as
+superseded. Docs: ADR-026, MEASURES.md, ARCHITECTURE.md (`standards` + §7).
+
 **PR #252 merged 2026-07-08T20:36Z** → deployed on push to `main`. With it, the Option A real-batch-eval
 arc is live code, not just an open PR.
 
