@@ -113,8 +113,6 @@ function main(): void {
     const subjectId = `wc-${patId}`;
     const obs = obsByPat.get(patId) ?? [];
     const proc = procByPat.get(patId) ?? [];
-    if (!obs.length && !proc.length) continue; // only patients with codeable clinical data (faithful + bounded)
-
     const ref = { reference: `Patient/${subjectId}` };
     const sex = str(pt.sex);
     const entries: Array<{ resource: unknown }> = [

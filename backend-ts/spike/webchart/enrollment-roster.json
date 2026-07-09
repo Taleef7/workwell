@@ -51,7 +51,19 @@
     "cholesterol_ldl",
     "hypertension"
   ],
+  "wc-14": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
   "wc-18": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-20": [
     "diabetes_hba1c",
     "obesity_bmi",
     "cholesterol_ldl",
@@ -162,6 +174,174 @@
     "hypertension"
   ],
   "wc-60": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-64": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-66": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-67": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-68": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-69": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-70": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-71": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-72": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-73": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-74": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-75": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-76": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-77": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-78": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-79": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-80": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-84": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-85": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-86": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-87": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-94": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-100": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-104": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-105": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-107": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-108": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-112": [
+    "diabetes_hba1c",
+    "obesity_bmi",
+    "cholesterol_ldl",
+    "hypertension"
+  ],
+  "wc-120": [
     "diabetes_hba1c",
     "obesity_bmi",
     "cholesterol_ldl",
