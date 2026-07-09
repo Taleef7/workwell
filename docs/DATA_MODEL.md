@@ -500,17 +500,28 @@ change**: they exist **only** as `outcomes` rows whose `subject_id` **encodes th
 structure are in `backend-ts/src/engine/synthetic/scale-structure.ts`). No employees, no new columns,
 no new tables.
 
-- **Seeded** by `pnpm seed:scale [--subjects 120000] [--mode evaluate|fabricated] [--trim-evidence]`
+- **Seeded** by `pnpm seed:scale [--subjects 120000] [--mode evaluate|fabricated] [--trim-evidence | --full-evidence] [--workers <n>]`
   (`backend-ts/src/run/cli/`) — owner-run on-demand, **not** on deploy. One COMPLETED `MEASURE` run per
   runnable measure with `triggered_by='seed:scale'`, backdated. Idempotent (a single `seed:scale` run ⇒
   no-op rerun).
 - **Now real CQL evaluation (2026-07-08, this branch — supersedes the fabricated seed).** `--mode evaluate`
-  (the default) writes **real batch-evaluated** outcomes — `evidence_json` is the **full CQL
-  `expressionResults`** per subject (or minimal `{scale:true}` only with `--trim-evidence`, recommended for a
-  full 120k run to protect Neon storage) — audited with the new **`SCALE_POPULATION_EVALUATED`** event per
-  measure. `--mode fabricated` is the legacy instant path (minimal `{scale:true}` evidence, audited
-  `SCALE_POPULATION_SEEDED`), kept one more release. The `subject_id` encoding and rollback SQL below are
-  **unchanged** — only the outcomes' provenance changed.
+  (the default) writes **real batch-evaluated** outcomes — audited with the new
+  **`SCALE_POPULATION_EVALUATED`** event per measure. `--mode fabricated` is the legacy instant path
+  (minimal `{scale:true}` evidence, audited `SCALE_POPULATION_SEEDED`), kept one more release. The
+  `subject_id` encoding and rollback SQL below are **unchanged** — only the outcomes' provenance changed.
+- **Tiered `evidence_json` policy (#257, 2026-07-09) — evidence value follows ACTIONABILITY.** Full
+  evidence (~1–3 KB/outcome) at 120k × 14 is GB-scale on the cost-capped Neon, so trimming is **tiered**
+  (`applyEvidenceTier`, `backend-ts/src/run/batch-evaluate-scale.ts`), not all-or-nothing: when trimming,
+  **OVERDUE / DUE_SOON / MISSING_DATA rows keep the FULL CQL `expressionResults`** (they feed
+  cases/worklists — load-bearing; an evaluation-error MISSING_DATA keeps its `{evaluationError}` payload),
+  **COMPLIANT / EXCLUDED rows get minimal `{scale:true}`**, and a **deterministic ~1% subject-index
+  sample** (`idx % 100 === 0`) keeps full evidence across ALL buckets for audit spot-checks
+  (reproducible — index-based, not random). The trim **auto-engages above `--subjects 20000`** unless
+  `--full-evidence` explicitly overrides (`--trim-evidence` forces it at any N; the two flags together
+  are a usage error). Existing `evidence_json` column only — **no DDL**; `outcomes.status` is never
+  touched, so `aggregateScaleRun` + the rollup (status-only reads) are provably unchanged (guard test).
+  **Long-term home** for large evidence payloads is the #167 managed S3/R2 bucket — once that lands,
+  Neon keeps status + hash only.
 - **Read** via `OutcomeStore.aggregateScaleRun(runId)` — a single `GROUP BY` over the encoded
   `subject_id` (Postgres `split_part(subject_id,'|',…)`; SQLite `substr` over the fixed-width id),
   returning per (location, provider, status) counts — **O(providers)** rows, never the per-subject rows.
