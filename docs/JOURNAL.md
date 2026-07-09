@@ -45,6 +45,30 @@ owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output an
 (#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
 in `docs/ROADMAP_2026-07-09.md`.
 
+### #256 — worker pool (2026-07-09)
+
+`seed:scale --mode evaluate` gains a **hand-rolled `node:worker_threads` pool** (`--workers <n>`, default
+4, clamped to `availableParallelism()-1`; issue #256, design followed exactly). Work units are
+`(start, end)` **subject-index ranges** — never FHIR bundles or cql-execution objects across the thread
+boundary; each worker loads ELM/bindings/crosswalk once, regenerates each subject's bundle IN-worker via
+the same deterministic-on-index `ScaleSubjectGenerator` (reconstructed from its `kind` string), evaluates
+all 14 measures, and returns plain-JSON rows. The **main thread does every DB write** (the shared
+`persistChunk` → `recordOutcomes`), so resume/idempotency (per-measure COMPLETED `seed:scale` +
+`requestedScope.batchEvaluated`), the legacy-fabricated refusal, `SCALE_POPULATION_EVALUATED` audit, and
+the status-only `aggregateScaleRun` read path are all **unchanged**. `--workers 1` (or 0) takes the
+prior single-threaded code path unchanged (escape hatch + parity baseline). Crash isolation: a worker
+error/non-zero exit replaces the worker and re-queues its chunk once; a second crash fails that chunk's
+subjects soft to MISSING_DATA with `{evaluationError}` evidence. New: `run/scale-eval-pool.ts` (pure
+orchestration, fake-worker unit-tested: exactly-once, retry-once, soft-fallback, DB-write rejection) +
+`run/scale-eval-worker.ts` (thread entry); the sequential/worker paths share one pure
+`evaluateScaleSubjectMeasure` so a worker row is byte-identical to a sequential row. **Parity test**
+(real threads): `--workers 2` produces the identical (subject, measure, status) set as `--workers 1`.
+**Measured** (N=500 × 14 = 7,000 real CQL evals, ~99 ms/eval sequential, 32-core host): 693.6s → 187.5s
+(4 workers, **3.70×**) → 136.3s (8 workers, **5.09×**). The pool lives ONLY on the batch CLI path —
+`worker_threads` is imported nowhere reachable from `worker.ts` (grep-verified). No new deps; no schema;
+CQL stays the sole `Outcome Status` authority (ADR-008). Docs: DEPLOY.md long-run warning, ARCHITECTURE
+seed:scale bullet. Branch `feat/issue-256-worker-pool`.
+
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 
 The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality

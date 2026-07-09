@@ -16,20 +16,32 @@
  * all measures for the chunk's subjects), flushing per chunk. All per-measure runs are created UP FRONT
  * (a subject-major loop writes to every run's id as it goes), then finalized + audited at the end.
  *
+ * PARALLELISM (#256): `args.workers > 1` runs the evaluation through a hand-rolled `node:worker_threads`
+ * pool (`scale-eval-pool.ts` + `scale-eval-worker.ts`). Work units are (start, end) SUBJECT-INDEX
+ * ranges — never FHIR bundles or cql-execution objects across the thread boundary; each worker
+ * regenerates the bundle in-thread from the index and returns plain-JSON rows. The MAIN thread still
+ * does every DB write (`recordOutcomes`) + finalize + audit, so idempotency/resume/audit semantics and
+ * the `aggregateScaleRun` read path are all UNCHANGED — parallelism only speeds up the evaluate phase.
+ * `args.workers <= 1` (the default) is the unchanged single-threaded path (escape hatch + parity
+ * baseline). The pool lives ONLY on this batch CLI path — it is unreachable from worker.ts.
+ *
  * ROLLBACK (reversible) — delete tagged outcomes THEN runs (schema-qualify on the Pg ceiling):
  *   DELETE FROM workwell_spike.outcomes
  *     WHERE run_id IN (SELECT id FROM workwell_spike.runs WHERE triggered_by = 'seed:scale');
  *   DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:scale';
  */
+import { Worker } from "node:worker_threads";
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { complianceRate } from "./compliance-rates.ts";
 import { encodeScaleSubject, SCALE_LOCATIONS, scaleProvidersFor } from "../engine/synthetic/scale-structure.ts";
 import { evaluateBundle } from "../engine/ingress/evaluate-bundle.ts";
-import { targetForIndex, type ScaleSubjectGenerator } from "./scale-generator.ts";
+import { targetForIndex, RECONSTRUCTABLE_GENERATOR_KINDS, type ScaleSubjectGenerator } from "./scale-generator.ts";
+import { runScaleEvalPool, type WorkerOutcomeRow } from "./scale-eval-pool.ts";
 
 export const SCALE_TRIGGER = "seed:scale";
 export const SCALE_EVALUATED_EVENT = "SCALE_POPULATION_EVALUATED";
@@ -50,6 +62,14 @@ export interface ScaleBatchArgs {
   chunkSize?: number;
   /** Persist minimal `{scale:true}` evidence instead of the full engine evidence (keeps rows small). */
   trimEvidence?: boolean;
+  /**
+   * Worker-pool size (#256). `<= 1` (the default) takes the unchanged single-threaded sequential path
+   * — the escape hatch + the parity baseline. `> 1` spawns exactly this many `node:worker_threads`
+   * workers, each regenerating bundles from subject indices and evaluating in-thread while the MAIN
+   * thread does every DB write. The CLI resolves this against `availableParallelism()`; a caller/test
+   * may force an exact count. Confined to this batch CLI path — never reachable from worker.ts.
+   */
+  workers?: number;
 }
 export interface ScaleBatchSummary {
   skipped: boolean;
@@ -62,6 +82,43 @@ export interface ScaleBatchSummary {
 const PROVIDER_PAIRS: ReadonlyArray<{ li: number; pi: number }> = SCALE_LOCATIONS.flatMap((loc, li) =>
   scaleProvidersFor(loc.id).map((_p, pi) => ({ li, pi })),
 );
+
+/**
+ * The encoded `mhn|Lxx|Pxx|n` subject id for subject index `i` — the round-robin over provider pairs.
+ * Shared by the sequential loop AND the worker (which regenerates subjects from indices), so an index
+ * maps to the SAME subject id regardless of which thread evaluates it. Deterministic on index.
+ */
+export function subjectIdForIndex(i: number): string {
+  const pair = PROVIDER_PAIRS[i % PROVIDER_PAIRS.length]!;
+  return encodeScaleSubject(pair.li, pair.pi, i);
+}
+
+/**
+ * Evaluate ONE (subject, measure) pair to a persistable `{status, evidence}` — the single pure unit
+ * shared by the sequential path and the worker, so a worker-produced row is byte-identical to a
+ * sequential row for the same inputs (the #256 parity guarantee). Per-(subject, measure) error
+ * isolation lives here (ARCHITECTURE §6 / DATA_MODEL §5): an evaluation failure becomes MISSING_DATA
+ * with evaluation-error evidence and never propagates, mirroring the run pipeline.
+ */
+export async function evaluateScaleSubjectMeasure(
+  generator: ScaleSubjectGenerator,
+  subjectId: string,
+  measureId: string,
+  target: TargetOutcome,
+  asOf: string,
+  trimEvidence: boolean,
+): Promise<{ status: string; evidence: unknown }> {
+  try {
+    const bundle = generator.bundleFor(subjectId, measureId, target, asOf);
+    const outcome = await evaluateBundle(bundle, measureId, { evaluationDate: asOf });
+    return { status: outcome.outcome, evidence: trimEvidence ? { scale: true } : outcome.evidence };
+  } catch (e) {
+    return {
+      status: "MISSING_DATA",
+      evidence: { evaluationError: "CQL engine failure", message: e instanceof Error ? e.message : String(e) },
+    };
+  }
+}
 
 export async function batchEvaluateScalePopulation(
   deps: ScaleBatchDeps,
@@ -148,44 +205,104 @@ export async function batchEvaluateScalePopulation(
   }
 
   let outcomesCreated = 0;
-  // SUBJECT-MAJOR, chunked. Only the current chunk's outcomes (across all measures) are buffered.
-  for (let off = 0; off < args.subjects; off += chunk) {
-    const end = Math.min(off + chunk, args.subjects);
-    const buffer: RecordOutcomeInput[] = [];
-    for (let i = off; i < end; i++) {
-      const pair = PROVIDER_PAIRS[i % PROVIDER_PAIRS.length]!;
-      const subjectId = encodeScaleSubject(pair.li, pair.pi, i);
-      for (const measureId of todo) {
-        const target = targetForIndex(i, args.subjects, rateByMeasure.get(measureId)!);
-        // Per-(subject, measure) error isolation (ARCHITECTURE §6 / DATA_MODEL §5): one evaluation
-        // failure must NOT abort the batch — the failed subject is persisted as MISSING_DATA with
-        // evaluation-error evidence and the run still finalizes COMPLETED, mirroring the run pipeline.
-        let status: string;
-        let evidence: unknown;
-        try {
-          const bundle = deps.generator.bundleFor(subjectId, measureId, target, args.asOf);
-          const outcome = await evaluateBundle(bundle, measureId, { evaluationDate: args.asOf });
-          status = outcome.outcome;
-          evidence = args.trimEvidence ? { scale: true } : outcome.evidence;
-        } catch (e) {
-          status = "MISSING_DATA";
-          evidence = { evaluationError: "CQL engine failure", message: e instanceof Error ? e.message : String(e) };
-        }
-        buffer.push({
-          runId: runIdByMeasure.get(measureId)!,
-          subjectId,
-          measureId,
-          evaluationPeriod: args.asOf,
-          status,
-          evaluatedAt: completedAt,
-          evidence,
-        });
-      }
-    }
+  const trimEvidence = args.trimEvidence === true;
+  const workers = args.workers ?? 1;
+
+  // The MAIN thread persists every chunk's rows — the sequential path and the worker path both flow
+  // through here, so the DB-write side is byte-identical regardless of parallelism (idempotency +
+  // audit semantics preserved; the aggregateScaleRun read path is untouched — status only).
+  const persistChunk = async (rows: WorkerOutcomeRow[]): Promise<void> => {
+    const buffer: RecordOutcomeInput[] = rows.map((row) => ({
+      runId: runIdByMeasure.get(row.measureId)!,
+      subjectId: row.subjectId,
+      measureId: row.measureId,
+      evaluationPeriod: args.asOf,
+      status: row.status,
+      evaluatedAt: completedAt,
+      evidence: row.evidence,
+    }));
     await deps.outcomeStore.recordOutcomes(buffer);
     outcomesCreated += buffer.length;
-    // One progress line per chunk (~1.68M sequential evals at 120k otherwise runs silently).
-    console.log(`[batch:scale] evaluated ${end}/${args.subjects} subjects`);
+  };
+
+  if (workers > 1) {
+    // PARALLEL (#256): a hand-rolled pool over node:worker_threads. Work units are (start, end)
+    // subject-index ranges; each worker regenerates the bundle IN-THREAD from the index (the generator
+    // is deterministic on index) and evaluates every measure, returning plain-JSON rows. The main
+    // thread does ALL DB writes via persistChunk (bounded memory: at most poolSize chunks buffered).
+    // The generator can't cross the thread boundary, so the worker reconstructs it from `kind` — fail
+    // fast if it isn't reconstructable rather than silently degrading every subject to MISSING_DATA.
+    if (!RECONSTRUCTABLE_GENERATOR_KINDS.has(deps.generator.kind)) {
+      throw new Error(
+        `worker pool (workers=${workers}) requires a reconstructable generator kind ` +
+          `(${[...RECONSTRUCTABLE_GENERATOR_KINDS].join(" / ")}), got '${deps.generator.kind}'`,
+      );
+    }
+    const workerUrl = new URL("./scale-eval-worker.ts", import.meta.url);
+    const workerData = {
+      asOf: args.asOf,
+      totalSubjects: args.subjects,
+      measureIds: todo,
+      generatorKind: deps.generator.kind,
+      trimEvidence,
+      rateByMeasure: Object.fromEntries(rateByMeasure),
+    };
+    let evaluated = 0;
+    await runScaleEvalPool({
+      totalSubjects: args.subjects,
+      chunkSize: chunk,
+      poolSize: workers,
+      spawnWorker: () => {
+        const w = new Worker(workerUrl, { workerData });
+        return {
+          postMessage: (m) => w.postMessage(m),
+          onMessage: (cb) => w.on("message", cb),
+          onError: (cb) => w.on("error", cb),
+          onExit: (cb) => w.on("exit", cb),
+          terminate: () => void w.terminate(),
+        };
+      },
+      onChunkRows: async (rows) => {
+        await persistChunk(rows);
+        evaluated = Math.min(evaluated + Math.round(rows.length / todo.length), args.subjects);
+        console.log(`[batch:scale] evaluated ~${evaluated}/${args.subjects} subjects (${workers} workers)`);
+      },
+      // Hard-crash fallback (a chunk whose worker crashed twice): fail its subjects soft to
+      // MISSING_DATA, mirroring the per-subject isolation of the in-worker/sequential path.
+      buildFallbackRows: (start, end) => {
+        const rows: WorkerOutcomeRow[] = [];
+        for (let i = start; i < end; i++) {
+          const subjectId = subjectIdForIndex(i);
+          for (const measureId of todo) {
+            rows.push({
+              subjectId,
+              measureId,
+              status: "MISSING_DATA",
+              evidence: { evaluationError: "worker crashed", message: "chunk failed after one retry" },
+            });
+          }
+        }
+        return rows;
+      },
+    });
+  } else {
+    // SEQUENTIAL (default; --workers 1): the unchanged subject-major chunked loop. Only the current
+    // chunk's outcomes (across all measures) are buffered.
+    for (let off = 0; off < args.subjects; off += chunk) {
+      const end = Math.min(off + chunk, args.subjects);
+      const rows: WorkerOutcomeRow[] = [];
+      for (let i = off; i < end; i++) {
+        const subjectId = subjectIdForIndex(i);
+        for (const measureId of todo) {
+          const target = targetForIndex(i, args.subjects, rateByMeasure.get(measureId)!);
+          const { status, evidence } = await evaluateScaleSubjectMeasure(deps.generator, subjectId, measureId, target, args.asOf, trimEvidence);
+          rows.push({ subjectId, measureId, status, evidence });
+        }
+      }
+      await persistChunk(rows);
+      // One progress line per chunk (~1.68M sequential evals at 120k otherwise runs silently).
+      console.log(`[batch:scale] evaluated ${end}/${args.subjects} subjects`);
+    }
   }
 
   // Finalize + audit each run (every state change is audited, CLAUDE.md). Finalize-before-audit, and

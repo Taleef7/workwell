@@ -178,13 +178,20 @@ or seed fewer `--subjects`.
 > `SCALE_POPULATION_SEEDED`). The **`mhn|Lxx|Pxx|n` `subject_id` encoding, `aggregateScaleRun`, and the
 > rollback SQL below are all unchanged** — only the outcomes' provenance changed (fabricated → real CQL).
 >
-> **⚠ Long-run warning.** `--mode evaluate` at the default 120k subjects is a **very** long, single-threaded
-> batch job. Measured cost is ~60 ms per evaluation, so a full 120k × 14 ≈ 1.68M evaluations is on the order
-> of **many hours to ~a day** single-threaded (parallelism is a deferred non-goal — see the plan's Phase 5);
-> progress is logged one line per chunk. For a proof/dev run use a small `--subjects` (e.g. 5000, ~minutes).
+> **⚠ Long-run warning + parallelism (#256).** `--mode evaluate` is CPU-bound at ~60 ms per evaluation, so
+> a full 120k × 14 ≈ 1.68M evaluations is **hours to ~a day single-threaded** (`--workers 1`). A **worker
+> pool** (`--workers <n>`, default **4**, clamped to `availableParallelism()-1`) parallelizes the evaluate
+> phase across `node:worker_threads` — measured **3.7× at 4 workers / 5.1× at 8 workers** on a many-core
+> host (N=500 × 14 measures: 693.6s → 187.5s → 136.3s; see `docs/JOURNAL.md` 2026-07-09), making the 120k
+> dial usable (order of hours on 8 cores rather than a day). Each worker regenerates bundles from subject indices and evaluates in-thread; the **main
+> thread does every DB write**, so resume/idempotency (per-measure COMPLETED `seed:scale` +
+> `requestedScope.batchEvaluated` marker) and the `SCALE_POPULATION_EVALUATED` audit are unchanged, and the
+> `aggregateScaleRun` read path is byte-for-byte the same (status-only). `--workers 1` (or `0`) forces the
+> single-threaded path unchanged. The pool is confined to this batch CLI — never the request path.
+> Progress is logged one line per chunk. For a proof/dev run use a small `--subjects` (e.g. 5000, ~minutes).
 > For a full 120k run add **`--trim-evidence`** to persist minimal `{scale:true}` evidence (protects Neon
 > storage); otherwise full real `evidence_json` (expressionResults) is stored per outcome. `--mode fabricated`
-> keeps the legacy instant path reachable for one more release.
+> keeps the legacy instant path reachable for one more release (it ignores `--workers`).
 >
 > **First run on a DB that already has the OLD fabricated seed (⚠ applies to live Neon).** `--mode evaluate`
 > **refuses to run** if any COMPLETED *fabricated* `seed:scale` run exists (it will not silently no-op, and
@@ -201,10 +208,12 @@ or seed fewer `--subjects`.
 >
 > ```bash
 > cd backend-ts
-> # proof/dev run: real batch eval over a small population
+> # proof/dev run: real batch eval over a small population (default 4 workers, core-clamped)
 > DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate
-> # full 120k real run: trim evidence to protect Neon storage
-> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --trim-evidence
+> # full 120k real run: trim evidence to protect Neon storage; scale workers to the host's cores
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 120000 --as-of 2026-06-26 --mode evaluate --trim-evidence --workers 8
+> # force the single-threaded path (escape hatch / parity baseline)
+> DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate --workers 1
 > ```
 >
 > Spec/plan: `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,

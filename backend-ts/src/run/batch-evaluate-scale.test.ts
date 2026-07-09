@@ -292,3 +292,85 @@ test("batchEvaluateScalePopulation outcomes reconcile via bounded aggregateScale
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
   }
 });
+
+/** Collect a stable (subjectId, measureId, status) fingerprint of every seed:scale outcome row. */
+async function outcomeFingerprint(runs: SqliteRunStore, outcomes: SqliteOutcomeStore): Promise<string[]> {
+  const scaleRuns = (await runs.listRuns(5000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+  const keys: string[] = [];
+  for (const run of scaleRuns) for (const row of await outcomes.listOutcomes(run.id)) keys.push(`${row.subjectId}|${row.measureId}|${row.status}`);
+  return keys.sort();
+}
+
+test("PARITY (#256): --workers 2 produces the identical (subject, measure, status) outcome set as --workers 1", async () => {
+  // Small N (real CQL eval is ~60ms/eval) — the worker pool must yield the SAME outcome set as the
+  // sequential path for the same N + as-of. The direct-synthetic generator is reconstructable in a worker.
+  const seq = await fresh();
+  const par = await fresh();
+  try {
+    const args = { subjects: 6, asOf: "2026-06-26", chunkSize: 2 };
+    await batchEvaluateScalePopulation(
+      { runStore: seq.runs, outcomeStore: seq.outcomes, auditStore: seq.events, generator: directSyntheticGenerator() },
+      { ...args, workers: 1 },
+    );
+    await batchEvaluateScalePopulation(
+      { runStore: par.runs, outcomeStore: par.outcomes, auditStore: par.events, generator: directSyntheticGenerator() },
+      { ...args, workers: 2 },
+    );
+    const seqFp = await outcomeFingerprint(seq.runs, seq.outcomes);
+    const parFp = await outcomeFingerprint(par.runs, par.outcomes);
+    assert.ok(seqFp.length > 0, "the sequential run produced outcomes");
+    assert.deepEqual(parFp, seqFp, "workers:2 outcome set is identical to workers:1 (subject, measure, status)");
+  } finally {
+    try { rmSync(seq.dbPath, { force: true }); } catch { /* best effort */ }
+    try { rmSync(par.dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("WORKER PATH (#256): --workers 2 writes the full outcome set, COMPLETED runs, and reconciles", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 8, asOf: "2026-06-26", chunkSize: 3, workers: 2 });
+    const measures = Object.keys(MEASURES).length;
+    assert.equal(r.skipped, false);
+    assert.equal(r.runsCreated, measures, "one run per runnable measure");
+    assert.equal(r.outcomesCreated, measures * 8, "every subject×measure row persisted via the pool");
+
+    const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
+    assert.equal(scaleRuns.length, measures);
+    assert.ok(scaleRuns.every((x) => x.status === "COMPLETED"), "all runs COMPLETED (main thread finalizes)");
+    // The aggregateScaleRun (status-only) read path is unchanged: group counts sum to the subject count.
+    const groups = await outcomes.aggregateScaleRun(scaleRuns[0]!.id);
+    assert.equal(groups.reduce((s, g) => s + g.count, 0), 8, "worker-path outcomes reconcile via aggregateScaleRun");
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("WORKER PATH (#256): rejects a non-reconstructable generator kind up front (fail-fast, no silent MISSING_DATA)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    // A generator whose kind a worker can't rebuild from a string — the pool must refuse, not degrade.
+    const badGen: ScaleSubjectGenerator = { kind: "failing-test", bundleFor: () => ({} as unknown as FhirBundle) };
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: badGen };
+    await assert.rejects(
+      () => batchEvaluateScalePopulation(deps, { subjects: 4, asOf: "2026-06-26", chunkSize: 2, workers: 2 }),
+      /reconstructable generator kind/,
+    );
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("WORKER PATH (#256): workers:1 takes the unchanged sequential path (escape hatch)", async () => {
+  const { dbPath, runs, outcomes, events } = await fresh();
+  try {
+    const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
+    // workers:1 must behave exactly like omitting workers (no thread spawned) — same counts.
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 6, asOf: "2026-06-26", chunkSize: 2, workers: 1 });
+    assert.equal(r.runsCreated, Object.keys(MEASURES).length);
+    assert.equal(r.outcomesCreated, Object.keys(MEASURES).length * 6);
+  } finally {
+    try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
+  }
+});
