@@ -1,8 +1,9 @@
 /**
- * Inert-seam inventory tests (#260): describeSeams flips each of the 7 seams on/off with the correct
- * env combination, preserving both-vars-required semantics where the underlying resolver requires it
- * (WebChart, DataChaser, ICE, EH-FHIR all need BOTH vars; SendGrid needs provider=sendgrid AND a key;
- * sql-executor is a single explicit opt-in; VSAC is a single key).
+ * Inert-seam inventory tests (#260/#264): describeSeams flips each of the 8 seams on/off with the
+ * correct env combination, preserving both-vars-required semantics where the underlying resolver
+ * requires it (WebChart, DataChaser, ICE, EH-FHIR all need BOTH vars; SendGrid needs provider=sendgrid
+ * AND a key; sql-executor is a single explicit opt-in; VSAC is a single key; alert-webhook is a single
+ * URL).
  *   node --import tsx --test src/config/seam-inventory.test.ts
  */
 import { test } from "node:test";
@@ -19,7 +20,7 @@ test("describeSeams: everything off with no env vars set", () => {
   const seams = describeSeams({});
   assert.deepEqual(
     seams.map((s) => s.name),
-    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac"],
+    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac", "alert-webhook"],
   );
   for (const s of seams) assert.equal(s.active, false, `${s.name} should default off`);
 });
@@ -27,7 +28,7 @@ test("describeSeams: everything off with no env vars set", () => {
 test("formatSeamLogLine: all-off shape matches the documented boot log line", () => {
   assert.equal(
     formatSeamLogLine({}),
-    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off",
+    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off",
   );
 });
 
@@ -141,6 +142,17 @@ test("vsac: on when the key is set (base url optional)", () => {
   assert.equal(statusOf({ WORKWELL_VSAC_API_KEY: "umls-key" }, "vsac"), true);
 });
 
+// ---- alert-webhook: a single URL (#264) -----------------------------------------------------------
+
+test("alert-webhook: off with a blank/whitespace URL", () => {
+  assert.equal(statusOf({ WORKWELL_ALERT_WEBHOOK_URL: "" }, "alert-webhook"), false);
+  assert.equal(statusOf({ WORKWELL_ALERT_WEBHOOK_URL: "   " }, "alert-webhook"), false);
+});
+
+test("alert-webhook: on when WORKWELL_ALERT_WEBHOOK_URL is set", () => {
+  assert.equal(statusOf({ WORKWELL_ALERT_WEBHOOK_URL: "https://hooks.example/alert" }, "alert-webhook"), true);
+});
+
 // ---- everything on at once, for the boot log line's full-on shape ---------------------------------
 
 test("formatSeamLogLine: all-on shape when every seam is configured", () => {
@@ -157,9 +169,10 @@ test("formatSeamLogLine: all-on shape when every seam is configured", () => {
     WORKWELL_WEBCHART_API_KEY: "k",
     WORKWELL_MEASURE_EXECUTOR: "sql-pushdown",
     WORKWELL_VSAC_API_KEY: "umls-key",
+    WORKWELL_ALERT_WEBHOOK_URL: "https://hooks.example/alert",
   };
   assert.equal(
     formatSeamLogLine(allOn),
-    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on",
+    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on alert-webhook=on",
   );
 });

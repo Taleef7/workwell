@@ -358,6 +358,11 @@ above is no longer a blocker. Worst-case recovery latency ≈ the 15-min interva
 container to exclude. The env blocks are duplicated from `deploy-twh-mieweb.yml` and marked
 **keep-in-sync** in both.
 
+**How to see reconciler history (#264 doc note):** open the repo on GitHub → **Actions** tab → filter
+workflow **`reconcile-twh-mieweb`** (or open `.github/workflows/reconcile-twh-mieweb.yml` → "View
+workflow runs"). Each run shows the health-check outcome and whether a recreate fired. Manual re-run:
+**Actions → reconcile-twh-mieweb → Run workflow** (`workflow_dispatch`).
+
 **Two safety properties to know.** (1) The reconciler shares the `twh-mieweb-container-ops` concurrency
 group with `deploy-twh-mieweb.yml`, so a heal never runs while a push-to-main deploy is mid
 delete+recreate of the same container — the later run queues behind the in-flight one. (2) A heal
@@ -408,6 +413,7 @@ shows all services `Up`).
 | `WORKWELL_EMAIL_FROM_NAME` | Backend | From display name (default `WorkWell Measure Studio`). |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
 | `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
+| `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
 
 `Where = Backend` vars are container environment on the MIE backend container (mapped from the
 `*_TWH` GitHub secrets where applicable); `Where = Frontend` vars are build-args/env baked into
@@ -430,6 +436,22 @@ demo stack.
 
 The non-prod `POST /api/admin/demo-reset` endpoint (admin-only, `@Profile("!prod")`) truncates
 volatile demo tables including `audit_events`; it returns 403 under the `prod` profile.
+
+### Failed-run alerts (#264)
+
+Every population run that ends **FAILED** or **PARTIAL_FAILURE** (plus stuck-run boot recovery and a
+scheduler tick throw) emits **exactly one** alert through `resolveAlertChannels(env)`:
+
+1. **Always:** a single greppable container log line —
+   `WORKWELL_ALERT {"kind":"RUN_PARTIAL_FAILURE",...}` (`console.error`). Grep MIE container logs for
+   `WORKWELL_ALERT`.
+2. **Optional:** when `WORKWELL_ALERT_WEBHOOK_URL` is set, a plain JSON POST of the same payload.
+   Leave unset on the demo stack unless you have a webhook sink. Inert-unless-configured; listed on
+   the boot seam inventory as `alert-webhook=off|on`.
+
+Alert emission is best-effort — a webhook timeout never fails the run. Run metrics (duration,
+evaluated count, compliant/non-compliant, per-status `outcomeCounts`) remain on `GET /api/runs` and
+`GET /api/runs/:id` as before.
 
 ### Evidence upload persistence (managed S3/R2 bucket)
 

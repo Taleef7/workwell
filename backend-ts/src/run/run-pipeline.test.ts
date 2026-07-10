@@ -21,6 +21,7 @@ import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
+import type { AlertChannel, RunAlert } from "./alert-channel.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -109,6 +110,86 @@ test("a subject evaluation failure is non-fatal but flags the run PARTIAL_FAILUR
   assert.equal(outcomes.length, 4, "every subject is still persisted (run not aborted)");
   assert.ok(outcomes.every((o) => o.status === "MISSING_DATA"));
   assert.ok(outcomes.every((o) => (o.evidence as { evaluationError?: string }).evaluationError));
+});
+
+// ---- #264 observability: failed-run alerts --------------------------------------------------------
+
+function countingAlertChannel(sink: RunAlert[]): AlertChannel {
+  return {
+    name: "test",
+    async send(alert) {
+      sink.push(alert);
+    },
+  };
+}
+
+test("#264: PARTIAL_FAILURE population run emits exactly one alert; COMPLETED emits none", async () => {
+  const partialAlerts: RunAlert[] = [];
+  const partial: RunPipelineDeps = {
+    ...deps,
+    engine: {
+      async evaluate() {
+        throw new Error("boom");
+      },
+    },
+    alertChannels: [countingAlertChannel(partialAlerts)],
+  };
+  const partialRes = await executeManualRun(partial, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(partialRes.status, "PARTIAL_FAILURE");
+  assert.equal(partialAlerts.length, 1, "exactly one alert on PARTIAL_FAILURE");
+  assert.equal(partialAlerts[0]!.kind, "RUN_PARTIAL_FAILURE");
+  assert.equal(partialAlerts[0]!.runId, partialRes.runId);
+  assert.ok((partialAlerts[0]!.failures ?? 0) > 0);
+
+  const okAlerts: RunAlert[] = [];
+  const ok: RunPipelineDeps = {
+    ...deps,
+    alertChannels: [countingAlertChannel(okAlerts)],
+  };
+  const okRes = await executeManualRun(ok, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(okRes.status, "COMPLETED");
+  assert.equal(okAlerts.length, 0, "COMPLETED emits no alert");
+});
+
+test("#264: FAILED finishOrFail emits exactly one alert", async () => {
+  const alerts: RunAlert[] = [];
+  const failing: RunPipelineDeps = {
+    ...deps,
+    outcomeStore: {
+      ...deps.outcomeStore,
+      async recordOutcome() {
+        throw new Error("store down");
+      },
+    } as RunPipelineDeps["outcomeStore"],
+    alertChannels: [countingAlertChannel(alerts)],
+  };
+  const planned = await planManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
+  await finishOrFail(failing, planned);
+  assert.equal((await deps.runStore.getRun(planned.run.id))?.status, "FAILED");
+  assert.equal(alerts.length, 1, "exactly one alert on FAILED");
+  assert.equal(alerts[0]!.kind, "RUN_FAILED");
+  assert.equal(alerts[0]!.runId, planned.run.id);
+});
+
+test("#264: alert-channel failure is best-effort — never fails an otherwise-complete PARTIAL_FAILURE run", async () => {
+  const boomChannel: AlertChannel = {
+    name: "boom",
+    async send() {
+      throw new Error("alert sink down");
+    },
+  };
+  const failing: RunPipelineDeps = {
+    ...deps,
+    engine: {
+      async evaluate() {
+        throw new Error("eval boom");
+      },
+    },
+    alertChannels: [boomChannel],
+  };
+  const res = await executeManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "PARTIAL_FAILURE", "run still finalizes despite alert throw");
+  assert.equal((await deps.runStore.getRun(res.runId))?.status, "PARTIAL_FAILURE");
 });
 
 test("ALL_PROGRAMS manual run evaluates every runnable measure × the whole population", async () => {

@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-07-10 — #264 observability minimum (failed-run alerts + metrics)
+
+M3 production-readiness item: silent FAILED/PARTIAL_FAILURE population runs are no longer silent.
+
+- **`AlertChannel` seam** (`backend-ts/src/run/alert-channel.ts`): always-on console channel emits one
+  structured `console.error` line prefixed `WORKWELL_ALERT` + JSON payload; optional webhook channel
+  (`WORKWELL_ALERT_WEBHOOK_URL`, plain `fetch` POST) inert-unless-configured.
+- Wired into `finishManualRun` (PARTIAL_FAILURE), `finishOrFail` (FAILED), `schedulerTick` catch
+  (SCHEDULER_TICK_ERROR), and stuck-run recovery (RUN_RECOVERED). Best-effort — alert failure never
+  fails the run (Fable-H1 pattern).
+- Seam inventory (#260) extended with `alert-webhook`; boot log line gains `alert-webhook=off|on`.
+- Run metrics on `/api/runs` already had duration / evaluated / per-status counts — verified, no API gap.
+- DEPLOY.md: reconciler history via GitHub Actions tab; env-var table row for the webhook.
+
+No schema, no new deps. Tests: alert-channel unit + pipeline integration (exactly-one / none / best-effort).
+
 ## 2026-07-10 — PR #280 MERGED + housekeep
 
 **PR #280** (`feat(ecqm): production-faithful CMS122v14 + CMS125v14`) **merged to `main`**
