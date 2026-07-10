@@ -227,69 +227,52 @@ as **DECLINED** by the roster read model (E10.5) and keeps the case open (same p
 Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evaluation:
 
 ### 3b.1 Breast Cancer Screening (CMS125v14 / MIPS 112)
-- Policy reference: CMS125v14
-- CQL file: `backend-ts/measures/cms125.cql`
+- Policy reference: **CMS125v14** (2026 eCQI; v15/2027 annual roll-forward — stay on v14 for 2026)
+- CQL file: `backend-ts/measures/cms125.cql` (v2.0.0 production faithful-subset)
 - Tags: `ecqm`, `cms`, `cancer-screening`, `preventive`
-- Compliance window: 27 months (820 days — mammogram within the measurement period or 26 months prior)
-- **Fidelity:** operational simplified CQL only — **no** E14 structural/execution/literal ladder yet
-  (unlike CMS122). Catalog identity (CMS125v14 / MIPS 112) is eCQI-current; logic is not claimed as
-  full official eCQM parity.
+- Measurement period: **12 months** (`periodMonths: 12`)
+- **Fidelity:** structural report at `GET /api/measures/cms125/fidelity`
 
-Outcome mapping:
-- `EXCLUDED` when bilateral mastectomy or documented clinical exclusion
-- `MISSING_DATA` when enrolled, not excluded, no mammogram date found
-- `OVERDUE` when enrolled, not excluded, days since last mammogram > 820
-- `DUE_SOON` when enrolled, not excluded, days in (790..820]
-- `COMPLIANT` when enrolled, not excluded, days <= 790
+Official criteria (CMS125-v14.0.000-QDM): women **42-74** + visit during MP; mammogram on/between **Oct 1 two years prior to MP** and end of MP (VSAC Mammography); DENEX hospice / mastectomy / palliative (66+ LTC + frailty/AI = Phase 2 residual).
+
+Outcome mapping (higher is better):
+- `EXCLUDED` — DENEX (mastectomy / hospice / palliative)
+- `COMPLIANT` — in IPP with qualifying mammogram
+- `OVERDUE` — in IPP without qualifying mammogram
+- `MISSING_DATA` — not in IPP
+- `DUE_SOON` — not used (cleaner eCQI proportion story)
 
 ### 3b.2 Diabetes: Glycemic Status Assessment Greater Than 9% (CMS122v14 / MIPS 1)
-- Policy reference: CMS122v14
-- CQL file: `backend-ts/measures/cms122.cql`
+- Policy reference: **CMS122v14** (2026 eCQI; stay on v14)
+- CQL file: `backend-ts/measures/cms122.cql` (v2.0.0 production faithful-subset)
 - Tags: `ecqm`, `cms`, `diabetes`
-- Value-based (numeric): outcome is driven by HbA1c lab value, not recency
-- Catalog/display name follows the current CMS122v14 title ("Glycemic Status Assessment Greater Than 9%"); the CQL define is still named `HbA1c Poor Control`. This name is the exact key the evaluator binds CQL by (`forMeasure`), so it must match across the DB seed, `measures/cms122.yaml`, and `backend-ts`.
+- Measurement period: **12 months**
+- Catalog/display name matches eCQI title; library `DiabetesHbA1cPoorControlCQL-2.0.0`
+- **Fidelity:** structural + estimate + subset + literal fqm (`GET /api/measures/cms122/fidelity` + `/diff`)
 
-Outcome mapping:
-- `EXCLUDED` when documented clinical exclusion
-- `MISSING_DATA` when diabetes diagnosis, not excluded, no recent HbA1c result
-- `OVERDUE` when diabetes diagnosis, not excluded, HbA1c value > 9% (poor control — intervention needed)
-- `COMPLIANT` when diabetes diagnosis, not excluded, HbA1c value ≤ 9% (adequate control)
-- `DUE_SOON` — not applicable (hard-coded false; control status drives outcome, not recency)
+Official criteria (CMS122-v14.0.000-QDM): age **18-75** + diabetes + visit; NUMER most recent **HbA1c or GMI (LOINC 97506-0)** in MP > 9% or missing/not performed; DENEX hospice + palliative (66+ LTC + frailty/AI = Phase 2).
 
-> **Known simplification (Fable L15):** the `Has Recent HbA1c Result` define does **not** yet apply a
-> recency window, so an old HbA1c can read COMPLIANT. This is the documented **SIMPLIFIED** criterion in
-> the E14 CMS122 fidelity report (a true measurement-period window needs the VSAC-backed value-set
-> resolver, blocked on credentials); the define/label keep the "recent" name pending that wiring.
+Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
+- `EXCLUDED` — DENEX
+- `OVERDUE` — in IPP and numerator (poor control or missing assessment)
+- `COMPLIANT` — in IPP with glycemic assessment <= 9%
+- `MISSING_DATA` — not in IPP
 
 ### eCQM accuracy posture (vs eCQI — read this before claiming parity)
 
-**Short answer:** we do **not** claim that every CMS row in the catalog is a byte-for-byte eCQI eCQM.
-Accuracy is tiered on purpose.
+**Short answer (2026-07 production-faithful promotion):** the two runnable CMS measures are **eCQI-aligned faithful subsets** for 2026 (v14). They are still not full multi-library QICore MAT packages for MIPS submission.
 
-| What we ship | Count | Relationship to eCQI / official eCQM | How we prove it |
+| What we ship | Count | Relationship to eCQI | How we prove it |
 |---|---|---|---|
-| **Runnable Active CMS CQL** | **2** — CMS122v14, CMS125v14 | **Intentional WorkWell simplifications** for TWH ops (inline codes / synthetic enrollment, 5-bucket Outcome Status). Not drop-in official MAT packages for production MIPS submission. | CMS122: structural + estimate + official-**subset** + **literal** fqm tiers (`GET /api/measures/cms122/fidelity/*`). CMS125: **no fidelity ladder yet** — operational CQL only (mammogram window + exclusions). |
-| **Draft CMS catalog entries** | **47** | **Metadata only** — correct CMS ID, **v14 = 2026** performance year, MIPS Quality ID, title (verified 2026-07-08 in `docs/TERMINOLOGY_AUDIT_2026-07-08.md`). **No CQL, not evaluated.** | Catalog seed + terminology audit against eCQI EC table |
-| **OSHA / HEDIS / permanent vax (12 runnable)** | 12 | **Not CMS eCQMs.** Different authorities (eCFR, NCQA HEDIS, ACIP/CDC). “Accurate” means policy-correct for those sources, not eCQI. | Measure docs + code filters + WebChart crosswalk currency audit |
+| **Runnable Active CMS CQL** | **2** — CMS122v14, CMS125v14 | Faithful official-subset production CQL: 12-month MP, age/sex/visit, VSAC OIDs, GMI, Oct-1 mammogram window, hospice/palliative/mastectomy. Residual Phase 2: 66+ LTC + frailty/AI. Dual-coded synthetic data. | Structural fidelity both; CMS122 also estimate + subset + literal fqm |
+| **Draft CMS catalog entries** | **47** | Metadata only — correct CMS ID, **v14 = 2026**, MIPS ID, title | Terminology audit 2026-07-08 |
+| **OSHA / HEDIS / permanent vax** | 12 | Not CMS eCQMs | Separate authorities |
 
-**What “using a real eCQM” means here:**
+**Demo claim that is honest:**
 
-1. **Catalog identity** — right eCQI measure ID / year / MIPS ID (done for all 49).  
-2. **Runnable logic** — CQL that drives cases and dashboards (only 2 CMS measures).  
-3. **Official logic comparison** — subject-by-subject vs official artifact (only **CMS122**, via E14 + #258).  
+> We evaluate CMS122v14 and CMS125v14 — the 2026 eCQI Eligible Clinician measures (MIPS 001 / 112) — with production CQL aligned to official population criteria. We can show structural fidelity (and for CMS122, a literal official package comparison). We do not claim full MAT multi-library submission packages or 2027 v15 until we cut over.
 
-**Recommended next accuracy work (if EH needs eCQI-grade claims):**
-
-1. **CMS125 fidelity package** (same shape as CMS122): vendored eCQI/MADiE reference + structural
-   COVERED/SIMPLIFIED/OMITTED + at least subset or literal execution diff. Highest-value gap among
-   measures we actually evaluate.  
-2. Close known CMS122 authored gaps the fidelity report already names (HbA1c **recency window**,
-   full VSAC “Glycemic Status Assessment” vs inline LOINC, authored GMI path if product wants it).  
-3. **Do not** bulk-author all 47 Draft CMS measures to “match eCQI” without a product list — each
-   official eCQM is multi-library + VSAC-heavy; pick EH sales / demo measures first.  
-4. Keep ADR-008: fidelity diffs stay **descriptive** — they never overwrite operational Outcome Status.
-
----
+**Remaining accuracy work:** Phase 2 DENEX (LTC/frailty); optional CMS125 literal ELM; annual roll-forward to v15/2027 when product targets that year.
 
 ## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 

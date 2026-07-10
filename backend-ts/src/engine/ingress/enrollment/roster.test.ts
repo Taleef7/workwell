@@ -150,6 +150,46 @@ test("stampEnrollment: no-ops for a clinical-enrollment measure — never fabric
   assert.equal(conditions(out).length, 0);
 });
 
+test("stampEnrollment (cms125): stamps enrollment Condition AND a qualifying office-visit Encounter (Codex P1 #280)", () => {
+  // Production CMS125v14 IPP requires a qualifying visit during the MP. WebChart clinical payloads
+  // typically have mammograms but no Encounter — the OH roster supplies both program membership and
+  // the eCQI-aligned visit evidence (CPT 99213), never a fabricated mammogram.
+  const roster = parseEnrollmentRoster({ "wc-49": ["cms125"] });
+  const input: FhirBundle = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "wc-49", gender: "female", birthDate: "1965-01-01" } },
+      {
+        resource: {
+          resourceType: "Procedure",
+          status: "completed",
+          subject: { reference: "Patient/wc-49" },
+          code: { coding: [{ system: "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", code: "G0202" }] },
+          performedDateTime: "2015-07-05T00:00:00",
+        },
+      },
+    ],
+  };
+  const stamped = stampEnrollment(input, "cms125", roster, { evaluationDate: "2024-06-01" });
+  assert.equal(conditions(input).length, 0, "input must not be mutated");
+  assert.equal(conditions(stamped).length, 1);
+  const visit = stamped.entry
+    .map((e) => (e as { resource: Record<string, unknown> }).resource)
+    .find((r) => r.resourceType === "Encounter");
+  assert.ok(visit, "cms125 enrollment must stamp a qualifying office-visit Encounter");
+  assert.equal(visit!.id, "wc-49-office-visit");
+  assert.equal(visit!.status, "finished");
+  const typeCoding = (visit!.type as Array<{ coding: Array<{ code: string; system: string }> }>)[0]!.coding[0]!;
+  assert.equal(typeCoding.code, "99213");
+  assert.equal(typeCoding.system, "http://www.ama-assn.org/go/cpt");
+  // Visit day is ~90d before the evaluation date → inside the 12-month measurement period.
+  assert.equal((visit!.period as { start: string }).start, "2024-03-03T09:00:00");
+  // Idempotent: second stamp is a no-op.
+  const twice = stampEnrollment(stamped, "cms125", roster, { evaluationDate: "2024-06-01" });
+  assert.deepEqual(twice, stamped);
+});
+
 test("stampEnrollment: no-ops on an unknown measure or a bundle with no Patient", () => {
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
   assert.equal(conditions(stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "not_a_measure", roster)).length, 0);

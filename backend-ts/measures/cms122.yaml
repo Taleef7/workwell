@@ -1,11 +1,13 @@
 id: cms122
 name: "Diabetes: Glycemic Status Assessment Greater Than 9%"
-version: 1.0.0
-title: Diabetes HbA1c Poor Control (CMS122v14 / MIPS 1)
+version: 2.0.0
+title: Diabetes: Glycemic Status Assessment Greater Than 9% (CMS122v14 / MIPS 1)
 policyRef: CMS122v14
 tags: [ecqm, cms, diabetes]
 complianceClass: RECURRING
 cql: cms122.cql
+# Production is eCQI CMS122v14 faithful-subset (age/visit/diabetes, HbA1c|GMI, hospice/palliative).
+# Synthetic dual-codes VSAC members + local urn:workwell for demo continuity.
 bindings:
   rateKey: cms122
   enrollment: { code: cms122-diabetes, valueSet: "urn:workwell:vs:cms122-diabetes" }

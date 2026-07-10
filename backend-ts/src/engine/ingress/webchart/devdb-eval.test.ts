@@ -72,9 +72,17 @@ test("cholesterol_ldl: LDL LOINC 2089-1 (MIE's actual code, new crosswalk row) e
   assert.equal(byId.get("wc-13"), "OVERDUE"); // LDL dated 2015
 });
 
-test("cms125: a real HCPCS G0202 mammogram (2015) → OVERDUE", async () => {
+test("cms125: age-in-band enrolled female with roster visit → OVERDUE; age-out stays MISSING_DATA", async () => {
+  // Production CMS125v14 IPP = female + age 42–74 + qualifying visit (roster-stamped CPT 99213).
+  // wc-49 has a real HCPCS G0202 mammogram (2015) but birthDate 1990 → age 33 at EVAL → out of IPP.
+  // Age-in-band enrolled subjects (visit stamped by the OH roster) land OVERDUE: no mammogram in the
+  // official Oct-1 window, so non-numerator while still in denominator.
   const byId = await runWithRoster("cms125");
-  assert.equal(byId.get("wc-49"), "OVERDUE"); // mammogram 2015-07-05, past the 820d window
+  assert.equal(byId.get("wc-49"), "MISSING_DATA", "wc-49 is female+enrolled but age 33 — out of 42–74 IPP");
+  assert.equal(byId.get("wc-8"), "OVERDUE");
+  assert.equal(byId.get("wc-36"), "OVERDUE");
+  assert.equal(byId.get("wc-45"), "OVERDUE");
+  assert.equal(byId.get("wc-47"), "OVERDUE");
 });
 
 test("the sample yields a real outcome distribution — NOT all MISSING_DATA (the proof)", async () => {
