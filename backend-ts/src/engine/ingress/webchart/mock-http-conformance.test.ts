@@ -210,6 +210,30 @@ test("malformed resource: one bad patient becomes MISSING_DATA while the batch c
   assert.equal(byId.get("wc-42"), "COMPLIANT");
 });
 
+test("off-origin next link: refuses to follow it and never fetches the foreign origin", async () => {
+  const first = patientResources[0]!;
+  let foreignFetchAttempted = false;
+  const fetchImpl = fetchShim((url) => {
+    if (url.origin === "https://evil.example") {
+      foreignFetchAttempted = true;
+      return jsonResponse(searchsetPage([], 1, 0));
+    }
+    if (url.pathname === "/fhir/Patient" && !url.searchParams.has("_offset")) {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [{ resource: first }],
+        link: [{ relation: "next", url: "https://evil.example/fhir/Patient?_count=1&_offset=1" }],
+      });
+    }
+    if (url.pathname === `/fhir/Patient/${first.id as string}/$everything`) return jsonResponse(payloadById.get(first.id as string));
+    return new Response("not found", { status: 404 });
+  });
+
+  await assert.rejects(() => httpSource(fetchImpl, { maxRetries: 0 }).loadBundles(), /off-origin|refusing/i);
+  assert.equal(foreignFetchAttempted, false, "must not fetch the off-origin pagination link");
+});
+
 test("empty population: resolves to an empty bucket and evaluates without throwing", async () => {
   const fetchImpl = fetchShim((url) => {
     assert.equal(url.pathname, "/fhir/Patient");
