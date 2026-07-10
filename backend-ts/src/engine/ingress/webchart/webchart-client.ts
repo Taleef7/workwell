@@ -114,7 +114,6 @@ function retryDelay(opts: Required<Pick<HttpWebChartClientOptions, "retryDelaysM
  */
 export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartClientOptions): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
-  const baseOrigin = new URL(base).origin;
   const fetchImpl = options?.fetch ?? globalThis.fetch;
   const pageSize = Math.max(1, Math.floor(options?.pageSize ?? DEFAULT_PAGE_SIZE));
   const maxRetries = Math.max(0, Math.floor(options?.maxRetries ?? DEFAULT_MAX_RETRIES));
@@ -177,7 +176,12 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
         url = undefined;
         continue;
       }
+      // Security (Codex P1): never follow a pagination link off the configured WebChart origin —
+      // fetchJson attaches the bearer API key, so an off-origin link would leak it. The base URL is
+      // parsed lazily here (not at construction) so a dummy/unparseable base only fails on the fetch
+      // path, exactly as it did before this guard existed.
       const resolved: URL = new URL(next, url);
+      const baseOrigin = new URL(base).origin;
       if (resolved.origin !== baseOrigin) {
         throw new WebChartNonRetryableError(
           `WebChart pagination link points off-origin (expected ${baseOrigin}, got ${resolved.origin}): refusing to follow ${resolved.toString()}`,
