@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-07-09 — #259 WebChart dev-DB fixtures expanded to all patients
+
+Expanded the offline WebChart dev-DB fixture corpus from the codeable-data subset to all 56 `is_patient=1`
+rows. `scripts/webchart-devdb-export.ts` now emits sparse Patient-only bundles instead of skipping
+patients without LOINC observations or coded procedures, and the generated OH enrollment roster now covers
+all 56 subjects. The sparse fixtures are intentional live-adapter edge cases: enrolled patients with no
+matching clinical data evaluate to CQL-authored `MISSING_DATA`; no evaluation logic, normalization
+semantics, terminology mapping, schema, or dependencies changed.
+
+The dev-DB golden tests now hard-assert the 56-patient corpus, sweep every patient across the
+`evaluate:webchart-devdb` whitelist and named-excluded measures, keep the existing real-code per-patient
+assertions, and pin a Patient-only subject (`wc-14`) to `MISSING_DATA` as the no-data proof. The CLI
+summary remains 28 real (non-`MISSING_DATA`) whitelist outcomes, now over 56 patients; docs updated in
+`WEBCHART_FHIR_MAPPING.md` §8.1.
+
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
 ### #253 — N=5000 real-eval proof (2026-07-09)
