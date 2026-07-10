@@ -176,9 +176,21 @@ export function iceForecaster(_config: { apiKey: string; baseUrl: string }): Imm
   };
 }
 
-export function resolveForecaster(env: ForecastEnv): ImmunizationForecaster {
+/**
+ * Pure predicate for whether the ICE stub is selected — both API_KEY and BASE_URL required. The
+ * single source of truth for `resolveForecaster` and the boot-time seam inventory (#260).
+ */
+export function isIceConfigured(env: ForecastEnv): boolean {
   const apiKey = (env.WORKWELL_IMMZ_ICE_API_KEY ?? "").trim();
   const baseUrl = (env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
-  if (apiKey && baseUrl) return iceForecaster({ apiKey, baseUrl });
+  return Boolean(apiKey && baseUrl);
+}
+
+export function resolveForecaster(env: ForecastEnv): ImmunizationForecaster {
+  if (isIceConfigured(env)) {
+    const apiKey = (env.WORKWELL_IMMZ_ICE_API_KEY ?? "").trim();
+    const baseUrl = (env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
+    return iceForecaster({ apiKey, baseUrl });
+  }
   return simulatedForecaster;
 }
