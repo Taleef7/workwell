@@ -66,6 +66,10 @@ function queryJson(sql: string): Row[] {
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+const fhirDate = (v: unknown): string | undefined => {
+  const s = str(v);
+  return s && !/^0{4}-0{2}-0{2}/.test(s) ? s : undefined;
+};
 const cptSystem = (cpt: string): string => (/^\d{5}$/.test(cpt) ? SYS.CPT : SYS.HCPCS); // G-codes etc. → HCPCS
 
 /** Group rows by their `pat_id`. */
@@ -113,8 +117,6 @@ function main(): void {
     const subjectId = `wc-${patId}`;
     const obs = obsByPat.get(patId) ?? [];
     const proc = procByPat.get(patId) ?? [];
-    if (!obs.length && !proc.length) continue; // only patients with codeable clinical data (faithful + bounded)
-
     const ref = { reference: `Patient/${subjectId}` };
     const sex = str(pt.sex);
     const entries: Array<{ resource: unknown }> = [
@@ -124,7 +126,7 @@ function main(): void {
           id: subjectId,
           name: [{ text: [str(pt.first_name), str(pt.last_name)].filter(Boolean).join(" ") || subjectId }],
           ...(sex === "F" ? { gender: "female" } : sex === "M" ? { gender: "male" } : {}),
-          ...(str(pt.birth_date) ? { birthDate: str(pt.birth_date) } : {}),
+          ...(fhirDate(pt.birth_date) ? { birthDate: fhirDate(pt.birth_date) } : {}),
         },
       },
     ];
@@ -137,7 +139,7 @@ function main(): void {
           status: "final",
           subject: ref,
           code: { coding: [{ system: SYS.LOINC, code: loinc, ...(str(o.name) ? { display: str(o.name) } : {}) }] },
-          ...(str(o.dt) ? { effectiveDateTime: str(o.dt) } : {}),
+          ...(fhirDate(o.dt) ? { effectiveDateTime: fhirDate(o.dt) } : {}),
           ...(o.value != null ? { valueQuantity: { value: Number(o.value) } } : {}),
         },
       });
@@ -151,7 +153,7 @@ function main(): void {
           status: "completed",
           subject: ref,
           code: { coding: [{ system: cptSystem(cpt), code: cpt }] },
-          ...(str(p.dt) ? { performedDateTime: str(p.dt) } : {}),
+          ...(fhirDate(p.dt) ? { performedDateTime: fhirDate(p.dt) } : {}),
         },
       });
     }
