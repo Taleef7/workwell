@@ -33,7 +33,7 @@ const diff = {
 };
 
 const executionDiff = {
-  mode: "execution",
+  mode: "subset",
   measureId: "cms122",
   ecqmId: "CMS122v14",
   runId: "run-1",

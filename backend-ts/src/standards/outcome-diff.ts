@@ -29,6 +29,8 @@ export interface CriterionImpact {
 }
 
 export interface OutcomeDiffReport {
+  /** Diff-mode tier (#258): the PR-2 criteria-impact estimate. See literal → subset → estimate ladder. */
+  mode: "estimate";
   measureId: string;
   ecqmId: string;
   /** The population run this diff is based on, or null when no run exists yet. */
@@ -165,6 +167,7 @@ export function computeOutcomeDiff(
     `(encounter, hospice, frailty, and palliative-care records absent).`;
 
   return {
+    mode: "estimate",
     measureId: ref.measureId,
     ecqmId: ref.ecqmId,
     runId,

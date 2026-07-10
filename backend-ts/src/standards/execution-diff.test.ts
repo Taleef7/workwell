@@ -30,7 +30,7 @@ test("execution diff: produces per-subject rows and a divergent count tied to th
     today: "2026-06-30",
     asOf: "2026-06-30",
   });
-  assert.equal(report.mode, "execution");
+  assert.equal(report.mode, "subset");
   assert.equal(report.runId, "run-1");
   assert.equal(report.subjects.length, rows.length);
   assert.ok(report.totalDivergent >= 1);
