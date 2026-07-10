@@ -55,7 +55,9 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
   }
 
   if (binding.event.type === "observation") {
-    // HbA1c-style: outcome is driven by the value (>9% poor control), not recency.
+    // HbA1c-style (CMS122): outcome is driven by the value (>9% poor control), not recency.
+    // EXCLUDED uses a palliative DENEX flag (hasWaiver); still stamps a controlled HbA1c so
+    // exclusion is the reason, not missing lab.
     const observationValue =
       target === "COMPLIANT" || target === "EXCLUDED" ? 7.5 : target === "OVERDUE" ? 10.5 : null;
     return {
@@ -64,6 +66,22 @@ export function deriveExamConfig(binding: MeasureBinding, target: TargetOutcome)
       hasWaiver,
       programEnrolled: true,
       observationValue,
+      refused: false,
+      doseCount: null,
+    };
+  }
+
+  // CMS125v14 (eCQI): COMPLIANT needs a mammogram inside the official Oct-1 window;
+  // OVERDUE / DUE_SOON / MISSING_DATA = in IPP with no mammogram (no DUE_SOON in production CQL —
+  // DUE_SOON converges to OVERDUE). EXCLUDED = mastectomy DENEX (hasWaiver).
+  if (binding.rateKey === "cms125") {
+    const daysSinceLastExam = target === "COMPLIANT" ? 180 : null;
+    return {
+      binding,
+      daysSinceLastExam,
+      hasWaiver,
+      programEnrolled: true,
+      observationValue: null,
       refused: false,
       doseCount: null,
     };

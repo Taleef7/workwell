@@ -24,20 +24,30 @@ export const CMS122_QUALIFYING_VISIT_OIDS = [
 export const CMS122_HOSPICE_OID = "2.16.840.1.113883.3.464.1003.1003";
 export const CMS122_PALLIATIVE_OID = "2.16.840.1.113883.3.464.1003.1167";
 
-/** Inline meta for the official-subset measure (never registered in MEASURES). */
+/**
+ * Diagnostic meta for the official-subset measure (kept OUT of the MEASURES registry so
+ * seed:scale / quality backfill never iterate it). As of the 2026-07 production-faithful
+ * promotion, production `cms122` *is* this subset — library points at the same ELM so
+ * fidelity "subset" mode and live evaluation stay byte-aligned.
+ */
 export const CMS122_OFFICIAL_META: MeasureMeta = {
   id: "cms122_official",
   name: "CMS122v14 Official-Subset (Diagnostic)",
-  library: "DiabetesHbA1cPoorControlOfficialCQL-1.0.0",
-  expansionLibrary: "DiabetesHbA1cPoorControlOfficialCQL-1.0.0",
+  library: "DiabetesHbA1cPoorControlCQL-2.0.0",
+  expansionLibrary: "DiabetesHbA1cPoorControlCQL-2.0.0",
   valueSets: [
     CMS122_DIABETES_OID,
     CMS122_HBA1C_OID,
     ...CMS122_QUALIFYING_VISIT_OIDS,
     CMS122_HOSPICE_OID,
+    "2.16.840.1.113883.3.526.3.1584",
+    "2.16.840.1.113883.3.464.1003.1165",
     CMS122_PALLIATIVE_OID,
+    "2.16.840.1.113883.3.464.1003.101.12.1090",
+    "2.16.840.1.113883.3.464.1003.198.12.1135",
   ],
   periodMonths: 12,
+  jurisdiction: "US",
 };
 
 export type Expansions = Map<string, CqlCode[]>;
@@ -63,12 +73,10 @@ function dateMinusDays(anchorDate: string, daysAgo: number): string {
 /**
  * Additively enrich a subject's synthetic bundle so the official-subset CMS122 gates fire. Real
  * VSAC-member codings sampled from `expansions` (the same sets the official measure resolves) are
- * APPENDED — never replacing existing `urn:workwell:*` codings — so WorkWell's cms122 outcome is
- * unchanged (ADR-008 guard test). The sole in-place field override is `Patient.birthDate` (age-out),
- * safe because WorkWell's cms122 CQL ignores age. `anchorDate` (YYYY-MM-DD, the run's eval date) anchors
- * the qualifying-visit + hospice Encounter periods so they fall WITHIN the measurement period
- * ([anchor−12mo, anchor]) by construction — the official CQL now period-filters those retrieves, so a
- * hardcoded/stale Encounter date would otherwise drop out and understate official eligibility (Codex P2).
+ * APPENDED — never replacing existing `urn:workwell:*` codings. Production cms122 is the eCQI
+ * faithful-subset (2026-07), so age-out / hospice / GMI enrichment *will* change live outcomes when
+ * used — that is intentional for the diagnostic fidelity ladder only. Never call this on a path that
+ * persists Outcome Status. `anchorDate` anchors visit/hospice periods inside the 12-month MP.
  * Deterministic per externalId. Mutates + returns `bundle`.
  */
 export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeeProfile, expansions: Expansions, anchorDate: string): FhirBundle {

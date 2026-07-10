@@ -4,11 +4,10 @@ import { computeOutcomeDiff } from "./outcome-diff.ts";
 import { CMS122V14 } from "./references/cms122v14.ts";
 
 // Three subjects with externalIds that hash into birth years 1980–1999 → ages 27–46 in 2026.
-// All are within the 18–75 official IPP age gate, so age divergence = 0.
 const MOCK_OUTCOMES = [
-  { subjectId: "emp-001", status: "OVERDUE",       runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
-  { subjectId: "emp-002", status: "COMPLIANT",     runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
-  { subjectId: "emp-003", status: "MISSING_DATA",  runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
+  { subjectId: "emp-001", status: "OVERDUE", runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
+  { subjectId: "emp-002", status: "COMPLIANT", runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
+  { subjectId: "emp-003", status: "MISSING_DATA", runId: "run-1", runStartedAt: "2026-06-01T00:00:00Z" },
 ];
 
 test("computeOutcomeDiff: one impact per criterion, measureId + ecqmId match ref", () => {
@@ -25,41 +24,26 @@ test("computeOutcomeDiff: run provenance comes from first outcome row", () => {
   assert.equal(r.asOf, "2026-06-01");
 });
 
-test("computeOutcomeDiff: age-18-75 is verifiable; all emp-00x ages 27–46 → 0 divergent", () => {
+test("computeOutcomeDiff: COVERED criteria report verifiable=true and 0 incremental impact", () => {
   const r = computeOutcomeDiff(CMS122V14, MOCK_OUTCOMES, 2026);
-  const age = r.criterionImpacts.find((c) => c.key === "age-18-75")!;
-  assert.ok(age, "age-18-75 criterion must be present");
-  assert.equal(age.verifiable, true);
-  assert.equal(age.subjectsAffected, 0);
-  assert.equal(age.coverage, "OMITTED");
-});
-
-test("computeOutcomeDiff: qualifying-visit is unverifiable with a reason string", () => {
-  const r = computeOutcomeDiff(CMS122V14, MOCK_OUTCOMES, 2026);
-  const visit = r.criterionImpacts.find((c) => c.key === "qualifying-visit")!;
-  assert.ok(visit);
-  assert.equal(visit.verifiable, false);
-  assert.equal(visit.subjectsAffected, 0);
-  assert.ok(visit.reason && visit.reason.length > 0);
-});
-
-test("computeOutcomeDiff: hospice, long-term-care-66, advanced-illness-frailty-66, palliative-care all unverifiable", () => {
-  const r = computeOutcomeDiff(CMS122V14, MOCK_OUTCOMES, 2026);
-  for (const key of ["hospice", "long-term-care-66", "advanced-illness-frailty-66", "palliative-care"]) {
+  for (const key of ["age-18-75", "qualifying-visit", "hospice", "palliative-care", "numerator-exclusions-none"]) {
     const c = r.criterionImpacts.find((x) => x.key === key)!;
     assert.ok(c, `missing criterion ${key}`);
-    assert.equal(c.verifiable, false, `${key} should be unverifiable`);
-    assert.ok(c.reason, `${key} should have a reason`);
+    assert.equal(c.coverage, "COVERED", `${key} should be COVERED after production-faithful promotion`);
+    assert.equal(c.verifiable, true);
+    assert.equal(c.subjectsAffected, 0, `${key}: COVERED ⇒ no incremental estimate impact`);
   }
 });
 
-test("computeOutcomeDiff: COVERED criterion numerator-exclusions-none has verifiable=true and 0 divergent", () => {
+test("computeOutcomeDiff: Phase-2 OMITTED DENEX remain unverifiable", () => {
   const r = computeOutcomeDiff(CMS122V14, MOCK_OUTCOMES, 2026);
-  const numex = r.criterionImpacts.find((c) => c.key === "numerator-exclusions-none")!;
-  assert.ok(numex);
-  assert.equal(numex.coverage, "COVERED");
-  assert.equal(numex.verifiable, true);
-  assert.equal(numex.subjectsAffected, 0);
+  for (const key of ["long-term-care-66", "advanced-illness-frailty-66"]) {
+    const c = r.criterionImpacts.find((x) => x.key === key)!;
+    assert.ok(c, `missing criterion ${key}`);
+    assert.equal(c.coverage, "OMITTED");
+    assert.equal(c.verifiable, false, `${key} should be unverifiable`);
+    assert.ok(c.reason, `${key} should have a reason`);
+  }
 });
 
 test("computeOutcomeDiff: totalDivergent equals sum of subjectsAffected across all impacts", () => {
@@ -88,15 +72,4 @@ test("computeOutcomeDiff: empty outcomes returns valid report with zeros", () =>
   assert.equal(r.totalSubjectsEvaluated, 0);
   assert.equal(r.totalDivergent, 0);
   assert.equal(r.criterionImpacts.length, CMS122V14.criteria.length);
-});
-
-test("computeOutcomeDiff: subjects born outside 18-75 range ARE counted as divergent on age criterion", () => {
-  // Construct a fake externalId that hashes to a birth year outside 18–75 in a given evalYear.
-  // birth year 1980 → evalYear 1950 → age = -30 → outside 18-75 → divergent.
-  const outcomes = [{ subjectId: "emp-001", status: "OVERDUE", runId: "r", runStartedAt: "1950-01-01" }];
-  const r = computeOutcomeDiff(CMS122V14, outcomes, 1950);
-  const age = r.criterionImpacts.find((c) => c.key === "age-18-75")!;
-  // birth year 1980, evalYear 1950 → age = -30 → outside 18-75 → divergent
-  assert.equal(age.subjectsAffected, 1);
-  assert.equal(r.totalDivergent, 1);
 });

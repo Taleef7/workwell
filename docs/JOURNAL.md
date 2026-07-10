@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-07-10 — production-faithful CMS122v14 + CMS125v14 (eCQI 2026)
+
+Promoted both runnable CMS eCQMs from simplified day-count / local-code CQL to **eCQI CMS*v14
+(2026) faithful-subset production logic** (branch `feat/ecqi-faithful-cms122-cms125`):
+
+- **CMS122:** age 18–75, visit-in-MP, VSAC diabetes, period-bounded HbA1c **or GMI (LOINC 97506-0)**,
+  hospice + palliative DENEX; `periodMonths: 12`. Missing assessment = numerator → OVERDUE.
+- **CMS125:** female 42–74, visit-in-MP (incl. virtual), mammogram in official **Oct 1 year−2 → end of
+  MP** window (VSAC Mammography), mastectomy + hospice + palliative DENEX; no DUE_SOON.
+- Dual-coded synthetic builder (VSAC/LOINC/CPT + urn:workwell); bundled offline VSAC expansions so
+  evaluation works without a live VSAC key; engine expands 2.16.* OIDs with store/VSAC fallback.
+- Structural fidelity for **both** measures; CMS122 literal fqm tier retained (diagnostic).
+- **Stayed on v14 / 2026** (not v15/2027): v15 is next-year roll-forward; population criteria essentially
+  unchanged; catalog/demo year is 2026. Residual Phase 2: 66+ LTC + frailty/AI DENEX.
+
+Verified against eCQI QDM HTML 2026-07-10. No schema. ADR-008: CQL Outcome Status still sole authority.
+
 ## 2026-07-10 — docs currency + eCQM accuracy posture
 
 Post-wave operator docs brought current so agents stop reading “M1 still open / #253 next”:
