@@ -21,7 +21,11 @@ const RESOLVER: ValueSetResolver = {
 
 const rows = EMPLOYEES.slice(0, 40).map((e) => ({ subjectId: e.externalId, status: "MISSING_DATA", runId: "run-1", runStartedAt: "2026-06-30T00:00:00Z" }));
 
-test("execution diff: produces per-subject rows and a divergent count tied to the run", async () => {
+test("execution diff: produces per-subject rows; production cms122 is parity-aligned with the official subset", async () => {
+  // Since the 2026-07 production-faithful promotion, production `cms122` and the diagnostic
+  // official-subset evaluate the same ELM (DiabetesHbA1cPoorControlCQL-2.0.0) on the same enriched
+  // bundle → totalDivergent is 0 (parity regression). Residual divergence is only possible if a
+  // mock engine injects it (see GMI / error tests below).
   __clearExecutionDiffCache();
   const report = await computeExecutionDiff(CMS122V14, rows, {
     engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }),
@@ -33,8 +37,10 @@ test("execution diff: produces per-subject rows and a divergent count tied to th
   assert.equal(report.mode, "subset");
   assert.equal(report.runId, "run-1");
   assert.equal(report.subjects.length, rows.length);
-  assert.ok(report.totalDivergent >= 1);
-  for (const s of report.subjects.filter((x) => x.diverged)) assert.ok(s.divergenceGate.length > 0);
+  assert.equal(report.totalDivergent, 0, "production cms122 is the eCQI faithful-subset — expect parity");
+  assert.equal(report.totalErrors, 0);
+  assert.ok(report.subjects.every((s) => !s.diverged && s.divergenceGate === ""));
+  assert.match(report.headline, /0 would have a different outcome/);
 });
 
 test("execution diff: per-subject evaluation failures surface in totalErrors, not divergence (Codex P2)", async () => {

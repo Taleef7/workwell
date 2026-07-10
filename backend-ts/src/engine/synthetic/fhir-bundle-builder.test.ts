@@ -54,12 +54,18 @@ const CASES: Array<[string, TargetOutcome, string]> = [
   ["flu_vaccine", "OVERDUE", "OVERDUE"],
   ["flu_vaccine", "MISSING_DATA", "MISSING_DATA"],
   ["flu_vaccine", "EXCLUDED", "EXCLUDED"],
-  // Observation, value-based (HbA1c > 9%): the DUE_SOON bucket has no value → MISSING_DATA
+  // CMS122v14 eCQI: missing lab in IPP is NUMERATOR → OVERDUE; DUE_SOON has no value → OVERDUE
   ["cms122", "COMPLIANT", "COMPLIANT"],
-  ["cms122", "DUE_SOON", "MISSING_DATA"], // convergence (value-based has no due-soon)
+  ["cms122", "DUE_SOON", "OVERDUE"],
   ["cms122", "OVERDUE", "OVERDUE"],
-  ["cms122", "MISSING_DATA", "MISSING_DATA"],
+  ["cms122", "MISSING_DATA", "OVERDUE"],
   ["cms122", "EXCLUDED", "EXCLUDED"],
+  // CMS125v14 eCQI: no DUE_SOON; no mammo in IPP → OVERDUE
+  ["cms125", "COMPLIANT", "COMPLIANT"],
+  ["cms125", "DUE_SOON", "OVERDUE"],
+  ["cms125", "OVERDUE", "OVERDUE"],
+  ["cms125", "MISSING_DATA", "OVERDUE"],
+  ["cms125", "EXCLUDED", "EXCLUDED"],
   // PERMANENT series (MMR): COMPLIANT (old doses still compliant), partial → MISSING_DATA, none → MISSING_DATA, excluded
   ["mmr", "COMPLIANT", "COMPLIANT"],
   ["mmr", "OVERDUE", "MISSING_DATA"],

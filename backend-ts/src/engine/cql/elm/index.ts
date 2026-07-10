@@ -3,9 +3,9 @@ import lib0 from "./AdultImmunizationTdap-1.0.0.elm.json" with { type: "json" };
 import lib1 from "./AnnualAudiogramCompleted-1.0.0.elm.json" with { type: "json" };
 import lib2 from "./AnnualAudiogramCompletedVS-1.0.0.elm.json" with { type: "json" };
 import lib3 from "./CholesterolLDLScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib4 from "./DiabetesHbA1cPoorControlCQL-1.0.0.elm.json" with { type: "json" };
+import lib4 from "./DiabetesHbA1cPoorControlCQL-2.0.0.elm.json" with { type: "json" };
 import lib5 from "./DiabetesHbA1cPoorControlOfficialCQL-1.0.0.elm.json" with { type: "json" };
-import lib6 from "./BreastCancerScreeningCQL-1.0.0.elm.json" with { type: "json" };
+import lib6 from "./BreastCancerScreeningCQL-2.0.0.elm.json" with { type: "json" };
 import lib7 from "./DiabetesHbA1cMonitoringCQL-1.0.0.elm.json" with { type: "json" };
 import lib8 from "./FluVaccineSeasonal-1.0.0.elm.json" with { type: "json" };
 import lib9 from "./HazwoperSurveillance-1.0.0.elm.json" with { type: "json" };
@@ -22,9 +22,9 @@ export const ELM_LIBRARIES: Record<string, unknown> = {
   "AnnualAudiogramCompleted-1.0.0": lib1,
   "AnnualAudiogramCompletedVS-1.0.0": lib2,
   "CholesterolLDLScreeningCQL-1.0.0": lib3,
-  "DiabetesHbA1cPoorControlCQL-1.0.0": lib4,
+  "DiabetesHbA1cPoorControlCQL-2.0.0": lib4,
   "DiabetesHbA1cPoorControlOfficialCQL-1.0.0": lib5,
-  "BreastCancerScreeningCQL-1.0.0": lib6,
+  "BreastCancerScreeningCQL-2.0.0": lib6,
   "DiabetesHbA1cMonitoringCQL-1.0.0": lib7,
   "FluVaccineSeasonal-1.0.0": lib8,
   "HazwoperSurveillance-1.0.0": lib9,

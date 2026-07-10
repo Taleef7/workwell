@@ -8,9 +8,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { CliUsageError, parseArgs, run, evaluate } from "./evaluate-measure-cli.ts";
 import { MEASURES } from "../cql/measure-registry.ts";
+import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";
+import { deriveExamConfig, type TargetOutcome } from "../synthetic/exam-config.ts";
+import { MEASURE_BINDINGS } from "../synthetic/measure-bindings.ts";
+import { EMPLOYEES } from "../synthetic/employee-catalog.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
 const fixture = (m: string, s: string) => path.join(SYNTH, m, `${s}.json`);
@@ -24,8 +30,46 @@ const EXPECTED: Record<string, string> = {
 
 // PERMANENT measures have no recency window — old doses stay COMPLIANT (the "compliant forever" proof).
 const PERMANENT = new Set(["mmr", "varicella", "hepatitis_b_vaccination_series"]);
-const expectedFor = (measureId: string, scenario: string): string =>
-  PERMANENT.has(measureId) && scenario === "present_old" ? "COMPLIANT" : EXPECTED[scenario]!;
+// eCQI-faithful CMS measures: spike fixtures predate dual-coding / visit gates — use the synthetic builder.
+const ECQM = new Set(["cms122", "cms125"]);
+const ECQM_SCENARIO_TARGET: Record<string, TargetOutcome> = {
+  present_recent: "COMPLIANT",
+  present_old: "COMPLIANT",
+  missing: "MISSING_DATA",
+  excluded: "EXCLUDED",
+};
+const ECQM_EXPECTED: Record<string, Record<string, string>> = {
+  cms122: {
+    present_recent: "COMPLIANT",
+    present_old: "COMPLIANT",
+    missing: "OVERDUE",
+    excluded: "EXCLUDED",
+  },
+  cms125: {
+    present_recent: "COMPLIANT",
+    present_old: "COMPLIANT",
+    missing: "OVERDUE",
+    excluded: "EXCLUDED",
+  },
+};
+const expectedFor = (measureId: string, scenario: string): string => {
+  if (ECQM.has(measureId)) return ECQM_EXPECTED[measureId]![scenario]!;
+  if (PERMANENT.has(measureId) && scenario === "present_old") return "COMPLIANT";
+  return EXPECTED[scenario]!;
+};
+
+const emp = EMPLOYEES[0]!;
+const ECQM_FIXTURE_DIR = mkdtempSync(path.join(tmpdir(), "ww-ecqm-cli-"));
+function ecqmFixture(measureId: string, scenario: string): string {
+  const target = ECQM_SCENARIO_TARGET[scenario]!;
+  const config = deriveExamConfig(MEASURE_BINDINGS[measureId]!, target);
+  const bundle = buildSyntheticBundle(emp, config, EVAL);
+  const file = path.join(ECQM_FIXTURE_DIR, `${measureId}-${scenario}.json`);
+  writeFileSync(file, JSON.stringify(bundle));
+  return file;
+}
+const patientPath = (measureId: string, scenario: string): string =>
+  ECQM.has(measureId) ? ecqmFixture(measureId, scenario) : fixture(measureId, scenario);
 
 test("parseArgs: parses required + optional flags", () => {
   const a = parseArgs(["--patient", "b.json", "--measure", "audiogram", "--date", "2026-06-12", "--pretty"]);
@@ -80,7 +124,7 @@ for (const measureId of Object.keys(MEASURES)) {
   test(`golden: CLI matches expected outcomes for ${measureId} (all scenarios)`, async () => {
     for (const scenario of Object.keys(EXPECTED)) {
       const expected = expectedFor(measureId, scenario);
-      const outcome = await run(["--patient", fixture(measureId, scenario), "--measure", measureId, "--date", EVAL]);
+      const outcome = await run(["--patient", patientPath(measureId, scenario), "--measure", measureId, "--date", EVAL]);
       assert.equal(outcome.outcome, expected, `${measureId}/${scenario}`);
       assert.equal(outcome.measure, MEASURES[measureId]!.name);
     }

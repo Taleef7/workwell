@@ -8,10 +8,14 @@
  * (Procedure | Immunization | Observation) stamped with the measure's code/value-set so
  * the CQL inline code filters match (see docs/MEASURES.md "Implementation Notes"). The
  * bundle is never persisted — it exists only to feed the engine.
+ *
+ * CMS122v14 / CMS125v14 (2026-07 production-faithful path): dual-codes real VSAC/LOINC/CPT
+ * members alongside legacy urn:workwell:* so eCQI value-set retrieves fire.
  */
 import type { EmployeeProfile } from "./employee-catalog.ts";
 import type { ExamConfig } from "./exam-config.ts";
 import type { MeasureBinding, SeriesAlternativeBinding } from "./measure-bindings.ts";
+import { ECQM_CANONICAL_CODES } from "../cql/bundled-ecqm-expansions.ts";
 
 /** Stable per-employee hash → pick one alternative dose series (Hep B Heplisav-vs-traditional). */
 function pickAlternative(binding: MeasureBinding, externalId: string): SeriesAlternativeBinding | null {
@@ -29,6 +33,7 @@ const QICORE_PROFILES = {
   Procedure: `${QICORE}qicore-procedure`,
   Immunization: `${QICORE}qicore-immunization`,
   Observation: `${QICORE}qicore-observation-clinical-result`,
+  Encounter: `${QICORE}qicore-encounter`,
 } as const;
 
 /** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it. */
@@ -38,14 +43,25 @@ function dateMinusDays(evaluationDate: string, daysAgo: number): string {
   return `${d.toISOString().slice(0, 10)}T00:00:00`;
 }
 
-/** Deterministic, outcome-irrelevant birth year (the CQL doesn't use age for these measures). */
+/** Deterministic birth year — mid-range adult (ages ~26–45 at 2026) for non-eCQM measures. */
 function birthDate(externalId: string): string {
   let h = 0;
   for (const ch of externalId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `${1980 + (h % 20)}-01-01`;
 }
 
-function condition(externalId: string, code: string, valueSet: string): unknown {
+/** Birth date for eCQM age gates (eval year derived from evaluationDate). */
+function ecqmBirthDate(evaluationDate: string, ageAtEnd: number): string {
+  const year = Number(evaluationDate.slice(0, 4)) - ageAtEnd;
+  return `${year}-06-15`;
+}
+
+function condition(
+  externalId: string,
+  code: string,
+  valueSet: string,
+  extraCodings: Array<{ system: string; code: string; display?: string }> = [],
+): unknown {
   return {
     resourceType: "Condition",
     meta: { profile: [QICORE_PROFILES.Condition] },
@@ -55,7 +71,23 @@ function condition(externalId: string, code: string, valueSet: string): unknown 
     verificationStatus: {
       coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
     },
-    code: { coding: [{ system: valueSet, code, display: code }] },
+    code: {
+      coding: [{ system: valueSet, code, display: code }, ...extraCodings],
+    },
+  };
+}
+
+function officeVisit(externalId: string, evaluationDate: string, daysAgo = 90): unknown {
+  const day = dateMinusDays(evaluationDate, daysAgo).slice(0, 10);
+  return {
+    resourceType: "Encounter",
+    meta: { profile: [QICORE_PROFILES.Encounter] },
+    id: `${externalId}-office-visit`,
+    status: "finished",
+    class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
+    subject: { reference: `Patient/${externalId}` },
+    type: [{ coding: [ECQM_CANONICAL_CODES.officeVisit] }],
+    period: { start: `${day}T09:00:00`, end: `${day}T09:30:00` },
   };
 }
 
@@ -68,6 +100,10 @@ export interface FhirBundle {
 export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConfig, evaluationDate: string): FhirBundle {
   const { externalId } = employee;
   const { binding } = config;
+
+  if (binding.rateKey === "cms122") return buildCms122Bundle(employee, config, evaluationDate);
+  if (binding.rateKey === "cms125") return buildCms125Bundle(employee, config, evaluationDate);
+
   const entries: Array<{ resource: unknown }> = [
     {
       resource: {
@@ -108,21 +144,12 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
   } else if (config.daysSinceLastExam !== null) {
     const when = dateMinusDays(evaluationDate, config.daysSinceLastExam);
     if (binding.event.type === "immunization") {
-      // E11.2c — multi-alternative series (Hep B Heplisav-vs-traditional): when the binding carries
-      // alternatives, pick one per employee and stamp ITS CVX code + dose count. config.doseCount
-      // (set from series.requiredDoses) encodes complete/partial/none; map that onto the chosen alt's
-      // own requiredDoses. Spacing stays ~60d, which exceeds every Hep B ACIP min interval (≤56d).
-      // Absent alternatives ⇒ today's single-code path, unchanged.
       const alt = pickAlternative(binding, externalId);
       const required = binding.series?.requiredDoses ?? 1;
       const doses = alt
         ? (config.doseCount ?? 0) >= required
-          ? alt.requiredDoses // complete → the chosen alternative's full series
+          ? alt.requiredDoses
           : (config.doseCount ?? 0) > 0
-            // Partial → neither alternative satisfied. Cap at `required - 1` (the roster's union
-            // denominator) so the union `Dose Count` stays below it and the roster renders IN_PROGRESS
-            // rather than MISSING_DATA with "N dose(s) on file" (e.g. a Traditional-3 partial would emit
-            // 2 doses and equal the denominator of 2). The CQL still returns MISSING_DATA either way.
             ? Math.max(Math.min(alt.requiredDoses - 1, required - 1), 1)
             : 0
         : config.doseCount ?? 1;
@@ -130,7 +157,6 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
         ? { system: binding.event.valueSet, code: alt.codes[0], display: alt.codes[0] }
         : coding;
       for (let i = 0; i < doses; i++) {
-        // Stagger doses ~60 days apart (synthetic spacing, not a clinical dose schedule), oldest first.
         const doseWhen = dateMinusDays(evaluationDate, config.daysSinceLastExam! + i * 60);
         entries.push({
           resource: {
@@ -159,5 +185,130 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
     }
   }
 
+  return { resourceType: "Bundle", type: "collection", entry: entries };
+}
+
+/** CMS122v14: age 18–75, visit, diabetes dual-code, HbA1c dual-code in MP, hospice/palliative DENEX. */
+function buildCms122Bundle(employee: EmployeeProfile, config: ExamConfig, evaluationDate: string): FhirBundle {
+  const { externalId } = employee;
+  const { binding } = config;
+  const entries: Array<{ resource: unknown }> = [
+    {
+      resource: {
+        resourceType: "Patient",
+        meta: { profile: [QICORE_PROFILES.Patient] },
+        id: externalId,
+        name: [{ text: employee.name }],
+        // Age 50 at end of MP — squarely in 18–75.
+        birthDate: ecqmBirthDate(evaluationDate, 50),
+      },
+    },
+  ];
+
+  // Qualifying visit in the 12-month measurement period (periodMonths=12).
+  entries.push({ resource: officeVisit(externalId, evaluationDate, 90) });
+
+  if (config.programEnrolled) {
+    entries.push({
+      resource: condition(externalId, binding.enrollment.code, binding.enrollment.valueSet, [
+        ECQM_CANONICAL_CODES.diabetes,
+      ]),
+    });
+  }
+
+  if (config.hasWaiver) {
+    // Map generic waiver → palliative diagnosis (DENEX) with dual coding.
+    entries.push({
+      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, [
+        ECQM_CANONICAL_CODES.palliativeDx,
+      ]),
+    });
+  }
+
+  if (config.observationValue !== null) {
+    const daysAgo = config.daysSinceLastExam ?? 30;
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        meta: { profile: [QICORE_PROFILES.Observation] },
+        id: `${externalId}-hba1c`,
+        status: "final",
+        subject: { reference: `Patient/${externalId}` },
+        code: {
+          coding: [
+            { system: binding.event.valueSet, code: binding.event.code, display: binding.event.code },
+            ECQM_CANONICAL_CODES.hba1c,
+          ],
+        },
+        effectiveDateTime: dateMinusDays(evaluationDate, daysAgo),
+        valueQuantity: {
+          value: config.observationValue,
+          unit: "%",
+          system: "http://unitsofmeasure.org",
+          code: "%",
+        },
+      },
+    });
+  }
+
+  return { resourceType: "Bundle", type: "collection", entry: entries };
+}
+
+/**
+ * CMS125v14: female 42–74, visit, mammogram in official Oct-1 window (≈27 months),
+ * mastectomy/hospice/palliative DENEX. No DUE_SOON — COMPLIANT if numerator else OVERDUE.
+ */
+function buildCms125Bundle(employee: EmployeeProfile, config: ExamConfig, evaluationDate: string): FhirBundle {
+  const { externalId } = employee;
+  const { binding } = config;
+  const entries: Array<{ resource: unknown }> = [
+    {
+      resource: {
+        resourceType: "Patient",
+        meta: { profile: [QICORE_PROFILES.Patient] },
+        id: externalId,
+        name: [{ text: employee.name }],
+        gender: "female",
+        // Age 55 — in 42–74 IPP band.
+        birthDate: ecqmBirthDate(evaluationDate, 55),
+      },
+    },
+  ];
+
+  entries.push({ resource: officeVisit(externalId, evaluationDate, 60) });
+
+  if (config.hasWaiver) {
+    // Generic exclusion → bilateral mastectomy history (DENEX).
+    entries.push({
+      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, [
+        ECQM_CANONICAL_CODES.historyBilateralMastectomy,
+      ]),
+    });
+  }
+
+  if (config.daysSinceLastExam !== null) {
+    // Stamp mammogram inside the official Oct-1 window (use ~180d before eval — always in-window
+    // for a 12-month MP ending on evaluationDate).
+    const when = dateMinusDays(evaluationDate, Math.min(config.daysSinceLastExam, 180));
+    entries.push({
+      resource: {
+        resourceType: "Procedure",
+        meta: { profile: [QICORE_PROFILES.Procedure] },
+        id: `${externalId}-mammogram`,
+        status: "completed",
+        subject: { reference: `Patient/${externalId}` },
+        code: {
+          coding: [
+            { system: binding.event.valueSet, code: binding.event.code, display: binding.event.code },
+            ECQM_CANONICAL_CODES.mammogram,
+          ],
+        },
+        performedDateTime: when,
+      },
+    });
+  }
+
+  // MISSING_DATA / OVERDUE: in IPP (female + age + visit) but no mammogram — daysSinceLastExam null.
+  // EXCLUDED: mastectomy condition above, still in IPP.
   return { resourceType: "Bundle", type: "collection", entry: entries };
 }

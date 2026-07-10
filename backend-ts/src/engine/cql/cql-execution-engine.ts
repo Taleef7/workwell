@@ -24,6 +24,7 @@ import type {
 import { MEASURES, type MeasureMeta } from "./measure-registry.ts";
 import { ELM_LIBRARIES } from "./elm/index.ts";
 import { buildCodeService, type ValueSetResolver } from "./value-set-resolver.ts";
+import { withBundledEcqmFallback } from "./bundled-ecqm-expansions.ts";
 
 const OUTCOMES: ReadonlySet<string> = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
@@ -85,8 +86,15 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
     if (!meta) throw new Error(`unknown measure '${input.measureId}'`);
     const evalDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
 
-    const expand = this.opts.valueSetResolver != null && meta.expansionLibrary != null && meta.valueSets != null;
-    const libraryName = expand ? meta.expansionLibrary! : meta.library;
+    // Expansion mode: measure declares valueSets. eCQM VSAC OIDs (2.16.*) expand offline via
+    // bundled expansions; urn:workwell:* expansion libraries (e.g. audiogram) still require a
+    // store resolver so an empty CodeService never silently zero-matches.
+    const wantsExpand = meta.valueSets != null && meta.valueSets.length > 0;
+    const canExpandOffline =
+      wantsExpand && meta.valueSets!.every((u) => /^(urn:oid:)?2\.16\./.test(u));
+    const expand = wantsExpand && (this.opts.valueSetResolver != null || canExpandOffline);
+    const libraryName =
+      expand && meta.expansionLibrary != null ? meta.expansionLibrary : meta.library;
     // E11.1: an optional pre-translated ELM (e.g. generated CQL) overrides the bundled library — same
     // measurement period / executor / extraction, so it proves codegen parity through the real engine path.
     const library = new cql.Library(input.elm ?? this.loadElm(libraryName), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
@@ -98,7 +106,7 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
       true,
     );
     const codeService = expand
-      ? await buildCodeService(this.opts.valueSetResolver!, meta.valueSets!)
+      ? await buildCodeService(withBundledEcqmFallback(this.opts.valueSetResolver), meta.valueSets!)
       : new cql.CodeService({});
     const executor = new cql.Executor(library, codeService, { "Measurement Period": measurementPeriod });
 

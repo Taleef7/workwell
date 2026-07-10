@@ -26,7 +26,8 @@ test("CMS122v14 reference: every criterion has a coverage + note; every value se
   }
 });
 
-test("referenceFor resolves cms122 and is undefined for measures without a reference", () => {
+test("referenceFor resolves cms122 and cms125; undefined for measures without a reference", () => {
   assert.equal(referenceFor("cms122")?.ecqmId, "CMS122v14");
+  assert.equal(referenceFor("cms125")?.ecqmId, "CMS125v14");
   assert.equal(referenceFor("audiogram"), undefined);
 });
