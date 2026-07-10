@@ -135,6 +135,28 @@ owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output an
 (#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
 in `docs/ROADMAP_2026-07-09.md`.
 
+### #261 — production-readiness memo (2026-07-09)
+
+Docs-only PR (`docs/issue-261-production-readiness-memo`), no code. Delivered
+`docs/PRODUCTION_READINESS_2026-07.md`, covering all 4 required sections: **PHI/HIPAA posture** (the
+hard rule stated once and meant absolutely — the demo stack never receives PHI — plus the required
+environment split, the BAA-chain question deferred to MIE Q C14, and a mapping of what already exists
+against it — the `audit_events` ledger, `authorize.ts` role gates, refresh-cookie production fail-fast
+checks — vs what's genuinely missing — a PHI-capable environment, a real user directory, real tenant
+isolation, a durable scheduler, a backup/DR runbook); **auth fork** (hardcoded accounts today; the
+three options — MIE SSO / WebChart-delegated / own OIDC — with the recommendation to not build until
+MIE answers Q C15); **tenancy** (today's read-time synthetic tenancy, E13 PR-1/ADR-019, is demo-grade
+grouping over one shared schema, not an isolation boundary; real multi-employer isolation flagged as a
+design-with-MIE item); and the **ordered gap list** from `docs/ROADMAP_2026-07-09.md`, each item marked
+required-for-first-integration vs nice-to-have and linked to its tracking issue.
+
+Created the 4 M3 stub issues the gap list needed (milestone "M3 — Production Readiness", label
+`infra`): **#267** PHI-capable environment split, **#268** durable scheduler (missed-run detection
+across restarts), **#269** real tenant isolation for multi-employer production, **#270** backup/DR
+runbook (Neon branch restore). Updated `CLAUDE.md` ("Other docs to consult on demand" + a Current Focus
+note) and `README.md` (docs map + a Status bullet) to point at the memo. No schema, no code, no new
+deps.
+
 ### #256 — worker pool (2026-07-09)
 
 `seed:scale --mode evaluate` gains a **hand-rolled `node:worker_threads` pool** (`--workers <n>`, default
@@ -158,6 +180,7 @@ orchestration, fake-worker unit-tested: exactly-once, retry-once, soft-fallback,
 `worker_threads` is imported nowhere reachable from `worker.ts` (grep-verified). No new deps; no schema;
 CQL stays the sole `Outcome Status` authority (ADR-008). Docs: DEPLOY.md long-run warning, ARCHITECTURE
 seed:scale bullet. Branch `feat/issue-256-worker-pool`.
+
 ### #260 — seam inventory (2026-07-09)
 
 Implemented the M1 issue: a boot-time inventory of the repo's ~7 "inert-unless-configured" seams
