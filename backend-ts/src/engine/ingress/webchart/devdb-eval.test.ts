@@ -41,8 +41,8 @@ async function runWithRoster(measureId: string): Promise<Map<string, OutcomeStat
   return new Map(res.results.filter((r) => r.ok && r.outcome).map((r) => [r.outcome!.subjectId, r.outcome!.outcome]));
 }
 
-test("fixtures loaded: 26 patient bundles + a roster", () => {
-  assert.ok(payloads.length >= 20, `expected the dev-DB sample, got ${payloads.length}`);
+test("fixtures loaded: full 56-patient dev-DB corpus + a roster", () => {
+  assert.equal(payloads.length, 56, `expected every is_patient=1 dev-DB row, got ${payloads.length}`);
 });
 
 test("diabetes_hba1c: a real HbA1c drives OVERDUE; no HbA1c → MISSING_DATA; no roster → MISSING_DATA", async () => {
@@ -79,7 +79,11 @@ test("cms125: a real HCPCS G0202 mammogram (2015) → OVERDUE", async () => {
 
 test("the sample yields a real outcome distribution — NOT all MISSING_DATA (the proof)", async () => {
   const all: OutcomeStatus[] = [];
-  for (const m of WHITELIST) all.push(...(await runWithRoster(m)).values());
+  for (const m of WHITELIST) {
+    const byId = await runWithRoster(m);
+    assert.equal(byId.size, payloads.length, `${m}: every patient should produce an outcome`);
+    all.push(...byId.values());
+  }
   const seen = new Set(all);
   assert.ok(seen.has("COMPLIANT"), "expected at least one COMPLIANT across the sample");
   assert.ok(seen.has("OVERDUE"), "expected at least one OVERDUE across the sample");
@@ -88,9 +92,18 @@ test("the sample yields a real outcome distribution — NOT all MISSING_DATA (th
   assert.ok(nonMissing >= 5, `expected several real (non-MISSING_DATA) outcomes, got ${nonMissing}`);
 });
 
+test("all 56 patients evaluate across the whitelist; sparse Patient-only bundles become MISSING_DATA", async () => {
+  for (const m of WHITELIST) {
+    const byId = await runWithRoster(m);
+    assert.equal(byId.size, 56, `${m}: every dev-DB patient should evaluate without crashing`);
+    assert.equal(byId.get("wc-14"), "MISSING_DATA", `${m}: sparse wc-14 has only Patient demographics`);
+  }
+});
+
 test("excluded measures stay MISSING_DATA (honest boundary — named, not silently dropped)", async () => {
   for (const m of EXCLUDED) {
     const byId = await runWithRoster(m);
+    assert.equal(byId.size, 56, `${m}: every dev-DB patient should evaluate without crashing`);
     const outcomes = new Set(byId.values());
     assert.deepEqual([...outcomes], ["MISSING_DATA"], `${m}: not roster-enrolled and/or no matching coded event → all MISSING_DATA`);
   }

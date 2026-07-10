@@ -44,6 +44,7 @@ import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
+import { formatSeamLogLine } from "./config/seam-inventory.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -80,6 +81,20 @@ export interface Env {
   /** Order generation EH FHIR seam (#77 E7) — standing-order dedupe. Inert stub unless both are set. */
   WORKWELL_EH_FHIR_BASE_URL?: string;
   WORKWELL_EH_FHIR_API_KEY?: string;
+  /** Outreach email provider (Sprint 6). Simulated by default; SendGrid stub only if provider=sendgrid AND a key are set. */
+  WORKWELL_EMAIL_PROVIDER?: string;
+  WORKWELL_EMAIL_SENDGRID_API_KEY?: string;
+  /** DataChaser outreach seam (#75 E5). Inert stub unless both are set. */
+  WORKWELL_OUTREACH_DATACHASER_API_KEY?: string;
+  WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
+  /** WebChart data-ingress seam (#184 E12). Inert stub unless both are set. */
+  WORKWELL_WEBCHART_BASE_URL?: string;
+  WORKWELL_WEBCHART_API_KEY?: string;
+  /** Measure-executor seam (#78 E9; ADR-025). FHIR-native default; "sql-pushdown" is an inert opt-in stub. */
+  WORKWELL_MEASURE_EXECUTOR?: string;
+  /** VSAC value-set resolution (ADR-023). Inert (local-store-only) unless the key is set. */
+  WORKWELL_VSAC_API_KEY?: string;
+  WORKWELL_VSAC_BASE_URL?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -299,8 +314,19 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   );
 }
 
+// Boot-time active-seam log line (#260) — logged once per worker instance (mirrors the auth-handler
+// memoization pattern above), not once per request. Descriptive only: it reports what the existing
+// resolve* predicates already decide, never a second parse of the env vars.
+let seamInventoryLogged = false;
+function logSeamInventoryOnce(env: Env): void {
+  if (seamInventoryLogged) return;
+  seamInventoryLogged = true;
+  console.log(`[workwell] ${formatSeamLogLine(env)}`);
+}
+
 export default {
   async fetch(req: Request, env: Env, _ctx: CloudExecutionContext): Promise<Response> {
+    logSeamInventoryOnce(env);
     const origins = parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS);
     // CORS preflight must be answered before auth — browsers send OPTIONS without
     // credentials, so the real cross-site login/API call is blocked otherwise.

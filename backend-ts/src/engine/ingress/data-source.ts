@@ -52,14 +52,26 @@ export interface DataSourceEnv {
 }
 
 /**
+ * Pure predicate for whether the WebChart source is selected — both BASE_URL and API_KEY required.
+ * The single source of truth for `resolveDataSource` and the boot-time seam inventory (#260).
+ */
+export function isWebChartConfigured(env: DataSourceEnv): boolean {
+  const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
+  const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
+  return Boolean(baseUrl && apiKey);
+}
+
+/**
  * Config-driven ingress selection (mirrors resolveForecaster/resolveChannel): JSON is the default;
  * WebChart is selected only when BOTH env vars are non-blank (inert until PR-2). The JSON source
  * needs the caller's bundles (inherent to JSON ingress), passed as jsonInput.
  */
 export function resolveDataSource(env: DataSourceEnv, jsonInput?: unknown | unknown[]): PatientDataSource {
-  const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
-  const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
-  if (baseUrl && apiKey) return webChartDataSource({ baseUrl, apiKey });
+  if (isWebChartConfigured(env)) {
+    const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
+    const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
+    return webChartDataSource({ baseUrl, apiKey });
+  }
   return jsonBucketDataSource(jsonInput);
 }
 

@@ -93,13 +93,25 @@ export function dataChaserChannel(type: ChannelType, _config: { apiKey: string; 
 }
 
 /**
+ * Pure predicate for whether the DataChaser stub is selected — both BASE_URL and API_KEY required.
+ * The single source of truth for `resolveChannel` and the boot-time seam inventory (#260).
+ */
+export function isDataChaserConfigured(env: ChannelEnv): boolean {
+  const apiKey = (env.WORKWELL_OUTREACH_DATACHASER_API_KEY ?? "").trim();
+  const baseUrl = (env.WORKWELL_OUTREACH_DATACHASER_BASE_URL ?? "").trim();
+  return Boolean(apiKey && baseUrl);
+}
+
+/**
  * Select the channel adapter: the simulated adapter by default; the DataChaser stub ONLY when both
  * WORKWELL_OUTREACH_DATACHASER_API_KEY and _BASE_URL are set (inert-unless-configured).
  */
 export function resolveChannel(type: ChannelType, env: ChannelEnv): OutreachChannel {
-  const apiKey = (env.WORKWELL_OUTREACH_DATACHASER_API_KEY ?? "").trim();
-  const baseUrl = (env.WORKWELL_OUTREACH_DATACHASER_BASE_URL ?? "").trim();
-  if (apiKey && baseUrl) return dataChaserChannel(type, { apiKey, baseUrl });
+  if (isDataChaserConfigured(env)) {
+    const apiKey = (env.WORKWELL_OUTREACH_DATACHASER_API_KEY ?? "").trim();
+    const baseUrl = (env.WORKWELL_OUTREACH_DATACHASER_BASE_URL ?? "").trim();
+    return dataChaserChannel(type, { apiKey, baseUrl });
+  }
   if (type === "EMAIL") return emailChannel(env); // EMAIL honors the email-provider env (simulated default)
   return SIMULATED[type];
 }
