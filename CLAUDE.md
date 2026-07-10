@@ -92,7 +92,7 @@ Neon DB still carries the OLD fabricated 1.68M-row seed — the first owner step
 
 **The active plan is now the GitHub roadmap (2026-07-09):** milestones M1 (Integration Readiness,
 pre-contract — issues #253–#261), M2 (WebChart Live Integration, contract-gated — #262, #263, + #187),
-M3 (Production Readiness — #264, #265, + #167, #168). Full strategy + decision positions:
+M3 (Production Readiness — #264, #265, the #261-memo stubs #267–#270, + #167, #168). Full strategy + decision positions:
 `docs/ROADMAP_2026-07-09.md`. The MIE question package to send: `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
 
 **Key recorded positions:** Option B permanently inert behind a triple trigger (see #78); E14 literal
