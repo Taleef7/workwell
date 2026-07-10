@@ -84,38 +84,46 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-09)
+## Current Focus (as of 2026-07-10)
 
-**PR #252 is MERGED + deployed (2026-07-08).** The Option A real-batch-eval arc is live code. The live
-Neon DB still carries the OLD fabricated 1.68M-row seed — the first owner step is the rollback + N=5000
-`--mode evaluate` proof (issue #253; runbook in the issue + DEPLOY.md).
+**M1 engineering is CLOSED on `main` (2026-07-10 wave closeout — PRs #271–#279).** Integration-readiness
+code that does not need MIE answers is shipped: mock WebChart HTTP transport (#255), worker pool (#256),
+tiered evidence (#257), fqm literal CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures (#259), seam
+inventory (#260), production-readiness memo (#261), N=5000 real-eval proof recorded (#253). Journal:
+`docs/JOURNAL.md` 2026-07-10. Strategy: `docs/ROADMAP_2026-07-09.md`.
 
-**The active plan is now the GitHub roadmap (2026-07-09):** milestones M1 (Integration Readiness,
-pre-contract — issues #253–#261), M2 (WebChart Live Integration, contract-gated — #262, #263, + #187),
-M3 (Production Readiness — #264, #265, the #261-memo stubs #267–#270, + #167, #168). Full strategy + decision positions:
-`docs/ROADMAP_2026-07-09.md`. The MIE question package to send: `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
+**Remaining M1 owner step (not code):** **#254 — send** `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`
+to Doug/Dave and record answers. That unblocks **M2** (#262 live transport, #263 delta-eval design,
+#187 real identity sources).
 
-**Key recorded positions:** Option B permanently inert behind a triple trigger (see #78); E14 literal
-diff unblocked via fqm-execution + pre-shipped official ELM (spike #258 — supersedes ADR-024's
-wait-for-translator clause); worker-pool parallelism approved as a bounded 1–2 day build (#256); evidence
-tiered-by-actionability with auto-trim >20k (#257); incremental eval deliberately deferred until MIE
-answers the change-signal question (Q A6).
+**Active milestones after M1 code:**
+- **M2 — WebChart Live Integration** (contract-gated): #262, #263, #187
+- **M3 — Production Readiness:** #264 observability, #265 auth/SSO, #267–#270 (PHI env / durable
+  scheduler / real tenancy / backup-DR), #167 evidence bucket, #168 Proxmox onboot
+- Optional pure-code while waiting on MIE: **#264**
 
-**#261 — production-readiness memo, done:** `docs/PRODUCTION_READINESS_2026-07.md` covers the PHI/HIPAA
-posture (hard rule: **the demo stack never receives PHI**; BAA chain gated on MIE Q C14), the auth fork
-(3 options; do-not-build recommendation until MIE answers Q C15), tenancy (today's read-time synthetic
-tenancy is demo-grade, not isolation; real multi-employer isolation is a design-with-MIE item), and the
-ordered M3 gap list — 4 new M3 stub issues created: **#267** PHI-capable environment split, **#268**
-durable scheduler, **#269** real tenant isolation, **#270** backup/DR runbook.
+**eCQM accuracy posture (honest):** only **two** CMS eCQMs are runnable Active with CQL — **CMS122v14**
+and **CMS125v14**. Catalog **metadata** for all 49 CMS IDs (v14 = 2026, MIPS IDs, titles) was verified
+against eCQI in `docs/TERMINOLOGY_AUDIT_2026-07-08.md`. **Logic fidelity to official eCQI CQL is deep
+only for CMS122** (structural + estimate + official-subset + literal fqm tiers via
+`GET /api/measures/cms122/fidelity/diff`). CMS125 is a simplified operational CQL (no fidelity ladder
+yet). The other **47 CMS entries are Draft catalog only** — not evaluated. OSHA/HEDIS/vax measures are
+not CMS eCQMs (different authorities). Do **not** claim full eCQI parity for every catalog row. Detail:
+`docs/MEASURES.md` → "eCQM accuracy posture".
 
-**#251 is closed** (superseded). The "5 remaining open issues are all blocked" paragraph from the
-07-08 block below is superseded by this roadmap — M1 is all actionable now.
+**Key recorded positions:** Option B permanently inert behind a triple trigger (#78); E14 literal diff
+via fqm + pre-shipped ELM (#258 / ADR-026); worker-pool for batch CLI only (#256); tiered evidence
+auto-trim >20k (#257); incremental eval deferred until MIE Q A6; demo stack never receives PHI
+(`docs/PRODUCTION_READINESS_2026-07.md`).
 
-**Latest (2026-07-08): the full "Option A" arc — PR #252 (`feat/scale-batch-eval`), since MERGED + deployed 2026-07-08 (see the 2026-07-09 block above).** Three parts (newest first):
+**#251 is closed** (superseded by #258). Full 120k real-CQL on Neon is **not planned** (cost; N=5000
+proof is enough for scale honesty).
 
-- **Real batch live-evaluation of the `mhn` (~120k) scale tenant — the headline.** Replaces the *fabricated* scale outcomes with real, chunked, **subject-major** CQL evaluation (`batchEvaluateScalePopulation`, `backend-ts/src/run/batch-evaluate-scale.ts`) behind a pluggable `ScaleSubjectGenerator` seam (`backend-ts/src/run/scale-generator.ts`). The default `webChartRealisticGenerator` emits **real LOINC/CVX/CPT codes routed through the WebChart terminology crosswalk** (13/14 measures; `hazwoper` has no real code and passes through), so the real adapter is exercised at scale. Bounded-memory (one chunk buffered), whole-batch resumable, per-subject error-isolated (failure ⇒ MISSING_DATA + error evidence), audited `SCALE_POPULATION_EVALUATED`. CLI: `pnpm seed:scale --mode evaluate` (**default**; `--mode fabricated` legacy one release; `--trim-evidence` for 120k). **The `mhn|Lxx|Pxx|n` encoding + `aggregateScaleRun` are UNCHANGED** (content-agnostic aggregation) → the rollup/hierarchy/programs read path is untouched; only outcome provenance changed (ADR-020 note; ADR-008). **Evaluate mode REFUSES over legacy fabricated `seed:scale` runs** (distinguished by a `requestedScope.batchEvaluated` marker) — so the **live Neon DB (which carries the 2026-06-29 fabricated 1.68M-row seed) must be rolled back before the first real-eval run** (DEPLOY.md). Reviewed: code-reviewer skill + Codex (default/low) + **Codex gpt-5.5 high** (which caught the evaluate-no-op-over-fabricated P1). **1057 pass / 1 pg-skip / 0 fail.** Spec/plan: `docs/superpowers/{specs,plans}/2026-07-08-option-a-scale-batch-eval*`. **Owner next step (plan Phase 4):** roll back the fabricated seed, then `pnpm seed:scale --subjects 5000 --mode evaluate` to prove + profile before any 120k run. **Deferred non-goals:** worker_threads parallelism, incremental/delta eval, live WebChart HTTP (E12 PR-2c), Option B (CQL→SQL).
-- **E9 (#78) — the `MeasureExecutor` seam (ADR-025).** The charter's biggest fork (Doug's Q2, "CQL→SQL") decided on our own: measure execution is pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`) extending `EvaluateMeasureBinding`; `fhirNativeExecutor` = default + correctness oracle (existing CQL→ELM engine, parity-tested), `sqlPushdownExecutor` = inert stub (Option B research-grade, not built), `resolveMeasureExecutor(env)` config-selects (SQL only on `WORKWELL_MEASURE_EXECUTOR=sql-pushdown`; deployed default byte-identical). Guardrail: a future SQL executor must pass golden parity per measure. ADR-014 superseded; ADR-017's parked second-executor now concrete. Descriptive only (ADR-008); no schema/deps/engine change.
-- **2026 terminology/standards currency sweep** (`docs/TERMINOLOGY_AUDIT_2026-07-08.md`). Three-way verification (our impl vs MIE WebChart dev DB vs current 2026 authorities: CMS eCQI, CDC CVX, LOINC, VSAC, AMA CPT, eCFR). Everything load-bearing verified correct — all 49 CMS catalog versions/MIPS IDs (**v14 = 2026**), all OSHA CFR, all runnable LOINC/CPT. Fixed the one defect class (vaccine-CVX currency on the WebChart crosswalk): full active flu CVX set (VSAC Influenza OID `…526.3.1254`); active Td `09/113/196` replacing the inactive `139`; MMRV `94` → varicella; `G0202` read-only. **Additive read-path only — no synthetic outcome changed** (crosswalk is WebChart-read-only; synthetic path matches `urn:workwell:*`, not CVX). Docs: MEASURES.md.
+**Historical (2026-07-08): the full "Option A" arc — PR #252 (`feat/scale-batch-eval`), MERGED + deployed.** Three parts (newest first):
+
+- **Real batch live-evaluation of the `mhn` (~120k) scale tenant — the headline.** Replaces the *fabricated* scale outcomes with real, chunked, **subject-major** CQL evaluation (`batchEvaluateScalePopulation`, `backend-ts/src/run/batch-evaluate-scale.ts`) behind a pluggable `ScaleSubjectGenerator` seam (`backend-ts/src/run/scale-generator.ts`). The default `webChartRealisticGenerator` emits **real LOINC/CVX/CPT codes routed through the WebChart terminology crosswalk** (13/14 measures; `hazwoper` has no real code and passes through), so the real adapter is exercised at scale. Bounded-memory (one chunk buffered), whole-batch resumable, per-subject error-isolated (failure ⇒ MISSING_DATA + error evidence), audited `SCALE_POPULATION_EVALUATED`. CLI: `pnpm seed:scale --mode evaluate` (**default**; `--mode fabricated` legacy one release; `--trim-evidence` / auto-trim for large N). **The `mhn|Lxx|Pxx|n` encoding + `aggregateScaleRun` are UNCHANGED**. Evaluate mode refuses over legacy fabricated seeds. **Phase 4 proof done (#253):** N=5000 real-eval on Neon (~68 ms/eval). Spec/plan: `docs/superpowers/{specs,plans}/2026-07-08-option-a-scale-batch-eval*`. Later M1: worker pool (#256), tiered evidence (#257).
+- **E9 (#78) — the `MeasureExecutor` seam (ADR-025).** Measure execution is pluggable; `fhirNativeExecutor` = default + correctness oracle; `sqlPushdownExecutor` = inert stub. Descriptive only (ADR-008).
+- **2026 terminology/standards currency sweep** (`docs/TERMINOLOGY_AUDIT_2026-07-08.md`). Catalog versions/MIPS/LOINC/CPT/OSHA verified; vaccine-CVX crosswalk currency fixed.
 
 **Prior (2026-07-05 → 07-07): VSAC + E14 PR-3, the UX/perf backlog sweep, the WebChart dev-DB proof, and pre-E12 foreign-data correctness — all merged + deployed.** Session arc, newest first:
 - **Foreign-data correctness pre-E12 (PR #250).** The two Fable "pre-E12" items that turn into wrong answers / attack surface the day real WebChart data arrives (the class the dev-DB proof just enabled): **L14** — AI-explain prompt fencing (`buildExplainUserPrompt`: per-request nonce'd BEGIN/END evidence markers labelled untrusted-data + an 8000-char cap; hardened system prompt) closing a prompt-injection surface; **L17** — an additive `inInitialPopulation?: boolean` on `MeasureOutcome` (read from the CQL "Initial Population" define) so an out-of-program subject is distinguishable from an enrolled-but-no-data MISSING_DATA on the CLI/ingress path. M19 (codegen degenerate-numeric validation) verified already-fixed. Descriptive only (ADR-008); no schema/deps. Docs: AI_GUARDRAILS §2.2, ARCHITECTURE §7.

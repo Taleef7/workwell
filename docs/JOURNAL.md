@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-07-10 — docs currency + eCQM accuracy posture
+
+Post-wave operator docs brought current so agents stop reading “M1 still open / #253 next”:
+
+- `CLAUDE.md` Current Focus → **2026-07-10**: M1 engineering closed; remaining owner step **#254**;
+  eCQM honesty summary; historical Option A block kept.
+- `README.md` Status, `docs/ROADMAP_2026-07-09.md` milestone/issue status columns + sequencing strike-throughs.
+- `docs/MEASURES.md` → new **“eCQM accuracy posture”** table: catalog metadata verified for 49 CMS IDs;
+  deep official-logic fidelity is **CMS122-only**; CMS125 simplified/no ladder; 47 Drafts not evaluated;
+  recommended next accuracy work (CMS125 fidelity package first, then CMS122 authored gaps, then
+  product-picked Draft promotions — never bulk “make all eCQIs”).
+
+No code/schema/deps.
+
 ## 2026-07-10 — roadmap wave closeout (#271–#279)
 
 Closed the 2026-07-09 roadmap-wave PR stack. Review fixes (Codex) were already on the branches before
