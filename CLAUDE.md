@@ -84,13 +84,13 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-10)
+## Current Focus (as of 2026-07-10, post-#280)
 
-**M1 engineering is CLOSED on `main` (2026-07-10 wave closeout — PRs #271–#279).** Integration-readiness
-code that does not need MIE answers is shipped: mock WebChart HTTP transport (#255), worker pool (#256),
-tiered evidence (#257), fqm literal CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures (#259), seam
-inventory (#260), production-readiness memo (#261), N=5000 real-eval proof recorded (#253). Journal:
-`docs/JOURNAL.md` 2026-07-10. Strategy: `docs/ROADMAP_2026-07-09.md`.
+**M1 engineering is CLOSED** (PRs #271–#279). **PR #280 MERGED** — production-faithful **CMS122v14 +
+CMS125v14** eCQI subsets (2026): 12-month MP, age/sex/visit, VSAC OIDs, GMI, official Oct-1 mammogram
+window, hospice/palliative/mastectomy DENEX; dual-coded synthetic + WebChart roster visit stamp for
+CMS125. Residual Phase 2: 66+ LTC + frailty/AI. Journal: `docs/JOURNAL.md`. Strategy:
+`docs/ROADMAP_2026-07-09.md`.
 
 **Remaining M1 owner step (not code):** **#254 — send** `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`
 to Doug/Dave and record answers. That unblocks **M2** (#262 live transport, #263 delta-eval design,
@@ -102,14 +102,13 @@ to Doug/Dave and record answers. That unblocks **M2** (#262 live transport, #263
   scheduler / real tenancy / backup-DR), #167 evidence bucket, #168 Proxmox onboot
 - Optional pure-code while waiting on MIE: **#264**
 
-**eCQM accuracy posture (honest):** only **two** CMS eCQMs are runnable Active with CQL — **CMS122v14**
-and **CMS125v14**. Catalog **metadata** for all 49 CMS IDs (v14 = 2026, MIPS IDs, titles) was verified
-against eCQI in `docs/TERMINOLOGY_AUDIT_2026-07-08.md`. **Logic fidelity to official eCQI CQL is deep
-only for CMS122** (structural + estimate + official-subset + literal fqm tiers via
-`GET /api/measures/cms122/fidelity/diff`). CMS125 is a simplified operational CQL (no fidelity ladder
-yet). The other **47 CMS entries are Draft catalog only** — not evaluated. OSHA/HEDIS/vax measures are
-not CMS eCQMs (different authorities). Do **not** claim full eCQI parity for every catalog row. Detail:
-`docs/MEASURES.md` → "eCQM accuracy posture".
+**eCQM accuracy posture (honest):** only **two** CMS eCQMs are runnable Active — **CMS122v14** and
+**CMS125v14**, both now **production-faithful official-subset** CQL (PR #280). Catalog **metadata** for
+all 49 CMS IDs (v14 = 2026) verified in `docs/TERMINOLOGY_AUDIT_2026-07-08.md`. CMS122 still has the
+full diagnostic ladder (structural + estimate + subset parity + literal fqm); CMS125 has structural
+fidelity + production CQL (literal ELM optional later). **47 CMS Drafts are catalog-only** — not
+evaluated. OSHA/HEDIS/vax are not CMS eCQMs. Do **not** claim full MAT multi-library submission packages
+or bulk eCQI parity. Detail: `docs/MEASURES.md` → "eCQM accuracy posture".
 
 **Key recorded positions:** Option B permanently inert behind a triple trigger (#78); E14 literal diff
 via fqm + pre-shipped ELM (#258 / ADR-026); worker-pool for batch CLI only (#256); tiered evidence
