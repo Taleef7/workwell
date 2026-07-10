@@ -17,6 +17,29 @@ summary remains 28 real (non-`MISSING_DATA`) whitelist outcomes, now over 56 pat
 
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
+### #255 — mock-contract WebChart transport (2026-07-09)
+
+Implemented the M1 pre-build of the live WebChart HTTP transport (`feat/issue-255-mock-webchart-transport`),
+making E12 PR-2c a days-size diff once MIE's contract answers land. `httpWebChartClient`
+(`backend-ts/src/engine/ingress/webchart/webchart-client.ts`) is now a **real transport built against our
+own assumed FHIR R4 contract** — documented in the new `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md` (two
+variants: A = true FHIR R4, implemented; B = proprietary REST over `wc_miehr_*`, documented fallback only —
+every assumption cross-referenced to its MIE question A1–A8/B9–B11/C13–C16 in
+`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`). The client: paged `GET /fhir/Patient?_count=` population
+listing (searchset `link[relation=next]` traversal), per-patient `GET /fhir/Patient/{id}/$everything`
+(one payload per patient — never a collapsed multi-patient bundle), `Authorization: Bearer` auth,
+AbortController timeouts, bounded 429/5xx retry-with-backoff, and per-patient failure degradation to a
+Patient-only bundle + `OperationOutcome` marker (the subject isolates as MISSING_DATA; the batch never
+aborts — mirrors `evaluateBatch`). Global `fetch` only — **no new deps, no schema**. A new named
+conformance suite (`webchart/mock-http-conformance.test.ts`) serves the 26 committed dev-DB patient
+bundles through an in-test `fetch` shim and asserts the mock-HTTP path's per-subject outcomes are
+**identical to the fixture-client path** for every whitelisted + excluded measure (the `devdb-eval.test.ts`
+goldens), plus the 5 failure-mode tests (timeout, 429-then-success, partial page, malformed resource,
+empty population). Deployed default is byte-identical: `resolveDataSource` still selects JSON unless BOTH
+`WORKWELL_WEBCHART_*` envs are set (explicit unset/blank-env test added). `normalize.ts`/`terminology.ts`
+semantics untouched. Docs: ARCHITECTURE `engine.ingress.webchart`, WEBCHART_FHIR_MAPPING §8.2, the new
+assumptions doc. Built by Codex (gpt-5.5 high) under orchestration; verified locally green. Descriptive
+only (ADR-008/ADR-017); read-only ingress — no audit-event surface.
 ### #253 — N=5000 real-eval proof (2026-07-09)
 
 The Phase-4 proof of the Option A batch engine, run live on Neon (owner-authorized #253). Precondition
