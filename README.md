@@ -25,11 +25,13 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 - **Roadmap 2026-07-09 — PoC → WebChart integration (M1/M2/M3).** **M1 engineering closed 2026-07-10**
   (PRs #271–#279 on `main`): mock WebChart HTTP transport, worker pool, tiered evidence, fqm literal
   CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures, seam inventory, production-readiness memo,
-  N=5000 real-eval proof. **Remaining M1 owner step: #254** — send
-  `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (unblocks M2: #262 live transport, #263 delta-eval,
-  #187 identity). Strategy: `docs/ROADMAP_2026-07-09.md`. **eCQM honesty:** only CMS122 + CMS125 are
-  runnable Active; catalog metadata for 49 CMS IDs is eCQI-current (2026/v14); deep official-logic
-  fidelity is CMS122-only today — see `docs/MEASURES.md` → "eCQM accuracy posture".
+  N=5000 real-eval proof. **PR #280 MERGED** — production-faithful **CMS122v14 + CMS125v14** eCQI
+  subsets (age/visit/VSAC/GMI/Oct-1 mammo window; dual-coded synthetic). **Remaining M1 owner step:
+  #254** — send `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (unblocks M2: #262 live transport,
+  #263 delta-eval, #187 identity). Strategy: `docs/ROADMAP_2026-07-09.md`. **eCQM honesty:** only
+  CMS122 + CMS125 are runnable Active (both faithful-subset production CQL as of #280); catalog
+  metadata for 49 CMS IDs is eCQI-current (2026/v14); 47 Drafts not evaluated — see
+  `docs/MEASURES.md` → "eCQM accuracy posture".
 - **Production-readiness memo (#261 — docs only).** `docs/PRODUCTION_READINESS_2026-07.md` names the
   hard rule (**the demo stack never receives PHI**), maps existing controls vs gaps, and tracks M3
   issues (#167, #264, #265, #267–#270, #168). PHI/auth/tenancy decisions wait on MIE answers in

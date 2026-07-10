@@ -1,5 +1,14 @@
 # Journal
 
+## 2026-07-10 — PR #280 MERGED + housekeep
+
+**PR #280** (`feat(ecqm): production-faithful CMS122v14 + CMS125v14`) **merged to `main`**
+(`aa3cf2c`, squash). Remote feature branch deleted on merge; local branch cleaned. Operator docs
+(`CLAUDE.md`, `README.md`, this journal) updated so eCQM posture matches production-faithful
+subsets for **both** CMS122 and CMS125 (no longer “CMS125 simplified only”).
+
+No open feature branches left. Next bottleneck remains **#254** (send MIE package) — not code.
+
 ## 2026-07-10 — PR #280 CI + Codex P1 (CMS125 visit + eCQM test parity)
 
 Addressed CI red + Codex review on `feat/ecqi-faithful-cms122-cms125`:
