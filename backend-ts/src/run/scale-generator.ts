@@ -122,3 +122,18 @@ export function webChartRealisticGenerator(): ScaleSubjectGenerator {
     },
   };
 }
+
+/**
+ * Generator kinds a worker can reconstruct from a `kind` STRING (#256): the generator object itself
+ * can't cross the `node:worker_threads` boundary (functions don't structured-clone), so the worker
+ * rebuilds it from this. The worker pool refuses any other kind up front (fail-fast), rather than
+ * silently degrading every subject to MISSING_DATA.
+ */
+export const RECONSTRUCTABLE_GENERATOR_KINDS: ReadonlySet<string> = new Set(["webchart", "direct-synthetic"]);
+
+/** Rebuild a `ScaleSubjectGenerator` from its `kind` — shared by the worker and the pool's guard. */
+export function reconstructGenerator(kind: string): ScaleSubjectGenerator {
+  if (kind === "webchart") return webChartRealisticGenerator();
+  if (kind === "direct-synthetic") return directSyntheticGenerator();
+  throw new Error(`unsupported generator kind '${kind}' (only ${[...RECONSTRUCTABLE_GENERATOR_KINDS].join(" / ")} are reconstructable in a worker)`);
+}
