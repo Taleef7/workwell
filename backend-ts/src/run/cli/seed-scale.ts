@@ -17,14 +17,17 @@
  *
  * This module is side-effect-free + importable by tests; `seed-scale-bin.ts` is the runnable entry.
  */
+import { availableParallelism } from "node:os";
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
 import { backfillScalePopulation } from "../backfill-scale.ts";
 import { batchEvaluateScalePopulation } from "../batch-evaluate-scale.ts";
 import { webChartRealisticGenerator } from "../scale-generator.ts";
 
 export const USAGE =
-  "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence]";
+  "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence] [--workers <n>]";
 const DEFAULT_SUBJECTS = 120_000;
+/** Default worker count for `--mode evaluate` (#256); clamped by `availableParallelism()-1` at run time. */
+const DEFAULT_WORKERS = 4;
 
 /** Bad invocation (unknown/invalid flags) — exit code 2. */
 export class SeedCliUsageError extends Error {
@@ -39,6 +42,12 @@ export interface SeedScaleArgs {
   mode?: "fabricated" | "evaluate";
   /** Persist minimal `{scale:true}` evidence (evaluate mode only) — protects Neon storage at 120k. */
   trimEvidence?: boolean;
+  /**
+   * Worker-pool size for `--mode evaluate` (#256). Default 4, clamped to `availableParallelism()-1` at
+   * run time (leaving one core for the main-thread DB writes). `--workers 1` (or 0) forces the
+   * single-threaded sequential path. Ignored by `--mode fabricated`.
+   */
+  workers?: number;
 }
 
 export function parseArgs(args: string[]): SeedScaleArgs {
@@ -59,6 +68,10 @@ export function parseArgs(args: string[]): SeedScaleArgs {
       out.mode = m;
     } else if (a === "--trim-evidence") {
       out.trimEvidence = true;
+    } else if (a === "--workers") {
+      const n = Number(args[++i]);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) throw new SeedCliUsageError(`--workers must be a non-negative integer\n${USAGE}`);
+      out.workers = n;
     } else if (a === "--help" || a === "-h") {
       throw new SeedCliUsageError(USAGE);
     } else {
@@ -95,6 +108,13 @@ export async function main(argv: string[]): Promise<number> {
     const asOf = parsed.asOf ?? new Date().toISOString().slice(0, 10);
     const mode = parsed.mode ?? "evaluate";
     const subjects = parsed.subjects ?? DEFAULT_SUBJECTS;
+    // Resolve the worker pool size (#256): clamp the flag by availableParallelism()-1 (leave one core
+    // for the main-thread DB writes). <= 1 → the single-threaded sequential path.
+    const workerFlag = parsed.workers ?? DEFAULT_WORKERS;
+    const workers = Math.max(1, Math.min(availableParallelism() - 1, workerFlag));
+    if (mode === "evaluate" && workers > 1) {
+      process.stdout.write(`[seed:scale] parallel evaluate — ${workers} worker(s) (flag ${workerFlag}, cores ${availableParallelism()}).\n`);
+    }
     const summary =
       mode === "fabricated"
         ? await backfillScalePopulation(
@@ -108,7 +128,7 @@ export async function main(argv: string[]): Promise<number> {
               auditStore: stores.events,
               generator: webChartRealisticGenerator(),
             },
-            { subjects, asOf, trimEvidence: parsed.trimEvidence },
+            { subjects, asOf, trimEvidence: parsed.trimEvidence, workers },
           );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";
     process.stdout.write(
