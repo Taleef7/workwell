@@ -38,3 +38,22 @@ test("new flags compose with --subjects/--as-of", () => {
     trimEvidence: true,
   });
 });
+
+test("parseArgs reads --workers as a non-negative integer and rejects bad input (#256)", () => {
+  assert.equal(parseArgs(["--workers", "4"]).workers, 4);
+  assert.equal(parseArgs(["--workers", "1"]).workers, 1); // sequential escape hatch
+  assert.equal(parseArgs(["--workers", "0"]).workers, 0); // also sequential
+  assert.equal(parseArgs([]).workers, undefined); // default resolved by the caller (4, clamped by cores)
+  assert.throws(() => parseArgs(["--workers", "-1"]), SeedCliUsageError);
+  assert.throws(() => parseArgs(["--workers", "2.5"]), SeedCliUsageError);
+  assert.throws(() => parseArgs(["--workers", "x"]), SeedCliUsageError);
+});
+
+test("--workers composes with the other evaluate flags (#256)", () => {
+  assert.deepEqual(parseArgs(["--subjects", "120000", "--mode", "evaluate", "--trim-evidence", "--workers", "8"]), {
+    subjects: 120000,
+    mode: "evaluate",
+    trimEvidence: true,
+    workers: 8,
+  });
+});

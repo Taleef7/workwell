@@ -1,5 +1,5 @@
 /**
- * E12 PR-1 (#184): the PatientDataSource port — JSON-bucket adapter (default), inert WebChart stub
+ * E12 PR-1/#255: the PatientDataSource port — JSON-bucket adapter (default), gated WebChart adapter
  * (inert-unless-configured), resolveDataSource selection, and evaluateSource sugar.
  *   node --import tsx --test src/engine/ingress/data-source.test.ts
  */
@@ -59,12 +59,22 @@ test("resolveDataSource: defaults to JSON; selects WebChart only when BOTH env v
   assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_API_KEY: "k" }).kind, "webchart");
 });
 
-test("webChartDataSource: the default HTTP transport is deferred (rejects) until the confirmed API contract", async () => {
-  // Constructing is fine; loading rejects — the live HTTP client is PR-2c (per-patient fan-out unknown),
-  // so it fails loudly rather than collapsing a population into one bundle (Codex P1).
+test("webChartDataSource: the default HTTP transport constructs only on the gated WebChart path", () => {
   const src = webChartDataSource({ baseUrl: "x", apiKey: "k" });
   assert.equal(src.kind, "webchart");
-  await assert.rejects(() => src.loadBundles(), /not yet implemented \(E12 PR-2c\)/);
+});
+
+test("resolveDataSource: deployed default stays JSON when WebChart env vars are unset or blank", async () => {
+  const input = { unchanged: true };
+  for (const env of [
+    {},
+    { WORKWELL_WEBCHART_BASE_URL: "", WORKWELL_WEBCHART_API_KEY: "" },
+    { WORKWELL_WEBCHART_BASE_URL: " ", WORKWELL_WEBCHART_API_KEY: " " },
+  ]) {
+    const source = resolveDataSource(env, input);
+    assert.equal(source.kind, "json");
+    assert.deepEqual(await source.loadBundles(), [input]);
+  }
 });
 
 test("webChartDataSource: real CPT-coded WebChart data evaluates end-to-end via terminology reconciliation", async () => {
