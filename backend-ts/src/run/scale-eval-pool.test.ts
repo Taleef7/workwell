@@ -11,7 +11,7 @@ import { runScaleEvalPool, type PoolWorker, type WorkerOutcomeRow, type ChunkReq
 const MEASURES = ["m1", "m2"];
 
 /** A behavior decision for one (chunk-start, attempt#) — how the fake worker responds to that chunk. */
-type Behavior = "ok" | "error" | "exit";
+type Behavior = "ok" | "error" | "exit" | "errorThenLateExit";
 
 interface Harness {
   spawnWorker: () => PoolWorker;
@@ -21,7 +21,9 @@ interface Harness {
 /**
  * Build a fake-worker spawner. `behavior(start, attempt)` decides how the fake responds to a chunk
  * request: "ok" posts deterministic COMPLIANT rows; "error"/"exit" simulate a crash (error event /
- * non-zero exit). Attempts are counted per chunk-start across worker replacements.
+ * non-zero exit). "errorThenLateExit" simulates node:worker_threads' error → non-zero exit double-signal
+ * with the exit delayed until after the error handler has replaced the worker. Attempts are counted per
+ * chunk-start across worker replacements.
  */
 function harness(behavior: (start: number, attempt: number) => Behavior): Harness {
   const attempts = new Map<number, number>();
@@ -44,6 +46,9 @@ function harness(behavior: (start: number, attempt: number) => Behavior): Harnes
             }
             onMsg?.({ chunkId: req.chunkId, rows });
           } else if (b === "error") {
+            onErr?.(new Error("worker boom"));
+          } else if (b === "errorThenLateExit") {
+            queueMicrotask(() => onExit?.(1));
             onErr?.(new Error("worker boom"));
           } else {
             onExit?.(1);
@@ -103,6 +108,14 @@ test("pool retries a crashed chunk ONCE then succeeds (error event)", async () =
   assert.equal(rows.length, 12 * MEASURES.length, "all subjects persisted after the retry");
   assert.ok(rows.every((r) => r.status === "COMPLIANT"), "retry produced real outcomes, no fallback");
   assert.ok(h.spawnCount() > 2, "a replacement worker was spawned for the crash");
+});
+
+test("pool ignores a stale non-zero exit from a worker already replaced after error", async () => {
+  const h = harness((start, attempt) => (start === 0 && attempt === 1 ? "errorThenLateExit" : "ok"));
+  const rows = await run(h, 3, 3, 1);
+  assert.equal(rows.length, 3 * MEASURES.length, "the retry still persists the chunk exactly once");
+  assert.ok(rows.every((r) => r.status === "COMPLIANT"), "stale exit did not soft-fail the retried chunk");
+  assert.equal(h.spawnCount(), 2, "stale exit did not crash-handle the replacement worker");
 });
 
 test("pool retries once for a non-zero EXIT crash too", async () => {

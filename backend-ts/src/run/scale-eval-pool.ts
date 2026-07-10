@@ -165,11 +165,15 @@ export async function runScaleEvalPool(cfg: ScaleEvalPoolConfig): Promise<void> 
     const wire = (slot: Slot, worker: PoolWorker) => {
       worker.onMessage((msg) => {
         // Ignore a stale message from a worker we've since replaced (chunk id mismatch).
-        if (settled || !slot.chunk || slot.chunk.id !== msg.chunkId) return;
+        if (settled || slot.worker !== worker || !slot.chunk || slot.chunk.id !== msg.chunkId) return;
         void settleChunk(slot, msg.rows);
       });
-      worker.onError(() => void handleCrash(slot));
+      worker.onError(() => {
+        if (slot.worker !== worker) return;
+        void handleCrash(slot);
+      });
       worker.onExit((code) => {
+        if (slot.worker !== worker) return;
         if (slot.intentionalExit || code === 0) return;
         void handleCrash(slot);
       });
