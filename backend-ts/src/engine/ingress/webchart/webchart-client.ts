@@ -114,6 +114,7 @@ function retryDelay(opts: Required<Pick<HttpWebChartClientOptions, "retryDelaysM
  */
 export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartClientOptions): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
+  const baseOrigin = new URL(base).origin;
   const fetchImpl = options?.fetch ?? globalThis.fetch;
   const pageSize = Math.max(1, Math.floor(options?.pageSize ?? DEFAULT_PAGE_SIZE));
   const maxRetries = Math.max(0, Math.floor(options?.maxRetries ?? DEFAULT_MAX_RETRIES));
@@ -172,7 +173,17 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
         }
       }
       const next = nextLink(page);
-      url = next ? new URL(next, url).toString() : undefined;
+      if (!next) {
+        url = undefined;
+        continue;
+      }
+      const resolved: URL = new URL(next, url);
+      if (resolved.origin !== baseOrigin) {
+        throw new WebChartNonRetryableError(
+          `WebChart pagination link points off-origin (expected ${baseOrigin}, got ${resolved.origin}): refusing to follow ${resolved.toString()}`,
+        );
+      }
+      url = resolved.toString();
     }
     return patients;
   }
