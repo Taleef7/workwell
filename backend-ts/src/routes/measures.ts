@@ -63,6 +63,7 @@ import { computeFidelity } from "../standards/measure-fidelity.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 import { computeExecutionDiff } from "../standards/execution-diff.ts";
+import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-diff.ts";
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
 import { StoreValueSetResolver, type ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
@@ -81,18 +82,30 @@ function measureCql(measureId: string): string {
 }
 
 /**
- * Execution diff only when EVERY VSAC value set the official-subset CMS122 measure retrieves resolves
- * non-empty from the store. Probing a single OID would let a PARTIAL `resolve-valuesets` import enter
- * execution mode: the importer records a failed OID as an empty-code ERROR row and can still exit
- * non-fatally when at least one OID resolved, so the HbA1c or qualifying-visit sets could be `[]` while
- * Diabetes has codes — the official subset would then run with empty retrieves and report fabricated
- * missing-visit / missing-HbA1c divergences instead of degrading to the PR-2 estimate (Codex P2).
+ * Three-tier diff-mode ladder (#258): `literal` → `subset` → `estimate`.
+ *
+ * The value-set gate is shared by both real-execution tiers: only when EVERY VSAC value set the official
+ * CMS122 measure retrieves resolves non-empty from the store do we run a real execution diff. Probing a
+ * single OID would let a PARTIAL `resolve-valuesets` import enter execution mode — the importer records a
+ * failed OID as an empty-code ERROR row and can still exit non-fatally when at least one OID resolved, so
+ * the HbA1c or qualifying-visit sets could be `[]` while Diabetes has codes; the measure would then run with
+ * empty retrieves and report fabricated missing-visit / missing-HbA1c divergences instead of degrading to
+ * the estimate (Codex P2).
+ *
+ * When the value sets resolve, we prefer the **literal** tier (the official multi-library QICore artifact
+ * run from pre-shipped ELM via fqm-execution — ADR-026) if its vendored bundle is present, else the
+ * **subset** tier (ADR-024 faithful official-subset). Absent the value sets → the PR-2 **estimate**.
+ * `literalAvailable` defaults false so a caller that hasn't loaded the vendored bundle never claims literal.
  */
-export async function chooseDiffMode(resolver: ValueSetResolver): Promise<"execution" | "estimate"> {
+export async function chooseDiffMode(
+  resolver: ValueSetResolver,
+  literalAvailable = false,
+): Promise<"literal" | "subset" | "estimate"> {
   const oids = CMS122_OFFICIAL_META.valueSets ?? [];
   if (oids.length === 0) return "estimate";
   const expansions = await Promise.all(oids.map((oid) => resolver.expand(oid)));
-  return expansions.every((codes) => codes.length > 0) ? "execution" : "estimate";
+  if (!expansions.every((codes) => codes.length > 0)) return "estimate";
+  return literalAvailable ? "literal" : "subset";
 }
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
@@ -467,23 +480,32 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
     const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
     const resolver = new StoreValueSetResolver(stores.valueSets);
-    // Execution diff only for cms122, only when there IS a completed population run (an empty latestRows
-    // must fall through to the estimate's no-run response, not render a misleading "0 of 0 diverge"
-    // execution report — Codex P2), and only when the imported VSAC rows are present; else the PR-2 estimate.
-    if (diffId === "cms122" && latestRows.length > 0 && (await chooseDiffMode(resolver)) === "execution") {
-      // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
-      // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
-      // date (WorkWell's value-based cms122 is date-insensitive, but the official subset's age gate is
-      // not) — Codex P2. Anchor the synthetic bundles to the same date so the diff mirrors the run.
-      const today = new Date().toISOString().slice(0, 10);
-      const runId = latestRows[0]?.runId;
-      const run = runId ? await stores.runs.getRun(runId) : null;
-      const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
-      const report = await computeExecutionDiff(ref, latestRows, {
-        engine: new CqlExecutionEngine({ valueSetResolver: resolver }),
-        resolver, employees: EMPLOYEES, today: asOf, asOf,
-      });
-      return json(report);
+    // Real execution diff only for cms122, only when there IS a completed population run (an empty
+    // latestRows must fall through to the estimate's no-run response, not render a misleading "0 of 0
+    // diverge" report — Codex P2), and only when the imported VSAC rows are present. The three-tier ladder
+    // (#258): literal (official QICore artifact via fqm-execution) → subset (ADR-024) → estimate (PR-2).
+    if (diffId === "cms122" && latestRows.length > 0) {
+      const mode = await chooseDiffMode(resolver, literalDiffAvailable());
+      if (mode !== "estimate") {
+        // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
+        // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
+        // date (WorkWell's value-based cms122 is date-insensitive, but the official age gate is not) —
+        // Codex P2. Anchor the synthetic bundles to the same date so the diff mirrors the run.
+        const today = new Date().toISOString().slice(0, 10);
+        const runId = latestRows[0]?.runId;
+        const run = runId ? await stores.runs.getRun(runId) : null;
+        const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
+        const deps = { engine: new CqlExecutionEngine({ valueSetResolver: resolver }), resolver, employees: EMPLOYEES, today: asOf, asOf };
+        if (mode === "literal") {
+          try {
+            return json(await computeLiteralDiff(ref, latestRows, deps));
+          } catch (err) {
+            // fqm-execution fought the runtime — degrade to the subset tier rather than failing the route.
+            console.warn(`[fidelity/diff] literal tier failed, falling back to subset: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        return json(await computeExecutionDiff(ref, latestRows, deps));
+      }
     }
     return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
   }

@@ -32,7 +32,8 @@ export interface SubjectDiff {
   divergenceGate: string;
 }
 export interface ExecutionDiffReport {
-  mode: "execution";
+  /** Diff-mode tier (#258): the ADR-024 official-SUBSET execution diff. literal → subset → estimate ladder. */
+  mode: "subset";
   measureId: string;
   ecqmId: string;
   runId: string | null;
@@ -134,7 +135,7 @@ export async function computeExecutionDiff(
   // or a broken evaluation would read as "no divergence" (Codex P2).
   const totalErrors = subjects.filter((s) => s.officialOutcome === "ERROR").length;
   const report: ExecutionDiffReport = {
-    mode: "execution",
+    mode: "subset",
     measureId: ref.measureId,
     ecqmId: ref.ecqmId,
     runId,
