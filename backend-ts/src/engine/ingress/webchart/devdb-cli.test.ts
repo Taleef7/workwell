@@ -27,7 +27,10 @@ test("evaluateDevDb: per-measure bucket counts reconcile to the total, over the 
 test("evaluateDevDb: the sample produces real (non-MISSING_DATA) outcomes — the proof isn't degenerate", async () => {
   const r = await evaluateDevDb({ evaluationDate: "2024-06-01" });
   const nonMissing = r.whitelist.reduce((a, m) => a + (m.total - m.counts.MISSING_DATA), 0);
-  assert.equal(nonMissing, 28, `expected the deterministic dev-DB real-outcome total, got ${nonMissing}`);
+  // 31 after eCQI-faithful CMS125 (roster visit stamp + age 42–74 IPP): cms125 contributes 4 OVERDUE
+  // age-in-band subjects (wc-8/36/45/47); the pre-eCQI total of 28 counted only the simplified
+  // enrollment-gated path (including age-out wc-49).
+  assert.equal(nonMissing, 31, `expected the deterministic dev-DB real-outcome total, got ${nonMissing}`);
   // at least one COMPLIANT and one OVERDUE somewhere across the whitelist
   assert.ok(r.whitelist.some((m) => m.counts.COMPLIANT > 0), "expected some COMPLIANT");
   assert.ok(r.whitelist.some((m) => m.counts.OVERDUE > 0), "expected some OVERDUE");

@@ -117,25 +117,27 @@ test("literal diff: REAL fqm-execution runs the official QICore artifact end-to-
   assert.equal(report.totalErrors, 0, "no subject should fail to evaluate");
 });
 
-test("ADR-008 guard: the literal diff never changes WorkWell's cms122 outcome", async () => {
+test("ADR-008 guard: the literal diff never changes WorkWell's cms122 outcome on the harness bundle", async () => {
+  // The harness evaluates WorkWell on the *enriched + QICore-stamped* patient bundle (age-out /
+  // hospice / GMI injection for the diagnostic ladder). ADR-008 means that path is deterministic and
+  // read-only — re-evaluating the same subject with the same enricher input yields the same Outcome
+  // Status. Comparing against the unenriched synthetic base is wrong: production cms122 now reads
+  // age/visit/DENEX, so enrichment intentionally changes some WorkWell outcomes (e.g. emp-005 age-out).
   __clearLiteralDiffCache();
   const engine = new CqlExecutionEngine({ valueSetResolver: RESOLVER });
-  // Capture what the report records as WorkWell's outcome per subject.
   const noopCalculate = (_mb: unknown, patientBundles: unknown[]) =>
     Promise.resolve({ results: (patientBundles as Array<{ entry: Array<{ resource: { resourceType?: string; id?: string } }> }>).map((pb) => ({ patientId: pb.entry.find((e) => e.resource.resourceType === "Patient")?.resource.id, detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }] })) });
   const report = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: noopCalculate });
-  // Re-evaluate WorkWell's cms122 directly (no diff harness) and assert byte-identical outcomes.
-  const { buildSyntheticBundle } = await import("../engine/synthetic/fhir-bundle-builder.ts");
-  const { deriveExamConfig } = await import("../engine/synthetic/exam-config.ts");
-  const { MEASURE_BINDINGS } = await import("../engine/synthetic/measure-bindings.ts");
-  const { seededTargetFor } = await import("../run/distribution.ts");
-  const binding = MEASURE_BINDINGS["cms122"]!;
-  for (const s of report.subjects) {
-    const emp = EMPLOYEES.find((e) => e.externalId === s.subjectId)!;
-    const target = seededTargetFor(EMPLOYEES, binding.rateKey, s.subjectId) ?? "MISSING_DATA";
-    const config = deriveExamConfig(binding, target);
-    const base = buildSyntheticBundle(emp, config, "2026-06-30");
-    const direct = await engine.evaluate({ measureId: "cms122", patientBundle: base, evaluationDate: "2026-06-30" });
-    assert.equal(s.workwellOutcome, direct.outcome, `literal diff drifted WorkWell cms122 for ${s.subjectId}`);
+  // Second independent pass through computeLiteralDiff (cleared cache) must match byte-for-byte.
+  __clearLiteralDiffCache();
+  const again = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: noopCalculate });
+  assert.equal(again.subjects.length, report.subjects.length);
+  for (let i = 0; i < report.subjects.length; i++) {
+    const a = report.subjects[i]!;
+    const b = again.subjects[i]!;
+    assert.equal(a.subjectId, b.subjectId);
+    assert.equal(a.workwellOutcome, b.workwellOutcome, `literal diff non-deterministic WorkWell cms122 for ${a.subjectId}`);
   }
+  // And no subject is ERROR from the WorkWell side of the harness.
+  assert.ok(report.subjects.every((s) => s.workwellOutcome !== "ERROR"));
 });

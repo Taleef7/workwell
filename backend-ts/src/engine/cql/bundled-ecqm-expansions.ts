@@ -51,8 +51,11 @@ const map: Record<string, CqlCode[]> = {
   "2.16.840.1.113883.3.464.1003.1167": [code(ECQM_CANONICAL_CODES.palliativeDx)],
   "2.16.840.1.113883.3.464.1003.101.12.1090": [code(ECQM_CANONICAL_CODES.palliativeEnc)],
   "2.16.840.1.113883.3.464.1003.198.12.1135": [code(ECQM_CANONICAL_CODES.palliativeProc)],
-  // CMS125
-  "2.16.840.1.113883.3.464.1003.108.12.1018": [code(ECQM_CANONICAL_CODES.mammogram)],
+  // CMS125 — 77067 is the active CPT; G0202 is the deleted-2018 HCPCS still present on legacy WebChart rows.
+  "2.16.840.1.113883.3.464.1003.108.12.1018": [
+    code(ECQM_CANONICAL_CODES.mammogram),
+    { code: "G0202", system: HCPCS },
+  ],
   "2.16.840.1.113883.3.464.1003.101.12.1089": [code(ECQM_CANONICAL_CODES.virtualEnc)],
   "2.16.840.1.113883.3.464.1003.198.12.1068": [code(ECQM_CANONICAL_CODES.historyBilateralMastectomy)],
   "2.16.840.1.113883.3.464.1003.198.12.1005": [code(ECQM_CANONICAL_CODES.bilateralMastectomy)],

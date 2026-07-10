@@ -71,13 +71,13 @@ function dateMinusDays(anchorDate: string, daysAgo: number): string {
 }
 
 /**
- * Additively enrich a subject's synthetic bundle so the official-subset CMS122 gates fire. Real
- * VSAC-member codings sampled from `expansions` (the same sets the official measure resolves) are
- * APPENDED — never replacing existing `urn:workwell:*` codings. Production cms122 is the eCQI
- * faithful-subset (2026-07), so age-out / hospice / GMI enrichment *will* change live outcomes when
- * used — that is intentional for the diagnostic fidelity ladder only. Never call this on a path that
- * persists Outcome Status. `anchorDate` anchors visit/hospice periods inside the 12-month MP.
- * Deterministic per externalId. Mutates + returns `bundle`.
+ * Additively enrich a subject's synthetic bundle for the diagnostic fidelity ladder (literal QICore
+ * / subset execution-diff). Real VSAC-member codings sampled from `expansions` are APPENDED — never
+ * replacing existing dual-codes. Deterministic age-out / missing-visit / hospice / GMI injection is
+ * intentional so the ladder has subjects to attribute; since production cms122 is the eCQI
+ * faithful-subset (2026-07), those injections change WorkWell outcomes on the *harness* path too
+ * (parity with the official subset remains). Never call this on a path that persists Outcome Status.
+ * `anchorDate` anchors visit/hospice periods inside the 12-month MP. Mutates + returns `bundle`.
  */
 export function enrichForOfficialCms122(bundle: FhirBundle, employee: EmployeeProfile, expansions: Expansions, anchorDate: string): FhirBundle {
   const h = hash(employee.externalId);

@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-07-10 — PR #280 CI + Codex P1 (CMS125 visit + eCQM test parity)
+
+Addressed CI red + Codex review on `feat/ecqi-faithful-cms122-cms125`:
+
+- **Codex P1:** `stampEnrollment` for `cms125` now also stamps a CPT 99213 office-visit Encounter
+  (evaluationDate-anchored inside the 12-month MP) so WebChart roster paths satisfy eCQI IPP visit gate
+  without fabricating mammograms. Idempotent; cms122 still never roster-stamps a diabetes dx.
+- **Dev-DB proof:** wc-49 is age 33 → honest `MISSING_DATA` under age 42–74; age-in-band OVERDUE are
+  wc-8/36/45/47; whitelist non-MISSING total **31** (was 28 under simplified CMS125).
+- **CLI goldens:** cms122/cms125 use dual-coded synthetic builder (spike fixtures predate VSAC/visit).
+- **Execution-diff:** production ≡ official-subset ELM → expect `totalDivergent === 0` (parity).
+- **Literal ADR-008:** determinism on the harness (enriched) path — not unenriched base.
+- Bundled Mammography expansion includes legacy HCPCS G0202 for WebChart rows.
+
+No schema/deps.
+
 ## 2026-07-10 — production-faithful CMS122v14 + CMS125v14 (eCQI 2026)
 
 Promoted both runnable CMS eCQMs from simplified day-count / local-code CQL to **eCQI CMS*v14
