@@ -82,6 +82,28 @@ test("literal diff: injected calculate → per-subject mapping, gate attribution
   assert.equal(again, report);
 });
 
+test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Codex P2, #277)", async () => {
+  __clearLiteralDiffCache();
+  let capturedOptions: Record<string, unknown> | undefined;
+  const spyCalculate = (_mb: unknown, patientBundles: unknown[], options: unknown) => {
+    capturedOptions = options as Record<string, unknown>;
+    return Promise.resolve({
+      results: (patientBundles as Array<{ entry: Array<{ resource: { resourceType?: string; id?: string } }> }>).map((pb) => ({
+        patientId: pb.entry.find((e) => e.resource.resourceType === "Patient")?.resource.id,
+        detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }],
+      })),
+    });
+  };
+  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: spyCalculate };
+  await computeLiteralDiff(CMS122V14, rows(4), deps);
+  assert.ok(capturedOptions, "calculate must be invoked with an options object");
+  assert.equal(capturedOptions!.calculateHTML, false, "fqm-execution 1.8.5 has no disableHTMLGeneration option — calculateHTML must be explicitly disabled");
+  assert.equal(capturedOptions!.calculateClauseCoverage, false);
+  assert.equal(capturedOptions!.calculateRAVs, false);
+  assert.equal(capturedOptions!.calculateSDEs, false);
+  assert.equal(capturedOptions!.disableHTMLGeneration, undefined, "disableHTMLGeneration is not a real fqm-execution option — must not be relied on");
+});
+
 test("literal diff: REAL fqm-execution runs the official QICore artifact end-to-end", async () => {
   __clearLiteralDiffCache();
   const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };

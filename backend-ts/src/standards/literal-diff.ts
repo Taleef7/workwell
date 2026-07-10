@@ -262,7 +262,13 @@ export async function computeLiteralDiff(
         measurementPeriodStart: `${deps.asOf.slice(0, 4)}-01-01`,
         measurementPeriodEnd: `${deps.asOf.slice(0, 4)}-12-31`,
         calculateSDEs: false,
-        disableHTMLGeneration: true,
+        // fqm-execution 1.8.5 has no `disableHTMLGeneration` option -- it reads `calculateHTML`
+        // (default true) plus these other on-by-default flags. Disable all of them: this diff
+        // harness only consumes population membership, not HTML/coverage/RAV output, and at
+        // population scale the HTML/coverage build is wasted CPU per subject (Codex P2, #277).
+        calculateHTML: false,
+        calculateClauseCoverage: false,
+        calculateRAVs: false,
         trustMetaProfile: false, // our bundles are plain FHIR (retrieve by base type, ignore profiles)
         verboseCalculationResults: true,
       },
