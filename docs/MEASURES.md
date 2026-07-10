@@ -231,6 +231,9 @@ Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evalua
 - CQL file: `backend-ts/measures/cms125.cql`
 - Tags: `ecqm`, `cms`, `cancer-screening`, `preventive`
 - Compliance window: 27 months (820 days — mammogram within the measurement period or 26 months prior)
+- **Fidelity:** operational simplified CQL only — **no** E14 structural/execution/literal ladder yet
+  (unlike CMS122). Catalog identity (CMS125v14 / MIPS 112) is eCQI-current; logic is not claimed as
+  full official eCQM parity.
 
 Outcome mapping:
 - `EXCLUDED` when bilateral mastectomy or documented clinical exclusion
@@ -257,6 +260,34 @@ Outcome mapping:
 > recency window, so an old HbA1c can read COMPLIANT. This is the documented **SIMPLIFIED** criterion in
 > the E14 CMS122 fidelity report (a true measurement-period window needs the VSAC-backed value-set
 > resolver, blocked on credentials); the define/label keep the "recent" name pending that wiring.
+
+### eCQM accuracy posture (vs eCQI — read this before claiming parity)
+
+**Short answer:** we do **not** claim that every CMS row in the catalog is a byte-for-byte eCQI eCQM.
+Accuracy is tiered on purpose.
+
+| What we ship | Count | Relationship to eCQI / official eCQM | How we prove it |
+|---|---|---|---|
+| **Runnable Active CMS CQL** | **2** — CMS122v14, CMS125v14 | **Intentional WorkWell simplifications** for TWH ops (inline codes / synthetic enrollment, 5-bucket Outcome Status). Not drop-in official MAT packages for production MIPS submission. | CMS122: structural + estimate + official-**subset** + **literal** fqm tiers (`GET /api/measures/cms122/fidelity/*`). CMS125: **no fidelity ladder yet** — operational CQL only (mammogram window + exclusions). |
+| **Draft CMS catalog entries** | **47** | **Metadata only** — correct CMS ID, **v14 = 2026** performance year, MIPS Quality ID, title (verified 2026-07-08 in `docs/TERMINOLOGY_AUDIT_2026-07-08.md`). **No CQL, not evaluated.** | Catalog seed + terminology audit against eCQI EC table |
+| **OSHA / HEDIS / permanent vax (12 runnable)** | 12 | **Not CMS eCQMs.** Different authorities (eCFR, NCQA HEDIS, ACIP/CDC). “Accurate” means policy-correct for those sources, not eCQI. | Measure docs + code filters + WebChart crosswalk currency audit |
+
+**What “using a real eCQM” means here:**
+
+1. **Catalog identity** — right eCQI measure ID / year / MIPS ID (done for all 49).  
+2. **Runnable logic** — CQL that drives cases and dashboards (only 2 CMS measures).  
+3. **Official logic comparison** — subject-by-subject vs official artifact (only **CMS122**, via E14 + #258).  
+
+**Recommended next accuracy work (if EH needs eCQI-grade claims):**
+
+1. **CMS125 fidelity package** (same shape as CMS122): vendored eCQI/MADiE reference + structural
+   COVERED/SIMPLIFIED/OMITTED + at least subset or literal execution diff. Highest-value gap among
+   measures we actually evaluate.  
+2. Close known CMS122 authored gaps the fidelity report already names (HbA1c **recency window**,
+   full VSAC “Glycemic Status Assessment” vs inline LOINC, authored GMI path if product wants it).  
+3. **Do not** bulk-author all 47 Draft CMS measures to “match eCQI” without a product list — each
+   official eCQM is multi-library + VSAC-heavy; pick EH sales / demo measures first.  
+4. Keep ADR-008: fidelity diffs stay **descriptive** — they never overwrite operational Outcome Status.
 
 ---
 

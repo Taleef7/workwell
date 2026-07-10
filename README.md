@@ -22,19 +22,17 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
-- **Roadmap 2026-07-09 — PoC → WebChart integration (milestones M1/M2/M3).** PR #252 merged; the
-  active plan is 13 new issues across three milestones (integration readiness now / contract-gated /
-  production readiness), with the MIE unblock package at `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`
-  and strategy + recorded decision positions at `docs/ROADMAP_2026-07-09.md`. Highlights: mock-contract
-  WebChart transport pre-build, bounded worker-pool parallelism for `seed:scale --mode evaluate`,
-  tiered evidence policy, and an fqm-execution spike unblocking the literal official-CQL diff (#251
-  closed as superseded).
+- **Roadmap 2026-07-09 — PoC → WebChart integration (M1/M2/M3).** **M1 engineering closed 2026-07-10**
+  (PRs #271–#279 on `main`): mock WebChart HTTP transport, worker pool, tiered evidence, fqm literal
+  CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures, seam inventory, production-readiness memo,
+  N=5000 real-eval proof. **Remaining M1 owner step: #254** — send
+  `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (unblocks M2: #262 live transport, #263 delta-eval,
+  #187 identity). Strategy: `docs/ROADMAP_2026-07-09.md`. **eCQM honesty:** only CMS122 + CMS125 are
+  runnable Active; catalog metadata for 49 CMS IDs is eCQI-current (2026/v14); deep official-logic
+  fidelity is CMS122-only today — see `docs/MEASURES.md` → "eCQM accuracy posture".
 - **Production-readiness memo (#261 — docs only).** `docs/PRODUCTION_READINESS_2026-07.md` names the
-  hard rule (**the demo stack never receives PHI**), maps what already exists (audit ledger, role gates,
-  refresh-cookie hardening) against what's missing (PHI-capable environment, real user directory, real
-  tenant isolation, durable scheduler, backup/DR runbook) for a production WebChart integration, and
-  gives every open gap an M3 tracking issue (#167, #264, #265, #256/#263, and 4 new stubs #267–#270).
-  PHI/auth/tenancy decisions are deferred to MIE's answers in
+  hard rule (**the demo stack never receives PHI**), maps existing controls vs gaps, and tracks M3
+  issues (#167, #264, #265, #267–#270, #168). PHI/auth/tenancy decisions wait on MIE answers in
   `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
 - **Option A at scale — real batch live-evaluation of the `mhn` (~120k) tenant (PR #252 — merged 2026-07-08).** The population-scale tenant's outcomes are now produced by **real batch CQL evaluation** (`batchEvaluateScalePopulation`, `backend-ts/src/run/batch-evaluate-scale.ts`) instead of a fabricated compliance distribution — subject-major, bounded-memory, whole-batch resumable, per-subject error-isolated (failure ⇒ MISSING_DATA + error evidence), audited `SCALE_POPULATION_EVALUATED`. The default `webChartRealisticGenerator` emits real LOINC/CVX/CPT codes through the WebChart terminology crosswalk (13/14 measures; `hazwoper` passes through), exercising the real adapter at scale. `pnpm seed:scale --mode evaluate` is now the **default** (`--mode fabricated` keeps the legacy instant path one more release; `--trim-evidence` for a large run). **Evaluate mode refuses over legacy fabricated `seed:scale` runs** (distinguished by a `requestedScope.batchEvaluated` marker) — so a DB with the old fabricated seed (incl. live Neon) must be rolled back first (DEPLOY.md). The `mhn|Lxx|Pxx|n` `subject_id` encoding + `aggregateScaleRun` (and thus the whole rollup/hierarchy read path) are **unchanged** — only the outcomes' provenance changed. Descriptive only (ADR-008/ADR-020); no schema, no new deps; same rollback SQL. Reviewed (code-reviewer skill + Codex low + Codex gpt-5.5 high); full suite **1057 pass / 1 pg-skip / 0 fail**. See `docs/JOURNAL.md`.
 - **E9 (#78) — measure-execution `MeasureExecutor` seam; the CQL→SQL fork decided on our own (ADR-025).** The charter's biggest architectural fork (Doug's Q2) resolved without waiting: measure execution is now pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`) that **extends `EvaluateMeasureBinding`**, so an executor drops into `evaluateBundle`/`evaluateBatch` with no new plumbing. `fhirNativeExecutor` is the **default + correctness oracle** (delegates to the existing CQL→ELM engine — no second evaluation path, parity-tested); `sqlPushdownExecutor` is an **inert stub** (Option B / CQL→SQL is research-grade, not built — constructs but rejects on use, mirroring the inert `webChartDataSource`); `resolveMeasureExecutor(env)` selects config-driven (SQL only on an explicit `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in, so the deployed default is byte-identical to today). Any future SQL executor must pass **golden parity** vs the FHIR-native oracle, per measure, before it serves. Descriptive only (ADR-008); no schema, no new deps, no engine change. ADR-014 superseded; ADR-017's parked "opt-in second executor" is now the concrete seam. 1017 backend tests (1017 pass / 1 pg-skip). See `docs/JOURNAL.md`.
