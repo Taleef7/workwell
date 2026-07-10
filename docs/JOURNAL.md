@@ -73,6 +73,26 @@ owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output an
 (#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
 in `docs/ROADMAP_2026-07-09.md`.
 
+### #260 — seam inventory (2026-07-09)
+
+Implemented the M1 issue: a boot-time inventory of the repo's ~7 "inert-unless-configured" seams
+(sendgrid, datachaser, ice, eh-fhir, webchart, sql-executor, vsac). `describeSeams(env)`
+(`backend-ts/src/config/seam-inventory.ts`) reports each seam's active/inactive state by calling a
+newly-extracted, exported predicate per seam (`isSendgridConfigured`, `isDataChaserConfigured`,
+`isIceConfigured`, `isEhFhirConfigured`, `isWebChartConfigured`, `isSqlPushdownSelected`,
+`isVsacConfigured`) — each `resolve*` function was refactored to call its own predicate rather than
+inline the env check twice, so nothing is duplicated. One boot log line in `worker.ts`
+(`logSeamInventoryOnce`, guarded like the existing auth-handler memo so it fires once per worker
+instance, not once per request): `seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off
+sql-executor=off vsac=off`. New "Inert-seam inventory" table in ARCHITECTURE.md §10 (module path,
+activating env var(s), default state, last-verified 2026-07-09, activation test file per seam).
+`seam-inventory.test.ts` covers all 7 seams' on/off transitions (including the both-vars-required pairs
+for datachaser/ice/eh-fhir/webchart) plus the all-off/all-on log-line shapes; the 6 pre-existing
+per-seam test files (email-service, outreach-channel, immunization-forecast, standing-order-provider,
+data-source, resolve-value-set-resolver) all still pass unchanged, confirming the predicate extraction
+is a pure, behavior-preserving refactor. No schema, no new deps, no behavior change to any seam.
+**1080 tests (1079 pass / 1 pg-skip / 0 fail).**
+
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 
 The Option A scale work (below) was built subagent-driven (implementer → spec review → code-quality
