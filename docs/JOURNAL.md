@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-07-09 — #259 WebChart dev-DB fixtures expanded to all patients
+
+Expanded the offline WebChart dev-DB fixture corpus from the codeable-data subset to all 56 `is_patient=1`
+rows. `scripts/webchart-devdb-export.ts` now emits sparse Patient-only bundles instead of skipping
+patients without LOINC observations or coded procedures, and the generated OH enrollment roster now covers
+all 56 subjects. The sparse fixtures are intentional live-adapter edge cases: enrolled patients with no
+matching clinical data evaluate to CQL-authored `MISSING_DATA`; no evaluation logic, normalization
+semantics, terminology mapping, schema, or dependencies changed.
+
+The dev-DB golden tests now hard-assert the 56-patient corpus, sweep every patient across the
+`evaluate:webchart-devdb` whitelist and named-excluded measures, keep the existing real-code per-patient
+assertions, and pin a Patient-only subject (`wc-14`) to `MISSING_DATA` as the no-data proof. The CLI
+summary remains 28 real (non-`MISSING_DATA`) whitelist outcomes, now over 56 patients; docs updated in
+`WEBCHART_FHIR_MAPPING.md` §8.1.
+
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
 ### #255 — mock-contract WebChart transport (2026-07-09)
@@ -25,6 +40,33 @@ empty population). Deployed default is byte-identical: `resolveDataSource` still
 semantics untouched. Docs: ARCHITECTURE `engine.ingress.webchart`, WEBCHART_FHIR_MAPPING §8.2, the new
 assumptions doc. Built by Codex (gpt-5.5 high) under orchestration; verified locally green. Descriptive
 only (ADR-008/ADR-017); read-only ingress — no audit-event surface.
+### #253 — N=5000 real-eval proof (2026-07-09)
+
+The Phase-4 proof of the Option A batch engine, run live on Neon (owner-authorized #253). Precondition
+verified first: the 2026-06-29 fabricated 1.68M-row seed was rolled back — 0 `seed:scale` runs before
+the run. `pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate` (full evidence, no trim):
+
+- **Completed: 14 runs × 5,000 subjects = 70,000 real CQL evaluations** — all 14 runs COMPLETED with
+  the `requestedScope.batchEvaluated` marker; 14 `SCALE_POPULATION_EVALUATED` audit events; 70,000
+  outcomes verified on Neon.
+- **Wall-clock ~79.5 min; ≈68 ms/evaluation overall.** The first two 500-subject chunks ran under
+  heavy host CPU contention (4 parallel build agents + their test suites): ~604 s / ~619 s per chunk
+  ≈ 86–88 ms/eval; the remaining eight chunks averaged ~443 s ≈ **63 ms/eval** once contention eased —
+  so the plan's ~60 ms estimate holds on a quiet machine.
+- **Distribution is multi-bucket and per-measure realistic** (e.g. audiogram 3,900/275/275/275/275
+  across COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED; PERMANENT measures mmr/varicella/hep-B
+  correctly emit no DUE_SOON/OVERDUE — partial series land MISSING_DATA; cms122 emits no DUE_SOON by
+  design). mhn COMPLIANT = 54,850 (78.4%), exactly Σ of the per-measure COMPLIANT counts. Full table
+  on issue #253.
+- **Live rollup reconciles:** All Systems = 72,100 = ihn 700 + twh 1,400 + mhn 70,000; mhn = Σ 24
+  locations = Σ 240 providers = 70,000; `?tenant=mhn` isolates the subtree; the roster still excludes
+  mhn.
+- Storage: full (untrimmed) evidence averaged ~630 bytes/outcome — `workwell_spike.outcomes` is now
+  80 MB (DB 202 MB total).
+- **Decision: a full 120k run on Neon is NOT planned.** ~30+ h single-threaded, and the storage cost
+  (~1 GB+ of evidence even before indexes) against the project's ~512 MB Neon branch headroom makes it
+  a bad trade. The worker-thread pool (#256) and the tiered evidence policy (#257) are the
+  prerequisites if it is ever done.
 
 **PR #252 merged 2026-07-08T20:36Z** → deployed on push to `main`. With it, the Option A real-batch-eval
 arc is live code, not just an open PR.
@@ -68,6 +110,26 @@ owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output an
 **Next:** owner ops — roll back the fabricated scale seed and run the N=5000 `--mode evaluate` proof
 (#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
 in `docs/ROADMAP_2026-07-09.md`.
+
+### #260 — seam inventory (2026-07-09)
+
+Implemented the M1 issue: a boot-time inventory of the repo's ~7 "inert-unless-configured" seams
+(sendgrid, datachaser, ice, eh-fhir, webchart, sql-executor, vsac). `describeSeams(env)`
+(`backend-ts/src/config/seam-inventory.ts`) reports each seam's active/inactive state by calling a
+newly-extracted, exported predicate per seam (`isSendgridConfigured`, `isDataChaserConfigured`,
+`isIceConfigured`, `isEhFhirConfigured`, `isWebChartConfigured`, `isSqlPushdownSelected`,
+`isVsacConfigured`) — each `resolve*` function was refactored to call its own predicate rather than
+inline the env check twice, so nothing is duplicated. One boot log line in `worker.ts`
+(`logSeamInventoryOnce`, guarded like the existing auth-handler memo so it fires once per worker
+instance, not once per request): `seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off
+sql-executor=off vsac=off`. New "Inert-seam inventory" table in ARCHITECTURE.md §10 (module path,
+activating env var(s), default state, last-verified 2026-07-09, activation test file per seam).
+`seam-inventory.test.ts` covers all 7 seams' on/off transitions (including the both-vars-required pairs
+for datachaser/ice/eh-fhir/webchart) plus the all-off/all-on log-line shapes; the 6 pre-existing
+per-seam test files (email-service, outreach-channel, immunization-forecast, standing-order-provider,
+data-source, resolve-value-set-resolver) all still pass unchanged, confirming the predicate extraction
+is a pure, behavior-preserving refactor. No schema, no new deps, no behavior change to any seam.
+**1080 tests (1079 pass / 1 pg-skip / 0 fail).**
 
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 

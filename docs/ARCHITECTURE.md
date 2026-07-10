@@ -280,3 +280,38 @@ No microservice decomposition is used in MVP; package boundaries are the future 
   path must be retained for at least one minor version cycle so integrators have
   a migration window. Additive, backward-compatible changes stay on v1.
 - The OpenAPI document (`workwell.swagger.enabled=true`) advertises version `v1`.
+
+## 10) Inert-seam inventory
+
+The repo has accumulated ~7 "inert-unless-configured" seams (ADR-011/012/013/017/023/025) — each
+correct and individually reviewed when it shipped, but collectively an untested-in-anger surface that
+can rot silently (a deploy secret typo, a seam nobody remembers is there). Issue #260 adds cheap
+insurance: a single pure `describeSeams(env)` (`backend-ts/src/config/seam-inventory.ts`) that reports
+each seam's active/inactive state by **calling the exact predicate each seam's own `resolve*` function
+already uses** (`isSendgridConfigured`, `isDataChaserConfigured`, `isIceConfigured`, `isEhFhirConfigured`,
+`isWebChartConfigured`, `isSqlPushdownSelected`, `isVsacConfigured`) — never a second parse of the env
+vars. Each `resolve*` function was refactored to call its own extracted predicate (a pure, behavior-
+preserving refactor; the predicate is the exact condition the resolver already branched on). One boot
+log line (`worker.ts`, guarded to fire once per worker instance, mirroring the existing auth-handler
+memoization pattern) makes the deployed configuration observable:
+
+```
+seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off
+```
+
+Descriptive only — this inventory makes no decisions and never selects a seam; it reports what the
+existing resolvers would already decide (ADR-008 n/a: nothing here touches compliance).
+
+| Seam | Module path | Activating env var(s) | Default state | Last verified | Activation test file |
+|------|-------------|------------------------|----------------|----------------|----------------------|
+| `sendgrid` | `backend-ts/src/case/email-service.ts` (`sendgridEmailService`, `resolveEmailService`, `isSendgridConfigured`) | `WORKWELL_EMAIL_PROVIDER=sendgrid` **and** `WORKWELL_EMAIL_SENDGRID_API_KEY` | off (simulated) | 2026-07-09 | `backend-ts/src/case/email-service.test.ts` |
+| `datachaser` | `backend-ts/src/case/outreach-channel.ts` (`dataChaserChannel`, `resolveChannel`, `isDataChaserConfigured`) | `WORKWELL_OUTREACH_DATACHASER_API_KEY` **and** `WORKWELL_OUTREACH_DATACHASER_BASE_URL` | off (simulated per-channel) | 2026-07-09 | `backend-ts/src/case/outreach-channel.test.ts` |
+| `ice` | `backend-ts/src/engine/immunization/immunization-forecast.ts` (`iceForecaster`, `resolveForecaster`, `isIceConfigured`) | `WORKWELL_IMMZ_ICE_API_KEY` **and** `WORKWELL_IMMZ_ICE_BASE_URL` | off (simulated forecaster) | 2026-07-09 | `backend-ts/src/engine/immunization/immunization-forecast.test.ts` |
+| `eh-fhir` | `backend-ts/src/order/standing-order-provider.ts` (`ehStandingOrderProvider`, `resolveStandingOrderProvider`, `isEhFhirConfigured`) | `WORKWELL_EH_FHIR_BASE_URL` **and** `WORKWELL_EH_FHIR_API_KEY` | off (simulated standing orders) | 2026-07-09 | `backend-ts/src/order/standing-order-provider.test.ts` |
+| `webchart` | `backend-ts/src/engine/ingress/data-source.ts` (`webChartDataSource`, `resolveDataSource`, `isWebChartConfigured`) | `WORKWELL_WEBCHART_BASE_URL` **and** `WORKWELL_WEBCHART_API_KEY` | off (JSON-bucket source) | 2026-07-09 | `backend-ts/src/engine/ingress/data-source.test.ts` |
+| `sql-executor` | `backend-ts/src/engine/measure-executor.ts` (`sqlPushdownExecutor`, `resolveMeasureExecutor`, `isSqlPushdownSelected`) | `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` (single explicit opt-in; the executor is an inert stub that rejects on use even when selected) | off (`fhirNativeExecutor`) | 2026-07-09 | `backend-ts/src/engine/measure-executor.test.ts` |
+| `vsac` | `backend-ts/src/engine/cql/resolve-value-set-resolver.ts` (`resolveValueSetResolver`, `isVsacConfigured`) + `engine-factory.ts` (`engineForEnv` key-gating) | `WORKWELL_VSAC_API_KEY` (base URL optional, defaults to the NLM FHIR terminology service) | off (local `StoreValueSetResolver` only) | 2026-07-09 | `backend-ts/src/engine/cql/resolve-value-set-resolver.test.ts`, `backend-ts/src/engine/cql/engine-factory.test.ts`, `backend-ts/src/engine/cql/audiogram-vsac-parity.test.ts` |
+
+The inventory itself is covered by `backend-ts/src/config/seam-inventory.test.ts` (flips each of the 7
+seams on/off with the correct env combination, including the both-vars-required pairs above, plus the
+all-off and all-on boot-log-line shapes).
