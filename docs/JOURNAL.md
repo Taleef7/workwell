@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-07-09 — #259 WebChart dev-DB fixtures expanded to all patients
+
+Expanded the offline WebChart dev-DB fixture corpus from the codeable-data subset to all 56 `is_patient=1`
+rows. `scripts/webchart-devdb-export.ts` now emits sparse Patient-only bundles instead of skipping
+patients without LOINC observations or coded procedures, and the generated OH enrollment roster now covers
+all 56 subjects. The sparse fixtures are intentional live-adapter edge cases: enrolled patients with no
+matching clinical data evaluate to CQL-authored `MISSING_DATA`; no evaluation logic, normalization
+semantics, terminology mapping, schema, or dependencies changed.
+
+The dev-DB golden tests now hard-assert the 56-patient corpus, sweep every patient across the
+`evaluate:webchart-devdb` whitelist and named-excluded measures, keep the existing real-code per-patient
+assertions, and pin a Patient-only subject (`wc-14`) to `MISSING_DATA` as the no-data proof. The CLI
+summary remains 28 real (non-`MISSING_DATA`) whitelist outcomes, now over 56 patients; docs updated in
+`WEBCHART_FHIR_MAPPING.md` §8.1.
+
 ## 2026-07-09 — Fable strategy session: roadmap materialized, MIE unblock package authored
 
 ### #258 — literal official-CQL diff spike (2026-07-09)
@@ -24,6 +39,58 @@ to subset). Empirical finding worth recording: the literal QICore retrieves requ
 stamp every subject reads out-of-population. Verified: backend **1065 pass / 1 pg-skip / 0 fail**;
 frontend lint + vitest + build green (StandardsTab now discriminates `subset|literal`). Closes #251 as
 superseded. Docs: ADR-026, MEASURES.md, ARCHITECTURE.md (`standards` + §7).
+
+### #255 — mock-contract WebChart transport (2026-07-09)
+
+Implemented the M1 pre-build of the live WebChart HTTP transport (`feat/issue-255-mock-webchart-transport`),
+making E12 PR-2c a days-size diff once MIE's contract answers land. `httpWebChartClient`
+(`backend-ts/src/engine/ingress/webchart/webchart-client.ts`) is now a **real transport built against our
+own assumed FHIR R4 contract** — documented in the new `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md` (two
+variants: A = true FHIR R4, implemented; B = proprietary REST over `wc_miehr_*`, documented fallback only —
+every assumption cross-referenced to its MIE question A1–A8/B9–B11/C13–C16 in
+`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`). The client: paged `GET /fhir/Patient?_count=` population
+listing (searchset `link[relation=next]` traversal), per-patient `GET /fhir/Patient/{id}/$everything`
+(one payload per patient — never a collapsed multi-patient bundle), `Authorization: Bearer` auth,
+AbortController timeouts, bounded 429/5xx retry-with-backoff, and per-patient failure degradation to a
+Patient-only bundle + `OperationOutcome` marker (the subject isolates as MISSING_DATA; the batch never
+aborts — mirrors `evaluateBatch`). Global `fetch` only — **no new deps, no schema**. A new named
+conformance suite (`webchart/mock-http-conformance.test.ts`) serves the 26 committed dev-DB patient
+bundles through an in-test `fetch` shim and asserts the mock-HTTP path's per-subject outcomes are
+**identical to the fixture-client path** for every whitelisted + excluded measure (the `devdb-eval.test.ts`
+goldens), plus the 5 failure-mode tests (timeout, 429-then-success, partial page, malformed resource,
+empty population). Deployed default is byte-identical: `resolveDataSource` still selects JSON unless BOTH
+`WORKWELL_WEBCHART_*` envs are set (explicit unset/blank-env test added). `normalize.ts`/`terminology.ts`
+semantics untouched. Docs: ARCHITECTURE `engine.ingress.webchart`, WEBCHART_FHIR_MAPPING §8.2, the new
+assumptions doc. Built by Codex (gpt-5.5 high) under orchestration; verified locally green. Descriptive
+only (ADR-008/ADR-017); read-only ingress — no audit-event surface.
+
+### #253 — N=5000 real-eval proof (2026-07-09)
+
+The Phase-4 proof of the Option A batch engine, run live on Neon (owner-authorized #253). Precondition
+verified first: the 2026-06-29 fabricated 1.68M-row seed was rolled back — 0 `seed:scale` runs before
+the run. `pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate` (full evidence, no trim):
+
+- **Completed: 14 runs × 5,000 subjects = 70,000 real CQL evaluations** — all 14 runs COMPLETED with
+  the `requestedScope.batchEvaluated` marker; 14 `SCALE_POPULATION_EVALUATED` audit events; 70,000
+  outcomes verified on Neon.
+- **Wall-clock ~79.5 min; ≈68 ms/evaluation overall.** The first two 500-subject chunks ran under
+  heavy host CPU contention (4 parallel build agents + their test suites): ~604 s / ~619 s per chunk
+  ≈ 86–88 ms/eval; the remaining eight chunks averaged ~443 s ≈ **63 ms/eval** once contention eased —
+  so the plan's ~60 ms estimate holds on a quiet machine.
+- **Distribution is multi-bucket and per-measure realistic** (e.g. audiogram 3,900/275/275/275/275
+  across COMPLIANT/DUE_SOON/OVERDUE/MISSING_DATA/EXCLUDED; PERMANENT measures mmr/varicella/hep-B
+  correctly emit no DUE_SOON/OVERDUE — partial series land MISSING_DATA; cms122 emits no DUE_SOON by
+  design). mhn COMPLIANT = 54,850 (78.4%), exactly Σ of the per-measure COMPLIANT counts. Full table
+  on issue #253.
+- **Live rollup reconciles:** All Systems = 72,100 = ihn 700 + twh 1,400 + mhn 70,000; mhn = Σ 24
+  locations = Σ 240 providers = 70,000; `?tenant=mhn` isolates the subtree; the roster still excludes
+  mhn.
+- Storage: full (untrimmed) evidence averaged ~630 bytes/outcome — `workwell_spike.outcomes` is now
+  80 MB (DB 202 MB total).
+- **Decision: a full 120k run on Neon is NOT planned.** ~30+ h single-threaded, and the storage cost
+  (~1 GB+ of evidence even before indexes) against the project's ~512 MB Neon branch headroom makes it
+  a bad trade. The worker-thread pool (#256) and the tiered evidence policy (#257) are the
+  prerequisites if it is ever done.
 
 **PR #252 merged 2026-07-08T20:36Z** → deployed on push to `main`. With it, the Option A real-batch-eval
 arc is live code, not just an open PR.
@@ -67,6 +134,49 @@ owner to send to Doug/Dave Carlson alongside the WebChart dev-DB proof output an
 **Next:** owner ops — roll back the fabricated scale seed and run the N=5000 `--mode evaluate` proof
 (#253), send the MIE package (#254) — both this week, in parallel — then work M1 in the order recorded
 in `docs/ROADMAP_2026-07-09.md`.
+
+### #256 — worker pool (2026-07-09)
+
+`seed:scale --mode evaluate` gains a **hand-rolled `node:worker_threads` pool** (`--workers <n>`, default
+4, clamped to `availableParallelism()-1`; issue #256, design followed exactly). Work units are
+`(start, end)` **subject-index ranges** — never FHIR bundles or cql-execution objects across the thread
+boundary; each worker loads ELM/bindings/crosswalk once, regenerates each subject's bundle IN-worker via
+the same deterministic-on-index `ScaleSubjectGenerator` (reconstructed from its `kind` string), evaluates
+all 14 measures, and returns plain-JSON rows. The **main thread does every DB write** (the shared
+`persistChunk` → `recordOutcomes`), so resume/idempotency (per-measure COMPLETED `seed:scale` +
+`requestedScope.batchEvaluated`), the legacy-fabricated refusal, `SCALE_POPULATION_EVALUATED` audit, and
+the status-only `aggregateScaleRun` read path are all **unchanged**. `--workers 1` (or 0) takes the
+prior single-threaded code path unchanged (escape hatch + parity baseline). Crash isolation: a worker
+error/non-zero exit replaces the worker and re-queues its chunk once; a second crash fails that chunk's
+subjects soft to MISSING_DATA with `{evaluationError}` evidence. New: `run/scale-eval-pool.ts` (pure
+orchestration, fake-worker unit-tested: exactly-once, retry-once, soft-fallback, DB-write rejection) +
+`run/scale-eval-worker.ts` (thread entry); the sequential/worker paths share one pure
+`evaluateScaleSubjectMeasure` so a worker row is byte-identical to a sequential row. **Parity test**
+(real threads): `--workers 2` produces the identical (subject, measure, status) set as `--workers 1`.
+**Measured** (N=500 × 14 = 7,000 real CQL evals, ~99 ms/eval sequential, 32-core host): 693.6s → 187.5s
+(4 workers, **3.70×**) → 136.3s (8 workers, **5.09×**). The pool lives ONLY on the batch CLI path —
+`worker_threads` is imported nowhere reachable from `worker.ts` (grep-verified). No new deps; no schema;
+CQL stays the sole `Outcome Status` authority (ADR-008). Docs: DEPLOY.md long-run warning, ARCHITECTURE
+seed:scale bullet. Branch `feat/issue-256-worker-pool`.
+### #260 — seam inventory (2026-07-09)
+
+Implemented the M1 issue: a boot-time inventory of the repo's ~7 "inert-unless-configured" seams
+(sendgrid, datachaser, ice, eh-fhir, webchart, sql-executor, vsac). `describeSeams(env)`
+(`backend-ts/src/config/seam-inventory.ts`) reports each seam's active/inactive state by calling a
+newly-extracted, exported predicate per seam (`isSendgridConfigured`, `isDataChaserConfigured`,
+`isIceConfigured`, `isEhFhirConfigured`, `isWebChartConfigured`, `isSqlPushdownSelected`,
+`isVsacConfigured`) — each `resolve*` function was refactored to call its own predicate rather than
+inline the env check twice, so nothing is duplicated. One boot log line in `worker.ts`
+(`logSeamInventoryOnce`, guarded like the existing auth-handler memo so it fires once per worker
+instance, not once per request): `seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off
+sql-executor=off vsac=off`. New "Inert-seam inventory" table in ARCHITECTURE.md §10 (module path,
+activating env var(s), default state, last-verified 2026-07-09, activation test file per seam).
+`seam-inventory.test.ts` covers all 7 seams' on/off transitions (including the both-vars-required pairs
+for datachaser/ice/eh-fhir/webchart) plus the all-off/all-on log-line shapes; the 6 pre-existing
+per-seam test files (email-service, outreach-channel, immunization-forecast, standing-order-provider,
+data-source, resolve-value-set-resolver) all still pass unchanged, confirming the predicate extraction
+is a pure, behavior-preserving refactor. No schema, no new deps, no behavior change to any seam.
+**1080 tests (1079 pass / 1 pg-skip / 0 fail).**
 
 ## 2026-07-08 (cont.) — scale batch-eval: review round + PR #252
 

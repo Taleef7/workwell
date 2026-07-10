@@ -288,7 +288,7 @@ with no live API and **no MariaDB driver**:
   enrollment) evaluates to a real bucket instead of MISSING_DATA.
 - **PR-2 — export tool + committed fixtures + e2e proof.** `scripts/webchart-devdb-export.ts` (dev-only,
   driver-free: shells `docker exec … mysql --batch --raw -N` with `JSON_OBJECT` and **serializes the FHIR
-  in Node**) emits `spike/webchart/devdb-patients.json` (26 patient bundles with codeable data) +
+  in Node**) emits `spike/webchart/devdb-patients.json` (56 patient bundles, every `is_patient=1` row) +
   `spike/webchart/enrollment-roster.json`. `webchart/devdb-eval.test.ts` runs them through the unchanged
   ingress + engine and asserts **deterministic, per-patient outcomes** at a data-contemporaneous eval date
   (2024-06-01) — a real COMPLIANT/OVERDUE/MISSING_DATA mix. Regenerate with
@@ -296,8 +296,8 @@ with no live API and **no MariaDB driver**:
 - **PR-3 — demo CLI.** `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
   (`webchart/devdb-cli.ts`) evaluates the committed sample across the whitelist and prints a per-measure
   outcome summary (naming the excluded measures — no silent caps) — the showable artifact. On the sample it
-  reports **28 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 13
-  MISSING_DATA over 26 patients).
+  reports **28 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 43
+  MISSING_DATA over 56 patients).
 
 **Crosswalk firmed to MIE's actual codes.** The dev DB records **LDL as LOINC `2089-1`** and **BP as the
 component `8480-6` (systolic)** — not the synthetic assumptions (`13457-7`/`18262-6`, panel `85354-9`).
@@ -310,3 +310,24 @@ never silently dropped): the OSHA CPTs (`audiogram`/`tb_surveillance`/`hazwoper`
 
 Descriptive-only throughout: the adapter supplies coded FHIR; the CQL engine remains the sole source of
 compliance truth (ADR-008/ADR-017).
+
+### 8.2 PR-2c pre-build — mock-contract HTTP transport (#255, 2026-07-09)
+
+While the final MIE answers in `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` are still pending,
+`httpWebChartClient` has been pre-built against the assumed **true FHIR R4** contract documented in
+`docs/WEBCHART_API_ASSUMPTIONS_2026-07.md`: `GET /fhir/Patient?_count=...` for paged population
+listing, FHIR searchset `link[relation=next]` pagination, and `GET /fhir/Patient/{id}/$everything` for
+one-patient clinical payloads. It sends `Authorization: Bearer <WORKWELL_WEBCHART_API_KEY>`, uses global
+`fetch`, bounds every request with an AbortController timeout, retries 429/5xx with short bounded
+backoff, and preserves the one-payload-per-patient invariant so the engine never evaluates a collapsed
+multi-patient bundle.
+
+The local conformance suite serves the committed dev-DB fixtures through an in-test mock `fetch` shim and
+asserts that the mock-HTTP path produces the same per-subject outcomes as the fixture-client path for the
+dev-DB goldens, plus timeout, 429-then-success, partial-page, malformed-resource, and empty-population
+failure modes. A malformed or failed per-patient `$everything` response degrades to a Patient-only
+collection bundle with an `OperationOutcome` marker, so the existing CQL evaluation path reports that
+known subject as missing data without aborting the rest of the batch. This is still **not** the final live
+transport: PR-2c must adjust request shaping, auth, pagination, and (if A1 says proprietary) add the
+row→FHIR mapper once MIE confirms the real contract. Inert-unless-configured remains unchanged:
+`resolveDataSource(env)` still selects WebChart only when both WebChart env vars are non-blank.

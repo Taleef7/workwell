@@ -66,13 +66,24 @@ export function sendgridEmailService(_config: { apiKey: string }): EmailService 
 }
 
 /**
+ * Pure predicate for whether the SendGrid stub is selected — the single source of truth for both
+ * `resolveEmailService` and the boot-time seam inventory (#260); never duplicate this parsing.
+ */
+export function isSendgridConfigured(env: EmailEnv): boolean {
+  const provider = (env.WORKWELL_EMAIL_PROVIDER ?? "").trim().toLowerCase();
+  const apiKey = (env.WORKWELL_EMAIL_SENDGRID_API_KEY ?? "").trim();
+  return provider === "sendgrid" && Boolean(apiKey);
+}
+
+/**
  * Select the email provider: simulated by DEFAULT (CLAUDE.md hard rule — must stay simulated on the
  * demo stack). The SendGrid stub is selected ONLY when WORKWELL_EMAIL_PROVIDER=sendgrid AND
  * WORKWELL_EMAIL_SENDGRID_API_KEY is set; provider=sendgrid without a key degrades back to simulated.
  */
 export function resolveEmailService(env: EmailEnv): EmailService {
-  const provider = (env.WORKWELL_EMAIL_PROVIDER ?? "").trim().toLowerCase();
-  const apiKey = (env.WORKWELL_EMAIL_SENDGRID_API_KEY ?? "").trim();
-  if (provider === "sendgrid" && apiKey) return sendgridEmailService({ apiKey });
+  if (isSendgridConfigured(env)) {
+    const apiKey = (env.WORKWELL_EMAIL_SENDGRID_API_KEY ?? "").trim();
+    return sendgridEmailService({ apiKey });
+  }
   return simulatedEmailService;
 }
