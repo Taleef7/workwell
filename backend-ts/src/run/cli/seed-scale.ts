@@ -4,11 +4,15 @@
  * SQL (no live CQL evaluation). Owner-run ON DEMAND, NOT on deploy. Local (SQLite floor) or Neon
  * (export DATABASE_URL). Builds the store bundle from `env` via the SAME factory the worker uses.
  *
- *   pnpm seed:scale [--subjects 120000] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence]
+ *   pnpm seed:scale [--subjects 120000] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate]
+ *                   [--trim-evidence | --full-evidence] [--workers <n>]
  *
  * --mode defaults to `evaluate` (real batch CQL engine via the WebChart-realistic generator); `fabricated`
- * keeps the legacy index-fabricated path one more release. --trim-evidence (evaluate mode) persists minimal
- * `{scale:true}` evidence to protect Neon storage at 120k.
+ * keeps the legacy index-fabricated path one more release. Evidence policy (#257, evaluate mode): trimming
+ * is TIERED by actionability (OVERDUE/DUE_SOON/MISSING_DATA keep full evidence; COMPLIANT/EXCLUDED get
+ * `{scale:true}`; a deterministic ~1% subject-index sample keeps full across all buckets) and AUTO-ENGAGES
+ * above 20,000 subjects unless --full-evidence explicitly overrides — a forgotten flag on a big run no
+ * longer floods Neon. --trim-evidence forces trim at any N; the two flags together are a usage error.
  *
  * ROLLBACK (reversible) — delete tagged OUTCOMES first, then runs (schema-qualify on Postgres):
  *   DELETE FROM workwell_spike.outcomes
@@ -24,10 +28,13 @@ import { batchEvaluateScalePopulation } from "../batch-evaluate-scale.ts";
 import { webChartRealisticGenerator } from "../scale-generator.ts";
 
 export const USAGE =
-  "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence] [--workers <n>]";
+  "Usage: pnpm seed:scale [--subjects <n>] [--as-of YYYY-MM-DD] [--mode fabricated|evaluate] [--trim-evidence | --full-evidence] [--workers <n>]";
 const DEFAULT_SUBJECTS = 120_000;
 /** Default worker count for `--mode evaluate` (#256); clamped by `availableParallelism()-1` at run time. */
 const DEFAULT_WORKERS = 4;
+/** Auto-trim engages STRICTLY ABOVE this subject count when neither --trim-evidence nor --full-evidence
+ *  is passed (#257) — full evidence at 120k×14 is GB-scale on the cost-capped Neon. */
+export const AUTO_TRIM_THRESHOLD = 20_000;
 
 /** Bad invocation (unknown/invalid flags) — exit code 2. */
 export class SeedCliUsageError extends Error {
@@ -40,8 +47,10 @@ export interface SeedScaleArgs {
   /** Evaluation strategy. `evaluate` (default) runs the real batch CQL engine; `fabricated` keeps the
    *  legacy index-fabricated `backfillScalePopulation` (reachable one more release). */
   mode?: "fabricated" | "evaluate";
-  /** Persist minimal `{scale:true}` evidence (evaluate mode only) — protects Neon storage at 120k. */
+  /** Force the TIERED evidence trim at any N (#257; evaluate mode only) — see `resolveTrimEvidence`. */
   trimEvidence?: boolean;
+  /** Explicitly keep FULL evidence on every row, overriding the >20k auto-trim (#257). */
+  fullEvidence?: boolean;
   /**
    * Worker-pool size for `--mode evaluate` (#256). Default 4, clamped to `availableParallelism()-1` at
    * run time (leaving one core for the main-thread DB writes). `--workers 1` (or 0) forces the
@@ -68,6 +77,8 @@ export function parseArgs(args: string[]): SeedScaleArgs {
       out.mode = m;
     } else if (a === "--trim-evidence") {
       out.trimEvidence = true;
+    } else if (a === "--full-evidence") {
+      out.fullEvidence = true;
     } else if (a === "--workers") {
       const n = Number(args[++i]);
       if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) throw new SeedCliUsageError(`--workers must be a non-negative integer\n${USAGE}`);
@@ -78,7 +89,33 @@ export function parseArgs(args: string[]): SeedScaleArgs {
       throw new SeedCliUsageError(`unknown argument '${a}'\n${USAGE}`);
     }
   }
+  if (out.trimEvidence && out.fullEvidence) {
+    throw new SeedCliUsageError(`--trim-evidence and --full-evidence are mutually exclusive\n${USAGE}`);
+  }
   return out;
+}
+
+/** How the evidence-trim decision resolved (#257). */
+export interface TrimResolution {
+  /** Whether the tiered trim is applied to this run. */
+  trim: boolean;
+  /** True when the trim engaged automatically via the >20k threshold (prints a notice). */
+  auto: boolean;
+}
+
+/**
+ * Resolve the evidence-trim policy for an evaluate run (#257) — pure + unit-tested:
+ *   1. `--full-evidence` → NO trim (explicit override, any N);
+ *   2. `--trim-evidence` → trim (explicit, any N);
+ *   3. neither flag + `subjects > AUTO_TRIM_THRESHOLD` (strictly above 20,000) → AUTO trim + notice —
+ *      the "forgotten flag on a big run" failure mode is closed;
+ *   4. otherwise → full evidence (small runs keep everything).
+ */
+export function resolveTrimEvidence(opts: { subjects: number; trimEvidence?: boolean; fullEvidence?: boolean }): TrimResolution {
+  if (opts.fullEvidence) return { trim: false, auto: false };
+  if (opts.trimEvidence) return { trim: true, auto: false };
+  if (opts.subjects > AUTO_TRIM_THRESHOLD) return { trim: true, auto: true };
+  return { trim: false, auto: false };
 }
 
 /** Build the store env from `process.env` — the same selection the worker factory makes (DATABASE_URL
@@ -115,6 +152,15 @@ export async function main(argv: string[]): Promise<number> {
     if (mode === "evaluate" && workers > 1) {
       process.stdout.write(`[seed:scale] parallel evaluate — ${workers} worker(s) (flag ${workerFlag}, cores ${availableParallelism()}).\n`);
     }
+    // Evidence policy (#257): tiered trim, auto-engaged above 20k subjects unless --full-evidence.
+    const trimResolution = resolveTrimEvidence({ subjects, trimEvidence: parsed.trimEvidence, fullEvidence: parsed.fullEvidence });
+    if (mode === "evaluate" && trimResolution.auto) {
+      process.stdout.write(
+        `[seed:scale] auto-trim engaged: --subjects ${subjects} > ${AUTO_TRIM_THRESHOLD} — tiered evidence ` +
+          "(OVERDUE/DUE_SOON/MISSING_DATA + a ~1% audit sample keep full evidence; COMPLIANT/EXCLUDED get {scale:true}). " +
+          "Pass --full-evidence to override.\n",
+      );
+    }
     const summary =
       mode === "fabricated"
         ? await backfillScalePopulation(
@@ -128,7 +174,7 @@ export async function main(argv: string[]): Promise<number> {
               auditStore: stores.events,
               generator: webChartRealisticGenerator(),
             },
-            { subjects, asOf, trimEvidence: parsed.trimEvidence, workers },
+            { subjects, asOf, trimEvidence: trimResolution.trim, workers },
           );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";
     process.stdout.write(

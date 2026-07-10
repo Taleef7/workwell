@@ -60,7 +60,13 @@ export interface ScaleBatchArgs {
   asOf: string;
   /** Outcomes buffered + flushed per chunk (bounds memory). Defaults to 500. */
   chunkSize?: number;
-  /** Persist minimal `{scale:true}` evidence instead of the full engine evidence (keeps rows small). */
+  /**
+   * TIERED evidence trim (#257 — replaces the all-or-nothing trim): when set, evidence value follows
+   * ACTIONABILITY — outcomes whose status is OVERDUE / DUE_SOON / MISSING_DATA keep the FULL engine
+   * evidence (they feed cases/worklists — load-bearing), COMPLIANT / EXCLUDED get minimal
+   * `{scale:true}`, and a deterministic ~1% subject-index sample (`idx % 100 === 0`) keeps full
+   * evidence across ALL buckets for audit spot-checks. See `applyEvidenceTier`.
+   */
   trimEvidence?: boolean;
   /**
    * Worker-pool size (#256). `<= 1` (the default) takes the unchanged single-threaded sequential path
@@ -98,7 +104,8 @@ export function subjectIdForIndex(i: number): string {
  * shared by the sequential path and the worker, so a worker-produced row is byte-identical to a
  * sequential row for the same inputs (the #256 parity guarantee). Per-(subject, measure) error
  * isolation lives here (ARCHITECTURE §6 / DATA_MODEL §5): an evaluation failure becomes MISSING_DATA
- * with evaluation-error evidence and never propagates, mirroring the run pipeline.
+ * with evaluation-error evidence and never propagates, mirroring the run pipeline. Always returns the
+ * FULL evidence — trimming is the caller's tier decision (`applyEvidenceTier`, #257).
  */
 export async function evaluateScaleSubjectMeasure(
   generator: ScaleSubjectGenerator,
@@ -106,18 +113,43 @@ export async function evaluateScaleSubjectMeasure(
   measureId: string,
   target: TargetOutcome,
   asOf: string,
-  trimEvidence: boolean,
 ): Promise<{ status: string; evidence: unknown }> {
   try {
     const bundle = generator.bundleFor(subjectId, measureId, target, asOf);
     const outcome = await evaluateBundle(bundle, measureId, { evaluationDate: asOf });
-    return { status: outcome.outcome, evidence: trimEvidence ? { scale: true } : outcome.evidence };
+    return { status: outcome.outcome, evidence: outcome.evidence };
   } catch (e) {
     return {
       status: "MISSING_DATA",
       evidence: { evaluationError: "CQL engine failure", message: e instanceof Error ? e.message : String(e) },
     };
   }
+}
+
+/** Statuses that keep FULL evidence when trimming (#257): they feed cases/worklists — load-bearing. */
+export const FULL_EVIDENCE_STATUSES: ReadonlySet<string> = new Set(["OVERDUE", "DUE_SOON", "MISSING_DATA"]);
+/** Deterministic audit-sample modulus (#257): subject indices divisible by this keep full evidence
+ *  across ALL buckets (~1% of subjects) for audit spot-checks. Index-based ⇒ reproducible. */
+export const EVIDENCE_SAMPLE_MODULUS = 100;
+
+/**
+ * The tiered evidence policy (#257) — evidence value follows ACTIONABILITY. Pure + shared by the
+ * sequential loop and the worker (both apply it to the same subject index + status), so trim output
+ * is identical regardless of parallelism. When `trim` is false, evidence passes through untouched.
+ * When trimming:
+ *   - `subjectIndex % EVIDENCE_SAMPLE_MODULUS === 0` → FULL evidence (deterministic ~1% audit sample,
+ *     all buckets);
+ *   - OVERDUE / DUE_SOON / MISSING_DATA → FULL evidence (feeds cases/worklists; an evaluation-error
+ *     MISSING_DATA also keeps its `{evaluationError}` payload);
+ *   - COMPLIANT / EXCLUDED → minimal `{scale:true}`.
+ * Descriptive only (ADR-008): the tier reads the CQL-decided status, never changes it — and the
+ * status-only `aggregateScaleRun`/rollup read path is provably unaffected (it never reads evidence).
+ */
+export function applyEvidenceTier(subjectIndex: number, status: string, evidence: unknown, trim: boolean): unknown {
+  if (!trim) return evidence;
+  if (subjectIndex % EVIDENCE_SAMPLE_MODULUS === 0) return evidence;
+  if (FULL_EVIDENCE_STATUSES.has(status)) return evidence;
+  return { scale: true };
 }
 
 export async function batchEvaluateScalePopulation(
@@ -295,8 +327,8 @@ export async function batchEvaluateScalePopulation(
         const subjectId = subjectIdForIndex(i);
         for (const measureId of todo) {
           const target = targetForIndex(i, args.subjects, rateByMeasure.get(measureId)!);
-          const { status, evidence } = await evaluateScaleSubjectMeasure(deps.generator, subjectId, measureId, target, args.asOf, trimEvidence);
-          rows.push({ subjectId, measureId, status, evidence });
+          const { status, evidence } = await evaluateScaleSubjectMeasure(deps.generator, subjectId, measureId, target, args.asOf);
+          rows.push({ subjectId, measureId, status, evidence: applyEvidenceTier(i, status, evidence, trimEvidence) });
         }
       }
       await persistChunk(rows);
