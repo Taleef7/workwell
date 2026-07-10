@@ -24,31 +24,191 @@ export function fixtureWebChartClient(payloads: unknown[]): WebChartClient {
   return { kind: "fixture", fetchPatientPayloads: () => Promise.resolve(payloads) };
 }
 
+export interface HttpWebChartClientOptions {
+  readonly fetch?: typeof globalThis.fetch;
+  readonly pageSize?: number;
+  readonly maxRetries?: number;
+  readonly retryDelaysMs?: readonly number[];
+  readonly timeoutMs?: number;
+}
+
+type Json = Record<string, unknown>;
+
+interface PatientRef {
+  readonly id: string;
+  readonly resource: Json;
+}
+
+const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_DELAYS_MS = [50, 100] as const;
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+class WebChartNonRetryableError extends Error {}
+
+function isObject(v: unknown): v is Json {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function fhirUrl(base: string, path: string): URL {
+  return new URL(`${base}${path}`);
+}
+
+function nextLink(bundle: unknown): string | undefined {
+  if (!isObject(bundle) || !Array.isArray(bundle.link)) return undefined;
+  for (const link of bundle.link) {
+    if (isObject(link) && link.relation === "next" && typeof link.url === "string") return link.url;
+  }
+  return undefined;
+}
+
+function patientsFromSearchset(bundle: unknown): PatientRef[] {
+  if (!isObject(bundle) || bundle.resourceType !== "Bundle" || !Array.isArray(bundle.entry)) return [];
+  const patients: PatientRef[] = [];
+  for (const entry of bundle.entry) {
+    const resource = isObject(entry) ? entry.resource : undefined;
+    if (isObject(resource) && resource.resourceType === "Patient" && typeof resource.id === "string") {
+      patients.push({ id: resource.id, resource });
+    }
+  }
+  return patients;
+}
+
+function patientFallbackBundle(patient: PatientRef, message: string): unknown {
+  return {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: patient.resource },
+      {
+        resource: {
+          resourceType: "OperationOutcome",
+          issue: [{ severity: "warning", code: "processing", diagnostics: message }],
+        },
+      },
+    ],
+  };
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function delay(ms: number): Promise<void> {
+  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelay(opts: Required<Pick<HttpWebChartClientOptions, "retryDelaysMs">>, attempt: number): number {
+  return opts.retryDelaysMs[Math.min(attempt, opts.retryDelaysMs.length - 1)] ?? 0;
+}
+
 /**
- * DEFERRED HTTP client (E12 PR-2c) — the live transport is NOT implemented until MIE confirms the
- * WebChart API contract (Dave Carlson).
+ * Mock-contract HTTP client (#255 / PR-2c pre-build).
  *
- * It intentionally REJECTS rather than doing a best-effort fetch, because the crucial unknown is how to
- * fan out to ONE payload PER PATIENT: a naive `/Patient` searchset handed to `normalizeWebChartBundle`
- * as a single payload would fold every patient's resources into ONE collection bundle — and
- * `CqlExecutionEngine` evaluates only the first subject of a bundle, so a real WebChart run would
- * silently report a single employee and drop/cross-contaminate the rest (Codex P1). Rather than ship
- * that footgun, the default HTTP client fails loudly; the transport-agnostic core (normalize + reconcile)
- * is fully exercised via `fixtureWebChartClient`. PR-2c implements this against the confirmed contract
- * (endpoints, auth, pagination, per-patient fan-out).
+ * Implements the assumed FHIR R4 variant documented in WEBCHART_API_ASSUMPTIONS_2026-07.md:
+ * `GET /fhir/Patient?_count=n` paged by FHIR searchset `link[relation=next]`, then
+ * `GET /fhir/Patient/{id}/$everything` per patient. One returned payload always represents at most one
+ * patient. A bad per-patient fetch degrades to a Patient-only bundle with an OperationOutcome marker, so
+ * downstream `evaluateBatch` keeps per-item isolation and the CQL engine remains the sole outcome
+ * authority. PR-2c still has to adjust request shaping once MIE confirms the real contract.
  */
-export function httpWebChartClient(cfg: WebChartConfig): WebChartClient {
+export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartClientOptions): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
+  const fetchImpl = options?.fetch ?? globalThis.fetch;
+  const pageSize = Math.max(1, Math.floor(options?.pageSize ?? DEFAULT_PAGE_SIZE));
+  const maxRetries = Math.max(0, Math.floor(options?.maxRetries ?? DEFAULT_MAX_RETRIES));
+  const retryDelaysMs = options?.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+  const commonHeaders = {
+    Accept: "application/fhir+json, application/json",
+    Authorization: `Bearer ${cfg.apiKey}`,
+  };
+
+  async function fetchJson(url: string): Promise<unknown> {
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new Error(`WebChart request timed out after ${timeoutMs}ms`)), timeoutMs);
+      try {
+        const response = await fetchImpl(url, { headers: commonHeaders, signal: controller.signal });
+        if (!response.ok) {
+          if (shouldRetryStatus(response.status) && attempt < maxRetries) {
+            await delay(retryDelay({ retryDelaysMs }, attempt));
+            continue;
+          }
+          const message = `WebChart request failed: ${response.status} ${response.statusText}`.trim();
+          throw shouldRetryStatus(response.status) ? new Error(message) : new WebChartNonRetryableError(message);
+        }
+        return await response.json();
+      } catch (e) {
+        if (e instanceof WebChartNonRetryableError) throw e;
+        if (attempt < maxRetries) {
+          await delay(retryDelay({ retryDelaysMs }, attempt));
+          continue;
+        }
+        throw e;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  async function listPopulation(): Promise<PatientRef[]> {
+    const first = fhirUrl(base, "/fhir/Patient");
+    first.searchParams.set("_count", String(pageSize));
+    const patients: PatientRef[] = [];
+    let url: string | undefined = first.toString();
+    const seen = new Set<string>();
+    while (url) {
+      let page: unknown;
+      try {
+        page = await fetchJson(url);
+      } catch {
+        break;
+      }
+      for (const patient of patientsFromSearchset(page)) {
+        if (!seen.has(patient.id)) {
+          seen.add(patient.id);
+          patients.push(patient);
+        }
+      }
+      const next = nextLink(page);
+      if (!next) {
+        url = undefined;
+        continue;
+      }
+      // Security (Codex P1): never follow a pagination link off the configured WebChart origin —
+      // fetchJson attaches the bearer API key, so an off-origin link would leak it. The base URL is
+      // parsed lazily here (not at construction) so a dummy/unparseable base only fails on the fetch
+      // path, exactly as it did before this guard existed.
+      const resolved: URL = new URL(next, url);
+      const baseOrigin = new URL(base).origin;
+      if (resolved.origin !== baseOrigin) {
+        throw new WebChartNonRetryableError(
+          `WebChart pagination link points off-origin (expected ${baseOrigin}, got ${resolved.origin}): refusing to follow ${resolved.toString()}`,
+        );
+      }
+      url = resolved.toString();
+    }
+    return patients;
+  }
+
+  async function fetchPatient(patient: PatientRef): Promise<unknown> {
+    const url = fhirUrl(base, `/fhir/Patient/${encodeURIComponent(patient.id)}/$everything`).toString();
+    try {
+      return await fetchJson(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return patientFallbackBundle(patient, message);
+    }
+  }
+
   return {
     kind: "http",
-    fetchPatientPayloads(): Promise<unknown[]> {
-      return Promise.reject(
-        new Error(
-          `WebChart HTTP transport not yet implemented (E12 PR-2c) — pending the confirmed WebChart API ` +
-            `contract for ${base} (endpoints/auth/pagination + one-payload-per-patient fan-out). Inject a ` +
-            `WebChartClient (e.g. fixtureWebChartClient) until then.`,
-        ),
-      );
+    async fetchPatientPayloads(): Promise<unknown[]> {
+      const patients = await listPopulation();
+      const payloads: unknown[] = [];
+      for (const patient of patients) payloads.push(await fetchPatient(patient));
+      return payloads;
     },
   };
 }
