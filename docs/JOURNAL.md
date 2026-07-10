@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-07-10 — roadmap wave closeout (#271–#279)
+
+Closed the 2026-07-09 roadmap-wave PR stack. Review fixes (Codex) were already on the branches before
+merge: off-origin WebChart pagination guard (#274 P1), invalid `0000-00-00` birthDate sanitization
+(#273), stale worker-pool exit ignore (#275), `calculateHTML: false` for fqm literal tier (#277), and
+M3 issue list #267–#270 in CLAUDE/roadmap (#271).
+
+**Merged (squash, owner-authorized):** #276 (N=5000 proof docs) → #272 (seam inventory) → #273
+(dev-DB full corpus) → #274 (mock WebChart transport) → #275 (worker pool) → #279 (tiered evidence
+#257; reopened as #279 after stacked #278 closed when its base branch deleted) → #277 (fqm literal
+diff #258) → #271 (production-readiness memo #261). Wave PRs from this set are closed; `gh pr list`
+shows 0 open. Agent worktrees under `.claude/worktrees/` pruned; feature branches deleted.
+
+**M1 engineering outcome:** integration-readiness code is on `main` (mock HTTP transport, worker
+pool, tiered evidence, full fixture corpus, seam inventory, literal CMS122 path, production memo).
+Remaining M1 owner step: **#254 send MIE question package**. M2 (#262/#263/#187) stays
+contract-gated; M3 (#264–#270, #167, #168) is production hardening.
+
+Deleted `docs/HANDOFF_2026-07-10.md` with this closeout.
+
 ## 2026-07-09 — #259 WebChart dev-DB fixtures expanded to all patients
 
 Expanded the offline WebChart dev-DB fixture corpus from the codeable-data subset to all 56 `is_patient=1`
@@ -6847,6 +6867,7 @@ Initial planning baseline and scaffolding completed.
 
 - MCP schema-compat deploy checkpoint:
   - 2026-05-03T13:53:42.1028589-04:00 GET https://workwell-measure-studio-api.fly.dev/actuator/health -> UP
+
 
 
 
