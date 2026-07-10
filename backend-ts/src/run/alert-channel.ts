@@ -43,10 +43,20 @@ export interface AlertEnv {
 }
 
 /** Injectable fetch for tests (webhook channel only). */
-export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<unknown>;
+export type FetchLike = (
+  input: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+) => Promise<unknown>;
 
 /** Stable prefix — greppable in MIE container logs (`grep WORKWELL_ALERT`). */
 export const WORKWELL_ALERT_PREFIX = "WORKWELL_ALERT";
+
+/**
+ * Hard cap on webhook delivery (Codex P2). Alerting is best-effort and awaited inline from
+ * finishManualRun / schedulerTick — a hung sink must never stall a run response or tick for the
+ * platform default fetch timeout. 3s is plenty for a fire-and-forget POST; longer = drop.
+ */
+export const WEBHOOK_TIMEOUT_MS = 3_000;
 
 /**
  * Default channel: one structured console.error line.
@@ -64,16 +74,30 @@ export function consoleAlertChannel(log: (line: string) => void = (line) => cons
 /**
  * Optional webhook channel — POSTs the alert JSON body. Only constructed when a URL is configured
  * (inert-unless-configured). Real HTTP via fetch; inject `fetchImpl` in tests.
+ *
+ * Bound by {@link WEBHOOK_TIMEOUT_MS} via AbortSignal so a slow/hung endpoint cannot stall the
+ * run pipeline (emitAlert already swallows the abort error as a channel failure).
  */
-export function webhookAlertChannel(url: string, fetchImpl: FetchLike = globalThis.fetch.bind(globalThis)): AlertChannel {
+export function webhookAlertChannel(
+  url: string,
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis),
+  timeoutMs: number = WEBHOOK_TIMEOUT_MS,
+): AlertChannel {
   return {
     name: "webhook",
     async send(alert) {
-      await fetchImpl(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(alert),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        await fetchImpl(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(alert),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

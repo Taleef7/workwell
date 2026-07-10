@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-07-10 — #264 Codex P2 follow-ups (PR #281)
+
+- **Scheduler env:** `server.ts` now passes `WORKWELL_ALERT_WEBHOOK_URL` (+ VSAC keys) into
+  `schedulerTick` so the nightly path is not console-only when the webhook is configured.
+- **Webhook timeout:** `webhookAlertChannel` aborts after 3s (`AbortSignal`) so a hung sink cannot
+  stall `finishManualRun` / the scheduler tick; `emitAlert` still swallows the failure.
+
 ## 2026-07-10 — #264 observability minimum (failed-run alerts + metrics)
 
 M3 production-readiness item: silent FAILED/PARTIAL_FAILURE population runs are no longer silent.
