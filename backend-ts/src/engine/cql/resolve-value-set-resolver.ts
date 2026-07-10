@@ -18,10 +18,19 @@ export interface VsacEnv {
 
 const DEFAULT_BASE = "https://cts.nlm.nih.gov/fhir";
 
+/**
+ * Pure predicate for the VSAC key-gate — the same condition `resolveValueSetResolver` and
+ * `engineForEnv` use to decide whether to attach the composite VSAC resolver. The single source of
+ * truth for both, and for the boot-time seam inventory (#260); never duplicate this parsing.
+ */
+export function isVsacConfigured(env: VsacEnv): boolean {
+  return Boolean((env.WORKWELL_VSAC_API_KEY ?? "").trim());
+}
+
 export function resolveValueSetResolver(env: VsacEnv, store: ValueSetStore): ValueSetResolver {
-  const apiKey = (env.WORKWELL_VSAC_API_KEY ?? "").trim();
   const storeResolver = new StoreValueSetResolver(store);
-  if (!apiKey) return storeResolver;
+  if (!isVsacConfigured(env)) return storeResolver;
+  const apiKey = (env.WORKWELL_VSAC_API_KEY ?? "").trim();
   const baseUrl = (env.WORKWELL_VSAC_BASE_URL ?? "").trim() || DEFAULT_BASE;
   const vsac = new VsacValueSetResolver(httpVsacClient({ baseUrl, apiKey }));
   return new CompositeValueSetResolver(vsac, storeResolver);
