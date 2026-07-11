@@ -42,6 +42,17 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 `services` as an array of flat objects, and job polling reads `.data.status` (success value
 `"success"`). See the 2026-06-03 JOURNAL entries for the v1 migration details (PRs #55, #56).
 
+> **Job-poll window (`DEPLOY_JOB_POLL_ATTEMPTS`, PR #283).** After the container-create call, the
+> script polls the MIE job until it reports `success`, **90 attempts × 10 s = 900 s** by default. The
+> attempt count is overridable via the `DEPLOY_JOB_POLL_ATTEMPTS` env var — it must be a positive
+> integer (validated `^[1-9][0-9]*$`, capped at 360 / 60 min); a non-numeric, zero, or empty value
+> **fails fast** rather than producing an empty poll loop that would report a deploy successful without
+> ever polling. The window was raised from the original 300 s because the backend image grew (the
+> `fqm-execution` dependency + the vendored `measures/official/` MADiE bundle) and the GHCR pull +
+> Proxmox `vzcreate` began exceeding 300 s; `backend-ts/Dockerfile` was also multi-staged to a slim
+> ~436 MB production runtime to keep the pull fast. If a genuinely slow MIE pull still times out, bump
+> `DEPLOY_JOB_POLL_ATTEMPTS` (up to 360) on a `workflow_dispatch` run.
+
 ### Required GitHub Secrets for MIE deploy
 
 | Secret | Purpose |
