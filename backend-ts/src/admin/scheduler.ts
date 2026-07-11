@@ -3,8 +3,8 @@
  *
  * An in-process scheduler that fires audited ALL_PROGRAMS runs on a 24-hour interval.
  * The scheduler is opt-in: disabled by default, toggled via WORKWELL_SCHEDULER_ENABLED=true
- * or programmatically via setSchedulerEnabled(). State is in-memory and resets on restart —
- * this is intentional for the demo stack; a persistent scheduler setting is a future drop-in.
+ * or programmatically via setSchedulerEnabled(). The opt-in flag is in-memory and resets on restart;
+ * run cadence is derived from persisted scheduler runs.
  *
  * Invariant: the SCHEDULER_RUN_TRIGGERED audit event is written BEFORE the run is created
  * (CLAUDE.md hard rule: every state change writes audit_event — no exceptions).
@@ -38,8 +38,6 @@ const SCHEDULER_RUN_INTERVAL_HOURS = 24;
 // ---------------------------------------------------------------------------
 
 let schedulerEnabled = false;
-/** Wall-clock ms when the scheduler was last enabled — used to compute the first-fire gate. */
-let _enabledAtMs: number | null = null;
 
 /** Read WORKWELL_SCHEDULER_ENABLED from env once at startup and set the flag. */
 export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string }): void {
@@ -49,11 +47,9 @@ export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string 
 
 /**
  * Programmatically enable or disable the scheduler (e.g. from the admin toggle route).
- * The optional `enabledAtMs` override is for tests — in production it defaults to Date.now().
  */
-export function setSchedulerEnabled(enabled: boolean, enabledAtMs?: number): void {
+export function setSchedulerEnabled(enabled: boolean): void {
   schedulerEnabled = enabled;
-  _enabledAtMs = enabled ? (enabledAtMs ?? Date.now()) : null;
 }
 
 /** Returns the current in-memory enabled state. */
@@ -84,13 +80,10 @@ export interface SchedulerStatus {
 function computeNextFireAt(lastAt: string | null): string | null {
   if (!schedulerEnabled) return null;
   if (!lastAt) {
-    // No prior run: schedule for today's 06:00 UTC, or tomorrow's if already past.
-    const now = new Date();
-    const todaySix = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 6, 0, 0, 0));
-    if (now.getTime() < todaySix.getTime()) return todaySix.toISOString();
-    // Past 06:00 today — next is tomorrow 06:00.
-    todaySix.setUTCDate(todaySix.getUTCDate() + 1);
-    return todaySix.toISOString();
+    // No prior scheduler run: cadence is derived from persisted runs, so with no history the
+    // scheduler fires on the next tick — the next fire is imminent, not a fixed wall-clock window.
+    // (Report "now" rather than a 06:00 UTC estimate the tick no longer waits for.)
+    return new Date().toISOString();
   }
   return new Date(new Date(lastAt).getTime() + SCHEDULER_RUN_INTERVAL_HOURS * 3_600_000).toISOString();
 }
@@ -165,15 +158,6 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     const elapsed = nowMs - new Date(lastSchedulerRun.startedAt).getTime();
     const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
     if (elapsed < minGapMs) return false;
-  } else {
-    // P2-1 fix: no prior run — honor the next-fire time computed at enable time.
-    // Wait until today's 06:00 UTC has passed (or tomorrow's if enabled past 06:00).
-    if (_enabledAtMs !== null) {
-      const ref = new Date(_enabledAtMs);
-      const refSix = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), 6, 0, 0, 0));
-      const firstFireAt = _enabledAtMs < refSix.getTime() ? refSix.getTime() : refSix.getTime() + 24 * 3_600_000;
-      if (nowMs < firstFireAt) return false;
-    }
   }
 
   // Write the audit event BEFORE creating the run (hard rule: every state change writes audit_event).
