@@ -84,7 +84,15 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-10, post-#280)
+## Current Focus (as of 2026-07-11, post-#284)
+
+**Post-#280 wave merged (2026-07-11):** **PR #283** fixed the failing production deploy (MIE
+Create-a-Container job-poll window enlarged 300 s→900 s + validated `DEPLOY_JOB_POLL_ATTEMPTS`;
+`backend-ts/Dockerfile` multi-staged to a ~436 MB runtime — the image had outgrown the 300 s poll
+window after #258's `fqm-execution` dep + the vendored MADiE bundle); **PR #281** merged the #264
+observability minimum (failed-run alerts + seam inventory); **PR #284** merged #268 (durable
+scheduler — cadence derived from persisted runs, survives container restart, no schema). Deploy is
+green again. Details in `docs/JOURNAL.md` (2026-07-11).
 
 **M1 engineering is CLOSED** (PRs #271–#279). **PR #280 MERGED** — production-faithful **CMS122v14 +
 CMS125v14** eCQI subsets (2026): 12-month MP, age/sex/visit, VSAC OIDs, GMI, official Oct-1 mammogram

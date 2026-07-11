@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-11 — Deploy fix, observability merge, durable scheduler (PRs #283, #281, #284)
+
+Three PRs merged to `main`; the production deploy is green again.
+
+- **Deploy fix (#282 / PR #283).** The `deploy-twh-mieweb.yml` MIE Create-a-Container step had been
+  failing on every push since #280: the backend image grew (the `fqm-execution` dependency from #258
+  plus the ~8.5 MB vendored `measures/official/` MADiE bundle) on top of a single-stage, unpruned
+  Dockerfile, so the GHCR image pull + Proxmox `vzcreate` exceeded the deploy script's 300 s job-poll
+  window and timed out (`Timed out waiting for deploy job`). Both images always built fine — the
+  failure was purely the deploy step. Fix, two parts: (1) `.github/scripts/deploy-mieweb-container.sh`
+  raises the job-poll window from 30 → 90 attempts (300 s → 900 s), overridable via a validated
+  `DEPLOY_JOB_POLL_ATTEMPTS` env var (positive integer, capped at 360; a bad value fails fast rather
+  than producing an empty poll loop that could report a deploy green without polling); (2)
+  `backend-ts/Dockerfile` converted to a multi-stage build (toolchain-heavy builder → slim
+  production-deps runtime), final image ~436 MB. Verified: full backend suite green, image builds and
+  boots. Post-merge the deploy ran green.
+
+- **#264 observability (PR #281).** Failed-run alerts + seam inventory — a FAILED/PARTIAL_FAILURE
+  population run (and scheduler-tick errors / stuck-run recovery) now emits exactly one alert: an
+  always-on `WORKWELL_ALERT` console line plus an optional webhook (`WORKWELL_ALERT_WEBHOOK_URL`,
+  inert-unless-configured). Best-effort — never fails the run.
+
+- **#268 durable scheduler (PR #284).** The in-process `setInterval` scheduler lost its 24 h debounce
+  on container restart (the first-fire gate lived in an in-memory `_enabledAtMs`), so a cycle missed
+  while the container was down was never backfilled. The gate is removed; cadence is now derived
+  entirely from the already-persisted last SCHEDULED run — a restart resumes the correct ~23.5 h
+  countdown, a missed cycle fires on the next tick, and a fresh enable with no history fires on the
+  first tick. No new schema; the `SCHEDULER_RUN_TRIGGERED`-before-run audit invariant is preserved.
+  `SchedulerStatus.nextFireAt` now reports the imminent next-tick time for a no-history scheduler
+  instead of a stale 06:00 UTC estimate.
+
+Housekeeping: merged branches deleted, agent worktrees removed, remote-tracking refs pruned.
+
 ## 2026-07-10 — #264 Codex P2 follow-ups (PR #281)
 
 - **Scheduler env:** `server.ts` now passes `WORKWELL_ALERT_WEBHOOK_URL` (+ VSAC keys) into
