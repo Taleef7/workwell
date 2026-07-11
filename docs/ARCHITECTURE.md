@@ -288,24 +288,33 @@ No microservice decomposition is used in MVP; package boundaries are the future 
 
 ## 10) Inert-seam inventory
 
-The repo has accumulated ~7 "inert-unless-configured" seams (ADR-011/012/013/017/023/025) — each
-correct and individually reviewed when it shipped, but collectively an untested-in-anger surface that
-can rot silently (a deploy secret typo, a seam nobody remembers is there). Issue #260 adds cheap
-insurance: a single pure `describeSeams(env)` (`backend-ts/src/config/seam-inventory.ts`) that reports
-each seam's active/inactive state by **calling the exact predicate each seam's own `resolve*` function
-already uses** (`isSendgridConfigured`, `isDataChaserConfigured`, `isIceConfigured`, `isEhFhirConfigured`,
-`isWebChartConfigured`, `isSqlPushdownSelected`, `isVsacConfigured`) — never a second parse of the env
-vars. Each `resolve*` function was refactored to call its own extracted predicate (a pure, behavior-
-preserving refactor; the predicate is the exact condition the resolver already branched on). One boot
-log line (`worker.ts`, guarded to fire once per worker instance, mirroring the existing auth-handler
-memoization pattern) makes the deployed configuration observable:
+The repo has accumulated ~8 "inert-unless-configured" seams (ADR-011/012/013/017/023/025 + #264 alert
+webhook) — each correct and individually reviewed when it shipped, but collectively an untested-in-anger
+surface that can rot silently (a deploy secret typo, a seam nobody remembers is there). Issue #260 adds
+cheap insurance: a single pure `describeSeams(env)` (`backend-ts/src/config/seam-inventory.ts`) that
+reports each seam's active/inactive state by **calling the exact predicate each seam's own `resolve*`
+function already uses** (`isSendgridConfigured`, `isDataChaserConfigured`, `isIceConfigured`,
+`isEhFhirConfigured`, `isWebChartConfigured`, `isSqlPushdownSelected`, `isVsacConfigured`,
+`isAlertWebhookConfigured`) — never a second parse of the env vars. Each `resolve*` function was
+refactored to call its own extracted predicate (a pure, behavior-preserving refactor; the predicate is
+the exact condition the resolver already branched on). One boot log line (`worker.ts`, guarded to fire
+once per worker instance, mirroring the existing auth-handler memoization pattern) makes the deployed
+configuration observable:
 
 ```
-seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off
+seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off
 ```
 
 Descriptive only — this inventory makes no decisions and never selects a seam; it reports what the
 existing resolvers would already decide (ADR-008 n/a: nothing here touches compliance).
+
+**Failed-run alerts (#264):** `backend-ts/src/run/alert-channel.ts` — on every run terminal
+FAILED/PARTIAL_FAILURE (and on stuck-run recovery / scheduler tick throw), emit exactly one alert via
+`emitAlert`. The **console** channel is always-on (`console.error` line prefixed `WORKWELL_ALERT` +
+JSON payload — greppable in MIE container logs). The **webhook** channel is inert-unless-configured
+(`WORKWELL_ALERT_WEBHOOK_URL`, plain `fetch` POST). Emission is best-effort (an alert failure never
+fails the run — Fable-H1 pattern). Run metrics on `/api/runs` already surface `durationMs`,
+`totalEvaluated`, `compliantCount`/`nonCompliantCount`, and per-status `outcomeCounts` — no API gap.
 
 | Seam | Module path | Activating env var(s) | Default state | Last verified | Activation test file |
 |------|-------------|------------------------|----------------|----------------|----------------------|
@@ -316,7 +325,8 @@ existing resolvers would already decide (ADR-008 n/a: nothing here touches compl
 | `webchart` | `backend-ts/src/engine/ingress/data-source.ts` (`webChartDataSource`, `resolveDataSource`, `isWebChartConfigured`) | `WORKWELL_WEBCHART_BASE_URL` **and** `WORKWELL_WEBCHART_API_KEY` | off (JSON-bucket source) | 2026-07-09 | `backend-ts/src/engine/ingress/data-source.test.ts` |
 | `sql-executor` | `backend-ts/src/engine/measure-executor.ts` (`sqlPushdownExecutor`, `resolveMeasureExecutor`, `isSqlPushdownSelected`) | `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` (single explicit opt-in; the executor is an inert stub that rejects on use even when selected) | off (`fhirNativeExecutor`) | 2026-07-09 | `backend-ts/src/engine/measure-executor.test.ts` |
 | `vsac` | `backend-ts/src/engine/cql/resolve-value-set-resolver.ts` (`resolveValueSetResolver`, `isVsacConfigured`) + `engine-factory.ts` (`engineForEnv` key-gating) | `WORKWELL_VSAC_API_KEY` (base URL optional, defaults to the NLM FHIR terminology service) | off (local `StoreValueSetResolver` only) | 2026-07-09 | `backend-ts/src/engine/cql/resolve-value-set-resolver.test.ts`, `backend-ts/src/engine/cql/engine-factory.test.ts`, `backend-ts/src/engine/cql/audiogram-vsac-parity.test.ts` |
+| `alert-webhook` | `backend-ts/src/run/alert-channel.ts` (`webhookAlertChannel`, `resolveAlertChannels`, `isAlertWebhookConfigured`) | `WORKWELL_ALERT_WEBHOOK_URL` | off (console `WORKWELL_ALERT` line always-on) | 2026-07-10 | `backend-ts/src/run/alert-channel.test.ts` |
 
-The inventory itself is covered by `backend-ts/src/config/seam-inventory.test.ts` (flips each of the 7
+The inventory itself is covered by `backend-ts/src/config/seam-inventory.test.ts` (flips each of the 8
 seams on/off with the correct env combination, including the both-vars-required pairs above, plus the
 all-off and all-on boot-log-line shapes).
