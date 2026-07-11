@@ -1,4 +1,4 @@
-# Dockerfile-scoped ignore for backend-ts/Dockerfile (issue #109 PR1).
+# Dockerfile-scoped ignore for backend-ts/Dockerfile (issue #109 PR1 + slim-image deploy fix).
 #
 # Named "<dockerfile>.dockerignore" beside the Dockerfile so BuildKit uses THIS file (instead of any
 # root .dockerignore) ONLY when building `-f backend-ts/Dockerfile <repo-root>`. Scoping it here keeps
@@ -9,12 +9,30 @@
 # Patterns are relative to the build context root (the repo root). This image only COPYs ./backend-ts
 # and ./external/mieweb-cloud, so everything else is excluded to trim the context, and installed deps /
 # local state are dropped (re-installed in the image).
+#
+# Do NOT exclude backend-ts/measures/official/ — vendored CMS122v14 ELM bundle is runtime-loaded by
+# standards/literal-diff.ts. Do NOT exclude external/mieweb-cloud — workspace members live there.
+
 .git
 **/node_modules
 **/.data
+**/.npm
+**/.pnpm-store
+**/.cache
 backend
 frontend
 e2e
 docs
+infra
+scripts
 *.pdf
 *.md
+
+# Host-side test / coverage noise under backend-ts (image re-installs deps; tests are not runtime)
+backend-ts/coverage
+backend-ts/**/*.log
+backend-ts/.env
+backend-ts/.env.*
+backend-ts/**/*.tsbuildinfo
+backend-ts/dist
+backend-ts/build

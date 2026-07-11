@@ -161,11 +161,14 @@ create_and_wait() {
     return 1
   fi
 
-  echo "Waiting for job ${job_id}..."
-  for attempt in $(seq 1 30); do
+  # Default 90 × 10s = 900s. Overridable via DEPLOY_JOB_POLL_ATTEMPTS for slower/faster MIE pulls.
+  # GHCR pull + vzcreate can exceed the old 300s window once the image grew (fqm-execution + official bundle).
+  local poll_attempts="${DEPLOY_JOB_POLL_ATTEMPTS:-90}"
+  echo "Waiting for job ${job_id} (up to ${poll_attempts} attempts × 10s)..."
+  for attempt in $(seq 1 "$poll_attempts"); do
     job_json="$(request GET "/jobs/${job_id}")"
     job_status="$(echo "$job_json" | jq -r '.data.status // .status // "unknown"')"
-    echo "Attempt ${attempt}/30: ${job_status}"
+    echo "Attempt ${attempt}/${poll_attempts}: ${job_status}"
     case "$job_status" in
       success|completed)
         return 0
@@ -181,7 +184,7 @@ create_and_wait() {
         return 1
         ;;
     esac
-    if [ "$attempt" -eq 30 ]; then
+    if [ "$attempt" -eq "$poll_attempts" ]; then
       echo "::error::Timed out waiting for deploy job ${job_id}." >&2
       request GET "/jobs/${job_id}/status?limit=1000" >&2 || true
       return 2
