@@ -1,11 +1,7 @@
 /**
- * scheduler.test.ts — E13 PR-3 scheduler unit tests (SQLite floor, no Postgres needed).
- *
- * Tests 2–5 share state: test 2 fires the first scheduler run, and tests 3–5
- * verify behaviour that depends on that run existing.  Run order is sequential
- * (node:test default).
+ * scheduler.test.ts — scheduler unit tests (SQLite floor, no Postgres needed).
  */
-import { before, after, test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,21 +21,10 @@ import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import {
   setSchedulerEnabled,
   runTick,
-  getSchedulerStatusFromStores,
   type SchedulerTickDeps,
 } from "./scheduler.ts";
 
-// ---------------------------------------------------------------------------
-// Shared SQLite DB (tests 2–5 depend on state accumulated across test 2–3–4–5)
-// ---------------------------------------------------------------------------
-
-const dbPath = join(
-  tmpdir(),
-  `workwell-scheduler-${crypto.randomUUID()}.sqlite`
-);
-
-/** Definite-assignment: populated in before(). */
-let stores!: Stores;
+const dbPaths: string[] = [];
 
 /** Mock engine — returns COMPLIANT immediately; avoids full CQL compilation. */
 const mockEngine: EvaluateMeasureBinding = {
@@ -51,8 +36,20 @@ const mockEngine: EvaluateMeasureBinding = {
   }),
 };
 
-/** Build the deps object at call-time so it picks up the assigned `stores`. */
-function deps(): SchedulerTickDeps {
+async function freshStores(): Promise<Stores> {
+  const dbPath = join(tmpdir(), `workwell-scheduler-${crypto.randomUUID()}.sqlite`);
+  dbPaths.push(dbPath);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  return {
+    runs: new SqliteRunStore(db),
+    outcomes: new SqliteOutcomeStore(db),
+    cases: new SqliteCaseStore(db),
+    events: new SqliteCaseEventStore(db),
+  } as unknown as Stores;
+}
+
+function deps(stores: Stores): SchedulerTickDeps {
   return {
     stores,
     engine: mockEngine,
@@ -61,115 +58,89 @@ function deps(): SchedulerTickDeps {
   };
 }
 
-before(async () => {
-  const db = await createSqliteD1(dbPath);
-  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  stores = {
-    runs: new SqliteRunStore(db),
-    outcomes: new SqliteOutcomeStore(db),
-    cases: new SqliteCaseStore(db),
-    events: new SqliteCaseEventStore(db),
-  } as unknown as Stores;
-  // Ensure scheduler starts disabled for test isolation.
-  setSchedulerEnabled(false);
-});
+async function createPriorSchedulerRun(stores: Stores, startedAt: string): Promise<void> {
+  await stores.runs.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "scheduler",
+    requestedScope: {},
+    measurementPeriodStart: startedAt,
+    measurementPeriodEnd: startedAt,
+    startedAt,
+    completedAt: startedAt,
+    status: "COMPLETED",
+  });
+}
+
+async function schedulerTriggerEvents(stores: Stores) {
+  const events = await stores.events.recentAuditEvents(50);
+  return events.filter((event) => event.eventType === "SCHEDULER_RUN_TRIGGERED");
+}
 
 after(() => {
-  try {
-    rmSync(dbPath, { force: true });
-  } catch {
-    // best-effort cleanup
+  setSchedulerEnabled(false);
+  for (const dbPath of dbPaths) {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      // best-effort cleanup
+    }
   }
 });
 
-// ---------------------------------------------------------------------------
-// Test 1 — disabled guard
-// ---------------------------------------------------------------------------
+test("runTick remains skipped after restart when the persisted scheduler run is within the 23.5 h cooldown", async () => {
+  const stores = await freshStores();
+  const startedAt = "2026-07-01T00:00:00.000Z";
+  await createPriorSchedulerRun(stores, startedAt);
 
-test("runTick returns false when scheduler is disabled", async () => {
+  setSchedulerEnabled(true);
+  setSchedulerEnabled(true); // simulated process restart: enabled state is re-initialized
+  const fired = await runTick(deps(stores), Date.parse(startedAt) + 23 * 3_600_000);
+
+  assert.equal(fired, false, "persisted prior run must retain its cooldown across restart");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 0, "skipped tick must not write an audit event");
+});
+
+test("runTick backfills promptly after a missed scheduler cycle", async () => {
+  const stores = await freshStores();
+  const startedAt = "2026-07-01T00:00:00.000Z";
+  await createPriorSchedulerRun(stores, startedAt);
+
+  setSchedulerEnabled(true);
+  const fired = await runTick(deps(stores), Date.parse(startedAt) + 24 * 3_600_000 + 1);
+
+  assert.equal(fired, true, "a missed 24-hour cycle must fire on the next tick");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 1, "a fired run must write its scheduler audit event");
+});
+
+test("runTick fires on the first enabled tick when no scheduler run has ever existed", async () => {
+  const stores = await freshStores();
+
+  setSchedulerEnabled(true);
+  const fired = await runTick(deps(stores), Date.UTC(2026, 6, 1, 2, 0, 0));
+
+  assert.equal(fired, true, "first activation must not wait for an in-memory wall-clock gate");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 1, "a fired run must write its scheduler audit event");
+});
+
+test("runTick never fires while the scheduler is disabled", async () => {
+  const stores = await freshStores();
+
   setSchedulerEnabled(false);
-  const fired = await runTick(deps());
-  assert.equal(fired, false, "Expected false — scheduler is disabled");
+  const fired = await runTick(deps(stores));
+
+  assert.equal(fired, false);
+  assert.equal((await stores.runs.listRuns()).length, 0);
+  assert.equal((await schedulerTriggerEvents(stores)).length, 0);
 });
 
-// ---------------------------------------------------------------------------
-// Test 1b — P2-1: first-fire gate honors the advertised nextFireAt
-// ---------------------------------------------------------------------------
+test("every fired scheduler tick records SCHEDULER_RUN_TRIGGERED in audit_events", async () => {
+  const stores = await freshStores();
 
-test("runTick returns false before the first-fire window (honors nextFireAt, no prior run)", async () => {
-  // Enable at midnight UTC so firstFireAt = today 06:00 UTC.
-  const today = new Date();
-  const midnightUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0);
-  setSchedulerEnabled(true, midnightUTC);
-  // Tick at 02:00 UTC — before the 06:00 first-fire window.
-  const twoAM = midnightUTC + 2 * 3_600_000;
-  const fired = await runTick(deps(), twoAM);
-  assert.equal(fired, false, "Expected false — tick is before the first-fire window (02:00 < 06:00 UTC)");
-  setSchedulerEnabled(false);
-});
+  setSchedulerEnabled(true);
+  const fired = await runTick(deps(stores));
 
-// ---------------------------------------------------------------------------
-// Test 2 — happy path: fires run + writes audit event
-// ---------------------------------------------------------------------------
-
-test("runTick fires an ALL_PROGRAMS run and writes SCHEDULER_RUN_TRIGGERED audit when enabled", async () => {
-  // Enable at midnight UTC → firstFireAt = today 06:00. Simulate tick at 07:00 UTC (past the window).
-  const today = new Date();
-  const midnightUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0);
-  setSchedulerEnabled(true, midnightUTC);
-  const sevenAM = midnightUTC + 7 * 3_600_000;
-  const fired = await runTick(deps(), sevenAM);
-  assert.equal(fired, true, "Expected true — past the first-fire window, no prior run exists");
-
-  // A scheduler-tagged run must exist.
-  const runs = await stores.runs.listRuns(10);
-  const schedulerRun = runs.find((r) => r.triggeredBy === "scheduler");
-  assert.ok(schedulerRun, "A run with triggeredBy='scheduler' should be in the runs table");
-  assert.equal(schedulerRun.scopeType, "ALL_PROGRAMS");
-
-  // The audit event must have been written BEFORE the run.
-  const events = await stores.events.recentAuditEvents(50);
-  const triggerEvent = events.find((e) => e.eventType === "SCHEDULER_RUN_TRIGGERED");
-  assert.ok(triggerEvent, "SCHEDULER_RUN_TRIGGERED audit event should exist");
-  assert.equal(triggerEvent.actor, "scheduler");
-});
-
-// ---------------------------------------------------------------------------
-// Test 3 — debounce: second call within the 23.5 h window returns false
-// ---------------------------------------------------------------------------
-
-test("runTick skips when called again within the debounce window (< 23.5 h since last run)", async () => {
-  // Scheduler is still enabled from test 2.  A run was created moments ago,
-  // so elapsed time is near zero — well within the 23.5 h threshold.
-  const fired = await runTick(deps());
-  assert.equal(fired, false, "Expected false — debounced because a run was just created");
-});
-
-// ---------------------------------------------------------------------------
-// Test 4 — getSchedulerStatusFromStores reflects enabled state + lastRunAt
-// ---------------------------------------------------------------------------
-
-test("getSchedulerStatusFromStores reflects enabled=true, lastRunAt, and nextFireAt after a run", async () => {
-  // Scheduler still enabled from test 2.
-  const status = await getSchedulerStatusFromStores(stores);
-  assert.equal(status.enabled, true);
-  assert.ok(status.lastRunAt !== null, "lastRunAt should be populated after a run");
-  assert.ok(
-    status.lastRunStatus === "COMPLETED" || status.lastRunStatus === "PARTIAL_FAILURE",
-    `lastRunStatus should be a terminal status, got: ${status.lastRunStatus}`
-  );
-  assert.ok(status.nextFireAt !== null, "nextFireAt should be set when enabled");
-});
-
-// ---------------------------------------------------------------------------
-// Test 5 — getSchedulerStatusFromStores returns nextFireAt=null when disabled
-// ---------------------------------------------------------------------------
-
-test("getSchedulerStatusFromStores returns nextFireAt=null when scheduler is disabled", async () => {
-  setSchedulerEnabled(false);
-  const status = await getSchedulerStatusFromStores(stores);
-  assert.equal(status.enabled, false);
-  assert.equal(status.nextFireAt, null, "nextFireAt must be null when disabled");
-  // lastRunAt should still reflect the run from test 2.
-  assert.ok(status.lastRunAt !== null, "lastRunAt should still be populated from the earlier run");
+  assert.equal(fired, true);
+  const events = await schedulerTriggerEvents(stores);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.actor, "scheduler");
 });
