@@ -79,13 +79,10 @@ export interface SchedulerStatus {
 function computeNextFireAt(lastAt: string | null): string | null {
   if (!schedulerEnabled) return null;
   if (!lastAt) {
-    // No prior run: schedule for today's 06:00 UTC, or tomorrow's if already past.
-    const now = new Date();
-    const todaySix = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 6, 0, 0, 0));
-    if (now.getTime() < todaySix.getTime()) return todaySix.toISOString();
-    // Past 06:00 today — next is tomorrow 06:00.
-    todaySix.setUTCDate(todaySix.getUTCDate() + 1);
-    return todaySix.toISOString();
+    // No prior scheduler run: cadence is derived from persisted runs, so with no history the
+    // scheduler fires on the next tick — the next fire is imminent, not a fixed wall-clock window.
+    // (Report "now" rather than a 06:00 UTC estimate the tick no longer waits for.)
+    return new Date().toISOString();
   }
   return new Date(new Date(lastAt).getTime() + SCHEDULER_RUN_INTERVAL_HOURS * 3_600_000).toISOString();
 }
