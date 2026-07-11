@@ -1,0 +1,41 @@
+# Build-context exclusions for backend-ts/.
+#
+# NOTE: Docker only reads this file when the build *context* is backend-ts/ itself.
+# Production builds use the REPO ROOT as context:
+#   docker build -f backend-ts/Dockerfile -t <tag> .
+# For those, BuildKit applies backend-ts/Dockerfile.dockerignore (patterns relative to
+# the repo root). Keep both files in sync for the backend-ts tree. external/mieweb-cloud/
+# is a sibling path outside this directory, so this file never filters it — that is
+# intentional (workspace resolution needs the full submodule tree in the image).
+
+node_modules
+**/node_modules
+.npm
+.pnpm-store
+.cache
+
+# Tests / coverage (not needed at runtime; source under src/ is still required)
+coverage
+.nyc_output
+**/*.test.ts
+**/*.spec.ts
+**/__tests__
+**/__mocks__
+
+# Local / editor / VCS noise
+.git
+.gitignore
+.vscode
+.idea
+*.log
+.env
+.env.*
+!.env.example
+
+# Build artifacts (tsx runs TypeScript source directly; no compiled dist required)
+dist
+build
+*.tsbuildinfo
+
+# Do NOT exclude measures/official/ — ~8.5MB vendored CMS122v14 bundle loaded by
+# standards/literal-diff.ts at runtime (fqm-execution fidelity-diff path).
