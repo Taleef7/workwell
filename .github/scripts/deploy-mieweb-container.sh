@@ -163,7 +163,19 @@ create_and_wait() {
 
   # Default 90 × 10s = 900s. Overridable via DEPLOY_JOB_POLL_ATTEMPTS for slower/faster MIE pulls.
   # GHCR pull + vzcreate can exceed the old 300s window once the image grew (fqm-execution + official bundle).
+  # Validate the override HARD: a non-numeric / 0 / negative / empty value would make `seq 1 "$poll_attempts"`
+  # an empty loop, so the poll would return success WITHOUT ever checking the job — a broken deploy reported
+  # green. Fail fast (a bad CI value must not silently proceed) and cap at 360 (60 min) so a fat-fingered huge
+  # value can't outlast the MIE job's own timeout budget.
   local poll_attempts="${DEPLOY_JOB_POLL_ATTEMPTS:-90}"
+  if ! [[ "$poll_attempts" =~ ^[1-9][0-9]*$ ]]; then
+    echo "::error::DEPLOY_JOB_POLL_ATTEMPTS must be a positive integer (got '${poll_attempts}')." >&2
+    exit 1
+  fi
+  if [ "$poll_attempts" -gt 360 ]; then
+    echo "::error::DEPLOY_JOB_POLL_ATTEMPTS=${poll_attempts} exceeds the 360 (60 min) cap." >&2
+    exit 1
+  fi
   echo "Waiting for job ${job_id} (up to ${poll_attempts} attempts × 10s)..."
   for attempt in $(seq 1 "$poll_attempts"); do
     job_json="$(request GET "/jobs/${job_id}")"

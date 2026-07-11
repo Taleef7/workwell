@@ -19,6 +19,11 @@
 **/.npm
 **/.pnpm-store
 **/.cache
+# Never leak a real env file into the image — anywhere in the context, incl. the
+# external/mieweb-cloud submodule (a scoped backend-ts/.env rule would miss it).
+**/.env
+**/.env.*
+!**/.env.example
 backend
 frontend
 e2e
