@@ -10,19 +10,24 @@
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
+import { emitAlert, resolveAlertChannels, type AlertChannel } from "./alert-channel.ts";
 
 export interface RecoverStuckRunsDeps {
   runs: RunStore;
   events: CaseEventStore;
+  /** Optional alert fan-out (#264). Default = console-only when omitted. */
+  alertChannels?: readonly AlertChannel[];
 }
 
 /**
  * Fail + audit any runs stuck RUNNING beyond the threshold (see {@link RunStore.failStuckRuns};
  * QUEUED runs are left for the claim path). Returns the recovered run ids. Best-effort: callers run
- * it fire-and-forget on boot.
+ * it fire-and-forget on boot. Emits one WORKWELL_ALERT per recovered run (#264) so orphaned failures
+ * are not silent.
  */
 export async function recoverStuckRuns(deps: RecoverStuckRunsDeps, olderThanMs?: number): Promise<string[]> {
   const recovered = await deps.runs.failStuckRuns(olderThanMs);
+  const channels = deps.alertChannels ?? resolveAlertChannels({});
   for (const runId of recovered) {
     await deps.events.appendAudit({
       eventType: "RUN_RECOVERED",
@@ -36,6 +41,14 @@ export async function recoverStuckRuns(deps: RecoverStuckRunsDeps, olderThanMs?:
         reason:
           "Orphaned by a container restart (the in-process run job did not survive); failed by boot recovery.",
       },
+    });
+    // Best-effort alert — never let observability fail boot recovery.
+    await emitAlert(channels, {
+      kind: "RUN_RECOVERED",
+      at: new Date().toISOString(),
+      status: "FAILED",
+      runId,
+      message: `Stuck run ${runId} recovered as FAILED (orphaned by container restart)`,
     });
   }
   return recovered;

@@ -51,8 +51,16 @@ async function main(): Promise<void> {
   // expires. The 5-min poll is shorter than the cooldown so the window is never missed; runTick
   // is idempotent — two concurrent ticks are safe (the cooldown check inside runTick debounces).
   // StoresEnv.DB is optional; when DATABASE_URL is set the Pg ceiling is used and DB is not accessed.
+  // Pass through the env knobs the tick actually resolves (not only DATABASE_URL):
+  //   - WORKWELL_ALERT_WEBHOOK_URL → #264 webhook channel (Codex P2: console-only if omitted)
+  //   - WORKWELL_VSAC_* → engineForEnv key-gating (parity with the request path)
   initSchedulerFromEnv(process.env);
-  const schedulerEnv = { DATABASE_URL: process.env.DATABASE_URL };
+  const schedulerEnv = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    WORKWELL_ALERT_WEBHOOK_URL: process.env.WORKWELL_ALERT_WEBHOOK_URL,
+    WORKWELL_VSAC_API_KEY: process.env.WORKWELL_VSAC_API_KEY,
+    WORKWELL_VSAC_BASE_URL: process.env.WORKWELL_VSAC_BASE_URL,
+  };
   const schedulerInterval = setInterval(() => {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>
       console.error("[workwell] scheduler tick error", e instanceof Error ? e.message : e),

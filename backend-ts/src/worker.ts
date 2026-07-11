@@ -95,6 +95,8 @@ export interface Env {
   /** VSAC value-set resolution (ADR-023). Inert (local-store-only) unless the key is set. */
   WORKWELL_VSAC_API_KEY?: string;
   WORKWELL_VSAC_BASE_URL?: string;
+  /** Failed-run alert webhook (#264). Inert unless set — console WORKWELL_ALERT line always fires. */
+  WORKWELL_ALERT_WEBHOOK_URL?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).

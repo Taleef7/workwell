@@ -21,6 +21,7 @@ import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { planManualRun, finishOrFail } from "../run/run-pipeline.ts";
+import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert-channel.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -133,6 +134,8 @@ export interface SchedulerTickDeps {
   engine: EvaluateMeasureBinding;
   segments: HydratedSegment[];
   employees?: readonly EmployeeProfile[];
+  /** Alert fan-out for FAILED runs + tick errors (#264). Default = console-only. */
+  alertChannels?: readonly AlertChannel[];
 }
 
 /**
@@ -187,6 +190,7 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
   });
 
   // Build run deps from the injected stores + engine + segments.
+  const alertChannels = deps.alertChannels ?? resolveAlertChannels({});
   const runDeps = {
     runStore: deps.stores.runs,
     outcomeStore: deps.stores.outcomes,
@@ -198,6 +202,7 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     qualitySnapshots: deps.stores.qualitySnapshots,
     events: deps.stores.events,
     actor: "scheduler", // system-initiated: audit rows attribute to the scheduler, not a user (Codex P1)
+    alertChannels, // #264 — FAILED/PARTIAL_FAILURE from the nightly run is not silent
   };
 
   const planned = await planManualRun(runDeps, {
@@ -219,15 +224,24 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
  * inline path otherwise) — so the nightly ALL_PROGRAMS run honors the same resolver as the routes.
  * Errors are logged but never rethrown — safe to hand to ctx.waitUntil.
  */
-export async function schedulerTick(env: StoresEnv): Promise<void> {
+export async function schedulerTick(env: StoresEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string }): Promise<void> {
+  const alertChannels = resolveAlertChannels(env);
   try {
     await ensureSegmentSeed(env);
     const stores = await getStores(env);
     const engine = await engineForEnv(env);
     const allSegments = await stores.segments.listSegments();
     const enabledSegments = allSegments.filter((s) => s.enabled);
-    await runTick({ stores, engine, segments: enabledSegments });
+    await runTick({ stores, engine, segments: enabledSegments, alertChannels });
   } catch (err) {
     console.error("[scheduler] tick error:", err);
+    // Observability (#264): a scheduler tick throw (store/plan failure before finishOrFail) must
+    // not be silent. Best-effort — never rethrow; the tick is safe for ctx.waitUntil.
+    await emitAlert(alertChannels, {
+      kind: "SCHEDULER_TICK_ERROR",
+      at: new Date().toISOString(),
+      status: "ERROR",
+      message: `Scheduler tick error: ${String((err as Error)?.message ?? err)}`,
+    });
   }
 }

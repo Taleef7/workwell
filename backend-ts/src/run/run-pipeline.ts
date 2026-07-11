@@ -32,6 +32,12 @@ import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { materializeRun } from "../quality/materialize-run.ts";
+import {
+  alertForTerminalRun,
+  emitAlert,
+  resolveAlertChannels,
+  type AlertChannel,
+} from "./alert-channel.ts";
 
 export type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
 
@@ -81,6 +87,12 @@ export interface RunPipelineDeps {
    * A scheduled run passes `"scheduler"`; absent (tests / offline tools) ⇒ `"system"`.
    */
   actor?: string;
+  /**
+   * Alert fan-out for FAILED / PARTIAL_FAILURE terminals (#264). Default = console-only
+   * (`WORKWELL_ALERT` structured line). Routes/scheduler pass `resolveAlertChannels(env)` so an
+   * optional webhook fires when `WORKWELL_ALERT_WEBHOOK_URL` is set. Emission is best-effort.
+   */
+  alertChannels?: readonly AlertChannel[];
 }
 
 /** Thrown for scopes not served by this path (CASE — handled by rerun-to-verify in the cases module). */
@@ -453,6 +465,24 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         .catch(() => {});
     });
   }
+  // Observability (#264): alert exactly once on FAILED/PARTIAL_FAILURE; COMPLETED is silent.
+  // Best-effort — emitAlert never rejects, but we still await so the console line is ordered after
+  // finalize in logs. Default channels = console-only when the caller did not inject any.
+  const runMessage =
+    `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
+    (failures > 0 ? ` ${failures} evaluation failure(s).` : "");
+  const alert = alertForTerminalRun({
+    status: terminalStatus,
+    runId: run.id,
+    scopeType,
+    scopeLabel,
+    totalEvaluated: items.length,
+    failures,
+    message: runMessage,
+  });
+  if (alert) {
+    await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
+  }
   return {
     runId: run.id,
     scopeType,
@@ -462,9 +492,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     totalEvaluated: items.length,
     compliant,
     nonCompliant,
-    message:
-      `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
-      (failures > 0 ? ` ${failures} evaluation failure(s).` : ""),
+    message: runMessage,
     measuresExecuted: measureIds.map((id) => MEASURES[id]!.name),
   };
 }
@@ -484,11 +512,26 @@ export async function finishOrFail(deps: RunPipelineDeps, planned: PlannedRun): 
   try {
     await finishManualRun(deps, planned);
   } catch (err) {
+    const errMsg = String((err as Error)?.message ?? err);
     try {
-      await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${String((err as Error)?.message ?? err)}`);
+      await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}`);
       await deps.runStore.finalizeRun(planned.run.id, "FAILED");
     } catch {
       /* best effort — the host's waitUntil also logs the original rejection */
+    }
+    // Observability (#264): a hard FAILED (outside per-subject isolation) must not be silent.
+    // Best-effort — never rethrow from the alert path.
+    const alert = alertForTerminalRun({
+      status: "FAILED",
+      runId: planned.run.id,
+      scopeType: planned.scopeType,
+      scopeLabel: planned.scopeLabel,
+      totalEvaluated: 0,
+      failures: 0,
+      message: `Run failed: ${errMsg}`,
+    });
+    if (alert) {
+      await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
     }
   }
 }

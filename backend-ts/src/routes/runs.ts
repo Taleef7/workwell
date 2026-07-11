@@ -28,6 +28,7 @@ import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
+import { resolveAlertChannels } from "../run/alert-channel.ts";
 import {
   executeManualRun,
   executeRerun,
@@ -49,6 +50,8 @@ import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 interface RunsEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
+  /** Optional failed-run webhook (#264). Inert unless set — see resolveAlertChannels. */
+  WORKWELL_ALERT_WEBHOOK_URL?: string;
 }
 
 // A run in one of these statuses has finished — its outcomes are final. Read models treat a terminal
@@ -90,7 +93,11 @@ async function store(env: RunsEnv): Promise<RunStore> {
   const stores = await getStores(env);
   if (!sweptForOrphans.has(env)) {
     sweptForOrphans.add(env);
-    void recoverStuckRuns({ runs: stores.runs, events: stores.events })
+    void recoverStuckRuns({
+      runs: stores.runs,
+      events: stores.events,
+      alertChannels: resolveAlertChannels(env),
+    })
       .then((ids) => {
         if (ids.length > 0)
           console.warn(`[workwell] recovered ${ids.length} stuck run(s) (RUNNING/QUEUED → FAILED, audited) on boot`);
@@ -230,6 +237,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware, not the body's triggeredBy (Codex P1)
+      alertChannels: resolveAlertChannels(env), // #264 failed-run alerts (console + optional webhook)
     };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
@@ -273,6 +281,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware (Codex P1)
+      alertChannels: resolveAlertChannels(env), // #264 failed-run alerts
     };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,
