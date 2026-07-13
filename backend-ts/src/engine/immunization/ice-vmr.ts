@@ -130,12 +130,25 @@ export function buildDssRequest(opts: { cdsInputXml: string; submissionTimeMs: n
           },
           data: {
             informationModelSSId: { scopingEntityId: "org.opencds.vmr", businessId: "VMR", version: "1.0" },
-            base64EncodedPayload: [btoa(opts.cdsInputXml)],
+            base64EncodedPayload: [base64Utf8(opts.cdsInputXml)],
           },
         },
       ],
     },
   };
+}
+
+/**
+ * UTF-8-safe base64. Plain `btoa` throws `InvalidCharacterError` on any code point above U+00FF, so
+ * a single non-ASCII character anywhere in the payload (a patient id, or a real WebChart-sourced
+ * field once the E12 history source lands) would otherwise fail every forecast for that subject —
+ * indistinguishable from a transport blip, because it degrades to the same fallback.
+ */
+function base64Utf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -171,13 +184,23 @@ export function parseDssResponse(envelope: unknown): string {
   return atob(b64);
 }
 
-/** `YYYYMMDDhhmmss.SSS±ZZZZ` → `YYYY-MM-DD`, or null when absent/malformed. */
+/**
+ * `YYYYMMDDhhmmss.SSS±ZZZZ` → the **UTC** calendar date `YYYY-MM-DD`, or null when absent/malformed.
+ *
+ * The offset is honored, not discarded: an ICE container running with a non-UTC `TZ` emits e.g.
+ * `20260630190000.000-0500`, which is 2026-07-01 in UTC. Dropping the offset would read that as
+ * 2026-06-30 and — since this date feeds the DUE/OVERDUE cut — could flip a boundary status by a day.
+ */
 export function parseIceTimestamp(ts: string | null | undefined): string | null {
   if (!ts) return null;
-  const m = /^(\d{4})(\d{2})(\d{2})\d{6}/.exec(ts);
+  const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.\d+)?(?:([+-])(\d{2})(\d{2})|Z)?$/.exec(ts.trim());
   if (!m) return null;
-  const [, y, mo, d] = m;
-  return `${y}-${mo}-${d}`;
+  const [, y, mo, d, hh, mm, ss, sign, offH, offM] = m;
+  const asIfUtc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+  if (Number.isNaN(asIfUtc)) return null;
+  // A "+0500" stamp is 5h AHEAD of UTC, so the UTC instant is (local − offset).
+  const offsetMin = sign ? (sign === "-" ? -1 : 1) * (Number(offH) * 60 + Number(offM)) : 0;
+  return new Date(asIfUtc - offsetMin * 60_000).toISOString().slice(0, 10);
 }
 
 const RECOMMENDATIONS: ReadonlySet<string> = new Set([
@@ -191,12 +214,18 @@ const RECOMMENDATIONS: ReadonlySet<string> = new Set([
  * Parse every `<substanceAdministrationProposal>` out of a vMR `CDSOutput` XML. Tolerant regex
  * scan (the vMR subset ICE emits is stable and flat enough); a proposal with an unknown
  * recommendation code is skipped rather than guessed at.
+ *
+ * The `<substance>` match deliberately tolerates intervening children (ICE writes an `<id>` inside
+ * `<substance>` on the *dose-evaluation* blocks, and our own request builder emits that shape) — an
+ * adjacency-only `<substance><substanceCode` regex would silently skip EVERY proposal if a future
+ * ICE image added an `<id>` there, and the all-or-nothing fallback would then serve simulated
+ * forecasts forever while the seam still reported `ice=on`.
  */
 export function parseCdsOutputProposals(cdsOutputXml: string): IceProposal[] {
   const proposals: IceProposal[] = [];
   const blocks = cdsOutputXml.match(/<substanceAdministrationProposal>[\s\S]*?<\/substanceAdministrationProposal>/g) ?? [];
   for (const block of blocks) {
-    const substance = /<substance><substanceCode code="([^"]+)" codeSystem="([^"]+)"/.exec(block);
+    const substance = /<substance>[\s\S]*?<substanceCode code="([^"]+)" codeSystem="([^"]+)"/.exec(block);
     // The vaccine GROUP is on the nested observationFocus — see the IceProposal.groupCode note.
     const focus = /<observationFocus code="([^"]+)"[^>]*?(?:displayName="([^"]*)")?\/>/.exec(block);
     const value = /<observationValue><concept code="([^"]+)"/.exec(block);

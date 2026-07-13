@@ -60,8 +60,8 @@ function goldenFetch(calls: Call[]): typeof fetch {
 
 // The golden response's DTP (Tdap) proposal is RECOMMENDED due 2026-03-15, influenza RECOMMENDED
 // due 2026-07-01, HepB NOT_RECOMMENDED (COMPLETE).
-const forecasterOn = (fetchImpl: typeof fetch, today = "2026-07-13") =>
-  realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl, today: () => today });
+const forecasterOn = (fetchImpl: typeof fetch) =>
+  realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl });
 
 test("maps the live ICE proposals onto the three port series", async () => {
   const calls: Call[] = [];
@@ -90,20 +90,23 @@ test("maps the live ICE proposals onto the three port series", async () => {
 });
 
 test("a RECOMMENDED proposal whose due date is still ahead of asOf reads DUE, not OVERDUE", async () => {
-  const f = await forecasterOn(goldenFetch([]), "2026-01-01").forecast("emp-006", "2026-01-01");
+  const f = await forecasterOn(goldenFetch([])).forecast("emp-006", "2026-01-01");
   const tdap = f.series.find((s) => s.series === "TDAP");
   assert.equal(tdap?.status, "DUE", "due 2026-03-15 is after asOf 2026-01-01");
 });
 
-test("asOf == today posts /evaluate; a different asOf posts /evaluateAtSpecifiedTime with specifiedTime", async () => {
+// ICE's clock is ALWAYS pinned to asOf — including when asOf is today. /evaluate would evaluate at the
+// ICE *container's* clock, so a TZ-skewed host would shift "today" forecasts by a day while as-of
+// forecasts stayed correct. (Verified live: pinning today returns byte-identical proposals.)
+test("every call posts /evaluateAtSpecifiedTime with specifiedTime = asOf (the clock is always pinned)", async () => {
   const calls: Call[] = [];
-  const f = forecasterOn(goldenFetch(calls), "2026-07-13");
+  const f = forecasterOn(goldenFetch(calls));
 
-  await f.forecast("emp-006", "2026-07-13");
-  assert.match(callAt(calls, 0).url, /\/api\/resources\/evaluate$/);
-  assert.equal((callAt(calls, 0).body as Record<string, unknown>).specifiedTime, undefined);
+  await f.forecast("emp-006", "2026-07-13"); // asOf == today
+  assert.match(callAt(calls, 0).url, /\/api\/resources\/evaluateAtSpecifiedTime$/);
+  assert.equal((callAt(calls, 0).body as Record<string, unknown>).specifiedTime, "2026-07-13");
 
-  await f.forecast("emp-006", "2020-01-18");
+  await f.forecast("emp-006", "2020-01-18"); // asOf in the past
   assert.match(callAt(calls, 1).url, /\/api\/resources\/evaluateAtSpecifiedTime$/);
   assert.equal((callAt(calls, 1).body as Record<string, unknown>).specifiedTime, "2020-01-18");
   // the DSS envelope must still be intact alongside specifiedTime
@@ -127,7 +130,7 @@ test("no API key ⇒ no Authorization header; an API key ⇒ bearer", async () =
 
   const keyed = realIceForecaster(
     { ...CFG, apiKey: "sekret" },
-    { fallback: simulatedForecaster, fetchImpl: goldenFetch(calls), today: () => "2026-07-13" },
+    { fallback: simulatedForecaster, fetchImpl: goldenFetch(calls) },
   );
   await keyed.forecast("emp-006", "2026-07-13");
   assert.equal(callAt(calls, 1).headers.authorization, "Bearer sekret");
@@ -233,7 +236,6 @@ test("the history source is injectable (the WebChart drop-in seam)", async () =>
     fallback: simulatedForecaster,
     fetchImpl: goldenFetch(calls),
     historySource: () => custom,
-    today: () => "2026-07-13",
   });
   const out = await f.forecast("emp-006", "2026-07-13");
   const xml = postedCdsInput(calls, 0);
@@ -258,6 +260,108 @@ test("syntheticIceHistory expands multi-dose series and is deterministic", () =>
 
 test("group codes are the ICE vaccine groups the live engine emits", () => {
   assert.deepEqual(ICE_VACCINE_GROUP, { TDAP: "200", INFLUENZA: "800", HEPB: "100" });
+});
+
+// An unhealthy sidecar (hung / restarting / OOM-thrashing) must not charge EVERY case-detail read the
+// full timeout. After one failure the breaker serves the fallback without dialing, until its TTL.
+test("the circuit breaker stops dialing an unhealthy ICE for the TTL, then retries", async () => {
+  let attempts = 0;
+  const failing = (async () => {
+    attempts += 1;
+    throw new Error("ECONNREFUSED");
+  }) as unknown as typeof fetch;
+
+  let clock = 1_000_000;
+  const f = realIceForecaster(CFG, {
+    fallback: simulatedForecaster,
+    fetchImpl: failing,
+    breakerTtlMs: 60_000,
+    now: () => clock,
+  });
+
+  await f.forecast("emp-006", "2026-07-13");
+  assert.equal(attempts, 1, "the first call dials ICE");
+
+  await f.forecast("emp-007", "2026-07-13");
+  await f.forecast("emp-008", "2026-07-13");
+  assert.equal(attempts, 1, "while the breaker is open, subsequent calls do NOT dial ICE");
+
+  clock += 60_001; // TTL elapsed
+  await f.forecast("emp-009", "2026-07-13");
+  assert.equal(attempts, 2, "after the TTL the breaker half-opens and retries");
+});
+
+test("a healthy call after a failure closes the breaker again", async () => {
+  const calls: Call[] = [];
+  let fail = true;
+  const flaky = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (fail) throw new Error("boom");
+    return goldenFetch(calls)(url as string, init);
+  }) as unknown as typeof fetch;
+
+  let clock = 5_000_000;
+  const f = realIceForecaster(CFG, {
+    fallback: simulatedForecaster,
+    fetchImpl: flaky,
+    breakerTtlMs: 1_000,
+    now: () => clock,
+  });
+
+  await f.forecast("emp-006", "2026-07-13"); // trips the breaker
+  fail = false;
+  clock += 1_001;
+  const recovered = await f.forecast("emp-006", "2026-07-13"); // retries, succeeds
+  assert.ok(
+    recovered.series.every((s) => String(s.reason).startsWith("ICE ")),
+    "the recovered forecast must come from ICE, not the fallback",
+  );
+  // Breaker is closed: the next call dials immediately, without waiting out any TTL.
+  const again = await f.forecast("emp-006", "2026-07-13");
+  assert.ok(again.series.every((s) => String(s.reason).startsWith("ICE ")));
+});
+
+// If ICE ever emits two proposals for one vaccine group (e.g. a Td and a Tdap product), document
+// order must win deterministically — a Map built by last-write would pick arbitrarily.
+test("duplicate proposals for one group: the first in document order wins", async () => {
+  const dup = (async () => {
+    const xml = `<ns3:cdsOutput>${["800", "800", "200", "100"]
+      .map(
+        (g, i) => `<substanceAdministrationProposal>
+<substance><substanceCode code="${g}" codeSystem="2.16.840.1.113883.3.795.12.100.1" displayName="G${g}"/></substance>
+<relatedClinicalStatement><observationResult>
+<observationFocus code="${g}" codeSystem="2.16.840.1.113883.3.795.12.100.1" displayName="G${g}"/>
+<observationValue><concept code="${i === 1 ? "NOT_RECOMMENDED" : "RECOMMENDED"}" codeSystem="x"/></observationValue>
+<interpretation code="${i === 1 ? "SECOND" : "FIRST"}" codeSystem="y"/>
+</observationResult></relatedClinicalStatement>
+<proposedAdministrationTimeInterval low="2026070100000${i}.000+0000"/>
+</substanceAdministrationProposal>`,
+      )
+      .join("")}</ns3:cdsOutput>`;
+    const envelope = {
+      finalKMEvaluationResponse: [
+        { kmEvaluationResultData: [{ data: { base64EncodedPayload: [btoa(xml)] } }] },
+      ],
+    };
+    return new Response(JSON.stringify(envelope), { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: dup }).forecast(
+    "emp-006",
+    "2026-07-13",
+  );
+  const flu = f.series.find((s) => s.series === "INFLUENZA");
+  assert.match(String(flu?.reason), /^ICE RECOMMENDED \(FIRST\)$/, "the FIRST influenza proposal wins");
+});
+
+// The doses ICE scores are CVX 43 (traditional adult HepB, a 3-dose ACIP series). Reporting
+// dosesRequired: 2 (the Heplisav model the simulated forecaster uses) would render the
+// self-contradictory card "2 of 2 doses — OVERDUE".
+test("HepB dosesRequired on the ICE path matches the CVX actually reported (3, not the Heplisav 2)", async () => {
+  const f = await forecasterOn(goldenFetch([])).forecast("emp-006", "2026-07-13");
+  const hepb = f.series.find((s) => s.series === "HEPB");
+  assert.equal(ICE_DOSE_CVX.HEPB, "43", "we report HepB doses as the traditional adult formulation");
+  assert.equal(hepb?.dosesRequired, 3, "so ICE's series length is 3");
+  assert.equal(hepb?.dosesReceived, 2, "emp-006 has 2 HepB doses in the shared synthetic history");
 });
 
 test("resolveForecaster: simulated by default, real ICE when BASE_URL is set (key optional)", async () => {

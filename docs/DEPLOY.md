@@ -499,10 +499,20 @@ docker run --rm -d -p 32775:8080 --memory=3g --name ice hlnconsulting/ice:latest
 
 **Operational notes.** ICE is a Drools engine: budget **~2–3 GB RAM** and a **tens-of-seconds cold
 start** (it compiles its rule base on boot). It must be a **long-lived sidecar** — never started
-per-request. The adapter bounds every call with a timeout (default 15 s) and, on **any** failure —
-transport error, non-2xx, timeout, unparseable body, a vaccine group missing from the response —
-falls back **whole** to the simulated forecaster and logs a warning. The advisory panel therefore
-degrades; it never errors the case-detail read.
+per-request; give it time to warm before pointing the backend at it.
+
+The adapter bounds every call at **3 s** (a warm ICE answers in ~50–300 ms — the sidecar's cold start
+must not be charged to an interactive case-detail read) and, on **any** failure — transport error,
+non-2xx, timeout, unparseable body, a vaccine group missing from the response — falls back **whole**
+to the simulated forecaster and logs `ICE forecast failed for <subject>; falling back to simulated: …`.
+A failure also **trips a 60-second circuit breaker**: while it is open, requests serve the simulated
+forecast immediately without dialing ICE, so an unhealthy sidecar costs one timeout per minute rather
+than one per page view. The breaker closes on the first success after the TTL. The advisory panel
+therefore degrades; it never errors the case-detail read.
+
+**Symptom to watch for:** the boot line says `ice=on` but every forecast reads like the simulated one
+(no `ICE …` reason strings). That means the adapter is falling back — grep the container log for
+`ICE forecast failed`.
 
 **Verify a live sidecar** from `backend-ts/` (these tests self-skip when the var is unset):
 

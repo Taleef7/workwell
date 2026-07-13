@@ -19,7 +19,34 @@ import { simulatedForecaster } from "./immunization-forecast.ts";
 import { resolveForecaster } from "./resolve-forecaster.ts";
 
 const BASE_URL = (process.env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
-const skip = BASE_URL ? false : "WORKWELL_IMMZ_ICE_BASE_URL not set — live ICE sidecar not available";
+
+/**
+ * Gate on REACHABLE, not merely on the var being SET. Otherwise a stale `WORKWELL_IMMZ_ICE_BASE_URL`
+ * (left over from an old compose session, or sourced from a `.env`) turns the standard `pnpm test`
+ * into a network-dependent suite that FAILS after a string of timeouts instead of skipping. The
+ * Pg-ceiling store contract — the precedent this file follows — probes connectivity the same way.
+ */
+async function iceReachable(): Promise<boolean> {
+  if (!BASE_URL) return false;
+  try {
+    const res = await fetch(`${BASE_URL.replace(/\/$/, "")}/api/resources/evaluate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(2_000),
+    });
+    // Any HTTP answer proves the sidecar is up — an empty body legitimately answers 400.
+    return res.status > 0;
+  } catch {
+    return false;
+  }
+}
+
+const skip = (await iceReachable())
+  ? false
+  : BASE_URL
+    ? `ICE sidecar at ${BASE_URL} is not reachable — skipping the live suite`
+    : "WORKWELL_IMMZ_ICE_BASE_URL not set — live ICE sidecar not available";
 
 // A forecaster whose fallback THROWS, so a silent degrade can never masquerade as a live pass.
 const strictFallback = {

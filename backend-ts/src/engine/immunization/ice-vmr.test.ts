@@ -139,3 +139,49 @@ test("parseIceTimestamp handles YYYYMMDDhhmmss.SSS±ZZZZ and rejects garbage", (
   assert.equal(parseIceTimestamp(""), null);
   assert.equal(parseIceTimestamp("not-a-date"), null);
 });
+
+// The parsed date feeds the DUE/OVERDUE cut, so discarding the offset would flip a boundary status by
+// a day on any ICE container started with a non-UTC TZ.
+test("parseIceTimestamp normalizes a non-UTC offset to the correct UTC calendar date", () => {
+  assert.equal(parseIceTimestamp("20260630190000.000-0500"), "2026-07-01", "19:00 -05:00 is next-day UTC");
+  assert.equal(parseIceTimestamp("20260701040000.000+0530"), "2026-06-30", "04:00 +05:30 is prior-day UTC");
+  assert.equal(parseIceTimestamp("20260701000000.000Z"), "2026-07-01");
+  assert.equal(parseIceTimestamp("20260701000000"), "2026-07-01", "offsetless is treated as UTC");
+});
+
+// Regression: ICE writes <id> inside <substance> on the dose-EVALUATION blocks (and our own request
+// builder emits that shape). An adjacency-only regex would skip EVERY proposal if a future ICE image
+// added an <id> to proposals — the forecast would then be silently simulated forever while the boot
+// seam line still reported ice=on.
+test("a proposal whose <substance> carries an <id> before <substanceCode> still parses", () => {
+  const xml = `<ns3:cdsOutput><substanceAdministrationProposal>
+<substance><id root="9f1b-uuid"/><substanceCode code="800" codeSystem="2.16.840.1.113883.3.795.12.100.1" displayName="Influenza Vaccine Group"/></substance>
+<relatedClinicalStatement><observationResult>
+<observationFocus code="800" codeSystem="2.16.840.1.113883.3.795.12.100.1" displayName="Influenza Vaccine Group"/>
+<observationValue><concept code="RECOMMENDED" codeSystem="2.16.840.1.113883.3.795.12.100.5"/></observationValue>
+</observationResult></relatedClinicalStatement>
+<proposedAdministrationTimeInterval low="20260701000000.000+0000"/>
+</substanceAdministrationProposal></ns3:cdsOutput>`;
+  const [p] = parseCdsOutputProposals(xml);
+  assert.ok(p, "an <id>-bearing <substance> must still yield a proposal");
+  assert.equal(p.groupCode, "800");
+  assert.equal(p.proposedSubstanceCode, "800");
+  assert.equal(p.proposedDate, "2026-07-01");
+});
+
+// btoa() throws InvalidCharacterError above U+00FF. Without a UTF-8-safe encoder, a single non-ASCII
+// character (a real WebChart-sourced id, once the E12 history source lands) would fail that subject's
+// forecast forever — degrading to the fallback indistinguishably from a transport blip.
+test("buildDssRequest base64-encodes a non-ASCII payload without throwing", () => {
+  const cdsInputXml = buildCdsInputXml({
+    patientId: "Zoë-Ωmega-患者",
+    dob: "1980-01-01",
+    gender: "F",
+    doses: [{ cvx: "115", date: "2020-01-01" }],
+  });
+  const req = buildDssRequest({ cdsInputXml, submissionTimeMs: 1579330800000 });
+  const b64 = req.evaluationRequest.dataRequirementItemData[0]?.data.base64EncodedPayload[0];
+  assert.ok(b64);
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  assert.equal(new TextDecoder().decode(bytes), cdsInputXml, "UTF-8 round-trip must be exact");
+});

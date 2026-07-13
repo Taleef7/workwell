@@ -33,6 +33,25 @@ Java→TS port of ICE remains infeasible (a continuously-updated Drools rule bas
    the sole compliance authority (ADR-008/ADR-012). ICE and WorkWell can legitimately disagree (ICE
    scores full ACIP; a WorkWell measure scores its own rule) and that is not a defect.
 
+**Operational hardening (from the whole-branch review):**
+- **The request-path timeout is 3 s, not a cold-start budget** (a warm ICE answers in ~50–300 ms), and
+  a **60 s circuit breaker** trips on failure. Without it, an unhealthy sidecar would charge *every*
+  `GET /api/cases/:id` the full timeout, forever — an interactive-latency incident whose only symptom
+  is a slow page. With it, an unhealthy ICE costs one timeout per TTL.
+- **ICE's clock is ALWAYS pinned** (`/evaluateAtSpecifiedTime` with `specifiedTime = asOf`, even when
+  `asOf` is today). `/evaluate` evaluates at the *container's* clock, so a TZ-skewed or drifting ICE
+  host would shift "today" forecasts by a day while as-of forecasts stayed correct. Verified live:
+  pinning today returns byte-identical proposals, so this costs nothing.
+- **`CONDITIONAL` is deliberately NOT surfaced as DUE.** ICE emits it for risk-conditional
+  recommendations, and an occupational-health cohort often *is* that high-risk group — but we do not
+  send ICE a risk group, so it cannot have applied one, and we must not assert one on its behalf.
+  Rendering every CONDITIONAL as DUE would manufacture work items ICE did not unconditionally
+  recommend. The reason string carries it verbatim (`ICE CONDITIONAL (HIGH_RISK)`); a risk-group-aware
+  mapping is future work, and needs the OH risk cohort in the CDSInput first.
+- **`dosesRequired` on the ICE path follows the CVX we actually report** (HepB = 3, the traditional
+  adult series we send as CVX 43 — not the Heplisav 2 the simulated forecaster models), so the card
+  cannot read the self-contradictory "2 of 2 doses — OVERDUE".
+
 **Two contract facts the live engine taught us** (both regression-tested, and neither documented
 where we looked):
 - The **request's** `base64EncodedPayload` is an **ARRAY**, not a string — a bare string is rejected

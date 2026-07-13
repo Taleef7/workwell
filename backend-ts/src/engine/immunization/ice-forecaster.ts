@@ -95,10 +95,18 @@ export function syntheticIceHistory(subjectId: string): IceDoseHistory {
   return { patientId: subjectId, dob, gender: h % 2 === 0 ? "F" : "M", doses };
 }
 
-const DOSES_REQUIRED: Record<VaccineSeries, number> = {
+/**
+ * Doses required, as ICE would score them — keyed to the CVX we actually report doses under
+ * (`ICE_DOSE_CVX`), NOT to the simulated forecaster's schedule. HepB is the one that matters: we
+ * report CVX 43 (the traditional adult formulation), whose ACIP primary series is **3** doses, while
+ * `SCHEDULE.HEPB_DOSES_REQUIRED` is 2 (the Heplisav model the simulated forecaster and the
+ * `hepatitis_b_vaccination_series` measure default to). Using the simulated 2 here would render the
+ * self-contradictory card "2 of 2 doses — OVERDUE".
+ */
+const ICE_DOSES_REQUIRED: Record<VaccineSeries, number> = {
   TDAP: 1,
   INFLUENZA: 1,
-  HEPB: SCHEDULE.HEPB_DOSES_REQUIRED,
+  HEPB: 3, // CVX 43 = HepB adult, 3-dose series (cf. SCHEDULE.HEPB_DOSES_REQUIRED = 2, Heplisav)
 };
 
 /**
@@ -106,8 +114,15 @@ const DOSES_REQUIRED: Record<VaccineSeries, number> = {
  *
  * - `RECOMMENDED`     → due now: OVERDUE if the proposed date has passed as of `asOf`, else DUE.
  * - `FUTURE_RECOMMENDED` → UP_TO_DATE, carrying the future due date.
- * - `NOT_RECOMMENDED` / `CONDITIONAL` → UP_TO_DATE (series complete, immune, or discretionary);
- *   ICE's reason codes are surfaced verbatim in `reason` so the advisory panel stays honest.
+ * - `NOT_RECOMMENDED` / `CONDITIONAL` → UP_TO_DATE (series complete, immune, or discretionary).
+ *
+ * **`CONDITIONAL` is deliberately NOT surfaced as DUE.** ICE emits it for risk-conditional
+ * recommendations ("recommended for high-risk groups"), and an occupational-health cohort often IS
+ * that high-risk group — but we do not send ICE a risk group, so ICE cannot have applied one, and we
+ * must not silently assert one on its behalf. Rendering every CONDITIONAL as DUE would manufacture
+ * work items ICE did not unconditionally recommend. The recommendation and ICE's own reason codes
+ * are surfaced verbatim in `reason` (e.g. `ICE CONDITIONAL (HIGH_RISK)`) so the panel stays honest,
+ * and a risk-group-aware mapping is future work — it needs the OH risk cohort in the CDSInput first.
  */
 function toSeriesForecast(
   series: VaccineSeries,
@@ -133,7 +148,7 @@ function toSeriesForecast(
     lastDoseDate,
     nextDueDate: proposal.proposedDate,
     dosesReceived: seriesDoses.length,
-    dosesRequired: DOSES_REQUIRED[series],
+    dosesRequired: ICE_DOSES_REQUIRED[series],
     reason,
   };
 }
@@ -148,12 +163,27 @@ export interface IceForecasterOptions {
   fallback: ImmunizationForecaster;
   fetchImpl?: typeof fetch;
   historySource?: IceHistorySource;
+  /** Per-call budget. Defaults to a REQUEST-path budget — see DEFAULT_TIMEOUT_MS. */
   timeoutMs?: number;
-  /** Injected clock (YYYY-MM-DD) so "asOf is today" is decidable under test. */
-  today?: () => string;
+  /** Negative-cache TTL after a failure (ms). 0 disables the breaker. */
+  breakerTtlMs?: number;
+  /** Injected clock (epoch ms) — only used by the breaker, so it is testable without fake timers. */
+  now?: () => number;
 }
 
-const DEFAULT_TIMEOUT_MS = 15_000; // ICE evaluation is Drools-heavy; a cold engine can take seconds
+/**
+ * REQUEST-path budget, not a cold-start budget. A warm ICE answers in ~50–300 ms (measured), so 3 s
+ * is generous; the sidecar's tens-of-seconds Drools *cold start* must not be charged to an
+ * interactive `GET /api/cases/:id`. A caller doing offline/batch work can raise this explicitly.
+ */
+const DEFAULT_TIMEOUT_MS = 3_000;
+
+/**
+ * After a failure, stop dialing ICE for this long and serve the fallback immediately. Without it, an
+ * unhealthy sidecar (hung, OOM-thrashing, restarting) costs EVERY case-detail read the full timeout,
+ * forever — an interactive-latency incident whose only symptom is a slow page.
+ */
+const DEFAULT_BREAKER_TTL_MS = 60_000;
 
 async function postDss(
   cfg: IceConfig,
@@ -191,10 +221,18 @@ export function realIceForecaster(cfg: IceConfig, opts: IceForecasterOptions): I
   const fetchImpl = opts.fetchImpl ?? fetch;
   const historySource = opts.historySource ?? syntheticIceHistory;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const today = opts.today ?? (() => new Date().toISOString().slice(0, 10));
+  const breakerTtlMs = opts.breakerTtlMs ?? DEFAULT_BREAKER_TTL_MS;
+  const now = opts.now ?? (() => Date.now());
+
+  // Circuit breaker: the instant of the last failure. While it is within the TTL, serve the fallback
+  // without dialing — one slow request per TTL instead of one per read.
+  let openedAt = 0;
 
   return {
     async forecast(subjectId: string, asOf: string): Promise<ImmunizationForecast> {
+      if (breakerTtlMs > 0 && openedAt !== 0 && now() - openedAt < breakerTtlMs) {
+        return opts.fallback.forecast(subjectId, asOf);
+      }
       try {
         const history = historySource(subjectId);
         const cdsInputXml = buildCdsInputXml({
@@ -205,29 +243,35 @@ export function realIceForecaster(cfg: IceConfig, opts: IceForecasterOptions): I
         });
         const request = buildDssRequest({ cdsInputXml, submissionTimeMs: Date.parse(`${asOf}T00:00:00Z`) });
 
-        // An as-of date in the past/future must move ICE's own clock, else every date it proposes
-        // is relative to the container's today (verified: /evaluateAtSpecifiedTime shifts them).
-        const envelope =
-          asOf === today()
-            ? await postDss(cfg, "/api/resources/evaluate", request, fetchImpl, timeoutMs)
-            : await postDss(
-                cfg,
-                "/api/resources/evaluateAtSpecifiedTime",
-                { specifiedTime: asOf, ...request },
-                fetchImpl,
-                timeoutMs,
-              );
+        // ALWAYS pin ICE's clock to `asOf` — even when asOf is today. /evaluate would evaluate at the
+        // *container's* clock, so a TZ-skewed or drifting ICE host would shift "today" forecasts by a
+        // day while as-of forecasts stayed correct. Verified live: /evaluateAtSpecifiedTime with
+        // today's date returns byte-identical proposals to /evaluate, so pinning costs nothing.
+        const envelope = await postDss(
+          cfg,
+          "/api/resources/evaluateAtSpecifiedTime",
+          { specifiedTime: asOf, ...request },
+          fetchImpl,
+          timeoutMs,
+        );
 
         const proposals = parseCdsOutputProposals(parseDssResponse(envelope));
-        const byGroup = new Map(proposals.map((p) => [p.groupCode, p]));
+        // First proposal wins per group: if ICE ever emits two for one group (e.g. a Td and a Tdap
+        // product), document-order is deterministic — a Map built by last-write would pick arbitrarily.
+        const byGroup = new Map<string, IceProposal>();
+        for (const p of proposals) if (!byGroup.has(p.groupCode)) byGroup.set(p.groupCode, p);
+
         const series = VACCINE_SERIES.map((s) => {
           const proposal = byGroup.get(ICE_VACCINE_GROUP[s]);
           if (!proposal) throw new Error(`ICE response carried no proposal for ${s} (group ${ICE_VACCINE_GROUP[s]})`);
           return toSeriesForecast(s, proposal, history, asOf);
         });
+        openedAt = 0; // healthy again
         return { subjectId, asOf, series };
       } catch (err) {
-        // Advisory surface — degrade, never fail the read (ADR-012).
+        // Advisory surface — degrade WHOLE, never fail the read (ADR-012). Trip the breaker so an
+        // unhealthy sidecar costs one timeout per TTL, not one per request.
+        openedAt = now();
         console.warn(`ICE forecast failed for ${subjectId}; falling back to simulated: ${(err as Error).message}`);
         return opts.fallback.forecast(subjectId, asOf);
       }
