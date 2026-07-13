@@ -17,8 +17,9 @@
 
 - FHIR base = `{WORKWELL_WEBCHART_BASE_URL}/fhir` (e.g. base `https://<practice>.webchartnow.com/webchart.cgi`) — unchanged from today.
 - Discovery: `GET {base}/fhir/.well-known/smart-configuration` → `token_endpoint`.
-- Token: `POST token_endpoint` (`application/x-www-form-urlencoded`): `grant_type=client_credentials`, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`, `client_assertion=<RS384 JWT>`, `scope=system/*.read`. JWT claims: `iss=sub=clientId`, `aud=token_endpoint`, `jti=randomUUID`, `exp=now+300s`, `iat=now`; header `{alg:"RS384", typ:"JWT", kid?}`.
+- Token: `POST token_endpoint` (`application/x-www-form-urlencoded`): `grant_type=client_credentials`, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`, `client_assertion=<RS384 JWT>`, `scope=system/*.read`ᵃ. JWT claims: `iss=sub=clientId`, `aud=token_endpoint`, `jti=randomUUID`, `exp=now+300s`, `iat=now`; header `{alg:"RS384", typ:"JWT", kid?}`.
 - Data: `GET {base}/fhir/Patient?_count=n` (population, `link[next]` paged) then, per patient, `GET {base}/fhir/{Observation|Condition|Procedure|Immunization|Encounter}?patient={id}&_count=n` (each `link[next]` paged), composed into one `Bundle type:collection` = `[Patient, ...resources]`. JSON only.
+- ᵃ **Post-review correction (Codex P2, de37e2a):** the implemented default scope is `system/*.rs` (the documented bulk-registration grant); the sandbox smart-configuration advertises v1-style `system/*.read`, so the scope is env-overridable (`WORKWELL_WEBCHART_SCOPE`). The `"system/*.read"` defaults shown in this plan's code snippets are the pre-correction spec.
 - Failure semantics (unchanged philosophy): any per-resource fetch failure after retries ⇒ that patient degrades to the Patient-only fallback bundle + OperationOutcome (⇒ MISSING_DATA downstream; never partial-data compliance). Off-origin `link[next]` refusal now also protects the OAuth token.
 
 ---
