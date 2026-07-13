@@ -242,8 +242,8 @@ export function isWebChartConfigured(env: DataSourceEnv): boolean {
 
 - [x] `cd backend-ts; pnpm typecheck` — clean.
 - [x] `cd backend-ts; pnpm test` — full suite green: **1151 tests, 1150 pass / 0 fail / 1 skipped (pg-skip)** (2026-07-13).
-- [ ] Whole-branch code review (superpowers:code-reviewer or Codex) per the standing always-review rule; fix findings; re-run suite. *(Fable adversarial review 2026-07-13: 3 real findings fixed — double-abort listener leak on retry, single-flight cache poisoning across invalidate(), missing branch-vs-main test-count parity check. Codex CLI unavailable in session; re-review with Codex before merge if desired.)*
-- [ ] Push branch, open PR referencing #262 (do NOT merge — owner reviews).
+- [x] Whole-branch code review done (superpowers:code-reviewer, adversarial): P2-1 auth-timeout hole, P2-2 page-boundary dose dedupe, P2-3 searchset hygiene/mis-attribution, P3-1 kid plumb-through, P3-2 first-page outage, P3-3 test gaps — ALL fixed in c09af87 with tests; suite re-run green (1227/1227, Pg ceiling live). *(Fable adversarial review 2026-07-13: 3 real findings fixed — double-abort listener leak on retry, single-flight cache poisoning across invalidate(), missing branch-vs-main test-count parity check. Codex CLI unavailable in session; re-review with Codex before merge if desired.)*
+- [x] Pushed; **PR #288** open (do NOT merge — owner reviews).
 
 ### Task 6 (non-code, after Task 5): live sandbox probe
 
