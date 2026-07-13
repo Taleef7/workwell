@@ -125,7 +125,7 @@ test("discovery + token exchange: posts a valid RS384 private_key_jwt assertion"
   const req = shim.tokenRequests[0]!;
   assert.match(req.contentType ?? "", /application\/x-www-form-urlencoded/);
   assert.equal(req.form.get("grant_type"), "client_credentials");
-  assert.equal(req.form.get("scope"), "system/*.read");
+  assert.equal(req.form.get("scope"), "system/*.rs");
   assert.equal(req.form.get("client_assertion_type"), ASSERTION_TYPE);
 
   const assertion = req.form.get("client_assertion")!;
@@ -162,12 +162,12 @@ test("tokenUrl config skips discovery entirely", async () => {
 test("kid + custom scope are honored", async () => {
   const { pem } = await testKeyPair();
   const shim = authServerShim();
-  const auth = smartBackendServicesAuth(cfgWith(pem, { tokenUrl: TOKEN_URL, kid: "key-1", scope: "system/*.rs" }), {
+  const auth = smartBackendServicesAuth(cfgWith(pem, { tokenUrl: TOKEN_URL, kid: "key-1", scope: "system/*.read" }), {
     fetch: shim.fetchImpl,
   });
   await auth.authorizationHeader();
   const req = shim.tokenRequests[0]!;
-  assert.equal(req.form.get("scope"), "system/*.rs");
+  assert.equal(req.form.get("scope"), "system/*.read");
   assert.equal(decodeJwtPart(req.form.get("client_assertion")!.split(".")[0]!).kid, "key-1");
 });
 
@@ -245,6 +245,42 @@ test("non-2xx token response throws with the status and without leaking the asse
   // a failed refresh must not poison the cache — the next call retries
   await assert.rejects(() => auth.authorizationHeader());
   assert.equal(shim.tokenRequests.length, 2);
+});
+
+test("an echoing token endpoint can never leak the client assertion into the error (Codex P2)", async () => {
+  const { pem } = await testKeyPair();
+  const fetchImpl: FetchImpl = (async (_input: FetchInput, init?: FetchInit) =>
+    // a hostile/debug endpoint that echoes the whole form body (assertion included) in its error
+    new Response(String(init?.body), { status: 400 })) as FetchImpl;
+  const auth = smartBackendServicesAuth(cfgWith(pem, { tokenUrl: TOKEN_URL }), { fetch: fetchImpl });
+  await assert.rejects(
+    () => auth.authorizationHeader(),
+    (e: unknown) => {
+      assert.ok(e instanceof Error);
+      assert.match(e.message, /400/);
+      assert.doesNotMatch(e.message, /client_assertion|eyJ/, "the echoed body must be discarded, never surfaced");
+      return true;
+    },
+  );
+});
+
+test("a structured OAuth error code IS surfaced (status + code only)", async () => {
+  const { pem } = await testKeyPair();
+  const fetchImpl: FetchImpl = (async () =>
+    new Response(JSON.stringify({ error: "invalid_client", error_description: "secret-ish detail" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    })) as FetchImpl;
+  const auth = smartBackendServicesAuth(cfgWith(pem, { tokenUrl: TOKEN_URL }), { fetch: fetchImpl });
+  await assert.rejects(
+    () => auth.authorizationHeader(),
+    (e: unknown) => {
+      assert.ok(e instanceof Error);
+      assert.match(e.message, /401.*invalid_client/);
+      assert.doesNotMatch(e.message, /secret-ish/, "only the error code, never the description");
+      return true;
+    },
+  );
 });
 
 test("discovery failure: a non-200 smart-configuration response throws", async () => {

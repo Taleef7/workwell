@@ -37,7 +37,9 @@ export interface SmartBackendAuthConfig {
   privateKeyPem: string;
   /** Skips discovery when provided. */
   tokenUrl?: string;
-  /** Default "system/*.read". */
+  /** Default "system/*.rs" — the scope WebChart's documented bulk-client registration grants
+   *  (SMART v2 read+search). The sandbox smart-configuration also advertises the v1-style
+   *  `system/*.read`; override via config if a deployment is registered with that form. */
   scope?: string;
   /** Optional JWK `kid` header for multi-key JWKS. */
   kid?: string;
@@ -55,7 +57,7 @@ export interface SmartBackendAuthOptions {
 }
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
-const DEFAULT_SCOPE = "system/*.read";
+const DEFAULT_SCOPE = "system/*.rs";
 const ASSERTION_LIFETIME_S = 300;
 const DEFAULT_TOKEN_LIFETIME_S = 300;
 const DEFAULT_EXPIRY_SKEW_MS = 60_000;
@@ -105,9 +107,19 @@ async function signAssertion(cfg: SmartBackendAuthConfig, aud: string, nowMs: nu
   return `${signingInput}.${base64url(new Uint8Array(sig))}`;
 }
 
-/** A short, secret-free snippet of an error body for diagnostics. */
-function bodySnippet(text: string): string {
-  return text.slice(0, 200).replace(/\s+/g, " ").trim();
+/**
+ * A structured OAuth `error` code from an error response body — and ONLY that (Codex P2): the raw
+ * body is never included in a thrown message, because a proxy/debug endpoint that echoes form
+ * parameters would otherwise put the `client_assertion` JWT into logs/alerts.
+ */
+function oauthErrorCode(text: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (isObject(parsed) && typeof parsed.error === "string" && /^[\w-]{1,64}$/.test(parsed.error)) return parsed.error;
+  } catch {
+    // non-JSON body — discard entirely
+  }
+  return undefined;
 }
 
 export function smartBackendServicesAuth(
@@ -167,7 +179,8 @@ export function smartBackendServicesAuth(
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`WebChart token request failed: ${response.status} ${response.statusText} ${bodySnippet(text)}`.trim());
+      const code = oauthErrorCode(text);
+      throw new Error(`WebChart token request failed: ${response.status} ${response.statusText}${code ? ` (${code})` : ""}`.trim());
     }
     const payload: unknown = await response.json();
     if (!isObject(payload) || typeof payload.access_token !== "string" || !payload.access_token) {

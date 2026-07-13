@@ -32,7 +32,7 @@ export interface WebChartConfig {
   privateKeyPem?: string;
   /** Token endpoint override; discovered from `{base}/fhir/.well-known/smart-configuration` when absent. */
   tokenUrl?: string;
-  /** OAuth scope; default `system/*.read`. */
+  /** OAuth scope; default `system/*.rs` (the documented bulk-registration grant). */
   scope?: string;
   /** Optional JWK `kid` header for a multi-key registered JWKS. */
   kid?: string;

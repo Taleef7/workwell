@@ -206,7 +206,7 @@ test("SMART mode: one token exchange authorizes the whole batch and outcomes mat
       tokenRequests++;
       const form = new URLSearchParams(String(init?.body));
       assert.equal(form.get("grant_type"), "client_credentials");
-      assert.equal(form.get("scope"), "system/*.read", "the scope default must survive the client config mapping");
+      assert.equal(form.get("scope"), "system/*.rs", "the scope default must survive the client config mapping");
       assert.ok(form.get("client_assertion"));
       return jsonResponse({ access_token: "tok-live", token_type: "bearer", expires_in: 3600 });
     }

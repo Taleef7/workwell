@@ -296,6 +296,13 @@ DELETE FROM workwell_spike.quality_snapshots;
 
 ### Resolving VSAC value sets (ADR-023, on-demand, NOT auto-run on deploy)
 
+> **✓ Done on live Neon (imported 2026-07-05; verified 2026-07-13).** All **21 CMS122v14 reference
+> OIDs** are present in `workwell_spike.value_sets` with `source='VSAC'`, `resolution_status='RESOLVED'`,
+> and non-empty code lists. Live-verified end-to-end on 2026-07-13:
+> `GET /api/measures/cms122/fidelity/diff` on the deployed stack returns **`mode: "literal"`**
+> (150 subjects, 15 divergent, 0 errors — the fqm-execution literal ladder is live). Re-run only to
+> refresh expansions or add OIDs (idempotent per-OID).
+
 `pnpm resolve-valuesets` imports **real VSAC (NLM UMLS) value-set expansions** into `value_sets` so the
 CQL engine can resolve official eCQM value sets against authoritative terminology instead of only the
 locally-seeded codes — the on-ramp for the E14 official-CQL work. It `$expand`s each target OID via the
@@ -426,7 +433,7 @@ shows all services `Up`).
 | `WORKWELL_WEBCHART_CLIENT_ID` | Backend | SMART Backend Services client id (the verified contract, PR-2c/ADR-028). Selects SMART auth together with `WORKWELL_WEBCHART_PRIVATE_KEY`. |
 | `WORKWELL_WEBCHART_PRIVATE_KEY` | Backend | PKCS#8 PEM private key for the RS384 `private_key_jwt` client assertion (multi-line env value; the matching public key is registered as the client's JWKS). |
 | `WORKWELL_WEBCHART_TOKEN_URL` | Backend | Optional token-endpoint override; when unset it is discovered from `{base}/fhir/.well-known/smart-configuration`. |
-| `WORKWELL_WEBCHART_SCOPE` | Backend | Optional OAuth scope (default `system/*.read`). |
+| `WORKWELL_WEBCHART_SCOPE` | Backend | Optional OAuth scope (default `system/*.rs` — the documented bulk-registration grant; the sandbox also advertises v1-style `system/*.read`). |
 | `WORKWELL_WEBCHART_KID` | Backend | Optional JWK `kid` header for the client assertion (multi-key registered JWKS). |
 | `WORKWELL_WEBCHART_API_KEY` | Backend | Legacy static bearer key (pre-verified-contract mode; kept for fixtures/proxies). Ignored for auth selection when the SMART pair is set. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
