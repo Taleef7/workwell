@@ -37,9 +37,15 @@ public-sources research pass and recorded it in **`docs/INTEGRATION_RESEARCH_202
 "here's what we found, confirm the residuals" instead of a blank questionnaire. Remaining
 genuinely MIE-gated: pagination, `$export _since`, A4/A5/A7/A8, B9–B12, C14–C16, D17.
 
-**Next:** send the updated #254 package (owner); run `pnpm resolve-valuesets` on Neon (owner);
-E12 PR-2c contract correction (SMART Backend Services client + per-resource composition +
-sandbox registration attempt); ICE sidecar spike; #263 redesign; cross-system-credit issue.
+**Executed same-day (see the respective branches/PRs):** E12 PR-2c built + reviewed + PR'd
+(**PR #288**, branch `feat/e12-pr2c-smart-transport`, ADR-028 — suite 1227/1227 green incl. the live
+Pg ceiling); **ICE spike PROVEN** — the official `hlnconsulting/ice` Docker image ran locally and
+returned 17 real vaccine-group forecasts + 60 dose evaluations for the canonical test payload
+(`docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`); **#263** redesign comment posted
+($export _since primary / content-hash fallback); **#287** filed (calculation-level cross-system
+credit — Doug's "compliant anywhere" ask is display-only today). **Remaining owner steps:** send the
+updated #254 package; run `pnpm resolve-valuesets` on Neon (free UMLS key) so the live cms122 diff
+runs literal.
 
 ## 2026-07-11 — Deploy fix, observability merge, durable scheduler (PRs #283, #281, #284)
 
