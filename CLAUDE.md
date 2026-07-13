@@ -84,7 +84,29 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-11, post-#284)
+## Current Focus (as of 2026-07-13 — independence sprint; prior block 2026-07-11 below)
+
+**2026-07-13 (PRs #286 docs + #288 code, in review):** rather than waiting on #254, the WebChart
+contract was **self-researched from public sources and live-verified** (public FHIR R4 sandbox
+`fhirr4sandbox.webchartnow.com`; docs source `github.com/mieweb/docs`): auth is **SMART Backend
+Services** (RS384 `private_key_jwt` + registered JWKS, default scope `system/*.rs`), and there is **no
+`Patient/$everything` and no `_lastUpdated`** — so **E12 PR-2c was built now** (PR #288, ADR-028):
+`httpWebChartClient` rewritten to the verified contract (per-resource `?patient=` composition,
+whole-patient degrade on any resource failure, page-boundary dedupe, off-origin guard; WebCrypto only,
+no new deps; whole-branch review findings all fixed; 1227/1227 tests green incl. live Pg ceiling).
+Sandbox dynamic registration is **not** openly enabled → the sharpened #254 ask is *"register a
+WorkWell backend-services client (JWKS attached) or enable RFC 7591"*. **ICE proven self-hostable**
+(official `hlnconsulting/ice` image; real forecasts returned locally; adapter spec
+`docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`, ~3–5d build) — answers D18 ourselves; a
+Java→TS ICE port is assessed infeasible. **Live literal eCQM diff verified in production 2026-07-13:**
+`GET /api/measures/cms122/fidelity/diff` returns `mode:"literal"` (VSAC OIDs were imported 2026-07-05;
+DEPLOY now carries the ✓ banner). #263 redesigned (`$export _since` primary / content-hash fallback);
+**#287 filed** (calculation-level "compliant anywhere = compliant everywhere" — display-only today).
+**Owner steps:** send the updated #254 package before the Wed 2026-07-15 Doug meeting; review/merge
+#286 + #288 (trivial JOURNAL heading overlap — keep both). Research record:
+`docs/INTEGRATION_RESEARCH_2026-07-13.md`.
+
+## Prior focus (as of 2026-07-11, post-#284)
 
 **Post-#280 wave merged (2026-07-11):** **PR #283** fixed the failing production deploy (MIE
 Create-a-Container job-poll window enlarged 300 s→900 s + validated `DEPLOY_JOB_POLL_ATTEMPTS`;
