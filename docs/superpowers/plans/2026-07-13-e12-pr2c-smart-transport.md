@@ -110,7 +110,7 @@ Behavior requirements:
 - Non-2xx token response, missing `access_token`, or malformed discovery JSON ⇒ throw `Error` with status + a short body snippet (never log the assertion or key).
 - `invalidate()` clears the cached token (next call re-fetches).
 
-- [ ] **Step 1: Write the failing tests** — `smart-backend-auth.test.ts` (node:test style, mirrors `mock-http-conformance.test.ts` helpers). Generate a real keypair in-test:
+- [x] **Step 1: Write the failing tests** — `smart-backend-auth.test.ts` (node:test style, mirrors `mock-http-conformance.test.ts` helpers). Generate a real keypair in-test:
 
 ```ts
 async function testKeyPair() {
@@ -133,10 +133,10 @@ Tests (each with a fetch shim that records requests):
 5. `invalidate() forces re-fetch`.
 6. `non-2xx token response throws (message carries status, not the assertion)`.
 
-- [ ] **Step 2: Run tests, verify they fail** — `cd backend-ts; pnpm test:file src/engine/ingress/webchart/smart-backend-auth.test.ts` (or `node --import tsx --test src/engine/ingress/webchart/smart-backend-auth.test.ts`). Expected: FAIL (module not found).
-- [ ] **Step 3: Implement `smart-backend-auth.ts`** per the surface + notes above.
-- [ ] **Step 4: Run tests, verify pass; `pnpm typecheck`.**
-- [ ] **Step 5: Commit** — `feat(webchart): SMART Backend Services auth provider (RS384 private_key_jwt, WebCrypto, no deps)`
+- [x] **Step 2: Run tests, verify they fail** — `cd backend-ts; pnpm test:file src/engine/ingress/webchart/smart-backend-auth.test.ts` (or `node --import tsx --test src/engine/ingress/webchart/smart-backend-auth.test.ts`). Expected: FAIL (module not found).
+- [x] **Step 3: Implement `smart-backend-auth.ts`** per the surface + notes above.
+- [x] **Step 4: Run tests, verify pass; `pnpm typecheck`.**
+- [x] **Step 5: Commit** *(f95d3d8 + tsc fix 3a46876)* — `feat(webchart): SMART Backend Services auth provider (RS384 private_key_jwt, WebCrypto, no deps)`
 
 ### Task 2: `webchart-client.ts` — auth provider + per-resource composition
 
@@ -179,10 +179,10 @@ Conformance-test updates (`mock-http-conformance.test.ts`):
 - Keep ALL existing test intents, adapted: outcome-parity vs fixture path (the load-bearing test), timeout, 429-then-success (now on a per-resource search), later-population-page failure tolerance, **per-resource failure ⇒ MISSING_DATA while batch continues** (replaces malformed-`$everything`; also keep a malformed-JSON variant), off-origin guard (population `link[next]` AND a per-resource `link[next]`), empty population.
 - Add SMART-mode conformance: shim serves `.well-known` + token endpoint (issues `tok-live`), asserts every FHIR request carries `Bearer tok-live` and that exactly **one** token request served the whole batch; cfg `{baseUrl, clientId, privateKeyPem, tokenUrl}`; outcomes must equal the fixture path. Add a 401-once test: first FHIR call 401 ⇒ token re-fetched ⇒ request retried ⇒ batch succeeds.
 
-- [ ] **Step 1: Update the shim + tests first, run, verify the new expectations fail** (parity test fails against `$everything` client).
-- [ ] **Step 2: Implement the client changes.**
-- [ ] **Step 3: Run the conformance file, verify pass; `pnpm typecheck`.**
-- [ ] **Step 4: Commit** — `feat(webchart): per-resource ?patient= composition + SMART auth in httpWebChartClient (no $everything — verified contract)`
+- [x] **Step 1: Update the shim + tests first, run, verify the new expectations fail** (parity test fails against `$everything` client).
+- [x] **Step 2: Implement the client changes.**
+- [x] **Step 3: Run the conformance file, verify pass; `pnpm typecheck`.** *(11/11)*
+- [x] **Step 4: Commit** *(750b529; WebChartConfig type extension folded in)* — `feat(webchart): per-resource ?patient= composition + SMART auth in httpWebChartClient (no $everything — verified contract)`
 
 ### Task 3: config + seam inventory
 
@@ -225,7 +225,7 @@ export function isWebChartConfigured(env: DataSourceEnv): boolean {
 
 `resolveDataSource` passes all trimmed fields through. Tests: baseUrl+clientId+privateKey ⇒ webchart selected; clientId without key ⇒ json; seam-inventory line flips to `webchart=on` for the SMART combination; legacy combination unchanged.
 
-- [ ] **Steps: failing tests → implement → pass → `pnpm typecheck` → commit** — `feat(webchart): SMART env contract (CLIENT_ID/PRIVATE_KEY) alongside legacy API_KEY; seam predicate covers both`
+- [x] **Steps: failing tests → implement → pass → `pnpm typecheck` → commit** *(in 750b529)* — `feat(webchart): SMART env contract (CLIENT_ID/PRIVATE_KEY) alongside legacy API_KEY; seam predicate covers both`
 
 ### Task 4: docs
 
@@ -236,17 +236,17 @@ export function isWebChartConfigured(env: DataSourceEnv): boolean {
 - Modify: `docs/DECISIONS.md` (ADR-027: dual-mode WebChart auth — SMART Backend Services per the public contract, preferred; legacy static bearer retained; WebCrypto, no deps; per-resource composition because no `$everything`; whole-patient fallback on any resource failure so partial clinical data never evaluates)
 - Modify: `docs/JOURNAL.md` (2026-07-13 entry extended with the PR-2c build)
 
-- [ ] **Step: write docs, commit** — `docs(webchart): verified-contract assumptions + ADR-027 + env reference for SMART transport`
+- [x] **Step: write docs, commit** *(83e452c; ADR number is ADR-028 — 027 was taken)* — `docs(webchart): verified-contract assumptions + ADR-027 + env reference for SMART transport`
 
 ### Task 5: verify + review
 
-- [ ] `cd backend-ts; pnpm typecheck` — clean.
-- [ ] `cd backend-ts; pnpm test` — full suite green (baseline 2026-07-11: ~1057+ pass / 1 pg-skip / 0 fail).
+- [x] `cd backend-ts; pnpm typecheck` — clean.
+- [x] `cd backend-ts; pnpm test` — full suite green: **1151 tests, 1150 pass / 0 fail / 1 skipped (pg-skip)** (2026-07-13).
 - [ ] Whole-branch code review (superpowers:code-reviewer or Codex) per the standing always-review rule; fix findings; re-run suite. *(Fable adversarial review 2026-07-13: 3 real findings fixed — double-abort listener leak on retry, single-flight cache poisoning across invalidate(), missing branch-vs-main test-count parity check. Codex CLI unavailable in session; re-review with Codex before merge if desired.)*
 - [ ] Push branch, open PR referencing #262 (do NOT merge — owner reviews).
 
 ### Task 6 (non-code, after Task 5): live sandbox probe
 
-- [ ] `curl https://fhirr4sandbox.webchartnow.com/webchart.cgi/fhir/metadata` + `.well-known/smart-configuration` — record actuals vs assumptions. *(Verified live 2026-07-14: R4 4.0.1, token endpoint + `private_key_jwt`/RS384 confirmed, `system/*.read` scope advertised. One deviation: sandbox smart-configuration omits `client_credentials` from grant_types_supported (authorization_code only) — recorded in INTEGRATION_RESEARCH §1.1a; needs MIE confirmation for backend-services on sandbox.)*
-- [ ] Attempt RFC 7591 dynamic registration (worked examples in mieweb/docs `oauth-2.0-tutorial.md`); if registered: token exchange + one `Patient?_count=1` through the NEW client (a tiny `pnpm`-runnable probe script is fine, kept out of the test suite). *(Attempted 2026-07-14: `POST /webchart.cgi/oauth/register/` = live registration endpoint — returns validation errors for missing fields i.e. endpoint exists and parses; full registration blocked: `software_statement` signed by an MIE-recognized issuer required (`invalid_software_statement`). Token exchange not reachable without registration. Recorded as sharpened #254 ask A3/C13: "issue WorkWell a software statement or register client manually via Login Trusts".)*
-- [ ] Record results (success or exact refusal) in `docs/INTEGRATION_RESEARCH_2026-07-13.md` + the #254 answer log; disclose the registration attempt in the #254 note.
+- [x] Live probe done 2026-07-13: R4 4.0.1 + private_key_jwt/RS384 + system/*.read confirmed; grant list advertises authorization_code only. Recorded in INTEGRATION_RESEARCH §1.1a (PR #286). *(Verified live 2026-07-14: R4 4.0.1, token endpoint + `private_key_jwt`/RS384 confirmed, `system/*.read` scope advertised. One deviation: sandbox smart-configuration omits `client_credentials` from grant_types_supported (authorization_code only) — recorded in INTEGRATION_RESEARCH §1.1a; needs MIE confirmation for backend-services on sandbox.)*
+- [x] Attempted 2026-07-13: NO registration endpoint openly enabled on the sandbox (none advertised; /register paths fall through to the login UI) → token exchange unreachable without MIE-side registration. Sharpened #254 ask recorded (register a WorkWell backend-services client / enable RFC 7591). *(Attempted 2026-07-14: `POST /webchart.cgi/oauth/register/` = live registration endpoint — returns validation errors for missing fields i.e. endpoint exists and parses; full registration blocked: `software_statement` signed by an MIE-recognized issuer required (`invalid_software_statement`). Token exchange not reachable without registration. Recorded as sharpened #254 ask A3/C13: "issue WorkWell a software statement or register client manually via Login Trusts".)*
+- [x] Recorded in INTEGRATION_RESEARCH §1.1a + the #254 answer log (docs branch, PR #286).
