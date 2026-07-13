@@ -69,6 +69,37 @@ detail, because it is the part we can build without waiting for anyone.
 The two tiers **compose**: `_since` narrows the candidate set (transport), the hash confirms each
 candidate actually changed (CPU). Build Tier 2 first; Tier 1 becomes a pre-filter when confirmed.
 
+### ⚠ Tier 1's candidate set is NOT just "the patients WebChart exported"
+
+**This is the sharpest trap in the whole design, and it only bites Tier 1.** A subject's evaluated
+input is *not* only their WebChart clinical data. WorkWell stamps its own inputs onto the bundle
+before CQL sees it:
+
+- **The OH enrollment roster** (`engine/ingress/enrollment/roster.ts`) — WebChart carries no
+  `urn:workwell:vs:*` program-membership Condition, so enrollment is held WorkWell-side and stamped
+  in. Enrolling or un-enrolling someone changes their evaluated input with **zero WebChart resources
+  changed**.
+- **Segments** (`segment-applicability.ts`) — a cohort/rule edit changes case creation for subjects
+  whose clinical data is untouched.
+- The CMS125 qualifying-visit stamp, and anything else the ingress adds pre-evaluation.
+
+So a `$export?_since=` candidate set would **miss** exactly these subjects, and copy-forward would
+then carry a **stale compliance answer** for someone who was just enrolled (MISSING_DATA →
+actionable) or just removed (actionable → out-of-population). That is a wrong answer, not a slow one.
+
+**Rule:** Tier 1's candidate set is
+`exported_patient_ids ∪ subjects_whose_workwell_side_inputs_changed`.
+
+Concretely, the WorkWell-side inputs must either (a) be included in the hashed payload — which they
+already are, if the hash is taken over the **post-stamp, evaluated** bundle as §5 requires, so **Tier 2
+is immune to this by construction** — or (b) force a hash recomputation for the affected subjects when
+`_since` is used to skip the fetch. **Recommendation: never let `_since` skip the *hash*, only the
+*fetch*.** If a subject is not in the export, we may reuse their last-fetched bundle, but we must still
+re-stamp the current roster/segments onto it and re-hash. The stamp is cheap; the CQL evaluation is
+what costs 68 ms.
+
+This is why Tier 2 is the floor and Tier 1 is only an optimization on top of it — never a replacement.
+
 ---
 
 ## 3. What "unchanged" means — the invalidation matrix
@@ -117,6 +148,36 @@ a 365-day window with a 30-day DUE_SOON band is ~90% of subjects on any given da
 worth building.** It is still descriptive (ADR-008): the CQL engine computes the status and the
 transition date on the evaluations it *does* run; the cache only decides *whether to run*, never what
 the answer is.
+
+### ⚠ The copied EVIDENCE goes stale even when the STATUS doesn't
+
+The status is stable until `next_transition_at` — but the **evidence is not**. CQL evidence carries
+date-dependent defines computed from the evaluation date: `Days Since Last Audiogram`, `Days Since Last
+Exam`, and the derived `why_flagged.days_overdue`. `CqlExecutionEngine` persists those values into
+`evidence_json`. So a row copied forward on day N+30 would carry **day N's day-counts stamped with day
+N+30's `evaluated_at`** — the case detail would say "412 days since last audiogram" when the true
+figure is 442, and the audit trail would show a fresh evaluation timestamp over stale arithmetic.
+
+That is not a cosmetic bug: it is exactly the kind of quiet inconsistency an auditor would find, and it
+breaks the §8 parity claim as literally stated (identical status **and** evidence).
+
+**Resolution — three options, in the order they should be considered:**
+
+1. **Recompute the cheap derived fields, copy the rest.** The stale defines are pure functions of
+   `(anchor date, evaluation date, window, grace)` — all of which are known without re-running CQL.
+   Recompute the day-count defines and `why_flagged` arithmetically at copy time from the cached anchor
+   date. This preserves both the status and honest evidence for ~0 cost. **Recommended.**
+2. **Label rather than recompute.** Copy the evidence verbatim, and add
+   `evidence_json.reusedFrom = <run-id>` **plus `evidence_json.evidenceComputedAsOf = <original date>`**,
+   so every consumer can see the arithmetic is as-of an earlier date. Cheaper, but it pushes the problem
+   onto every reader (the case UI, the AI explain surface, the auditor packet) and *one of them will
+   forget*.
+3. **Don't copy evidence at all for RECURRING measures** — i.e. only skip PERMANENT ones (the 21% case).
+   Correct, and gives up the whole point.
+
+**Whichever is chosen, the §8 parity test must be written to match it** — comparing status exactly, and
+evidence either exactly (option 1) or modulo the explicitly-recomputed date-dependent defines. A parity
+test that quietly ignores the evidence would be testing the wrong thing.
 
 ---
 
@@ -235,12 +296,18 @@ The golden test that must exist before this ships:
    evidence)`.
 2. Run an **incremental** run over the *same unchanged* data → assert **every** outcome is identical
    (status **and** evidence), and assert the run reports `skipped == total` (nothing was re-evaluated).
+   *(Same-day: no date-dependent define can have moved, so evidence must match byte-for-byte.)*
 3. Mutate one subject's data → assert **exactly one** subject re-evaluates, its outcome is correct, and
    every other subject's outcome is byte-identical to the full run.
 4. Bump a measure's ELM (or a referenced value set's expansion) → assert **every** subject for that
    measure re-evaluates (the `logic_version` invalidation, §3).
 5. Advance the clock past a subject's `next_transition_at` → assert it re-evaluates and flips status
-   (the trap in §3).
+   (the first trap in §3).
+6. Advance the clock **short of** `next_transition_at` → assert the subject is skipped, the status is
+   unchanged, **and the day-count defines / `why_flagged.days_overdue` in the copied row match a full
+   run's values for that date** (the second trap in §3 — the stale-evidence one). This is the test that
+   makes option 1 above real; without it, the copy-forward silently ships day-N arithmetic under a
+   day-N+30 timestamp.
 
 **A failure of (2) or (3) is a correctness bug, not a performance regression.** The rule stands: CQL
 decides every outcome (ADR-008); this feature only decides *whether to ask it again*, and must be
@@ -271,3 +338,6 @@ provably unable to change an answer.
 3. **Is `next_transition_at` (§3) in scope for Phase 2?** Without it, the daily saving is ~21% (PERMANENT
    measures only) and the feature is arguably not worth its complexity. With it, it is ~90% — but it
    requires the engine to also emit the transition date, which is a real (if small) engine change.
+4. **Stale-evidence handling on a copied row (§3):** recompute the date-dependent defines at copy time
+   (recommended — honest evidence, ~0 cost), or label them (`evidenceComputedAsOf`) and push the problem
+   to every reader? This is a correctness/auditability call, not a performance one.
