@@ -2,9 +2,9 @@
 
 ## 2026-07-13 — E12 PR-2c: verified-contract WebChart transport (SMART Backend Services + per-resource composition)
 
-Built on the same day's public-sources research (PR #286 carries the research record +
-`docs/INTEGRATION_RESEARCH_2026-07-13.md`; if that PR merges first, this entry stacks above its
-2026-07-13 entry): `httpWebChartClient` no longer implements the #255 *assumed* mock contract — it
+Built on the same day's public-sources research (PR #286, merged — the research record is
+`docs/INTEGRATION_RESEARCH_2026-07-13.md`; its journal entry is directly below this one):
+`httpWebChartClient` no longer implements the #255 *assumed* mock contract — it
 implements WebChart's **real, publicly verified FHIR contract** (ADR-028), un-blocking PR-2c's
 request shaping from #254:
 
@@ -31,6 +31,53 @@ request shaping from #254:
 Residual #254-gated: credentials/registration (a sandbox dynamic-registration attempt is the next
 step), pagination semantics, `Group/$export _since`. Descriptive only (ADR-008/ADR-017); no schema,
 no new deps.
+
+## 2026-07-13 — Independent integration research: WebChart public FHIR contract + self-hostable ICE (docs only)
+
+Rather than staying blocked on #254 answers ahead of the 2026-07-15 Doug meeting, ran a
+public-sources research pass and recorded it in **`docs/INTEGRATION_RESEARCH_2026-07-13.md`**
+(new). Headlines:
+
+- **WebChart has a public, certified FHIR R4 API** (R4 4.0.1, US Core 7.0.0, SMART App Launch
+  2.2, Bulk Data 2.0, Inferno g10) documented in `github.com/mieweb/docs`, with a **live public
+  sandbox** (`fhirr4sandbox.webchartnow.com` — CapabilityStatement + smart-configuration fetched
+  and verified 2026-07-13) that documents **dynamic client registration** incl. the SMART
+  **Backend Services** server-to-server flow (`client_credentials` + RS384 `private_key_jwt` +
+  JWKS, `system/*.rs`).
+- **Two corrections to the #255 mock contract** for E12 PR-2c: (1) auth is SMART Backend
+  Services, **not** a static bearer API key; (2) there is **no `Patient/$everything` and no
+  `_lastUpdated`/history** — per-patient pulls compose from per-resource `?patient={id}`
+  searches, and the incremental candidate for #263 is `Group/$export?_since=` (unverified) with
+  content-hashing as the fallback. Pagination remains genuinely undocumented (kept as an open
+  #254 question).
+- **WebChart itself is not runnable locally** (closed-source; `dev-wcdb` is the DB only), and
+  Doug's "MIE open-source server" is `mieweb/opensource-server` — the Proxmox Create-a-Container
+  platform we already deploy on, not WebChart.
+- **ICE is self-hostable today:** official HLN Docker image (`hlnconsulting/ice`, release 2.57.2
+  of 2026-07-08, actively ACIP-maintained), REST DSS endpoint over vMR payloads; ~3–5 days to a
+  real TS adapter behind the existing `ImmunizationForecast` port. A Java→TS port of ICE is
+  assessed infeasible (continuously-updated Drools rule base).
+- **Two internal gaps surfaced** (one later corrected): (1) ~~the VSAC import was never run on
+  live Neon~~ — **corrected on double-check (2026-07-13):** the 21 OIDs were imported 2026-07-05;
+  only the DEPLOY "✓ Done" banner was missing (added on the PR-2c branch), and the live diff was
+  **verified returning `mode: "literal"`** (150 subjects / 15 divergent / 0 errors); (2) Doug's
+  "compliant anywhere = compliant everywhere" (2026-06-24) is **display-only** today — E15 merges
+  the timeline but quality calculations never credit cross-system events (ADR-022 by design);
+  filed as **#287**.
+
+**`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` updated:** A1/A2/A3/A6/C13/D18 now carry dated
+**provisional answers (confirm/correct)** blocks + an answer-log entry — the package now reads
+"here's what we found, confirm the residuals" instead of a blank questionnaire. Remaining
+genuinely MIE-gated: pagination, `$export _since`, A4/A5/A7/A8, B9–B12, C14–C16, D17.
+
+**Executed same-day (see the respective branches/PRs):** E12 PR-2c built + reviewed + PR'd
+(**PR #288**, branch `feat/e12-pr2c-smart-transport`, ADR-028 — suite 1227/1227 green incl. the live
+Pg ceiling); **ICE spike PROVEN** — the official `hlnconsulting/ice` Docker image ran locally and
+returned 17 real vaccine-group forecasts + 60 dose evaluations for the canonical test payload
+(`docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`); **#263** redesign comment posted
+($export _since primary / content-hash fallback); **#287** filed (calculation-level cross-system
+credit — Doug's "compliant anywhere" ask is display-only today). **Remaining owner step:** send the
+updated #254 package (the VSAC/Neon step turned out to be already done — see the correction above).
 
 ## 2026-07-11 — Deploy fix, observability merge, durable scheduler (PRs #283, #281, #284)
 
