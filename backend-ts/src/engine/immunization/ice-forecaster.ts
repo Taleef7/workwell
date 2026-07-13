@@ -171,13 +171,19 @@ function toSeriesForecast(
     status = "UP_TO_DATE";
   }
 
+  // `dosesReceived`/`dosesRequired` mean "progress toward the current requirement", not a lifetime
+  // tally — so clamp. A real Td/flu history routinely carries several lifetime boosters against a
+  // per-cycle requirement of 1, which would otherwise render the nonsensical card "2 of 1 doses"
+  // (and a 4th HepB dose "4 of 3"). `lastDoseDate` and ICE's own `reason` carry the full truth.
+  const dosesRequired = iceDosesRequired(series, seriesDoses);
+
   return {
     series,
     status,
     lastDoseDate,
     nextDueDate: proposal.proposedDate,
-    dosesReceived: seriesDoses.length,
-    dosesRequired: iceDosesRequired(series, seriesDoses),
+    dosesReceived: Math.min(seriesDoses.length, dosesRequired),
+    dosesRequired,
     reason,
   };
 }

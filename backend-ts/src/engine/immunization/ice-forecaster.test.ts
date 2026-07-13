@@ -392,8 +392,12 @@ test("doses are counted across the WHOLE CVX set for a series, not just the repr
   const out = await f.forecast("wc-real", "2026-07-13");
 
   const tdap = out.series.find((s) => s.series === "TDAP");
-  assert.equal(tdap?.dosesReceived, 2, "both Td codes count toward the DTP/Tdap series");
-  assert.equal(tdap?.lastDoseDate, "2019-03-03");
+  // Both Td codes were recognized (the point of this test) — but dosesReceived means "progress toward
+  // the current requirement", so it clamps at 1 rather than rendering the nonsensical "2 of 1 doses".
+  // lastDoseDate proves the SECOND dose was seen.
+  assert.equal(tdap?.dosesReceived, 1);
+  assert.equal(tdap?.dosesRequired, 1);
+  assert.equal(tdap?.lastDoseDate, "2019-03-03", "the later Td (113) was recognized, not just the first");
 
   const flu = out.series.find((s) => s.series === "INFLUENZA");
   assert.equal(flu?.dosesReceived, 1, "a quadrivalent flu code counts");
@@ -402,6 +406,38 @@ test("doses are counted across the WHOLE CVX set for a series, not just the repr
   const hepb = out.series.find((s) => s.series === "HEPB");
   assert.equal(hepb?.dosesReceived, 2, "HepB 08 + 44 count toward the HepB series");
   assert.equal(hepb?.dosesRequired, 3, "a non-Heplisav history is a 3-dose series");
+});
+
+// A lifetime booster count against a per-cycle requirement would render "2 of 1 doses" on the card.
+test("dosesReceived is progress toward the requirement, not a lifetime tally (never 'N of 1')", async () => {
+  const many: IceDoseHistory = {
+    patientId: "wc-many",
+    dob: "1970-01-01",
+    gender: "M",
+    doses: [
+      { cvx: "115", date: "2001-01-01" },
+      { cvx: "09", date: "2011-01-01" },
+      { cvx: "113", date: "2021-01-01" }, // three lifetime Td/Tdap boosters
+      { cvx: "43", date: "2010-01-01" },
+      { cvx: "43", date: "2010-03-01" },
+      { cvx: "43", date: "2010-09-01" },
+      { cvx: "44", date: "2015-01-01" }, // a FOURTH HepB dose on a 3-dose series
+    ],
+  };
+  const out = await realIceForecaster(CFG, {
+    fallback: simulatedForecaster,
+    fetchImpl: goldenFetch([]),
+    historySource: () => many,
+  }).forecast("wc-many", "2026-07-13");
+
+  for (const s of out.series) {
+    assert.ok(
+      s.dosesReceived <= s.dosesRequired,
+      `${s.series}: dosesReceived (${s.dosesReceived}) must never exceed dosesRequired (${s.dosesRequired})`,
+    );
+  }
+  assert.equal(out.series.find((s) => s.series === "TDAP")?.lastDoseDate, "2021-01-01");
+  assert.equal(out.series.find((s) => s.series === "HEPB")?.dosesReceived, 3, "clamped to the 3-dose series");
 });
 
 test("a pure Heplisav-B history is reported as the 2-dose series it is", async () => {
