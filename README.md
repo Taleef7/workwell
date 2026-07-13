@@ -22,7 +22,7 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
-- **2026-07-13 — independence sprint (PRs #286 + #288 merged; ICE adapter in review).** WebChart's
+- **2026-07-13 — independence sprint (PRs #286, #288, #289 merged).** WebChart's
   integration contract turned out to be **publicly documented and live-verifiable**: FHIR R4 + US Core 7
   + SMART Backend Services, with a public sandbox (`fhirr4sandbox.webchartnow.com`). The E12 PR-2c
   transport was rebuilt to that **verified contract** (RS384 `private_key_jwt` via WebCrypto,
@@ -40,7 +40,13 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
   injectable dose-history source (the E12/WebChart drop-in). Verified against a real container (5 live
   tests that self-skip without the env var); the demo stack stays `ice=off` and byte-identical.
   Forecasts remain **advisory** — CQL is still the sole compliance authority (ADR-008/ADR-012). Answers
-  #254 Q D18 ourselves. Suite 1260: 1255 pass / 0 fail / 5 skip. No schema, no new deps.
+  #254 Q D18 ourselves. Suite 1270: 1265 pass / 0 fail / 5 skip. No schema, no new deps.
+- **Design/ops docs (#263 delta-eval, #287 cross-system credit, #270 backup/DR).** Each surfaced
+  something that changes the shape of the work: a delta run that skipped outcome *rows* would silently
+  break every read model (and the saving is ~21%, not ~99%, without status-boundary caching); Doug's
+  "compliant anywhere" hides two lenses, only one of which preserves `All = Σ tenants`; and the live
+  Neon **PITR window is six hours**, with no second line of defence — one bucket unblocks both #167 and
+  a nightly DB dump. All owner-gated: no code, no DDL.
 - **Roadmap 2026-07-09 — PoC → WebChart integration (M1/M2/M3).** **M1 engineering closed 2026-07-10**
   (PRs #271–#279 on `main`): mock WebChart HTTP transport, worker pool, tiered evidence, fqm literal
   CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures, seam inventory, production-readiness memo,
