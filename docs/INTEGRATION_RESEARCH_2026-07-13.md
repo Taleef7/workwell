@@ -57,6 +57,31 @@ The sandbox `.well-known/smart-configuration` (fetched live 2026-07-13):
   "Login Trusts" / the FHIR App editor (admin required).
 - Example client: `github.com/mieweb/webchart-oauth-example`.
 
+### 1.1a Sandbox probe results (2026-07-13, run from the dev machine — confirms + sharpens §1.1)
+
+Live probes of `fhirr4sandbox.webchartnow.com` after the initial research pass:
+
+- **Re-confirmed:** `/fhir/metadata` = FHIR 4.0.1, JSON-only, 34 resource types;
+  `.well-known/smart-configuration` = token endpoint `…/webchart.cgi/oauth/token/`, token auth
+  **`private_key_jwt`**, signing alg **RS384**, scopes `patient/*.rs` + **`system/*.read`**, PKCE S256.
+- **Deviation:** the sandbox's `grant_types_supported` lists **only `authorization_code`** —
+  `client_credentials` is *not advertised*, though the docs' Backend Services tutorial and the
+  `system/*.read` scope imply it exists (Inferno g10 requires Bulk Backend Services). Needs MIE
+  confirmation that backend-services is enabled on the sandbox (#254 A3/C13).
+- **Dynamic registration is NOT openly enabled on the sandbox:** no `registration_endpoint` in
+  `smart-configuration` **or** `openid-configuration`; `.well-known/oauth-authorization-server` is a
+  missing layout module; `POST /webchart.cgi/oauth/register/`, `/webchart.cgi/register/`, and
+  `/register` all fall through to the app login UI (HTTP 200 HTML). Per the docs' own wording
+  ("systems **configured to allow** App Registration via RFC 7591/7592…"), registration is a
+  per-system switch — the public sandbox doesn't expose it self-service; the Drummond/Inferno client
+  examples in the docs were presumably registered MIE-side.
+- **Sharpened #254 ask (replaces "how do we authenticate?"):** *register a WorkWell
+  backend-services client on the sandbox (client_credentials + private_key_jwt; we will provide the
+  JWKS / public key), or enable RFC 7591 registration for us — and confirm `client_credentials` is
+  supported there despite the advertised grant list.* Everything else on our side is built.
+- Operational note: the alternate host `fhirr4sandbox.fhir.webch.art` fails TLS (SNI/cert mismatch)
+  from our network — use the `webchartnow.com` host.
+
 ### 1.2 Resource coverage (from the live sandbox CapabilityStatement)
 
 32 resource types; everything the WorkWell adapter consumes is present with US Core STU7

@@ -57,10 +57,15 @@ process for provisioning a service account for WorkWell.
 > OAuth 2.0. For server-to-server, **SMART Bulk Backend Services**: `client_credentials` grant with
 > an RS384 `private_key_jwt` client assertion verified against a registered **JWKS URL**, scope
 > `system/*.read`. The docs describe **dynamic client registration (RFC 7591)** at `/register`
-> (plus manual registration via Login Trusts / the FHIR App editor). We are rebuilding our HTTP
-> client to this contract now. **Still open:** (a) is self-service dynamic registration against the
-> public sandbox sanctioned for WorkWell's conformance testing? (b) what is the provisioning
-> process + token lifetime for a production service account?
+> (plus manual registration via Login Trusts / the FHIR App editor). Our HTTP client now implements
+> this contract (SMART Backend Services, RS384 private_key_jwt). **Probe result (2026-07-13):** the
+> public sandbox does **not** expose a registration endpoint (none advertised in any well-known
+> document; `/register` paths fall through to the login UI), and its `grant_types_supported`
+> advertises only `authorization_code`. **Concrete ask:** (a) register a WorkWell backend-services
+> client on the sandbox (client_credentials + private_key_jwt — we'll provide the JWKS/public key),
+> or enable RFC 7591 for us; (b) confirm `client_credentials` is supported on the sandbox despite
+> the advertised grant list; (c) the provisioning process + token lifetime for a production service
+> account.
 
 **A4. Rate limits & latency.** Rate limits, quotas, concurrency ceilings, and expected p50/p95 latency
 per call — this sizes our batch evaluation windows.
@@ -164,3 +169,10 @@ what does its contract look like?
   `private_key_jwt` + JWKS, dynamic registration), A6 (no `_lastUpdated`/history; `$export
   _since` unverified), C13 (public sandbox found), D18 (self-hosted ICE proposed; TS port
   assessed infeasible). Sources + confidence: `docs/INTEGRATION_RESEARCH_2026-07-13.md`.
+- **2026-07-13 (sandbox probe):** dynamic registration is **not** openly enabled on the public
+  sandbox (no `registration_endpoint` advertised; `/register` paths fall through to the UI) and
+  `client_credentials` is not in its advertised grant list — so the A3/C13 ask is now concrete:
+  **register a WorkWell backend-services client for us (JWKS attached) or enable RFC 7591**, and
+  confirm backend-services support on the sandbox. Details: `INTEGRATION_RESEARCH_2026-07-13.md`
+  §1.1a. Meanwhile the transport itself is already rebuilt to the verified contract (E12 PR-2c
+  branch; ADR-028) — only credentials stand between us and a live sandbox evaluation.
