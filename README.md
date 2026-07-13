@@ -22,18 +22,25 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
-- **2026-07-13 — independence sprint (in review: PRs #286 docs + #288 code).** WebChart's integration
-  contract turned out to be **publicly documented and live-verifiable**: FHIR R4 + US Core 7 + SMART
-  Backend Services, with a public sandbox (`fhirr4sandbox.webchartnow.com`). The E12 PR-2c transport was
-  rebuilt to that **verified contract** (RS384 `private_key_jwt` via WebCrypto, per-resource `?patient=`
-  composition — no `$everything`; ADR-028; suite 1227/1227 green incl. the live Pg ceiling), most #254
-  questions now carry provisional confirm/correct answers, the sandbox probe sharpened the remaining ask
-  to "register us a backend-services client (JWKS attached)", **ICE was proven self-hostable** (official
-  `hlnconsulting/ice` image returned 17 real vaccine-group forecasts locally —
-  `docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`), and the **live CMS122 fidelity diff was
-  verified running `mode:"literal"`** in production (fqm-execution over the official MADiE artifact; the
-  VSAC OIDs were imported 2026-07-05). Research record: `docs/INTEGRATION_RESEARCH_2026-07-13.md`. New:
-  #287 (calculation-level cross-system credit).
+- **2026-07-13 — independence sprint (PRs #286 + #288 merged; ICE adapter in review).** WebChart's
+  integration contract turned out to be **publicly documented and live-verifiable**: FHIR R4 + US Core 7
+  + SMART Backend Services, with a public sandbox (`fhirr4sandbox.webchartnow.com`). The E12 PR-2c
+  transport was rebuilt to that **verified contract** (RS384 `private_key_jwt` via WebCrypto,
+  per-resource `?patient=` composition — no `$everything`; ADR-028), most #254 questions now carry
+  provisional confirm/correct answers, the sandbox probe sharpened the remaining ask to "register us a
+  backend-services client (JWKS attached)", and the **live CMS122 fidelity diff was verified running
+  `mode:"literal"`** in production (fqm-execution over the official MADiE artifact; the VSAC OIDs were
+  imported 2026-07-05). Research record: `docs/INTEGRATION_RESEARCH_2026-07-13.md`. New: #287
+  (calculation-level cross-system credit).
+- **Immunization forecasting is real — the ICE stub is now a live adapter (ADR-029).** `iceForecaster`
+  had been inert since E6 (#76); ICE turned out to be **self-hostable today** (HLN's ACIP-maintained
+  `hlnconsulting/ice` image), so `realIceForecaster` now speaks its OpenCDS DSS contract through a
+  dependency-free vMR codec — selected by `WORKWELL_IMMZ_ICE_BASE_URL` alone (a self-hosted sidecar has
+  no API key), with a **whole-forecast** fallback to the simulated forecaster on any failure, and an
+  injectable dose-history source (the E12/WebChart drop-in). Verified against a real container (5 live
+  tests that self-skip without the env var); the demo stack stays `ice=off` and byte-identical.
+  Forecasts remain **advisory** — CQL is still the sole compliance authority (ADR-008/ADR-012). Answers
+  #254 Q D18 ourselves. Suite 1260: 1255 pass / 0 fail / 5 skip. No schema, no new deps.
 - **Roadmap 2026-07-09 — PoC → WebChart integration (M1/M2/M3).** **M1 engineering closed 2026-07-10**
   (PRs #271–#279 on `main`): mock WebChart HTTP transport, worker pool, tiered evidence, fqm literal
   CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures, seam inventory, production-readiness memo,

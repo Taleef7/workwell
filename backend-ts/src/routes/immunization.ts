@@ -5,7 +5,8 @@
  *
  *   GET /api/immunization/forecast?subjectId=&asOf=  → ImmunizationForecast
  */
-import { resolveForecaster, type ForecastEnv } from "../engine/immunization/immunization-forecast.ts";
+import type { ForecastEnv } from "../engine/immunization/immunization-forecast.ts";
+import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 
 const json = (data: unknown, status = 200): Response =>
@@ -27,6 +28,6 @@ export async function handleImmunizationForecast(req: Request, env: ForecastEnv)
     throw err;
   }
   const today = new Date().toISOString().slice(0, 10);
-  const forecast = resolveForecaster(env).forecast(subjectId, asOf ?? today);
+  const forecast = await resolveForecaster(env).forecast(subjectId, asOf ?? today);
   return json(forecast);
 }
