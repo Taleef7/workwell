@@ -59,6 +59,22 @@ test("resolveDataSource: defaults to JSON; selects WebChart only when BOTH env v
   assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_API_KEY: "k" }).kind, "webchart");
 });
 
+test("resolveDataSource: the SMART pair (CLIENT_ID + PRIVATE_KEY) also selects WebChart (PR-2c)", () => {
+  const PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
+  assert.equal(
+    resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_CLIENT_ID: "c", WORKWELL_WEBCHART_PRIVATE_KEY: PEM }).kind,
+    "webchart",
+  );
+  // half a SMART pair is NOT configured
+  assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_CLIENT_ID: "c" }, { a: 1 }).kind, "json");
+  assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_PRIVATE_KEY: PEM }, { a: 1 }).kind, "json");
+  // blank-after-trim SMART values are NOT configured
+  assert.equal(
+    resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_CLIENT_ID: " ", WORKWELL_WEBCHART_PRIVATE_KEY: " " }, { a: 1 }).kind,
+    "json",
+  );
+});
+
 test("webChartDataSource: the default HTTP transport constructs only on the gated WebChart path", () => {
   const src = webChartDataSource({ baseUrl: "x", apiKey: "k" });
   assert.equal(src.kind, "webchart");
