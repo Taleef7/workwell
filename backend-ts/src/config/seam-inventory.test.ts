@@ -120,6 +120,24 @@ test("webchart: on with both base url and api key", () => {
   );
 });
 
+test("webchart: on with the SMART pair (CLIENT_ID + PRIVATE_KEY) and no api key (PR-2c)", () => {
+  const PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
+  assert.equal(
+    statusOf(
+      { WORKWELL_WEBCHART_BASE_URL: "https://wc.example", WORKWELL_WEBCHART_CLIENT_ID: "c", WORKWELL_WEBCHART_PRIVATE_KEY: PEM },
+      "webchart",
+    ),
+    true,
+  );
+});
+
+test("webchart: off with only half the SMART pair", () => {
+  assert.equal(
+    statusOf({ WORKWELL_WEBCHART_BASE_URL: "https://wc.example", WORKWELL_WEBCHART_CLIENT_ID: "c" }, "webchart"),
+    false,
+  );
+});
+
 // ---- sql-executor: a single explicit opt-in --------------------------------------------------------
 
 test("sql-executor: off for an unrelated/blank value", () => {

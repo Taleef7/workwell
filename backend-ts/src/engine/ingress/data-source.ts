@@ -24,7 +24,18 @@ export function jsonBucketDataSource(input?: unknown | unknown[]): PatientDataSo
 
 export interface WebChartConfig {
   baseUrl: string;
-  apiKey: string;
+  /** Legacy static bearer key (the pre-PR-2c assumption; kept for fixtures/tests/proxies). */
+  apiKey?: string;
+  /** SMART Backend Services (the verified contract — preferred when both are set). */
+  clientId?: string;
+  /** PKCS#8 PEM private key for the RS384 client assertion. */
+  privateKeyPem?: string;
+  /** Token endpoint override; discovered from `{base}/fhir/.well-known/smart-configuration` when absent. */
+  tokenUrl?: string;
+  /** OAuth scope; default `system/*.rs` (the documented bulk-registration grant). */
+  scope?: string;
+  /** Optional JWK `kid` header for a multi-key registered JWKS. */
+  kid?: string;
 }
 
 /**
@@ -49,28 +60,47 @@ export function webChartDataSource(cfg: WebChartConfig, client?: WebChartClient)
 export interface DataSourceEnv {
   WORKWELL_WEBCHART_BASE_URL?: string;
   WORKWELL_WEBCHART_API_KEY?: string;
+  WORKWELL_WEBCHART_CLIENT_ID?: string;
+  /** PKCS#8 PEM (multi-line env value). */
+  WORKWELL_WEBCHART_PRIVATE_KEY?: string;
+  WORKWELL_WEBCHART_TOKEN_URL?: string;
+  WORKWELL_WEBCHART_SCOPE?: string;
+  WORKWELL_WEBCHART_KID?: string;
 }
 
 /**
- * Pure predicate for whether the WebChart source is selected — both BASE_URL and API_KEY required.
+ * Pure predicate for whether the WebChart source is selected — BASE_URL plus either the legacy
+ * API_KEY or the SMART pair (CLIENT_ID + PRIVATE_KEY, the verified contract — PR-2c).
  * The single source of truth for `resolveDataSource` and the boot-time seam inventory (#260).
  */
 export function isWebChartConfigured(env: DataSourceEnv): boolean {
   const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
   const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
-  return Boolean(baseUrl && apiKey);
+  const clientId = (env.WORKWELL_WEBCHART_CLIENT_ID ?? "").trim();
+  const privateKey = (env.WORKWELL_WEBCHART_PRIVATE_KEY ?? "").trim();
+  return Boolean(baseUrl && (apiKey || (clientId && privateKey)));
 }
 
 /**
  * Config-driven ingress selection (mirrors resolveForecaster/resolveChannel): JSON is the default;
- * WebChart is selected only when BOTH env vars are non-blank (inert until PR-2). The JSON source
- * needs the caller's bundles (inherent to JSON ingress), passed as jsonInput.
+ * WebChart is selected only when its env vars are non-blank (inert-unless-configured). The JSON
+ * source needs the caller's bundles (inherent to JSON ingress), passed as jsonInput.
  */
 export function resolveDataSource(env: DataSourceEnv, jsonInput?: unknown | unknown[]): PatientDataSource {
   if (isWebChartConfigured(env)) {
-    const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
-    const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
-    return webChartDataSource({ baseUrl, apiKey });
+    const trimmed = (v?: string) => {
+      const t = (v ?? "").trim();
+      return t || undefined;
+    };
+    return webChartDataSource({
+      baseUrl: (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim(),
+      apiKey: trimmed(env.WORKWELL_WEBCHART_API_KEY),
+      clientId: trimmed(env.WORKWELL_WEBCHART_CLIENT_ID),
+      privateKeyPem: trimmed(env.WORKWELL_WEBCHART_PRIVATE_KEY),
+      tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
+      scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
+      kid: trimmed(env.WORKWELL_WEBCHART_KID),
+    });
   }
   return jsonBucketDataSource(jsonInput);
 }
