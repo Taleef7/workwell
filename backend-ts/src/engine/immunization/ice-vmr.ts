@@ -5,9 +5,11 @@
  * on 2026-07-13 (docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md):
  *
  * - Request: DSS JSON envelope; the patient data is a base64-encoded vMR `CDSInput` XML in
- *   `evaluationRequest.dataRequirementItemData[0].data.base64EncodedPayload`.
+ *   `evaluationRequest.dataRequirementItemData[0].data.base64EncodedPayload`. That field is an
+ *   ARRAY of base64 strings — a bare string is rejected `400 Bad Request` by the live engine
+ *   (verified 2026-07-13; the canonical ICE test payload sends `["<base64>"]`).
  * - Response: `finalKMEvaluationResponse[0].kmEvaluationResultData[0].data.base64EncodedPayload[0]`
- *   (note: the response payload is an ARRAY) → base64 → vMR `CDSOutput` XML, one
+ *   (an ARRAY on this side too) → base64 → vMR `CDSOutput` XML, one
  *   `<substanceAdministrationProposal>` per vaccine group.
  * - Dates in the request are plain YYYY-MM-DD; timestamps in the response are
  *   `YYYYMMDDhhmmss.SSS±ZZZZ`.
@@ -28,8 +30,19 @@ export interface CdsInputParams {
 export type IceRecommendation = "RECOMMENDED" | "FUTURE_RECOMMENDED" | "CONDITIONAL" | "NOT_RECOMMENDED";
 
 export interface IceProposal {
-  groupCode: string; // ICE vaccine group code (codeSystem 2.16.840.1.113883.3.795.12.100.1), e.g. 800 = Influenza
+  /**
+   * ICE vaccine GROUP code (codeSystem 2.16.840.1.113883.3.795.12.100.1), e.g. 800 = Influenza,
+   * 200 = DTP, 100 = Hep B. Read from the nested `<observationFocus>`, NOT from `<substanceCode>`:
+   * ICE sometimes proposes a concrete product instead of a group, in which case `substanceCode`
+   * carries a CVX (e.g. 115 Tdap, 187 Shingrix) while `observationFocus` still carries the group
+   * (200 DTP, 620 Zoster). Keying on the substance would silently lose those groups
+   * (verified live 2026-07-13 — a patient with no DTP history gets substance=115/focus=200).
+   */
+  groupCode: string;
   groupName: string;
+  /** The concrete substance ICE proposes — a group code or a specific CVX, with its code system. */
+  proposedSubstanceCode: string;
+  proposedSubstanceSystem: string;
   recommendation: IceRecommendation;
   interpretations: string[]; // ICE recommendation-reason codes (DUE_NOW, COMPLETE, HIGH_RISK, ...)
   proposedDate: string | null; // proposedAdministrationTimeInterval@low → YYYY-MM-DD (the due date)
@@ -87,7 +100,8 @@ export interface DssRequest {
       driId: { containingEntityId: { scopingEntityId: string; businessId: string; version: string }; itemId: string };
       data: {
         informationModelSSId: { scopingEntityId: string; businessId: string; version: string };
-        base64EncodedPayload: string;
+        /** ARRAY, not a string — the live engine 400s on a bare string (see the header note). */
+        base64EncodedPayload: string[];
       };
     }>;
   };
@@ -116,7 +130,7 @@ export function buildDssRequest(opts: { cdsInputXml: string; submissionTimeMs: n
           },
           data: {
             informationModelSSId: { scopingEntityId: "org.opencds.vmr", businessId: "VMR", version: "1.0" },
-            base64EncodedPayload: btoa(opts.cdsInputXml),
+            base64EncodedPayload: [btoa(opts.cdsInputXml)],
           },
         },
       ],
@@ -162,7 +176,8 @@ export function parseIceTimestamp(ts: string | null | undefined): string | null 
   if (!ts) return null;
   const m = /^(\d{4})(\d{2})(\d{2})\d{6}/.exec(ts);
   if (!m) return null;
-  return `${m[1]}-${m[2]}-${m[3]}`;
+  const [, y, mo, d] = m;
+  return `${y}-${mo}-${d}`;
 }
 
 const RECOMMENDATIONS: ReadonlySet<string> = new Set([
@@ -181,18 +196,35 @@ export function parseCdsOutputProposals(cdsOutputXml: string): IceProposal[] {
   const proposals: IceProposal[] = [];
   const blocks = cdsOutputXml.match(/<substanceAdministrationProposal>[\s\S]*?<\/substanceAdministrationProposal>/g) ?? [];
   for (const block of blocks) {
-    const substance = /<substance><substanceCode code="([^"]+)"[^>]*?displayName="([^"]*)"/.exec(block);
+    const substance = /<substance><substanceCode code="([^"]+)" codeSystem="([^"]+)"/.exec(block);
+    // The vaccine GROUP is on the nested observationFocus — see the IceProposal.groupCode note.
+    const focus = /<observationFocus code="([^"]+)"[^>]*?(?:displayName="([^"]*)")?\/>/.exec(block);
     const value = /<observationValue><concept code="([^"]+)"/.exec(block);
-    if (!substance || !value || !RECOMMENDATIONS.has(value[1])) continue;
+    const groupCode = focus?.[1];
+    const groupName = focus?.[2] ?? "";
+    const proposedSubstanceCode = substance?.[1];
+    const proposedSubstanceSystem = substance?.[2];
+    const recommendation = value?.[1];
+    if (
+      !groupCode ||
+      !proposedSubstanceCode ||
+      !proposedSubstanceSystem ||
+      !recommendation ||
+      !RECOMMENDATIONS.has(recommendation)
+    ) {
+      continue;
+    }
     const proposed = /<proposedAdministrationTimeInterval low="([^"]*)"/.exec(block);
     const valid = /<validAdministrationTimeInterval low="([^"]*)"/.exec(block);
     const interpretations = [...block.matchAll(/<interpretation code="([^"]+)"/g)]
       .map((m) => m[1])
-      .filter((c) => c !== "SUPPLEMENTAL_TEXT");
+      .filter((c): c is string => c !== undefined && c !== "SUPPLEMENTAL_TEXT");
     proposals.push({
-      groupCode: substance[1],
-      groupName: substance[2],
-      recommendation: value[1] as IceRecommendation,
+      groupCode,
+      groupName,
+      proposedSubstanceCode,
+      proposedSubstanceSystem,
+      recommendation: recommendation as IceRecommendation,
       interpretations,
       proposedDate: parseIceTimestamp(proposed?.[1]),
       earliestDate: parseIceTimestamp(valid?.[1]),

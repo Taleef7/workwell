@@ -1,11 +1,12 @@
 /**
- * ImmunizationForecast port (#76 E6) — ICE-ready immunization forecasting. The simulated
+ * ImmunizationForecast port (#76 E6) — immunization forecasting behind one port. The simulated
  * forecaster (default) computes ACIP-style "next dose due" over its OWN deterministic per-subject
- * synthetic immunization history (decoupled from the run pipeline). An inert ICE stub stands in for
- * the real forecaster and is selected ONLY when both WORKWELL_IMMZ_ICE_* env vars are set
- * (inert-unless-configured, mirroring SendGrid/DataChaser). Forecasting is ADVISORY — the CQL
- * Outcome Status remains the sole compliance authority. Doug Q5 (CDS Hooks vs ICE API vs
- * WebChart-ICE bridge) is deferred behind iceForecaster.
+ * synthetic immunization history (decoupled from the run pipeline). The REAL forecaster
+ * (`realIceForecaster`, `ice-forecaster.ts` — ADR-029) talks to a self-hosted ICE sidecar over the
+ * OpenCDS DSS REST contract and is selected ONLY when WORKWELL_IMMZ_ICE_BASE_URL is set
+ * (inert-unless-configured, mirroring SendGrid/DataChaser); it falls back to the simulated
+ * forecaster on any failure. Forecasting is ADVISORY — the CQL Outcome Status remains the sole
+ * compliance authority (ADR-012).
  */
 export type VaccineSeries = "TDAP" | "INFLUENZA" | "HEPB";
 /** `CONTRAINDICATED` and `REFUSED` are measure-level states surfaced via case enrichment / the CQL path — not produced by `simulatedForecaster`'s own synthetic history. */
@@ -30,7 +31,8 @@ export interface ImmunizationForecast {
 }
 
 export interface ImmunizationForecaster {
-  forecast(subjectId: string, asOf: string): ImmunizationForecast;
+  /** Async since ADR-029 — the real ICE adapter is an HTTP call to the sidecar. */
+  forecast(subjectId: string, asOf: string): Promise<ImmunizationForecast>;
 }
 
 /** Schedule constants — single source of truth, reviewable + testable (AIS-E real windows). */
@@ -138,7 +140,7 @@ function forecastSeries(dose: SyntheticDose, asOf: string): SeriesForecast {
 }
 
 export const simulatedForecaster: ImmunizationForecaster = {
-  forecast(subjectId, asOf) {
+  async forecast(subjectId, asOf) {
     return {
       subjectId,
       asOf,
@@ -153,44 +155,15 @@ export interface ForecastEnv {
 }
 
 /**
- * Inert ICE stub — represents the real ICE/CDS-Hooks forecaster. Performs NO HTTP; returns each
- * series with a "not wired" reason. Real transport (Doug Q5) is the only thing that changes here.
- */
-export function iceForecaster(_config: { apiKey: string; baseUrl: string }): ImmunizationForecaster {
-  return {
-    forecast(subjectId, asOf) {
-      return {
-        subjectId,
-        asOf,
-        series: VACCINE_SERIES.map((series) => ({
-          series,
-          status: "DUE" as ForecastStatus,
-          lastDoseDate: null,
-          nextDueDate: null,
-          dosesReceived: 0,
-          dosesRequired: SERIES_META[series].dosesRequired,
-          reason: "ICE not wired (Doug Q5)",
-        })),
-      };
-    },
-  };
-}
-
-/**
- * Pure predicate for whether the ICE stub is selected — both API_KEY and BASE_URL required. The
- * single source of truth for `resolveForecaster` and the boot-time seam inventory (#260).
+ * Pure predicate for whether the real ICE forecaster is selected — BASE_URL alone (ADR-029: a
+ * self-hosted ICE sidecar has no API key; WORKWELL_IMMZ_ICE_API_KEY stays optional and is sent as
+ * a bearer token only when a deployment fronts ICE with an authenticating proxy). The single
+ * source of truth for `resolveForecaster` and the boot-time seam inventory (#260).
  */
 export function isIceConfigured(env: ForecastEnv): boolean {
-  const apiKey = (env.WORKWELL_IMMZ_ICE_API_KEY ?? "").trim();
-  const baseUrl = (env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
-  return Boolean(apiKey && baseUrl);
+  return Boolean((env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim());
 }
 
-export function resolveForecaster(env: ForecastEnv): ImmunizationForecaster {
-  if (isIceConfigured(env)) {
-    const apiKey = (env.WORKWELL_IMMZ_ICE_API_KEY ?? "").trim();
-    const baseUrl = (env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
-    return iceForecaster({ apiKey, baseUrl });
-  }
-  return simulatedForecaster;
-}
+// `resolveForecaster` lives in `resolve-forecaster.ts` — the real ICE adapter imports this module
+// (for the port types + the synthetic history), so selection must sit ABOVE both to avoid an
+// import cycle. Same shape as `engine/cql/resolve-value-set-resolver.ts`.

@@ -53,11 +53,15 @@ test("buildDssRequest wraps a base64 CDSInput in the DSS envelope; payload round
   const req = buildDssRequest({ cdsInputXml, submissionTimeMs: 1579330800000 });
   assert.equal(req.interactionId.scopingEntityId, "org.nyc.cir");
   assert.equal(req.interactionId.submissionTime, 1579330800000);
-  const km = req.evaluationRequest.kmEvaluationRequest[0].kmId;
+  const km = req.evaluationRequest.kmEvaluationRequest[0]?.kmId;
   assert.deepEqual(km, { scopingEntityId: "org.nyc.cir", businessId: "ICE", version: "1.0.0" });
   const dri = req.evaluationRequest.dataRequirementItemData[0];
+  assert.ok(dri);
   assert.equal(dri.data.informationModelSSId.businessId, "VMR");
-  assert.equal(atob(dri.data.base64EncodedPayload), cdsInputXml);
+  // The payload field is an ARRAY — the live ICE engine rejects a bare string with 400 (2026-07-13).
+  assert.ok(Array.isArray(dri.data.base64EncodedPayload), "base64EncodedPayload must be an array");
+  assert.equal(dri.data.base64EncodedPayload.length, 1);
+  assert.equal(atob(String(dri.data.base64EncodedPayload[0])), cdsInputXml);
 });
 
 test("parseDssResponse extracts the base64EncodedPayload ARRAY form from the golden fixture", () => {
@@ -103,6 +107,30 @@ test("golden: HepB group 100 is NOT_RECOMMENDED (COMPLETE) with no dates", () =>
   assert.equal(hepb.proposedDate, null);
   assert.equal(hepb.earliestDate, null);
   assert.deepEqual(hepb.interpretations, ["COMPLETE"]);
+});
+
+// Regression (found live 2026-07-13): ICE proposes a concrete PRODUCT for some groups — a patient
+// with no DTP history gets <substanceCode code="115"> (CVX Tdap) with <observationFocus code="200">
+// (DTP Vaccine Group). Keying the proposal off substanceCode silently loses the DTP group and the
+// whole forecast degrades. The group must come from observationFocus.
+test("a product-coded proposal (CVX substance) still resolves to its vaccine GROUP", () => {
+  const xml = `<ns3:cdsOutput><substanceAdministrationProposal>
+<substance><substanceCode code="115" codeSystem="2.16.840.1.113883.12.292"/></substance>
+<relatedClinicalStatement><observationResult>
+<observationFocus code="200" codeSystem="2.16.840.1.113883.3.795.12.100.1" displayName="DTP Vaccine Group"/>
+<observationValue><concept code="RECOMMENDED" codeSystem="2.16.840.1.113883.3.795.12.100.5"/></observationValue>
+<interpretation code="DUE_NOW" codeSystem="2.16.840.1.113883.3.795.12.100.6"/>
+</observationResult></relatedClinicalStatement>
+<proposedAdministrationTimeInterval low="19870202000000.000+0000"/>
+</substanceAdministrationProposal></ns3:cdsOutput>`;
+  const [p] = parseCdsOutputProposals(xml);
+  assert.ok(p);
+  assert.equal(p.groupCode, "200", "group must come from observationFocus, not the CVX substance");
+  assert.equal(p.groupName, "DTP Vaccine Group");
+  assert.equal(p.proposedSubstanceCode, "115", "the concrete product ICE proposes is kept");
+  assert.equal(p.proposedSubstanceSystem, "2.16.840.1.113883.12.292");
+  assert.equal(p.recommendation, "RECOMMENDED");
+  assert.equal(p.proposedDate, "1987-02-02");
 });
 
 test("parseIceTimestamp handles YYYYMMDDhhmmss.SSS±ZZZZ and rejects garbage", () => {
