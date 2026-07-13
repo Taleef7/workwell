@@ -1,5 +1,41 @@
 # Architecture Decision Records
 
+## ADR-028: WebChart transport implements the verified public FHIR contract — SMART Backend Services auth (dual-mode) + per-resource composition — E12 PR-2c (#262)
+
+**Status:** Accepted (2026-07-13).
+
+**Context:** The #255 pre-build coded `httpWebChartClient` against an *assumed* contract (static bearer
+API key + `Patient/$everything`), pending MIE's #254 answers. A 2026-07-13 public-sources research pass
+(`docs/INTEGRATION_RESEARCH_2026-07-13.md`) live-verified WebChart's real contract from its public FHIR
+sandbox and published docs: auth is **SMART Bulk Backend Services** (`client_credentials` + RS384
+`private_key_jwt` verified against a registered JWKS — not an API key), and the CapabilityStatement
+exposes **no `Patient/$everything`** (per-resource `?patient={id}` searches; the only operation is
+`Group/$export`). Waiting for MIE to restate publicly documented facts was the wrong trade.
+
+**Decision:**
+1. `httpWebChartClient` implements the **verified** contract: population `GET /fhir/Patient` (searchset
+   `link[next]` paging) + per-patient composition from paged
+   `GET /fhir/{Observation|Condition|Procedure|Immunization|Encounter}?patient={id}` searches into one
+   collection Bundle.
+2. **Auth is dual-mode behind a `WebChartAuthProvider` port** (`smart-backend-auth.ts`):
+   `smartBackendServicesAuth` (smart-configuration discovery or `tokenUrl` override; RS384
+   `private_key_jwt` assertion; token cache + expiry skew; single-flight refresh; 401 → invalidate +
+   one retry) is selected when `WORKWELL_WEBCHART_CLIENT_ID` + `WORKWELL_WEBCHART_PRIVATE_KEY` are set;
+   the legacy static bearer (`WORKWELL_WEBCHART_API_KEY`) is retained for fixtures/tests/proxies.
+   Signing uses **WebCrypto only** (portable, mirrors `auth/password.ts`; no `node:crypto`, no new deps).
+3. **Any per-resource fetch failure degrades the whole patient** to the Patient-only fallback bundle
+   (⇒ MISSING_DATA downstream): partial clinical data must never evaluate — a missing
+   Condition/Observation page could silently flip an outcome. The off-origin pagination guard now also
+   covers resource searches (it protects the OAuth token, not just the legacy key).
+4. Pagination semantics remain **unverified** with MIE (#254 A2): `_count` + `link[next]` are the
+   standard-FHIR conservative default; `Group/$export` (bulk) is future scope tied to #263.
+
+**Consequences:** PR-2c is no longer blocked on #254 for request shaping — only for credentials
+(registration/service account) and the residual unknowns (pagination, `$export _since`). The seam
+predicate (`isWebChartConfigured`) accepts BASE_URL + (API_KEY or CLIENT_ID+PRIVATE_KEY); the deployed
+default stays inert (no env vars → JSON source, byte-identical). Reversible by reverting the client
+commits (the `WebChartClient` port is unchanged).
+
 ## ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07
 
 **Status:** Accepted (2026-07-10).
