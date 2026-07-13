@@ -1,5 +1,54 @@
 # Journal
 
+## 2026-07-13 — Three design/ops documents: delta-eval (#263), cross-system credit (#287), backup/DR (#270)
+
+Docs only — no code, no DDL. Each surfaced something that changes the shape of the work, which is the
+point of writing them before building.
+
+- **#263 — incremental/delta evaluation** (`docs/superpowers/specs/2026-07-13-e263-incremental-evaluation-design.md`).
+  Two findings, both of which would have been expensive to discover in code. (1) **A skipped subject
+  must still get an outcome ROW:** every read model is "the outcomes of the latest population run per
+  measure" (`latestRunRows`), so writing rows only for re-evaluated subjects would silently drop
+  unchanged employees from the roster, break the rollup's `All = Σ tenants` invariant, and collapse
+  quality-snapshot denominators. Design: **skip the evaluation, copy the prior outcome forward** — write
+  volume unchanged, we save the ~68 ms/eval CQL (the cost that actually matters, #253), and no read
+  model needs to know the feature exists. (2) **The saving is not ~99%:** the *clock* changes for
+  everyone daily even when the data doesn't, so a data-only hash would serve a stale COMPLIANT for weeks
+  on any RECURRING measure. Data-invariance covers only the 3 PERMANENT measures (~21%); the mechanism
+  that recovers the real saving is **status-boundary caching** (`next_transition_at`), named and put to
+  the owner as an explicit decision rather than assumed. Owner-gated `eval_state` DDL proposed (§6);
+  **no code until it is signed off** (the issue's own acceptance criteria).
+  Two Codex findings folded in: the **Tier-1 candidate set is not just "the patients WebChart exported"**
+  (the OH enrollment roster is stamped WorkWell-side, so a subject's evaluated input can change with
+  *zero* WebChart resources changed — `_since` may skip the FETCH, never the HASH), and the **copied
+  evidence goes stale even when the status doesn't** (date-dependent defines like `Days Since Last
+  Audiogram` would show day-N arithmetic under a day-N+30 timestamp).
+- **#287 — cross-system credit** (`…-e287-cross-system-credit-design.md`). Doug's *"if they are compliant
+  anywhere, are they compliant everywhere"*, display-only today. **Two lenses hide behind one sentence**:
+  record-scoped credit-shared (denominators unchanged) vs person-scoped dedup. Doug asked for the former,
+  and **only it preserves `All = Σ tenants`**. Credit may only combine outcomes sharing
+  `(measure, evaluation_period)` — a bucket is a function of the evaluation date, not a durable fact —
+  which is what makes RECURRING credit safe, and RECURRING is precisely Doug's own example (a flu shot).
+  **Credit is only as trustworthy as the identity match beneath it:** today a bad match mis-groups a
+  timeline (embarrassing); with credit it mis-states compliance (dangerous), so credit flows only across
+  E15 match-key groups and human-CONFIRMED links (ADR-022 preserved). The real payoff is a **write path**
+  (stop chasing someone who already got the shot) — scoped as an audited, opt-in Phase 2 with its own
+  sign-off.
+- **#270 — backup & DR runbook** (`docs/BACKUP_DR_RUNBOOK.md`). Read from the **live** Neon project, not
+  assumed: `history_retention_seconds = 21600` — **the PITR window is six hours**, and it is the *only*
+  recovery mechanism (no scheduled dump, no snapshot schedule). A destructive change noticed the next
+  morning is **unrecoverable**. Tolerable for synthetic demo data; a compliance-grade incident the moment
+  real data lands. **Provisioning one bucket unblocks both #167 (evidence) and a nightly DB dump**, which
+  makes #167 materially more valuable than it looks on the M3 list. Also: restore procedures (incl. the
+  classic failure — a restore that mints a *new* branch needs `DATABASE_URL_TWH` repointed or the app
+  keeps writing to the damaged one), an RPO/RTO table, what's regenerable vs what a backup actually
+  protects (the audit ledger, real case state, human `person_links` decisions — all small), and a
+  zero-risk restore drill on a Neon branch.
+
+**Owner decisions now blocking further build on these tracks:** the `eval_state` DDL; Neon retention +
+the nightly dump + branch protection; and whether cross-system credit gets its Phase-2 case-closure write
+path.
+
 ## 2026-07-13 — ICE forecasting is real: the inert stub is replaced by a live sidecar adapter (ADR-029)
 
 `iceForecaster` had been an inert stub since E6 (#76) — it answered "ICE not wired (Doug Q5)" for

@@ -97,7 +97,7 @@ dedupe, off-origin guard; WebCrypto only, no new deps). Sandbox dynamic registra
 enabled → the sharpened #254 ask is *"register a WorkWell backend-services client (JWKS attached) or
 enable RFC 7591"*.
 
-**ICE forecasting is now REAL (ADR-029, branch `feat/ice-forecaster-adapter`).** The inert
+**ICE forecasting is now REAL (ADR-029, PR #289 MERGED).** The inert
 `iceForecaster` stub (E6/#76) is replaced by `realIceForecaster` against a self-hosted
 `hlnconsulting/ice` sidecar: a dependency-free vMR/DSS codec (`ice-vmr.ts`), injectable transport +
 **dose-history source** (the E12/WebChart drop-in), whole-forecast fallback to the simulated forecaster
@@ -114,9 +114,16 @@ returns `mode:"literal"` (VSAC OIDs were imported 2026-07-05; DEPLOY carries the
 redesigned (`$export _since` primary / content-hash fallback); **#287 filed** (calculation-level
 "compliant anywhere = compliant everywhere" — display-only today).
 
-**Owner steps:** send the updated #254 package before the Wed 2026-07-15 Doug meeting; review/merge the
-ICE PR. **Next builds after that:** #263 content-hash fallback → #287 design → M3 (#167 evidence
-bucket, #270 backup/DR runbook, #267 PHI-split design). Research record:
+**Design/ops docs landed the same day (PR #290):** **#263** delta-eval (owner-gated `eval_state` DDL;
+two traps: a skipped subject must still get an outcome ROW or every read model silently breaks, and the
+saving is ~21% not ~99% without status-boundary caching), **#287** cross-system credit (Doug's "compliant
+anywhere" — two lenses, only one preserves `All = Σ tenants`; the real payoff is an audited Phase-2 write
+path), **#270** backup/DR runbook (**the live Neon PITR window is SIX HOURS** and is the only recovery
+mechanism — one bucket unblocks both #167 and a nightly dump).
+
+**Owner steps:** send the updated #254 package before the Wed 2026-07-15 Doug meeting. **Decisions now
+blocking further build:** the `eval_state` DDL; Neon retention + nightly dump + branch protection;
+whether cross-system credit gets its Phase-2 case-closure write path. Research record:
 `docs/INTEGRATION_RESEARCH_2026-07-13.md`.
 
 ## Prior focus (as of 2026-07-11, post-#284)
