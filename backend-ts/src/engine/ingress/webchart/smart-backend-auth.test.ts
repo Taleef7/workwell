@@ -30,7 +30,7 @@ async function testKeyPair() {
     true,
     ["sign", "verify"],
   )) as CryptoKeyPair;
-  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+  const pkcs8 = new Uint8Array((await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer);
   let bin = "";
   for (const b of pkcs8) bin += String.fromCharCode(b);
   const b64 = btoa(bin);
