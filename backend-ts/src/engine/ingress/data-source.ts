@@ -34,6 +34,8 @@ export interface WebChartConfig {
   tokenUrl?: string;
   /** OAuth scope; default `system/*.read`. */
   scope?: string;
+  /** Optional JWK `kid` header for a multi-key registered JWKS. */
+  kid?: string;
 }
 
 /**
@@ -63,6 +65,7 @@ export interface DataSourceEnv {
   WORKWELL_WEBCHART_PRIVATE_KEY?: string;
   WORKWELL_WEBCHART_TOKEN_URL?: string;
   WORKWELL_WEBCHART_SCOPE?: string;
+  WORKWELL_WEBCHART_KID?: string;
 }
 
 /**
@@ -96,6 +99,7 @@ export function resolveDataSource(env: DataSourceEnv, jsonInput?: unknown | unkn
       privateKeyPem: trimmed(env.WORKWELL_WEBCHART_PRIVATE_KEY),
       tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
       scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
+      kid: trimmed(env.WORKWELL_WEBCHART_KID),
     });
   }
   return jsonBucketDataSource(jsonInput);

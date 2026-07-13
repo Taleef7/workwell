@@ -206,6 +206,7 @@ test("SMART mode: one token exchange authorizes the whole batch and outcomes mat
       tokenRequests++;
       const form = new URLSearchParams(String(init?.body));
       assert.equal(form.get("grant_type"), "client_credentials");
+      assert.equal(form.get("scope"), "system/*.read", "the scope default must survive the client config mapping");
       assert.ok(form.get("client_assertion"));
       return jsonResponse({ access_token: "tok-live", token_type: "bearer", expires_in: 3600 });
     }
@@ -252,14 +253,13 @@ test("SMART mode: a 401 invalidates the token, re-exchanges, and retries the req
   assert.equal(tokenRequests, 2, "the 401 must force a token re-exchange");
 });
 
-test("timeout: population fetch resolves to an empty bucket within the configured timeout", async () => {
+test("timeout: a stalled FIRST population page rejects loudly (an outage is not an empty population)", async () => {
   const stalled = fetchShim((_url, init) =>
     new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason ?? new Error("aborted")), { once: true });
     }),
   );
-  const bundles = await httpSource(stalled, { maxRetries: 0, timeoutMs: 5 }).loadBundles();
-  assert.deepEqual(bundles, []);
+  await assert.rejects(() => httpSource(stalled, { maxRetries: 0, timeoutMs: 5 }).loadBundles(), /timed out/);
 });
 
 test("429 then success: retries the resource search and composes the payload", async () => {
@@ -383,6 +383,123 @@ test("off-origin resource next link: never fetched; that patient degrades to the
   const entries = (bundles[0] as Json).entry as Json[];
   const hasOutcomeMarker = entries.some((e) => isObject(e.resource) && (e.resource as Json).resourceType === "OperationOutcome");
   assert.equal(hasOutcomeMarker, true, "patient must degrade to the fallback bundle with an OperationOutcome");
+});
+
+test("page-boundary duplicate: the same Immunization on two pages composes ONCE (no dose double-count)", async () => {
+  const first = patientResources[0]!;
+  const id = first.id as string;
+  const dose = {
+    resourceType: "Immunization",
+    id: "imm-dup-1",
+    status: "completed",
+    patient: { reference: `Patient/${id}` },
+    vaccineCode: { coding: [{ system: "http://hl7.org/fhir/sid/cvx", code: "189" }] },
+    occurrenceDateTime: "2024-01-01",
+  };
+  const fetchImpl = fetchShim((url) => {
+    if (url.pathname === "/fhir/Patient") {
+      return jsonResponse({ resourceType: "Bundle", type: "searchset", entry: [{ resource: first }], link: [] });
+    }
+    if (url.pathname === "/fhir/Immunization") {
+      const offset = url.searchParams.get("_offset");
+      // page 1 and page 2 BOTH carry imm-dup-1 (offset-paging boundary shift)
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [{ resource: dose }],
+        link: offset ? [] : [{ relation: "next", url: `/fhir/Immunization?patient=${id}&_count=1&_offset=1` }],
+      });
+    }
+    return jsonResponse({ resourceType: "Bundle", type: "searchset", entry: [], link: [] });
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, pageSize: 1, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloads();
+  assert.equal(payloads.length, 1);
+  const entries = ((payloads[0] as Json).entry as Json[]).map((e) => e.resource as Json);
+  const doses = entries.filter((r) => r.resourceType === "Immunization");
+  assert.equal(doses.length, 1, "a page-boundary duplicate must not double-count a dose");
+});
+
+test("mis-attributed resource: data referencing a DIFFERENT patient degrades the requested patient", async () => {
+  const first = patientResources[0]!;
+  const id = first.id as string;
+  const fetchImpl = fetchShim((url) => {
+    if (url.pathname === "/fhir/Patient") {
+      return jsonResponse({ resourceType: "Bundle", type: "searchset", entry: [{ resource: first }], link: [] });
+    }
+    if (url.pathname === "/fhir/Observation") {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [{ resource: { resourceType: "Observation", id: "obs-x", status: "final", subject: { reference: "Patient/SOMEONE-ELSE" } } }],
+        link: [],
+      });
+    }
+    return jsonResponse({ resourceType: "Bundle", type: "searchset", entry: [], link: [] });
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloads();
+  assert.equal(payloads.length, 1);
+  const entries = ((payloads[0] as Json).entry as Json[]).map((e) => e.resource as Json);
+  assert.ok(entries.some((r) => r.resourceType === "OperationOutcome"), "must degrade to the fallback bundle");
+  assert.ok(!entries.some((r) => r.resourceType === "Observation"), "the foreign observation must never be attributed");
+});
+
+test("non-match searchset entries (search.mode include/outcome) are skipped, patient evaluates normally", async () => {
+  const first = patientResources[0]!;
+  const id = first.id as string;
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === "/fhir/Patient") {
+      return jsonResponse({ resourceType: "Bundle", type: "searchset", entry: [{ resource: first }], link: [] });
+    }
+    if (url.pathname === "/fhir/Observation") {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [
+          { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing" }] } },
+          { search: { mode: "include" }, resource: { resourceType: "Patient", id: "other-patient" } },
+        ],
+        link: [],
+      });
+    }
+    return routes(url, init);
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloads();
+  const entries = ((payloads[0] as Json).entry as Json[]).map((e) => e.resource as Json);
+  assert.ok(!entries.some((r) => r.resourceType === "OperationOutcome"), "an outcome-mode entry must not pollute the composed bundle");
+  assert.equal(entries.filter((r) => r.resourceType === "Patient").length, 1, "exactly one Patient in the composed bundle");
+});
+
+test("persistent 401: one token re-exchange then a hard failure (never an infinite loop, never an empty 'success')", async () => {
+  const pair = (await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-384" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const pkcs8 = new Uint8Array((await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer);
+  let bin = "";
+  for (const b of pkcs8) bin += String.fromCharCode(b);
+  const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(bin).match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----`;
+
+  let tokenRequests = 0;
+  const fetchImpl: FetchImpl = (async (input: FetchInput) => {
+    const url = new URL(inputUrl(input));
+    if (url.toString() === TOKEN_URL) {
+      tokenRequests++;
+      return jsonResponse({ access_token: `tok-${tokenRequests}`, token_type: "bearer", expires_in: 3600 });
+    }
+    return new Response("unauthorized", { status: 401 });
+  }) as FetchImpl;
+
+  const smartCfg = { baseUrl: "https://webchart.test", clientId: "workwell", privateKeyPem: pem, tokenUrl: TOKEN_URL };
+  await assert.rejects(() => httpSource(fetchImpl, { maxRetries: 0 }, smartCfg).loadBundles(), /401/);
+  assert.equal(tokenRequests, 2, "exactly one re-exchange, then terminal");
 });
 
 test("empty population: resolves to an empty bucket and evaluates without throwing", async () => {

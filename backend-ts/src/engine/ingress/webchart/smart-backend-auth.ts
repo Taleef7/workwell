@@ -49,6 +49,9 @@ export interface SmartBackendAuthOptions {
   now?: () => number;
   /** Refresh this many ms before expiry; default 60_000. */
   expirySkewMs?: number;
+  /** Per-request AbortController timeout for the discovery + token fetches; default 10_000 ms. A
+   *  black-holed token endpoint must never hang the whole batch (review P2-1). */
+  timeoutMs?: number;
 }
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -56,6 +59,7 @@ const DEFAULT_SCOPE = "system/*.read";
 const ASSERTION_LIFETIME_S = 300;
 const DEFAULT_TOKEN_LIFETIME_S = 300;
 const DEFAULT_EXPIRY_SKEW_MS = 60_000;
+const DEFAULT_AUTH_TIMEOUT_MS = 10_000;
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -113,16 +117,28 @@ export function smartBackendServicesAuth(
   const fetchImpl = options?.fetch ?? globalThis.fetch;
   const now = options?.now ?? (() => Date.now());
   const expirySkewMs = options?.expirySkewMs ?? DEFAULT_EXPIRY_SKEW_MS;
+  const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS));
   const scope = cfg.scope ?? DEFAULT_SCOPE;
 
   let tokenEndpoint: string | undefined = cfg.tokenUrl;
   let cached: { accessToken: string; expiresAtMs: number } | undefined;
   let inFlight: Promise<string> | undefined;
 
+  /** Every auth fetch is timeout-bounded (its own controller — the single flight is shared across callers). */
+  async function boundedFetch(url: string, init: Omit<RequestInit, "signal">): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error(`WebChart auth request timed out after ${timeoutMs}ms`)), timeoutMs);
+    try {
+      return await fetchImpl(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function discoverTokenEndpoint(): Promise<string> {
     if (tokenEndpoint) return tokenEndpoint;
     const url = `${cfg.fhirBase.replace(/\/+$/, "")}/.well-known/smart-configuration`;
-    const response = await fetchImpl(url, { headers: { Accept: "application/json" } });
+    const response = await boundedFetch(url, { headers: { Accept: "application/json" } });
     if (!response.ok) {
       throw new Error(`WebChart SMART discovery failed: ${response.status} ${response.statusText}`.trim());
     }
@@ -144,7 +160,7 @@ export function smartBackendServicesAuth(
       client_assertion_type: CLIENT_ASSERTION_TYPE,
       client_assertion: assertion,
     });
-    const response = await fetchImpl(endpoint, {
+    const response = await boundedFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: body.toString(),

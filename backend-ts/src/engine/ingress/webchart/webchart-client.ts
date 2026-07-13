@@ -86,15 +86,37 @@ function patientsFromSearchset(bundle: unknown): PatientRef[] {
   return patients;
 }
 
-function resourcesFromSearchset(bundle: unknown): Json[] {
+/** `Patient/{id}` reference match — accepts relative and absolute reference forms. */
+function referencesPatient(resource: Json, patientId: string): boolean | undefined {
+  const holder = isObject(resource.subject) ? resource.subject : isObject(resource.patient) ? resource.patient : undefined;
+  if (!holder || typeof holder.reference !== "string") return undefined; // unverifiable — caller keeps it
+  return holder.reference === `Patient/${patientId}` || holder.reference.endsWith(`/Patient/${patientId}`);
+}
+
+/**
+ * Match-mode resources of one searchset page (review P2-3): non-`match` entries (`search.mode`
+ * "include"/"outcome") are skipped, as are OperationOutcome (this client's own degraded-patient
+ * marker) and Patient resources (the composed bundle must carry exactly one patient). A resource
+ * whose subject/patient reference points at a DIFFERENT patient is a hard error — mis-attributed
+ * clinical data must degrade the patient (strict semantics), never evaluate as theirs.
+ */
+function resourcesFromSearchset(bundle: unknown, patientId: string): Json[] {
   if (!isObject(bundle) || bundle.resourceType !== "Bundle") {
     throw new Error("WebChart resource search returned a non-Bundle response");
   }
   if (!Array.isArray(bundle.entry)) return [];
   const resources: Json[] = [];
   for (const entry of bundle.entry) {
-    const resource = isObject(entry) ? entry.resource : undefined;
-    if (isObject(resource)) resources.push(resource);
+    if (!isObject(entry)) continue;
+    const mode = isObject(entry.search) ? entry.search.mode : undefined;
+    if (typeof mode === "string" && mode !== "match") continue;
+    const resource = entry.resource;
+    if (!isObject(resource)) continue;
+    if (resource.resourceType === "OperationOutcome" || resource.resourceType === "Patient") continue;
+    if (referencesPatient(resource, patientId) === false) {
+      throw new Error(`WebChart search for patient ${patientId} returned a resource attributed to a different patient`);
+    }
+    resources.push(resource);
   }
   return resources;
 }
@@ -127,7 +149,7 @@ function retryDelay(opts: Required<Pick<HttpWebChartClientOptions, "retryDelaysM
   return opts.retryDelaysMs[Math.min(attempt, opts.retryDelaysMs.length - 1)] ?? 0;
 }
 
-function authProviderFor(cfg: WebChartConfig, fetchImpl: typeof globalThis.fetch): WebChartAuthProvider {
+function authProviderFor(cfg: WebChartConfig, fetchImpl: typeof globalThis.fetch, timeoutMs: number): WebChartAuthProvider {
   if (cfg.clientId && cfg.privateKeyPem) {
     return smartBackendServicesAuth(
       {
@@ -136,8 +158,9 @@ function authProviderFor(cfg: WebChartConfig, fetchImpl: typeof globalThis.fetch
         privateKeyPem: cfg.privateKeyPem,
         ...(cfg.tokenUrl ? { tokenUrl: cfg.tokenUrl } : {}),
         ...(cfg.scope ? { scope: cfg.scope } : {}),
+        ...(cfg.kid ? { kid: cfg.kid } : {}),
       },
-      { fetch: fetchImpl },
+      { fetch: fetchImpl, timeoutMs },
     );
   }
   if (cfg.apiKey) return staticBearerAuth(cfg.apiKey);
@@ -159,7 +182,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   const retryDelaysMs = options?.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
   const resourceTypes = options?.resourceTypes ?? COMPOSED_RESOURCE_TYPES;
-  const auth = authProviderFor(cfg, fetchImpl);
+  const auth = authProviderFor(cfg, fetchImpl, timeoutMs);
 
   async function fetchJson(url: string): Promise<unknown> {
     let attempt = 0;
@@ -228,15 +251,20 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     const patients: PatientRef[] = [];
     let url: string | undefined = first.toString();
     const seen = new Set<string>();
+    let firstPage = true;
     while (url) {
       let page: unknown;
       try {
         page = await fetchJson(url);
-      } catch {
-        // A failed later page keeps the patients already listed (documented population semantics);
-        // the off-origin guard below still rejects hard.
+      } catch (e) {
+        // A FIRST-page failure is an outage, not an empty population — surface it so a scheduled
+        // run fails loudly instead of "succeeding" over zero subjects (review P3-2). A failed LATER
+        // page keeps the patients already listed (documented population semantics); the off-origin
+        // guard below still rejects hard.
+        if (firstPage) throw e;
         break;
       }
+      firstPage = false;
       for (const patient of patientsFromSearchset(page)) {
         if (!seen.has(patient.id)) {
           seen.add(patient.id);
@@ -257,7 +285,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     let url: string | undefined = first.toString();
     while (url) {
       const page = await fetchJson(url);
-      resources.push(...resourcesFromSearchset(page));
+      resources.push(...resourcesFromSearchset(page, patientId));
       url = resolveNext(page, url);
     }
     return resources;
@@ -266,8 +294,19 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   async function fetchPatient(patient: PatientRef): Promise<unknown> {
     try {
       const resources: Json[] = [];
+      // Dedupe across pages/searches by type+id (review P2-2): an offset-paging boundary can repeat a
+      // resource, and a duplicated Immunization would double-count doses — flipping a
+      // series-completion measure to falsely COMPLIANT. Resources without a string id are kept as-is.
+      const seenIds = new Set<string>();
       for (const resourceType of resourceTypes) {
-        resources.push(...(await searchResources(resourceType, patient.id)));
+        for (const resource of await searchResources(resourceType, patient.id)) {
+          if (typeof resource.id === "string" && resource.id) {
+            const key = `${String(resource.resourceType)}/${resource.id}`;
+            if (seenIds.has(key)) continue;
+            seenIds.add(key);
+          }
+          resources.push(resource);
+        }
       }
       return {
         resourceType: "Bundle",

@@ -247,6 +247,34 @@ test("non-2xx token response throws with the status and without leaking the asse
   assert.equal(shim.tokenRequests.length, 2);
 });
 
+test("discovery failure: a non-200 smart-configuration response throws", async () => {
+  const { pem } = await testKeyPair();
+  const fetchImpl: FetchImpl = (async () => new Response("down", { status: 503 })) as FetchImpl;
+  const auth = smartBackendServicesAuth(cfgWith(pem), { fetch: fetchImpl });
+  await assert.rejects(() => auth.authorizationHeader(), /discovery failed: 503/);
+});
+
+test("discovery failure: a 200 without token_endpoint throws", async () => {
+  const { pem } = await testKeyPair();
+  const fetchImpl: FetchImpl = (async () =>
+    new Response(JSON.stringify({ authorization_endpoint: "https://x" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as FetchImpl;
+  const auth = smartBackendServicesAuth(cfgWith(pem), { fetch: fetchImpl });
+  await assert.rejects(() => auth.authorizationHeader(), /token_endpoint/);
+});
+
+test("a black-holed token endpoint times out instead of hanging (P2-1)", async () => {
+  const { pem } = await testKeyPair();
+  const fetchImpl: FetchImpl = ((_input: FetchInput, init?: FetchInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason ?? new Error("aborted")), { once: true });
+    })) as FetchImpl;
+  const auth = smartBackendServicesAuth(cfgWith(pem, { tokenUrl: TOKEN_URL }), { fetch: fetchImpl, timeoutMs: 10 });
+  await assert.rejects(() => auth.authorizationHeader(), /timed out/);
+});
+
 test("missing access_token in a 2xx response throws", async () => {
   const { pem } = await testKeyPair();
   let served = false;
