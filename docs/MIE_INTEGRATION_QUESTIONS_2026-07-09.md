@@ -56,7 +56,8 @@ process for provisioning a service account for WorkWell.
 > **Provisional answer (self-research 2026-07-13 — please confirm/correct):** SMART on FHIR
 > OAuth 2.0. For server-to-server, **SMART Bulk Backend Services**: `client_credentials` grant with
 > an RS384 `private_key_jwt` client assertion verified against a registered **JWKS URL**, scope
-> `system/*.read`. The docs describe **dynamic client registration (RFC 7591)** at `/register`
+> `system/*.rs` per the documented bulk-registration example (the sandbox smart-configuration
+> also advertises v1-style `system/*.read` — please confirm which form registrations grant). The docs describe **dynamic client registration (RFC 7591)** at `/register`
 > (plus manual registration via Login Trusts / the FHIR App editor). Our HTTP client now implements
 > this contract (SMART Backend Services, RS384 private_key_jwt). **Probe result (2026-07-13):** the
 > public sandbox does **not** expose a registration endpoint (none advertised in any well-known

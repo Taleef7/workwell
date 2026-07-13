@@ -11,7 +11,7 @@ public-sources research pass and recorded it in **`docs/INTEGRATION_RESEARCH_202
   sandbox** (`fhirr4sandbox.webchartnow.com` — CapabilityStatement + smart-configuration fetched
   and verified 2026-07-13) that documents **dynamic client registration** incl. the SMART
   **Backend Services** server-to-server flow (`client_credentials` + RS384 `private_key_jwt` +
-  JWKS, `system/*.read`).
+  JWKS, `system/*.rs`).
 - **Two corrections to the #255 mock contract** for E12 PR-2c: (1) auth is SMART Backend
   Services, **not** a static bearer API key; (2) there is **no `Patient/$everything` and no
   `_lastUpdated`/history** — per-patient pulls compose from per-resource `?patient={id}`
@@ -25,12 +25,13 @@ public-sources research pass and recorded it in **`docs/INTEGRATION_RESEARCH_202
   of 2026-07-08, actively ACIP-maintained), REST DSS endpoint over vMR payloads; ~3–5 days to a
   real TS adapter behind the existing `ImmunizationForecast` port. A Java→TS port of ICE is
   assessed infeasible (continuously-updated Drools rule base).
-- **Two internal gaps surfaced:** (1) the **VSAC import was never run on live Neon** (DEPLOY.md
-  has no "✓ Done" banner for `pnpm resolve-valuesets`), so the live cms122 fidelity diff
-  degrades to `estimate` mode — self-serve fix via a free UMLS key; (2) Doug's "compliant
-  anywhere = compliant everywhere" (2026-06-24) is **display-only** today — E15 merges the
-  timeline but quality calculations never credit cross-system events (ADR-022 by design); needs
-  an issue for a calculation-level, still-descriptive person-resolved view.
+- **Two internal gaps surfaced** (one later corrected): (1) ~~the VSAC import was never run on
+  live Neon~~ — **corrected on double-check (2026-07-13):** the 21 OIDs were imported 2026-07-05;
+  only the DEPLOY "✓ Done" banner was missing (added on the PR-2c branch), and the live diff was
+  **verified returning `mode: "literal"`** (150 subjects / 15 divergent / 0 errors); (2) Doug's
+  "compliant anywhere = compliant everywhere" (2026-06-24) is **display-only** today — E15 merges
+  the timeline but quality calculations never credit cross-system events (ADR-022 by design);
+  filed as **#287**.
 
 **`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` updated:** A1/A2/A3/A6/C13/D18 now carry dated
 **provisional answers (confirm/correct)** blocks + an answer-log entry — the package now reads

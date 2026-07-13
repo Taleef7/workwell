@@ -130,7 +130,8 @@ Auth (M2):   SMART Backend Services
              1. Register client with a JWKS URI (dynamic POST /register, or MIE-side Login Trust)
              2. POST {token_endpoint}: grant_type=client_credentials,
                 client_assertion_type=…jwt-bearer, client_assertion=<RS384 private_key_jwt>,
-                scope=system/*.read
+                scope=system/*.rs   # SMART v2 read+search — the documented bulk-registration grant
+                # (the sandbox smart-configuration also advertises v1-style system/*.read; keep overridable)
              3. Bearer <access_token> on FHIR calls
 Population:  GET {base}/Patient?…                      (follow Bundle link[next] if present)
 Per patient: GET {base}/Observation?patient={id}&category=…&date=ge…
@@ -198,12 +199,15 @@ The E6 `iceForecaster` seam can be backed by the real engine with zero vendor in
 
 ## 5. Other findings from the 2026-07-13 session
 
-- **VSAC import never run on live Neon.** DEPLOY.md marks every other owner seed "✓ Done" but
-  not `pnpm resolve-valuesets` — so the live `GET /api/measures/cms122/fidelity/diff` degrades
-  to `estimate` mode and the #258 literal fqm-execution ladder never fires on the deployed
-  stack. Self-serve fix (no MIE dependency): a UMLS key is free self-registration →
-  `DATABASE_URL=<neon> WORKWELL_VSAC_API_KEY=<key> pnpm resolve-valuesets`, then verify the
-  diff responds `mode: "literal"`.
+- **VSAC import — CORRECTED 2026-07-13 (double-check): it WAS already run.** The initial
+  research pass claimed the import was never run on live Neon (inferred from the missing "✓ Done"
+  banner in DEPLOY.md). A direct Neon check found all **21 CMS122v14 OIDs present**
+  (`source='VSAC'`, `resolution_status='RESOLVED'`, non-empty code lists, imported 2026-07-05 —
+  the day E14 PR-3 shipped). Live end-to-end verification (2026-07-13):
+  `GET /api/measures/cms122/fidelity/diff` on the deployed stack returns **`mode: "literal"`**
+  (150 subjects, 15 divergent, 0 errors, ~48s cold) — the #258 fqm-execution literal ladder is
+  live in production. The only real gap was the missing DEPLOY.md banner (now added on the
+  PR-2c branch).
 - **"Compliant anywhere = compliant everywhere" is display-only.** Doug's 2026-06-24 ask ("when
   doing quality calculations, give everybody credit regardless of who did it") is implemented
   at the E15 display layer (merged, system-tagged timeline) but **not** at the calculation
@@ -236,7 +240,7 @@ Everything else in the A-section is provisionally answered — recorded inline i
 ## 7. Recommended next actions (recorded 2026-07-13)
 
 1. Send the updated #254 package (now with provisional answers) — before the 2026-07-15 meeting.
-2. Run the VSAC import on live Neon (§5) — lights up the literal official-CQL diff live.
+2. ~~Run the VSAC import on live Neon~~ — **already done (2026-07-05); live literal mode verified 2026-07-13** (§5).
 3. E12 PR-2c contract correction: rewrite `httpWebChartClient` to SMART Backend Services +
    per-resource `?patient=` composition; attempt dynamic registration against the public
    sandbox; point the conformance suite at it if registration succeeds.

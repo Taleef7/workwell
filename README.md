@@ -22,6 +22,18 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-13 — independence sprint (in review: PRs #286 docs + #288 code).** WebChart's integration
+  contract turned out to be **publicly documented and live-verifiable**: FHIR R4 + US Core 7 + SMART
+  Backend Services, with a public sandbox (`fhirr4sandbox.webchartnow.com`). The E12 PR-2c transport was
+  rebuilt to that **verified contract** (RS384 `private_key_jwt` via WebCrypto, per-resource `?patient=`
+  composition — no `$everything`; ADR-028; suite 1227/1227 green incl. the live Pg ceiling), most #254
+  questions now carry provisional confirm/correct answers, the sandbox probe sharpened the remaining ask
+  to "register us a backend-services client (JWKS attached)", **ICE was proven self-hostable** (official
+  `hlnconsulting/ice` image returned 17 real vaccine-group forecasts locally —
+  `docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`), and the **live CMS122 fidelity diff was
+  verified running `mode:"literal"`** in production (fqm-execution over the official MADiE artifact; the
+  VSAC OIDs were imported 2026-07-05). Research record: `docs/INTEGRATION_RESEARCH_2026-07-13.md`. New:
+  #287 (calculation-level cross-system credit).
 - **Roadmap 2026-07-09 — PoC → WebChart integration (M1/M2/M3).** **M1 engineering closed 2026-07-10**
   (PRs #271–#279 on `main`): mock WebChart HTTP transport, worker pool, tiered evidence, fqm literal
   CMS122 fidelity (#258 / ADR-026), full dev-DB fixtures, seam inventory, production-readiness memo,
