@@ -14,6 +14,14 @@ only on the contract details below. Attachments: the dev-DB evaluation output ta
 **How to answer:** inline under each question is fine. Answers are recorded here (dated) as they
 arrive; each question notes which WorkWell workstream it unblocks.
 
+> **Update 2026-07-13 — provisional answers from public sources.** We researched MIE's public
+> documentation (`docs.webchartnow.com` via `github.com/mieweb/docs`) and live-verified the public
+> FHIR sandbox (`https://fhirr4sandbox.webchartnow.com/webchart.cgi/fhir/` — CapabilityStatement +
+> `.well-known/smart-configuration`, fetched 2026-07-13). Several A-section questions now carry a
+> **Provisional answer (self-research — please confirm/correct)** block; only confirmation is
+> needed there, not a from-scratch answer. Full findings, sources, and confidence levels:
+> `docs/INTEGRATION_RESEARCH_2026-07-13.md`.
+
 ---
 
 ## A. API contract (blocks E12 PR-2c — the live transport; our critical path)
@@ -22,12 +30,37 @@ arrive; each question notes which WorkWell workstream it unblocks.
 proprietary REST API over the `wc_miehr_*` schema? *(Determines whether our normalizer is
 pass-through + reconciliation, or also maps rows→FHIR per our mapping doc §3.)*
 
+> **Provisional answer (self-research 2026-07-13 — please confirm/correct):** WebChart exposes a
+> certified **FHIR R4 (4.0.1)** API — US Core 7.0.0 (STU7)/USCDI v4, SMART App Launch 2.2,
+> Bulk Data 2.0, Inferno g10-certified; JSON only (`application/fhir+json`). Base shape
+> `https://<practice>.webchartnow.com/webchart.cgi/fhir/`. A legacy non-FHIR JSON API over the
+> `wc_miehr_*` tables also exists (`mieapi-js` et al.). **Please confirm the FHIR R4 API is the
+> intended integration surface for WorkWell** (we assume yes; the legacy API would only matter if
+> employer/OH fields don't surface in FHIR — see B12).
+
 **A2. Endpoints & population read.** How do we (a) enumerate the worker population and (b) fetch one
 patient's clinical data — FHIR `$everything`/search, Bulk `$export`, or per-resource endpoints? Exact
 pagination semantics (page size limits, cursor vs offset, ordering guarantees)?
 
+> **Provisional answer (self-research 2026-07-13 — please confirm/correct):** the live sandbox
+> CapabilityStatement shows **no `Patient/$everything`**; the only operation is **`Group/$export`**
+> (Bulk Data 2.0). So: population via `GET /Patient` search, per-patient data composed from
+> per-resource searches (`Observation|Condition|Procedure|Immunization|Encounter?patient={id}`), or
+> bulk via `Group/$export`. **Still open: pagination semantics** — no `_count` is documented and
+> the docs don't describe paging; we will follow standard `Bundle.link[next]` unless you tell us
+> otherwise. Please confirm the per-resource composition approach and describe page-size behavior.
+
 **A3. Auth.** Mechanism (bearer / OAuth client-credentials / API key header), token lifetime, and the
 process for provisioning a service account for WorkWell.
+
+> **Provisional answer (self-research 2026-07-13 — please confirm/correct):** SMART on FHIR
+> OAuth 2.0. For server-to-server, **SMART Bulk Backend Services**: `client_credentials` grant with
+> an RS384 `private_key_jwt` client assertion verified against a registered **JWKS URL**, scope
+> `system/*.read`. The docs describe **dynamic client registration (RFC 7591)** at `/register`
+> (plus manual registration via Login Trusts / the FHIR App editor). We are rebuilding our HTTP
+> client to this contract now. **Still open:** (a) is self-service dynamic registration against the
+> public sandbox sanctioned for WorkWell's conformance testing? (b) what is the provisioning
+> process + token lifetime for a production service account?
 
 **A4. Rate limits & latency.** Rate limits, quotas, concurrency ceilings, and expected p50/p95 latency
 per call — this sizes our batch evaluation windows.
@@ -41,6 +74,12 @@ immunity and coded results depend on this.)*
 resource history, or any subscription/webhook mechanism? *(This decides our incremental re-evaluation
 design — re-evaluating only patients whose data changed. If none exists we will hash bundle content;
 we'd rather know now.)*
+
+> **Provisional answer (self-research 2026-07-13 — please confirm/correct):** the CapabilityStatement
+> shows **no `_lastUpdated` search parameter, no `history` interaction, no versioning** on any
+> resource. The one candidate is Bulk Data 2.0's kickoff **`_since`** parameter on `Group/$export`
+> (spec-defined; we could not verify acceptance without credentials). **Please confirm whether
+> `$export?_since=` works**; if not, we will proceed with content-hash change detection.
 
 **A7. Procedure coding density.** The dev seed has 1 of 99 `patient_procedures` rows CPT-coded — is
 production materially denser? Which code systems are reliably present on procedures?
@@ -73,6 +112,11 @@ reliable enough in production to drive tenant/site attribution for a Total-Worke
 test credentials and synthetic/de-identified data? *(The single biggest integration accelerator —
 our conformance suite is ready to point at it.)*
 
+> **Partially self-served (2026-07-13):** we found the **public FHIR R4 sandbox**
+> (`https://fhirr4sandbox.webchartnow.com/webchart.cgi/fhir/`) and plan to register a test client
+> against it (see A3). Still valuable from MIE: a staging instance whose data carries the
+> **Enterprise Health employer/OH fields** (B12) — the sandbox's data shape for those is unknown.
+
 **C14. PHI/BAA constraints.** When real data flows: where may WorkWell run (MIE infrastructure only?
 is our managed-Postgres tier eligible?), encryption/retention requirements, and who owns the BAA
 chain? *(Our current demo stack will never receive PHI; we need the target posture to design the
@@ -99,8 +143,24 @@ whether data egress is a policy constraint.
 adapter does not source immunizations). When is an ICE surface available to integrate against, and
 what does its contract look like?
 
+> **Provisional answer / proposal (self-research 2026-07-13):** we can self-host ICE — HLN
+> publishes an official, actively maintained Docker image (`hlnconsulting/ice`; latest release
+> 2.57.2, 2026-07-08) exposing the OpenCDS DSS REST endpoint (vMR payloads). We plan to run it as
+> a sidecar and back our existing `ImmunizationForecast` port with it (advisory-only, ADR-012).
+> **Question becomes:** does MIE prefer we integrate against an MIE-hosted ICE instance instead,
+> and is there one? Also, on the Java→TypeScript port idea: our assessment is it's infeasible as
+> a side project (ICE's value is HLN maintaining the ACIP-updated Drools rule base) — running the
+> real engine is the right call. Happy to discuss.
+
 ---
 
 ## Answer log
 
 *(record answers here, dated, as they arrive)*
+
+- **2026-07-13 (self-research, pending MIE confirmation):** provisional answers recorded inline
+  above for A1 (FHIR R4/US Core 7/SMART, JSON-only), A2 (no `$everything`; per-resource
+  `?patient=` composition + `Group/$export`; pagination still open), A3 (SMART Backend Services,
+  `private_key_jwt` + JWKS, dynamic registration), A6 (no `_lastUpdated`/history; `$export
+  _since` unverified), C13 (public sandbox found), D18 (self-hosted ICE proposed; TS port
+  assessed infeasible). Sources + confidence: `docs/INTEGRATION_RESEARCH_2026-07-13.md`.

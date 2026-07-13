@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-07-13 — Independent integration research: WebChart public FHIR contract + self-hostable ICE (docs only)
+
+Rather than staying blocked on #254 answers ahead of the 2026-07-15 Doug meeting, ran a
+public-sources research pass and recorded it in **`docs/INTEGRATION_RESEARCH_2026-07-13.md`**
+(new). Headlines:
+
+- **WebChart has a public, certified FHIR R4 API** (R4 4.0.1, US Core 7.0.0, SMART App Launch
+  2.2, Bulk Data 2.0, Inferno g10) documented in `github.com/mieweb/docs`, with a **live public
+  sandbox** (`fhirr4sandbox.webchartnow.com` — CapabilityStatement + smart-configuration fetched
+  and verified 2026-07-13) that documents **dynamic client registration** incl. the SMART
+  **Backend Services** server-to-server flow (`client_credentials` + RS384 `private_key_jwt` +
+  JWKS, `system/*.read`).
+- **Two corrections to the #255 mock contract** for E12 PR-2c: (1) auth is SMART Backend
+  Services, **not** a static bearer API key; (2) there is **no `Patient/$everything` and no
+  `_lastUpdated`/history** — per-patient pulls compose from per-resource `?patient={id}`
+  searches, and the incremental candidate for #263 is `Group/$export?_since=` (unverified) with
+  content-hashing as the fallback. Pagination remains genuinely undocumented (kept as an open
+  #254 question).
+- **WebChart itself is not runnable locally** (closed-source; `dev-wcdb` is the DB only), and
+  Doug's "MIE open-source server" is `mieweb/opensource-server` — the Proxmox Create-a-Container
+  platform we already deploy on, not WebChart.
+- **ICE is self-hostable today:** official HLN Docker image (`hlnconsulting/ice`, release 2.57.2
+  of 2026-07-08, actively ACIP-maintained), REST DSS endpoint over vMR payloads; ~3–5 days to a
+  real TS adapter behind the existing `ImmunizationForecast` port. A Java→TS port of ICE is
+  assessed infeasible (continuously-updated Drools rule base).
+- **Two internal gaps surfaced:** (1) the **VSAC import was never run on live Neon** (DEPLOY.md
+  has no "✓ Done" banner for `pnpm resolve-valuesets`), so the live cms122 fidelity diff
+  degrades to `estimate` mode — self-serve fix via a free UMLS key; (2) Doug's "compliant
+  anywhere = compliant everywhere" (2026-06-24) is **display-only** today — E15 merges the
+  timeline but quality calculations never credit cross-system events (ADR-022 by design); needs
+  an issue for a calculation-level, still-descriptive person-resolved view.
+
+**`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` updated:** A1/A2/A3/A6/C13/D18 now carry dated
+**provisional answers (confirm/correct)** blocks + an answer-log entry — the package now reads
+"here's what we found, confirm the residuals" instead of a blank questionnaire. Remaining
+genuinely MIE-gated: pagination, `$export _since`, A4/A5/A7/A8, B9–B12, C14–C16, D17.
+
+**Next:** send the updated #254 package (owner); run `pnpm resolve-valuesets` on Neon (owner);
+E12 PR-2c contract correction (SMART Backend Services client + per-resource composition +
+sandbox registration attempt); ICE sidecar spike; #263 redesign; cross-system-credit issue.
+
 ## 2026-07-11 — Deploy fix, observability merge, durable scheduler (PRs #283, #281, #284)
 
 Three PRs merged to `main`; the production deploy is green again.
