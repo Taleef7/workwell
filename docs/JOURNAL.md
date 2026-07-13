@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-07-13 — E12 PR-2c: verified-contract WebChart transport (SMART Backend Services + per-resource composition)
+
+Built on the same day's public-sources research (PR #286 carries the research record +
+`docs/INTEGRATION_RESEARCH_2026-07-13.md`; if that PR merges first, this entry stacks above its
+2026-07-13 entry): `httpWebChartClient` no longer implements the #255 *assumed* mock contract — it
+implements WebChart's **real, publicly verified FHIR contract** (ADR-028), un-blocking PR-2c's
+request shaping from #254:
+
+- **`smart-backend-auth.ts` (new):** SMART Bulk Backend Services behind a `WebChartAuthProvider`
+  port — `.well-known/smart-configuration` discovery (or `WORKWELL_WEBCHART_TOKEN_URL` override),
+  RS384 `private_key_jwt` client assertion signed via **WebCrypto** (portable, mirrors
+  `auth/password.ts`; no `node:crypto`, **no new deps**), `client_credentials` token exchange, token
+  cache with expiry skew, single-flight refresh, `invalidate()` for 401 handling. 10 tests including
+  real signature verification against an in-test generated keypair. The legacy static bearer mode is
+  retained (`staticBearerAuth`).
+- **Per-resource composition (no `$everything`):** each patient is composed from paged
+  `GET /fhir/{Observation|Condition|Procedure|Immunization|Encounter}?patient={id}` searches into one
+  collection Bundle; **any per-resource failure degrades the whole patient** to the fallback bundle
+  (MISSING_DATA — partial clinical data never evaluates); the off-origin pagination guard now covers
+  resource searches (protects the OAuth token). 401 → invalidate + one immediate retry.
+- **Config/seams:** `isWebChartConfigured` accepts BASE_URL + (API_KEY **or**
+  CLIENT_ID+PRIVATE_KEY); new env vars `WORKWELL_WEBCHART_CLIENT_ID/_PRIVATE_KEY/_TOKEN_URL/_SCOPE`
+  (DEPLOY.md table); deployed default stays inert (no env → JSON source, byte-identical).
+- **Conformance suite reworked** to the verified contract: fixture-vs-HTTP **golden outcome parity
+  across every dev-DB measure**, SMART one-token-per-batch + 401 re-exchange, per-resource
+  429/malformed/persistent-failure isolation, off-origin guards (population + resource), empty
+  population. Plan: `docs/superpowers/plans/2026-07-13-e12-pr2c-smart-transport.md`.
+
+Residual #254-gated: credentials/registration (a sandbox dynamic-registration attempt is the next
+step), pagination semantics, `Group/$export _since`. Descriptive only (ADR-008/ADR-017); no schema,
+no new deps.
+
 ## 2026-07-11 — Deploy fix, observability merge, durable scheduler (PRs #283, #281, #284)
 
 Three PRs merged to `main`; the production deploy is green again.

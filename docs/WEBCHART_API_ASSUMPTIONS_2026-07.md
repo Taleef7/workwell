@@ -1,56 +1,63 @@
-# WebChart API Assumptions — July 2026 Mock-Contract Pre-Build
+# WebChart API Assumptions — July 2026 (Verified-Contract Revision)
 
-**Status:** Working assumptions for #255 / PR-2c pre-build. These are not confirmed MIE contract
-answers. The implemented client uses **Variant A: true FHIR R4**. **Variant B: proprietary REST over
-`wc_miehr_*` shapes** is documented as the fallback design if MIE answers A1 that the API is not FHIR;
-it is not implemented in this pre-build.
+**Status (revised 2026-07-13 — PR-2c / ADR-028):** Variant A below is no longer a blind mock — it is
+the **publicly verified WebChart FHIR R4 contract**, live-checked against the public sandbox
+(`https://fhirr4sandbox.webchartnow.com/webchart.cgi/fhir/` CapabilityStatement +
+`.well-known/smart-configuration`, fetched 2026-07-13; sources + confidence in
+`docs/INTEGRATION_RESEARCH_2026-07-13.md`), and `httpWebChartClient` now implements it. Two original
+assumptions were **corrected**: auth is SMART Backend Services (not a static API key), and there is
+**no `Patient/$everything`** (per-resource composition). Rows are tagged **[VERIFIED]** (public
+docs/live sandbox) or **[ASSUMED]** (still needs the MIE answer). **Variant B: proprietary REST over
+`wc_miehr_*` shapes** remains documented as the fallback design; it is not implemented.
 
-Question references point to `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`. Every assumption below is
-intended to be confirmed or refuted by those questions.
+Question references point to `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
 
 ---
 
-## Variant A — True FHIR R4 API (implemented now)
+## Variant A — True FHIR R4 API (implemented; verified where tagged)
 
 ### Endpoints
 
-| Assumption | MIE question(s) |
-|---|---|
-| WorkWell receives a base API origin in `WORKWELL_WEBCHART_BASE_URL`; the FHIR root is `{baseUrl}/fhir`. | A1, A2, C13 |
-| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | A1, A2, C16 |
-| Search results are a FHIR R4 searchset `Bundle` whose `entry[].resource` values are `Patient` resources with stable `Patient.id` values. | A1, A2, B11 |
-| Each patient is fetched independently with `GET {baseUrl}/fhir/Patient/{id}/$everything`; the response is one FHIR Bundle for that patient only. | A1, A2 |
-| The `$everything` payload includes the clinical resources the existing normalizer understands: Patient, Observation, Procedure, Condition, and, if WebChart ever exposes them, Immunization. | A1, A2, A5, A7, A8, D18 |
-| WorkWell does not combine multiple patients into one evaluation bundle; the transport returns one raw payload per patient. | A2, C16 |
-| Occupational-health program enrollment remains an external roster input unless MIE identifies a WebChart-side enrollment source. | B9 |
+| Assumption | Status | MIE question(s) |
+|---|---|---|
+| WorkWell receives a base API origin+app path in `WORKWELL_WEBCHART_BASE_URL` (e.g. `https://<practice>.webchartnow.com/webchart.cgi`); the FHIR root is `{baseUrl}/fhir`. | [VERIFIED] (endpoint directory + sandbox) | A1, C13 |
+| The API is FHIR **R4 (4.0.1)**, US Core 7.0.0, JSON only (`application/fhir+json`). | [VERIFIED] | A1 |
+| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | [VERIFIED] Patient search exists; `_count` is [ASSUMED] (undocumented) | A2, C16 |
+| Search results are a FHIR R4 searchset `Bundle` whose `entry[].resource` values are `Patient` resources with stable `Patient.id` values. | [VERIFIED] | A2, B11 |
+| ~~Each patient is fetched with `GET /fhir/Patient/{id}/$everything`.~~ **CORRECTED:** the CapabilityStatement exposes **no `$everything`** — each patient is composed from paged per-resource searches `GET {baseUrl}/fhir/{Observation\|Condition\|Procedure\|Immunization\|Encounter}?patient={id}`, all supported with a `patient` search param. The only operation is `Group/$export` (Bulk Data 2.0). | [VERIFIED] | A2 |
+| WorkWell does not combine multiple patients into one evaluation bundle; the transport composes one collection Bundle per patient. | design invariant | A2, C16 |
+| Any per-resource fetch failure degrades the **whole patient** to the fallback bundle (partial clinical data never evaluates). | design invariant (ADR-028) | A2, A4 |
+| Occupational-health program enrollment remains an external roster input unless MIE identifies a WebChart-side enrollment source. | [ASSUMED] | B9 |
 
 ### Pagination
 
-| Assumption | MIE question(s) |
-|---|---|
-| Population search is paged by `_count`; the server may cap the requested page size. | A2, A4, C16 |
-| The next page is discovered from `Bundle.link[]` where `relation === "next"` and `url` is either absolute or relative to the base API origin. | A2 |
-| Patient ordering is stable enough for batch traversal; WorkWell does not depend on a specific sort order for compliance semantics. | A2 |
-| If a later population page fails, WorkWell evaluates the patients already listed and does not abort the whole batch. | A2, A4, C16 |
+| Assumption | Status | MIE question(s) |
+|---|---|---|
+| Searches are paged by `_count`; the server may cap the requested page size. | [ASSUMED] — `_count` and page size are **undocumented**; kept as the standard-FHIR conservative default | A2, A4, C16 |
+| The next page is discovered from `Bundle.link[]` where `relation === "next"` and `url` is either absolute or relative; off-origin next links are refused (token protection). | [ASSUMED] (standard FHIR) | A2 |
+| Patient ordering is stable enough for batch traversal; WorkWell does not depend on a specific sort order for compliance semantics. | [ASSUMED] | A2 |
+| If a later population page fails, WorkWell evaluates the patients already listed and does not abort the whole batch. | design invariant | A2, A4, C16 |
+| No `_lastUpdated` search, no `history`, no versioning on any resource; the incremental-eval candidate is `Group/$export?_since=` (spec-defined, unverified). | [VERIFIED] (absence, from the CapabilityStatement); `_since` [ASSUMED] | A6 |
 
-### Auth Header
+### Auth
 
-| Assumption | MIE question(s) |
-|---|---|
-| `WORKWELL_WEBCHART_API_KEY` is sent as `Authorization: Bearer <apiKey>`. | A3, C13, C14 |
-| Requests send `Accept: application/fhir+json, application/json`. | A1, A2 |
-| No OAuth token exchange, refresh flow, tenant header, or per-user delegation is required for this pre-build. | A3, C13, C15 |
+| Assumption | Status | MIE question(s) |
+|---|---|---|
+| ~~`WORKWELL_WEBCHART_API_KEY` is sent as `Authorization: Bearer <apiKey>`.~~ **CORRECTED:** auth is **SMART on FHIR OAuth 2.0**; server-to-server uses **SMART Bulk Backend Services** — `client_credentials` grant with an RS384 `private_key_jwt` client assertion verified against the client's registered JWKS, scope `system/*.read`; token endpoint from `{base}/fhir/.well-known/smart-configuration`. Implemented in `smart-backend-auth.ts`; selected by `WORKWELL_WEBCHART_CLIENT_ID`+`WORKWELL_WEBCHART_PRIVATE_KEY`. The legacy static-bearer mode is retained for fixtures/tests/proxies. | [VERIFIED] (sandbox smart-configuration + OAuth tutorial) | A3 |
+| Client provisioning: dynamic client registration (RFC 7591) at `/register`, or manual EHR-side registration (Login Trusts / FHIR App editor). Production provisioning process + token lifetime still needed from MIE. | [VERIFIED] mechanism; [ASSUMED] process | A3, C13 |
+| Requests send `Accept: application/fhir+json, application/json`. | [VERIFIED] (JSON-only API) | A1 |
+| A 401 on a FHIR call means an expired/revoked token: invalidate the cached token, re-exchange once, retry the request once. | design invariant | A3 |
 
 ### Error Model
 
-| Assumption | MIE question(s) |
-|---|---|
-| HTTP 429 and 5xx responses are transient and should be retried with bounded backoff. | A4 |
-| 4xx responses other than 429 are terminal for that request. | A3, A4, C13 |
-| Every request is bounded by an AbortController timeout. | A4, C16 |
-| A malformed or failed per-patient `$everything` response degrades to a Patient-only collection Bundle plus an OperationOutcome marker, so the existing evaluator can classify that known subject as MISSING_DATA without aborting the batch. | A2, A4, C16 |
-| A failed population page cannot invent patient ids that were never listed, so only already-listed patients are evaluated. | A2, C16 |
-| The transport is read-only and writes no `audit_events`; downstream state-changing run/case workflows retain the audit invariant. | C14 |
+| Assumption | Status | MIE question(s) |
+|---|---|---|
+| HTTP 429 and 5xx responses are transient and should be retried with bounded backoff. | [ASSUMED] | A4 |
+| 4xx responses other than 429 (and the single 401 re-auth) are terminal for that request. | [ASSUMED] | A3, A4 |
+| Every request is bounded by an AbortController timeout. | design invariant | A4, C16 |
+| A malformed or failed per-resource search degrades that patient to a Patient-only collection Bundle plus an OperationOutcome marker, so the evaluator classifies that known subject as MISSING_DATA without aborting the batch. | design invariant (ADR-028) | A2, A4, C16 |
+| A failed population page cannot invent patient ids that were never listed, so only already-listed patients are evaluated. | design invariant | A2, C16 |
+| The transport is read-only and writes no `audit_events`; downstream state-changing run/case workflows retain the audit invariant. | design invariant | C14 |
 
 ---
 

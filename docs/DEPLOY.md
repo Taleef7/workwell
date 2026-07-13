@@ -422,6 +422,12 @@ shows all services `Up`).
 | `WORKWELL_EMAIL_SENDGRID_API_KEY` | Backend | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
 | `WORKWELL_EMAIL_FROM_ADDRESS` | Backend | From address for outreach (default `noreply@workwell-demo.dev`). |
 | `WORKWELL_EMAIL_FROM_NAME` | Backend | From display name (default `WorkWell Measure Studio`). |
+| `WORKWELL_WEBCHART_BASE_URL` | Backend | WebChart origin+app path (e.g. `https://<practice>.webchartnow.com/webchart.cgi`; the FHIR root is `{base}/fhir`). **Inert unless paired with an auth mode below — the demo stack leaves all `WORKWELL_WEBCHART_*` unset** (JSON-bucket ingress stays selected). |
+| `WORKWELL_WEBCHART_CLIENT_ID` | Backend | SMART Backend Services client id (the verified contract, PR-2c/ADR-028). Selects SMART auth together with `WORKWELL_WEBCHART_PRIVATE_KEY`. |
+| `WORKWELL_WEBCHART_PRIVATE_KEY` | Backend | PKCS#8 PEM private key for the RS384 `private_key_jwt` client assertion (multi-line env value; the matching public key is registered as the client's JWKS). |
+| `WORKWELL_WEBCHART_TOKEN_URL` | Backend | Optional token-endpoint override; when unset it is discovered from `{base}/fhir/.well-known/smart-configuration`. |
+| `WORKWELL_WEBCHART_SCOPE` | Backend | Optional OAuth scope (default `system/*.read`). |
+| `WORKWELL_WEBCHART_API_KEY` | Backend | Legacy static bearer key (pre-verified-contract mode; kept for fixtures/proxies). Ignored for auth selection when the SMART pair is set. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
 | `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
 | `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
