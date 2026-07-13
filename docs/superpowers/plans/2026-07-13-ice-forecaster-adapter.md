@@ -43,16 +43,16 @@ Forecasting remains **advisory only** — CQL `Outcome Status` is the sole compl
 - Test: `backend-ts/src/engine/immunization/ice-vmr.test.ts`
 - Fixture: `backend-ts/spike/ice/dss-response.json` (already copied)
 
-- [ ] **Step 1: Failing tests** — `buildCdsInputXml` (dob/gender/doses render; XML-escape),
+- [x] **Step 1: Failing tests** *(ran red: module absent)* — `buildCdsInputXml` (dob/gender/doses render; XML-escape),
   `buildDssRequest` (envelope shape, base64 payload round-trips), `parseDssResponse` +
   `parseCdsOutputProposals` against the golden fixture (17 proposals; influenza `800` RECOMMENDED
   due `2026-07-01`; DTP `200` RECOMMENDED due `2026-03-15` earliest `2021-03-15`; HepB `100`
   NOT_RECOMMENDED `COMPLETE`), `parseIceTimestamp`.
-- [ ] **Step 2: Implement** — string-template `CDSInput` (patient id/dob/gender +
+- [x] **Step 2: Implement** *(11/11 green)* — string-template `CDSInput` (patient id/dob/gender +
   `substanceAdministrationEvents` per dose), DSS envelope builder (submissionTime injected — no
   `Date.now()` inside the pure codec), tolerant regex proposal parser (per-proposal block scan),
   base64 via `atob`/`btoa` (worker-portable).
-- [ ] **Step 3: Commit** — `feat(immunization): vMR codec for ICE DSS (build + parse, no deps)`
+- [x] **Step 3: Commit** — `feat(immunization): vMR codec for the ICE DSS contract` *(0dec609)*
 
 ### Task 2: Real adapter — `ice-forecaster.ts`
 
@@ -60,19 +60,19 @@ Forecasting remains **advisory only** — CQL `Outcome Status` is the sole compl
 - Create: `backend-ts/src/engine/immunization/ice-forecaster.ts`
 - Test: `backend-ts/src/engine/immunization/ice-forecaster.test.ts`
 
-- [ ] **Step 1: Failing tests** — fixture-transport forecast maps 3 series (TDAP DUE/OVERDUE by
+- [x] **Step 1: Failing tests** — fixture-transport forecast maps 3 series (TDAP DUE/OVERDUE by
   proposed-vs-asOf, INFLUENZA DUE, HEPB UP_TO_DATE complete); asOf ≠ today routes to
   `evaluateAtSpecifiedTime` with `specifiedTime`; transport error → fallback (simulated result);
   non-200 → fallback; missing group in response → fallback; timeout aborts; apiKey (when set) sent
   as `Authorization: Bearer`; history source injectable.
-- [ ] **Step 2: Implement** — `IceDoseHistory {dob, gender, doses: [{cvx, date}]}`;
+- [x] **Step 2: Implement** *(14/14 green)* — `IceDoseHistory {dob, gender, doses: [{cvx, date}]}`;
   `syntheticIceHistory(subjectId)` derived deterministically from `syntheticImmunizationHistory`
   (TDAP→CVX 115, INFLUENZA→141, HEPB→189; earlier HepB doses back-spaced 60d; dob/gender from the
   same subject hash); `realIceForecaster(cfg, {fallback, transportFetch?, historySource?, timeoutMs?})`
   — fallback is **injected** (no runtime import cycle); status mapping RECOMMENDED→DUE|OVERDUE,
   FUTURE_RECOMMENDED→UP_TO_DATE(+nextDueDate), NOT_RECOMMENDED/CONDITIONAL→UP_TO_DATE(+reason);
   `reason` carries `ICE {rec} ({interpretations})`.
-- [ ] **Step 3: Commit** — `feat(immunization): real ICE forecaster adapter with deterministic fallback`
+- [x] **Step 3: Commit** — folded into the adapter commit *(d737020)*
 
 ### Task 3: Port async + wiring + seam predicate
 
@@ -85,7 +85,7 @@ Forecasting remains **advisory only** — CQL `Outcome Status` is the sole compl
   `backend-ts/src/case/case-detail-read-model.test.ts` (await), `backend-ts/src/config/seam-inventory.test.ts`
   (ice = BASE_URL-only on; key-only off)
 
-- [ ] **Steps: red → green → full suite → commit** — `feat(immunization): async port + BASE_URL-only ICE seam`
+- [x] **Steps: red → green → full suite → commit** *(d737020; selection extracted to `resolve-forecaster.ts` to break the port↔adapter import cycle — a deviation from the plan, which had `resolveForecaster` staying in the port file)*
 
 ### Task 4: Live verification + compose + docs
 
@@ -99,12 +99,12 @@ Forecasting remains **advisory only** — CQL `Outcome Status` is the sole compl
   `.env.example`, `docs/JOURNAL.md`, `README.md`, `docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`
   (status → built)
 
-- [ ] **Steps: live test against localhost:32775 → compose → docs → commit**
+- [x] **Steps: live test against localhost:32775 → compose → docs → commit** *(5 live tests pass against a real `hlnconsulting/ice` container; they exposed the two contract bugs recorded in ADR-029)*
 
 ### Verification gate (before PR)
 
-- [ ] `corepack pnpm@10 typecheck` clean
-- [ ] Full suite `corepack pnpm@10 test` — 0 fail
-- [ ] Live test against the running sidecar: `WORKWELL_IMMZ_ICE_BASE_URL=http://localhost:32775/opencds-decision-support-service`
+- [x] `corepack pnpm@10 typecheck` clean *(exit 0)*
+- [x] Full suite `corepack pnpm@10 test` *(1260: 1255 pass / 0 fail / 5 skip)*
+- [x] Live test against the running sidecar *(5/5 pass)*
 - [ ] Adversarial code review of the whole branch
 - [ ] PR with docs current

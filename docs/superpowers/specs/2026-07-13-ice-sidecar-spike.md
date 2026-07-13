@@ -1,8 +1,22 @@
 # ICE sidecar spike — proven working round-trip (2026-07-13)
 
-**Status:** Spike complete — a real ICE instance ran locally and returned real forecasts. The TS
-adapter behind the existing `ImmunizationForecast` port is the follow-up build (~3–5 days), NOT
-started. Feeds #254 Q D18 (our answer: self-host ICE; a Java→TS port is infeasible).
+**Status:** ✅ **SUPERSEDED BY THE BUILD — the adapter is done** (2026-07-13, same day; ADR-029).
+This document is kept as the spike record; the shipped code is
+`backend-ts/src/engine/immunization/{ice-vmr,ice-forecaster,resolve-forecaster}.ts` with
+`ice-live.test.ts` proving it against a real container. Answers #254 Q D18 ourselves (self-host ICE;
+a Java→TS port is infeasible). Plan: `docs/superpowers/plans/2026-07-13-ice-forecaster-adapter.md`.
+
+**Two contract facts the build discovered that this spike did NOT capture** (both cost a live
+debugging round; both are now regression-tested):
+1. The **request's** `base64EncodedPayload` is an **ARRAY**, not a string — a bare string is rejected
+   `400 Bad Request`. (The spike noted the *response* payload is an array and missed that the request
+   is too — `atob()` silently coerced the one-element array, masking it.)
+2. A proposal's **vaccine group is on `<observationFocus>`, not `<substanceCode>`.** ICE proposes a
+   concrete *product* for some groups (CVX 115 Tdap under focus group 200 DTP; CVX 187 Shingrix under
+   focus 620 Zoster), so keying on the substance loses TDAP entirely for a subject with **no DTP
+   history** — the normal adult occupational-health case. The spike's canonical test patient had DTP
+   history, which hid this.
+
 **Context:** `docs/INTEGRATION_RESEARCH_2026-07-13.md` §4 (sources, maintenance state, effort).
 
 ## What was proven today (on the dev machine)

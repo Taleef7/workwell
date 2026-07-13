@@ -1,5 +1,56 @@
 # Architecture Decision Records
 
+## ADR-029: Immunization forecasting is a self-hosted ICE sidecar behind the existing port — the stub is replaced by a real adapter (#76 / D18)
+
+**Status:** Accepted (2026-07-13).
+
+**Context:** `iceForecaster` had been an **inert stub** since E6 (#76) — it returned "ICE not wired
+(Doug Q5)" for every series — because the transport question (CDS Hooks vs ICE API vs a WebChart-ICE
+bridge) was deferred to MIE. The 2026-07-13 research pass
+(`docs/INTEGRATION_RESEARCH_2026-07-13.md` §4) established that ICE is **self-hostable today**: HLN
+publishes an official, actively ACIP-maintained Docker image (`hlnconsulting/ice`), and its OpenCDS
+DSS REST endpoint answers real forecasts. That answers #254 Q D18 ourselves — no MIE dependency. A
+Java→TS port of ICE remains infeasible (a continuously-updated Drools rule base is the product).
+
+**Decision:**
+1. Replace the stub with a **real HTTP adapter** (`engine/immunization/ice-forecaster.ts`) speaking
+   the DSS contract (`/api/resources/evaluate`, `/api/resources/evaluateAtSpecifiedTime` for an as-of
+   date) over a pure vMR codec (`ice-vmr.ts` — string-template `CDSInput` build + regex `CDSOutput`
+   parse; **no new deps**, the same hand-rolled-XML pattern as the QRDA stub). ICE runs as a
+   **long-lived sidecar** (~2–3 GB, tens-of-seconds Drools cold start) — never per-request.
+2. **The seam predicate relaxes to BASE_URL-only.** A self-hosted sidecar has no API key;
+   `WORKWELL_IMMZ_ICE_API_KEY` stays optional (a bearer token if a deployment fronts ICE with an
+   authenticating proxy) and can never by itself select the seam. Inert-unless-configured holds: with
+   no `WORKWELL_IMMZ_ICE_BASE_URL` the simulated forecaster serves and behavior is byte-identical.
+3. **Any failure falls back to `simulatedForecaster`** (injected, so no import cycle): transport
+   error, non-2xx, timeout, unparseable body, or a vaccine group missing from the response. The
+   forecast is an *advisory* panel — it must degrade, never error the case-detail read (ADR-012).
+   The fallback is deliberately **all-or-nothing**: a half-ICE/half-simulated forecast would be an
+   unattributable mix of two schedules.
+4. The port's `forecast()` becomes **async** (it is now a network call); selection moves to
+   `resolve-forecaster.ts` (above both port and adapter).
+5. Forecasting stays **advisory only** — it never sets or overrides an `Outcome Status`. CQL remains
+   the sole compliance authority (ADR-008/ADR-012). ICE and WorkWell can legitimately disagree (ICE
+   scores full ACIP; a WorkWell measure scores its own rule) and that is not a defect.
+
+**Two contract facts the live engine taught us** (both regression-tested, and neither documented
+where we looked):
+- The **request's** `base64EncodedPayload` is an **ARRAY**, not a string — a bare string is rejected
+  `400 Bad Request`.
+- A proposal's **vaccine group is on `<observationFocus>`, not `<substanceCode>`**: ICE proposes a
+  concrete *product* for some groups (CVX 115 Tdap under focus group 200 DTP; CVX 187 Shingrix under
+  focus 620 Zoster). Keying on the substance loses TDAP entirely for any subject with **no DTP
+  history** — i.e. exactly the adult occupational-health population — and (per decision 3) that
+  silently degraded the whole forecast to simulated.
+
+**Consequences:** D18 is answered without MIE. The demo/live stacks stay unchanged (no
+`WORKWELL_IMMZ_ICE_BASE_URL` ⇒ simulated); `infra/docker-compose.yml` gains an opt-in `ice` service
+for local/self-hosted use. The dose-history source is **injectable** (`historySource`) — the synthetic
+history is today's demo source and real WebChart immunization history is the E12 drop-in. Reversible
+by reverting the adapter commits (the port shape, minus `async`, is unchanged). Verified against a
+real `hlnconsulting/ice` container: 5 live tests (self-skipping without the env var) plus a golden
+fixture captured from that container.
+
 ## ADR-028: WebChart transport implements the verified public FHIR contract — SMART Backend Services auth (dual-mode) + per-resource composition — E12 PR-2c (#262)
 
 **Status:** Accepted (2026-07-13).
