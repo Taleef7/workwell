@@ -180,8 +180,22 @@ to a case manager for intervention. Refusal does not trigger an EXCLUDED outcome
 
 **Advisory immunization forecast:** for `adult_immunization` cases, `GET /api/cases/:id` attaches
 an advisory `immunizationForecast` covering all 3 ACIP series (Td/Tdap, Influenza annual, Hepatitis B
-3-dose). This is computed by the `ImmunizationForecast` port (simulated default; ICE-ready; ADR-012)
-and is **advisory only** — it never affects the CQL `Outcome Status`.
+3-dose). It is computed by the `ImmunizationForecast` port and is **advisory only** — it never affects
+the CQL `Outcome Status` (ADR-012).
+
+The port has two implementations (ADR-029, 2026-07-13): the **simulated** forecaster (the default —
+ACIP-style windows over its own deterministic synthetic dose history) and a **real** adapter against a
+self-hosted **ICE** sidecar (HLN's ACIP-maintained Immunization Calculation Engine), selected by
+`WORKWELL_IMMZ_ICE_BASE_URL` alone and falling back whole to the simulated forecaster on any failure.
+When ICE is on, the forecast carries ICE's own recommendation and reason codes (e.g.
+`ICE RECOMMENDED (DUE_NOW, ADMINISTER_TDAP_OR_TD)`).
+
+**ICE and a WorkWell measure can legitimately disagree, and that is not a defect.** ICE scores the
+full ACIP schedule for a vaccine *group*; a WorkWell measure scores its own authored rule. A subject
+with 2 Hep B doses reads COMPLIANT under `hepatitis_b_vaccination_series` if those doses complete the
+Heplisav-B alternative, while ICE — told the doses are a traditional adult formulation — will
+correctly propose dose 3. The CQL `Outcome Status` remains the sole compliance authority
+(ADR-008/ADR-012); the ICE forecast is clinical advice sitting beside it, not a second verdict.
 
 ---
 

@@ -438,6 +438,8 @@ shows all services `Up`).
 | `WORKWELL_WEBCHART_API_KEY` | Backend | Legacy static bearer key (pre-verified-contract mode; kept for fixtures/proxies). Ignored for auth selection when the SMART pair is set. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
 | `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
+| `WORKWELL_IMMZ_ICE_BASE_URL` | Backend | Base URL of a self-hosted **ICE** sidecar (ADR-029), e.g. `http://ice:8080/opencds-decision-support-service`. **Selects the real ICE forecaster on its own** — a self-hosted sidecar has no API key. **Inert unless set — the demo stack leaves it unset** (the simulated forecaster serves; behavior is byte-identical). See "Immunization forecasting (ICE sidecar)" below. |
+| `WORKWELL_IMMZ_ICE_API_KEY` | Backend | Optional bearer token, only if ICE is fronted by an authenticating proxy. It **never selects** the seam by itself. |
 | `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
 
 `Where = Backend` vars are container environment on the MIE backend container (mapped from the
@@ -477,6 +479,53 @@ scheduler tick throw) emits **exactly one** alert through `resolveAlertChannels(
 Alert emission is best-effort — a webhook timeout never fails the run. Run metrics (duration,
 evaluated count, compliant/non-compliant, per-status `outcomeCounts`) remain on `GET /api/runs` and
 `GET /api/runs/:id` as before.
+
+### Immunization forecasting (ICE sidecar) — ADR-029, opt-in, NOT on the demo stack
+
+The advisory immunization forecast (`GET /api/immunization/forecast`, and the panel on an
+`adult_immunization` case) is served by the **simulated** forecaster unless
+`WORKWELL_IMMZ_ICE_BASE_URL` is set. Setting it selects a **real** adapter against a self-hosted
+**ICE** — HLN's Immunization Calculation Engine, the ACIP-maintained forecaster (ADR-029). No API key
+is involved (a self-hosted sidecar has none; `WORKWELL_IMMZ_ICE_API_KEY` exists only for an
+authenticating proxy and never selects the seam by itself).
+
+**Run the sidecar** (local/self-hosted; `infra/docker-compose.yml` carries the same service):
+
+```bash
+docker run --rm -d -p 32775:8080 --memory=3g --name ice hlnconsulting/ice:latest
+# then point the backend at it (compose does this for you):
+#   WORKWELL_IMMZ_ICE_BASE_URL=http://localhost:32775/opencds-decision-support-service
+```
+
+**Operational notes.** ICE is a Drools engine: budget **~2–3 GB RAM** and a **tens-of-seconds cold
+start** (it compiles its rule base on boot). It must be a **long-lived sidecar** — never started
+per-request; give it time to warm before pointing the backend at it.
+
+The adapter bounds every call at **3 s** (a warm ICE answers in ~50–300 ms — the sidecar's cold start
+must not be charged to an interactive case-detail read) and, on **any** failure — transport error,
+non-2xx, timeout, unparseable body, a vaccine group missing from the response — falls back **whole**
+to the simulated forecaster and logs `ICE forecast failed for <subject>; falling back to simulated: …`.
+A failure also **trips a 60-second circuit breaker**: while it is open, requests serve the simulated
+forecast immediately without dialing ICE, so an unhealthy sidecar costs one timeout per minute rather
+than one per page view. The breaker closes on the first success after the TTL. The advisory panel
+therefore degrades; it never errors the case-detail read.
+
+**Symptom to watch for:** the boot line says `ice=on` but every forecast reads like the simulated one
+(no `ICE …` reason strings). That means the adapter is falling back — grep the container log for
+`ICE forecast failed`.
+
+**Verify a live sidecar** from `backend-ts/` (these tests self-skip when the var is unset):
+
+```bash
+cd backend-ts
+WORKWELL_IMMZ_ICE_BASE_URL=http://localhost:32775/opencds-decision-support-service \
+  node --import tsx --test src/engine/immunization/ice-live.test.ts
+```
+
+**The demo stack leaves `WORKWELL_IMMZ_ICE_BASE_URL` unset** — the boot seam line reads `ice=off` and
+the forecast path is byte-identical to before ADR-029. The forecast is **advisory**: it never sets or
+overrides an `Outcome Status` (CQL stays authoritative, ADR-008/ADR-012), and ICE disagreeing with a
+WorkWell measure (ICE scores full ACIP; a measure scores its own rule) is expected, not a defect.
 
 ### Evidence upload persistence (managed S3/R2 bucket)
 

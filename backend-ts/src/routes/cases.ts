@@ -39,7 +39,7 @@ import {
   type EvidenceDeps,
 } from "../case/evidence-service.ts";
 import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
-import { resolveForecaster } from "../engine/immunization/immunization-forecast.ts";
+import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -263,7 +263,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const latest = await events.latestOutreachDeliveryStatus(detailId);
     const today = new Date().toISOString().slice(0, 10);
     const immunizationForecast =
-      c.measureId === "adult_immunization" ? resolveForecaster(env).forecast(c.employeeId, today) : undefined;
+      c.measureId === "adult_immunization" ? await resolveForecaster(env).forecast(c.employeeId, today) : undefined;
     return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast));
   }
 

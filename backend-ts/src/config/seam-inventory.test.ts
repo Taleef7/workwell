@@ -69,14 +69,14 @@ test("datachaser: on with both api key and base url", () => {
   );
 });
 
-// ---- ice: both API_KEY and BASE_URL required -------------------------------------------------------
+// ---- ice: BASE_URL alone selects (ADR-029 — a self-hosted sidecar has no API key) -----------------
 
 test("ice: off with only the api key", () => {
   assert.equal(statusOf({ WORKWELL_IMMZ_ICE_API_KEY: "k" }, "ice"), false);
 });
 
-test("ice: off with only the base url", () => {
-  assert.equal(statusOf({ WORKWELL_IMMZ_ICE_BASE_URL: "https://ice.example" }, "ice"), false);
+test("ice: ON with only the base url (the API key is optional)", () => {
+  assert.equal(statusOf({ WORKWELL_IMMZ_ICE_BASE_URL: "https://ice.example" }, "ice"), true);
 });
 
 test("ice: on with both api key and base url", () => {

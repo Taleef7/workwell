@@ -86,24 +86,37 @@
 
 ## Current Focus (as of 2026-07-13 — independence sprint; prior block 2026-07-11 below)
 
-**2026-07-13 (PRs #286 docs + #288 code, in review):** rather than waiting on #254, the WebChart
-contract was **self-researched from public sources and live-verified** (public FHIR R4 sandbox
-`fhirr4sandbox.webchartnow.com`; docs source `github.com/mieweb/docs`): auth is **SMART Backend
-Services** (RS384 `private_key_jwt` + registered JWKS, default scope `system/*.rs`), and there is **no
-`Patient/$everything` and no `_lastUpdated`** — so **E12 PR-2c was built now** (PR #288, ADR-028):
-`httpWebChartClient` rewritten to the verified contract (per-resource `?patient=` composition,
-whole-patient degrade on any resource failure, page-boundary dedupe, off-origin guard; WebCrypto only,
-no new deps; whole-branch review findings all fixed; 1227/1227 tests green incl. live Pg ceiling).
-Sandbox dynamic registration is **not** openly enabled → the sharpened #254 ask is *"register a
-WorkWell backend-services client (JWKS attached) or enable RFC 7591"*. **ICE proven self-hostable**
-(official `hlnconsulting/ice` image; real forecasts returned locally; adapter spec
-`docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md`, ~3–5d build) — answers D18 ourselves; a
-Java→TS ICE port is assessed infeasible. **Live literal eCQM diff verified in production 2026-07-13:**
-`GET /api/measures/cms122/fidelity/diff` returns `mode:"literal"` (VSAC OIDs were imported 2026-07-05;
-DEPLOY now carries the ✓ banner). #263 redesigned (`$export _since` primary / content-hash fallback);
-**#287 filed** (calculation-level "compliant anywhere = compliant everywhere" — display-only today).
-**Owner steps:** send the updated #254 package before the Wed 2026-07-15 Doug meeting; review/merge
-#286 + #288 (trivial JOURNAL heading overlap — keep both). Research record:
+**2026-07-13 — independence sprint. PRs #286 (docs) + #288 (E12 PR-2c) are MERGED; the ICE adapter is
+in review.** Rather than waiting on #254, the WebChart contract was **self-researched from public
+sources and live-verified** (public FHIR R4 sandbox `fhirr4sandbox.webchartnow.com`; docs source
+`github.com/mieweb/docs`): auth is **SMART Backend Services** (RS384 `private_key_jwt` + registered
+JWKS, default scope `system/*.rs`), and there is **no `Patient/$everything` and no `_lastUpdated`** —
+so **E12 PR-2c was built** (PR #288, ADR-028): `httpWebChartClient` rewritten to the verified contract
+(per-resource `?patient=` composition, whole-patient degrade on any resource failure, page-boundary
+dedupe, off-origin guard; WebCrypto only, no new deps). Sandbox dynamic registration is **not** openly
+enabled → the sharpened #254 ask is *"register a WorkWell backend-services client (JWKS attached) or
+enable RFC 7591"*.
+
+**ICE forecasting is now REAL (ADR-029, branch `feat/ice-forecaster-adapter`).** The inert
+`iceForecaster` stub (E6/#76) is replaced by `realIceForecaster` against a self-hosted
+`hlnconsulting/ice` sidecar: a dependency-free vMR/DSS codec (`ice-vmr.ts`), injectable transport +
+**dose-history source** (the E12/WebChart drop-in), whole-forecast fallback to the simulated forecaster
+on any failure, `forecast()` now **async**, and the seam relaxed to **`WORKWELL_IMMZ_ICE_BASE_URL`
+alone** (a self-hosted sidecar has no API key). Demo stack unset ⇒ `ice=off`, byte-identical. Answers
+#254 Q D18 ourselves. Two live-only contract facts are now regression-tested: the **request's**
+`base64EncodedPayload` is an **array** (a bare string 400s), and a proposal's **vaccine group is on
+`<observationFocus>`, not `<substanceCode>`** (ICE proposes a product — CVX 115 Tdap under group 200 —
+so substance-keying loses TDAP for any subject with no DTP history). Suite 1260: 1255 pass / 0 fail /
+5 skip (the live-ICE tests self-skip). Advisory only — CQL stays the sole authority (ADR-008/ADR-012).
+
+**Live literal eCQM diff verified in production 2026-07-13:** `GET /api/measures/cms122/fidelity/diff`
+returns `mode:"literal"` (VSAC OIDs were imported 2026-07-05; DEPLOY carries the ✓ banner). #263
+redesigned (`$export _since` primary / content-hash fallback); **#287 filed** (calculation-level
+"compliant anywhere = compliant everywhere" — display-only today).
+
+**Owner steps:** send the updated #254 package before the Wed 2026-07-15 Doug meeting; review/merge the
+ICE PR. **Next builds after that:** #263 content-hash fallback → #287 design → M3 (#167 evidence
+bucket, #270 backup/DR runbook, #267 PHI-split design). Research record:
 `docs/INTEGRATION_RESEARCH_2026-07-13.md`.
 
 ## Prior focus (as of 2026-07-11, post-#284)

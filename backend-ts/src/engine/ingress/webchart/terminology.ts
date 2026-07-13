@@ -196,3 +196,14 @@ export function reconcileCodings(codings: Coding[] | undefined): Coding[] {
 export function crosswalkMeasureIds(): string[] {
   return [...new Set(CROSSWALK_ROWS.map((r) => r.measureId))].sort();
 }
+
+/**
+ * Every CVX code this crosswalk recognizes for a measure — the repo's single source of truth for
+ * "which vaccine codes count toward this series" (active codes plus the read-only inactive ones kept
+ * for legacy records). Consumed by the ICE forecaster (ADR-029) so its dose counting recognizes the
+ * same real-world codes the WebChart read path does, rather than the one representative code the
+ * synthetic history happens to emit.
+ */
+export function cvxCodesForMeasure(measureId: string): string[] {
+  return CROSSWALK_ROWS.filter((r) => r.system === SYSTEMS.CVX && r.measureId === measureId).map((r) => r.code);
+}

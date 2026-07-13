@@ -379,17 +379,23 @@ from documented to created. Until then the port keeps the data model unchanged.
 
 ### 3.18 Immunization forecasting — `ImmunizationForecast` port (read-time; no table)
 E6 (#76) adds ACIP-style immunization forecasting behind the `ImmunizationForecast` port
-(`backend-ts/src/engine/immunization/immunization-forecast.ts`). **No new DB table.** The forecast
-is computed read-time by the simulated forecaster over its own deterministic per-subject synthetic
-immunization history; it is never persisted in `backend-ts` today.
+(`backend-ts/src/engine/immunization/immunization-forecast.ts`). **No new DB table** — and, as of
+ADR-029 (2026-07-13), **still none even though the real ICE adapter is now built**: a forecast is
+computed read-time (either by the simulated forecaster over its own deterministic per-subject
+synthetic history, or by `realIceForecaster` calling a self-hosted ICE sidecar) and is never
+persisted in `backend-ts`.
 
 - **Refusal / contraindication** for the `adult_immunization` measure ride in `outcomes.evidence_json`
   as CQL expression defines (`Refused`, `Has Contraindication`) — no new columns.
-- **Production drop-in (documented, not built):** an `immunization_forecasts` cache table (one row
-  per subject + series: next-dose-due date, forecasting engine, computed-at timestamp) fed by a real
-  ICE adapter behind `resolveForecaster`. This is the analogous pattern to §3.17 — when a real ICE
-  adapter is wired, the cache table drops in without touching the measure or case schema. Until then
-  the port keeps the data model unchanged.
+- **The real ICE adapter is built (ADR-029) and adds NO schema.** `realIceForecaster`
+  (`engine/immunization/ice-forecaster.ts`) posts a per-subject dose history to ICE's DSS endpoint and
+  maps the response at read-time; the dose history itself comes from an **injectable**
+  `historySource` (today: the synthetic history; the E12 drop-in: real WebChart immunization records),
+  so no dose table is introduced on either side.
+- **Still-optional drop-in (documented, not built):** an `immunization_forecasts` **cache** table (one
+  row per subject + series: next-dose-due date, forecasting engine, computed-at timestamp) — worth
+  adding only if the per-call ICE latency becomes a problem at roster scale. It remains additive and
+  touches neither the measure nor the case schema (analogous to §3.17).
 - `adult_immunization` adds no new columns to `outcomes`, `cases`, or any other table. The advisory
   `immunizationForecast` block in `GET /api/cases/:id` is assembled at read-time.
 

@@ -31,7 +31,9 @@ const CASE: CaseRecord = {
   closedBy: null,
 };
 
-const FORECAST = simulatedForecaster.forecast("emp-006", "2026-06-19");
+// The port is async since ADR-029 (the real forecaster is an HTTP call to the ICE sidecar); the
+// simulated one still resolves synchronously in practice, so awaiting it once here is enough.
+const FORECAST = await simulatedForecaster.forecast("emp-006", "2026-06-19");
 
 test("toCaseDetail omits immunizationForecast key when param is not provided", () => {
   const detail = toCaseDetail(CASE, null);

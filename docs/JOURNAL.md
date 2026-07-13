@@ -1,5 +1,47 @@
 # Journal
 
+## 2026-07-13 — ICE forecasting is real: the inert stub is replaced by a live sidecar adapter (ADR-029)
+
+`iceForecaster` had been an inert stub since E6 (#76) — it answered "ICE not wired (Doug Q5)" for
+every series, because the transport question was parked with MIE. The same-day research pass proved
+ICE is **self-hostable today** (HLN's official, ACIP-maintained `hlnconsulting/ice` image), so the
+stub is now a **real adapter** and #254 Q D18 is answered without MIE.
+
+- **`ice-vmr.ts` (new, pure):** the OpenCDS DSS codec — string-template vMR `CDSInput` builder + DSS
+  envelope + tolerant `CDSOutput` proposal parser. **No new deps** (the hand-rolled-XML pattern the
+  QRDA stub already uses). Golden-tested against a real captured response
+  (`backend-ts/spike/ice/dss-response.json`).
+- **`ice-forecaster.ts` (new):** `realIceForecaster` — `POST /api/resources/evaluate`, or
+  `/evaluateAtSpecifiedTime` when an as-of date must move ICE's own clock (verified: a 2020 as-of
+  shifts the influenza due-date from 2026-07-01 to 2019-07-01). Injectable transport, injectable
+  **dose-history source** (the E12/WebChart drop-in seam), bounded timeout, and a **whole-forecast**
+  deterministic fallback to `simulatedForecaster` on ANY failure — the advisory panel degrades, it
+  never errors the case read (ADR-012). A half-ICE/half-simulated forecast would mix two schedules.
+- **Port + seam:** `forecast()` is now **async**; selection moved to `resolve-forecaster.ts` (above
+  both port and adapter, so the adapter imports the port without a cycle). `isIceConfigured` relaxes
+  to **BASE_URL-only** — a self-hosted sidecar has no API key (the key stays optional, for an
+  authenticating proxy, and never selects the seam alone). Demo stack unset ⇒ `ice=off`, byte-identical.
+- **`infra/docker-compose.yml`** gains an opt-in `ice` service (3 GB cap); `ice-live.test.ts` runs
+  against a real container and self-skips without the env var (the Pg-ceiling pattern).
+
+**Two contract facts the live engine taught us that no doc we found states** (both now regression-tested,
+both would have shipped as silent bugs against a mock):
+1. The **request's** `base64EncodedPayload` is an **ARRAY** — a bare string is `400 Bad Request`.
+   (`atob()` silently coerced the one-element array when reading the canonical payload, hiding this.)
+2. A proposal's **vaccine group is on `<observationFocus>`, not `<substanceCode>`** — ICE proposes a
+   concrete *product* for some groups (CVX 115 Tdap under focus group 200 DTP). Keying on the substance
+   loses TDAP for any subject with **no DTP history** — i.e. the normal adult occupational-health case —
+   and, per the all-or-nothing fallback, silently degraded the *whole* forecast to simulated. Caught only
+   because the live test's fallback was made to **throw** instead of pass.
+
+Live output for a real subject (`emp-006`, ICE 2.57.2): TDAP OVERDUE `ICE RECOMMENDED (DUE_NOW,
+ADMINISTER_TDAP_OR_TD)`, INFLUENZA OVERDUE due 2026-07-01, HEPB OVERDUE (dose 3 of the traditional
+series). **ICE disagreeing with a WorkWell measure is expected, not a defect** — ICE scores full ACIP,
+a measure scores its own authored rule; CQL stays the sole compliance authority (ADR-008/ADR-012).
+
+Suite: **1260 tests — 1255 pass / 0 fail / 5 skip** (the live-ICE tests skip without the env var).
+No schema, no new deps. Plan: `docs/superpowers/plans/2026-07-13-ice-forecaster-adapter.md`.
+
 ## 2026-07-13 — E12 PR-2c: verified-contract WebChart transport (SMART Backend Services + per-resource composition)
 
 Built on the same day's public-sources research (PR #286, merged — the research record is
