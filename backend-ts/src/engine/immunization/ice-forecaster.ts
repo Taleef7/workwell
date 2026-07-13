@@ -15,6 +15,7 @@
  *   without a container.
  * - No new deps: plain `fetch` + `AbortController`.
  */
+import { cvxCodesForMeasure } from "../ingress/webchart/terminology.ts";
 import {
   buildCdsInputXml,
   buildDssRequest,
@@ -41,12 +42,36 @@ export const ICE_VACCINE_GROUP: Record<VaccineSeries, string> = {
   HEPB: "100",
 };
 
-/** WorkWell series → the CVX code we report historical doses under (CDC CVX, 2.16.840.1.113883.12.292). */
+/**
+ * WorkWell series → the CVX code the SYNTHETIC history emits for a dose (CDC CVX,
+ * 2.16.840.1.113883.12.292). This is what we *write*; it is NOT the set we *recognize* — see
+ * `ICE_SERIES_CVX`.
+ */
 export const ICE_DOSE_CVX: Record<VaccineSeries, string> = {
   TDAP: "115", // Tdap
   INFLUENZA: "141", // Influenza, seasonal, injectable
   HEPB: "43", // HepB, adult 3-dose (the traditional adult formulation ICE scores against)
 };
+
+/**
+ * Every CVX code that COUNTS toward each series, sourced from the WebChart crosswalk — the repo's
+ * single authority on vaccine-code membership (2026 currency audit).
+ *
+ * Why this must be a set and not `ICE_DOSE_CVX`: ICE scores whatever codes it is given, so a history
+ * source that supplies real-world codes — Td `09`/`113`/`196`, any of the 19 active seasonal flu
+ * codes, Heplisav `189` or HepB `08`/`44`/`45` — produces a correct ICE recommendation. If the
+ * display fields only counted the one representative code the synthetic generator happens to emit,
+ * the panel would claim "no prior dose" for those subjects while ICE's own recommendation was
+ * plainly based on them. That mismatch lands the moment the E12 WebChart history source is injected.
+ */
+export const ICE_SERIES_CVX: Record<VaccineSeries, ReadonlySet<string>> = {
+  TDAP: new Set(cvxCodesForMeasure("adult_immunization")),
+  INFLUENZA: new Set(cvxCodesForMeasure("flu_vaccine")),
+  HEPB: new Set(cvxCodesForMeasure("hepatitis_b_vaccination_series")),
+};
+
+/** Heplisav-B — a 2-dose primary series, unlike every other HepB formulation (3 doses). */
+const HEPLISAV_CVX = "189";
 
 const DOSE_SPACING_DAYS = 60; // back-spacing for earlier doses of a multi-dose series
 
@@ -96,18 +121,21 @@ export function syntheticIceHistory(subjectId: string): IceDoseHistory {
 }
 
 /**
- * Doses required, as ICE would score them — keyed to the CVX we actually report doses under
- * (`ICE_DOSE_CVX`), NOT to the simulated forecaster's schedule. HepB is the one that matters: we
- * report CVX 43 (the traditional adult formulation), whose ACIP primary series is **3** doses, while
- * `SCHEDULE.HEPB_DOSES_REQUIRED` is 2 (the Heplisav model the simulated forecaster and the
- * `hepatitis_b_vaccination_series` measure default to). Using the simulated 2 here would render the
- * self-contradictory card "2 of 2 doses — OVERDUE".
+ * Doses required, as ICE would score them — derived from the CVX codes the subject's history
+ * ACTUALLY carries, not from the simulated forecaster's schedule.
+ *
+ * HepB is the one that matters. `SCHEDULE.HEPB_DOSES_REQUIRED` is **2** (the Heplisav model the
+ * simulated forecaster and the `hepatitis_b_vaccination_series` measure default to), but the ACIP
+ * primary series is **3** doses for every HepB formulation *except* Heplisav-B (CVX 189). Reporting
+ * the simulated 2 against a traditional 3-dose history renders the self-contradictory card
+ * "2 of 2 doses — OVERDUE"; hardcoding 3 would misreport a genuine Heplisav history.
  */
-const ICE_DOSES_REQUIRED: Record<VaccineSeries, number> = {
-  TDAP: 1,
-  INFLUENZA: 1,
-  HEPB: 3, // CVX 43 = HepB adult, 3-dose series (cf. SCHEDULE.HEPB_DOSES_REQUIRED = 2, Heplisav)
-};
+function iceDosesRequired(series: VaccineSeries, seriesDoses: IceDose[]): number {
+  if (series !== "HEPB") return 1;
+  // Heplisav-B is a 2-dose series — but only if that is what the subject actually received.
+  const allHeplisav = seriesDoses.length > 0 && seriesDoses.every((d) => d.cvx === HEPLISAV_CVX);
+  return allHeplisav ? 2 : 3;
+}
 
 /**
  * Map one ICE proposal onto the port's `SeriesForecast`.
@@ -130,8 +158,9 @@ function toSeriesForecast(
   history: IceDoseHistory,
   asOf: string,
 ): SeriesForecast {
-  const cvx = ICE_DOSE_CVX[series];
-  const seriesDoses = history.doses.filter((d) => d.cvx === cvx);
+  // Count EVERY code that belongs to the series (ICE scored them all), not just the representative
+  // code the synthetic generator emits — see ICE_SERIES_CVX.
+  const seriesDoses = history.doses.filter((d) => ICE_SERIES_CVX[series].has(d.cvx));
   const lastDoseDate = seriesDoses[seriesDoses.length - 1]?.date ?? null;
   const reason = `ICE ${proposal.recommendation}${proposal.interpretations.length ? ` (${proposal.interpretations.join(", ")})` : ""}`;
 
@@ -148,7 +177,7 @@ function toSeriesForecast(
     lastDoseDate,
     nextDueDate: proposal.proposedDate,
     dosesReceived: seriesDoses.length,
-    dosesRequired: ICE_DOSES_REQUIRED[series],
+    dosesRequired: iceDosesRequired(series, seriesDoses),
     reason,
   };
 }

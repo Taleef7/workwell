@@ -6,9 +6,11 @@ import {
   realIceForecaster,
   syntheticIceHistory,
   ICE_DOSE_CVX,
+  ICE_SERIES_CVX,
   ICE_VACCINE_GROUP,
   type IceDoseHistory,
 } from "./ice-forecaster.ts";
+import { cvxCodesForMeasure } from "../ingress/webchart/terminology.ts";
 import { parseCdsOutputProposals } from "./ice-vmr.ts";
 import { simulatedForecaster, type ImmunizationForecast } from "./immunization-forecast.ts";
 import { resolveForecaster } from "./resolve-forecaster.ts";
@@ -362,6 +364,79 @@ test("HepB dosesRequired on the ICE path matches the CVX actually reported (3, n
   assert.equal(ICE_DOSE_CVX.HEPB, "43", "we report HepB doses as the traditional adult formulation");
   assert.equal(hepb?.dosesRequired, 3, "so ICE's series length is 3");
   assert.equal(hepb?.dosesReceived, 2, "emp-006 has 2 HepB doses in the shared synthetic history");
+});
+
+// ICE scores whatever codes it is given. A history source supplying REAL-WORLD codes (Td 09/113/196,
+// any of the 19 active seasonal flu codes, Heplisav 189 / HepB 08/44/45) gets a correct ICE
+// recommendation — so the display fields must recognize those codes too, or the panel claims
+// "no prior dose" for a subject whose recommendation was plainly based on them. This lands the moment
+// the E12 WebChart history source is injected.
+test("doses are counted across the WHOLE CVX set for a series, not just the representative code", async () => {
+  const realWorld: IceDoseHistory = {
+    patientId: "wc-real",
+    dob: "1979-08-08",
+    gender: "M",
+    doses: [
+      { cvx: "09", date: "2015-02-02" }, // Td (adult) — NOT the representative 115
+      { cvx: "113", date: "2019-03-03" }, // Td (preservative-free)
+      { cvx: "150", date: "2025-10-01" }, // influenza, quadrivalent — NOT the representative 141
+      { cvx: "08", date: "2012-01-01" }, // HepB, adolescent/pediatric — NOT the representative 43
+      { cvx: "44", date: "2012-03-01" }, // HepB, dialysis
+    ],
+  };
+  const f = realIceForecaster(CFG, {
+    fallback: simulatedForecaster,
+    fetchImpl: goldenFetch([]),
+    historySource: () => realWorld,
+  });
+  const out = await f.forecast("wc-real", "2026-07-13");
+
+  const tdap = out.series.find((s) => s.series === "TDAP");
+  assert.equal(tdap?.dosesReceived, 2, "both Td codes count toward the DTP/Tdap series");
+  assert.equal(tdap?.lastDoseDate, "2019-03-03");
+
+  const flu = out.series.find((s) => s.series === "INFLUENZA");
+  assert.equal(flu?.dosesReceived, 1, "a quadrivalent flu code counts");
+  assert.equal(flu?.lastDoseDate, "2025-10-01");
+
+  const hepb = out.series.find((s) => s.series === "HEPB");
+  assert.equal(hepb?.dosesReceived, 2, "HepB 08 + 44 count toward the HepB series");
+  assert.equal(hepb?.dosesRequired, 3, "a non-Heplisav history is a 3-dose series");
+});
+
+test("a pure Heplisav-B history is reported as the 2-dose series it is", async () => {
+  const heplisav: IceDoseHistory = {
+    patientId: "wc-heplisav",
+    dob: "1985-01-01",
+    gender: "F",
+    doses: [
+      { cvx: "189", date: "2024-01-01" },
+      { cvx: "189", date: "2024-02-05" },
+    ],
+  };
+  const out = await realIceForecaster(CFG, {
+    fallback: simulatedForecaster,
+    fetchImpl: goldenFetch([]),
+    historySource: () => heplisav,
+  }).forecast("wc-heplisav", "2026-07-13");
+  const hepb = out.series.find((s) => s.series === "HEPB");
+  assert.equal(hepb?.dosesReceived, 2);
+  assert.equal(hepb?.dosesRequired, 2, "Heplisav-B is a 2-dose primary series — not 3");
+});
+
+// The CVX sets must stay tied to the crosswalk (the repo's terminology authority), not drift into a
+// private second list that a currency audit would miss.
+test("the ICE series CVX sets are sourced from the WebChart crosswalk", () => {
+  assert.deepEqual([...ICE_SERIES_CVX.TDAP].sort(), [...cvxCodesForMeasure("adult_immunization")].sort());
+  assert.deepEqual([...ICE_SERIES_CVX.INFLUENZA].sort(), [...cvxCodesForMeasure("flu_vaccine")].sort());
+  assert.deepEqual(
+    [...ICE_SERIES_CVX.HEPB].sort(),
+    [...cvxCodesForMeasure("hepatitis_b_vaccination_series")].sort(),
+  );
+  // And the code the synthetic generator emits must itself be a member of its series' set.
+  for (const s of ["TDAP", "INFLUENZA", "HEPB"] as const) {
+    assert.ok(ICE_SERIES_CVX[s].has(ICE_DOSE_CVX[s]), `${s}: the emitted code must be in the recognized set`);
+  }
 });
 
 test("resolveForecaster: simulated by default, real ICE when BASE_URL is set (key optional)", async () => {
