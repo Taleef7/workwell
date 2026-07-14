@@ -79,6 +79,9 @@ jobs:
           # Anchor the -pooler strip to the HOST portion (first '-pooler.' after the '@'), so a
           # password that happens to contain '-pooler.' is never corrupted (review P3-3).
           direct_url="$(printf '%s' "$db_url" | sed 's/@\([^/@]*\)-pooler\./@\1./')"
+          # The JDBC URL uses camelCase query params; libpq wants snake_case (pg_dump rejects
+          # "channelBinding" outright — first live run 2026-07-14).
+          direct_url="${direct_url/channelBinding=/channel_binding=}"
           pg_dump "$direct_url" --schema=workwell_spike --format=custom --no-owner \
             --file=workwell_spike.dump
           ls -l workwell_spike.dump
