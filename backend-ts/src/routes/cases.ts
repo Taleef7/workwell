@@ -40,11 +40,19 @@ import {
 } from "../case/evidence-service.ts";
 import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
 import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
+import { resolveBucket } from "../case/resolve-bucket.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
   BUCKET: CloudBucket;
+  // Evidence-bucket seam (#167/ADR-030): when the three WORKWELL_BUCKET_S3_* selecting vars are set,
+  // evidence bytes go to a managed S3-compatible bucket instead of the (ephemeral-on-MIE) BUCKET binding.
+  WORKWELL_BUCKET_S3_BUCKET?: string;
+  WORKWELL_BUCKET_S3_ACCESS_KEY_ID?: string;
+  WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY?: string;
+  WORKWELL_BUCKET_S3_REGION?: string;
+  WORKWELL_BUCKET_S3_ENDPOINT?: string;
   WORKWELL_IMMZ_ICE_API_KEY?: string;
   WORKWELL_IMMZ_ICE_BASE_URL?: string;
   // Outreach channel/email-provider knobs read by resolveChannel (simulated by default).
@@ -73,7 +81,9 @@ async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
 }
 async function evidenceDeps(env: CasesEnv): Promise<EvidenceDeps> {
   const s = await getStores(env);
-  return { evidence: s.evidence, cases: s.cases, bucket: env.BUCKET, events: s.events };
+  // #167/ADR-030: durable S3 evidence bucket when the WORKWELL_BUCKET_S3_* vars are set;
+  // the injected (in-container fs on MIE) BUCKET binding otherwise — inert-unless-configured.
+  return { evidence: s.evidence, cases: s.cases, bucket: await resolveBucket(env), events: s.events };
 }
 async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
   const s = await getStores(env);

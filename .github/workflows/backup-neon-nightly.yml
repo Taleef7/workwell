@@ -1,0 +1,81 @@
+# Nightly logical backup of the live Neon DB (#270 / docs/BACKUP_DR_RUNBOOK.md §2 decision 2).
+#
+# The live Neon project's PITR window is plan-capped at SIX HOURS (Free plan maximum — verified
+# 2026-07-14), and until this workflow existed retention was the ONLY recovery mechanism. This adds
+# the second line of defence: a nightly `pg_dump` of the `workwell_spike` schema to the managed S3
+# bucket (`workwell-twh-evidence`, prefix `db-dumps/`), giving a recovery path independent of Neon
+# retention AND independent of Neon itself. Bucket lifecycle expires dumps after 30 days.
+#
+# Restore (see BACKUP_DR_RUNBOOK.md §3): download a dump, `pg_restore -d <target> --no-owner
+# --schema=workwell_spike <file>` into a fresh Neon project/branch, repoint DATABASE_URL_TWH.
+#
+# On failure GitHub emails the repo owner (default notification for scheduled-workflow failures).
+name: backup-neon-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily 03:17 UTC — off the :00 spike, after the scheduler's daily run window
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-neon-nightly
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    name: pg_dump workwell_spike → S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
+      AWS_DEFAULT_REGION: us-east-1
+      BACKUP_BUCKET: workwell-twh-evidence
+    steps:
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
+          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH")
+          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Ensure pg_dump 16+
+        # The Neon server is Postgres 16; pg_dump's major version must be >= the server's.
+        run: |
+          if ! pg_dump --version | grep -qE ' (1[6-9]|[2-9][0-9])\.'; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          fi
+          pg_dump --version
+
+      - name: Dump the workwell_spike schema
+        run: |
+          # DATABASE_URL_TWH is the JDBC URL (jdbc:postgresql://...) — strip the prefix for libpq,
+          # exactly as deploy-twh-mieweb.yml does. pg_dump must NOT go through the transaction
+          # pooler, so also strip Neon's `-pooler` host infix for a direct connection.
+          db_url="${DATABASE_URL#jdbc:}"
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_TWH must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          direct_url="${db_url/-pooler./.}"
+          pg_dump "$direct_url" --schema=workwell_spike --format=custom --no-owner \
+            --file=workwell_spike.dump
+          ls -l workwell_spike.dump
+
+      - name: Upload to S3 (db-dumps/, 30-day lifecycle)
+        run: |
+          stamp="$(date -u +%Y-%m-%dT%H%M%SZ)"
+          key="db-dumps/workwell_spike-${stamp}.dump"
+          aws s3 cp workwell_spike.dump "s3://${BACKUP_BUCKET}/${key}"
+          echo "Uploaded s3://${BACKUP_BUCKET}/${key} ($(stat -c%s workwell_spike.dump) bytes)"

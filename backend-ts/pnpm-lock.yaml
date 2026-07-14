@@ -11,6 +11,9 @@ importers:
 
   .:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1067.0
+        version: 3.1067.0
       '@cqframework/cql':
         specifier: 4.0.0-beta.1
         version: 4.0.0-beta.1
@@ -1638,14 +1641,12 @@ snapshots:
       '@aws-crypto/util': 5.2.0
       '@aws-sdk/types': 3.973.12
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/crc32c@5.2.0':
     dependencies:
       '@aws-crypto/util': 5.2.0
       '@aws-sdk/types': 3.973.12
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/sha1-browser@5.2.0':
     dependencies:
@@ -1655,7 +1656,6 @@ snapshots:
       '@aws-sdk/util-locate-window': 3.965.7
       '@smithy/util-utf8': 2.3.0
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/sha256-browser@5.2.0':
     dependencies:
@@ -1666,26 +1666,22 @@ snapshots:
       '@aws-sdk/util-locate-window': 3.965.7
       '@smithy/util-utf8': 2.3.0
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/sha256-js@5.2.0':
     dependencies:
       '@aws-crypto/util': 5.2.0
       '@aws-sdk/types': 3.973.12
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/supports-web-crypto@5.2.0':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@aws-crypto/util@5.2.0':
     dependencies:
       '@aws-sdk/types': 3.973.12
       '@smithy/util-utf8': 2.3.0
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/checksums@3.1000.5':
     dependencies:
@@ -1697,7 +1693,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/client-s3@3.1067.0':
     dependencies:
@@ -1715,7 +1710,6 @@ snapshots:
       '@smithy/node-http-handler': 4.7.7
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/core@3.974.20':
     dependencies:
@@ -1727,7 +1721,6 @@ snapshots:
       '@smithy/types': 4.14.3
       bowser: 2.14.1
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-env@3.972.46':
     dependencies:
@@ -1736,7 +1729,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-http@3.972.48':
     dependencies:
@@ -1747,7 +1739,6 @@ snapshots:
       '@smithy/node-http-handler': 4.7.7
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-ini@3.972.53':
     dependencies:
@@ -1764,7 +1755,6 @@ snapshots:
       '@smithy/credential-provider-imds': 4.3.8
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-login@3.972.52':
     dependencies:
@@ -1774,7 +1764,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-node@3.972.55':
     dependencies:
@@ -1789,7 +1778,6 @@ snapshots:
       '@smithy/credential-provider-imds': 4.3.8
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-process@3.972.46':
     dependencies:
@@ -1798,7 +1786,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-sso@3.972.52':
     dependencies:
@@ -1809,7 +1796,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/credential-provider-web-identity@3.972.52':
     dependencies:
@@ -1819,13 +1805,11 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/middleware-flexible-checksums@3.974.30':
     dependencies:
       '@aws-sdk/checksums': 3.1000.5
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/middleware-sdk-s3@3.972.51':
     dependencies:
@@ -1835,7 +1819,6 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/nested-clients@3.997.20':
     dependencies:
@@ -1849,7 +1832,6 @@ snapshots:
       '@smithy/node-http-handler': 4.7.7
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/signature-v4-multi-region@3.996.34':
     dependencies:
@@ -1857,7 +1839,6 @@ snapshots:
       '@smithy/signature-v4': 5.4.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/token-providers@3.1066.0':
     dependencies:
@@ -1867,28 +1848,23 @@ snapshots:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/types@3.973.12':
     dependencies:
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/util-locate-window@3.965.7':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@aws-sdk/xml-builder@3.972.29':
     dependencies:
       '@smithy/types': 4.14.3
       fast-xml-parser: 5.7.3
       tslib: 2.8.1
-    optional: true
 
-  '@aws/lambda-invoke-store@0.2.4':
-    optional: true
+  '@aws/lambda-invoke-store@0.2.4': {}
 
   '@cloudflare/workers-types@4.20260612.1': {}
 
@@ -2094,8 +2070,7 @@ snapshots:
   '@neon-rs/load@0.0.4':
     optional: true
 
-  '@nodable/entities@2.2.0':
-    optional: true
+  '@nodable/entities@2.2.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -2114,57 +2089,48 @@ snapshots:
       '@aws-crypto/crc32': 5.2.0
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@smithy/credential-provider-imds@4.3.8':
     dependencies:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@smithy/fetch-http-handler@5.4.6':
     dependencies:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@smithy/is-array-buffer@2.2.0':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@smithy/node-http-handler@4.7.7':
     dependencies:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@smithy/signature-v4@5.4.6':
     dependencies:
       '@smithy/core': 3.24.6
       '@smithy/types': 4.14.3
       tslib: 2.8.1
-    optional: true
 
   '@smithy/types@4.14.3':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@smithy/util-buffer-from@2.2.0':
     dependencies:
       '@smithy/is-array-buffer': 2.2.0
       tslib: 2.8.1
-    optional: true
 
   '@smithy/util-utf8@2.3.0':
     dependencies:
       '@smithy/util-buffer-from': 2.2.0
       tslib: 2.8.1
-    optional: true
 
   '@types/eslint@9.6.1':
     dependencies:
@@ -2304,8 +2270,7 @@ snapshots:
     dependencies:
       color-convert: 2.0.1
 
-  anynum@1.0.0:
-    optional: true
+  anynum@1.0.0: {}
 
   argparse@2.0.1: {}
 
@@ -2342,8 +2307,7 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
-  bowser@2.14.1:
-    optional: true
+  bowser@2.14.1: {}
 
   brace-expansion@1.1.16:
     dependencies:
@@ -2606,7 +2570,6 @@ snapshots:
     dependencies:
       path-expression-matcher: 1.5.0
       xml-naming: 0.1.0
-    optional: true
 
   fast-xml-parser@5.7.3:
     dependencies:
@@ -2614,7 +2577,6 @@ snapshots:
       fast-xml-builder: 1.2.0
       path-expression-matcher: 1.5.0
       strnum: 2.4.0
-    optional: true
 
   fastq@1.20.1:
     dependencies:
@@ -2976,8 +2938,7 @@ snapshots:
 
   path-exists@4.0.0: {}
 
-  path-expression-matcher@1.5.0:
-    optional: true
+  path-expression-matcher@1.5.0: {}
 
   path-is-absolute@1.0.1: {}
 
@@ -3195,7 +3156,6 @@ snapshots:
   strnum@2.4.0:
     dependencies:
       anynum: 1.0.0
-    optional: true
 
   supports-color@7.2.0:
     dependencies:
@@ -3226,8 +3186,7 @@ snapshots:
     dependencies:
       typescript: 5.9.3
 
-  tslib@2.8.1:
-    optional: true
+  tslib@2.8.1: {}
 
   tsx@4.22.4:
     dependencies:
@@ -3287,8 +3246,7 @@ snapshots:
   ws@8.21.0:
     optional: true
 
-  xml-naming@0.1.0:
-    optional: true
+  xml-naming@0.1.0: {}
 
   xml2js@0.6.2:
     dependencies:
