@@ -1,7 +1,7 @@
 /**
  * Inert-seam inventory + boot-time active-seam log line (#260/#264).
  *
- * The repo has ~8 "inert-unless-configured" seams (ADR-011/012/013/017/023/025 + #264 alert webhook):
+ * The repo has 9 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030 + #264 alert webhook):
  * each has a simulated or store-backed default and an inert/stub adapter that only activates when its
  * env var(s) are set. Individually each is correct and reviewed; collectively they're untested-in-anger
  * surface that can rot silently (a var typo'd in a deploy secret, a seam nobody remembers exists). This
@@ -18,6 +18,7 @@
  * compliance).
  */
 import { isSendgridConfigured, type EmailEnv } from "../case/email-service.ts";
+import { isS3BucketConfigured, type BucketSeamEnv } from "../case/resolve-bucket.ts";
 import { isDataChaserConfigured, type ChannelEnv } from "../case/outreach-channel.ts";
 import { isIceConfigured, type ForecastEnv } from "../engine/immunization/immunization-forecast.ts";
 import { isEhFhirConfigured, type StandingOrderEnv } from "../order/standing-order-provider.ts";
@@ -34,7 +35,8 @@ export type SeamEnv = EmailEnv &
   DataSourceEnv &
   MeasureExecutorEnv &
   VsacEnv &
-  AlertEnv;
+  AlertEnv &
+  BucketSeamEnv;
 
 export interface SeamStatus {
   /** Short, stable, log-line-friendly seam name. */
@@ -56,6 +58,7 @@ export function describeSeams(env: SeamEnv): SeamStatus[] {
     { name: "sql-executor", active: isSqlPushdownSelected(env) },
     { name: "vsac", active: isVsacConfigured(env) },
     { name: "alert-webhook", active: isAlertWebhookConfigured(env) },
+    { name: "bucket-s3", active: isS3BucketConfigured(env) },
   ];
 }
 

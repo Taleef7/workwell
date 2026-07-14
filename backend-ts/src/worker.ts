@@ -1,15 +1,16 @@
 /**
- * WorkWell TS backend — worker entry (Phase 0 skeleton, issue #96 / ADR-008).
+ * WorkWell TS backend — worker entry (issue #96 / ADR-008; sole backend since the
+ * #109 PR4 JVM retirement).
  *
  * The SAME module runs unchanged on every target (Cloudflare native, the
  * @mieweb/cloud-local Node host, and mieweb/os adapters) — see wrangler.jsonc
  * for the binding shapes and mieweb.jsonc for the per-target drivers.
  *
- * This is a skeleton: only health/version are wired. The real endpoint groups
- * are ported strangler-fig in Phase 4 (#107, #108), each behind the unchanged
- * frontend fetch contract (frontend/lib/api/client.ts). Persistence goes
- * through the storage contracts in src/stores (#104); compliance goes through
- * the EvaluateMeasure compute binding in src/engine (#106).
+ * Every endpoint group is ported (#107/#108 strangler complete) behind the
+ * unchanged frontend fetch contract (frontend/lib/api/client.ts). Persistence
+ * goes through the storage contracts in src/stores (#104; SQLite floor /
+ * Postgres ceiling); compliance goes through the EvaluateMeasure compute
+ * binding in src/engine (#106).
  */
 import type {
   CloudDatabase,
@@ -97,6 +98,12 @@ export interface Env {
   WORKWELL_VSAC_BASE_URL?: string;
   /** Failed-run alert webhook (#264). Inert unless set — console WORKWELL_ALERT line always fires. */
   WORKWELL_ALERT_WEBHOOK_URL?: string;
+  /** Durable S3 evidence bucket (#167/ADR-030). Inert (in-container BUCKET binding) unless bucket + key id + secret are ALL set. */
+  WORKWELL_BUCKET_S3_BUCKET?: string;
+  WORKWELL_BUCKET_S3_ACCESS_KEY_ID?: string;
+  WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY?: string;
+  WORKWELL_BUCKET_S3_REGION?: string;
+  WORKWELL_BUCKET_S3_ENDPOINT?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -181,12 +188,12 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
 
   // Health — parity with the Java backend's GET /actuator/health.
   if (pathname === "/actuator/health" || pathname === "/health") {
-    return json({ status: "UP", stack: "workwell-ts", phase: "1-spike" });
+    return json({ status: "UP", stack: "workwell-ts" });
   }
 
   // Version — parity with GET /api/version (unauthenticated discovery).
   if (pathname === "/api/version") {
-    return json({ api: "v1", stack: "typescript", build: "phase1-spike" });
+    return json({ api: "v1", stack: "typescript", build: "workwell-api-ts" });
   }
 
   // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
@@ -304,13 +311,14 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const mcpResponse = await handleMcp(req, env, { actor, role: principalRole, enforce: enforceAuth });
   if (mcpResponse) return mcpResponse;
 
-  // Everything else is not ported yet. Be honest (no faked behavior), the
-  // same principle as UnsupportedBindingError / "AI never decides compliance".
+  // Unknown route. Be honest (no faked behavior), the same principle as
+  // UnsupportedBindingError / "AI never decides compliance". 501 (not 404) is the
+  // long-standing contract for unrouted /api paths — kept stable for probes/tooling.
   return json(
     {
       error: "not_implemented",
       path: pathname,
-      hint: "TS backend skeleton — endpoint groups are ported in Phase 4 (#107/#108)",
+      hint: "No such API route — the full v1 surface is documented in docs/ARCHITECTURE.md §7",
     },
     501,
   );

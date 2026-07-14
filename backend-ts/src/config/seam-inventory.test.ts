@@ -1,9 +1,9 @@
 /**
- * Inert-seam inventory tests (#260/#264): describeSeams flips each of the 8 seams on/off with the
+ * Inert-seam inventory tests (#260/#264): describeSeams flips each of the 9 seams on/off with the
  * correct env combination, preserving both-vars-required semantics where the underlying resolver
  * requires it (WebChart, DataChaser, ICE, EH-FHIR all need BOTH vars; SendGrid needs provider=sendgrid
  * AND a key; sql-executor is a single explicit opt-in; VSAC is a single key; alert-webhook is a single
- * URL).
+ * URL; bucket-s3 needs all THREE of bucket + key id + secret, #167/ADR-030).
  *   node --import tsx --test src/config/seam-inventory.test.ts
  */
 import { test } from "node:test";
@@ -20,7 +20,7 @@ test("describeSeams: everything off with no env vars set", () => {
   const seams = describeSeams({});
   assert.deepEqual(
     seams.map((s) => s.name),
-    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac", "alert-webhook"],
+    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac", "alert-webhook", "bucket-s3"],
   );
   for (const s of seams) assert.equal(s.active, false, `${s.name} should default off`);
 });
@@ -28,7 +28,7 @@ test("describeSeams: everything off with no env vars set", () => {
 test("formatSeamLogLine: all-off shape matches the documented boot log line", () => {
   assert.equal(
     formatSeamLogLine({}),
-    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off",
+    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off bucket-s3=off",
   );
 });
 
@@ -171,6 +171,56 @@ test("alert-webhook: on when WORKWELL_ALERT_WEBHOOK_URL is set", () => {
   assert.equal(statusOf({ WORKWELL_ALERT_WEBHOOK_URL: "https://hooks.example/alert" }, "alert-webhook"), true);
 });
 
+// ---- bucket-s3: bucket name AND access key id AND secret all required (#167/ADR-030) ---------------
+
+test("bucket-s3: off with any partial combination of the three selecting vars", () => {
+  assert.equal(statusOf({ WORKWELL_BUCKET_S3_BUCKET: "b" }, "bucket-s3"), false);
+  assert.equal(statusOf({ WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "k" }, "bucket-s3"), false);
+  assert.equal(statusOf({ WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "s" }, "bucket-s3"), false);
+  assert.equal(
+    statusOf({ WORKWELL_BUCKET_S3_BUCKET: "b", WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "k" }, "bucket-s3"),
+    false,
+  );
+});
+
+test("bucket-s3: whitespace-only values stay off (deploy-secret hygiene)", () => {
+  assert.equal(
+    statusOf(
+      {
+        WORKWELL_BUCKET_S3_BUCKET: "  ",
+        WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "\n",
+        WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: " ",
+      },
+      "bucket-s3",
+    ),
+    false,
+  );
+});
+
+test("bucket-s3: region/endpoint alone never select the seam", () => {
+  assert.equal(
+    statusOf(
+      { WORKWELL_BUCKET_S3_REGION: "us-east-1", WORKWELL_BUCKET_S3_ENDPOINT: "https://s3.example" },
+      "bucket-s3",
+    ),
+    false,
+  );
+});
+
+test("bucket-s3: on when bucket + key id + secret are all set", () => {
+  assert.equal(
+    statusOf(
+      {
+        WORKWELL_BUCKET_S3_BUCKET: "workwell-twh-evidence",
+        WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "AKIA",
+        WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "s",
+      },
+      "bucket-s3",
+    ),
+    true,
+  );
+});
+
 // ---- everything on at once, for the boot log line's full-on shape ---------------------------------
 
 test("formatSeamLogLine: all-on shape when every seam is configured", () => {
@@ -188,9 +238,12 @@ test("formatSeamLogLine: all-on shape when every seam is configured", () => {
     WORKWELL_MEASURE_EXECUTOR: "sql-pushdown",
     WORKWELL_VSAC_API_KEY: "umls-key",
     WORKWELL_ALERT_WEBHOOK_URL: "https://hooks.example/alert",
+    WORKWELL_BUCKET_S3_BUCKET: "workwell-twh-evidence",
+    WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "AKIA",
+    WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "s",
   };
   assert.equal(
     formatSeamLogLine(allOn),
-    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on alert-webhook=on",
+    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on alert-webhook=on bucket-s3=on",
   );
 });
