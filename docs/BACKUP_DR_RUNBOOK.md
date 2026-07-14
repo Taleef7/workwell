@@ -61,6 +61,13 @@ moment any real data lands it becomes a compliance-grade incident**, which is ex
 1. **Raise `history_retention_seconds`** on the Neon project — 7 days is the conventional floor for
    anything with a human in the loop. **Blocked by the Free plan (max 21600s, verified 2026-07-14);
    requires a plan upgrade.**
+> **⚠ Bucket-host expiry (found 2026-07-14):** `workwell-twh-evidence` lives on an AWS **Free Plan**
+> account (no card linked, cannot be charged — but the plan **expires 2026-08-24**, after which AWS
+> restricts the account and eventually deletes resources). The bucket, the nightly dumps, and the
+> live evidence seam must be **re-homed before ~2026-08-24**: MIE-provided S3/R2 (the C14 hosting
+> conversation — preferred), a paid-plan upgrade, or a Cloudflare R2 free bucket. Migration is env
+> vars only (`WORKWELL_BUCKET_S3_*` + optional `_ENDPOINT`) plus an `aws s3 sync`; no code change.
+
 2. ~~**Add a second line of defence: a scheduled logical dump.**~~ **DONE 2026-07-14 (#167 + #270):**
    the managed bucket `workwell-twh-evidence` is provisioned (ADR-030) and
    `.github/workflows/backup-neon-nightly.yml` dumps the `workwell_spike` schema to
