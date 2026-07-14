@@ -97,7 +97,7 @@ explicit checklist rather than a blank page:
 | Role-based access control | **Exists** | `authorize.ts` role gates (VIEWER/EMPLOYEE/CASE_MANAGER/AUTHOR/APPROVER/ADMIN) enforced server-side on every route; frontend `rbac.ts` mirrors it for nav/action gating (ARCHITECTURE §6–7). |
 | Encrypted transport | **Exists** | TLS-only Neon connections; HTTPS-only MIE container endpoints; refresh-token cookie hardened `SameSite=None; Secure` with production fail-fast checks if misconfigured (DEPLOY.md, ARCHITECTURE §6). |
 | Production startup safety checks | **Exists** | The backend refuses to start in a production-like profile with auth disabled, a weak JWT secret, wildcard/localhost CORS, or backend-demo configuration (ARCHITECTURE §6). |
-| Durable, access-controlled evidence storage | **Missing** | The live `BUCKET` binding is an in-container filesystem driver — evidence is lost on every container recreate and has no access-control layer beyond the API route gate. The `CloudBucket` port already abstracts the storage backend; wiring an S3/R2 bucket is a deploy-config + credentials step, not new code (#167, DEPLOY.md). |
+| Durable, access-controlled evidence storage | **Exists (since 2026-07-14)** | #167 closed — evidence bytes go to the managed `workwell-twh-evidence` S3 bucket (public-access-blocked, versioned, least-privilege IAM) via the `resolveBucket` app seam (ADR-030); the same bucket receives the nightly `pg_dump` (#270, `backup-neon-nightly.yml`). |
 | PHI-eligible database tier / BAA | **Missing** | The live Neon project (`workwell-twh`) is not provisioned under a BAA and should not be assumed HIPAA-eligible without explicit confirmation. Blocked on MIE Q C14. |
 | Separate PHI-capable environment | **Missing** | No second environment exists. See the environment-split requirements above. Tracked as #267. |
 | Real user directory / production auth | **Missing** | Accounts are hardcoded (CLAUDE.md hard rule, unchanged since inception). See §2. |
@@ -198,12 +198,12 @@ flows) or **nice-to-have** (improves the production posture but does not block t
 |---|---|---|---|
 | 1 | PHI / environment split | **Required** — nothing touches real data until this exists | #267 (new, this memo) |
 | 2 | Auth (production) | **Required** — hardcoded accounts cannot serve real users; MIE-gated (Q C15) | #265 |
-| 3 | Evidence bucket (durable storage) | **Required** — evidence bytes must survive container recreates before real evidence is uploaded | #167 |
+| 3 | Evidence bucket (durable storage) | **✓ DONE 2026-07-14** — `workwell-twh-evidence` live via the ADR-030 `resolveBucket` seam; evidence survives container recreates | #167 (closed) |
 | 4 | Observability (failed-run alerting + run metrics) | **Required** — a silent failed batch run over real patient data is a correctness incident, not just an inconvenience | #264 |
 | 5 | Scale performance (contract-timed once MIE answers volume) | Nice-to-have at launch, required before full-volume production — timing depends on Q C16 (realistic production population size) | #256, #263 (Option B trigger conditions tracked on #78) |
 | 6 | Durable scheduler (missed-run detection across restarts) | Nice-to-have — the current in-process `setInterval` scheduler (E13 PR-3) loses its debounce state on container restart/redeploy, so a missed 24h cycle isn't detected or backfilled | #268 (new, this memo) |
 | 7 | Real tenancy (multi-employer isolation) | Nice-to-have for a single-employer first integration; required before onboarding a second real employer | #269 (new, this memo) |
-| 8 | Backup/DR runbook (Neon branch restore) | Nice-to-have at demo scale; required before real data makes data loss a compliance incident, not an inconvenience | #270 (new, this memo) |
+| 8 | Backup/DR runbook (Neon branch restore) | **Mostly done 2026-07-14** — runbook written + drill executed + nightly `pg_dump` to S3 live; residual = the Neon plan-upgrade decision (6h PITR + branch protection are Free-plan caps) | #270 |
 
 Items 1–4 are the floor for touching any real WebChart data at all, PHI or not (an observability gap or
 a lossy evidence bucket is unacceptable the moment a real case manager depends on the system, before PHI

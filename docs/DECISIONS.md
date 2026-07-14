@@ -1,5 +1,37 @@
 # Architecture Decision Records
 
+## ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
+
+**Status:** Accepted (2026-07-14).
+
+**Context:** Evidence bytes lived behind the `CloudBucket` port on the live stack's in-container `fs`
+`BUCKET` binding — lost on every container recreate (deploy/heal). DEPLOY.md's documented recipe was
+"point the `BUCKET` binding at the s3 driver", but the `@mieweb/cloud` config loader
+(`external/mieweb-cloud/packages/cli/src/config.mjs`) parses `mieweb.jsonc` bindings as **literal
+JSON — no env substitution** — so a committed binding cannot carry credentials, and the config-level
+route is unreachable without forking the platform CLI. Separately, the #270 runbook found the live
+Neon PITR window is the **Free-plan-capped six hours** with **no second recovery line**; one managed
+bucket unblocks both evidence durability (#167) and a nightly `pg_dump` (#270).
+
+**Decision:** Select the durable backend **at app level**, exactly like the `DATABASE_URL` store
+override (stores/factory.ts): a `resolveBucket(env)` seam (`backend-ts/src/case/resolve-bucket.ts`)
+that constructs an S3-backed `CloudBucket` via `createS3Bucket` (`@mieweb/cloud-os` — the same adapter
+the mieweb target's binding uses) **only** when ALL THREE of `WORKWELL_BUCKET_S3_BUCKET` +
+`WORKWELL_BUCKET_S3_ACCESS_KEY_ID` + `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` are set
+(inert-unless-configured, the 9th inventory seam `bucket-s3`; region defaults us-east-1; `endpoint`
+only for non-AWS S3 — it also flips to path-style). `createIfMissing: false` — bucket provisioning is
+owner-gated infra and the app's IAM policy deliberately cannot create buckets. The provisioned bucket
+is `workwell-twh-evidence` (us-east-1, public-access-blocked, versioned; least-privilege IAM user
+`workwell-twh-app`; 30-day lifecycle on `db-dumps/`). A nightly `backup-neon-nightly.yml` workflow
+dumps the `workwell_spike` schema to the same bucket. **`@aws-sdk/client-s3` is an approved dependency
+add** — it is the platform package's own declared optionalDependency for this adapter, promoted to a
+direct dep so the seam works on the `local` target the live container runs.
+
+**Consequences:** evidence survives container recreates on the live stack with zero `EvidenceService`
+changes (the `CloudBucket` contract is unchanged); unset env ⇒ byte-identical fs-binding behavior
+(tested); the remaining #270 gap — the 6-hour PITR window itself — is a Neon **plan-upgrade decision**
+(owner/billing), tracked for the MIE conversation.
+
 ## ADR-029: Immunization forecasting is a self-hosted ICE sidecar behind the existing port — the stub is replaced by a real adapter (#76 / D18)
 
 **Status:** Accepted (2026-07-13).

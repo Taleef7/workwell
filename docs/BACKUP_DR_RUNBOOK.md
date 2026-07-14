@@ -2,7 +2,10 @@
 
 **Date:** 2026-07-13. **Scope:** the live TWH stack — Neon Postgres (`workwell-twh`), the MIE
 containers, and the evidence bucket.
-**Status:** Runbook + a gap list. **One gap is material and needs an owner decision today (§2).**
+**Status (updated 2026-07-14):** Runbook **executed** (§6 drill ✓). The nightly-dump second line of
+defence is **live** (`backup-neon-nightly.yml` → `s3://workwell-twh-evidence/db-dumps/`, §2 item 2).
+Remaining owner decision: **the Neon plan upgrade** — the 6-hour PITR window and the unprotected
+`production` branch are both Free-plan caps (§2), not settings.
 
 All facts below were read from the live Neon project on 2026-07-13, not assumed.
 
@@ -37,22 +40,35 @@ noticed within six hours**. A bad change made in the evening and noticed the nex
 There is **no second line of defence**: no scheduled `pg_dump`, no export to object storage, no Neon
 snapshot schedule. Retention is the *only* mechanism, and it is six hours.
 
+> **Update 2026-07-14:** no longer true — the nightly `pg_dump` to S3 is live (see the decisions
+> block below). The 6-hour PITR window itself remains, pending the plan-upgrade decision.
+
 For today's synthetic demo data this is an inconvenience (the data is regenerable — see §5). **The
 moment any real data lands it becomes a compliance-grade incident**, which is exactly the transition
 `docs/PRODUCTION_READINESS_2026-07.md` says must not happen accidentally.
 
 ### Owner decisions (§2 is the whole point of this document)
 
+> **Update 2026-07-14 — attempted live; two of three are PLAN-CAPPED.** Both settings were attempted
+> against the live project via the Neon API: `history_retention_seconds: 604800` was rejected —
+> *"requested history retention seconds exceeds allowed maximum; max: 21600"* — and protecting
+> `production` was rejected with `BRANCHES_PROTECTED_LIMIT_EXCEEDED`. **The 6-hour window IS the Free
+> plan's maximum, and Free allows zero protected branches** — so decisions 1 and 3 are one combined
+> decision: **upgrade the Neon plan** (Launch tier gives 7-day restore + protected branches). That is
+> a billing call (owner / the MIE-hosting conversation, Q C14), not a settings toggle. Decision 2 is
+> **DONE** — see below.
+
 1. **Raise `history_retention_seconds`** on the Neon project — 7 days is the conventional floor for
-   anything with a human in the loop. This is a project-setting change (owner-gated; it may affect
-   the storage bill, which is why it is a decision and not a task).
-2. **Add a second line of defence: a scheduled logical dump.** A nightly `pg_dump` of the
-   `workwell_spike` schema to object storage gives a recovery path independent of Neon retention *and*
-   independent of Neon itself. **This shares its blocker with #167** (there is no managed bucket yet) —
-   so provisioning one bucket unblocks *both* evidence persistence and DB backups. That makes #167
-   materially more valuable than it looks on the M3 list.
-3. **Protect the `production` branch** (`protected: false` today). Neon branch protection prevents
-   accidental deletion of the primary branch.
+   anything with a human in the loop. **Blocked by the Free plan (max 21600s, verified 2026-07-14);
+   requires a plan upgrade.**
+2. ~~**Add a second line of defence: a scheduled logical dump.**~~ **DONE 2026-07-14 (#167 + #270):**
+   the managed bucket `workwell-twh-evidence` is provisioned (ADR-030) and
+   `.github/workflows/backup-neon-nightly.yml` dumps the `workwell_spike` schema to
+   `s3://workwell-twh-evidence/db-dumps/` nightly (03:17 UTC, custom format, direct — non-pooler —
+   connection, 30-day lifecycle expiry). Recovery is now independent of Neon retention *and* of Neon
+   itself. Worst-case data-loss window: ~24h (nightly dump) beyond the 6h PITR window.
+3. **Protect the `production` branch** — **blocked by the Free plan (0 protected branches, verified
+   2026-07-14); same plan-upgrade decision as item 1.**
 
 ---
 
@@ -135,6 +151,15 @@ small, which is a further argument for §2.2 (a nightly logical dump of just the
 ---
 
 ## 6. Drill
+
+> **✓ EXECUTED 2026-07-14 (live Neon, zero production impact).** Branch `drill-2026-07-14` created
+> from `production`; a backend booted against it (`DATABASE_URL=<branch>` — schema present, both
+> `public` and `workwell_spike`, `/api/version` + authenticated `/api/tenants` + `/api/runs` reads
+> returned real data); 2 rows deleted from `workwell_spike.terminology_mappings` on the branch
+> (5 → 3, verified); the branch restored to its own pre-deletion timestamp
+> (`neonctl branches restore <drill> "^self@<T0>"` — note Neon requires `--preserve-under-name` when
+> restoring a branch to itself); the deleted rows returned (5/5, outcomes intact at 118,292); both
+> drill branches deleted. The exact §3.1 mechanism works as documented.
 
 A runbook that has never been executed is a hypothesis. Before this is considered done:
 

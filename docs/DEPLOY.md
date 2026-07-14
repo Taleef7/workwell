@@ -26,8 +26,9 @@ The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 > companion services, internal port **8080**) and overrides the DB to Neon via `DATABASE_URL` (the
 > store factory then uses the Pg ceiling, isolated to the `workwell_spike` schema; Java's `public`
 > tables are untouched). The `DATABASE_URL_TWH` secret is a **JDBC** URL (`jdbc:postgresql://…`); the
-> workflow strips the `jdbc:` prefix for node-postgres. **Evidence upload is ephemeral** (in-container
-> `fs` BUCKET) until a managed S3/R2 bucket is wired. See **Rollback** below.
+> workflow strips the `jdbc:` prefix for node-postgres. **Evidence upload is durable since 2026-07-14**
+> (#167/ADR-030): the `WORKWELL_BUCKET_S3_*` env vars route evidence bytes to the managed
+> `workwell-twh-evidence` S3 bucket via the `resolveBucket` seam. See **Rollback** below.
 
 ### Deployment workflow
 
@@ -86,11 +87,12 @@ environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
 ### Instance seeding
 
 The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
-- All 4 OSHA surveillance measures with full CQL (Audiogram, HAZWOPER, TB, Flu)
-- 4 HEDIS wellness catalog measures (Cholesterol, BMI, Diabetes HbA1c, Hypertension)
-- All 49 CMS eCQM catalog entries (Draft, awaiting CQL authoring)
+- 4 OSHA surveillance measures with full CQL (Audiogram, HAZWOPER, TB, Flu) + 2 OSHA catalog-only
+- 5 HEDIS wellness measures with full CQL (Cholesterol, BMI, Diabetes HbA1c, Hypertension, Adult Immunization AIS-E)
+- 3 permanent immunization-panel measures with full CQL (MMR, Varicella, Hep B series — E10.6)
+- 49 CMS eCQM catalog entries (CMS122v14 + CMS125v14 Active with full CQL; 47 Draft)
 
-Total catalog: **60 measures** (see `docs/MEASURES.md` for the full breakdown).
+Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full breakdown).
 
 #### One-time segment repair after adding a tenant (E13 PR-1, owner-gated)
 
@@ -145,10 +147,13 @@ DELETE FROM workwell_spike.runs WHERE triggered_by = 'seed:trend-history';
 
 ### Seeding the population-scale tenant (E13 PR-2, on-demand, NOT auto-run on deploy)
 
-> **✓ Done on 2026-06-29 (live Neon).** `pnpm seed:scale --subjects 120000 --as-of 2026-06-26`
-> wrote **14 runs × 120,000 subjects = 1,680,000 outcomes** to `workwell_spike` (14 `SCALE_POPULATION_SEEDED`
-> audit events). Live All Systems rollup = 1,682,100 (ihn 700 + twh 1,400 + mhn 1,680,000), all reconciling.
-> Re-run only after rolling back (see SQL below) or to change `--subjects`.
+> **✓ Live Neon status (updated 2026-07-09, superseding the 2026-06-29 fabricated seed).** The
+> 2026-06-29 fabricated 1.68M-row seed was **rolled back** and replaced by the **#253 real-eval proof**:
+> `pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate` — **14 runs × 5,000 subjects =
+> 70,000 real CQL evaluations** (14 `SCALE_POPULATION_EVALUATED` audit events, full evidence). Live All
+> Systems rollup = **72,100** (ihn 700 + twh 1,400 + mhn 70,000), all reconciling. The full-120k
+> real-eval run on Neon is **not planned** (cost; the N=5000 proof carries the scale-honesty claim —
+> see CLAUDE.md). Re-run only after rolling back (see SQL below) or to change `--subjects`.
 
 `pnpm seed:scale` populates the **`mhn` ("MetroHealth Network") ~120k-subject tenant** so the
 `/programs/hierarchy` rollup + the `/programs` KPIs aggregate a real population-scale system (Doug's
@@ -441,6 +446,11 @@ shows all services `Up`).
 | `WORKWELL_IMMZ_ICE_BASE_URL` | Backend | Base URL of a self-hosted **ICE** sidecar (ADR-029), e.g. `http://ice:8080/opencds-decision-support-service`. **Selects the real ICE forecaster on its own** — a self-hosted sidecar has no API key. **Inert unless set — the demo stack leaves it unset** (the simulated forecaster serves; behavior is byte-identical). See "Immunization forecasting (ICE sidecar)" below. |
 | `WORKWELL_IMMZ_ICE_API_KEY` | Backend | Optional bearer token, only if ICE is fronted by an authenticating proxy. It **never selects** the seam by itself. |
 | `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
+| `WORKWELL_BUCKET_S3_BUCKET` | Backend | Durable evidence bucket name (#167/ADR-030). Selects the S3-backed evidence bucket **only together with** the key id + secret below (all three required; inert otherwise — evidence falls back to the in-container `fs` BUCKET binding). **Set on the live TWH stack since 2026-07-14** (`workwell-twh-evidence`). |
+| `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` | Backend | Access key id for the evidence bucket (from the `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` GitHub secret; least-privilege IAM user `workwell-twh-app`). |
+| `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` | Backend | Secret access key for the evidence bucket (from the `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secret). |
+| `WORKWELL_BUCKET_S3_REGION` | Backend | Bucket region (default `us-east-1`). |
+| `WORKWELL_BUCKET_S3_ENDPOINT` | Backend | Optional S3 endpoint for non-AWS S3 APIs (Cloudflare R2, MinIO) — also switches to path-style addressing. Leave unset for AWS S3. |
 
 `Where = Backend` vars are container environment on the MIE backend container (mapped from the
 `*_TWH` GitHub secrets where applicable); `Where = Frontend` vars are build-args/env baked into
@@ -527,40 +537,31 @@ the forecast path is byte-identical to before ADR-029. The forecast is **advisor
 overrides an `Outcome Status` (CQL stays authoritative, ADR-008/ADR-012), and ICE disagreeing with a
 WorkWell measure (ICE scores full ACIP; a measure scores its own rule) is expected, not a defect.
 
-### Evidence upload persistence (managed S3/R2 bucket)
+### Evidence upload persistence (managed S3 bucket) — LIVE since 2026-07-14 (#167 / ADR-030)
 
 Evidence bytes are stored behind the `CloudBucket` port (`@mieweb/cloud`): `EvidenceService`
-(`backend-ts/src/case/evidence-service.ts`) only calls `bucket.put(key, bytes)` / `bucket.get(key)`,
-so **the storage backend is a binding choice — no app code changes to make evidence persistent.**
+(`backend-ts/src/case/evidence-service.ts`) only calls `bucket.put(key, bytes)` / `bucket.get(key)`.
 
-The live TWH container runs the `local` mieweb target, whose `BUCKET` binding is
-`{"driver":"fs","path":".data/local/evidence"}` (`backend-ts/mieweb.jsonc`) — an **in-container
-filesystem** bucket, so uploaded evidence is **lost on container recreate** (every deploy/heal
-recreates the container). The DB persists (Neon) because it is overridden to Postgres via
-`DATABASE_URL`; the bucket has no equivalent managed backend wired yet.
+**The durable backend is selected at app level** by the `resolveBucket(env)` seam
+(`backend-ts/src/case/resolve-bucket.ts`) — the `mieweb.jsonc` bindings are literal JSON (the
+`@mieweb/cloud` config loader does no env substitution), so a committed binding cannot carry
+credentials; the seam mirrors the `DATABASE_URL` store override instead. When ALL THREE of
+`WORKWELL_BUCKET_S3_BUCKET` + `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` +
+`WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` are set, evidence I/O goes to that S3-compatible bucket
+(`createS3Bucket`, the same `@mieweb/cloud-os` adapter the mieweb target uses); unset ⇒ the
+in-container `fs` BUCKET binding serves unchanged (inert-unless-configured — the `bucket-s3` seam on
+the boot inventory line).
 
-**To make evidence durable, point `BUCKET` at a managed S3-compatible bucket (AWS S3 or Cloudflare
-R2).** The `mieweb` target in `mieweb.jsonc` already shows the exact `s3` driver shape:
+**Live TWH setup (provisioned 2026-07-14):** bucket `workwell-twh-evidence` (AWS us-east-1,
+public-access-blocked, versioning on, 30-day lifecycle on the `db-dumps/` prefix), least-privilege
+IAM user `workwell-twh-app` (List/Get/Put/DeleteObject on this bucket only), credentials in the
+`WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` / `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secrets,
+mapped onto the backend container env by `deploy-twh-mieweb.yml` (and the reconciler — keep-in-sync).
+The same bucket receives the **nightly `pg_dump`** written by `backup-neon-nightly.yml` (#270 —
+see `docs/BACKUP_DR_RUNBOOK.md`).
 
-```jsonc
-"BUCKET": {
-  "driver": "s3",
-  "endpoint": "https://<account>.r2.cloudflarestorage.com",   // or an S3 region endpoint
-  "bucket": "workwell-evidence",
-  "accessKeyId":  "<from a GitHub secret>",
-  "secretAccessKey": "<from a GitHub secret>",
-  "forcePathStyle": true,
-  "createIfMissing": true
-}
-```
-
-Steps when a bucket is available: (1) provision an R2/S3 bucket + scoped credentials; (2) add the
-access key/secret as GitHub secrets and map them onto the backend container env in
-`deploy-twh-mieweb.yml` (alongside `DATABASE_URL_TWH`); (3) set the live `BUCKET` binding to the `s3`
-driver above (env-substituted from those secrets). No code change — the `CloudBucket` contract is
-unchanged. **Owner-gated, like schema/DDL — provisioning + the deploy-config edit are Taleef's;**
-this is the documented recipe for when the bucket exists. Until then, treat evidence upload as
-ephemeral (demo-only).
+Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
+(known demo-era limitation); everything uploaded after persists across deploys/heals.
 
 ## Neon (Postgres)
 
