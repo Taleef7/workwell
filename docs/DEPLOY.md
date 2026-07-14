@@ -566,6 +566,11 @@ so a compromised app container cannot read, overwrite, or delete the DB backups.
 Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
 (known demo-era limitation); everything uploaded after persists across deploys/heals.
 
+> **⚠ Bucket re-home deadline:** the hosting AWS account is a Free Plan account that **expires
+> 2026-08-24** (it cannot be charged; AWS restricts-then-deletes instead). Move the bucket before
+> then — MIE-provided storage (C14), a paid-plan upgrade, or Cloudflare R2 free tier. Env-var-only
+> migration (see `docs/BACKUP_DR_RUNBOOK.md` §2 note).
+
 ## Neon (Postgres)
 
 1. Project `workwell-twh`, region us-east, **Postgres 16**
