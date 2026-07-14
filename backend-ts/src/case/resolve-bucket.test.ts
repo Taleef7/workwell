@@ -54,6 +54,42 @@ test("selection requires ALL THREE vars — any partial combination stays inert"
   assert.equal(isS3BucketConfigured({ WORKWELL_BUCKET_S3_REGION: "us-east-1" }), false);
 });
 
+test("whitespace-only values do not select the seam; trailing whitespace is trimmed from config", async () => {
+  // A blank/whitespace deploy secret must stay inert (the isVsacConfigured pattern) …
+  assert.equal(
+    isS3BucketConfigured({
+      WORKWELL_BUCKET_S3_BUCKET: "   ",
+      WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "\n",
+      WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "\t",
+    }),
+    false,
+  );
+  // … and a trailing newline on a real secret must never reach SigV4.
+  const calls: S3BucketConfig[] = [];
+  const fake = async (cfg: S3BucketConfig) => {
+    calls.push(cfg);
+    return s3Bucket;
+  };
+  await resolveBucket(
+    env({
+      WORKWELL_BUCKET_S3_BUCKET: "workwell-twh-evidence\n",
+      WORKWELL_BUCKET_S3_ACCESS_KEY_ID: " AKIAEXAMPLE ",
+      WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "secret\n",
+      WORKWELL_BUCKET_S3_ENDPOINT: "   ",
+    }),
+    fake,
+  );
+  assert.deepEqual(calls[0], {
+    bucket: "workwell-twh-evidence",
+    region: "us-east-1",
+    endpoint: undefined,
+    accessKeyId: "AKIAEXAMPLE",
+    secretAccessKey: "secret",
+    forcePathStyle: false,
+    createIfMissing: false,
+  });
+});
+
 test("configured: constructs the S3 bucket with the expected config (AWS = virtual-hosted style)", async () => {
   const calls: S3BucketConfig[] = [];
   const fake = async (cfg: S3BucketConfig) => {

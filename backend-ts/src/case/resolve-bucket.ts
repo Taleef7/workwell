@@ -21,7 +21,6 @@
  * memo pattern). Descriptive only (ADR-008 n/a): storage backend selection never touches compliance.
  */
 import type { CloudBucket } from "@mieweb/cloud";
-import { createS3Bucket } from "@mieweb/cloud-os";
 
 /** Env-var shape for the seam inventory (all optional — assignable from the worker `Env`). */
 export interface BucketSeamEnv {
@@ -50,14 +49,26 @@ export interface S3BucketConfig {
 
 export type S3BucketFactory = (cfg: S3BucketConfig) => Promise<CloudBucket>;
 
+/** Deploy-secret hygiene: a whitespace-only or trailing-newline value must neither select the seam
+ *  nor reach SigV4 (mirrors `isVsacConfigured`; DEPLOY.md's "no trailing whitespace" failure class). */
+const val = (s?: string): string => (s ?? "").trim();
+
 /** The exact predicate `resolveBucket` selects on — consumed by the seam inventory (#260). */
 export function isS3BucketConfigured(env: BucketSeamEnv): boolean {
   return Boolean(
-    env.WORKWELL_BUCKET_S3_BUCKET &&
-      env.WORKWELL_BUCKET_S3_ACCESS_KEY_ID &&
-      env.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY,
+    val(env.WORKWELL_BUCKET_S3_BUCKET) &&
+      val(env.WORKWELL_BUCKET_S3_ACCESS_KEY_ID) &&
+      val(env.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY),
   );
 }
+
+// Lazy import (the ADR-026 fqm-execution pattern): @mieweb/cloud-os registers its drivers on import,
+// so loading it at module top would add a boot side effect even with the seam off. The unset path
+// must stay byte-identical at module-graph level too.
+const defaultFactory: S3BucketFactory = async (cfg) => {
+  const { createS3Bucket } = await import("@mieweb/cloud-os");
+  return createS3Bucket(cfg);
+};
 
 let cached: Promise<CloudBucket> | null = null;
 
@@ -67,18 +78,19 @@ let cached: Promise<CloudBucket> | null = null;
  */
 export function resolveBucket(
   env: BucketEnv,
-  factory: S3BucketFactory = createS3Bucket,
+  factory: S3BucketFactory = defaultFactory,
 ): Promise<CloudBucket> {
   if (!isS3BucketConfigured(env)) return Promise.resolve(env.BUCKET);
   if (!cached) {
+    const endpoint = val(env.WORKWELL_BUCKET_S3_ENDPOINT);
     cached = factory({
-      bucket: env.WORKWELL_BUCKET_S3_BUCKET!,
-      region: env.WORKWELL_BUCKET_S3_REGION || "us-east-1",
-      endpoint: env.WORKWELL_BUCKET_S3_ENDPOINT || undefined,
-      accessKeyId: env.WORKWELL_BUCKET_S3_ACCESS_KEY_ID!,
-      secretAccessKey: env.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY!,
+      bucket: val(env.WORKWELL_BUCKET_S3_BUCKET),
+      region: val(env.WORKWELL_BUCKET_S3_REGION) || "us-east-1",
+      endpoint: endpoint || undefined,
+      accessKeyId: val(env.WORKWELL_BUCKET_S3_ACCESS_KEY_ID),
+      secretAccessKey: val(env.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY),
       // Path-style only for non-AWS endpoints (R2/MinIO); AWS S3 uses virtual-hosted style.
-      forcePathStyle: Boolean(env.WORKWELL_BUCKET_S3_ENDPOINT),
+      forcePathStyle: Boolean(endpoint),
       createIfMissing: false,
     }).catch((err) => {
       cached = null; // a failed construction must not be sticky — retry on the next evidence op

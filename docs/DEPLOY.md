@@ -558,7 +558,10 @@ IAM user `workwell-twh-app` (List/Get/Put/DeleteObject on this bucket only), cre
 `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` / `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secrets,
 mapped onto the backend container env by `deploy-twh-mieweb.yml` (and the reconciler — keep-in-sync).
 The same bucket receives the **nightly `pg_dump`** written by `backup-neon-nightly.yml` (#270 —
-see `docs/BACKUP_DR_RUNBOOK.md`).
+see `docs/BACKUP_DR_RUNBOOK.md`) under a **separate, dedicated IAM principal** (`workwell-twh-backup`,
+`PutObject` on `db-dumps/*` only; secrets `WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH` /
+`WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH`). The app user carries an **explicit deny on `db-dumps/*`**,
+so a compromised app container cannot read, overwrite, or delete the DB backups.
 
 Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
 (known demo-era limitation); everything uploaded after persists across deploys/heals.

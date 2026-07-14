@@ -31,8 +31,11 @@ jobs:
     timeout-minutes: 30
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
+      # A DEDICATED backup principal (workwell-twh-backup): PutObject on db-dumps/* only. The app's
+      # runtime credentials are a different IAM user that carries an explicit DENY on db-dumps/*,
+      # so a compromised app container cannot read/overwrite/delete the dumps (review P2-2).
+      AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH }}
       AWS_DEFAULT_REGION: us-east-1
       BACKUP_BUCKET: workwell-twh-evidence
     steps:
@@ -40,8 +43,8 @@ jobs:
         run: |
           missing=()
           [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
-          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH")
-          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH")
+          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH")
+          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secret(s): ${missing[*]}"
             exit 1
@@ -50,10 +53,15 @@ jobs:
       - name: Ensure pg_dump 16+
         # The Neon server is Postgres 16; pg_dump's major version must be >= the server's.
         run: |
-          if ! pg_dump --version | grep -qE ' (1[6-9]|[2-9][0-9])\.'; then
+          ok() { pg_dump --version | grep -qE ' (1[6-9]|[2-9][0-9])\.'; }
+          if ! ok; then
             sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
           fi
           pg_dump --version
+          if ! ok; then
+            echo "::error::pg_dump is still older than 16 after install — dump would fail against the PG16 server." >&2
+            exit 1
+          fi
 
       - name: Dump the workwell_spike schema
         run: |
@@ -68,7 +76,9 @@ jobs:
               exit 1
               ;;
           esac
-          direct_url="${db_url/-pooler./.}"
+          # Anchor the -pooler strip to the HOST portion (first '-pooler.' after the '@'), so a
+          # password that happens to contain '-pooler.' is never corrupted (review P3-3).
+          direct_url="$(printf '%s' "$db_url" | sed 's/@\([^/@]*\)-pooler\./@\1./')"
           pg_dump "$direct_url" --schema=workwell_spike --format=custom --no-owner \
             --file=workwell_spike.dump
           ls -l workwell_spike.dump

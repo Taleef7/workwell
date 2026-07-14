@@ -65,8 +65,11 @@ moment any real data lands it becomes a compliance-grade incident**, which is ex
    the managed bucket `workwell-twh-evidence` is provisioned (ADR-030) and
    `.github/workflows/backup-neon-nightly.yml` dumps the `workwell_spike` schema to
    `s3://workwell-twh-evidence/db-dumps/` nightly (03:17 UTC, custom format, direct — non-pooler —
-   connection, 30-day lifecycle expiry). Recovery is now independent of Neon retention *and* of Neon
-   itself. Worst-case data-loss window: ~24h (nightly dump) beyond the 6h PITR window.
+   connection, 30-day lifecycle expiry). The dump is written by a **dedicated IAM principal**
+   (`workwell-twh-backup`, PutObject on `db-dumps/*` only) and the app's own IAM user has an
+   **explicit deny on `db-dumps/*`** — a compromised app container cannot touch the backups.
+   Recovery is now independent of Neon retention *and* of Neon itself. Worst-case data-loss window:
+   ~24h (nightly dump) beyond the 6h PITR window.
 3. **Protect the `production` branch** — **blocked by the Free plan (0 protected branches, verified
    2026-07-14); same plan-upgrade decision as item 1.**
 

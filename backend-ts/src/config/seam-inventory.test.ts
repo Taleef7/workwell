@@ -183,6 +183,20 @@ test("bucket-s3: off with any partial combination of the three selecting vars", 
   );
 });
 
+test("bucket-s3: whitespace-only values stay off (deploy-secret hygiene)", () => {
+  assert.equal(
+    statusOf(
+      {
+        WORKWELL_BUCKET_S3_BUCKET: "  ",
+        WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "\n",
+        WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: " ",
+      },
+      "bucket-s3",
+    ),
+    false,
+  );
+});
+
 test("bucket-s3: region/endpoint alone never select the seam", () => {
   assert.equal(
     statusOf(
