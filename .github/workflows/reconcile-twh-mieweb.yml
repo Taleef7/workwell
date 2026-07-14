@@ -95,6 +95,11 @@ jobs:
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_TWH }}
       # Optional (E14/ADR-023): inert when the WORKWELL_VSAC_API_KEY_TWH secret is unset. KEEP IN SYNC with deploy-twh-mieweb.yml.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
+      # Optional (#167/ADR-030): durable S3 evidence bucket. Inert when unset. KEEP IN SYNC with deploy-twh-mieweb.yml.
+      WORKWELL_BUCKET_S3_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
+      WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
+      WORKWELL_BUCKET_S3_BUCKET: workwell-twh-evidence
+      WORKWELL_BUCKET_S3_REGION: us-east-1
       REPLACE_EXISTING: "true"
     steps:
       - uses: actions/checkout@v4
@@ -133,6 +138,10 @@ jobs:
               --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
               --arg frontend_url "$FRONTEND_URL" \
               --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
+              --arg bucket_key_id "$WORKWELL_BUCKET_S3_ACCESS_KEY_ID" \
+              --arg bucket_secret "$WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY" \
+              --arg bucket_name "$WORKWELL_BUCKET_S3_BUCKET" \
+              --arg bucket_region "$WORKWELL_BUCKET_S3_REGION" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -146,7 +155,11 @@ jobs:
                 {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
+                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
+                {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
+                {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
+                {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
+                {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"

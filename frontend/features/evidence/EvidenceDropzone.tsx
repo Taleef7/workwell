@@ -13,8 +13,9 @@ function formatFileSize(bytes: number): string {
  * Styled drag-and-drop evidence dropzone (UX-7). Presentational wrapper around the same native
  * file input that drove the bare "Choose File" control — it does NOT fork the upload logic:
  * both a click-selection and a drop feed the identical `onFileChange(file)` callback the parent
- * already used. Keeps `aria-label="Evidence file"` on the input for a11y. Upload storage is
- * ephemeral on the demo (in-container fs BUCKET), surfaced here as a muted note (DEPLOY.md).
+ * already used. Keeps `aria-label="Evidence file"` on the input for a11y. Storage is durable since
+ * #167/ADR-030 (managed S3 bucket); the muted note now reminds that the demo takes synthetic
+ * evidence only (the demo stack never receives PHI — PRODUCTION_READINESS_2026-07.md).
  */
 export function EvidenceDropzone({
   file,
@@ -94,7 +95,7 @@ export function EvidenceDropzone({
         )}
       </label>
       <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        Evidence storage is temporary on this demo — uploads are not retained across redeploys.
+        Demo note: uploaded files are synthetic demo evidence — do not upload real records.
       </p>
     </div>
   );

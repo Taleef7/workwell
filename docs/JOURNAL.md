@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-07-14 — Pre-meeting closeout: durable evidence bucket LIVE (#167/ADR-030), nightly DB backups (#270), DR drill executed, Neon plan-cap finding, tracking + doc-drift cleanup
+
+Everything owner-actionable without MIE, closed out the day before the Doug meeting. The one
+remaining owner step is unchanged: **send #254.**
+
+- **#167 CLOSED — evidence is durable (ADR-030).** Provisioned `workwell-twh-evidence` (AWS
+  us-east-1: public-access-blocked, versioning on, 30-day lifecycle on `db-dumps/`; least-privilege
+  IAM user `workwell-twh-app` — List/Get/Put/DeleteObject on this bucket only, policy smoke-tested
+  incl. cross-bucket deny). The documented "point the BUCKET binding at the s3 driver" recipe turned
+  out **unreachable**: the `@mieweb/cloud` config loader parses `mieweb.jsonc` bindings as literal
+  JSON (no env substitution), so a committed binding can't carry credentials. The durable backend is
+  instead selected **at app level** — `resolveBucket(env)` (`backend-ts/src/case/resolve-bucket.ts`),
+  mirroring the `DATABASE_URL` store override: ALL THREE of `WORKWELL_BUCKET_S3_BUCKET` +
+  `_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` set ⇒ `createS3Bucket` (`@mieweb/cloud-os`, the same
+  adapter the mieweb target uses; `createIfMissing:false` — the app's IAM deliberately cannot create
+  infra); unset ⇒ the injected fs binding, byte-identical. Memoized per worker (failed construction
+  not sticky). The **9th inventory seam** (`bucket-s3`, #260 pattern — predicate-reusing, boot-line
+  visible). **`@aws-sdk/client-s3` is an approved dependency add** — it is `@mieweb/cloud-os`'s own
+  declared optionalDependency for exactly this adapter, promoted to a direct dep so the s3 path works
+  on the `local` target the live container runs. Secrets `WORKWELL_BUCKET_S3_*_TWH` mapped in
+  `deploy-twh-mieweb.yml` **and** the keep-in-sync `reconcile-twh-mieweb.yml`.
+- **#270 second line of defence LIVE + the drill executed + a plan-cap finding.** New
+  `backup-neon-nightly.yml` (03:17 UTC): `pg_dump --schema=workwell_spike -Fc` over the **direct**
+  (de-`-pooler`ed) Neon connection → `s3://workwell-twh-evidence/db-dumps/` (30-day lifecycle).
+  Attempting the runbook's other two §2 decisions live surfaced the real constraint: the Neon API
+  rejects both `history_retention_seconds: 604800` (*"max: 21600"*) and protecting `production`
+  (`BRANCHES_PROTECTED_LIMIT_EXCEEDED`) — **the 6-hour PITR window IS the Free plan's maximum and
+  Free allows zero protected branches**, so runbook §2 items 1+3 collapse into one owner/billing
+  decision: upgrade the Neon plan (Launch = 7-day restore + protected branches). The **§6 drill was
+  executed** on live Neon, zero production impact: branch `drill-2026-07-14` → backend booted against
+  it (schema + authed tenants/runs reads real) → 2 `terminology_mappings` rows deleted → branch
+  restored to `^self@T0` (Neon requires `--preserve-under-name` for self-restore) → rows returned
+  5/5, outcomes intact (118,292) → both drill branches deleted.
+- **Tracking + estate cleanup.** **#268 closed** — PR #284 (merged 2026-07-11) covered the full scope
+  (persisted-run-derived debounce, missed-cycle backfill, first-tick fire, audit invariant, 5 tests)
+  but said `Refs` not `Closes`; same pattern as #183. The **decommissioned Vercel preview project
+  was deleted** (`workwell-measure-studio.vercel.app` had still been serving the old frontend against
+  the dead Fly backend — a publicly reachable broken copy; now 404; the v0 design storyboard project
+  is kept, it's referenced by the archived SPIKE_PLAN).
+- **Doc-drift reconciliation + stale-string cleanup.** `worker.ts`: the Phase-0 "skeleton" header,
+  the 501 hint ("endpoint groups are ported in Phase 4"), and `build:"phase1-spike"` (still served
+  live by `/api/version`) were all a month stale → header describes the completed strangler, the 501
+  hint points at ARCHITECTURE §7 (501 contract kept stable), version/health read
+  `build:"workwell-api-ts"` / no phase field. Catalog counts 60→63 (CLAUDE.md, DEPLOY.md incl. the
+  pre-E10 seeding list). The three "✓ 1,680,000 outcomes live" callouts (CLAUDE.md/DEPLOY/DATA_MODEL
+  §3.23) updated: the fabricated seed was rolled back 2026-07-09 for the #253 proof — **live is the
+  N=5000 real-eval, All Systems = 72,100** (verified today via SQL on the drill branch).
+  PRODUCTION_READINESS gap rows 3+8 updated; ARCHITECTURE §10 seam table + boot line carry
+  `bucket-s3`.
+
+Suite: typecheck clean; resolve-bucket (6) + seam-inventory (all 9 seams) + cases + worker tests
+green locally; full suite on CI. Post-merge verification: live `/api/version` shows the new build
+string; a `workflow_dispatch` of `backup-neon-nightly.yml` proves the first dump lands in S3.
+
+**Remaining owner steps:** send #254 (tomorrow's meeting); decide the Neon plan upgrade; the
+`eval_state` DDL (#263) and #287 Phase-2 write path remain deliberate decisions, not forgotten work.
+
 ## 2026-07-13 — Three design/ops documents: delta-eval (#263), cross-system credit (#287), backup/DR (#270)
 
 Docs only — no code, no DDL. Each surfaced something that changes the shape of the work, which is the

@@ -40,10 +40,10 @@ describe("EvidenceDropzone", () => {
     expect(onFileChange).toHaveBeenCalledWith(dropped);
   });
 
-  it("renders the ephemeral-storage note", () => {
+  it("renders the synthetic-evidence demo note", () => {
     render(<EvidenceDropzone file={null} onFileChange={() => {}} />);
     expect(
-      screen.getByText(/temporary on this demo/i)
+      screen.getByText(/synthetic demo evidence/i)
     ).toBeInTheDocument();
   });
 });
