@@ -31,16 +31,22 @@ than the official CMS canonical.
 3. MeasureReport export must continue to claim `urn:workwell:measure:*`. Switching to an official CMS
    canonical is forbidden unless numerator orientation and improvement notation are changed together;
    a guard test pins this invariant.
-4. Add base-R4 identity/provenance elements (`MeasureReport.id`, completion `date`, contained WorkWell
-   Organization `reporter`, and Bundle-entry `urn:uuid:*` `fullUrl`) without claiming DEQM profiles.
+4. Add base-R4 identity/provenance elements (`MeasureReport.id`, report-generation `date`, contained
+   WorkWell Organization `reporter`, and Bundle-entry `urn:uuid:*` `fullUrl`) without claiming DEQM
+   profiles. The route injects one generation timestamp so the timestamp field remains deterministic
+   under test; the run's measurement timeframe remains in `period`.
 
 **Consequences:** Exported DENOM values increase by the DENEX count, while scores are unchanged for
 OSHA/HEDIS-style measures because exclusions still subtract in the rate. CMS122/CMS125 IPP and DENOM
 now omit out-of-population `MISSING_DATA` rows, correcting their previously deflated exported scores.
 Individual populations still sum exactly to the summary. QRDA inherits the same corrected count/rate
 semantics. CQL `Outcome Status` remains the sole compliance authority (ADR-008); no schema, dependency,
-or stored-outcome change is introduced. Revisit the count interpretation if the final published QM IG
-materially differs from the cited ballot-branch clarification.
+or stored-outcome change is introduced. Accepted limitation: the run pipeline forces a per-subject
+evaluation failure to `MISSING_DATA`, with `evidence_json.evaluationError`; for `cms122`/`cms125`, the
+FHIR/QRDA exports consequently omit that subject from IPP/DENOM, indistinguishable from verified
+not-in-IPP. A future refinement may distinguish those cases using the persisted evaluation-error
+evidence. Revisit the count interpretation if the final published QM IG materially differs from the
+cited ballot-branch clarification.
 
 ## ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
 

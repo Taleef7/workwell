@@ -14,8 +14,9 @@ export type QualityScopeLevel = "all" | "tenant" | "site" | "provider";
 /**
  * A snapshot to persist (no `id` — the adapter assigns/keeps it on upsert). `scopeId` encodes the
  * hierarchy: `"ALL"` | `tenantId` | `` `${tenantId}|${site}` `` | `` `${tenantId}|${site}|${providerId}` ``.
- * `tenantId` is null only for the `"all"` root. `numerator = compliant`; `denominator = total − excluded`
- * (the proportion model, reconciled 1:1 with `countPopulations`).
+ * `tenantId` is null only for the `"all"` root. Snapshots intentionally retain their internal trend
+ * model: `numerator = compliant`; `denominator = total − excluded` (the effective denominator), with
+ * MISSING_DATA included for every measure. This deliberately diverges from FHIR/QRDA export semantics.
  */
 export interface QualitySnapshotInput {
   measureId: string;

@@ -183,7 +183,13 @@ function caseRerunResponse(detail: {
 /** Schedules background work that must outlive the response (ctx.waitUntil); awaits inline if absent. */
 export type WaitUntil = (p: Promise<unknown>) => void;
 
-export async function handleRuns(req: Request, env: RunsEnv, actor = "system", waitUntil?: WaitUntil): Promise<Response | null> {
+export async function handleRuns(
+  req: Request,
+  env: RunsEnv,
+  actor = "system",
+  waitUntil?: WaitUntil,
+  generatedAt = new Date().toISOString(),
+): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
@@ -444,7 +450,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
       const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId), measureId);
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts));
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts, generatedAt));
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
     // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.
@@ -462,7 +468,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
         );
       }
       const rows = await os.listOutcomes(mrId, { limit: MAX_INDIVIDUAL_REPORT_SUBJECTS });
-      return fhir(buildMeasureReportBundle(run, measureId, rows));
+      return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt));
     }
     return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);
   }

@@ -20,6 +20,7 @@ const run: RunRecord = {
   requestedScope: { measureId: "audiogram" }, startedAt: "2026-06-12T00:00:00.000Z", completedAt: "2026-06-12T00:05:00.000Z",
   measurementPeriodStart: "2025-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
 };
+const GENERATED_AT = "2026-07-15T20:30:00.000Z";
 const POP = "http://terminology.hl7.org/CodeSystem/measure-population";
 let n = 0;
 const oc = (status: string): OutcomeRecord => ({
@@ -41,7 +42,7 @@ test("countPopulations: IPP/DENEX/DENOM/NUMER from buckets", () => {
 });
 
 test("summary: counts + measureScore reconcile; conformant", () => {
-  const mr = buildSummaryMeasureReport(run, "audiogram", outcomes);
+  const mr = buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT);
   assert.equal(mr.resourceType, "MeasureReport");
   assert.equal(mr.status, "complete");
   assert.equal(mr.type, "summary");
@@ -57,7 +58,7 @@ test("summary: counts + measureScore reconcile; conformant", () => {
 });
 
 test("summary: all-excluded retains DENOM membership count and omits score when effective denominator is zero", () => {
-  const mr = buildSummaryMeasureReport(run, "audiogram", [oc("EXCLUDED"), oc("EXCLUDED")]);
+  const mr = buildSummaryMeasureReport(run, "audiogram", [oc("EXCLUDED"), oc("EXCLUDED")], GENERATED_AT);
   assert.equal(countOf(mr, "denominator"), 2);
   assert.equal(countOf(mr, "denominator-exclusion"), 2);
   assert.equal(mr.group[0]!.measureScore, undefined);
@@ -81,20 +82,20 @@ test("cms122/cms125 MISSING_DATA is out of population in row and histogram count
 });
 
 test("individual: subject ref + 0/1 membership; no measureScore", () => {
-  const compliant = buildIndividualMeasureReport(oc("COMPLIANT"), run, "audiogram");
+  const compliant = buildIndividualMeasureReport(oc("COMPLIANT"), run, "audiogram", GENERATED_AT);
   assert.equal(compliant.type, "individual");
   assert.match(compliant.subject!.reference, /^Patient\/emp-/);
   assert.equal(compliant.group[0]!.measureScore, undefined);
   assert.equal(countOf(compliant, "numerator"), 1);
   assert.equal(countOf(compliant, "denominator"), 1);
   assert.equal(countOf(compliant, "denominator-exclusion"), 0);
-  const excluded = buildIndividualMeasureReport(oc("EXCLUDED"), run, "audiogram");
+  const excluded = buildIndividualMeasureReport(oc("EXCLUDED"), run, "audiogram", GENERATED_AT);
   assert.equal(countOf(excluded, "denominator-exclusion"), 1);
   assert.equal(countOf(excluded, "denominator"), 1);
   assert.equal(countOf(excluded, "numerator"), 0);
 
   for (const measureId of ["cms122", "cms125"]) {
-    const missing = buildIndividualMeasureReport(oc("MISSING_DATA"), run, measureId);
+    const missing = buildIndividualMeasureReport(oc("MISSING_DATA"), run, measureId, GENERATED_AT);
     for (const code of ["initial-population", "numerator", "denominator", "denominator-exclusion"])
       assert.equal(countOf(missing, code), 0, `${measureId} ${code}`);
   }
@@ -102,7 +103,7 @@ test("individual: subject ref + 0/1 membership; no measureScore", () => {
 
 test("WorkWell canonical and increase notation stay coupled to the compliance-oriented numerator", () => {
   for (const measureId of ["cms122", "cms125"]) {
-    const report = buildSummaryMeasureReport(run, measureId, [oc("COMPLIANT"), oc("OVERDUE")]);
+    const report = buildSummaryMeasureReport(run, measureId, [oc("COMPLIANT"), oc("OVERDUE")], GENERATED_AT);
     assert.equal(report.measure, `urn:workwell:measure:${measureId}`);
     assert.ok(!report.measure.includes("cms.gov"), "never claims the official CMS canonical");
     assert.equal(report.improvementNotation?.coding[0]?.code, "increase");
@@ -110,24 +111,25 @@ test("WorkWell canonical and increase notation stay coupled to the compliance-or
   }
 });
 
-test("base R4 metadata: UUID id, completion date, and contained WorkWell reporter", () => {
-  const summary = buildSummaryMeasureReport(run, "audiogram", outcomes);
+test("base R4 metadata: UUID id, generation date, and contained WorkWell reporter", () => {
+  const summary = buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT);
   assert.match(summary.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  assert.equal(summary.date, run.completedAt);
+  assert.equal(summary.date, GENERATED_AT);
+  assert.notEqual(summary.date, run.completedAt, "generation time is distinct from run completion time");
   assert.deepEqual(summary.reporter, { reference: "#workwell-measure-studio" });
   assert.deepEqual(summary.contained, [
     { resourceType: "Organization", id: "workwell-measure-studio", name: "WorkWell Measure Studio" },
   ]);
 
-  const individual = buildIndividualMeasureReport(oc("COMPLIANT"), run, "cms122");
+  const individual = buildIndividualMeasureReport(oc("COMPLIANT"), run, "cms122", GENERATED_AT);
   assert.match(individual.id, /^[0-9a-f-]{36}$/);
-  assert.equal(individual.date, run.completedAt);
+  assert.equal(individual.date, GENERATED_AT);
   assert.equal(individual.reporter.reference, "#workwell-measure-studio");
   assert.equal(individual.improvementNotation?.coding[0]?.code, "increase");
 });
 
 test("bundle: summary + one individual per outcome; individuals sum to summary", () => {
-  const bundle = buildMeasureReportBundle(run, "audiogram", outcomes);
+  const bundle = buildMeasureReportBundle(run, "audiogram", outcomes, GENERATED_AT);
   assert.equal(bundle.resourceType, "Bundle");
   assert.equal(bundle.type, "collection");
   assert.equal(bundle.entry.length, 1 + outcomes.length);
@@ -135,6 +137,7 @@ test("bundle: summary + one individual per outcome; individuals sum to summary",
   for (const entry of bundle.entry) {
     assert.equal(entry.fullUrl, `urn:uuid:${entry.resource.id}`);
     assert.match(entry.fullUrl, /^urn:uuid:[0-9a-f-]{36}$/);
+    assert.equal(entry.resource.date, GENERATED_AT, "every report in the bundle shares one generation time");
   }
   const individuals = bundle.entry.slice(1).map((e) => e.resource);
   const sum = (code: string) => individuals.reduce((acc, mr) => acc + countOf(mr, code), 0);

@@ -25,7 +25,7 @@ export interface MeasureReport {
   measure: string;
   contained: Array<{ resourceType: "Organization"; id: string; name: string }>;
   subject?: { reference: string };
-  date?: string;
+  date: string;
   reporter: { reference: string };
   period: { start: string; end: string };
   improvementNotation?: { coding: Array<{ system: string; code: string }> };
@@ -84,9 +84,9 @@ const improvementNotation = (measureId: string): "increase" | "decrease" =>
   MEASURE_BINDINGS[measureId]?.improvementNotation ?? "increase";
 
 const REPORTER_ID = "workwell-measure-studio";
-const reportMetadata = (run: RunRecord) => ({
+const reportMetadata = (generatedAt: string) => ({
   id: crypto.randomUUID(),
-  ...(run.completedAt ? { date: run.completedAt } : {}),
+  date: generatedAt,
   contained: [{ resourceType: "Organization" as const, id: REPORTER_ID, name: "WorkWell Measure Studio" }],
   reporter: { reference: `#${REPORTER_ID}` },
 });
@@ -100,18 +100,28 @@ const populations = (c: PopulationCounts): Population[] => [
   pop("denominator-exclusion", c.denex),
 ];
 
-export function buildSummaryMeasureReport(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): MeasureReport {
-  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId));
+export function buildSummaryMeasureReport(
+  run: RunRecord,
+  measureId: string,
+  outcomes: OutcomeRecord[],
+  generatedAt: string,
+): MeasureReport {
+  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId), generatedAt);
 }
 
 /** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
-export function buildSummaryMeasureReportFromCounts(run: RunRecord, measureId: string, c: PopulationCounts): MeasureReport {
+export function buildSummaryMeasureReportFromCounts(
+  run: RunRecord,
+  measureId: string,
+  c: PopulationCounts,
+  generatedAt: string,
+): MeasureReport {
   const group: MeasureReport["group"][number] = { population: populations(c) };
   const effectiveDenominator = c.denom - c.denex;
   if (effectiveDenominator > 0) group.measureScore = { value: c.numer / effectiveDenominator };
   return {
     resourceType: "MeasureReport",
-    ...reportMetadata(run),
+    ...reportMetadata(generatedAt),
     status: "complete",
     type: "summary",
     measure: measureCanonical(measureId),
@@ -130,13 +140,18 @@ const MEMBERSHIP: Record<string, PopulationCounts> = {
   EXCLUDED: { ipp: 1, denom: 1, denex: 1, numer: 0 },
 };
 
-export function buildIndividualMeasureReport(outcome: OutcomeRecord, run: RunRecord, measureId: string): MeasureReport {
+export function buildIndividualMeasureReport(
+  outcome: OutcomeRecord,
+  run: RunRecord,
+  measureId: string,
+  generatedAt: string,
+): MeasureReport {
   const c = missingDataMeansOutOfPopulation(measureId) && outcome.status === "MISSING_DATA"
     ? zeroCounts()
     : MEMBERSHIP[outcome.status] ?? { ipp: 1, denom: 1, denex: 0, numer: 0 };
   return {
     resourceType: "MeasureReport",
-    ...reportMetadata(run),
+    ...reportMetadata(generatedAt),
     status: "complete",
     type: "individual",
     measure: measureCanonical(measureId),
@@ -148,10 +163,15 @@ export function buildIndividualMeasureReport(outcome: OutcomeRecord, run: RunRec
   };
 }
 
-export function buildMeasureReportBundle(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): MeasureReportBundle {
+export function buildMeasureReportBundle(
+  run: RunRecord,
+  measureId: string,
+  outcomes: OutcomeRecord[],
+  generatedAt: string,
+): MeasureReportBundle {
   const reports = [
-    buildSummaryMeasureReport(run, measureId, outcomes),
-    ...outcomes.map((outcome) => buildIndividualMeasureReport(outcome, run, measureId)),
+    buildSummaryMeasureReport(run, measureId, outcomes, generatedAt),
+    ...outcomes.map((outcome) => buildIndividualMeasureReport(outcome, run, measureId, generatedAt)),
   ];
   return {
     resourceType: "Bundle",

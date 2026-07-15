@@ -22,10 +22,12 @@ const bundle = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../spike/synthetic/audiogram/present_recent.json", import.meta.url)), "utf8"),
 );
 let env: { DB: unknown };
+const GENERATED_AT = "2026-07-15T20:30:00.000Z";
 
 const post = (path: string, body?: unknown) =>
   handleRuns(new Request(`http://x${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }), env as never);
-const get = (path: string) => handleRuns(new Request(`http://x${path}`, { method: "GET" }), env as never);
+const get = (path: string) =>
+  handleRuns(new Request(`http://x${path}`, { method: "GET" }), env as never, "system", undefined, GENERATED_AT);
 /** POST that captures ctx.waitUntil background work so the async-scope path can be awaited deterministically. */
 const postAsync = async (path: string, body?: unknown) => {
   const tasks: Promise<unknown>[] = [];
@@ -288,7 +290,7 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   assert.equal(mr.resourceType, "MeasureReport");
   assert.equal(mr.type, "summary");
   assert.match(mr.id, /^[0-9a-f-]{36}$/);
-  assert.match(mr.date, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(mr.date, GENERATED_AT, "MeasureReport.date is the injected report-generation time");
   assert.equal(mr.reporter.reference, "#workwell-measure-studio");
   assert.equal(mr.contained[0]?.name, "WorkWell Measure Studio");
 

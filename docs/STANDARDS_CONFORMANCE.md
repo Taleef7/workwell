@@ -7,7 +7,7 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Measure logic | HL7 CQL 1.x | Authored `.cql` per runnable measure (`backend-ts/measures/*.cql`) | Authored + compiles | Inline-code + value-set-retrieve variants |
 | Compiled logic | HL7 ELM | Build-time CQL→ELM (`@cqframework/cql`, JVM-free), committed JSON | Compiled + executed | Runtime engine executes ELM via `cql-execution` |
 | Value sets | FHIR ValueSet / VSAC | `ValueSetResolver` expansion → populated `cql.CodeService` (E3.2) | Real expansion (store-backed) | VSAC-ready behind the port; synthetic codes today |
-| Measure result (patient + summary) | FHIR R4 MeasureReport | `GET /api/runs/{id}/measure-report` (summary + individual + Bundle) (E3.1) | Structurally conformant | Membership-label counts reconcile individual↔summary; UUID ids, completion date, contained reporter, Bundle `fullUrl`; structural (not HL7-validator) |
+| Measure result (patient + summary) | FHIR R4 MeasureReport | `GET /api/runs/{id}/measure-report` (summary + individual + Bundle) (E3.1) | Structurally conformant | Membership-label counts reconcile individual↔summary; UUID ids, report-generation date, contained reporter, Bundle `fullUrl`; structural (not HL7-validator) |
 | Measure definition export | MAT (Measure/Library/ValueSet) | `GET /api/measures/{id}/versions/{vid}/export/mat` (FHIR R4 XML) | MAT-compatible | Hand-built FHIR R4 bundle |
 | Aggregate report | HL7 QRDA Category III | `GET /api/runs/{id}/qrda` (CDA XML) (E3.3) | **Stub** | Well-formed + structurally representative; **not** IG/Schematron-validated |
 | Evaluated resources | HL7 QI-Core (US Realm) | Synthetic FHIR bundles stamped with QI-Core `meta.profile` + required elements (E3.4) | Structural alignment | `meta.profile` declared + required elements present; **not** IG/validator-validated (ADR-009) |
@@ -42,8 +42,10 @@ always compliance-oriented. This includes `cms122`, whose WorkWell numerator rev
 poor-control orientation. Accordingly, reports claim only `urn:workwell:measure:*`; using an official
 CMS canonical without also reorienting the numerator and notation is forbidden and guard-tested.
 
-Each emitted MeasureReport now has a lowercase UUID `id`, `date` from the completed run, and a contained
-Organization reporter named **WorkWell Measure Studio**. Collection Bundle entries carry matching
+Each emitted MeasureReport now has a lowercase UUID `id`, a request-scoped report-generation `date`, and
+a contained Organization reporter named **WorkWell Measure Studio**. The route injects one generation
+timestamp for deterministic timestamp assertions; the run's measurement timeframe remains in `period`.
+Collection Bundle entries carry matching
 `urn:uuid:*` `fullUrl` values. These are valid base-R4 additions only: WorkWell still does **not** claim a
 DEQM `meta.profile`, and the structural/not-validator-verified posture above is unchanged.
 
