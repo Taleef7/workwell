@@ -573,8 +573,10 @@ quality_snapshots (
   (`QUALITY_SNAPSHOT_MATERIALIZED`).
 - **Aggregate-only** — no per-employee row (that would reintroduce the 160k-row scan the table exists to
   avoid; the per-person Simulate path #197 covers the individual case). Reconciles
-  All = Σ tenants = Σ sites = Σ providers at every (measure, period). `numerator`/`denominator` reuse the
-  proportion model (`fhir/measure-report.ts` `countPopulations`).
+  All = Σ tenants = Σ sites = Σ providers at every (measure, period). Snapshots intentionally keep the
+  internal trend model `numerator = compliant`, `denominator = total − excluded`: this is already the
+  effective denominator, and it retains `MISSING_DATA` for every measure (including `cms122`/`cms125`).
+  It therefore deliberately diverges from the FHIR/QRDA membership-label export model in ADR-031.
 - **Read** via the `QualitySnapshotStore` port (`querySnapshots({measureId, scopeLevel, scopeId, tenantId, from, to})`),
   surfaced by `GET /api/quality/history` (E16 PR-2, authenticated read-only). Also **backfilled** for past
   months by `pnpm seed:quality-history` (`run/backfill-quality-history.ts`) — real evaluated snapshots

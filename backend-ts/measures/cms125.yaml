@@ -9,6 +9,8 @@ cql: cms125.cql
 # Production is eCQI CMS125v14 faithful-subset (female 42-74, visit, Oct-1 mammogram window).
 # complianceWindowDays retained for synthetic stamping (~27 months ≈ 820 days); CQL uses official Oct-1 interval.
 bindings:
+  improvementNotation: increase
+  missingDataMeansOutOfPopulation: true
   rateKey: cms125
   enrollment: { code: cms125-eligible, valueSet: "urn:workwell:vs:cms125-eligible" }
   waiver:     { code: cms125-excluded, valueSet: "urn:workwell:vs:cms125-excluded" }

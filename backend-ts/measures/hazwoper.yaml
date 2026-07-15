@@ -7,6 +7,7 @@ tags: [surveillance, hazmat, osha]
 complianceClass: RECURRING
 cql: hazwoper.cql
 bindings:
+  improvementNotation: increase
   rateKey: hazwoper
   enrollment: { code: hazwoper-program, valueSet: "urn:workwell:vs:hazwoper-enrollment" }
   waiver:     { code: hazwoper-exemption, valueSet: "urn:workwell:vs:hazwoper-exemption" }

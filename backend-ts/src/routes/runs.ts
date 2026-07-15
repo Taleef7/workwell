@@ -183,7 +183,13 @@ function caseRerunResponse(detail: {
 /** Schedules background work that must outlive the response (ctx.waitUntil); awaits inline if absent. */
 export type WaitUntil = (p: Promise<unknown>) => void;
 
-export async function handleRuns(req: Request, env: RunsEnv, actor = "system", waitUntil?: WaitUntil): Promise<Response | null> {
+export async function handleRuns(
+  req: Request,
+  env: RunsEnv,
+  actor = "system",
+  waitUntil?: WaitUntil,
+  generatedAt = new Date().toISOString(),
+): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
 
@@ -407,8 +413,9 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     }
     const fmt = url.searchParams.get("format") ?? "xml";
     if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
-    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId));
-    return new Response(buildQrda3DocumentFromCounts(run, measureIds[0]!, counts), {
+    const measureId = measureIds[0]!;
+    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId), measureId);
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, counts), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -442,8 +449,8 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       });
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
-      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId));
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts));
+      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId), measureId);
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts, generatedAt));
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
     // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.
@@ -461,7 +468,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
         );
       }
       const rows = await os.listOutcomes(mrId, { limit: MAX_INDIVIDUAL_REPORT_SUBJECTS });
-      return fhir(buildMeasureReportBundle(run, measureId, rows));
+      return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt));
     }
     return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);
   }

@@ -7,6 +7,7 @@ tags: [wellness, immunization, varicella, permanent]
 complianceClass: PERMANENT
 cql: varicella.cql
 bindings:
+  improvementNotation: increase
   rateKey: varicella
   complianceWindowDays: 0
   series: { requiredDoses: 2 }

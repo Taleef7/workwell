@@ -7,6 +7,7 @@ tags: [wellness, immunization, adult, hedis]
 complianceClass: RECURRING
 cql: adult_immunization.cql
 bindings:
+  improvementNotation: increase
   rateKey: adult_immunization
   complianceWindowDays: 3650
   enrollment: { code: adult-immz-enrolled, valueSet: "urn:workwell:vs:adult-immz-enrollment" }

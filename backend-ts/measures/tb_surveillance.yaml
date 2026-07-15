@@ -7,6 +7,7 @@ tags: [surveillance, infection-control, cdc]
 complianceClass: RECURRING
 cql: tb_surveillance.cql
 bindings:
+  improvementNotation: increase
   rateKey: tb_surveillance
   enrollment: { code: tb-program, valueSet: "urn:workwell:vs:tb-eligible-roles" }
   waiver:     { code: tb-exemption, valueSet: "urn:workwell:vs:tb-exemption" }

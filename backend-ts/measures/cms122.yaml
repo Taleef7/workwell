@@ -9,6 +9,8 @@ cql: cms122.cql
 # Production is eCQI CMS122v14 faithful-subset (age/visit/diabetes, HbA1c|GMI, hospice/palliative).
 # Synthetic dual-codes VSAC members + local urn:workwell for demo continuity.
 bindings:
+  improvementNotation: increase
+  missingDataMeansOutOfPopulation: true
   rateKey: cms122
   enrollment: { code: cms122-diabetes, valueSet: "urn:workwell:vs:cms122-diabetes" }
   waiver:     { code: cms122-excluded, valueSet: "urn:workwell:vs:cms122-excluded" }
