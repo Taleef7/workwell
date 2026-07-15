@@ -7,6 +7,7 @@ tags: [wellness, immunization, mmr, permanent]
 complianceClass: PERMANENT
 cql: mmr.cql
 bindings:
+  improvementNotation: increase
   rateKey: mmr
   complianceWindowDays: 0
   series: { requiredDoses: 2 }

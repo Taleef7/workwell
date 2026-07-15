@@ -407,8 +407,9 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
     }
     const fmt = url.searchParams.get("format") ?? "xml";
     if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
-    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId));
-    return new Response(buildQrda3DocumentFromCounts(run, measureIds[0]!, counts), {
+    const measureId = measureIds[0]!;
+    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId), measureId);
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, counts), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -442,7 +443,7 @@ export async function handleRuns(req: Request, env: RunsEnv, actor = "system", w
       });
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
-      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId));
+      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId), measureId);
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts));
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a

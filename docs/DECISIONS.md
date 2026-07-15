@@ -1,5 +1,47 @@
 # Architecture Decision Records
 
+## ADR-031: MeasureReport exports use membership-label counts and binding-owned measure semantics
+
+**Status:** Accepted (2026-07-15).
+
+**Context:** Connectathon review found two export-only conformance defects. First, WorkWell reported
+`DENOM = IPP - DENEX`, even though the clarified calculation example on the `fhir-cqm` ballot branch
+`br-57509` treats denominator populations as membership labels: exclusion members remain in the
+reported DENOM and subtract only in the score (`score=(3-1)/(6-1-1)` over `DENOM=6`). This is a
+ballot-branch QM IG clarification, not yet published normative text, but the worked arithmetic is
+unambiguous. Second, the generic outcome mapping counted every `MISSING_DATA` subject in IPP/DENOM;
+that is correct for WorkWell's OSHA/HEDIS-style measures, but `cms122.cql` and `cms125.cql` explicitly
+emit `MISSING_DATA` for `not Initial Population`. Both defects affected FHIR/QRDA export numbers only;
+stored outcomes and compliance decisions were correct.
+
+The same review found a fragile semantic coupling: the exporter hardcoded `improvementNotation` to
+`increase`. That is internally correct only because WorkWell defines every numerator as
+compliance-oriented (including an inverted CMS122 numerator) and claims a WorkWell canonical rather
+than the official CMS canonical.
+
+**Decision:**
+
+1. `countPopulations`, the bounded status-histogram path, individual memberships, FHIR summary score,
+   and the QRDA performance rate share membership-label semantics: `DENOM = IPP`, `EXCLUDED` contributes
+   to both DENOM and DENEX, and the effective score denominator is `DENOM - DENEX` (guarded above zero).
+2. Measure-specific export semantics live in the YAML-generated `MEASURE_BINDINGS`. All current
+   measures explicitly declare `improvementNotation: increase`; only `cms122` and `cms125` declare
+   `missingDataMeansOutOfPopulation: true`, mapping `MISSING_DATA` to all-zero populations in both
+   count paths and individual reports.
+3. MeasureReport export must continue to claim `urn:workwell:measure:*`. Switching to an official CMS
+   canonical is forbidden unless numerator orientation and improvement notation are changed together;
+   a guard test pins this invariant.
+4. Add base-R4 identity/provenance elements (`MeasureReport.id`, completion `date`, contained WorkWell
+   Organization `reporter`, and Bundle-entry `urn:uuid:*` `fullUrl`) without claiming DEQM profiles.
+
+**Consequences:** Exported DENOM values increase by the DENEX count, while scores are unchanged for
+OSHA/HEDIS-style measures because exclusions still subtract in the rate. CMS122/CMS125 IPP and DENOM
+now omit out-of-population `MISSING_DATA` rows, correcting their previously deflated exported scores.
+Individual populations still sum exactly to the summary. QRDA inherits the same corrected count/rate
+semantics. CQL `Outcome Status` remains the sole compliance authority (ADR-008); no schema, dependency,
+or stored-outcome change is introduced. Revisit the count interpretation if the final published QM IG
+materially differs from the cited ballot-branch clarification.
+
 ## ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
 
 **Status:** Accepted (2026-07-14).

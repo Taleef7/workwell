@@ -13,3 +13,14 @@ test("a permanent vaccine measure carries complianceClass PERMANENT + series.req
   assert.equal(mmr.complianceClass, "PERMANENT");
   assert.equal(mmr.series?.requiredDoses, 2);
 });
+
+test("MeasureReport semantics are explicit per binding; only CMS122/CMS125 exclude MISSING_DATA from IPP", () => {
+  assert.ok(Object.values(MEASURE_BINDINGS).every((binding) => binding.improvementNotation === "increase"));
+  assert.deepEqual(
+    Object.entries(MEASURE_BINDINGS)
+      .filter(([, binding]) => binding.missingDataMeansOutOfPopulation)
+      .map(([measureId]) => measureId)
+      .sort(),
+    ["cms122", "cms125"],
+  );
+});

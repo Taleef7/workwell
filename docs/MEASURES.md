@@ -419,8 +419,11 @@ Each outcome evidence payload includes:
   forecast is **advisory only** — the CQL `Outcome Status` remains the sole compliance authority (ADR-012).
 - A completed single-measure run can be exported as a FHIR R4 `MeasureReport` (summary + per-subject
   individual + a collection Bundle) via `GET /api/runs/{runId}/measure-report` — built from persisted
-  `outcomes` with a proportion population model whose counts reconcile 1:1 with the run's outcomes
-  (#89 / E3.1). Value-set expansion + QRDA are separate E3 items (#90/#91).
+  `outcomes` with a proportion population model whose individual membership labels reconcile 1:1 with
+  the summary (#89 / E3.1; ADR-031). Reported DENOM includes DENEX membership; the score is
+  `NUMER / (DENOM - DENEX)`. For `cms122`/`cms125` only, binding metadata maps `MISSING_DATA` to
+  out-of-population because their authored CQL uses that status for `not Initial Population`; OSHA and
+  HEDIS-style measures keep it in IPP/DENOM. Value-set expansion + QRDA are separate E3 items (#90/#91).
 - A completed single-measure run can be exported as an HL7 QRDA Category III aggregate stub via
   `GET /api/runs/{runId}/qrda?format=xml` — well-formed CDA carrying the aggregate population counts +
   performance rate (reuses the MeasureReport `countPopulations`); a stub, not IG-validated (#91 / E3.3).
