@@ -1,6 +1,10 @@
 [CmdletBinding()]
 param(
-  [string]$ContentDir = (Join-Path $PSScriptRoot "..\.official-content")
+  [string]$ContentDir = (Join-Path $PSScriptRoot "..\.official-content"),
+  # Upstream revision the committed docs/OFFICIAL_TESTCASE_REPORT_2026-07.md was generated against.
+  # Pass -Ref master (or another SHA) to test newer content; the committed report is only
+  # reproducible at this pin.
+  [string]$Ref = "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,15 +29,18 @@ if (Test-Path -LiteralPath (Join-Path $ContentDir ".git")) {
   if ($LASTEXITCODE -ne 0) { throw "Unable to inspect existing checkout: $ContentDir" }
   if ($dirty) { throw "Official content checkout has local changes; refusing to update: $ContentDir" }
   git -C $ContentDir config core.longpaths true
-  git -C $ContentDir pull --ff-only origin master
-  if ($LASTEXITCODE -ne 0) { throw "Unable to fast-forward official content checkout" }
 } else {
-  git clone -c core.longpaths=true --filter=blob:none --sparse --depth 1 $repo $ContentDir
+  git clone -c core.longpaths=true --filter=blob:none --sparse --no-checkout $repo $ContentDir
   if ($LASTEXITCODE -ne 0) { throw "Unable to clone official content" }
 }
 
 git -C $ContentDir sparse-checkout set @paths
 if ($LASTEXITCODE -ne 0) { throw "Unable to configure sparse checkout" }
+
+git -C $ContentDir fetch --depth 1 origin $Ref
+if ($LASTEXITCODE -ne 0) { throw "Unable to fetch pinned revision ${Ref}" }
+git -C $ContentDir -c advice.detachedHead=false checkout --detach FETCH_HEAD
+if ($LASTEXITCODE -ne 0) { throw "Unable to checkout pinned revision ${Ref}" }
 
 $revision = git -C $ContentDir rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw "Unable to resolve official content revision" }
