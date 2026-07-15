@@ -33,7 +33,7 @@ The fetch script sparse-checks out only the two measure bundles and two test-cas
 
 `fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call or key is used.
 
-**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue to be filed); the un-normalized run scores 64/66.
+**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue filed: projecttacoma/fqm-execution#371); the un-normalized run scores 64/66.
 
 - **CMS122:** trustMetaProfile=false (first pass; no retry); 26/26 Bundle ValueSets carry expansions; 1 expansion(s) report more total codes than are present; fqm warnings=0.
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.

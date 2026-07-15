@@ -142,7 +142,7 @@ Both primary runs used `trustMetaProfile:false` on the first attempt; neither re
 `fqm-execution` consumed the expanded ValueSets directly from each measure Bundle (CMS122 26/26;
 CMS125 32/32), so no external cache or VSAC call was required for v1.0.000.
 
-**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue to be filed); the un-normalized run scores 64/66.
+**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue filed: projecttacoma/fqm-execution#371); the un-normalized run scores 64/66.
 
 ### 7.2 CMS122 calibration: committed expecteds vs the source comparison
 

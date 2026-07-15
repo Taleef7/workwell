@@ -432,7 +432,7 @@ test("renderOfficialCaseReport documents primary end-of-day normalization withou
   });
   assert.match(
     markdown,
-    /date-only period ends are normalized to end-of-day because fqm-execution 1\.8\.5 parses them as start-of-day \(upstream issue to be filed\); the un-normalized run scores 64\/66\./,
+    /date-only period ends are normalized to end-of-day because fqm-execution 1\.8\.5 parses them as start-of-day \(upstream issue filed: projecttacoma\/fqm-execution#371\); the un-normalized run scores 64\/66\./,
   );
   assert.doesNotMatch(markdown, /diagnostic probe|primary table intentionally preserves/i);
 });
