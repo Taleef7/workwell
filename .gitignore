@@ -39,6 +39,9 @@ backend/src/test/resources/logback-test.xml
 .tmp_eval_payload.json
 .vercel
 
+# Downloaded official dQM bundles/test cases (fetched on demand; never vendored)
+/backend-ts/.official-content/
+
 # Git worktrees (isolated workspaces — project-local)
 .worktrees/
 

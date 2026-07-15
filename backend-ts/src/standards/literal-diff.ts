@@ -260,7 +260,7 @@ export async function computeLiteralDiff(
       patientBundles,
       {
         measurementPeriodStart: `${deps.asOf.slice(0, 4)}-01-01`,
-        measurementPeriodEnd: `${deps.asOf.slice(0, 4)}-12-31`,
+        measurementPeriodEnd: `${deps.asOf.slice(0, 4)}-12-31T23:59:59.999Z`,
         calculateSDEs: false,
         // fqm-execution 1.8.5 has no `disableHTMLGeneration` option -- it reads `calculateHTML`
         // (default true) plus these other on-by-default flags. Disable all of them: this diff
