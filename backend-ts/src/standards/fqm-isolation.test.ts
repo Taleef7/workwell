@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
  * transitive deps — axios/handlebars/moment/lodash) must NEVER be imported by the live run pipeline,
  * engine ingress, or the worker entrypoint — only by the standards diagnostic module reached from the
  * fidelity-diff route. This arch test greps the whole `src/` tree for any `fqm-execution` import and
- * asserts the sole owner is `standards/literal-diff.ts`.
+ * asserts the exact allowlist is the live fidelity diagnostic plus the offline official-case CLI core.
  */
 const SRC_ROOT = fileURLToPath(new URL("../", import.meta.url)); // .../backend-ts/src/
 const IMPORT_RE = /(?:from\s*|import\s*\(\s*)["']fqm-execution["']/;
@@ -25,15 +25,16 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-test("fqm-execution is imported ONLY from standards/literal-diff.ts (ADR-026 isolation)", () => {
+test("fqm-execution imports match the exact standards-diagnostic allowlist (ADR-026 isolation)", () => {
   const files: string[] = [];
   walk(SRC_ROOT.replace(/\/$/, ""), files);
   const importers = files
     .filter((f) => IMPORT_RE.test(readFileSync(f, "utf8")))
-    .map((f) => f.replace(/\\/g, "/"));
+    .map((f) => f.replace(/\\/g, "/").replace(/\/{2,}/g, "/"));
 
-  assert.equal(importers.length, 1, `fqm-execution imported from unexpected files: ${importers.join(", ")}`);
-  assert.match(importers[0]!, /standards\/literal-diff\.ts$/);
+  const allowed = ["standards/literal-diff.ts", "standards/official-cases.ts"];
+  const actual = importers.map((file) => file.slice(file.lastIndexOf("/src/") + "/src/".length)).sort();
+  assert.deepEqual(actual, allowed, `fqm-execution imported from unexpected files: ${importers.join(", ")}`);
 });
 
 test("fqm-execution is NOT imported by run/, engine/ingress/, or worker.ts (ADR-026)", () => {
