@@ -260,7 +260,7 @@ test("runOfficialMeasureCases calls Calculator once for the patient batch with l
   assert.deepEqual(calls[0]![1], [loaded.cases[0]!.patientBundle]);
   assert.deepEqual(calls[0]![2], {
     measurementPeriodStart: "2026-01-01",
-    measurementPeriodEnd: "2026-12-31",
+    measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
     calculateSDEs: false,
     calculateHTML: false,
     calculateClauseCoverage: false,
@@ -362,6 +362,7 @@ test("runCms122DraftDrift reuses official Bundle ValueSets and counts changed po
         }),
       ),
   });
+  officialRun.trustMetaProfile = true;
   const calls: unknown[][] = [];
   const calculate = (...args: unknown[]) => {
     calls.push(args);
@@ -382,6 +383,11 @@ test("runCms122DraftDrift reuses official Bundle ValueSets and counts changed po
   const drift = await module.runCms122DraftDrift(loaded, officialRun, draftBundle, { calculate });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.length, 4);
+  assert.equal(
+    (calls[0]![2] as { trustMetaProfile: boolean }).trustMetaProfile,
+    true,
+    "draft drift must use the official run's resolved profile mode",
+  );
   assert.equal(calls[0]![3], loaded.valueSetResources);
   assert.equal(drift.total, 1);
   assert.equal(drift.changedCases, 1);
@@ -389,7 +395,7 @@ test("runCms122DraftDrift reuses official Bundle ValueSets and counts changed po
   assert.deepEqual(drift.cases[0]!.differences, ["numerator"]);
 });
 
-test("renderOfficialCaseReport classifies the two CMS125 Dec-31 misses as an fqm date-precision finding", async () => {
+test("renderOfficialCaseReport documents primary end-of-day normalization without probe prose", async () => {
   const module = await import("./official-cases.ts");
   const loaded = loadedMeasureForRunner();
   const expected = { ...loaded.cases[0]!.expected!, "denominator-exclusion": 1 };
@@ -424,7 +430,9 @@ test("renderOfficialCaseReport classifies the two CMS125 Dec-31 misses as an fqm
     generatedDate: "2026-07-15",
     sourceRevision: "source-sha",
   });
-  assert.match(markdown, /fqm-execution 1\.8\.5 date-precision finding/);
-  assert.match(markdown, /2026-12-31T23:59:59/);
-  assert.match(markdown, /end-of-day diagnostic probe produced 66\/66/);
+  assert.match(
+    markdown,
+    /date-only period ends are normalized to end-of-day because fqm-execution 1\.8\.5 parses them as start-of-day \(upstream issue to be filed\); the un-normalized run scores 64\/66\./,
+  );
+  assert.doesNotMatch(markdown, /diagnostic probe|primary table intentionally preserves/i);
 });

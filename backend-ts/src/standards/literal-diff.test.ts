@@ -101,6 +101,8 @@ test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Code
   assert.equal(capturedOptions!.calculateClauseCoverage, false);
   assert.equal(capturedOptions!.calculateRAVs, false);
   assert.equal(capturedOptions!.calculateSDEs, false);
+  assert.equal(capturedOptions!.measurementPeriodStart, "2026-01-01");
+  assert.equal(capturedOptions!.measurementPeriodEnd, "2026-12-31T23:59:59.999Z");
   assert.equal(capturedOptions!.disableHTMLGeneration, undefined, "disableHTMLGeneration is not a real fqm-execution option — must not be relied on");
 });
 

@@ -404,7 +404,9 @@ export interface OfficialMeasureRun {
 function calculationOptions(period: MeasurementPeriod, trustMetaProfile: boolean): FqmCalculationOptions {
   return {
     measurementPeriodStart: period.start,
-    measurementPeriodEnd: period.end,
+    measurementPeriodEnd: /^\d{4}-\d{2}-\d{2}$/.test(period.end)
+      ? `${period.end}T23:59:59.999Z`
+      : period.end,
     calculateSDEs: false,
     calculateHTML: false,
     calculateClauseCoverage: false,
@@ -575,7 +577,7 @@ export async function runCms122DraftDrift(
     output = await calculate(
       draftBundle,
       validCases.map((item) => item.patientBundle),
-      calculationOptions(loaded.measurementPeriod, false),
+      calculationOptions(loaded.measurementPeriod, officialRun.trustMetaProfile),
       loaded.valueSetResources,
     );
   } catch (error) {
@@ -623,22 +625,6 @@ export async function runCms122DraftDrift(
     errors: cases.filter((item) => item.error).length,
     cases,
   };
-}
-
-const CMS125_END_BOUNDARY_FINDINGS = new Set([
-  "4cf81a94-81fb-4be2-b075-7d8f9ff02a6e",
-  "857fec09-9c8c-4e4b-a123-85f473b8fc2a",
-]);
-
-function isCms125EndBoundaryFinding(item: OfficialCaseResult): boolean {
-  return (
-    CMS125_END_BOUNDARY_FINDINGS.has(item.uuid) &&
-    item.agreement?.status === "mismatch" &&
-    item.agreement.differences.length === 1 &&
-    item.agreement.differences[0] === "denominator-exclusion" &&
-    item.expected?.["denominator-exclusion"] === 1 &&
-    item.actual?.["denominator-exclusion"] === 0
-  );
 }
 
 export interface OfficialReportMetadata {
@@ -713,6 +699,8 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "",
     "`fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call or key is used.",
     "",
+    "**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue to be filed); the un-normalized run scores 64/66.",
+    "",
   );
   for (const run of runs) {
     const profile = `trustMetaProfile=${run.trustMetaProfile}`;
@@ -730,10 +718,7 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
 
   const cms122 = runs.find((run) => run.measure === "cms122");
   const knownCms122 = cms122?.cases.filter((item) => CMS122_KNOWN_BAD_EXPECTEDS.has(item.uuid)) ?? [];
-  const endBoundaryFindings = runs
-    .filter((run) => run.measure === "cms125")
-    .flatMap((run) => run.cases.filter(isCms125EndBoundaryFinding));
-  if (knownCms122.length > 0 || endBoundaryFindings.length > 0) {
+  if (knownCms122.length > 0) {
     lines.push("", "## Investigated findings", "");
   }
   if (knownCms122.length > 0) {
@@ -744,16 +729,6 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
         `${referenceMatches}/${knownCms122.length} reproduced the source comparison's numerator=1 result. This is reported separately from adjusted pass/fail.`,
     );
   }
-  if (endBoundaryFindings.length > 0) {
-    lines.push(
-      `- **CMS125 fqm-execution 1.8.5 date-precision finding (${endBoundaryFindings.length} case(s)):** ` +
-        "the missed denominator exclusions are mastectomy Procedures at `2026-12-31T23:59:59Z`. The expected MeasureReport supplies `period.end=2026-12-31`; " +
-        "fqm converts that date through JavaScript `Date`, yielding midnight at the start of Dec 31, so those late-day resources fall outside the interval. " +
-        "A controlled end-of-day diagnostic probe produced 66/66 CMS125 agreement with `2026-12-31T23:59:59.999Z`. The primary table intentionally preserves the official period string and the finding. " +
-        "This is not a loader error or cap effect: the bilateral and left/right mastectomy codes are present in complete 16-code and 9-code expansions; the capped set is Advanced Illness.",
-    );
-  }
-
   for (const run of runs) {
     lines.push(
       "",

@@ -29,7 +29,7 @@ test("exitCodeForRuns distinguishes adjusted agreement from mismatches and error
   assert.equal(module.exitCodeForRuns([run(0, 1)]), 1);
 });
 
-test("main loads selected content, writes the committed report path, and returns the result policy", async () => {
+test("main loads a selected measure without overwriting the committed combined report", async () => {
   const module = await import("./official-cases.ts").catch(() => null);
   assert.ok(module, "official-cases CLI module must exist");
   assert.equal(typeof module.main, "function", "CLI main must be exported");
@@ -67,9 +67,7 @@ test("main loads selected content, writes the committed report path, and returns
 
   assert.equal(code, 0);
   assert.deepEqual(loadedMeasures, [{ contentDir: resolve(testCwd, "fixtures"), measure: "cms125" }]);
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0]!.path, resolve(testCwd, "..", "docs", "OFFICIAL_TESTCASE_REPORT_2026-07.md"));
-  assert.match(writes[0]!.markdown, /source-sha/);
+  assert.equal(writes.length, 0);
 });
 
 test("main runs the CMS122 vendored-draft drift stretch after the official batch", async () => {

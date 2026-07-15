@@ -7,32 +7,35 @@ test cases from `cqframework/dqm-content-qicore-2025` (source revision
 `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`) through the pinned `fqm-execution` 1.8.5 literal
 path. The content is fetched into ignored `backend-ts/.official-content/` by a Windows-long-path-safe
 sparse-clone script and is never committed. The CLI batches each measure's patient bundles into one
-calculator call, preserves the expected MeasureReport period, reads embedded expanded ValueSets,
-compares the four raw population memberships, and writes the full 121-case Markdown report.
+calculator call, reads the expected MeasureReport period and embedded expanded ValueSets, normalizes
+a date-only period end to inclusive end-of-day before Calculator execution, compares the
+four raw population memberships, and writes the full 121-case Markdown report only for the default
+two-measure run.
 
 - **Official results.** CMS122 matched all 55/55 committed MeasureReports. For the six UUIDs called
   out as bad expecteds by the source repository, `fqm-execution` returned numerator 0, matching the
   committed expected files; it did not reproduce that repository's separately reported numerator 1.
-  CMS125 matched 64/66. The two failures were denominator-exclusion misses for
-  `4cf81a94-81fb-4be2-b075-7d8f9ff02a6e` and `857fec09-9c8c-4e4b-a123-85f473b8fc2a`.
-- **CMS125 finding isolated to `fqm-execution` date precision.** Both cases place a qualifying
-  mastectomy at `2026-12-31T23:59:59Z`, while the official expected period ends at date-only
-  `2026-12-31`. Version 1.8.5 converts that date to start-of-day and excludes the late-day Procedure.
-  A controlled end-of-day rerun (`2026-12-31T23:59:59.999Z`) matched 66/66. The relevant mastectomy
-  ValueSets are complete; the only capped embedded expansion is Advanced Illness (1,000/1,997) and
-  is unrelated. There were no loader/calculation errors, and `trustMetaProfile:false` worked without
-  retry for both measures.
+  Those six remain an open JS-vs-Java question pending reconciliation of the January discrepancy
+  report with the reportedly clean regenerated 2026-07-14 report. CMS125 matched **66/66** after the
+  primary harness normalized the official date-only end to `2026-12-31T23:59:59.999Z`; combined
+  agreement is **121/121** with no loader/calculation errors.
+- **Inclusive-day finding applied to both diagnostic surfaces.** `fqm-execution` 1.8.5 parses a
+  date-only period end as start-of-day; the un-normalized CMS125 run scored 64/66 because two
+  qualifying mastectomies occur at `2026-12-31T23:59:59Z`. The live
+  `/api/measures/cms122/fidelity/diff` literal tier passed the same date-only Dec 31 value and could
+  silently truncate that day; it now passes end-of-day while retaining the correct date-only Jan 1
+  start. The relevant ValueSets are complete, and the capped Advanced Illness expansion is unrelated.
 - **Draft drift check.** The vendored CMS122 v0.5.000 draft, evaluated with the official bundle's
   ValueSets, changed 0/55 population vectors versus official v1.0.000.
 - **Isolation preserved.** `fqm-execution` remains diagnostic-only. Its exact import allowlist now
   contains `standards/literal-diff.ts` and `standards/official-cases.ts`; the architecture test still
-  rejects imports from the run pipeline, engine ingress, and `worker.ts`. No dependency, schema,
-  request-path, or worker change was made.
+  rejects imports from the run pipeline, engine ingress, and `worker.ts`. No dependency, schema, or
+  worker change was made; the only live diagnostic-path change is the corrected literal period end.
 
-Verification: `corepack pnpm typecheck` clean; focused harness/CLI/isolation tests 14/14; full backend
-suite 1,294 tests (1,289 pass, 5 skip, 0 fail). The official diagnostic command generated all 121
-case rows and intentionally exited 1 for the two honest CMS125 mismatches; report-validation checks
-confirmed the summary, drift section, and reproduction instructions.
+Verification: `corepack pnpm typecheck` clean; focused harness/CLI/literal tests 17/17; full backend
+suite 1,294 tests (1,289 pass, 5 skip, 0 fail). The primary official command exited 0 with CMS122
+55/55 and CMS125 66/66, generated exactly 121 case rows and one normalization caveat, and retained
+the 0/55 draft drift result. A real `--measure cms122` run left the committed report SHA-256 unchanged.
 
 ## 2026-07-14 — Pre-meeting closeout: durable evidence bucket LIVE (#167/ADR-030), nightly DB backups (#270), DR drill executed, Neon plan-cap finding, tracking + doc-drift cleanup
 

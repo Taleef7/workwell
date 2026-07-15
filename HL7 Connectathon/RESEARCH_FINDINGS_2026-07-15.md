@@ -135,18 +135,22 @@ checked at this revision is CC0-1.0, but the local-only rule is retained.
 | Measure | Cases | Exact MADiE expected agreement | Source-known discrepancies reproduced | Unexpected mismatches | Loader/calculation errors |
 |---|---:|---:|---:|---:|---:|
 | CMS122 v1.0.000 | 55 | **55/55 (100.0%)** | **0/6** | 0 | 0 |
-| CMS125 v1.0.000 | 66 | **64/66 (97.0%)** | n/a (source says zero) | **2** | 0 |
-| Combined | 121 | **119/121 (98.3%)** | 0/6 | **2** | 0 |
+| CMS125 v1.0.000 | 66 | **66/66 (100.0%)** | n/a (source says zero) | 0 | 0 |
+| Combined | 121 | **121/121 (100.0%)** | 0/6 | 0 | 0 |
 
 Both primary runs used `trustMetaProfile:false` on the first attempt; neither required the retry.
 `fqm-execution` consumed the expanded ValueSets directly from each measure Bundle (CMS122 26/26;
 CMS125 32/32), so no external cache or VSAC call was required for v1.0.000.
+
+**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue to be filed); the un-normalized run scores 64/66.
 
 ### 7.2 CMS122 calibration: committed expecteds vs the source comparison
 
 All six UUIDs called out by the source repo as bad expecteds produced numerator `0`, exactly matching
 their committed MeasureReports. They did **not** reproduce the source comparison engine's numerator
 `1`. The harness therefore reports 55 exact expected passes, not six reference-adjusted passes.
+The six cases remain an **open JS-vs-Java question** until the January discrepancy report is
+reconciled with the regenerated 2026-07-14 report, which reportedly shows CMS122 clean.
 
 | UUID | MADiE expected NUMER | fqm actual NUMER | Source comparison actual |
 |---|---:|---:|---:|
@@ -160,33 +164,31 @@ their committed MeasureReports. They did **not** reproduce the source comparison
 CMS122 is inverse; these are raw population memberships only. No numerator value was translated to a
 WorkWell compliance label.
 
-### 7.3 CMS125: two real fqm date-precision findings
+### 7.3 CMS125: inclusive Dec 31 behavior in the primary run
 
-The two failures are the same shape: expected DENEX `1`, actual `0`; every other population agrees.
+The two Dec 31 boundary cases now match their MADiE expected denominator exclusions in the primary
+configuration:
 
-| Case | UUID | Expected IPP/DEN/DENEX/NUM | Actual IPP/DEN/DENEX/NUM | Classification |
+| Case | UUID | Expected IPP/DEN/DENEX/NUM | Actual IPP/DEN/DENEX/NUM | Result |
 |---|---|---|---|---|
-| BilateralMastProcOnDec31OfMP | `4cf81a94-81fb-4be2-b075-7d8f9ff02a6e` | 1/1/**1**/0 | 1/1/**0**/0 | fqm 1.8.5 MP-end date precision |
-| UniMastRandLProcDec31OfMP | `857fec09-9c8c-4e4b-a123-85f473b8fc2a` | 1/1/**1**/0 | 1/1/**0**/0 | fqm 1.8.5 MP-end date precision |
+| BilateralMastProcOnDec31OfMP | `4cf81a94-81fb-4be2-b075-7d8f9ff02a6e` | 1/1/**1**/0 | 1/1/**1**/0 | PASS |
+| UniMastRandLProcDec31OfMP | `857fec09-9c8c-4e4b-a123-85f473b8fc2a` | 1/1/**1**/0 | 1/1/**1**/0 | PASS |
 
-Both cases put the qualifying Procedure at `2026-12-31T23:59:59Z`. The expected MeasureReports carry
-the date-precision end `2026-12-31`; fqm 1.8.5 converts that through JavaScript `Date`, yielding
-midnight at the **start** of Dec 31, so the late-day Procedures are outside the execution interval.
-A controlled diagnostic rerun with end `2026-12-31T23:59:59.999Z` produced **66/66**. The primary
-report deliberately retains the official expected period string, so the two fqm defects remain visible.
-
-This is not a loader or ValueSet-cap effect: the relevant SNOMED bilateral mastectomy code is present
-in its complete 16/16 expansion, and both ICD-10-PCS unilateral codes are present in their complete
-9/9 expansions. The sole capped set in both bundles is **Advanced Illness** (1000/1997), which neither
-failed case exercises.
+Both qualifying Procedures occur at `2026-12-31T23:59:59Z`. The relevant bilateral SNOMED expansion
+is complete at 16/16 codes and both unilateral ICD-10-PCS expansions are complete at 9/9. The sole
+capped set in both bundles is **Advanced Illness** (1000/1997), which neither case exercises.
 
 ### 7.4 Honest classification and draft drift
 
-- **WorkWell production-engine/request-path bugs:** 0 found. This CLI executes the ADR-026
-  diagnostic-only fqm path; it does not exercise or change WorkWell's authored run pipeline.
-- **fqm-execution findings:** 2 CMS125 end-of-day DENEX misses, isolated above.
+- **WorkWell literal diagnostic bug fixed:** `/api/measures/cms122/fidelity/diff` passed a date-only
+  Dec 31 end to the same Calculator and could silently truncate that day. It now passes
+  `T23:59:59.999Z`; the January 1 date-only start remains correct. The authored compliance engine and
+  run pipeline are unchanged.
+- **fqm-execution finding:** date-only end parsing needs an upstream issue; the harness now makes the
+  inclusive-day intent explicit before invoking version 1.8.5.
 - **Known-bad MADiE expecteds:** the six CMS122 cases remain known from the source report, but this
-  fqm run matched the committed expecteds on all six rather than reproducing the comparison engine.
+  fqm run matched the committed expecteds on all six rather than reproducing the comparison engine;
+  the JS-vs-Java discrepancy remains open pending report reconciliation.
 - **Harness/loader errors:** 0/121. Every case resolved one Patient, one expected MeasureReport, and a
   patientId-keyed fqm result.
 - **Value-set-cap effects:** 0 observed. Advanced Illness is capped at 1000/1997 in both bundles, but

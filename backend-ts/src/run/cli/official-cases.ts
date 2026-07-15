@@ -155,7 +155,8 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       generatedDate: deps.generatedDate,
       sourceRevision: deps.sourceRevision(contentDir),
     });
-    deps.writeReport(reportPath, markdown);
+    const writesCommittedReport = parsed.measures.length === 2;
+    if (writesCommittedReport) deps.writeReport(reportPath, markdown);
     for (const run of runs) {
       const adjusted = run.summary.expectedAgreements + run.summary.referenceAgreements;
       deps.log(
@@ -164,7 +165,11 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
           `errors=${run.summary.errors}`,
       );
     }
-    deps.log(`official-cases: wrote ${reportPath}`);
+    deps.log(
+      writesCommittedReport
+        ? `official-cases: wrote ${reportPath}`
+        : "official-cases: single-measure run; committed combined report not written",
+    );
     return exitCodeForRuns(runs);
   } catch (error) {
     deps.error(`official-cases: ${error instanceof Error ? error.message : String(error)}`);
