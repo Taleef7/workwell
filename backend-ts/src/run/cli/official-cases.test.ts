@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 
 test("parseArgs defaults to both measures and accepts measure/content overrides", async () => {
   const module = await import("./official-cases.ts").catch(() => null);
@@ -45,9 +46,10 @@ test("main loads selected content, writes the committed report path, and returns
       errors: 0,
     },
   };
+  const testCwd = resolve("test-repo", "backend-ts");
 
   const code = await module.main(["--measure", "cms125", "--content-dir", "fixtures"], {
-    cwd: "C:/repo/backend-ts",
+    cwd: testCwd,
     load: (contentDir, measure) => {
       loadedMeasures.push({ contentDir, measure });
       return fakeLoaded as never;
@@ -64,9 +66,9 @@ test("main loads selected content, writes the committed report path, and returns
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(loadedMeasures, [{ contentDir: "C:\\repo\\backend-ts\\fixtures", measure: "cms125" }]);
+  assert.deepEqual(loadedMeasures, [{ contentDir: resolve(testCwd, "fixtures"), measure: "cms125" }]);
   assert.equal(writes.length, 1);
-  assert.equal(writes[0]!.path, "C:\\repo\\docs\\OFFICIAL_TESTCASE_REPORT_2026-07.md");
+  assert.equal(writes[0]!.path, resolve(testCwd, "..", "docs", "OFFICIAL_TESTCASE_REPORT_2026-07.md"));
   assert.match(writes[0]!.markdown, /source-sha/);
 });
 
@@ -80,13 +82,14 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
     summary: { total: 55, expectedAgreements: 55, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
   };
   const fakeDrift = { total: 55, changedCases: 3, errors: 0 };
+  const testCwd = resolve("test-repo", "backend-ts");
 
   const code = await module.main(["--measure", "cms122"], {
-    cwd: "C:/repo/backend-ts",
+    cwd: testCwd,
     load: () => fakeLoaded,
     run: () => Promise.resolve(fakeRun as never),
     loadDraftBundle: (path) => {
-      assert.equal(path, "C:\\repo\\backend-ts\\measures\\official\\cms122v14\\CMS122FHIR-v0.5.000-FHIR.json");
+      assert.equal(path, resolve(testCwd, "measures", "official", "cms122v14", "CMS122FHIR-v0.5.000-FHIR.json"));
       return { resourceType: "Bundle", entry: [] } as never;
     },
     runDraftDrift: () => {
