@@ -212,7 +212,7 @@ test("does NOT emit a refusal Condition when config.refused is false", () => {
 
 test("permanent series: COMPLIANT bucket emits requiredDoses Immunizations", () => {
   const binding = {
-    rateKey: "test_series", complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
+    rateKey: "test_series", improvementNotation: "increase" as const, complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
     enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
     waiver: { code: "x-contra", valueSet: "urn:workwell:vs:x-contra" },
     event: { code: "x-vaccine", valueSet: "urn:workwell:vs:x-vaccines", type: "immunization" as const },
@@ -227,7 +227,7 @@ test("permanent series: COMPLIANT bucket emits requiredDoses Immunizations", () 
 
 test("permanent series: OVERDUE bucket emits a partial series (requiredDoses - 1)", () => {
   const binding = {
-    rateKey: "test_series", complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
+    rateKey: "test_series", improvementNotation: "increase" as const, complianceClass: "PERMANENT" as const, complianceWindowDays: 0,
     enrollment: { code: "immz-enrolled", valueSet: "urn:workwell:vs:immz-enrollment" },
     waiver: { code: "x-contra", valueSet: "urn:workwell:vs:x-contra" },
     event: { code: "x-vaccine", valueSet: "urn:workwell:vs:x-vaccines", type: "immunization" as const },

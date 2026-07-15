@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-07-15 — Connectathon D1+D2 MeasureReport conformance fixes (ADR-031)
+
+Corrected the two verified export-only defects from
+`HL7 Connectathon/RESEARCH_FINDINGS_2026-07-15.md` §3 and added the cheap base-R4 metadata. Population
+elements now report membership-label counts: DENOM includes DENEX, while FHIR/QRDA scores use
+`NUMER / (DENOM - DENEX)` with a non-positive guard. Individual `EXCLUDED` membership is therefore
+IPP=1/DENOM=1/DENEX=1, and individual populations continue to sum exactly to the summary.
+
+The YAML-generated measure binding now owns two export semantics. All 14 runnable measures explicitly
+declare `improvementNotation: increase`; `missingDataMeansOutOfPopulation: true` is set only on
+`cms122` and `cms125`, whose authored CQL emits `MISSING_DATA` for `not Initial Population`. That status
+maps to all-zero populations for those two measures in the per-row, bounded histogram, and individual
+paths; OSHA/HEDIS-style missing-data membership is unchanged. A guard test couples the compliance-
+oriented numerator (including inverted CMS122) to the `urn:workwell:measure:*` canonical and forbids an
+accidental official-CMS claim without reorientation.
+
+MeasureReports now carry UUID ids, a request-scoped report-generation date, and a contained static
+Organization reporter (`WorkWell Measure Studio`); collection Bundle entries carry matching
+`urn:uuid:*` `fullUrl`s. The route accepts an injected generation timestamp so timestamp assertions are
+deterministic and every report within a bundle shares one value; the run's measurement timeframe remains
+in `period`. No DEQM profile is claimed. This remains a base-R4, structurally conformant export; the adopted DENOM
+interpretation follows the unambiguous worked arithmetic on ballot branch `br-57509` and is documented
+as a clarification that is not yet published normative QM IG text.
+
+Review follow-up also aligned the external-interface architecture entry with ADR-031 and documented the
+intentional quality-snapshot divergence: snapshots keep their internal effective denominator
+`total − excluded` and retain `MISSING_DATA` for every measure. Accepted export limitation: pipeline
+evaluation failures are persisted as `MISSING_DATA` with `evidence_json.evaluationError`, so CMS122/125
+FHIR/QRDA exports currently cannot distinguish such a failure from verified not-in-IPP and omit both
+from IPP/DENOM; evidence-aware differentiation is a future refinement.
+
+No dependency, schema, CQL, stored-outcome, or compliance-decision change (ADR-008). Verification:
+typecheck clean; focused MeasureReport builders 8/8 plus the route-level generation-time regression 1/1;
+full backend suite **1,298 total — 1,293 pass / 5 expected skip / 0 fail**.
+
 ## 2026-07-15 — Official MADiE CMS122/CMS125 offline diagnostic harness
 
 Added an offline, no-server/no-DB/no-VSAC diagnostic CLI that runs the official 2025-AU MADiE

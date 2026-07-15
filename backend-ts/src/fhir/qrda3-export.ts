@@ -31,7 +31,7 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
 ];
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
-  return buildQrda3DocumentFromCounts(run, measureId, countPopulations(outcomes));
+  return buildQrda3DocumentFromCounts(run, measureId, countPopulations(outcomes, measureId));
 }
 
 /** QRDA III from pre-aggregated proportion counts (the bounded Fable H4 path). */
@@ -40,7 +40,8 @@ export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, 
   const now = hl7Ts(new Date().toISOString());
   const low = hl7Ts(run.measurementPeriodStart);
   const high = hl7Ts(run.measurementPeriodEnd);
-  const perfRate = c.denom > 0 ? (c.numer / c.denom).toFixed(4) : "0";
+  const effectiveDenominator = c.denom - c.denex;
+  const perfRate = effectiveDenominator > 0 ? (c.numer / effectiveDenominator).toFixed(4) : "0";
 
   const populationObs = POPULATIONS.map(
     ({ code, label }) => `

@@ -22,10 +22,12 @@ const bundle = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../spike/synthetic/audiogram/present_recent.json", import.meta.url)), "utf8"),
 );
 let env: { DB: unknown };
+const GENERATED_AT = "2026-07-15T20:30:00.000Z";
 
 const post = (path: string, body?: unknown) =>
   handleRuns(new Request(`http://x${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }), env as never);
-const get = (path: string) => handleRuns(new Request(`http://x${path}`, { method: "GET" }), env as never);
+const get = (path: string) =>
+  handleRuns(new Request(`http://x${path}`, { method: "GET" }), env as never, "system", undefined, GENERATED_AT);
 /** POST that captures ctx.waitUntil background work so the async-scope path can be awaited deterministically. */
 const postAsync = async (path: string, body?: unknown) => {
   const tasks: Promise<unknown>[] = [];
@@ -276,9 +278,21 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   const sumRes = (await get(`/api/runs/${runId}/measure-report`))!; // default type=summary
   assert.equal(sumRes.status, 200);
   assert.equal(sumRes.headers.get("content-type"), "application/fhir+json");
-  const mr = (await sumRes.json()) as { resourceType: string; type: string; group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> };
+  const mr = (await sumRes.json()) as {
+    resourceType: string;
+    id: string;
+    date: string;
+    reporter: { reference: string };
+    contained: Array<{ resourceType: string; id: string; name: string }>;
+    type: string;
+    group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }>;
+  };
   assert.equal(mr.resourceType, "MeasureReport");
   assert.equal(mr.type, "summary");
+  assert.match(mr.id, /^[0-9a-f-]{36}$/);
+  assert.equal(mr.date, GENERATED_AT, "MeasureReport.date is the injected report-generation time");
+  assert.equal(mr.reporter.reference, "#workwell-measure-studio");
+  assert.equal(mr.contained[0]?.name, "WorkWell Measure Studio");
 
   const rows = (await (await get(`/api/runs/${runId}/outcomes`))!.json()) as Array<{ outcomeStatus: string }>;
   const total = rows.length;
@@ -292,12 +306,16 @@ test("GET /api/runs/:id/measure-report → summary reconciles with outcomes; 404
   };
   assert.equal(popCount("initial-population"), total);
   assert.equal(popCount("denominator-exclusion"), excluded);
-  assert.equal(popCount("denominator"), total - excluded);
+  assert.equal(popCount("denominator"), total);
   assert.equal(popCount("numerator"), compliant);
 
-  const bundle = (await (await get(`/api/runs/${runId}/measure-report?type=bundle`))!.json()) as { resourceType: string; entry: unknown[] };
+  const bundle = (await (await get(`/api/runs/${runId}/measure-report?type=bundle`))!.json()) as {
+    resourceType: string;
+    entry: Array<{ fullUrl: string; resource: { id: string } }>;
+  };
   assert.equal(bundle.resourceType, "Bundle");
   assert.equal(bundle.entry.length, 1 + total);
+  for (const entry of bundle.entry) assert.equal(entry.fullUrl, `urn:uuid:${entry.resource.id}`);
 
   // type=individual is a synonym for the collection bundle (it carries the per-subject individuals).
   const indiv = (await (await get(`/api/runs/${runId}/measure-report?type=individual`))!.json()) as { resourceType: string };

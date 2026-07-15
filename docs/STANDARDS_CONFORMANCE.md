@@ -7,12 +7,47 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Measure logic | HL7 CQL 1.x | Authored `.cql` per runnable measure (`backend-ts/measures/*.cql`) | Authored + compiles | Inline-code + value-set-retrieve variants |
 | Compiled logic | HL7 ELM | Build-time CQL→ELM (`@cqframework/cql`, JVM-free), committed JSON | Compiled + executed | Runtime engine executes ELM via `cql-execution` |
 | Value sets | FHIR ValueSet / VSAC | `ValueSetResolver` expansion → populated `cql.CodeService` (E3.2) | Real expansion (store-backed) | VSAC-ready behind the port; synthetic codes today |
-| Measure result (patient + summary) | FHIR R4 MeasureReport | `GET /api/runs/{id}/measure-report` (summary + individual + Bundle) (E3.1) | Structurally conformant | Counts reconcile 1:1 with outcomes; structural (not HL7-validator) |
+| Measure result (patient + summary) | FHIR R4 MeasureReport | `GET /api/runs/{id}/measure-report` (summary + individual + Bundle) (E3.1) | Structurally conformant | Membership-label counts reconcile individual↔summary; UUID ids, report-generation date, contained reporter, Bundle `fullUrl`; structural (not HL7-validator) |
 | Measure definition export | MAT (Measure/Library/ValueSet) | `GET /api/measures/{id}/versions/{vid}/export/mat` (FHIR R4 XML) | MAT-compatible | Hand-built FHIR R4 bundle |
 | Aggregate report | HL7 QRDA Category III | `GET /api/runs/{id}/qrda` (CDA XML) (E3.3) | **Stub** | Well-formed + structurally representative; **not** IG/Schematron-validated |
 | Evaluated resources | HL7 QI-Core (US Realm) | Synthetic FHIR bundles stamped with QI-Core `meta.profile` + required elements (E3.4) | Structural alignment | `meta.profile` declared + required elements present; **not** IG/validator-validated (ADR-009) |
 | Measure fidelity | Official eCQM spec (eCQI/CMS) | Structural fidelity diff of WorkWell's authored measure vs the official spec (`GET /api/measures/:id/fidelity`) (E14) | **Structural / definitional (descriptive)** | Sourced, versioned `OfficialMeasureReference` (CMS122v14) with provenance; per-criterion COVERED/SIMPLIFIED/OMITTED + value-set coverage; **does not execute the official CQL or diff outcomes**; advisory — `Outcome Status` stays authoritative (ADR-008/ADR-018) |
 | External known-answer diagnostics | Official MADiE CMS122/CMS125 test cases (2025 AU / PY2026) | `pnpm test:official-cases` executes the official pre-compiled ELM in one fqm batch per measure and compares four raw population memberships | **Executed / diagnostic-only** | **121/121 exact:** CMS122 55/55 and CMS125 66/66 after inclusive-day normalization of date-only period ends; 0 loader errors. Full evidence: `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` (ADR-026) |
+
+## MeasureReport population and identity semantics (2026-07-15; ADR-031)
+
+The FHIR and QRDA aggregate exports use **population-membership label counts**. A subject labeled
+`denominator-exclusion` is also labeled `denominator`, so the reported denominator **includes**
+exclusion members. Exclusions are subtracted only when calculating the performance rate:
+
+`measureScore = numerator / (denominator - denominator-exclusion)`
+
+The score is omitted in FHIR (and emitted as zero by the QRDA stub) when that effective denominator is
+not positive. Individual report memberships sum exactly to the summary populations under the same
+semantics; in particular, `EXCLUDED` contributes `{ IPP: 1, DENOM: 1, DENEX: 1, NUMER: 0 }`.
+
+This count interpretation follows the worked calculation in the `fhir-cqm` ballot branch `br-57509`
+(`score=(3-1)/(6-1-1)` with `DENOM=6` including exclusions). It is a **ballot-branch clarification of
+the QM IG, not yet published normative text**; ADR-031 records why WorkWell adopted the unambiguous
+worked arithmetic now.
+
+`MISSING_DATA` remains in IPP/DENOM for the OSHA and HEDIS-style measures: there it means an enrolled
+subject without sufficient data. The YAML binding flag `missingDataMeansOutOfPopulation` is true only
+for `cms122` and `cms125`, whose authored CQL uses `MISSING_DATA` for `not Initial Population`; their
+FHIR/QRDA exports therefore map that status to all-zero population membership. Stored outcomes and CQL
+`Outcome Status` are unchanged (ADR-008).
+
+All current exports use binding-driven `improvementNotation: increase` because WorkWell's numerator is
+always compliance-oriented. This includes `cms122`, whose WorkWell numerator reverses the official
+poor-control orientation. Accordingly, reports claim only `urn:workwell:measure:*`; using an official
+CMS canonical without also reorienting the numerator and notation is forbidden and guard-tested.
+
+Each emitted MeasureReport now has a lowercase UUID `id`, a request-scoped report-generation `date`, and
+a contained Organization reporter named **WorkWell Measure Studio**. The route injects one generation
+timestamp for deterministic timestamp assertions; the run's measurement timeframe remains in `period`.
+Collection Bundle entries carry matching
+`urn:uuid:*` `fullUrl` values. These are valid base-R4 additions only: WorkWell still does **not** claim a
+DEQM `meta.profile`, and the structural/not-validator-verified posture above is unchanged.
 
 ## E14 — standards fidelity (authored measure vs official eCQM spec)
 

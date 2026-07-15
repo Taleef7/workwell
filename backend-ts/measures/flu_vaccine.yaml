@@ -7,6 +7,7 @@ tags: [vaccine, seasonal, immunization]
 complianceClass: RECURRING
 cql: flu_vaccine.cql
 bindings:
+  improvementNotation: increase
   rateKey: flu_vaccine
   enrollment: { code: clinical-role, valueSet: "urn:workwell:vs:clinical-roles" }
   waiver:     { code: flu-exemption, valueSet: "urn:workwell:vs:flu-exemption" }

@@ -21,7 +21,13 @@ const oc = (status: string): OutcomeRecord => ({
 const outcomes: OutcomeRecord[] = [
   ...Array.from({ length: 6 }, () => oc("COMPLIANT")),
   oc("DUE_SOON"), oc("OVERDUE"), oc("MISSING_DATA"), oc("EXCLUDED"),
-]; // IPP 10, DENEX 1, DENOM 9, NUMER 6
+]; // IPP 10, DENEX 1, DENOM label count 10, effective denominator 9, NUMER 6
+
+const aggregateCount = (xml: string, code: string): number => {
+  const match = xml.match(new RegExp(`code="${code}"[\\s\\S]*?xsi:type="INT" value="(\\d+)"`));
+  assert.ok(match, `${code} aggregate count`);
+  return Number(match[1]);
+};
 
 test("buildQrda3Document: well-formed + structurally representative", () => {
   const xml = buildQrda3Document(run, "audiogram", outcomes);
@@ -37,11 +43,11 @@ test("buildQrda3Document: well-formed + structurally representative", () => {
 
 test("buildQrda3Document: aggregate counts reconcile with countPopulations", () => {
   const xml = buildQrda3Document(run, "audiogram", outcomes);
-  assert.ok(xml.includes('value="10"'), "IPP 10");
-  assert.ok(xml.includes('value="9"'), "DENOM 9");
-  assert.ok(xml.includes('value="6"'), "NUMER 6");
-  assert.ok(xml.includes('value="1"'), "DENEX 1");
-  assert.ok(xml.includes('value="0.6667"'), "performance rate 6/9");
+  assert.equal(aggregateCount(xml, "IPOP"), 10);
+  assert.equal(aggregateCount(xml, "DENOM"), 10, "DENOM membership count includes DENEX");
+  assert.equal(aggregateCount(xml, "NUMER"), 6);
+  assert.equal(aggregateCount(xml, "DENEX"), 1);
+  assert.ok(xml.includes('value="0.6667"'), "performance rate 6/(10-1)");
 });
 
 test("buildQrda3Document: all-excluded → performance rate 0, no divide-by-zero", () => {

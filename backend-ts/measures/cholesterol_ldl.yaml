@@ -7,6 +7,7 @@ tags: [wellness, cholesterol, cardiovascular]
 complianceClass: RECURRING
 cql: cholesterol_ldl.cql
 bindings:
+  improvementNotation: increase
   rateKey: cholesterol_ldl
   enrollment: { code: cholesterol-enrolled, valueSet: "urn:workwell:vs:cholesterol-program" }
   waiver:     { code: cholesterol-exempt, valueSet: "urn:workwell:vs:cholesterol-exemption" }

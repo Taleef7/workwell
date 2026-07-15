@@ -7,6 +7,7 @@ tags: [vaccine, bbp, osha, permanent]
 complianceClass: PERMANENT
 cql: hepatitis_b.cql
 bindings:
+  improvementNotation: increase
   rateKey: hepatitis_b_vaccination_series
   complianceWindowDays: 0
   series: { requiredDoses: 2 }
