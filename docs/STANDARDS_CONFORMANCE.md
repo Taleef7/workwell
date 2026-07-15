@@ -12,6 +12,7 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Aggregate report | HL7 QRDA Category III | `GET /api/runs/{id}/qrda` (CDA XML) (E3.3) | **Stub** | Well-formed + structurally representative; **not** IG/Schematron-validated |
 | Evaluated resources | HL7 QI-Core (US Realm) | Synthetic FHIR bundles stamped with QI-Core `meta.profile` + required elements (E3.4) | Structural alignment | `meta.profile` declared + required elements present; **not** IG/validator-validated (ADR-009) |
 | Measure fidelity | Official eCQM spec (eCQI/CMS) | Structural fidelity diff of WorkWell's authored measure vs the official spec (`GET /api/measures/:id/fidelity`) (E14) | **Structural / definitional (descriptive)** | Sourced, versioned `OfficialMeasureReference` (CMS122v14) with provenance; per-criterion COVERED/SIMPLIFIED/OMITTED + value-set coverage; **does not execute the official CQL or diff outcomes**; advisory — `Outcome Status` stays authoritative (ADR-008/ADR-018) |
+| External known-answer diagnostics | Official MADiE CMS122/CMS125 test cases (2025 AU / PY2026) | `pnpm test:official-cases` executes the official pre-compiled ELM in one fqm batch per measure and compares four raw population memberships | **Executed / diagnostic-only** | **121/121 exact:** CMS122 55/55 and CMS125 66/66 after inclusive-day normalization of date-only period ends; 0 loader errors. Full evidence: `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` (ADR-026) |
 
 ## E14 — standards fidelity (authored measure vs official eCQM spec)
 
@@ -43,3 +44,37 @@ The QRDA III stub uses the well-known QRDA III IG template OIDs and carries the 
 performance rate; **its internal observation `code` values (e.g. on the performance-rate observation) are
 placeholders pending QRDA III IG alignment** — the document is structurally representative, not IG-code-exact.
 Full IG/Schematron validation, IG-exact codes, and multi-measure aggregation are future work.
+
+## Official MADiE offline diagnostic harness (2026-07-15)
+
+The official-case harness is a reproducible, DB-less check of the **literal diagnostic path**, not a
+second compliance authority and not a request-path feature. It downloads no content during execution,
+writes no database state, and never calls VSAC. Fetch and run from `backend-ts/`:
+
+```powershell
+.\scripts\fetch-official-cases.ps1
+pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]
+```
+
+The fetch script performs the required Windows-long-path sparse clone into ignored
+`backend-ts/.official-content/`; downloaded FHIR resources are not committed. At content revision
+`ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`, both measures ran with
+`trustMetaProfile:false` on the first pass and consumed their own Bundle ValueSet expansions:
+
+| Measure | Cases | Exact expected agreement | Unexpected mismatch | Errors | Result note |
+|---|---:|---:|---:|---:|---|
+| CMS122 v1.0.000 | 55 | **55/55** | 0 | 0 | All six source-reported bad-expecteds matched their committed numerator=0; 0/6 reproduced the source comparison's numerator=1 |
+| CMS125 v1.0.000 | 66 | **66/66** | 0 | 0 | Primary execution normalizes the official date-only Dec 31 end to `2026-12-31T23:59:59.999Z`, matching MADiE's inclusive-day expected results; the un-normalized run is 64/66 |
+
+Date-only period ends are normalized before Calculator execution because `fqm-execution` 1.8.5
+parses them as start-of-day. The live `/api/measures/cms122/fidelity/diff` literal tier uses the same
+inclusive end-of-day bound, while its date-only January 1 start remains correct.
+
+The sole truncated expansion is Advanced Illness (1000/1997) in each Bundle; no primary-run mismatch
+depends on it. The older vendored CMS122 v0.5.000 bundle changed **0/55** population vectors when run with
+the v1 Bundle's ValueSets as `valueSetCache`; re-vendoring remains a provenance/currency improvement,
+not an outcome change for this fixture corpus.
+
+ADR-026 isolation remains executable policy: only `standards/literal-diff.ts` and
+`standards/official-cases.ts` may import `fqm-execution`; the architecture test separately preserves
+the prohibition on request/run-pipeline, engine-ingress, and `worker.ts` imports.
