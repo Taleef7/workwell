@@ -1,5 +1,34 @@
 # Architecture Decision Records
 
+## ADR-032: A local HAPI FHIR server is the WebChart simulator ("fake WebChart")
+
+**Status:** Accepted (2026-07-16).
+
+**Context:** The 2026-07-15 Doug meeting confirmed the integration contract (FHIR R4 + SMART
+Backend Services; data flows WebChart→WorkWell) and suggested standing up a HAPI FHIR server over
+the dev-DB data to simulate WebChart. Until now the live transport (`httpWebChartClient`, ADR-028)
+had only ever run against in-process shims — the fixture client and a mock-`fetch` conformance
+suite — so real-HTTP behaviors (server-minted pagination links, the off-origin guard, header
+handling against a genuine server) were untested in anger. Separately, the real teatea trial
+instance is remote, read-only via FHIR, and rate-limited by courtesy — unsuitable as a
+development/CI hammer.
+
+**Decision:** The official `hapiproject/hapi` image (already in `infra/docker-compose.yml`, R4,
+port 8081) is the local WebChart stand-in, populated from the committed dev-DB fixtures by
+`pnpm load:hapi` via a pure collection→transaction transform (`hapi-transform.ts`): `PUT` with
+preserved patient ids (roster keying) and deterministic minted ids for id-less clinical resources
+(idempotent re-loads). The `jamesagnew/hapi-fhir` fork Doug pointed at is a stale personal fork of
+upstream with no MIE-specific code — the official image is used instead. Stock HAPI stays open
+(no auth): the static-bearer path exercises the Authorization header, while the SMART
+backend-services flow is proven against the real trial. Division of labor: **HAPI = local/CI
+real-HTTP + rich-clinical-data proof; teatea = real-contract auth + live-instance proof.**
+
+**Consequences:** Development and self-skipping live tests never depend on the remote trial;
+re-loads are idempotent (verified 293 created → 293 updated, no growth); the simulator is one
+`docker compose up` away. HAPI is not WebChart — contract quirks (scope forms, grant types, paging
+behavior) are still verified against teatea and recorded in the #254 answer log. Descriptive only
+(ADR-008): the simulator feeds data; the CQL engine remains the sole compliance authority.
+
 ## ADR-031: MeasureReport exports use membership-label counts and binding-owned measure semantics
 
 **Status:** Accepted (2026-07-15).
