@@ -1,5 +1,35 @@
 # Journal
 
+## 2026-07-16 — teatea runbook: auth probe + import-file generator (owner steps packaged)
+
+Everything the owner needs to bring the teatea trial live, in one PR. **Runbook**
+(`docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`): RS384 keypair generation (Node one-liner, keys stay
+in `~\.workwell\`, never the repo), client registration at the admin JWT screen
+(`webchart.cgi?f=admin&s=jwt` — the smart-configuration's `management_endpoint`), the
+`client_credentials` probe, population seeding, live evaluation, and exactly what to record back
+into the #254 answer log (A2 pagination / A3 grant+lifetime / A4 rate signals / A5 observation
+shape). **Auth probe** (`pnpm webchart:probe-auth`): reuses `smartBackendServicesAuth` unchanged —
+discovery → the RS384 `private_key_jwt` grant → an authorized `GET /fhir/Patient?_count=1` — with
+targeted hints per OAuth error code (`unsupported_grant_type` ⇒ the sharpened MIE ask;
+`invalid_client` ⇒ registration/JWKS mismatch). Token-response output is a non-secret whitelist
+(token_type/scope/expires_in); key/assertion/token are never printed.
+
+**Import generator** (`pnpm generate:webchart-import`): a deterministic ~30-patient synthetic
+cohort emitted in MIE's own documented Data-Migration CSV formats — verified from the `mieweb/docs`
+repo sources (the rendered docs 403 automated fetches; the markdown sources + published spec sheets
+don't): Chart Data CSV (demographics, `@patient_mrns.MR` creates charts), Clinical Encounter CSV
+(office visits — the eCQM qualifying-visit gate), Observation Import (18 fixed columns, `YYYYMMDD`,
+**keyed on observation name not LOINC** — the runbook's spot-check verifies the FHIR read-back
+carries the intended LOINC via the instance compendium), and Injections CSV (CVX codes, the
+verified 18-column header). Five repeating clinical profiles guarantee every outcome bucket;
+mammograms ride the manual checklist (WebChart has no procedure CSV — completed CPT 77067 orders).
+Mammogram eligibility uses date-exact age at the requested `--as-of`, including the 42/74 boundary
+birthdays, so pinned generation remains deterministic and aligned with the CQL age gate.
+Smoke-run: 30 patients → 24 visits, 102 observations, 78 immunizations, 7 mammograms. Three
+flagged format caveats (exact `patients.sex` header, `part:MR` id-type, name→LOINC mapping) are
+first-small-upload checks, not blockers. No new deps; no schema; descriptive only (ADR-008).
+Owner steps: execute the runbook §§1–5, record results.
+
 ## 2026-07-16 — `evaluate:webchart-live`: the transport's first real-HTTP proof (bucket-for-bucket parity)
 
 The live-evaluate CLI closes the gap ADR-028 left open: `httpWebChartClient` had only ever run
