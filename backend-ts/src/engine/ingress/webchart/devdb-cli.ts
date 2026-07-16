@@ -16,6 +16,9 @@ import type { OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
+import { BUCKETS, isValidDate, measureTableLines, type MeasureSummary } from "./report-table.ts";
+
+export type { MeasureSummary } from "./report-table.ts";
 
 /** Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled). */
 export const DEVDB_WHITELIST = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension", "cms125"];
@@ -25,20 +28,6 @@ export const DEVDB_EXCLUDED = [
   "adult_immunization", "mmr", "varicella", "hepatitis_b_vaccination_series", "cms122",
 ];
 const DEFAULT_EVAL = "2024-06-01"; // the sample spans 2015–2024; a contemporaneous date yields a real mix
-const BUCKETS: OutcomeStatus[] = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
-const BUCKET_LABEL: Record<OutcomeStatus, string> = {
-  COMPLIANT: "COMPL",
-  DUE_SOON: "DUE",
-  OVERDUE: "OVERDUE",
-  MISSING_DATA: "MISSING",
-  EXCLUDED: "EXCL",
-};
-
-export interface MeasureSummary {
-  measureId: string;
-  total: number;
-  counts: Record<OutcomeStatus, number>;
-}
 export interface DevDbReport {
   evaluationDate: string;
   population: number;
@@ -69,22 +58,14 @@ export async function evaluateDevDb(opts?: { evaluationDate?: string }): Promise
   return { evaluationDate, population: payloads.length, whitelist, excluded: DEVDB_EXCLUDED };
 }
 
-const pad = (s: string, n: number) => s.padEnd(n);
-const padL = (s: string, n: number) => s.padStart(n);
-
 /** Render the report as a readable fixed-width table. */
 export function renderReport(r: DevDbReport): string {
   const lines: string[] = [];
   lines.push(`WebChart dev-DB evaluation proof — ${r.population} patients, as-of ${r.evaluationDate}`);
   lines.push("(real MIE WebChart-shaped data → the unchanged CQL engine; descriptive only, ADR-008)");
   lines.push("");
-  lines.push(`  ${pad("measure", 22)}${BUCKETS.map((b) => padL(BUCKET_LABEL[b], 9)).join("")}${padL("total", 8)}`);
-  lines.push(`  ${"-".repeat(22 + 9 * BUCKETS.length + 8)}`);
-  let nonMissing = 0;
-  for (const m of r.whitelist) {
-    nonMissing += m.total - m.counts.MISSING_DATA;
-    lines.push(`  ${pad(m.measureId, 22)}${BUCKETS.map((b) => padL(String(m.counts[b]), 9)).join("")}${padL(String(m.total), 8)}`);
-  }
+  lines.push(...measureTableLines(r.whitelist));
+  const nonMissing = r.whitelist.reduce((n, m) => n + m.total - m.counts.MISSING_DATA, 0);
   lines.push("");
   lines.push(`  → ${nonMissing} real (non-MISSING_DATA) outcomes across the whitelist — the pipeline works end-to-end.`);
   lines.push(`  excluded (no reconcilable data in this sample; all MISSING_DATA): ${r.excluded.join(", ")}`);
@@ -92,13 +73,6 @@ export function renderReport(r: DevDbReport): string {
 }
 
 const USAGE = "usage: evaluate:webchart-devdb [--date YYYY-MM-DD]\n";
-
-/** A real calendar date in YYYY-MM-DD (rejects e.g. 2024-13-45, which a format regex alone would pass). */
-function isValidDate(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
 
 export async function main(argv: string[]): Promise<number> {
   let evaluationDate: string | undefined;
