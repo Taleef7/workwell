@@ -40,6 +40,19 @@ test("unconfigured env fails fast (exit 2) and never falls back to the JSON sour
   assert.match(err.join(""), /not configured/);
 });
 
+test("an injected client cannot bypass the config gate", async () => {
+  const { io } = capture();
+  const code = await runLiveCli(["--list-patients"], { env: {}, client: fixtureWebChartClient([]), ...io });
+  assert.equal(code, 2);
+});
+
+test("a missing/malformed roster file exits 2 with the path named (no stack trace)", async () => {
+  const { io, err } = capture();
+  const code = await runLiveCli(["--roster", "does-not-exist.json"], { env: ENV, client: fixtureWebChartClient([]), ...io });
+  assert.equal(code, 2);
+  assert.match(err.join(""), /roster file does-not-exist\.json/);
+});
+
 test("bad arguments exit 2: malformed date, unknown measure, missing roster value, bad page size", async () => {
   for (const argv of [
     ["--date", "2024-13-45"],

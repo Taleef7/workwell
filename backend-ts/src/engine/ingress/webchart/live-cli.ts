@@ -135,6 +135,17 @@ export async function runLiveCli(argv: string[], io?: LiveCliIo): Promise<number
     return 2;
   }
 
+  // parse the roster BEFORE the network fetch — a typo'd path must not cost a live population pull
+  let roster: ReturnType<typeof parseEnrollmentRoster> | undefined;
+  if (!listPatients) {
+    try {
+      roster = parseEnrollmentRoster(JSON.parse(readFileSync(rosterPath!, "utf8")));
+    } catch (err) {
+      stderr(`roster file ${rosterPath}: ${err instanceof Error ? err.message : String(err)}\n`);
+      return 2;
+    }
+  }
+
   let host = cfg.baseUrl;
   try {
     host = new URL(cfg.baseUrl).host;
@@ -154,6 +165,9 @@ export async function runLiveCli(argv: string[], io?: LiveCliIo): Promise<number
 
   if (listPatients) {
     const rows = payloads.map(patientOf).filter((p): p is PatientRow => p !== undefined);
+    if (rows.length !== payloads.length) {
+      stderr(`warning: ${payloads.length - rows.length} of ${payloads.length} payloads carried no recoverable Patient — omitted from the template\n`);
+    }
     stderr(`WebChart live population — ${rows.length} patients from ${host} (auth: ${auth})\n\n`);
     stderr(`  ${"id".padEnd(24)}${"name".padEnd(30)}${"gender".padEnd(10)}birthDate\n`);
     stderr(`  ${"-".repeat(72)}\n`);
@@ -164,13 +178,12 @@ export async function runLiveCli(argv: string[], io?: LiveCliIo): Promise<number
     return 0;
   }
 
-  const roster = parseEnrollmentRoster(JSON.parse(readFileSync(rosterPath!, "utf8")));
   const asOf = evaluationDate ?? io?.today ?? new Date().toISOString().slice(0, 10);
   const summaries: MeasureSummary[] = [];
   for (const measureId of measures) {
     // one HTTP fetch total: the already-fetched payloads replay through a fixture client per measure
     const src = webChartDataSource(cfg, fixtureWebChartClient(payloads));
-    const res = await evaluateSourceWithRoster(src, measureId, roster, { evaluationDate: asOf });
+    const res = await evaluateSourceWithRoster(src, measureId, roster!, { evaluationDate: asOf });
     const counts = Object.fromEntries(BUCKETS.map((b) => [b, 0])) as Record<OutcomeStatus, number>;
     for (const r of res.results) if (r.ok && r.outcome) counts[r.outcome.outcome]++;
     summaries.push({ measureId, total: res.results.filter((r) => r.ok).length, counts });
