@@ -22,6 +22,15 @@ arrive; each question notes which WorkWell workstream it unblocks.
 > needed there, not a from-scratch answer. Full findings, sources, and confidence levels:
 > `docs/INTEGRATION_RESEARCH_2026-07-13.md`.
 
+> **Update 2026-07-16 — Doug meeting (2026-07-15) + trial-instance probe.** The package was
+> discussed with Doug in person. **A1 and A3 are CONFIRMED, C13 and D17 are ANSWERED** (inline
+> below, marked ✅). Doug also granted a WebChartNow **trial instance** —
+> `https://teatea.webchartnow.com` (we hold the System Owner role) — whose FHIR + SMART surfaces we
+> live-probed on 2026-07-16 (see the Answer log). The production/governance questions (A4–A8,
+> B9–B12, C14–C16) were **not** covered; per Doug's direction to be self-sufficient, we resolve
+> those with documented assumptions + live observation where possible (assumption register:
+> `docs/MIE_PRODUCT_RESEARCH_2026-07-16.md`, forthcoming) rather than re-blocking on MIE.
+
 ---
 
 ## A. API contract (blocks E12 PR-2c — the live transport; our critical path)
@@ -37,6 +46,11 @@ pass-through + reconciliation, or also maps rows→FHIR per our mapping doc §3.
 > `wc_miehr_*` tables also exists (`mieapi-js` et al.). **Please confirm the FHIR R4 API is the
 > intended integration surface for WorkWell** (we assume yes; the legacy API would only matter if
 > employer/OH fields don't surface in FHIR — see B12).
+
+> ✅ **CONFIRMED (Doug, 2026-07-15 meeting):** the FHIR R4 API is the integration surface. Data
+> flows **from WebChart into WorkWell, where CQL runs** (see D17). Trial-instance probe
+> corroborates: `teatea.webchartnow.com/webchart.cgi/fhir/metadata` serves an R4 4.0.1
+> CapabilityStatement (35 resource types, US Core + Bulk Data IG declared).
 
 **A2. Endpoints & population read.** How do we (a) enumerate the worker population and (b) fetch one
 patient's clinical data — FHIR `$everything`/search, Bulk `$export`, or per-resource endpoints? Exact
@@ -67,6 +81,23 @@ process for provisioning a service account for WorkWell.
 > or enable RFC 7591 for us; (b) confirm `client_credentials` is supported on the sandbox despite
 > the advertised grant list; (c) the provisioning process + token lifetime for a production service
 > account.
+
+> ✅ **CONFIRMED (Doug, 2026-07-15 meeting) + self-serviceable (trial probe, 2026-07-16):** the
+> auth contract is **SMART Backend Services** — matching what we built (ADR-028). This confirms the
+> intended contract, but live compatibility remains operationally gated until the trial accepts a
+> `client_credentials` token request because its discovery document does not advertise that grant.
+> On the trial instance we now hold, client registration is **manual, admin-driven, and
+> self-serviceable**: the smart-configuration's `management_endpoint` is the WebChart admin JWT
+> screen (`webchart.cgi?f=admin&s=jwt`), where a System Owner registers a client + its public
+> JWK/JWKS and scopes — so no MIE action is needed to provision a trial client. Trial
+> smart-configuration specifics: token endpoint `.../webchart.cgi/oauth/token/`,
+> `token_endpoint_auth_methods_supported: ["private_key_jwt"]`, signing alg **RS384 only**, scopes
+> `patient/*.rs` + `system/*.read` (registrations grant the v1-style `system/*.read`, so we set
+> `WORKWELL_WEBCHART_SCOPE=system/*.read`), JWKS at `/webchart.cgi/jwks/`, no
+> `registration_endpoint`. **Residual open item:** `grant_types_supported` still advertises only
+> `authorization_code` — whether a registered backend client can use `client_credentials` is being
+> live-tested (runbook: `docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`); the result will be recorded
+> here. Token lifetime: to be observed from `expires_in` on the first successful grant.
 
 **A4. Rate limits & latency.** Rate limits, quotas, concurrency ceilings, and expected p50/p95 latency
 per call — this sizes our batch evaluation windows.
@@ -123,6 +154,17 @@ our conformance suite is ready to point at it.)*
 > against it (see A3). Still valuable from MIE: a staging instance whose data carries the
 > **Enterprise Health employer/OH fields** (B12) — the sandbox's data shape for those is unknown.
 
+> ✅ **ANSWERED (Doug, 2026-07-15 meeting):** Doug granted a WebChartNow **trial instance** —
+> `https://teatea.webchartnow.com`, with the System Owner role — which serves as our staging
+> target: its FHIR + SMART surfaces are live (probed 2026-07-16), and as System Owner we can
+> register OAuth clients and seed synthetic patients ourselves. Doug additionally suggested a
+> **HAPI FHIR server as a local WebChart simulator** over the dev-DB data (we use the official
+> `hapiproject/hapi` image — the `jamesagnew/hapi-fhir` repo he pointed at is a stale personal fork
+> of upstream HAPI with no MIE-specific code), and re-confirmed dev-DB access. The trial starts
+> empty and its FHIR scopes are read-only, so data is seeded via WebChart's own import tooling/UI —
+> synthetic only, never PHI. The B12 caveat stands: whether the trial's data model carries the
+> Enterprise Health employer/OH fields is still to be observed.
+
 **C14. PHI/BAA constraints.** When real data flows: where may WorkWell run (MIE infrastructure only?
 is our managed-Postgres tier eligible?), encryption/retention requirements, and who owns the BAA
 chain? *(Our current demo stack will never receive PHI; we need the target posture to design the
@@ -144,6 +186,14 @@ WebChart's data? We've built the architecture so either answer is safe (ADR-025:
 `MeasureExecutor`; FHIR-native default + correctness oracle; SQL-pushdown as a parity-gated future
 executor) — but the answer determines whether a scoped SQL-pushdown executor ever gets scheduled, and
 whether data egress is a policy constraint.
+
+> ✅ **ANSWERED (Doug, 2026-07-15 meeting):** the model is **data from WebChart → CQL runs on the
+> WorkWell side**. CQL→SQL transpilation is **not on the cards right now** — interesting, and it may
+> be explored *alongside* the current implementation later, but it is not the integration path. This
+> confirms the ADR-025 posture: `fhirNativeExecutor` remains the default and correctness oracle,
+> `sqlPushdownExecutor` stays an inert stub, and the Option B trigger conditions tracked on #292
+> remain formally parked. Data egress from WebChart to WorkWell is therefore the expected flow (the
+> C14 PHI/BAA posture governs *where* WorkWell may run when that data is real).
 
 **D18. ICE timeline.** Immunization data is routed via ICE per the 2026-07-03 decision (the WebChart
 adapter does not source immunizations). When is an ICE surface available to integrate against, and
@@ -177,3 +227,19 @@ what does its contract look like?
   confirm backend-services support on the sandbox. Details: `INTEGRATION_RESEARCH_2026-07-13.md`
   §1.1a. Meanwhile the transport itself is already rebuilt to the verified contract (E12 PR-2c
   branch; ADR-028) — only credentials stand between us and a live sandbox evaluation.
+- **2026-07-16 (Doug meeting 2026-07-15 + teatea trial probe):** **A1 CONFIRMED** (FHIR R4 is the
+  surface), **A3 CONFIRMED** (SMART; registration is manual + self-serviceable on the trial via
+  `webchart.cgi?f=admin&s=jwt`), **C13 ANSWERED** (trial instance `teatea.webchartnow.com`, System
+  Owner role; HAPI simulator suggested for local work), **D17 ANSWERED** (WebChart→WorkWell data
+  flow, CQL our side; CQL→SQL parked — #292 triggers stay dormant). D18 was already self-resolved
+  (ADR-029, self-hosted ICE live). Live probe of the trial (2026-07-16, unauthenticated, both 200):
+  `GET /webchart.cgi/fhir/metadata` → R4 4.0.1 CapabilityStatement (35 resources, US Core + Bulk
+  Data IG); `GET /webchart.cgi/fhir/.well-known/smart-configuration` → token endpoint
+  `/webchart.cgi/oauth/token/`, `private_key_jwt` + **RS384 only**, scopes `patient/*.rs` +
+  `system/*.read`, `grant_types_supported: ["authorization_code"]` (client_credentials
+  unadvertised — live test pending, runbook `docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`), JWKS
+  `/webchart.cgi/jwks/`, no dynamic registration. The remaining open items (A2 pagination, A4–A8,
+  B9–B12, C14–C16) were not covered in the meeting; per Doug's be-self-sufficient direction they
+  move to an assumption register with live verification where observable
+  (`docs/MIE_PRODUCT_RESEARCH_2026-07-16.md`, forthcoming) instead of re-blocking on MIE. This
+  entry supersedes "send #254" as an owner step — the package is delivered and discussed.
