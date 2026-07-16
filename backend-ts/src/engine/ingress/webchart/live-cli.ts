@@ -43,6 +43,8 @@ export interface LiveCliIo {
   env?: DataSourceEnv;
   /** Test injection — overrides the HTTP transport, never the config gate. */
   client?: WebChartClient;
+  /** Test injection for exercising batch-failure handling without forcing the CQL engine to throw. */
+  evaluate?: typeof evaluateSourceWithRoster;
   stdout?: (s: string) => void;
   stderr?: (s: string) => void;
   /** Injectable "today" (YYYY-MM-DD) so tests are date-stable. */
@@ -183,7 +185,11 @@ export async function runLiveCli(argv: string[], io?: LiveCliIo): Promise<number
   for (const measureId of measures) {
     // one HTTP fetch total: the already-fetched payloads replay through a fixture client per measure
     const src = webChartDataSource(cfg, fixtureWebChartClient(payloads));
-    const res = await evaluateSourceWithRoster(src, measureId, roster!, { evaluationDate: asOf });
+    const res = await (io?.evaluate ?? evaluateSourceWithRoster)(src, measureId, roster!, { evaluationDate: asOf });
+    if (res.failed > 0) {
+      stderr(`live evaluation failed for ${measureId}: ${res.failed} of ${res.total} patient bundles failed\n`);
+      return 1;
+    }
     const counts = Object.fromEntries(BUCKETS.map((b) => [b, 0])) as Record<OutcomeStatus, number>;
     for (const r of res.results) if (r.ok && r.outcome) counts[r.outcome.outcome]++;
     summaries.push({ measureId, total: res.results.filter((r) => r.ok).length, counts });

@@ -130,3 +130,36 @@ test("a transport failure exits 1 with the host named (never a stack-trace-free 
   assert.equal(code, 1);
   assert.match(err.join(""), /live fetch failed against example.test: connect ECONNREFUSED/);
 });
+
+test("a per-patient evaluation failure exits 1 instead of reporting a reduced successful population", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "live-cli-"));
+  const rosterPath = path.join(dir, "roster.json");
+  writeFileSync(rosterPath, JSON.stringify({}));
+  const { io, out, err } = capture();
+  const code = await runLiveCli(
+    ["--roster", rosterPath, "--measures", "diabetes_hba1c", "--date", "2024-06-01"],
+    {
+      env: ENV,
+      client: fixtureWebChartClient([patientBundle("wc-1"), patientBundle("wc-2")]),
+      evaluate: async (_source, measureId, _roster, opts) => ({
+        measureId,
+        evaluationDate: opts?.evaluationDate ?? "2024-06-01",
+        total: 2,
+        succeeded: 1,
+        failed: 1,
+        results: [
+          {
+            index: 0,
+            ok: true,
+            outcome: { subjectId: "wc-1", measure: measureId, outcome: "MISSING_DATA", evidence: { expressionResults: [] } },
+          },
+          { index: 1, ok: false, error: "malformed live bundle" },
+        ],
+      }),
+      ...io,
+    },
+  );
+  assert.equal(code, 1);
+  assert.equal(out.join(""), "");
+  assert.match(err.join(""), /live evaluation failed for diabetes_hba1c: 1 of 2 patient bundles failed/);
+});

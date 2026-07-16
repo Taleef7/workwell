@@ -20,9 +20,10 @@ patients, 31 real non-MISSING_DATA outcomes, identical table to `evaluate:webcha
 per-resource `?patient=` composition, and the Authorization header all exercised for real. New
 `hapi-live.test.ts` pins that as a 4-test live suite gated on the **dedicated**
 `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` + a 2s reachability probe (the ice-live pattern; verified to
-self-skip when unset), plus 7 CI tests for the CLI (`live-cli.test.ts`: parsing, fail-fast gate,
-fixture-client e2e). No new deps; no schema; read-only + descriptive (ADR-008). Next: the teatea
-runbook + auth probe + import generator (wave PR 4).
+self-skip when unset), plus 10 CI tests for the CLI (`live-cli.test.ts`: parsing, config/roster
+fail-fast gates, fixture-client e2e, and a per-patient evaluation failure that exits 1 rather than
+reporting a reduced successful population). No new deps; no schema; read-only + descriptive
+(ADR-008). Next: the teatea runbook + auth probe + import generator (wave PR 4).
 
 ## 2026-07-16 — HAPI "fake WebChart" loader (ADR-032): dev-DB fixtures → local FHIR R4 server
 
