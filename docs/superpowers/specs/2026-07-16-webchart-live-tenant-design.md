@@ -51,45 +51,59 @@ aggregate path is left untouched.
 
 ### 2. The live directory (new module: `engine/ingress/webchart/live-directory.ts`)
 
-A per-worker, in-memory **last-known-good registry** of live `EmployeeProfile`s:
+A per-worker, in-memory **last-known-good registry** of live `EmployeeProfile`s. It is a directory
+cache, not a clinical-data cache: stale bundles must never be presented as a fresh case verification.
 
-- `refreshLiveDirectory(env, client?)` — fetches the population via the existing
-  `httpWebChartClient` (payloads → Patient extraction, reusing the live-CLI's tolerant
-  `patientOf`), maps to profiles, swaps the registry atomically. Called (a) by every population
-  run that includes the live tenant (the run's fetch doubles as the refresh — no second fetch),
-  and (b) lazily by read models when the registry is empty/stale (TTL ~10 min, single-flight,
-  2s-bounded; on failure keep last-known-good).
-- **Restart rehydration (no schema):** when the registry is empty (fresh worker) the read models
-  fall back to deriving **minimal profiles** (`name = patient id`, flat placement) from the latest
-  population run's `wc|`-prefixed outcome `subjectId`s — so roster/hierarchy rows survive a
-  container restart; full names return on the next refresh. This keeps the feature schema-free.
-- Read models consume a merged view: `directoryFor(env)` → `{ employees, byId }` = static
-  `EMPLOYEES` + live registry. `roster-read-model.ts`, `hierarchy-rollup.ts`,
-  `program-read-models.ts` (tenant/site matchers), and `case-detail-read-model.ts` name resolution
-  switch from the static imports to the merged view — a mechanical, behavior-preserving change
-  when the seam is off (merged view === static directory).
+- `replaceLiveDirectory(bundles)` extracts Patients from an already-fetched population, maps them to
+  profiles, and atomically swaps the registry. A population run performs the HTTP fetch once in its
+  background preparation step (§3); the same normalized bundles feed both this refresh and CQL.
+- **Restart rehydration (no schema):** each read model already loads the latest population outcome
+  rows. Its merged-directory snapshot is static `EMPLOYEES` + the registry + minimal profiles for
+  unknown `wc|` subject ids in those rows (`name = raw Patient.id`, flat `wc` placement). This is an
+  explicit `directoryForRows(rows)` input, not a hidden database read from a synchronous lookup.
+  Roster/hierarchy rows therefore survive a restart or WebChart outage; full names return after the
+  next successful population run. When the seam is configured, a `profileForId("wc|...")` fallback
+  provides the same minimal identity to case detail; seam-off lookup remains the static behavior.
+- `roster-read-model.ts`, `hierarchy-rollup.ts`, `program-read-models.ts` (tenant/site matchers),
+  `case-detail-read-model.ts`, and `quality/materialize-run.ts` consume one injected directory
+  snapshot (`employees`, employee/provider/tenant lookups). With the seam off and no `wc|` rows, that
+  snapshot is byte-identical to the static catalog.
 
-### 3. Run pipeline integration (`run-pipeline.ts`)
+### 3. Run pipeline integration (`run-pipeline.ts` + `routes/runs.ts`)
 
-- `planManualRun`: when the seam is configured and scope is **ALL_PROGRAMS or MEASURE**, fetch the
-  live payloads **once** (`webChartDataSource(cfg).loadBundles()` — normalize/crosswalk applied),
-  refresh the live directory from them, and append live `WorkItem`s: one per (live subject ×
-  runnable measure), carrying the prefetched bundle (`WorkItem` gains optional
-  `liveBundle?: unknown`; `target` is absent for live items — live outcomes are whatever CQL says,
-  never seeded). `requestedScope` gains `{ liveTenant: { count, host } }` for observability.
-- `finishManualRun` loop: `item.liveBundle` present → `stampEnrollment(bundle, measureId, roster)`
-  → `deps.engine.evaluate({ measureId, patientBundle })`; else the synthetic path, unchanged
-  byte-for-byte. Outcome recorded with `subjectId = item.employee.externalId` (`wc|…`) — evidence,
-  case upsert, cycle rollover, audit events, quality snapshots all flow through the existing code
-  with zero special-casing.
-- **Failure posture:** a population-fetch failure at plan time logs a run WARN + emits the #264
-  alert line and **skips the live tenant** (synthetic tenants evaluate normally; the run never
-  fails because teatea is down). Per-patient degradation is already the client's contract
-  (Patient-only bundle → MISSING_DATA).
-- **Scopes deferred to phase 2:** EMPLOYEE/CASE scope for `wc|` subjects (rerun-to-verify against
-  a re-fetched single patient — needs a fetch-one-patient client method). V1: rerun-to-verify on a
-  live subject's case re-uses the last fetched bundle if present, else records MISSING_DATA with
-  an explanatory evidence note. SITE scope: the `wc` site behaves like any site (matcher works).
+- `planManualRun` remains network-free. It creates the run and static work items, and attaches a
+  small live-population descriptor for configured **ALL_PROGRAMS or MEASURE** requests. This is
+  required by `routes/runs.ts::scheduleAsyncRun`, which awaits planning before registering
+  `finishOrFail(...)` with `waitUntil`; putting the population fetch in the planner would move all
+  WebChart pagination and per-patient composition onto the foreground HTTP request.
+- `scheduleAsyncRun` treats a configured MEASURE population run like ALL_PROGRAMS and returns the
+  RUNNING response before any remote fetch. (Without `waitUntil`, the existing synchronous fallback
+  remains valid for tests/local tools, but production has the background lifetime.) The initial
+  response reports the known static count and says that the live count is pending; run logs and the
+  terminal audit payload carry host, fetched count, degraded count, and duration.
+- At the start of `finishManualRun`, the background preparation step fetches normalized bundles once,
+  refreshes the live directory, and appends live `WorkItem`s: one per applicable (live subject ×
+  measure), with `liveBundle?: unknown` and no synthetic target. The loop uses
+  `stampEnrollment(bundle, measureId, roster)` then the unchanged engine; only CQL supplies the
+  outcome. Synthetic items keep the existing byte-for-byte builder path.
+- **Failure posture / last-known-good:** when the seam is configured, failure to fetch the live
+  population aborts the population run *before any outcomes are recorded*. `finishOrFail` records
+  the failure audit/log/alert and finalizes the run FAILED. Read models ignore FAILED runs, so the
+  prior successful run remains authoritative for both synthetic and live subjects. A
+  synthetic-only COMPLETED/PARTIAL_FAILURE run is forbidden here because latest-run-per-measure is
+  selected as a whole; such a run would otherwise erase all `wc|` rows. Per-patient degradation after
+  a successful population fetch retains the existing Patient-only → MISSING_DATA behavior.
+- Quality materialization receives the same merged directory snapshot used for the run.
+  `quality/materialize-run.ts::resolveScope` must use the injected employee/provider lookups, not the
+  static `employeeById`/`providerById`; otherwise all `wc|` rows are silently omitted from the all,
+  tenant, site, and provider snapshots.
+- **Scopes deferred to phase 2:** EMPLOYEE and CASE require fetch-one-patient support. Until then,
+  `case-rerun.ts`/its route reject rerun-to-verify for `wc|` cases with a controlled non-mutating 409;
+  they never reuse a stale bundle and never write a fabricated MISSING_DATA result. SITE is also
+  explicitly deferred: the current latest-run reducer treats SITE as a population run even though it
+  is a partial slice, so enabling a `WebChart` SITE run would supersede other tenants' rows. A
+  configured `SITE=WebChart` request returns a controlled unsupported-scope response until that
+  general SITE/latest-run contract is corrected.
 
 ### 4. Enrollment roster for app runs
 
@@ -113,17 +127,19 @@ created** (the existing COMPLIANT/EXCLUDED close-only bypasses still apply). On 
 the segment seed derives the All-Employees site list from the directory at seed time (which won't
 include the live site yet) — so the runbook documents the one-click fix: edit **All Employees** in
 `/admin → Groups` to add the `WebChart` site (audited `SEGMENT_UPDATED`, the E13 precedent). This
-keeps ADR-016 intact and needs no seed changes.
+keeps ADR-016 intact and needs no seed changes. If that enables live case creation, the CASE
+rerun-to-verify action remains the explicit non-mutating 409 described in §3 until phase 2.
 
 ### 6. Inert-unless-configured + observability
 
 - Selection predicate: the existing `isWebChartConfigured(env)` — no new seam, the boot inventory
-  line's `webchart=on|off` already covers it. Seam off ⇒ `directoryFor` returns the static
+  line's `webchart=on|off` already covers it. Seam off ⇒ `directoryForRows` returns the static
   directory, `/api/tenants` returns the static list, `planManualRun` plans no live items:
   **byte-identical**.
 - One boot-adjacent log line when on: `webchart live tenant: enabled (host …)`. Run logs carry the
-  fetch (count, duration, degraded-patient count). No new audit event types — `RUN_COMPLETED` +
-  `requestedScope.liveTenant` carry the provenance.
+  fetch (count, duration, degraded-patient count). The existing terminal `RUN_COMPLETED` audit
+  convention gains the same `liveTenant` payload (including `status: FAILED` on preparation failure);
+  the fetch count is not put in `requestedScope`, which is persisted before background preparation.
 
 ### 7. What stays OUT (follow-ups, not this feature)
 
@@ -135,17 +151,22 @@ keeps ADR-016 intact and needs no seed changes.
 
 ## Implementation slicing (PR 6, reviewable halves)
 
-- **PR 6a — backend core:** `live-directory.ts` + `directoryFor` merge + run-pipeline live items +
-  tenants route conditional + enrollment policy. Tests: run-pipeline with `fixtureWebChartClient`
-  (live items evaluated, `wc|` outcomes recorded, failure-skip posture, seam-off byte-identity),
-  live-directory rehydration from outcome rows.
-- **PR 6b — read models + e2e:** roster/hierarchy/programs/case-detail on the merged directory;
-  self-skipping HAPI live test (app-level: run → roster rows + hierarchy tenant present);
-  docs (ARCHITECTURE §3/§7, DEPLOY env, MEASURES note, JOURNAL) + ADR-033.
+- **PR 6a — backend core:** `live-directory.ts` + injected directory snapshot + network-free planning
+  + background live preparation + tenants route conditional + enrollment policy. Tests cover the
+  foreground-response boundary, live items and `wc|` outcomes, atomic directory refresh, fetch
+  failure producing a FAILED run with zero new outcomes (prior population stays latest), configured
+  MEASURE background scheduling, SITE rejection, and seam-off byte identity.
+- **PR 6b — read models + safety/e2e:** roster/hierarchy/programs/case-detail and
+  `quality/materialize-run.ts` use the same merged directory; minimal-profile rehydration from latest
+  outcome rows; `case-rerun.ts` returns a non-mutating unsupported result for `wc|`; app-level
+  self-skipping HAPI test proves run → roster/hierarchy/quality snapshot visibility plus restart-style
+  minimal names. Docs: ARCHITECTURE §3/§7, DEPLOY env, MEASURES note, JOURNAL, ADR-033.
 
 ## Verification
 
-- Unit: full suite green; seam-off paths byte-identical (existing tests are the guard).
+- Unit: full suite green; seam-off paths byte-identical; a blocked WebChart fetch does not delay the
+  201 RUNNING response; a failed fetch writes zero outcomes and does not supersede prior live rows;
+  quality snapshot totals include `wc`; CASE/SITE deferrals make no state change.
 - Local e2e: HAPI loaded (`pnpm load:hapi`) → backend `pnpm dev` with
   `WORKWELL_WEBCHART_BASE_URL=http://localhost:8081` + `WORKWELL_WEBCHART_API_KEY=local-dev` →
   frontend `npm run dev` → trigger ALL_PROGRAMS → **"WebChart (localhost:8081)" appears in the
@@ -156,7 +177,8 @@ keeps ADR-016 intact and needs no seed changes.
 
 ## Hard-rule compliance
 
-Descriptive only (ADR-008): adapters feed data; CQL alone sets `Outcome Status`. Every state
-change already audited by the unchanged pipeline. No new deps, no schema, no microservices.
+Descriptive only (ADR-008): adapters feed data; CQL alone sets `Outcome Status`. Successful state
+changes use the existing run/case/snapshot audit paths; the preparation-failure path writes its
+terminal run audit before finalizing FAILED. No new deps, no schema, no microservices.
 Reconciliation (All = Σ tenants) holds — live subjects belong to exactly one tenant. Reversible:
-unset the env vars (outcomes remain as historical runs, like any tenant's).
+unset the env vars (outcomes remain in history but the `wc` tenant is no longer rendered).
