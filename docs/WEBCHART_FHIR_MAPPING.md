@@ -357,11 +357,14 @@ Authorization header path, timeouts/retries — everything the in-process shims 
   (the static bearer is sent and ignored — the header code path still executes). The SMART
   backend-services flow is exercised against the real teatea trial instead (the teatea runbook,
   a follow-up PR in this wave).
-- **After regenerating the fixture file, wipe HAPI before reloading** (`docker compose down -v` on
-  the service, or delete its volume): minted ids are positional, so a re-export that reorders or
-  removes resources mints *different* ids — the loader PUTs the new set but never deletes the old,
-  and stale leftovers would double-count in `?patient=` searches. Idempotence holds for
-  byte-identical fixtures only.
+- **After regenerating the fixture file, recreate only the HAPI container before reloading:** from
+  `backend-ts/`, run `docker compose -f ../infra/docker-compose.yml rm -sf hapi-fhir`, then
+  `docker compose -f ../infra/docker-compose.yml up -d hapi-fhir`. HAPI has no mounted volume in
+  this Compose file, so removing its container clears its embedded data while preserving the
+  separate `postgres_data` volume. Minted ids are positional: a re-export that reorders or removes
+  resources mints *different* ids, and the loader PUTs the new set but never deletes old resources.
+  Stale leftovers would double-count in `?patient=` searches; idempotence holds for byte-identical
+  fixtures only.
 - Do **not** set `hapi.fhir.server_address`: HAPI derives `link[next]` from the request host
   (`localhost:8081`), which keeps pagination same-origin; an off-host server_address would trip the
   client's off-origin guard (a handy manual negative test, not a supported configuration).
