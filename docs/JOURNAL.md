@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-07-16 — WebChart live-integration follow-through wave merged
+
+Merged the six-PR follow-through stack bottom-up: Doug's confirmed contract and trial findings
+(#298), the idempotent HAPI FHIR simulator loader and ADR-032 (#299), the real-HTTP live CLI with
+HAPI bucket-for-bucket parity (#300), the owner-only teatea runbook and supporting probe/import
+tooling (#301), the schema-free live `wc` tenant design (#302), and the MIE product/assumption
+register (#303). The stack adds no runtime behavior to the deployed demo unless the WebChart seam
+is explicitly configured; CQL remains the sole Outcome Status authority and no schema or
+dependency changes were introduced. Two gates remain open: **owner sign-off on the #302 design
+before PR 6 may be implemented**, and **owner execution of the teatea runbook before live trial
+observations may be recorded**.
+
 ## 2026-07-16 — MIE product research + the #254 assumption register (self-sufficiency doc)
 
 `docs/MIE_PRODUCT_RESEARCH_2026-07-16.md` executes Doug's "know our products, stop waiting on us"
