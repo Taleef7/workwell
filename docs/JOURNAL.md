@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-07-16 — Doug meeting recorded: #254 delivered, M2 unblocked, WebChart live-integration wave planned
+
+The 2026-07-15 Doug meeting answered the #254 package's load-bearing questions and this entry
+records them (details inline in `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` + its Answer log):
+**A1 confirmed** — the FHIR R4 API is the integration surface; **A3 confirmed** — auth is SMART
+(Backend Services; exactly the ADR-028 contract the transport already implements); **D17 answered**
+— data flows WebChart→WorkWell and CQL runs on our side (CQL→SQL is parked; the #292 Option B
+triggers stay dormant); **C13 answered** — we now hold a WebChartNow **trial instance**,
+`teatea.webchartnow.com`, with the System Owner role. Doug also suggested standing up a **HAPI FHIR
+server as a local WebChart simulator** over the dev-DB data (the official `hapiproject/hapi` image
+already sits unwired in `infra/docker-compose.yml`; the `jamesagnew/hapi-fhir` repo he pointed at
+was verified to be a stale personal fork of upstream HAPI, no MIE code), and directed us to be
+self-sufficient on the rest: the un-discussed items (A2 pagination, A4–A8, B9–B12, C14–C16) move to
+a documented assumption register with live verification where observable, rather than re-blocking
+on MIE.
+
+Live probe of the trial (2026-07-16, unauthenticated, both 200): the FHIR base
+`/webchart.cgi/fhir/` serves an R4 4.0.1 CapabilityStatement (35 resources, US Core + Bulk Data
+IG), and `.well-known/smart-configuration` advertises `private_key_jwt` + **RS384 only**, scopes
+`patient/*.rs` + `system/*.read` (so the runbook sets `WORKWELL_WEBCHART_SCOPE=system/*.read`
+against our `system/*.rs` default), and `grant_types_supported: ["authorization_code"]` only —
+whether a registered backend client can use `client_credentials` is the wave's key live test. The
+big operational discovery: **client registration is self-serviceable** — the
+`management_endpoint` is the WebChart admin JWT screen (`webchart.cgi?f=admin&s=jwt`), where a
+System Owner uploads a public JWK and grants scopes. No waiting on MIE for trial credentials.
+
+Wave plan (approved; `~/.claude/plans/okay-i-had-a-async-hearth.md`): this docs PR → HAPI fixture
+loader → `pnpm evaluate:webchart-live` CLI + self-skipping HAPI parity test → teatea runbook (keys,
+registration, auth probe, and a **realistic ~30-patient import generated from the synthetic
+corpus** through WebChart's import tooling) → a **live WebChart tenant** spec + implementation
+(behind the E1/ADR-005 `EmployeeDirectory`/`PatientDataProvider` ports, inert-unless-configured) so
+the app's own dashboards visualize live WebChart-derived compliance → the MIE product research doc
+(Enterprise Health ↔ WorkWell mapping + assumption register). Docs-only today: questions doc,
+CLAUDE.md focus block, this entry. The "send #254" owner step is retired — delivered and discussed.
+
 ## 2026-07-15 — Connectathon D1+D2 MeasureReport conformance fixes (ADR-031)
 
 Corrected the two verified export-only defects from
