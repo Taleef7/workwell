@@ -84,7 +84,34 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-15 — HL7 Connectathon validation wave; prior blocks below)
+## Current Focus (as of 2026-07-16 — WebChart live-integration wave; prior blocks below)
+
+**2026-07-16 — Doug meeting (07-15) delivered #254 and unblocked M2.** Confirmed: **A1** — FHIR R4
+is the integration surface; **A3** — auth is SMART (Backend Services, matching ADR-028); **D17** —
+data flows **WebChart→WorkWell, CQL runs our side** (CQL→SQL parked; #292 triggers dormant);
+**C13** — we hold a WebChartNow **trial instance** `teatea.webchartnow.com` (System Owner). Doug
+also suggested a **HAPI FHIR server as a local WebChart simulator** (use official
+`hapiproject/hapi` — already in `infra/docker-compose.yml`, port 8081; the `jamesagnew/hapi-fhir`
+link is a stale personal fork) and directed us to **be self-sufficient**: remaining #254 items
+(A2/A4–A8/B9–B12/C14–C16 — not discussed) become a documented assumption register, not blockers.
+**Trial probe (2026-07-16):** FHIR + smart-configuration live; `private_key_jwt` RS384 only, scopes
+`patient/*.rs`+`system/*.read` (⇒ `WORKWELL_WEBCHART_SCOPE=system/*.read`), grant list advertises
+only `authorization_code` (client_credentials = live test); **client registration is
+self-serviceable** at `webchart.cgi?f=admin&s=jwt`. **The wave (approved plan summarized in the
+stacked PR descriptions, 7 PRs):** record answers (this PR) → HAPI fixture
+loader (collection→transaction transform, PUT w/ deterministic ids) → `pnpm evaluate:webchart-live`
+CLI + self-skipping HAPI parity test → teatea runbook (keypair, client registration, auth probe,
+**realistic ~30-patient import generated from the synthetic corpus** via WebChart's import tooling)
+→ **live WebChart tenant spec + implementation** (WebChart-backed tenant behind the E1/ADR-005
+`EmployeeDirectory`/`PatientDataProvider` ports, inert-unless-configured — the app's dashboards
+visualize live WebChart-derived compliance) → MIE product research doc (Enterprise Health ↔
+WorkWell mapping + the assumption register). End state: teatea holds a realistic synthetic
+population; the app fetches it live over FHIR, evaluates, persists audited outcomes, and
+`/compliance`, `/programs`, `/programs/hierarchy` visualize it. Demo stack stays untouched (seam
+unset ⇒ byte-identical; **no PHI ever**). Remaining owner steps: execute the teatea runbook; Neon
+plan-upgrade decision (unchanged).
+
+## Prior focus (2026-07-15 — HL7 Connectathon validation wave)
 
 **2026-07-15 — the CMS Connectathon 7 research + validation wave is MERGED (PRs #293 + #294; Codex-implemented, review-gated).** Research record: `HL7 Connectathon/RESEARCH_FINDINGS_2026-07-15.md` (now tracked in-repo). **#293 — official MADiE test-case harness** (`pnpm test:official-cases`; content fetched gitignored, pinned @ upstream `ca4b495`, `-Ref` override): **121/121 official test cases pass — CMS122 55/55, CMS125 66/66** (`docs/OFFICIAL_TESTCASE_REPORT_2026-07.md`) — the project's first *external* ground truth. Found + filed **projecttacoma/fqm-execution#371** (date-only `measurementPeriodEnd` — including the `Measure.effectivePeriod.end` default — parsed as START-of-day, dropping Dec-31 events; harness normalizes to end-of-day, documented caveat) and fixed the same latent bug in the live literal-diff route (`literal-diff.ts` period end now `T23:59:59.999Z`). CMS122 bundle drift v0.5.000→v1.0.000 = **0/55 outcome changes** (re-vendoring is cosmetic, deprioritized). **#294 (ADR-031) — MeasureReport export conformance:** DENOM is now the **membership-label count** (score = `NUMER/(DENOM−DENEX)`; br-57509 ballot-branch semantics, caveat documented); cms122/cms125 `MISSING_DATA` maps **out-of-population** via the new `missingDataMeansOutOfPopulation` binding flag (their CQL encodes not-in-IPP as MISSING_DATA — other measures unchanged); `improvementNotation` is binding-driven with a **guard test** on the urn:workwell-canonical + compliance-numerator invariant (never ship the inverted cms122 numerator under the official CMS canonical); base-R4 adds (id, injectable generation `date`, contained `reporter`, Bundle `fullUrl`s); QRDA inherits the corrected counts. `quality_snapshots`/programs/roster are **byte-identical** (documented intentional divergence). **Connectathon backlog now tracked as issues (filed 2026-07-15):** VSAC manifest pinning + provenance, the CQL conformance harness, and the standards follow-ups bundle (fqm#371 watch, subset-vs-official-cases fidelity, DEQM profile tier). **Owner steps: send #254 — now including the new DEQM `$submit-data`/`$collect-data` + US Quality Core trajectory questions — and the Neon plan-upgrade decision.**
 
