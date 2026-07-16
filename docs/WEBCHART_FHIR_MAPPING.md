@@ -355,8 +355,13 @@ Authorization header path, timeouts/retries — everything the in-process shims 
 - **Auth note:** stock HAPI is open (no auth); point the client at it with
   `WORKWELL_WEBCHART_BASE_URL=http://localhost:8081` + any non-blank `WORKWELL_WEBCHART_API_KEY`
   (the static bearer is sent and ignored — the header code path still executes). The SMART
-  backend-services flow is exercised against the real teatea trial instead
-  (`docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`).
+  backend-services flow is exercised against the real teatea trial instead (the teatea runbook,
+  a follow-up PR in this wave).
+- **After regenerating the fixture file, wipe HAPI before reloading** (`docker compose down -v` on
+  the service, or delete its volume): minted ids are positional, so a re-export that reorders or
+  removes resources mints *different* ids — the loader PUTs the new set but never deletes the old,
+  and stale leftovers would double-count in `?patient=` searches. Idempotence holds for
+  byte-identical fixtures only.
 - Do **not** set `hapi.fhir.server_address`: HAPI derives `link[next]` from the request host
   (`localhost:8081`), which keeps pagination same-origin; an off-host server_address would trip the
   client's off-origin guard (a handy manual negative test, not a supported configuration).

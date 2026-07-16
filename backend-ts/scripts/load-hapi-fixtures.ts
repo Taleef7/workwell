@@ -64,6 +64,13 @@ async function main(argv: string[]): Promise<number> {
       );
       return 1;
     }
+    // every SENT entry must be answered — a short response would otherwise pass as success
+    if ((body.entry ?? []).length !== tx.entry.length) {
+      process.stderr.write(
+        `bundle ${i}: transaction-response has ${(body.entry ?? []).length} entries for ${tx.entry.length} sent\n`,
+      );
+      return 1;
+    }
     for (const entry of body.entry ?? []) {
       const status = entry.response?.status ?? "";
       if (!/^2\d\d/.test(status)) {
