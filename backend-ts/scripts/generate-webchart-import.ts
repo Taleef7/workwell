@@ -104,7 +104,9 @@ function buildCohort(n: number, asOf: string): Person[] {
     const diabetes = () =>
       p.diagnoses.push({ name: "Type 2 diabetes mellitus", snomed: "44054006", daysAgo: 1200 });
 
-    const age = asOfYear - birthYear; // as-of-derived so a pinned --as-of stays deterministic across calendar years
+    // ISO month-day strings sort chronologically, so this matches CQL's age-at-date behavior at
+    // the 42/74 boundaries instead of counting a birthday that has not happened yet.
+    const age = asOfYear - birthYear - (asOf.slice(5) < birthDate.slice(5) ? 1 : 0);
     const mammoEligible = sex === "F" && age >= 42 && age <= 74;
 
     switch (profile) {
