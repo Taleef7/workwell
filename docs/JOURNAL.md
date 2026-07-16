@@ -23,6 +23,8 @@ don't): Chart Data CSV (demographics, `@patient_mrns.MR` creates charts), Clinic
 carries the intended LOINC via the instance compendium), and Injections CSV (CVX codes, the
 verified 18-column header). Five repeating clinical profiles guarantee every outcome bucket;
 mammograms ride the manual checklist (WebChart has no procedure CSV — completed CPT 77067 orders).
+Mammogram eligibility uses date-exact age at the requested `--as-of`, including the 42/74 boundary
+birthdays, so pinned generation remains deterministic and aligned with the CQL age gate.
 Smoke-run: 30 patients → 24 visits, 102 observations, 78 immunizations, 7 mammograms. Three
 flagged format caveats (exact `patients.sex` header, `part:MR` id-type, name→LOINC mapping) are
 first-small-upload checks, not blockers. No new deps; no schema; descriptive only (ADR-008).
