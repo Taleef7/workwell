@@ -241,5 +241,18 @@ what does its contract look like?
   `/webchart.cgi/jwks/`, no dynamic registration. The remaining open items (A2 pagination, A4–A8,
   B9–B12, C14–C16) were not covered in the meeting; per Doug's be-self-sufficient direction they
   move to an assumption register with live verification where observable
-  (`docs/MIE_PRODUCT_RESEARCH_2026-07-16.md`, forthcoming) instead of re-blocking on MIE. This
+  (`docs/MIE_PRODUCT_RESEARCH_2026-07-16.md`) instead of re-blocking on MIE. This
   entry supersedes "send #254" as an owner step — the package is delivered and discussed.
+- **2026-07-16 (assumption register):** `docs/MIE_PRODUCT_RESEARCH_2026-07-16.md` §3 records a
+  working assumption + falsifier + live-verification surface for **every** still-open item — A2
+  (standard `link[next]`, observed on the runbook's live pull), A4 (conservative serial posture),
+  A5 (LOINC-coded valueQuantity, spot-checked post-import), A6 (content-hash — the #263 decided
+  design), A7/A8 (cms122 requires an actual coded FHIR Condition; fail-closed), B9
+  (**WorkWell-side roster is the working design**), B10 (flat live-tenant placement until real keys
+  observed), B11
+  (MRNs remain system-local `(authority, partition, value)` identifiers until a shared enterprise
+  key is confirmed), B12 (per-endpoint tenant
+  topology sidesteps employer fields for v1), C14/C15/C16 (not self-resolvable — posture
+  unchanged; they gate production, not trial work). §1–2 map MIE's products (WebChart platform /
+  **Enterprise Health** occ-health EHR / NoMoreClipboard; BlueHive is third-party) and fix
+  WorkWell's position: the standards-based CQL/eCQM layer alongside EH's native surveillance logic.
