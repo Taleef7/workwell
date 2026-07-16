@@ -123,6 +123,12 @@ sources, 2026-07-16 — the rendered docs live under
    only the rejected rows for fixing.
 5. Mammograms: manual, per `checklist.md` (completed screening-mammography order, CPT 77067).
 
+**One clinical must-do:** the HbA1c-bearing profiles need a **manual problem-list diabetes
+diagnosis, SNOMED CT 44054006** (per `checklist.md`) — cms122's IPP gates on a diabetes Condition,
+the enrollment roster deliberately never stamps one, and its value-set expansion is SNOMED-only, so
+the encounter CSV's ICD diagnosis field cannot satisfy it. Skipping this makes every patient read
+out-of-IPP (MISSING_DATA) for cms122.
+
 **Three format caveats to verify on the first small upload** (all flagged in the generated README):
 the exact `patients.sex` header string; `part:MR` as the `pat_id_type` for encounters/injections
 (documented `part:` prefix, not byte-verified — fallback `id:ext_id`); and — most important —

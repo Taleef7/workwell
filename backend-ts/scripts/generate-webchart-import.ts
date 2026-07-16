@@ -53,6 +53,11 @@ interface Visit {
   daysAgo: number;
   extId: string;
 }
+interface Diagnosis {
+  name: string;
+  snomed: string; // the cms122 Diabetes expansion is SNOMED-only (44054006) — ICD entries won't match
+  daysAgo: number;
+}
 interface Person {
   mrn: string;
   first: string;
@@ -63,11 +68,13 @@ interface Person {
   obs: Obs[];
   shots: Shot[];
   visits: Visit[];
+  diagnoses: Diagnosis[]; // manual-entry items (problem list; the encounter CSV's ICD field can't carry these)
   mammogramDaysAgo?: number; // manual-entry item (no procedure CSV) — women in the cms125 age band
 }
 
 /** Deterministic cohort: index-derived names/ages/profiles; five profiles cover every bucket. */
-function buildCohort(n: number): Person[] {
+function buildCohort(n: number, asOf: string): Person[] {
+  const asOfYear = Number(asOf.slice(0, 4));
   const people: Person[] = [];
   for (let i = 0; i < n; i++) {
     const sex: "F" | "M" = i % 2 === 0 ? "F" : "M";
@@ -87,42 +94,47 @@ function buildCohort(n: number): Person[] {
       obs: [],
       shots: [],
       visits: [],
+      diagnoses: [],
     };
 
     const visit = (daysAgo: number) => p.visits.push({ daysAgo, extId: `${p.mrn}-visit-${p.visits.length + 1}` });
     const obs = (name: string, loinc: string, value: string, units: string, daysAgo: number) =>
       p.obs.push({ name, loinc, value, units, daysAgo });
     const shot = (description: string, cvx: string, daysAgo: number) => p.shots.push({ description, cvx, daysAgo });
+    const diabetes = () =>
+      p.diagnoses.push({ name: "Type 2 diabetes mellitus", snomed: "44054006", daysAgo: 1200 });
 
-    const age = new Date().getUTCFullYear() - birthYear;
+    const age = asOfYear - birthYear; // as-of-derived so a pinned --as-of stays deterministic across calendar years
     const mammoEligible = sex === "F" && age >= 42 && age <= 74;
 
     switch (profile) {
       case 0: // fully compliant
         visit(60);
+        diabetes(); // cms122 IPP gate — must exist in the chart, the roster never stamps it
         obs("HbA1c", "4548-4", "6.9", "%", 30);
         obs("LDL", "2089-1", "110", "mg/dL", 60);
         obs("BMI", "39156-5", "24.5", "kg/m2", 90);
         obs("Systolic BP", "8480-6", "118", "mmHg", 45);
         obs("Diastolic BP", "8462-4", "76", "mmHg", 45);
-        shot("Influenza, seasonal, injectable", "141", 100);
+        shot("Influenza seasonal injectable", "141", 100);
         shot("Tdap", "115", 730);
         shot("MMR", "03", 9000);
         shot("MMR", "03", 8900);
         shot("Varicella", "21", 9000);
         shot("Varicella", "21", 8900);
-        shot("Hep B, adult (Heplisav-B)", "189", 1885);
-        shot("Hep B, adult (Heplisav-B)", "189", 1825);
+        shot("Hep B adult (Heplisav-B)", "189", 1885);
+        shot("Hep B adult (Heplisav-B)", "189", 1825);
         if (mammoEligible) p.mammogramDaysAgo = 240;
         break;
       case 1: // poor control (cms122 numerator; hypertensive; obese) — everything present, values bad
         visit(45);
+        diabetes(); // cms122 IPP gate
         obs("HbA1c", "4548-4", "10.2", "%", 40);
         obs("LDL", "2089-1", "165", "mg/dL", 70);
         obs("BMI", "39156-5", "31.4", "kg/m2", 80);
         obs("Systolic BP", "8480-6", "152", "mmHg", 50);
         obs("Diastolic BP", "8462-4", "95", "mmHg", 50);
-        shot("Influenza, seasonal, injectable", "141", 90);
+        shot("Influenza seasonal injectable", "141", 90);
         shot("Td (adult)", "09", 1500);
         if (mammoEligible) p.mammogramDaysAgo = 300;
         break;
@@ -133,16 +145,16 @@ function buildCohort(n: number): Person[] {
         obs("BMI", "39156-5", "27.0", "kg/m2", 420);
         obs("Systolic BP", "8480-6", "131", "mmHg", 400);
         obs("Diastolic BP", "8462-4", "84", "mmHg", 400);
-        shot("Influenza, seasonal, injectable", "140", 420);
+        shot("Influenza seasonal injectable", "140", 420);
         if (mammoEligible) p.mammogramDaysAgo = 1100; // ~3y — outside the cms125 window
         break;
       case 3: // missing data — chart exists, nothing else
         break;
       case 4: // due-soon / partial series
         visit(30);
-        obs("HbA1c", "4548-4", "7.6", "%", 170); // inside diabetes_hba1c's 161–180d DUE_SOON band
+        obs("HbA1c", "4548-4", "7.6", "%", 165); // inside diabetes_hba1c's 161–180d DUE_SOON band (evaluate within ~15d of --as-of)
         obs("BMI", "39156-5", "26.1", "kg/m2", 300);
-        shot("Hep B, adult", "43", 90); // 1 of 3 traditional doses — IN_PROGRESS
+        shot("Hep B adult", "43", 90); // 1 of 3 traditional doses — IN_PROGRESS
         shot("MMR", "03", 60); // 1 of 2 doses
         break;
     }
@@ -256,9 +268,13 @@ function checklistMd(people: Person[], asOf: string): string {
   lines.push("");
   for (const p of people) {
     lines.push(`## ${p.mrn} — ${p.first} ${p.last} (${p.sex}, DOB ${p.birthDate}) — profile: ${PROFILE_NAMES[p.profile]}`);
-    if (p.visits.length + p.obs.length + p.shots.length === 0 && p.mammogramDaysAgo === undefined) {
+    if (p.visits.length + p.obs.length + p.shots.length + p.diagnoses.length === 0 && p.mammogramDaysAgo === undefined) {
       lines.push("- register the chart only (deliberately empty — the MISSING_DATA cohort)");
     }
+    for (const d of p.diagnoses)
+      lines.push(
+        `- problem-list diagnosis **${d.name}** (SNOMED CT ${d.snomed} — must be SNOMED; an ICD entry won't match the cms122 value set) onset ~${iso(dateNDaysBefore(asOf, d.daysAgo))}`,
+      );
     for (const v of p.visits) lines.push(`- office visit (CPT 99213) on ${iso(dateNDaysBefore(asOf, v.daysAgo))}`);
     for (const o of p.obs)
       lines.push(`- observation **${o.name}** (LOINC ${o.loinc}): ${o.value} ${o.units} on ${iso(dateNDaysBefore(asOf, o.daysAgo))}`);
@@ -283,6 +299,9 @@ Generated by \`pnpm generate:webchart-import\` (WorkWell). **Synthetic data — 
 3. \`03-observations.csv\` — Observation Import (labs + vitals; date format \`YYYYMMDD\`)
 4. \`04-injections.csv\` — Injections CSV API (immunizations; CVX in \`injections.inject_code\`)
 5. Mammograms: **manual** — no procedure CSV exists; see \`checklist.md\` (completed order, CPT 77067)
+6. Diabetes diagnoses: **manual** — problem-list entries per \`checklist.md\`, **SNOMED CT 44054006**
+   (the cms122 Diabetes value-set expansion is SNOMED-only, so the encounter CSV's ICD diagnosis
+   field cannot satisfy it; without this entry every patient reads out-of-IPP for cms122)
 
 Tick **Verbose** on the upload form the first time; a failed-rows file can be downloaded, fixed, and
 re-uploaded. **Test with 2–3 rows first** (MIE's own best-practice note).
@@ -344,7 +363,7 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  const people = buildCohort(patients);
+  const people = buildCohort(patients, asOf);
   mkdirSync(out, { recursive: true });
   const wrote: string[] = [];
   const write = (name: string, content: string) => {

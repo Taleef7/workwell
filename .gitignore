@@ -48,3 +48,4 @@ backend/src/test/resources/logback-test.xml
 # Local-only notes (tokens, personal config — never commit)
 docs/MCP_LOCAL.md
 docs/vision doc screenshots
+webchart-import/
