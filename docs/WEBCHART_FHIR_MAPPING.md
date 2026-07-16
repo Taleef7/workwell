@@ -365,6 +365,16 @@ Authorization header path, timeouts/retries — everything the in-process shims 
   resources mints *different* ids, and the loader PUTs the new set but never deletes old resources.
   Stale leftovers would double-count in `?patient=` searches; idempotence holds for byte-identical
   fixtures only.
+- **Evaluate over live HTTP:** `pnpm evaluate:webchart-live` (`live-cli.ts`) drives the same
+  roster+crosswalk+engine pipeline as `evaluate:webchart-devdb`, but through `httpWebChartClient`
+  against a real endpoint. `--list-patients` prints a roster-template JSON on stdout (human table
+  on stderr); `--roster <path>` + `--date` + `--measures` + `--page-size` run the evaluation (one
+  population fetch reused across measures). It **fails fast when the WebChart seam is
+  unconfigured** — a silent JSON fallback would fake a live pass. Verified against HAPI: the
+  per-measure bucket counts are **deep-equal to the committed-fixture path** (the parity headline
+  of `hapi-live.test.ts`, which self-skips unless the dedicated
+  `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` is set AND reachable — deliberately not the runtime var,
+  so a teatea-pointing `.env` can never turn `pnpm test` into a remote-network suite).
 - Do **not** set `hapi.fhir.server_address`: HAPI derives `link[next]` from the request host
   (`localhost:8081`), which keeps pagination same-origin; an off-host server_address would trip the
   client's off-origin guard (a handy manual negative test, not a supported configuration).
