@@ -12,6 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  deploy-helper:
+    name: Deploy helper — Shell test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test bounded MIE manager requests
+        run: bash .github/scripts/mieweb-api-request.test.sh
+
   frontend:
     name: Frontend — Lint, Test, Build
     runs-on: ubuntu-latest
