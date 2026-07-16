@@ -20,8 +20,8 @@ export interface MeasureSummary {
   counts: Record<OutcomeStatus, number>;
 }
 
-export const pad = (s: string, n: number) => s.padEnd(n);
-export const padL = (s: string, n: number) => s.padStart(n);
+const pad = (s: string, n: number) => s.padEnd(n);
+const padL = (s: string, n: number) => s.padStart(n);
 
 /** The header + separator + one row per measure (no caption/footer — those are per-CLI). */
 export function measureTableLines(summaries: readonly MeasureSummary[]): string[] {
