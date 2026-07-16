@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-07-16 — WebChart live-integration follow-through wave merged
+## 2026-07-16 — WebChart live-integration six-PR prerequisite stack merged
 
 Merged the six-PR follow-through stack bottom-up: Doug's confirmed contract and trial findings
 (#298), the idempotent HAPI FHIR simulator loader and ADR-032 (#299), the real-HTTP live CLI with
