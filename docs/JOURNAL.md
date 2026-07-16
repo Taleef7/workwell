@@ -26,7 +26,7 @@ big operational discovery: **client registration is self-serviceable** — the
 `management_endpoint` is the WebChart admin JWT screen (`webchart.cgi?f=admin&s=jwt`), where a
 System Owner uploads a public JWK and grants scopes. No waiting on MIE for trial credentials.
 
-Wave plan (approved; `~/.claude/plans/okay-i-had-a-async-hearth.md`): this docs PR → HAPI fixture
+Wave plan (approved; summarized in the stacked PR descriptions): this docs PR → HAPI fixture
 loader → `pnpm evaluate:webchart-live` CLI + self-skipping HAPI parity test → teatea runbook (keys,
 registration, auth probe, and a **realistic ~30-patient import generated from the synthetic
 corpus** through WebChart's import tooling) → a **live WebChart tenant** spec + implementation
