@@ -1,5 +1,24 @@
 # Journal
 
+## 2026-07-16 — HAPI "fake WebChart" loader (ADR-032): dev-DB fixtures → local FHIR R4 server
+
+Wired the previously-unused `hapi-fhir` compose service into the workflow as the local WebChart
+simulator Doug suggested. New pure transform `hapi-transform.ts` (CI-tested, 8 tests) converts each
+committed dev-DB fixture *collection* Bundle into a *transaction* Bundle of `PUT {type}/{id}`
+entries: patient ids (`wc-5`) preserved because the enrollment roster keys on them (a POST's
+server-assigned id would silently break stamping into all-MISSING_DATA), and id-less clinical
+resources get deterministic minted ids (`{patientId}-{type}-{ordinal}`) so re-loads update in place
+instead of duplicating (a duplicate Immunization would double-count doses). New thin CLI
+`pnpm load:hapi` (`scripts/load-hapi-fixtures.ts`) POSTs the transactions and fails loudly on any
+non-2xx entry.
+
+Live-verified end-to-end: `docker compose up -d hapi-fhir` → first `pnpm load:hapi` = **56
+patients, 293 resources, 293 created**; second run = **293 updated, 0 created** (idempotent, no
+growth); `GET /fhir/Patient?_summary=count` → 56; `GET /fhir/Observation?patient=wc-5` → 2. Docs:
+ADR-032 (division of labor: HAPI = local real-HTTP + rich-data proof, teatea = real-contract auth
+proof), WEBCHART_FHIR_MAPPING §8.3. No new deps (global fetch); no schema; descriptive only
+(ADR-008). Next: the live-HTTP evaluate CLI + self-skipping HAPI parity test (wave PR 3).
+
 ## 2026-07-16 — Doug meeting recorded: #254 delivered, M2 unblocked, WebChart live-integration wave planned
 
 The 2026-07-15 Doug meeting answered the #254 package's load-bearing questions and this entry
