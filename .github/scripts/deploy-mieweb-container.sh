@@ -33,59 +33,8 @@ api_root="${api_root%/api/v1}"
 api_root="${api_root%/v1}"
 api_root="${api_root%/api}"
 api_base="${api_root}/api/v1"
-
-request() {
-  local method="$1"
-  local path="$2"
-  local body_file="${3:-}"
-  local response_file status curl_exit
-  response_file="$(mktemp)"
-
-  set +e
-  if [ -n "$body_file" ]; then
-    status=$(curl -sS -o "$response_file" -w "%{http_code}" \
-      -X "$method" "${api_base}${path}" \
-      -H "Authorization: Bearer ${MIEWEB_API_KEY}" \
-      -H "Accept: application/json" \
-      -H "Content-Type: application/json" \
-      --data-binary "@$body_file")
-    curl_exit=$?
-  else
-    status=$(curl -sS -o "$response_file" -w "%{http_code}" \
-      -X "$method" "${api_base}${path}" \
-      -H "Authorization: Bearer ${MIEWEB_API_KEY}" \
-      -H "Accept: application/json")
-    curl_exit=$?
-  fi
-  set -e
-
-  if [ "$curl_exit" -ne 0 ]; then
-    echo "::error::${method} ${path} failed before HTTP response (curl exit ${curl_exit})" >&2
-    cat "$response_file" >&2 || true
-    return 1
-  fi
-
-  if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
-    echo "::error::${method} ${path} failed with HTTP ${status}" >&2
-    cat "$response_file" >&2
-    return 1
-  fi
-
-  if [ "$status" = "204" ] || { [ "$method" = "DELETE" ] && [ ! -s "$response_file" ]; }; then
-    return 0
-  fi
-
-  if ! jq -e . "$response_file" >/dev/null 2>&1; then
-    echo "::error::${method} ${path} returned a non-JSON response from ${api_base}${path}." >&2
-    echo "::error::Check LAUNCHPAD_API_URL. The web UI serves HTML at the origin and Swagger at /api; the JSON REST API is at /api/v1." >&2
-    echo "Response preview:" >&2
-    head -c 500 "$response_file" >&2 || true
-    echo >&2
-    return 1
-  fi
-
-  cat "$response_file"
-}
+# shellcheck source=mieweb-api-request.sh
+source "$(dirname "${BASH_SOURCE[0]}")/mieweb-api-request.sh"
 
 echo "$CONTAINER_ENV_VARS_JSON" | jq -e '
   type == "array" and all(.[]; type == "object" and has("key") and has("value"))

@@ -54,6 +54,14 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 > ~436 MB production runtime to keep the pull fast. If a genuinely slow MIE pull still times out, bump
 > `DEPLOY_JOB_POLL_ATTEMPTS` (up to 360) on a `workflow_dispatch` run.
 
+> **Manager-request resilience.** Every Container Manager call has a 10-second connection timeout
+> and a 30-second overall timeout. Safe `GET` calls retry transient curl transport failures up to
+> six times with 20-second spacing; `POST` and `DELETE` are attempted
+> once because a lost response is ambiguous (the manager may already have applied the state change).
+> CI runs `.github/scripts/mieweb-api-request.test.sh` to pin the timeout, retry, and method-safety
+> behavior. A manager outage longer than this bounded window still fails the deploy honestly; wait
+> for `manager.os.mieweb.org:443` to recover, then rerun the failed workflow jobs.
+
 ### Required GitHub Secrets for MIE deploy
 
 | Secret | Purpose |
@@ -686,6 +694,9 @@ If any approaches limit, fix that day. Don't wait.
 **Backend deploy job fails at the MIE manager API**
 - Confirm the API base resolves to `<manager-origin>/api/v1` (the origin serves the SPA; `/api` serves Swagger)
 - Responses are `{"data": ...}` enveloped; the create body uses `template` + `services[]`; job polling reads `.data.status` (`"success"`)
+- For `curl exit 7/28`, verify TCP 443 reachability to the manager. The deploy
+  retries safe reads within a bounded window; if the control plane remains unavailable, do not loop
+  state-changing requests manually. Once it recovers, use `gh run rerun <run-id> --failed`.
 
 **Deploy fails with `Container is 'offline', expected running`**
 - This is a **startup race**, not a crash: the create job reports `success` once the container is

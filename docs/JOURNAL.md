@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-07-16 — MIE manager outage: bounded, method-safe deploy retries
+
+The WebChart stack's final deploy exposed a pre-existing failure mode in
+`deploy-mieweb-container.sh`: when `manager.os.mieweb.org:443` was unreachable, the first
+`GET /sites` inherited curl's long platform timeout and then failed permanently, even though safe
+reads can be retried. The request boundary now applies 10-second connect/30-second overall limits
+and retries transient **GET** transport failures six times with bounded backoff.
+State-changing POST/DELETE calls remain single-attempt because retrying a lost response could
+duplicate or mis-handle an already-applied operation. A no-network shell regression test runs in
+CI. This changes deployment tooling only: no runtime, dependency, schema, PHI, or Outcome Status
+behavior.
+
 ## 2026-07-16 — WebChart live-integration six-PR prerequisite stack merged
 
 Merged the six-PR follow-through stack bottom-up: Doug's confirmed contract and trial findings
