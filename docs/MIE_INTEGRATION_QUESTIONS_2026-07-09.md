@@ -247,10 +247,12 @@ what does its contract look like?
   working assumption + falsifier + live-verification surface for **every** still-open item — A2
   (standard `link[next]`, observed on the runbook's live pull), A4 (conservative serial posture),
   A5 (LOINC-coded valueQuantity, spot-checked post-import), A6 (content-hash — the #263 decided
-  design), A7/A8 (fail-closed; pre-production unknowables flagged), B9 (**WorkWell-side roster is
-  the working design**), B10 (flat live-tenant placement until real keys observed), B11
-  (MRN-partition identifiers; the E15 seam absorbs the real key), B12 (per-endpoint tenant
+  design), A7/A8 (cms122 requires an actual coded FHIR Condition; fail-closed), B9
+  (**WorkWell-side roster is the working design**), B10 (flat live-tenant placement until real keys
+  observed), B11
+  (MRNs remain system-local `(authority, partition, value)` identifiers until a shared enterprise
+  key is confirmed), B12 (per-endpoint tenant
   topology sidesteps employer fields for v1), C14/C15/C16 (not self-resolvable — posture
   unchanged; they gate production, not trial work). §1–2 map MIE's products (WebChart platform /
   **Enterprise Health** occ-health EHR / NoMoreClipboard; BlueHive is third-party) and fix
-  WorkWell's position: the CQL measure-computation layer over EH-shaped data.
+  WorkWell's position: the standards-based CQL/eCQM layer alongside EH's native surveillance logic.

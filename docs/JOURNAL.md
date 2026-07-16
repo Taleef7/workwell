@@ -6,14 +6,16 @@
 directive. §1 maps the landscape (WebChart = the ONC-certified platform EHR; **Enterprise Health =
 the occupational-health EHR built ON it** — surveillance programs, immunizations, OSHA
 recordkeeping, case management; NoMoreClipboard = the PHR line; BlueHive = a third-party network,
-not MIE). §2 fixes WorkWell's position in one sentence: **the CQL measure-computation layer over
-EH-shaped data** — EH captures the occupational-health data and runs hand-authored reports;
-WorkWell pulls it over FHIR and computes standards-based compliance (authorable CQL measures,
+not MIE). §2 fixes WorkWell's position in one sentence: **the standards-based CQL/eCQM layer over
+EH-shaped data** — WorkWell complements EH's native panel due/decertification logic by pulling data
+over FHIR and computing portable standards-based compliance (authorable CQL measures,
 evidence-carrying outcomes, audit-first case workflow, eCQM exports), with a module-level
 EH↔WorkWell seam mapping. §3 is the register: every still-open #254 item now carries a working
 assumption + falsifier + the live surface that verifies it (A2/A5 land automatically when the
 teatea runbook runs; B9's WorkWell-side roster is promoted to *the working design*; C14/C15/C16
-stay flagged as genuinely MIE-gated production questions, not trial blockers). §4 names the
+stay flagged as genuinely MIE-gated production questions, not trial blockers). A8 requires a real
+coded FHIR Condition for cms122, and B11 keeps MRNs system-local until a shared authority is proven.
+§4 names the
 deployability shape: the whole live integration is env-var configuration on one seam — *configure,
 don't build* — with the PHI environment split still the production gate. Cross-linked from the
 #254 Answer log so that doc stays the single index.

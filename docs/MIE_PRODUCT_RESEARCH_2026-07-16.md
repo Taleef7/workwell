@@ -28,14 +28,15 @@ EH-flavored occupational fields (`employer_name`, incident/OSHA tables).
 
 ## 2. Where WorkWell sits (Doug-confirmed direction)
 
-**WorkWell is the measure-engine / quality-computation layer that Enterprise Health does not have
-as a first-class engine**: EH captures the occupational-health *data* (surveillance exams,
-immunizations, OSHA events, encounters) and runs hand-authored reports; WorkWell **pulls that data
-out over FHIR and computes standards-based compliance with CQL** — authorable measures (CQL
-canonical, rule-builder compiled), deterministic population runs, evidence-carrying outcomes, case
+**WorkWell is the standards-based CQL/eCQM measure layer alongside Enterprise Health's native
+operational surveillance workflows**. EH captures the occupational-health *data* (surveillance
+exams, immunizations, OSHA events, encounters) and already evaluates panel due dates, required
+actions, and decertification; WorkWell **pulls that data out over FHIR and computes externally
+authorable CQL measures** — deterministic population runs, evidence-carrying outcomes, case
 workflow, audit-first posture, and eCQM-grade exports (MeasureReport/QRDA). Doug's D17 answer fixed
 the direction: **data flows WebChart→WorkWell; CQL runs on our side** (no engine-inside-the-DB, no
-CQL→SQL now).
+CQL→SQL now). The complement is CQL/standards portability and evidence, not a claim that EH lacks
+its own program-specific due/compliance logic.
 
 Module-level mapping (EH concept → WorkWell seam):
 
@@ -94,11 +95,14 @@ would change it · **Where verified** = the live surface that can confirm it wit
   observation twin — pre-production unknowable; flagged risk, revisit at first real-customer data.
 
 ### A8 — problem list
-- **Assumption:** encounter diagnoses (ICD on `encounters.primary_diagnosis`) are the practical
-  Condition source; FHIR `Condition` may be sparse. Impact is confined to cms122's
-  diabetes-diagnosis gate; the live tenant treats a missing diagnosis as not-in-IPP (correct
-  fail-closed behavior).
-- **Falsifier:** teatea/production charts carrying a populated problem list → prefer it.
+- **Assumption:** cms122 requires a real problem-list/FHIR `Condition` carrying the Diabetes value
+  set code (the teatea seed uses SNOMED CT 44054006). An ICD value on
+  `Encounter.primary_diagnosis` is not sufficient: the current normalizer does not synthesize a
+  Condition from Encounter data, and CQL retrieves `[Condition: "Diabetes"]`. MIE's Conditions CSV
+  API can record SNOMED concept ids, but whether that record appears on the trial's FHIR Condition
+  surface remains an observation to verify. Missing Condition ⇒ out of IPP, fail closed.
+- **Falsifier:** a future, explicitly tested ICD→Condition normalization rule or a different
+  standards-approved diagnosis source; neither is assumed today.
 
 ### B9 — OH program enrollment home
 - **Assumption (now the working design):** **WorkWell-side roster** is the authoritative home —
@@ -116,10 +120,14 @@ would change it · **Where verified** = the live surface that can confirm it wit
   (the trial exposes all three resource types — inspect once charts exist).
 
 ### B11 — identity keys
-- **Assumption:** `Patient.identifier` (MRN partitions, e.g. `MR`) is the cross-system key; E15's
-  `matchKey` seam absorbs whatever the real key turns out to be. Live-tenant subjects are
-  deliberately NOT linked to twh/ihn people yet (#187 PR-3).
-- **Falsifier:** an enterprise master-person id appearing on `Patient`/`Person` resources.
+- **Assumption:** an MRN is **system-local identity only**, keyed by
+  `(WebChart instance/assigning authority, partition, value)`. MIE documents partition+MRN
+  uniqueness within a database; that does not make the value globally shared, and raw MRNs must not
+  drive E15 cross-system linkage. Live-tenant subjects therefore remain deliberately unlinked to
+  twh/ihn people (#187 PR-3).
+- **Falsifier / promotion rule:** only an explicitly documented enterprise master-person identifier
+  on `Patient`/`Person` (or another MIE-confirmed shared authority) may be promoted into E15's
+  `nationalId`/`matchKey` seam.
 
 ### B12 — employer/occupational fields
 - **Assumption:** employer fields (`employer_name`, `employer_uid`) do **not** surface in base
@@ -160,8 +168,14 @@ D17: WebChart→WorkWell, CQL our side (Doug); Option B (#292) dormant. D18: sel
 
 ## 5. Sources
 
-- `mieweb/docs` repo (docs sources; data-migration specs + published Google-Sheet column specs)
+- [`mieweb/docs` FHIR API](https://github.com/mieweb/docs/tree/master/content/resources/system-specifications/fhir-application-programming-interface-api)
+  and Data Migration sources, including
+  [Conditions CSV](https://github.com/mieweb/docs/blob/master/content/features/system-administration/data-migration/conditions-csv-api.md),
+  [MRN import semantics](https://github.com/mieweb/docs/blob/master/content/features/system-administration/data-migration/chart-medical-record-number-mrn-import-options.md), and
+  [Panel Membership](https://github.com/mieweb/docs/blob/master/content/features/health-surveillance/panel-membership-portlet.md)
+  (plus their published Google-Sheet column specs)
 - Live probes 2026-07-16: `teatea.webchartnow.com/webchart.cgi/fhir/{metadata,.well-known/smart-configuration}`
-- enterprisehealth.com, webchartnow.com, bluehive.com (product pages)
+- [Enterprise Health](https://www.enterprisehealth.com/), webchartnow.com, and
+  [BlueHive](https://bluehive.com/) product pages
 - `docs/INTEGRATION_RESEARCH_2026-07-13.md` (the verified FHIR contract), `docs/WEBCHART_FHIR_MAPPING.md`
 - Doug meeting 2026-07-15 (owner recollection, recorded in the #254 Answer log 2026-07-16)
