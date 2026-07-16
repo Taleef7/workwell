@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-07-16 — MIE product research + the #254 assumption register (self-sufficiency doc)
+
+`docs/MIE_PRODUCT_RESEARCH_2026-07-16.md` executes Doug's "know our products, stop waiting on us"
+directive. §1 maps the landscape (WebChart = the ONC-certified platform EHR; **Enterprise Health =
+the occupational-health EHR built ON it** — surveillance programs, immunizations, OSHA
+recordkeeping, case management; NoMoreClipboard = the PHR line; BlueHive = a third-party network,
+not MIE). §2 fixes WorkWell's position in one sentence: **the CQL measure-computation layer over
+EH-shaped data** — EH captures the occupational-health data and runs hand-authored reports;
+WorkWell pulls it over FHIR and computes standards-based compliance (authorable CQL measures,
+evidence-carrying outcomes, audit-first case workflow, eCQM exports), with a module-level
+EH↔WorkWell seam mapping. §3 is the register: every still-open #254 item now carries a working
+assumption + falsifier + the live surface that verifies it (A2/A5 land automatically when the
+teatea runbook runs; B9's WorkWell-side roster is promoted to *the working design*; C14/C15/C16
+stay flagged as genuinely MIE-gated production questions, not trial blockers). §4 names the
+deployability shape: the whole live integration is env-var configuration on one seam — *configure,
+don't build* — with the PHI environment split still the production gate. Cross-linked from the
+#254 Answer log so that doc stays the single index.
+
 ## 2026-07-16 — teatea runbook: auth probe + import-file generator (owner steps packaged)
 
 Everything the owner needs to bring the teatea trial live, in one PR. **Runbook**
