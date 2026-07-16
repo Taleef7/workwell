@@ -1,5 +1,30 @@
 # Journal
 
+## 2026-07-16 — `evaluate:webchart-live`: the transport's first real-HTTP proof (bucket-for-bucket parity)
+
+The live-evaluate CLI closes the gap ADR-028 left open: `httpWebChartClient` had only ever run
+against in-process shims. New `live-cli.ts` (`pnpm evaluate:webchart-live`) drives the unchanged
+roster+crosswalk+engine pipeline over real HTTP — `--list-patients` emits a roster-template JSON on
+stdout (human table on stderr, so `> roster.json` yields a valid file), `--roster/--date/--measures`
+evaluate (one population fetch reused across measures), `--page-size` forces genuine multi-page
+`link[next]` pagination, and an unconfigured seam **fails fast** rather than silently falling back
+to the JSON source. Two pure extractions, both covered by existing tests: the fixed-width table +
+date validation into `report-table.ts` (devdb output byte-identical), and `webChartConfigFromEnv`
+out of `resolveDataSource` (behavior-preserving; the CLI needs it to construct the client with
+options).
+
+**Verified live against the loaded HAPI simulator: the parity headline holds.** At `--page-size 10`
+(6 real pages) the per-measure bucket counts are **deep-equal to the committed-fixture path** — 56
+patients, 31 real non-MISSING_DATA outcomes, identical table to `evaluate:webchart-devdb --date
+2024-06-01`. HTTP in, identical outcomes out: server-minted pagination, the off-origin guard,
+per-resource `?patient=` composition, and the Authorization header all exercised for real. New
+`hapi-live.test.ts` pins that as a 4-test live suite gated on the **dedicated**
+`WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` + a 2s reachability probe (the ice-live pattern; verified to
+self-skip when unset), plus 10 CI tests for the CLI (`live-cli.test.ts`: parsing, config/roster
+fail-fast gates, fixture-client e2e, and a per-patient evaluation failure that exits 1 rather than
+reporting a reduced successful population). No new deps; no schema; read-only + descriptive
+(ADR-008). Next: the teatea runbook + auth probe + import generator (wave PR 4).
+
 ## 2026-07-16 — HAPI "fake WebChart" loader (ADR-032): dev-DB fixtures → local FHIR R4 server
 
 Wired the previously-unused `hapi-fhir` compose service into the workflow as the local WebChart

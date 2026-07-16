@@ -82,26 +82,35 @@ export function isWebChartConfigured(env: DataSourceEnv): boolean {
 }
 
 /**
+ * The env→WebChartConfig mapping, extracted so callers that must construct the HTTP client with
+ * options (the live-evaluate CLI's `--page-size`) share the exact mapping `resolveDataSource`
+ * uses. Returns undefined when the seam is not configured.
+ */
+export function webChartConfigFromEnv(env: DataSourceEnv): WebChartConfig | undefined {
+  if (!isWebChartConfigured(env)) return undefined;
+  const trimmed = (v?: string) => {
+    const t = (v ?? "").trim();
+    return t || undefined;
+  };
+  return {
+    baseUrl: (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim(),
+    apiKey: trimmed(env.WORKWELL_WEBCHART_API_KEY),
+    clientId: trimmed(env.WORKWELL_WEBCHART_CLIENT_ID),
+    privateKeyPem: trimmed(env.WORKWELL_WEBCHART_PRIVATE_KEY),
+    tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
+    scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
+    kid: trimmed(env.WORKWELL_WEBCHART_KID),
+  };
+}
+
+/**
  * Config-driven ingress selection (mirrors resolveForecaster/resolveChannel): JSON is the default;
  * WebChart is selected only when its env vars are non-blank (inert-unless-configured). The JSON
  * source needs the caller's bundles (inherent to JSON ingress), passed as jsonInput.
  */
 export function resolveDataSource(env: DataSourceEnv, jsonInput?: unknown | unknown[]): PatientDataSource {
-  if (isWebChartConfigured(env)) {
-    const trimmed = (v?: string) => {
-      const t = (v ?? "").trim();
-      return t || undefined;
-    };
-    return webChartDataSource({
-      baseUrl: (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim(),
-      apiKey: trimmed(env.WORKWELL_WEBCHART_API_KEY),
-      clientId: trimmed(env.WORKWELL_WEBCHART_CLIENT_ID),
-      privateKeyPem: trimmed(env.WORKWELL_WEBCHART_PRIVATE_KEY),
-      tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
-      scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
-      kid: trimmed(env.WORKWELL_WEBCHART_KID),
-    });
-  }
+  const cfg = webChartConfigFromEnv(env);
+  if (cfg) return webChartDataSource(cfg);
   return jsonBucketDataSource(jsonInput);
 }
 
