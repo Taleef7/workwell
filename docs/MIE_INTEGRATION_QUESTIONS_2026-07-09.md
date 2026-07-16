@@ -83,7 +83,9 @@ process for provisioning a service account for WorkWell.
 > account.
 
 > ✅ **CONFIRMED (Doug, 2026-07-15 meeting) + self-serviceable (trial probe, 2026-07-16):** the
-> auth standard is **SMART** (the official HL7/FHIR mechanism) — matching what we built (ADR-028).
+> auth contract is **SMART Backend Services** — matching what we built (ADR-028). This confirms the
+> intended contract, but live compatibility remains operationally gated until the trial accepts a
+> `client_credentials` token request because its discovery document does not advertise that grant.
 > On the trial instance we now hold, client registration is **manual, admin-driven, and
 > self-serviceable**: the smart-configuration's `management_endpoint` is the WebChart admin JWT
 > screen (`webchart.cgi?f=admin&s=jwt`), where a System Owner registers a client + its public

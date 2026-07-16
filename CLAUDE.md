@@ -97,8 +97,8 @@ link is a stale personal fork) and directed us to **be self-sufficient**: remain
 **Trial probe (2026-07-16):** FHIR + smart-configuration live; `private_key_jwt` RS384 only, scopes
 `patient/*.rs`+`system/*.read` (⇒ `WORKWELL_WEBCHART_SCOPE=system/*.read`), grant list advertises
 only `authorization_code` (client_credentials = live test); **client registration is
-self-serviceable** at `webchart.cgi?f=admin&s=jwt`. **The wave (plan:
-`~/.claude/plans/okay-i-had-a-async-hearth.md`, 7 PRs):** record answers (this PR) → HAPI fixture
+self-serviceable** at `webchart.cgi?f=admin&s=jwt`. **The wave (approved plan summarized in the
+stacked PR descriptions, 7 PRs):** record answers (this PR) → HAPI fixture
 loader (collection→transaction transform, PUT w/ deterministic ids) → `pnpm evaluate:webchart-live`
 CLI + self-skipping HAPI parity test → teatea runbook (keypair, client registration, auth probe,
 **realistic ~30-patient import generated from the synthetic corpus** via WebChart's import tooling)
