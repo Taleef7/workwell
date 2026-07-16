@@ -331,3 +331,40 @@ known subject as missing data without aborting the rest of the batch. This is st
 transport: PR-2c must adjust request shaping, auth, pagination, and (if A1 says proprietary) add the
 row→FHIR mapper once MIE confirms the real contract. Inert-unless-configured remains unchanged:
 `resolveDataSource(env)` still selects WebChart only when both WebChart env vars are non-blank.
+
+### 8.3 Local HAPI FHIR simulation — the "fake WebChart" (ADR-032, 2026-07-16)
+
+Doug's 2026-07-15 suggestion, now wired: the `hapi-fhir` service that has sat unwired in
+`infra/docker-compose.yml` (`hapiproject/hapi`, R4, host port **8081**) is the local stand-in for a
+real WebChart FHIR endpoint, populated from the same committed dev-DB fixtures §8.1 evaluates
+offline. Unlike the fixture client and the mock-`fetch` conformance suite (§8.2), a request to HAPI
+exercises `httpWebChartClient` over **real HTTP**: genuine searchset pagination (`link[next]`
+minted by a real server), the off-origin pagination guard, per-resource `?patient=` searches, the
+Authorization header path, timeouts/retries — everything the in-process shims can only imitate.
+
+- **Load:** `docker compose -f ../infra/docker-compose.yml up -d hapi-fhir`, then from
+  `backend-ts/`: `pnpm load:hapi` (defaults: `--target http://localhost:8081/fhir`,
+  `--file spike/webchart/devdb-patients.json`).
+- **Shape:** `src/engine/ingress/webchart/hapi-transform.ts` (pure, CI-tested) converts each
+  fixture *collection* Bundle into a *transaction* Bundle of `PUT {type}/{id}` entries. Patient ids
+  (`wc-5`) are preserved — the enrollment roster keys on them, so a POST (server-assigned id) would
+  silently break roster stamping into all-MISSING_DATA. Id-less clinical resources get
+  deterministic minted ids (`{patientId}-{type}-{ordinal}`), making re-loads idempotent updates
+  (verified: run 1 = 293 created, run 2 = 293 updated, 0 duplicates) — a duplicated Immunization
+  would double-count doses.
+- **Auth note:** stock HAPI is open (no auth); point the client at it with
+  `WORKWELL_WEBCHART_BASE_URL=http://localhost:8081` + any non-blank `WORKWELL_WEBCHART_API_KEY`
+  (the static bearer is sent and ignored — the header code path still executes). The SMART
+  backend-services flow is exercised against the real teatea trial instead (the teatea runbook,
+  a follow-up PR in this wave).
+- **After regenerating the fixture file, recreate only the HAPI container before reloading:** from
+  `backend-ts/`, run `docker compose -f ../infra/docker-compose.yml rm -sf hapi-fhir`, then
+  `docker compose -f ../infra/docker-compose.yml up -d hapi-fhir`. HAPI has no mounted volume in
+  this Compose file, so removing its container clears its embedded data while preserving the
+  separate `postgres_data` volume. Minted ids are positional: a re-export that reorders or removes
+  resources mints *different* ids, and the loader PUTs the new set but never deletes old resources.
+  Stale leftovers would double-count in `?patient=` searches; idempotence holds for byte-identical
+  fixtures only.
+- Do **not** set `hapi.fhir.server_address`: HAPI derives `link[next]` from the request host
+  (`localhost:8081`), which keeps pagination same-origin; an off-host server_address would trip the
+  client's off-origin guard (a handy manual negative test, not a supported configuration).

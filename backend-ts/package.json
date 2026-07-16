@@ -21,6 +21,7 @@
     "test:official-cases": "tsx src/run/cli/official-cases-bin.ts",
     "webchart:export-devdb": "tsx scripts/webchart-devdb-export.ts",
     "evaluate:webchart-devdb": "tsx src/engine/ingress/webchart/devdb-cli-bin.ts",
+    "load:hapi": "tsx scripts/load-hapi-fixtures.ts",
     "compile-measures": "node scripts/compile-measures.mjs",
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
