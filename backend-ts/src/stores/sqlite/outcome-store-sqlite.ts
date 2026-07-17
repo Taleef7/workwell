@@ -163,11 +163,19 @@ export class SqliteOutcomeStore implements OutcomeStore {
 
   async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
     // E13 PR-2: excludeScale drops the population-scale tenant's (mhn-prefixed) rows in SQL.
-    const scaleClause = opts?.excludeScale ? ` AND subject_id NOT LIKE 'mhn|%'` : "";
+    const alias = opts?.successfulPopulationOnly ? "o." : "";
+    const scaleClause = opts?.excludeScale ? ` AND ${alias}subject_id NOT LIKE 'mhn|%'` : "";
+    const source = opts?.successfulPopulationOnly
+      ? `outcomes o
+           JOIN runs r ON r.id = o.run_id
+          WHERE o.measure_id = ?
+            AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+            AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')`
+      : `outcomes WHERE measure_id = ?`;
     const { results } = await this.db
       .prepare(
-        `SELECT subject_id, status, evaluation_period, evaluated_at, evidence_json
-           FROM outcomes WHERE measure_id = ?${scaleClause} ORDER BY evaluated_at ASC`,
+        `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json
+           FROM ${source}${scaleClause} ORDER BY ${alias}evaluated_at ASC${alias ? ", o.id ASC" : ""}`,
       )
       .bind(measureId)
       .all<{ subject_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();

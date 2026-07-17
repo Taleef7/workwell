@@ -33,6 +33,14 @@ export interface RerunDeps {
   employees?: readonly EmployeeProfile[];
 }
 
+export class UnsupportedCaseRerunError extends Error {
+  readonly code = "unsupported_scope";
+  constructor(message = "Live WebChart CASE rerun-to-verify is not supported until fetch-one-patient is available.") {
+    super(message);
+    this.name = "UnsupportedCaseRerunError";
+  }
+}
+
 const verificationCaseStatus = (current: string, verified: string): string =>
   verified === "COMPLIANT"
     ? "RESOLVED"
@@ -51,6 +59,10 @@ const isClosing = (verified: string): boolean => verified === "COMPLIANT" || ver
 export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: string): Promise<CaseDetail | null> {
   const existing = await deps.cases.getCase(caseId);
   if (!existing) return null;
+  // A wc subject has no synthetic target and phase 1 deliberately has no fetch-one-patient path.
+  // Reject before creating a run or writing outcomes/case/audit state: stale population bundles are
+  // never reused and a fabricated MISSING_DATA verification is never persisted.
+  if (existing.employeeId.startsWith("wc|")) throw new UnsupportedCaseRerunError();
   const employees = deps.employees ?? EMPLOYEES;
   const employee = employeeById(existing.employeeId);
   const binding = MEASURE_BINDINGS[existing.measureId];

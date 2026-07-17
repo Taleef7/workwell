@@ -1,5 +1,44 @@
 # Journal
 
+## 2026-07-17 — PR #307 review hardening: fail-closed paging and complete live identity reads
+
+The review pass made authoritative WebChart population replacement fail closed: the in-app run now
+opts into strict Patient pagination, so any later-page transport failure finalizes FAILED before an
+outcome or directory swap and leaves the prior successful population authoritative. The read-only
+`evaluate:webchart-live` CLI retains the transport's lenient default. Scheduled ALL_PROGRAMS runs now
+receive the same runtime WebChart env/client path as manual runs, and synchronous hosts finalize live
+preparation failures instead of stranding RUNNING rows.
+
+Live employee-profile links and case-worklist name/site filters now resolve through the configured,
+restart-safe directory, and roster/hierarchy tenant labels consistently include the configured host
+(`WebChart (<host>)`). The risk-outlook query's `successfulPopulationOnly: true` behavior is also now an
+owned correctness decision: risk outlook reads terminal successful population runs only, matching the
+other population read models and avoiding unbounded per-run evidence hydration. This query-scope
+alignment does not introduce a new architectural seam, so ADR-033 remains sufficient.
+
+## 2026-07-17 — Live WebChart tenant run pipeline and restart-safe read models (PR 6a + 6b)
+
+Completed the two-part live-tenant implementation behind the existing inert WebChart seam. PR 6a keeps
+planning network-free, loads configured populations in background execution, refreshes one per-worker
+identity directory, applies the enrollment override/default policy, evaluates the normalized bundles
+through the unchanged CQL engine, and exposes the conditional `wc` tenant. A population-fetch failure
+writes no outcomes, finalizes FAILED with operational metadata, and cannot supersede the prior successful
+population. Configured `SITE=WebChart` remains a controlled deferral.
+
+PR 6b threads one persisted-row-derived directory snapshot through roster, programs, hierarchy, case
+detail, and quality materialization. Unknown persisted `wc|` ids survive a restart with raw Patient-id
+names; full names return after the next successful directory refresh. `All Systems = Σ tenants` and
+all/tenant/site/provider quality scopes include live rows. `wc|` CASE rerun-to-verify now returns a
+controlled 409 before run, outcome, case, or audit mutation—no stale bundle reuse and no fabricated
+`MISSING_DATA`. Existing twh/ihn-only groups still exclude the `WebChart` site from case creation; the
+owner can add it to All Employees at `/admin → Groups`, producing audited `SEGMENT_UPDATED`.
+
+Focused RED/GREEN tests cover restart rehydration, full-name refresh, FAILED-run exclusion, program
+site/tenant filters, hierarchy reconciliation, quality scopes, direct/route rerun immutability, and a
+self-skipping HAPI app flow (dedicated test env plus two-second metadata probe). CQL remains the sole
+`Outcome Status` authority. No schema/DDL, dependency, frontend behavior, secret, PHI, or clinical-cache
+change was introduced (ADR-008/ADR-033).
+
 ## 2026-07-16 — teatea runbook executed live: registration is MIE-gated, seed contract verified
 
 Ran the teatea trial runbook (`WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`) end-to-end as System Owner.

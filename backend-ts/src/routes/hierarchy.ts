@@ -9,8 +9,9 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildHierarchyRollup } from "../program/hierarchy-rollup.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface HierarchyEnv {
+interface HierarchyEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -35,7 +36,12 @@ export async function handleHierarchy(req: Request, env: HierarchyEnv): Promise<
   }
   const s = await getStores(env);
   const tree = await buildHierarchyRollup(
-    { outcomeStore: s.outcomes, caseStore: s.cases, runStore: s.runs },
+    {
+      outcomeStore: s.outcomes,
+      caseStore: s.cases,
+      runStore: s.runs,
+      webChartEnv: env,
+    },
     { measureId: q.get("measureId"), from, to, tenant: q.get("tenant") },
   );
   return json(tree);

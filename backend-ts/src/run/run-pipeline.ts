@@ -6,9 +6,8 @@
  *
  * Supports the manual scopes MEASURE (one measure × all employees), EMPLOYEE (all runnable
  * measures × one employee), ALL_PROGRAMS (all runnable measures × all employees), and SITE
- * (all runnable measures × one site's employees). All run synchronously here — the Java side
- * routes ALL_PROGRAMS/SITE through the async job model, but the frontend contract is identical
- * (the run finishes COMPLETED/PARTIAL_FAILURE either way); the async queue is a later refinement.
+ * (all runnable measures × one site's employees). The route schedules wide scopes — plus a configured
+ * live WebChart MEASURE population — through waitUntil; direct callers retain synchronous completion.
  * CASE reruns go through rerun-to-verify in the cases module, not this path.
  *
  * Invariant preserved: one employee's evaluation failure does not abort the run — it is
@@ -27,6 +26,21 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import {
+  ROSTER_ELIGIBLE_MEASURES,
+  parseEnrollmentRoster,
+  stampEnrollment,
+  type EnrollmentRoster,
+} from "../engine/ingress/enrollment/roster.ts";
+import {
+  isWebChartConfigured,
+  webChartConfigFromEnv,
+  webChartDataSource,
+  type DataSourceEnv,
+} from "../engine/ingress/data-source.ts";
+import { httpWebChartClient, type WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
+import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
@@ -93,10 +107,22 @@ export interface RunPipelineDeps {
    * optional webhook fires when `WORKWELL_ALERT_WEBHOOK_URL` is set. Emission is best-effort.
    */
   alertChannels?: readonly AlertChannel[];
+  /** Runtime WebChart configuration. The existing isWebChartConfigured predicate is the only selector. */
+  webChartEnv?: WebChartRunEnv;
+  /** Verified client seam for tests/offline callers; production uses httpWebChartClient. */
+  webChartClient?: WebChartClient;
+}
+
+export interface WebChartRunEnv extends DataSourceEnv {
+  WORKWELL_WEBCHART_ENROLLMENT_JSON?: string;
 }
 
 /** Thrown for scopes not served by this path (CASE — handled by rerun-to-verify in the cases module). */
-export class UnsupportedScopeError extends Error {}
+export class UnsupportedScopeError extends Error {
+  constructor(message: string, readonly status = 501) {
+    super(message);
+  }
+}
 /** Thrown for a malformed request (unknown measure/employee, missing field). */
 export class InvalidRunRequestError extends Error {}
 
@@ -106,8 +132,31 @@ const RUNNABLE_MEASURE_IDS = Object.keys(MEASURES);
 interface WorkItem {
   employee: EmployeeProfile;
   measureId: string;
-  target: TargetOutcome;
+  target?: TargetOutcome;
+  liveBundle?: unknown;
 }
+
+export interface LivePopulationDescriptor {
+  host: string;
+  pageSize: number;
+  enrollmentJson: string | undefined;
+}
+
+interface LiveTenantMetadata {
+  host: string;
+  fetchedCount: number;
+  degradedCount: number;
+  durationMs: number;
+  status: "COMPLETED" | "FAILED";
+}
+
+class LivePopulationPreparationError extends Error {
+  constructor(message: string, readonly liveTenant: LiveTenantMetadata) {
+    super(message);
+  }
+}
+
+const WEBCHART_PAGE_SIZE = 100;
 
 /** Resolve a scoped request into the (employee × measure) work items + run metadata. */
 function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[]) {
@@ -171,7 +220,8 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
 
 /** ALL_PROGRAMS / SITE fan out to hundreds–thousands of evaluations (~1 min) — too long for a
  *  synchronous request, so the route runs them in the background (ctx.waitUntil) and the page polls.
- *  MEASURE/EMPLOYEE stay synchronous (≤ a few seconds). */
+ *  A configured WebChart MEASURE is also scheduled because its remote population load must not block
+ *  the foreground response. Static MEASURE and EMPLOYEE stay synchronous (≤ a few seconds). */
 export const ASYNC_SCOPES: ReadonlySet<RunScopeType> = new Set(["ALL_PROGRAMS", "SITE"]);
 
 /** A created + RUNNING run with its resolved work items — the fast first half of a manual run. */
@@ -182,13 +232,33 @@ export interface PlannedRun {
   scopeLabel: string;
   scopeType: RunScopeType;
   evalDate: string;
+  livePopulation?: LivePopulationDescriptor;
 }
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
   const employees = deps.employees ?? EMPLOYEES;
   const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
+  const webChartEnv = deps.webChartEnv ?? {};
+  const webChartConfigured = isWebChartConfigured(webChartEnv);
+  if (webChartConfigured && req.scopeType === "SITE" && req.site?.trim() === "WebChart") {
+    throw new UnsupportedScopeError("SITE=WebChart is not supported until partial-site runs can preserve the latest population.");
+  }
+  if (webChartConfigured && req.scopeType === "EMPLOYEE" && req.employeeExternalId?.startsWith("wc|")) {
+    throw new UnsupportedScopeError(
+      "Live WebChart EMPLOYEE rerun-to-verify is not supported until fetch-one-patient is available.",
+      409,
+    );
+  }
   const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees);
+  const cfg = webChartConfigured ? webChartConfigFromEnv(webChartEnv) : undefined;
+  const livePopulation = cfg && (req.scopeType === "ALL_PROGRAMS" || req.scopeType === "MEASURE")
+    ? {
+        host: new URL(cfg.baseUrl).host,
+        pageSize: WEBCHART_PAGE_SIZE,
+        enrollmentJson: webChartEnv.WORKWELL_WEBCHART_ENROLLMENT_JSON,
+      }
+    : undefined;
 
   const periodEnd = `${evalDate}T00:00:00.000Z`;
   const periodStart = new Date(new Date(periodEnd).getTime() - 365 * 86400000).toISOString();
@@ -204,7 +274,7 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
-  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate };
+  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate, ...(livePopulation ? { livePopulation } : {}) };
 }
 
 /** Map an upsert disposition to its case audit event type; UNCHANGED (idempotent re-confirm) → no event. */
@@ -217,8 +287,9 @@ const CASE_EVENT_FOR: Record<string, string | null> = {
   UNCHANGED: null,
 };
 
-/** The immediate RUNNING response for an async (ALL_PROGRAMS/SITE) run — the page polls to terminal. */
+/** The immediate RUNNING response for an async wide or configured-live run — the page polls to terminal. */
 export function runningResponse(planned: PlannedRun): ManualRunResponse {
+  const livePending = planned.livePopulation ? " Live population count pending (WebChart)." : "";
   return {
     runId: planned.run.id,
     scopeType: planned.scopeType,
@@ -228,14 +299,137 @@ export function runningResponse(planned: PlannedRun): ManualRunResponse {
     totalEvaluated: planned.items.length,
     compliant: 0,
     nonCompliant: 0,
-    message: `Running ${planned.items.length} evaluation(s) in the background — refresh for results.`,
+    message: `Running ${planned.items.length} evaluation(s) in the background — refresh for results.${livePending}`,
     measuresExecuted: planned.measureIds.map((id) => MEASURES[id]!.name),
   };
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function patientIdOf(bundle: unknown): string | undefined {
+  if (!isObject(bundle) || bundle.resourceType !== "Bundle" || !Array.isArray(bundle.entry)) return undefined;
+  for (const entry of bundle.entry) {
+    const resource = isObject(entry) ? entry.resource : undefined;
+    if (isObject(resource) && resource.resourceType === "Patient" && typeof resource.id === "string" && resource.id) {
+      return resource.id;
+    }
+  }
+  return undefined;
+}
+
+function isDegradedBundle(bundle: unknown): boolean {
+  if (!isObject(bundle) || !Array.isArray(bundle.entry)) return false;
+  return bundle.entry.some((entry) => {
+    const resource = isObject(entry) ? entry.resource : undefined;
+    return isObject(resource) && resource.resourceType === "OperationOutcome";
+  });
+}
+
+function explicitEnrollmentRoster(raw: string): EnrollmentRoster {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Invalid WORKWELL_WEBCHART_ENROLLMENT_JSON: ${String((error as Error)?.message ?? error)}`);
+  }
+  if (!isObject(parsed)) throw new Error("Invalid WORKWELL_WEBCHART_ENROLLMENT_JSON: expected an object");
+  for (const [subjectId, measures] of Object.entries(parsed)) {
+    if (!Array.isArray(measures) || measures.some((measure) => typeof measure !== "string")) {
+      throw new Error(`Invalid WORKWELL_WEBCHART_ENROLLMENT_JSON: '${subjectId}' must map to an array of measure ids`);
+    }
+  }
+  return parseEnrollmentRoster(parsed);
+}
+
+function enrollmentRosterFor(ids: readonly string[], explicitJson: string | undefined): EnrollmentRoster {
+  if (explicitJson !== undefined) return explicitEnrollmentRoster(explicitJson);
+  return new Map(ids.map((id) => [id, ROSTER_ELIGIBLE_MEASURES]));
+}
+
+async function prepareLivePopulation(
+  deps: RunPipelineDeps,
+  planned: PlannedRun,
+): Promise<{ items: WorkItem[]; roster: EnrollmentRoster; metadata: LiveTenantMetadata }> {
+  const descriptor = planned.livePopulation!;
+  const started = Date.now();
+  let fetchedCount = 0;
+  let degradedCount = 0;
+  try {
+    const env = deps.webChartEnv ?? {};
+    const cfg = webChartConfigFromEnv(env);
+    if (!cfg) throw new Error("WebChart became unconfigured before background preparation");
+    // Validate explicit policy before starting remote work; malformed policy never broadens enrollment.
+    const explicitRoster = descriptor.enrollmentJson === undefined
+      ? undefined
+      : explicitEnrollmentRoster(descriptor.enrollmentJson);
+    const client = deps.webChartClient ?? httpWebChartClient(cfg, {
+      pageSize: descriptor.pageSize,
+      // This run supersedes the latest population read model. A truncated Patient list would erase
+      // every subject on the missing pages, so later-page transport failures are fatal here. The
+      // read-only live CLI keeps the transport's lenient default.
+      failOnPartialPage: true,
+    });
+    const bundles = await webChartDataSource(cfg, client).loadBundles();
+    fetchedCount = bundles.length;
+    degradedCount = bundles.filter(isDegradedBundle).length;
+    const patientIds = bundles.map(patientIdOf).filter((id): id is string => id !== undefined);
+    if (patientIds.length === 0) {
+      throw new Error("WebChart returned zero usable Patient bundles");
+    }
+    replaceLiveDirectory(bundles);
+    const roster = explicitRoster ?? enrollmentRosterFor(patientIds, undefined);
+    const items: WorkItem[] = [];
+    for (const bundle of bundles) {
+      const patientId = patientIdOf(bundle);
+      if (!patientId) continue;
+      const employee = profileForId(`wc|${patientId}`);
+      if (!employee) continue;
+      for (const measureId of planned.measureIds) items.push({ employee, measureId, liveBundle: bundle });
+    }
+    return {
+      items,
+      roster,
+      metadata: {
+        host: descriptor.host,
+        fetchedCount,
+        degradedCount,
+        durationMs: Date.now() - started,
+        status: "COMPLETED",
+      },
+    };
+  } catch (error) {
+    throw new LivePopulationPreparationError(
+      String((error as Error)?.message ?? error),
+      {
+        host: descriptor.host,
+        fetchedCount,
+        degradedCount,
+        durationMs: Date.now() - started,
+        status: "FAILED",
+      },
+    );
+  }
+}
+
 /** Evaluate the planned work items, persist outcomes + cases, finalize the run — the slow half. */
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
-  const { run, items, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  const { run, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  let items = planned.items;
+  let liveRoster: EnrollmentRoster | undefined;
+  let liveTenant: LiveTenantMetadata | undefined;
+  if (planned.livePopulation) {
+    const prepared = await prepareLivePopulation(deps, planned);
+    items = [...items, ...prepared.items];
+    liveRoster = prepared.roster;
+    liveTenant = prepared.metadata;
+    await deps.runStore.appendLog(
+      run.id,
+      "INFO",
+      `WebChart ${liveTenant.host}: fetched ${liveTenant.fetchedCount} subject(s), ${liveTenant.degradedCount} degraded, ${liveTenant.durationMs}ms`,
+    );
+  }
   // Audit actor = the authenticated user (never the caller-influenced triggeredBy label; Codex P1).
   const auditActor = deps.actor ?? "system";
   let compliant = 0;
@@ -262,8 +456,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   }
 
   for (const item of items) {
-    const config = deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target);
-    const bundle = buildSyntheticBundle(item.employee, config, evalDate);
+    const bundle = item.liveBundle !== undefined
+      ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
+      : buildSyntheticBundle(
+          item.employee,
+          deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target!),
+          evalDate,
+        );
     // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
     // day-math is current, but the persisted evaluation_period is bucketed to the measure's
     // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
@@ -443,6 +642,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           nonCompliant,
           failures,
           measuresExecuted: measureIds,
+          ...(liveTenant ? { liveTenant } : {}),
         },
       })
       .catch(() => {
@@ -497,9 +697,71 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   };
 }
 
+async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: unknown): Promise<void> {
+  const errMsg = String((err as Error)?.message ?? err);
+  const liveTenant = err instanceof LivePopulationPreparationError ? err.liveTenant : undefined;
+  const liveSuffix = liveTenant
+    ? ` [WebChart ${liveTenant.host}; fetched=${liveTenant.fetchedCount}; degraded=${liveTenant.degradedCount}; durationMs=${liveTenant.durationMs}]`
+    : "";
+  await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}${liveSuffix}`).catch(() => {});
+  if (liveTenant && deps.events) {
+    await deps.events
+      .appendAudit({
+        eventType: "RUN_COMPLETED",
+        entityType: "run",
+        entityId: planned.run.id,
+        actor: deps.actor ?? "system",
+        refRunId: planned.run.id,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: {
+          scopeType: planned.scopeType,
+          scopeLabel: planned.scopeLabel,
+          status: "FAILED",
+          totalEvaluated: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          failures: 0,
+          measuresExecuted: planned.measureIds,
+          liveTenant,
+          error: errMsg,
+        },
+      })
+      .catch(() => {
+        /* terminal audit is best-effort at this boundary; FAILED finalization must still be attempted */
+      });
+  }
+  await deps.runStore.finalizeRun(planned.run.id, "FAILED").catch(() => {
+    /* best effort — the host's waitUntil also logs the original rejection */
+  });
+  // Observability (#264): a hard FAILED (outside per-subject isolation) must not be silent.
+  // Best-effort — never rethrow from the alert path.
+  const alert = alertForTerminalRun({
+    status: "FAILED",
+    runId: planned.run.id,
+    scopeType: planned.scopeType,
+    scopeLabel: planned.scopeLabel,
+    totalEvaluated: 0,
+    failures: 0,
+    message: `Run failed: ${errMsg}${liveTenant ? ` (WebChart ${liveTenant.host})` : ""}`,
+  });
+  if (alert) {
+    await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
+  }
+}
+
 /** Plan + finish in one call — the synchronous manual run (MEASURE/EMPLOYEE, and the rerun path). */
 export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<ManualRunResponse> {
-  return finishManualRun(deps, await planManualRun(deps, req));
+  const planned = await planManualRun(deps, req);
+  try {
+    return await finishManualRun(deps, planned);
+  } catch (err) {
+    // Hosts without waitUntil use this synchronous path. A configured population preparation error
+    // happens before outcomes are written; finalize it exactly like the background path, then retain
+    // the synchronous caller's existing rejected-promise contract.
+    if (err instanceof LivePopulationPreparationError) await failPlannedRun(deps, planned, err);
+    throw err;
+  }
 }
 
 /**
@@ -512,27 +774,7 @@ export async function finishOrFail(deps: RunPipelineDeps, planned: PlannedRun): 
   try {
     await finishManualRun(deps, planned);
   } catch (err) {
-    const errMsg = String((err as Error)?.message ?? err);
-    try {
-      await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}`);
-      await deps.runStore.finalizeRun(planned.run.id, "FAILED");
-    } catch {
-      /* best effort — the host's waitUntil also logs the original rejection */
-    }
-    // Observability (#264): a hard FAILED (outside per-subject isolation) must not be silent.
-    // Best-effort — never rethrow from the alert path.
-    const alert = alertForTerminalRun({
-      status: "FAILED",
-      runId: planned.run.id,
-      scopeType: planned.scopeType,
-      scopeLabel: planned.scopeLabel,
-      totalEvaluated: 0,
-      failures: 0,
-      message: `Run failed: ${errMsg}`,
-    });
-    if (alert) {
-      await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
-    }
+    await failPlannedRun(deps, planned, err);
   }
 }
 

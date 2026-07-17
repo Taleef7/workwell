@@ -9,8 +9,9 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { getEmployeeProfile, searchEmployees, type EmployeeProfileDeps } from "../run/employee-profile.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface EmployeesEnv {
+interface EmployeesEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -20,7 +21,7 @@ const json = (data: unknown, status = 200): Response =>
 
 async function deps(env: EmployeesEnv): Promise<EmployeeProfileDeps> {
   const s = await getStores(env);
-  return { outcomes: s.outcomes, cases: s.cases, events: s.events };
+  return { outcomes: s.outcomes, cases: s.cases, events: s.events, webChartEnv: env };
 }
 
 export async function handleEmployees(req: Request, env: EmployeesEnv): Promise<Response | null> {

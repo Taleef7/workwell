@@ -17,12 +17,13 @@ import {
   programTrend,
   programTopDrivers,
   programRiskOutlook,
-  listSites,
+  programSites,
   type ProgramDeps,
 } from "../program/program-read-models.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface ProgramsEnv {
+interface ProgramsEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -34,6 +35,7 @@ async function deps(env: ProgramsEnv): Promise<ProgramDeps> {
     outcomeStore: s.outcomes,
     caseStore: s.cases,
     qualitySnapshots: s.qualitySnapshots,
+    webChartEnv: env,
   };
 }
 
@@ -46,7 +48,7 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
   if (req.method !== "GET") return null;
 
   if (pathname === "/api/programs/sites") {
-    return json(listSites());
+    return json(await programSites(await deps(env)));
   }
 
   // Shared ?site=&tenant=&from=&to= parsing (date filters validated like the Java controller).

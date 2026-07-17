@@ -339,6 +339,17 @@ Each outcome evidence payload includes:
 
 ## Implementation Notes
 
+- **Live WebChart enrollment and groups (ADR-033).** When the live tenant seam is configured,
+  `WORKWELL_WEBCHART_ENROLLMENT_JSON` may map raw Patient ids to explicitly enrolled measure ids.
+  Otherwise the safe demo default enrolls every live subject in every `ROSTER_ELIGIBLE_MEASURES`
+  member. Enrollment only supplies occupational-health context: each measure's CQL age, sex,
+  diagnosis, visit, exclusion, and clinical-data gates remain authoritative, and CQL alone sets
+  `Outcome Status`. Existing enabled groups whose site predicates name only `twh`/`ihn` sites do not
+  match the fixed live site `WebChart`, so outcomes persist but no live cases are created by default.
+  The one-click fix is to edit **All Employees** at `/admin → Groups`, add site **WebChart**, and save; the existing
+  audited write records `SEGMENT_UPDATED`. Until fetch-one-patient lands, rerun-to-verify on any
+  resulting `wc|` case returns a non-mutating 409.
+
 - **Terminology & standards currency (2026 audit, 2026-07-08 — `docs/TERMINOLOGY_AUDIT_2026-07-08.md`).** A three-way verification (our implementation vs MIE's WebChart dev DB vs the current 2026 authorities — CMS eCQI, CDC CVX, LOINC, VSAC, AMA CPT, eCFR) confirmed everything load-bearing is correct and current: all 49 CMS catalog versions/MIPS IDs (**v14 = 2026** confirmed), all OSHA CFR citations, and all runnable LOINC/CPT codes. The one defect class — **vaccine CVX currency** on the WebChart crosswalk — was fixed: influenza matching expanded from `141`/`140`-only to the full active seasonal CVX set (VSAC "Influenza Vaccine" OID `2.16.840.1.113883.3.526.3.1254`); the **inactive** Td code `139` supplemented with active `09`/`113`/`196`; MMRV `94` now counts toward varicella; deleted HCPCS `G0202` marked read-only. All fixes are additive to the WebChart read path (`engine/ingress/webchart/terminology.ts`) — **synthetic outcomes are unchanged** (the synthetic CQL matches `urn:workwell:*` codes, not CVX numbers). Inactive codes are matched on read for legacy records, never emitted. Durable follow-up: resolve flu membership from the VSAC value set via the ADR-023 resolver rather than the hardcoded active list.
 - All active CQL measures now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. **HAZWOPER (`hazwoper.cql`) and TB Screening (`tb_surveillance.cql`) were the last two still on the un-scoped pattern; the Fable H3 hardening fix (2026-07-03) brought them into line** — a patient with unrelated Conditions no longer false-positives as enrolled/exempt on the arbitrary-bundle path (`evaluateBundle`/`pnpm evaluate`), where the synthetic per-measure bundles had masked it. A `foreign-condition-scoping.test.ts` golden regression guards it; the ELM was recompiled (`pnpm compile-measures`); synthetic outcomes are unchanged. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
   **(E3.2 / #90 update)** A `ValueSetResolver` seam now supports real value-set expansion: the engine

@@ -47,7 +47,7 @@ const QICORE_ENCOUNTER = "http://hl7.org/fhir/us/qicore/StructureDefinition/qico
  * come from the WebChart clinical data, never the roster. Any future diagnosis-gated measure is likewise
  * excluded until explicitly added here.
  */
-const ROSTER_ELIGIBLE_MEASURES: ReadonlySet<string> = new Set([
+export const ROSTER_ELIGIBLE_MEASURES: ReadonlySet<string> = new Set([
   "audiogram", "hazwoper", "tb_surveillance", "adult_immunization", "flu_vaccine",
   "diabetes_hba1c", "cholesterol_ldl", "hypertension", "obesity_bmi",
   "mmr", "varicella", "hepatitis_b_vaccination_series", "cms125",

@@ -11,8 +11,9 @@ import { getStores } from "../stores/factory.ts";
 import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
 import { isPanelId } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface ComplianceEnv {
+interface ComplianceEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -41,7 +42,12 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   const stores = await getStores(env);
   const segments = await stores.segments.listSegments();
   const roster = await buildRoster(
-    { outcomeStore: stores.outcomes, segments, cellCache: rosterCellCache },
+    {
+      outcomeStore: stores.outcomes,
+      segments,
+      cellCache: rosterCellCache,
+      webChartEnv: env,
+    },
     {
       panel: q.get("panel"),
       status: q.get("status"),

@@ -45,8 +45,12 @@ function measureVersion(measureId: string): string {
   return dash >= 0 ? lib.slice(dash + 1) : "";
 }
 
-export function toCaseSummary(c: CaseRecord, outreachRecordCount = 0): CaseSummary {
-  const emp = employeeById(c.employeeId);
+export function toCaseSummary(
+  c: CaseRecord,
+  outreachRecordCount = 0,
+  employeeLookup: typeof employeeById = employeeById,
+): CaseSummary {
+  const emp = employeeLookup(c.employeeId);
   return {
     caseId: c.id,
     employeeId: c.employeeId,

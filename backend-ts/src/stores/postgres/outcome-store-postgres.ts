@@ -172,7 +172,15 @@ export class PgOutcomeStore implements OutcomeStore {
   async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
     // E13 PR-2: when excludeScale is set, drop the population-scale tenant's rows IN SQL (its subject
     // ids are mhn-prefixed) so the per-measure analytics never fetch the 120k rows into app memory.
-    const scaleClause = opts?.excludeScale ? ` AND subject_id NOT LIKE 'mhn|%'` : "";
+    const alias = opts?.successfulPopulationOnly ? "o." : "";
+    const scaleClause = opts?.excludeScale ? ` AND ${alias}subject_id NOT LIKE 'mhn|%'` : "";
+    const source = opts?.successfulPopulationOnly
+      ? `${T} o
+           JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
+          WHERE o.measure_id = $1
+            AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+            AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')`
+      : `${T} WHERE measure_id = $1`;
     const { rows } = await this.pool.query<{
       subject_id: string;
       status: string;
@@ -180,8 +188,8 @@ export class PgOutcomeStore implements OutcomeStore {
       evaluated_at: Date | string;
       evidence_json: unknown;
     }>(
-      `SELECT subject_id, status, evaluation_period, evaluated_at, evidence_json
-         FROM ${T} WHERE measure_id = $1${scaleClause} ORDER BY evaluated_at ASC`,
+      `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json
+         FROM ${source}${scaleClause} ORDER BY ${alias}evaluated_at ASC${alias ? ", o.id ASC" : ""}`,
       [measureId],
     );
     return rows.map((r) => ({

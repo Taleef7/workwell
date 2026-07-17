@@ -297,6 +297,28 @@ test("partial page: a later population page failure keeps the patients already l
   assert.equal(bundles.length, 1);
 });
 
+test("strict population paging: a later page failure rejects instead of returning a truncated population", async () => {
+  const first = patientResources[0]!;
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === "/fhir/Patient" && !url.searchParams.has("_offset")) {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [{ resource: first }],
+        link: [{ relation: "next", url: "/fhir/Patient?_count=1&_offset=1" }],
+      });
+    }
+    if (url.pathname === "/fhir/Patient") return new Response("page 2 failed", { status: 500 });
+    return routes(url, init);
+  });
+
+  await assert.rejects(
+    () => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage: true }).loadBundles(),
+    /500|page 2 failed|request failed/i,
+  );
+});
+
 test("malformed resource search: that patient becomes MISSING_DATA while the batch continues", async () => {
   const selected = ["wc-13", "wc-42"];
   const selectedPatients = selected.map((id) => patientResources.find((p) => p.id === id)!);

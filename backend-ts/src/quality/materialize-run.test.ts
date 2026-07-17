@@ -20,6 +20,7 @@ import { materializeRun, QUALITY_SNAPSHOT_MATERIALIZED_EVENT, type MaterializeDe
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const created: string[] = [];
 async function freshStores(): Promise<MaterializeDeps & { events: SqliteCaseEventStore }> {
@@ -148,4 +149,27 @@ test("materializeRun: skips non-population scopes and seed:scale runs", async ()
   assert.equal((await materializeRun(scale.id, s)).materialized, false);
 
   assert.deepEqual(await s.qualitySnapshots.querySnapshots({}), []);
+});
+
+test("materializeRun: restart-rehydrated wc outcomes appear in all/tenant/site/provider snapshots", async () => {
+  const s = await freshStores();
+  const run = await popRun(s, { startedAt: "2026-07-17T10:00:00.000Z", completedAt: "2026-07-17T10:05:00.000Z" });
+  replaceLiveDirectory([]);
+  try {
+    await s.outcomeStore.recordOutcomes([
+      { runId: run.id, subjectId: "wc|quality-1", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: run.id, subjectId: "wc|quality-2", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+    ]);
+
+    const result = await materializeRun(run.id, s);
+    assert.equal(result.materialized, true);
+    const rows = await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", from: "2026-07", to: "2026-07" });
+    const find = (level: string, id: string) => rows.find((row) => row.scopeLevel === level && row.scopeId === id);
+    assert.equal(find("all", "ALL")?.denominator, 2);
+    assert.equal(find("tenant", "wc")?.denominator, 2);
+    assert.equal(find("site", "wc|WebChart")?.denominator, 2);
+    assert.equal(find("provider", "wc|WebChart|wc-provider-1")?.denominator, 2);
+  } finally {
+    replaceLiveDirectory([]);
+  }
 });

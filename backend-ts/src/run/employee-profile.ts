@@ -12,6 +12,8 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { employeeById, EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
@@ -69,6 +71,7 @@ export interface EmployeeProfileDeps {
   outcomes: OutcomeStore;
   cases: CaseStore;
   events: CaseEventStore;
+  webChartEnv?: DataSourceEnv;
 }
 
 const measureVersionOf = (measureId: string): string => {
@@ -118,7 +121,16 @@ function humanReadable(eventType: string, actor: string | null, measureName: str
 
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
 export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
-  const emp = employeeById(externalId);
+  // Load the subject's persisted history before identity resolution so a configured wc profile can
+  // rehydrate after a worker restart. Requiring at least one row avoids fabricating profiles for
+  // arbitrary wc| ids; seam-off continues to resolve only the static catalog.
+  const history = await deps.outcomes.listOutcomesForEmployee(externalId, 100000);
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const emp = employeeById(externalId) ?? (
+    webChartConfigured && history.length > 0
+      ? directoryForRows([{ subjectId: externalId }], true, deps.webChartEnv).employeeById(externalId)
+      : null
+  );
   if (!emp) return null;
 
   // One cases fetch for this employee: derive the open subset AND the full case-id set used by the
@@ -133,7 +145,6 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 
   // Latest outcome per measure (newest-first history, dedupe by measure).
-  const history = await deps.outcomes.listOutcomesForEmployee(externalId, 100000);
   const seen = new Set<string>();
   const measureOutcomes: MeasureOutcomeSummary[] = [];
   for (const o of history) {

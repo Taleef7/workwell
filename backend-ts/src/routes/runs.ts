@@ -43,15 +43,17 @@ import {
   type ManualRunResponse,
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
-import { rerunToVerify } from "../case/case-rerun.ts";
+import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import { buildMeasureReportBundle, buildSummaryMeasureReportFromCounts, populationCountsFromStatus } from "../fhir/measure-report.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface RunsEnv {
+interface RunsEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
   /** Optional failed-run webhook (#264). Inert unless set — see resolveAlertChannels. */
   WORKWELL_ALERT_WEBHOOK_URL?: string;
+  WORKWELL_WEBCHART_ENROLLMENT_JSON?: string;
 }
 
 // A run in one of these statuses has finished — its outcomes are final. Read models treat a terminal
@@ -133,7 +135,7 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
 const OUTCOMES_GRID_FULL_CAP = 5000;
 
 /**
- * Run an async-scope (ALL_PROGRAMS/SITE) manual run or rerun: create the run + return RUNNING
+ * Run an async-scope (ALL_PROGRAMS/SITE or configured-live MEASURE) manual run or rerun: create the run + return RUNNING
  * immediately, finish the fan-out in the background via waitUntil. The background promise gets a
  * rejection handler so a failure AFTER the response (recordOutcome/upsert/finalize) finalizes the
  * run FAILED instead of leaving it stuck RUNNING (which the page would poll forever). Returns the
@@ -144,7 +146,8 @@ async function scheduleAsyncRun(
   body: ManualRunRequest,
   waitUntil: WaitUntil | undefined,
 ): Promise<ManualRunResponse | null> {
-  if (!waitUntil || !ASYNC_SCOPES.has(body.scopeType)) return null;
+  const configuredMeasure = body.scopeType === "MEASURE" && isWebChartConfigured(deps.webChartEnv ?? {});
+  if (!waitUntil || (!ASYNC_SCOPES.has(body.scopeType) && !configuredMeasure)) return null;
   const planned = await planManualRun(deps, body);
   waitUntil(finishOrFail(deps, planned)); // finishOrFail finalizes FAILED on a post-response error
   return runningResponse(planned);
@@ -227,9 +230,9 @@ export async function handleRuns(
   }
 
   // ---- write pipeline (#107 runs module) ----------------------------------
-  // Manual scoped run: evaluate + persist + summarize. MEASURE/EMPLOYEE run synchronously
-  // (≤ a few seconds); ALL_PROGRAMS/SITE fan out to ~1000 evaluations (~1 min), so they create
-  // the run, return RUNNING immediately, and finish in the background (the page polls to terminal).
+  // Manual scoped run: evaluate + persist + summarize. Static MEASURE/EMPLOYEE run synchronously
+  // (≤ a few seconds); ALL_PROGRAMS/SITE and configured-live MEASURE create the run, return RUNNING
+  // immediately, and finish the fan-out/remote load in the background (the page polls to terminal).
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     body.triggeredBy = externalTriggeredBy(body.triggeredBy); // Fable M1: no forged seed:*/scheduler labels
@@ -244,6 +247,7 @@ export async function handleRuns(
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware, not the body's triggeredBy (Codex P1)
       alertChannels: resolveAlertChannels(env), // #264 failed-run alerts (console + optional webhook)
+      webChartEnv: env,
     };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
@@ -251,7 +255,7 @@ export async function handleRuns(
       // No waitUntil (e.g. tests) → fall back to synchronous completion for every scope.
       return json(await executeManualRun(deps, body), 201);
     } catch (err) {
-      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
+      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, err.status);
       if (err instanceof InvalidRunRequestError) return json({ error: "invalid_request", message: err.message }, 400);
       return json({ error: "run_failed", message: String((err as Error)?.message ?? err) }, 500);
     }
@@ -270,13 +274,18 @@ export async function handleRuns(
     if (prior.scopeType === "CASE") {
       const caseId = prior.requestedScope.caseId as string | undefined;
       if (!caseId) return json({ error: "invalid_request", message: "CASE run has no caseId to rerun" }, 400);
-      const detail = await rerunToVerify(
-        { cases: await cases(env), events: (await getStores(env)).events, outcomes: await outcomes(env), runStore, engine },
-        caseId,
-        actor,
-      );
-      if (!detail) return json({ error: "not_found", id: caseId }, 404);
-      return json(caseRerunResponse(detail), 201);
+      try {
+        const detail = await rerunToVerify(
+          { cases: await cases(env), events: (await getStores(env)).events, outcomes: await outcomes(env), runStore, engine },
+          caseId,
+          actor,
+        );
+        if (!detail) return json({ error: "not_found", id: caseId }, 404);
+        return json(caseRerunResponse(detail), 201);
+      } catch (err) {
+        if (err instanceof UnsupportedCaseRerunError) return json({ error: err.code, message: err.message }, 409);
+        throw err;
+      }
     }
     const deps = {
       runStore,
@@ -288,6 +297,7 @@ export async function handleRuns(
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware (Codex P1)
       alertChannels: resolveAlertChannels(env), // #264 failed-run alerts
+      webChartEnv: env,
     };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,
@@ -297,7 +307,7 @@ export async function handleRuns(
       return json(await executeRerun(deps, rerunId), 201);
     } catch (err) {
       if (err instanceof InvalidRunRequestError) return json({ error: "not_found", message: err.message }, 404);
-      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, 501);
+      if (err instanceof UnsupportedScopeError) return json({ error: "unsupported_scope", message: err.message }, err.status);
       return json({ error: "run_failed", message: String((err as Error)?.message ?? err) }, 500);
     }
   }

@@ -20,7 +20,13 @@ import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { engineForEnv } from "../engine/cql/engine-factory.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { planManualRun, finishOrFail } from "../run/run-pipeline.ts";
+import {
+  planManualRun,
+  finishOrFail,
+  type RunPipelineDeps,
+  type WebChartRunEnv,
+} from "../run/run-pipeline.ts";
+import type { WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert-channel.ts";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +133,10 @@ export interface SchedulerTickDeps {
   engine: EvaluateMeasureBinding;
   segments: HydratedSegment[];
   employees?: readonly EmployeeProfile[];
+  /** Runtime WebChart configuration; selection remains inside planManualRun via isWebChartConfigured. */
+  webChartEnv?: WebChartRunEnv;
+  /** Existing verified client seam, threaded only for tests/offline scheduler callers. */
+  webChartClient?: WebChartClient;
   /** Alert fan-out for FAILED runs + tick errors (#264). Default = console-only. */
   alertChannels?: readonly AlertChannel[];
 }
@@ -175,13 +185,15 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
 
   // Build run deps from the injected stores + engine + segments.
   const alertChannels = deps.alertChannels ?? resolveAlertChannels({});
-  const runDeps = {
+  const runDeps: RunPipelineDeps = {
     runStore: deps.stores.runs,
     outcomeStore: deps.stores.outcomes,
     caseStore: deps.stores.cases,
     engine: deps.engine,
     segments: deps.segments,
     employees: deps.employees,
+    webChartEnv: deps.webChartEnv,
+    webChartClient: deps.webChartClient,
     // The scheduled ALL_PROGRAMS run materializes a quality-over-time snapshot for the period (#E16).
     qualitySnapshots: deps.stores.qualitySnapshots,
     events: deps.stores.events,
@@ -208,7 +220,9 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
  * inline path otherwise) — so the nightly ALL_PROGRAMS run honors the same resolver as the routes.
  * Errors are logged but never rethrown — safe to hand to ctx.waitUntil.
  */
-export async function schedulerTick(env: StoresEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string }): Promise<void> {
+export async function schedulerTick(
+  env: StoresEnv & WebChartRunEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string },
+): Promise<void> {
   const alertChannels = resolveAlertChannels(env);
   try {
     await ensureSegmentSeed(env);
@@ -216,7 +230,7 @@ export async function schedulerTick(env: StoresEnv & { WORKWELL_ALERT_WEBHOOK_UR
     const engine = await engineForEnv(env);
     const allSegments = await stores.segments.listSegments();
     const enabledSegments = allSegments.filter((s) => s.enabled);
-    await runTick({ stores, engine, segments: enabledSegments, alertChannels });
+    await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env });
   } catch (err) {
     console.error("[scheduler] tick error:", err);
     // Observability (#264): a scheduler tick throw (store/plan failure before finishOrFail) must

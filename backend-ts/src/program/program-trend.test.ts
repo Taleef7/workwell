@@ -97,6 +97,7 @@ function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[
     caseStore: {} as ProgramDeps["caseStore"],
     outcomeStore: { listOutcomesWithRun: async () => opts.perRun ?? [] } as unknown as ProgramDeps["outcomeStore"],
   } as ProgramDeps;
+  deps.webChartEnv = { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" };
   if (opts.withSnapshots !== false) {
     deps.qualitySnapshots = { querySnapshots: async () => opts.snaps ?? [], upsertSnapshots: async () => {} };
   }

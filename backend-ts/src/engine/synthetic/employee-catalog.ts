@@ -5,6 +5,12 @@
  * this behind the same lookup. Used by the run read models to resolve outcome rows to
  * employee name/role/site. Generated from the Java catalog — keep in sync on re-seed.
  */
+import {
+  isWebChartConfigured,
+  webChartConfigFromEnv,
+  type DataSourceEnv,
+} from "../ingress/data-source.ts";
+
 export interface EmployeeProfile {
   externalId: string;
   name: string;
@@ -293,13 +299,22 @@ export const isDemoPersona = (externalId: string): boolean => DEMO_PERSONA_EXTER
 const BY_ID = new Map<string, EmployeeProfile>(EMPLOYEES.map((e) => [e.externalId, e]));
 const PROVIDER_BY_ID = new Map<string, Provider>(PROVIDERS.map((p) => [p.id, p]));
 
+const WEBCHART_PROVIDER: Provider = {
+  id: "wc-provider-1",
+  name: "WebChart Clinician",
+  location: "WebChart",
+  tenantId: "wc",
+};
+const WEBCHART_ENTERPRISE: Enterprise = { id: "wc", name: "WebChart", tenantId: "wc" };
+
 /** Lookup by external id; null when unknown (callers degrade gracefully — no throw). */
 export function employeeById(externalId: string): EmployeeProfile | null {
   return BY_ID.get(externalId) ?? null;
 }
 
 /** Lookup a provider by id; null when unknown. */
-export function providerById(id: string): Provider | null {
+export function providerById(id: string, env?: DataSourceEnv): Provider | null {
+  if (id === WEBCHART_PROVIDER.id && env && isWebChartConfigured(env)) return WEBCHART_PROVIDER;
   return PROVIDER_BY_ID.get(id) ?? null;
 }
 
@@ -307,13 +322,22 @@ const TENANT_BY_ID = new Map<string, Tenant>(TENANTS.map((t) => [t.id, t]));
 const ENTERPRISE_BY_TENANT = new Map<string, Enterprise>(ENTERPRISES.map((e) => [e.tenantId, e]));
 
 /** Lookup a tenant by id; null when unknown (#185 E13). */
-export function tenantById(id: string): Tenant | null {
+export function tenantById(id: string, env?: DataSourceEnv): Tenant | null {
+  if (id === "wc" && env) return webChartTenant(env);
   return TENANT_BY_ID.get(id) ?? null;
 }
 
 /** The enterprise for a tenant; null when unknown. */
-export function enterpriseForTenant(tenantId: string): Enterprise | null {
+export function enterpriseForTenant(tenantId: string, env?: DataSourceEnv): Enterprise | null {
+  if (tenantId === "wc" && env && isWebChartConfigured(env)) return WEBCHART_ENTERPRISE;
   return ENTERPRISE_BY_TENANT.get(tenantId) ?? null;
+}
+
+/** The configured live WebChart tenant; absent unless the existing ingress seam is selected. */
+export function webChartTenant(env: DataSourceEnv): Tenant | null {
+  if (!isWebChartConfigured(env)) return null;
+  const cfg = webChartConfigFromEnv(env)!;
+  return { id: "wc", name: `WebChart (${new URL(cfg.baseUrl).host})` };
 }
 
 /** Employees belonging to a tenant, in directory order. */

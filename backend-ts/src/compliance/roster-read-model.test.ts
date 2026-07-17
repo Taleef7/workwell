@@ -6,6 +6,7 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
 import { buildRoster, type RosterCellCache } from "./roster-read-model.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 /** The store's latest-terminal-population-run-per-measure reduction, applied to fixture rows so the
  *  fake mirrors production semantics (perf #233). */
@@ -74,6 +75,44 @@ test("buildRoster — columns reflect the panel; a COMPLIANT mmr cell carries th
   assert.equal(row.cells["mmr"]!.method, "2 valid dose(s)");
   assert.equal(row.cells["flu_vaccine"]!.status, "NA");
   assert.equal(roster.total, EMPLOYEES.length);
+});
+
+test("buildRoster — restart rehydrates completed wc rows with raw ids, then registry refresh restores names", async () => {
+  replaceLiveDirectory([]);
+  try {
+    const subjectId = "wc|restart-patient-1";
+    const failedSubjectId = "wc|failed-patient";
+    const withRun: OutcomeWithRun[] = [
+      { runId: "run-wc-ok", runStartedAt: "2026-07-17T00:00:00Z", runScopeType: "MEASURE", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId, measureId: "mmr", status: "COMPLIANT" },
+      { runId: "run-wc-failed", runStartedAt: "2026-07-18T00:00:00Z", runScopeType: "MEASURE", runStatus: "FAILED", runTriggeredBy: "manual", subjectId: failedSubjectId, measureId: "mmr", status: "OVERDUE" },
+    ];
+    const byRun: Record<string, OutcomeRecord[]> = {
+      "run-wc-ok": [
+        { id: "out-wc-ok", runId: "run-wc-ok", subjectId, measureId: "mmr", evaluationPeriod: "2026-07-17", status: "COMPLIANT", evidence: ev([["Dose Count", 2]]), evaluatedAt: "2026-07-17T00:00:00Z" },
+      ],
+    };
+
+    const restarted = await buildRoster(
+      { outcomeStore: fakeStore(withRun, byRun), segments: [], webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" } },
+      { panel: "immunizations", tenant: "wc", pageSize: 200 },
+    );
+    assert.equal(restarted.total, 1);
+    assert.equal(restarted.rows[0]!.subject.externalId, subjectId);
+    assert.equal(restarted.rows[0]!.subject.name, "restart-patient-1");
+    assert.equal(restarted.rows[0]!.subject.site, "WebChart");
+    assert.equal(restarted.rows[0]!.subject.tenantName, "WebChart (webchart.test)");
+    assert.equal(restarted.rows[0]!.cells.mmr!.status, "COMPLIANT");
+    assert.equal(restarted.rows.some((row) => row.subject.externalId === failedSubjectId), false, "FAILED population rows stay invisible");
+
+    replaceLiveDirectory([{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "restart-patient-1", name: [{ given: ["Amina"], family: "Khan" }] } }] }]);
+    const refreshed = await buildRoster(
+      { outcomeStore: fakeStore(withRun, byRun), segments: [], webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" } },
+      { panel: "immunizations", tenant: "wc", pageSize: 200 },
+    );
+    assert.equal(refreshed.rows[0]!.subject.name, "Amina Khan");
+  } finally {
+    replaceLiveDirectory([]);
+  }
 });
 
 test("buildRoster — caches derived cells per measure's latest run; a newer run supersedes (perf #233)", async () => {

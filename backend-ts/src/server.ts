@@ -54,12 +54,21 @@ async function main(): Promise<void> {
   // Pass through the env knobs the tick actually resolves (not only DATABASE_URL):
   //   - WORKWELL_ALERT_WEBHOOK_URL → #264 webhook channel (Codex P2: console-only if omitted)
   //   - WORKWELL_VSAC_* → engineForEnv key-gating (parity with the request path)
+  //   - WORKWELL_WEBCHART_* → the same configured live population path as manual runs
   initSchedulerFromEnv(process.env);
   const schedulerEnv = {
     DATABASE_URL: process.env.DATABASE_URL,
     WORKWELL_ALERT_WEBHOOK_URL: process.env.WORKWELL_ALERT_WEBHOOK_URL,
     WORKWELL_VSAC_API_KEY: process.env.WORKWELL_VSAC_API_KEY,
     WORKWELL_VSAC_BASE_URL: process.env.WORKWELL_VSAC_BASE_URL,
+    WORKWELL_WEBCHART_BASE_URL: process.env.WORKWELL_WEBCHART_BASE_URL,
+    WORKWELL_WEBCHART_API_KEY: process.env.WORKWELL_WEBCHART_API_KEY,
+    WORKWELL_WEBCHART_CLIENT_ID: process.env.WORKWELL_WEBCHART_CLIENT_ID,
+    WORKWELL_WEBCHART_PRIVATE_KEY: process.env.WORKWELL_WEBCHART_PRIVATE_KEY,
+    WORKWELL_WEBCHART_TOKEN_URL: process.env.WORKWELL_WEBCHART_TOKEN_URL,
+    WORKWELL_WEBCHART_SCOPE: process.env.WORKWELL_WEBCHART_SCOPE,
+    WORKWELL_WEBCHART_KID: process.env.WORKWELL_WEBCHART_KID,
+    WORKWELL_WEBCHART_ENROLLMENT_JSON: process.env.WORKWELL_WEBCHART_ENROLLMENT_JSON,
   };
   const schedulerInterval = setInterval(() => {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>

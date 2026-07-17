@@ -140,8 +140,9 @@ export function toCaseDetail(
   timeline: unknown[] = [],
   latestOutreachDeliveryStatus: string | null = null,
   immunizationForecast?: ImmunizationForecast,
+  employeeLookup: typeof employeeById = employeeById,
 ): CaseDetail {
-  const emp = employeeById(c.employeeId);
+  const emp = employeeLookup(c.employeeId);
   const evidence = (outcome?.evidence as Record<string, unknown> | undefined) ?? {};
   return {
     caseId: c.id,
