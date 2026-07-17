@@ -197,6 +197,27 @@ test("POST /api/runs/manual SITE runs async: 201 RUNNING immediately, then compl
   assert.equal(summary.totalEvaluated, 14 * 4, "14 runnable measures × 4 HQ employees evaluated in the background");
 });
 
+test("POST /api/runs/:id/rerun rejects a wc CASE branch with controlled 409", async () => {
+  await get("/api/runs"); // initialize the floor schema when this test is selected in isolation
+  const caseStore = new SqliteCaseStore(env.DB as never);
+  const runStore = new SqliteRunStore(env.DB as never);
+  const source = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-07-17T00:00:00.000Z", measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  const wcCase = await caseStore.upsertFromOutcome({ runId: source.id, subjectId: "wc|runs-route-case", measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
+  const prior = await runStore.createRun({
+    scopeType: "CASE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { caseId: wcCase!.id, measureId: "audiogram", employeeExternalId: "wc|runs-route-case" },
+    measurementPeriodStart: "2026-07-17T00:00:00.000Z", measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  const beforeRuns = (await runStore.listRuns(1000)).length;
+
+  const response = await post(`/api/runs/${prior.id}/rerun`);
+  assert.equal(response?.status, 409);
+  assert.deepEqual(await response!.json(), { error: "unsupported_scope", message: "Live WebChart CASE rerun-to-verify is not supported until fetch-one-patient is available." });
+  assert.equal((await runStore.listRuns(1000)).length, beforeRuns);
+});
+
 test("configured MEASURE schedules in waitUntil and returns 201 RUNNING before a blocked fetch settles", async () => {
   const originalFetch = globalThis.fetch;
   let release!: (response: Response) => void;

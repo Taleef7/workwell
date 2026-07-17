@@ -1,5 +1,38 @@
 # Architecture Decision Records
 
+## ADR-033: Inject a schema-free live WebChart directory into population read models
+
+**Status:** Accepted (2026-07-17).
+
+**Context:** A configured WebChart population can be evaluated through the existing FHIR/CQL ingress,
+but persisted outcomes carry only subject ids. The static synthetic directory therefore dropped live
+subjects from roster, hierarchy, programs, case identity, and quality scopes. Persisting a second
+clinical/directory model would add owner-gated DDL and risk making stale clinical data look current.
+
+**Decision:** Keep a per-worker, atomically replaced last-known-good registry of live identity profiles
+(`wc|Patient.id`, display name, birth date, and fixed `wc`/`WebChart`/`wc-provider-1` placement). It is
+a directory cache only; clinical bundles are never cached for verification. Every population read or
+materialization first loads its persisted latest/run outcome rows, constructs exactly one
+`directoryForRows(rows)` snapshot, and threads that snapshot's lookup closures through the operation.
+The snapshot merges the static catalog, the registry, and minimal profiles for unknown persisted `wc|`
+ids (`name = raw Patient.id`). A successful population fetch replaces the registry; a fetch failure
+aborts the configured population run before any outcomes, leaving the prior successful run and registry
+authoritative. Read models ignore FAILED runs.
+
+Clinical eligibility and `Outcome Status` remain exclusively CQL-owned (ADR-008). The live enrollment
+override is optional; the default is enroll-all within the existing fail-closed eligible-measure list.
+Existing site-specific segments do not match `WebChart`, so they create no live cases unless an
+administrator adds that site. Fetch-one-subject is not available in phase 1: `wc|` CASE reruns return a
+controlled, non-mutating 409, and `SITE=WebChart` remains unsupported rather than superseding a whole
+population with a partial latest run.
+
+**Consequences:** No schema, dependency, frontend, or clinical-cache change is introduced. A worker
+restart temporarily shows raw Patient ids until the next successful population refresh, while persisted
+rows and hierarchy/quality totals remain visible and reconciling. Unsetting the WebChart configuration
+restores the byte-identical static path; stored outcome history remains but the live tenant is no longer
+selected. Reversal is therefore environment-only plus an ordinary code revert. Real provider/site
+attribution, fetch-one CASE/EMPLOYEE, safe SITE latest-run semantics, and identity linking are deferred.
+
 ## ADR-032: A local HAPI FHIR server is the WebChart simulator ("fake WebChart")
 
 **Status:** Accepted (2026-07-16).

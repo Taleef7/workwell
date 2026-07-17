@@ -91,9 +91,16 @@ export interface OutcomeMeasureFilter {
   excludeTrendHistory?: boolean;
 }
 
-/** Options for the per-measure outcome scan; `excludeScale` drops the scale tenant in SQL (E13 PR-2). */
+/** Options for the per-measure evidence-rich outcome scan. */
 export interface MeasureScanOptions {
+  /** Drop the scale tenant's mhn-prefixed subjects in SQL (E13 PR-2). */
   excludeScale?: boolean;
+  /**
+   * Join to runs and retain only terminal successful population runs in SQL. "Population" excludes
+   * CASE/EMPLOYEE scopes; "successful terminal" is COMPLETED/PARTIAL_FAILURE. Risk outlook uses this
+   * to keep evidence without an unbounded listOutcomes-per-run hydration pass.
+   */
+  successfulPopulationOnly?: boolean;
 }
 
 export interface OutcomeStore {
@@ -145,8 +152,8 @@ export interface OutcomeStore {
    */
   listLatestPopulationOutcomes(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]>;
   /**
-   * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence —
-   * the per-subject history the risk-outlook analytics group in the app.
+   * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence. Pass
+   * `successfulPopulationOnly` for the risk-outlook history: filtering happens in the same query.
    */
   listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**

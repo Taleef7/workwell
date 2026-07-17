@@ -43,7 +43,7 @@ import {
   type ManualRunResponse,
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
-import { rerunToVerify } from "../case/case-rerun.ts";
+import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import { buildMeasureReportBundle, buildSummaryMeasureReportFromCounts, populationCountsFromStatus } from "../fhir/measure-report.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -274,13 +274,18 @@ export async function handleRuns(
     if (prior.scopeType === "CASE") {
       const caseId = prior.requestedScope.caseId as string | undefined;
       if (!caseId) return json({ error: "invalid_request", message: "CASE run has no caseId to rerun" }, 400);
-      const detail = await rerunToVerify(
-        { cases: await cases(env), events: (await getStores(env)).events, outcomes: await outcomes(env), runStore, engine },
-        caseId,
-        actor,
-      );
-      if (!detail) return json({ error: "not_found", id: caseId }, 404);
-      return json(caseRerunResponse(detail), 201);
+      try {
+        const detail = await rerunToVerify(
+          { cases: await cases(env), events: (await getStores(env)).events, outcomes: await outcomes(env), runStore, engine },
+          caseId,
+          actor,
+        );
+        if (!detail) return json({ error: "not_found", id: caseId }, 404);
+        return json(caseRerunResponse(detail), 201);
+      } catch (err) {
+        if (err instanceof UnsupportedCaseRerunError) return json({ error: err.code, message: err.message }, 409);
+        throw err;
+      }
     }
     const deps = {
       runStore,

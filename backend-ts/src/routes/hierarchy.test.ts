@@ -16,9 +16,10 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { handleHierarchy } from "./hierarchy.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const dbPath = join(tmpdir(), `workwell-hier-route-${crypto.randomUUID()}.sqlite`);
-let env: { DB: unknown };
+let env: { DB: unknown; WORKWELL_WEBCHART_BASE_URL?: string; WORKWELL_WEBCHART_API_KEY?: string };
 const get = (qs = "") => handleHierarchy(new Request(`http://x/api/hierarchy/rollup${qs}`, { method: "GET" }), env as never);
 
 interface Node { level: string; id: string; totals: { evaluated: number; compliant: number; complianceRate: number; openCases: number }; children: Node[]; }
@@ -88,4 +89,31 @@ test("unknown measureId → 200 with an empty All-Systems tree", async () => {
   assert.equal(root.level, "all");
   assert.equal(root.totals.evaluated, 0);
   assert.equal(root.children.length, 0);
+});
+
+test("persisted wc hierarchy rows are hidden seam-off and rehydrated only when configured", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", status: "COMPLETED",
+    requestedScope: { measureId: "mmr" }, measurementPeriodStart: "2026-07-17T00:00:00.000Z",
+    measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "wc|hierarchy-restart", measureId: "mmr", status: "COMPLIANT", evidence: {} });
+  replaceLiveDirectory([{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "hierarchy-restart", name: [{ text: "Cached Hierarchy Name" }] } }] }]);
+  try {
+    const off = (await get("?measureId=mmr").then((response) => response!.json())) as Node;
+    assert.equal(off.totals.evaluated, 0);
+    assert.ok(!off.children.some((child) => child.id === "wc"));
+
+    env.WORKWELL_WEBCHART_BASE_URL = "http://webchart.test";
+    env.WORKWELL_WEBCHART_API_KEY = "fixture-key";
+    const on = (await get("?measureId=mmr").then((response) => response!.json())) as Node;
+    assert.equal(on.totals.evaluated, 1);
+    assert.equal(on.children.find((child) => child.id === "wc")?.totals.evaluated, 1);
+  } finally {
+    delete env.WORKWELL_WEBCHART_BASE_URL;
+    delete env.WORKWELL_WEBCHART_API_KEY;
+    replaceLiveDirectory([]);
+  }
 });

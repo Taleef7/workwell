@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { EMPLOYEES } from "../../synthetic/employee-catalog.ts";
 import {
@@ -6,6 +6,8 @@ import {
   profileForId,
   replaceLiveDirectory,
 } from "./live-directory.ts";
+
+afterEach(() => replaceLiveDirectory([]));
 
 function bundle(...resources: unknown[]): unknown {
   return {
@@ -21,7 +23,7 @@ test("replaceLiveDirectory maps the first Patient in each normalized bundle", ()
       {
         resourceType: "Patient",
         id: "patient-17",
-        name: [{ given: ["Amina", "Noor"], family: "Khan" }],
+        name: [{ given: ["Amina", "Noor"], family: "Khan", text: "Fallback Display" }],
         birthDate: "1988-04-03",
       },
       { resourceType: "Patient", id: "ignored-second-patient", name: [{ given: ["Wrong"] }] },
@@ -40,6 +42,14 @@ test("replaceLiveDirectory maps the first Patient in each normalized bundle", ()
     },
   ]);
   assert.deepEqual(profileForId("wc|patient-17"), profiles[0]);
+});
+
+test("replaceLiveDirectory uses trimmed HumanName.text when structured name parts are absent", () => {
+  const [profile] = replaceLiveDirectory([
+    bundle({ resourceType: "Patient", id: "patient-text", name: [{ text: "  Jane Doe  " }] }),
+  ]);
+
+  assert.equal(profile?.name, "Jane Doe");
 });
 
 test("replaceLiveDirectory atomically replaces the last-known-good registry", () => {

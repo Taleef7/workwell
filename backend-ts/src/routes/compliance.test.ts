@@ -13,9 +13,10 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { handleCompliance } from "./compliance.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const dbPath = join(tmpdir(), `workwell-roster-route-${crypto.randomUUID()}.sqlite`);
-let env: { DB: unknown };
+let env: { DB: unknown; WORKWELL_WEBCHART_BASE_URL?: string; WORKWELL_WEBCHART_API_KEY?: string };
 const get = (qs = "") => handleCompliance(new Request(`http://x/api/compliance/roster${qs}`, { method: "GET" }), env as never);
 
 before(async () => {
@@ -71,4 +72,33 @@ test("GET /api/compliance/roster → columns + rows + X-Total-Count; mmr cell ca
   const mmrCell = row.cells["mmr"]!;
   assert.equal(mmrCell.status, "COMPLIANT");
   assert.equal(mmrCell.method, "2 valid dose(s)");
+});
+
+test("persisted wc rows are reversible: hidden seam-off and rehydrated only when configured", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", status: "COMPLETED",
+    requestedScope: { measureId: "mmr" }, measurementPeriodStart: "2026-07-17T00:00:00.000Z",
+    measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "wc|roster-restart", measureId: "mmr", status: "COMPLIANT", evidence: {} });
+  replaceLiveDirectory([{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "roster-restart", name: [{ text: "Cached Live Name" }] } }] }]);
+  try {
+    const off = (await get("?panel=immunizations&pageSize=300").then((r) => r!.json())) as {
+      rows: Array<{ subject: { externalId: string } }>;
+    };
+    assert.ok(!off.rows.some((row) => row.subject.externalId.startsWith("wc|")));
+
+    env.WORKWELL_WEBCHART_BASE_URL = "http://webchart.test";
+    env.WORKWELL_WEBCHART_API_KEY = "fixture-key";
+    const on = (await get("?panel=immunizations&pageSize=300").then((r) => r!.json())) as {
+      rows: Array<{ subject: { externalId: string; name: string } }>;
+    };
+    assert.equal(on.rows.find((row) => row.subject.externalId === "wc|roster-restart")?.subject.name, "Cached Live Name");
+  } finally {
+    delete env.WORKWELL_WEBCHART_BASE_URL;
+    delete env.WORKWELL_WEBCHART_API_KEY;
+    replaceLiveDirectory([]);
+  }
 });

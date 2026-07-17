@@ -29,6 +29,14 @@ export interface DirectorySnapshot {
 
 let liveEmployees: readonly EmployeeProfile[] = [];
 
+const STATIC_DIRECTORY: DirectorySnapshot = {
+  employees: EMPLOYEES,
+  employeeById: staticEmployeeById,
+  providerById: staticProviderById,
+  tenantById: staticTenantById,
+  enterpriseForTenant: staticEnterpriseForTenant,
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -66,7 +74,9 @@ function profileFromPatient(patient: Record<string, unknown>): EmployeeProfile {
     ? firstName.given.filter((part): part is string => typeof part === "string" && part.length > 0)
     : [];
   const family = firstName && typeof firstName.family === "string" ? firstName.family : "";
-  const name = [...given, family].filter(Boolean).join(" ") || id;
+  const structuredName = [...given, family].filter(Boolean).join(" ");
+  const textName = firstName && typeof firstName.text === "string" ? firstName.text.trim() : "";
+  const name = structuredName || textName || id;
   return {
     externalId: `wc|${id}`,
     name,
@@ -96,7 +106,11 @@ export function profileForId(externalId: string): EmployeeProfile | null {
 }
 
 /** Build one immutable lookup view from static rows, the current registry, and persisted wc outcome ids. */
-export function directoryForRows(rows: readonly { subjectId: string }[]): DirectorySnapshot {
+export function directoryForRows(
+  rows: readonly { subjectId: string }[],
+  webChartConfigured = true,
+): DirectorySnapshot {
+  if (!webChartConfigured) return STATIC_DIRECTORY;
   const mergedById = new Map<string, EmployeeProfile>(EMPLOYEES.map((employee) => [employee.externalId, employee]));
   for (const employee of liveEmployees) mergedById.set(employee.externalId, employee);
   for (const row of rows) {
@@ -106,13 +120,7 @@ export function directoryForRows(rows: readonly { subjectId: string }[]): Direct
   }
 
   if (mergedById.size === EMPLOYEES.length) {
-    return {
-      employees: EMPLOYEES,
-      employeeById: staticEmployeeById,
-      providerById: staticProviderById,
-      tenantById: staticTenantById,
-      enterpriseForTenant: staticEnterpriseForTenant,
-    };
+    return STATIC_DIRECTORY;
   }
 
   const employees = [...mergedById.values()];

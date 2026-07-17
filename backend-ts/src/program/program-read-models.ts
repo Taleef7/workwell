@@ -17,6 +17,8 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
+import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 export interface ProgramSummary {
   measureId: string;
@@ -50,13 +52,14 @@ export interface ProgramFilters {
  */
 export function snapshotScopeFor(
   filters: ProgramFilters,
+  employees: readonly EmployeeProfile[] = EMPLOYEES,
 ): { scopeLevel: QualityScopeLevel; scopeId: string } | null {
   const site = filters.site?.trim() || null;
   const tenant = filters.tenant?.trim() || null;
   if (site) {
     let tenantId = tenant;
     if (!tenantId) {
-      const tenants = [...new Set(EMPLOYEES.filter((e) => e.site === site).map((e) => e.tenantId))];
+      const tenants = [...new Set(employees.filter((e) => e.site === site).map((e) => e.tenantId))];
       if (tenants.length !== 1) return null; // 0 (unknown) or >1 (ambiguous) → per-run fallback
       tenantId = tenants[0]!;
     }
@@ -102,6 +105,8 @@ export interface ProgramDeps {
   employees?: readonly EmployeeProfile[];
   /** Optional — the monthly (quality_snapshots) trend source (UX-8). Absent ⇒ per-run trend only. */
   qualitySnapshots?: QualitySnapshotStore;
+  /** Runtime environment consumed only through the existing isWebChartConfigured predicate. */
+  webChartEnv?: DataSourceEnv;
 }
 
 /** Per-run trend point (Java ProgramTrendPoint). The chart reads runId/startedAt/complianceRate/totalEvaluated. */
@@ -156,6 +161,14 @@ export function listSites(employees: readonly EmployeeProfile[] = EMPLOYEES): st
   return [...new Set(employees.map((e) => e.site).filter((s): s is string => !!s))].sort((a, b) => a.localeCompare(b));
 }
 
+/** Distinct sites from one restart-safe snapshot of the latest successful population rows. */
+export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "webChartEnv">): Promise<string[]> {
+  const rows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
+    (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
+  );
+  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {})).employees);
+}
+
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
 interface RunGroup {
   runId: string;
@@ -174,22 +187,24 @@ function groupByRun(rows: OutcomeWithRun[]): RunGroup[] {
   return [...byRun.values()];
 }
 
-const siteMatcher = (filters: ProgramFilters) => {
+const siteMatcher = (filters: ProgramFilters, employeeLookup = employeeById) => {
   const site = filters.site?.trim() || null;
-  return (subjectId: string) => !site || eq(employeeById(subjectId)?.site ?? null, site);
+  return (subjectId: string) => !site || eq(employeeLookup(subjectId)?.site ?? null, site);
 };
 
 /** Tenant/system filter (E13 PR-1) — exact tenantId match, resolved read-time from the directory. */
-const tenantMatcher = (filters: ProgramFilters) => {
+const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) => {
   const tenant = filters.tenant?.trim() || null;
-  return (subjectId: string) => !tenant || (employeeById(subjectId)?.tenantId ?? null) === tenant;
+  return (subjectId: string) => !tenant || (employeeLookup(subjectId)?.tenantId ?? null) === tenant;
 };
+
+/** Hide only live-tenant ids when the existing runtime seam is off; all non-wc legacy behavior stays unchanged. */
+const subjectVisible = (subjectId: string, webChartConfigured: boolean): boolean =>
+  webChartConfigured || !subjectId.startsWith("wc|");
 
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;
   const to = filters.to?.trim() || null;
-  const siteMatch = siteMatcher(filters);
-  const tenantMatch = tenantMatcher(filters);
   const inPeriod = (iso: string): boolean => (!from || day(iso) >= day(from)) && (!to || day(iso) <= day(to));
 
   // ONE bounded query (measure/date filtering pushed into SQL) instead of fanning out a
@@ -203,13 +218,16 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // excludeTrendHistory (Fable M16): the synthetic trend rows are always older than each measure's
   // latest real run, so this overview (latest-run-per-measure) never selects them — dropping them in
   // SQL avoids the fetch-then-discard. The /programs TREND read model below intentionally keeps them.
-  const rows = (await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true, excludeTrendHistory: true })).filter(
-    (r) =>
-      siteMatch(r.subjectId) &&
-      tenantMatch(r.subjectId) &&
-      isPopulationRun(r.runScopeType) &&
-      isCompletedRun(r.runStatus) &&
-      r.runTriggeredBy !== "seed:scale",
+  const persistedRows = await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true, excludeTrendHistory: true });
+  const successfulRows = persistedRows.filter(
+    (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
+  );
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const directory = directoryForRows(successfulRows, webChartConfigured);
+  const siteMatch = siteMatcher(filters, directory.employeeById);
+  const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const rows = successfulRows.filter(
+    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -227,6 +245,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       (c) =>
         c.measureId === m.id &&
         (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) &&
+        subjectVisible(c.employeeId, webChartConfigured) &&
         siteMatch(c.employeeId) &&
         tenantMatch(c.employeeId) &&
         inPeriod(c.createdAt),
@@ -305,20 +324,29 @@ function zeroSummary(s: ProgramSummary): void {
 }
 
 /** Run groups carrying site-filtered outcomes for one measure (bounded query, no per-run fan-out). */
-async function runsWithOutcomes(deps: ProgramDeps, measureId: string, filters: ProgramFilters): Promise<RunGroup[]> {
-  const siteMatch = siteMatcher(filters);
-  const tenantMatch = tenantMatcher(filters);
-  const rows = (
-    await deps.outcomeStore.listOutcomesWithRun({
+async function runsWithOutcomes(
+  deps: ProgramDeps,
+  measureId: string,
+  filters: ProgramFilters,
+): Promise<{ groups: RunGroup[]; directory: DirectorySnapshot; hasWebChartRows: boolean }> {
+  const persistedRows = await deps.outcomeStore.listOutcomesWithRun({
       measureId,
       from: filters.from?.trim() || undefined,
       to: filters.to?.trim() || undefined,
       // E13 PR-2: trend + top-drivers are NOT extended to the scale tenant; exclude it in SQL so a
       // seeded measure's 120k rows never enter this scan (bounded) and never skew the live charts.
       excludeScale: true,
-    })
-  ).filter((r) => siteMatch(r.subjectId) && tenantMatch(r.subjectId) && isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
-  return groupByRun(rows);
+    });
+  const successfulRows = persistedRows.filter((row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus));
+  const hasWebChartRows = successfulRows.some((row) => row.subjectId.startsWith("wc|"));
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const directory = directoryForRows(successfulRows, webChartConfigured);
+  const siteMatch = siteMatcher(filters, directory.employeeById);
+  const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const rows = successfulRows.filter(
+    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
+  );
+  return { groups: groupByRun(rows), directory, hasWebChartRows };
 }
 
 /** Last day of the (1-indexed) month in `YYYY-MM-DD`? `Date.UTC(y, m, 0)` = day 0 of month m's successor = last day of month m. */
@@ -342,6 +370,17 @@ export function isWholeMonthRange(from?: string, to?: string): boolean {
   return firstDayOk && lastDayOk;
 }
 
+/** A persisted monthly snapshot is safe seam-off only when its key structurally excludes WebChart. */
+function monthlySnapshotScopeIsSafe(
+  scope: { scopeLevel: QualityScopeLevel; scopeId: string },
+  webChartConfigured: boolean,
+  hasWebChartRows: boolean,
+): boolean {
+  if (webChartConfigured) return true;
+  if (scope.scopeLevel === "all") return !hasWebChartRows;
+  return scope.scopeId !== "wc" && !scope.scopeId.startsWith("wc|");
+}
+
 /** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity). */
 export async function programTrend(
   deps: ProgramDeps,
@@ -356,8 +395,19 @@ export async function programTrend(
   // per-run trend below (which honors day-granular from/to).
   const from = filters.from?.trim() || undefined;
   const to = filters.to?.trim() || undefined;
-  const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to) ? snapshotScopeFor(filters) : null;
-  if (opts?.monthly && deps.qualitySnapshots && scope) {
+  // Load once before the optional monthly early return: the same successful rows both rehydrate the
+  // site-only scope after restart and feed the per-run fallback without a second store read.
+  const { groups, directory, hasWebChartRows } = await runsWithOutcomes(deps, measureId, filters);
+  const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to)
+    ? snapshotScopeFor(filters, directory.employees)
+    : null;
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  if (
+    opts?.monthly &&
+    deps.qualitySnapshots &&
+    scope &&
+    monthlySnapshotScopeIsSafe(scope, webChartConfigured, hasWebChartRows)
+  ) {
     const snaps = await deps.qualitySnapshots.querySnapshots({
       measureId,
       scopeLevel: scope.scopeLevel,
@@ -372,7 +422,6 @@ export async function programTrend(
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
-  const groups = await runsWithOutcomes(deps, measureId, filters);
   const n = (os: OutcomeWithRun[], s: string) => os.filter((o) => o.status === s).length;
   return groups
     .map(({ runId, runStartedAt, rows }): ProgramTrendPoint => {
@@ -401,7 +450,7 @@ export async function programTopDrivers(
   filters: ProgramFilters,
 ): Promise<TopDrivers> {
   const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
-  const groups = await runsWithOutcomes(deps, measureId, filters);
+  const { groups, directory } = await runsWithOutcomes(deps, measureId, filters);
   if (groups.length === 0) return empty;
   // Latest filtered run with outcomes for this measure.
   const latest = groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a));
@@ -416,8 +465,8 @@ export async function programTopDrivers(
     }
     return counts;
   };
-  const siteCounts = tally((id) => employeeById(id)?.site ?? "");
-  const roleCounts = tally((id) => employeeById(id)?.role ?? "");
+  const siteCounts = tally((id) => directory.employeeById(id)?.site ?? "");
+  const roleCounts = tally((id) => directory.employeeById(id)?.role ?? "");
 
   const bySite = [...siteCounts.entries()]
     .map(([site, overdueCount]) => ({ site, overdueCount, note: "High overdue concentration" }))
@@ -469,18 +518,25 @@ export async function programRiskOutlook(
   const horizon = Math.max(1, Math.min(Number.isFinite(horizonDays) ? Math.trunc(horizonDays) : 30, 180));
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const today = new Date().toISOString().slice(0, 10);
-  // E13 PR-2: risk-outlook is NOT extended to the scale tenant; exclude its (mhn-prefixed) rows in SQL
-  // so a seeded measure's 120k rows never materialize into the per-subject map (bounded memory).
-  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId, { excludeScale: true });
+  // One evidence-rich query retains only terminal successful population runs. This keeps FAILED,
+  // RUNNING, CASE, and EMPLOYEE outcomes from affecting status/streaks/directory visibility without
+  // the unbounded listOutcomes-per-historical-run hydration pass. Scale rows are also dropped in SQL.
+  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId, {
+    excludeScale: true,
+    successfulPopulationOnly: true,
+  });
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const directory = directoryForRows(rows, webChartConfigured);
+  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured));
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
   const latestBySubject = new Map<string, MeasureOutcomeRow>();
-  for (const r of rows) latestBySubject.set(r.subjectId, r);
+  for (const r of visibleRows) latestBySubject.set(r.subjectId, r);
 
   const siteAcc = new Map<string, { total: number; compliant: number; upcoming: number }>();
   const upcomingExpirations: RiskOutlook["upcomingExpirations"] = [];
   for (const snap of latestBySubject.values()) {
-    const emp = employeeById(snap.subjectId);
+    const emp = directory.employeeById(snap.subjectId);
     const site = emp?.site || "Unknown";
     const acc = siteAcc.get(site) ?? siteAcc.set(site, { total: 0, compliant: 0, upcoming: 0 }).get(site)!;
     acc.total++;
@@ -522,7 +578,7 @@ export async function programRiskOutlook(
   // Repeat non-compliers: per subject, dedupe to the latest outcome per evaluation_period, order
   // newest-first, count the leading OVERDUE/MISSING_DATA streak; keep streak ≥ 3 (top 10).
   const bySubject = new Map<string, MeasureOutcomeRow[]>();
-  for (const r of rows) (bySubject.get(r.subjectId) ?? bySubject.set(r.subjectId, []).get(r.subjectId)!).push(r);
+  for (const r of visibleRows) (bySubject.get(r.subjectId) ?? bySubject.set(r.subjectId, []).get(r.subjectId)!).push(r);
   const FLAGGED = new Set(["OVERDUE", "MISSING_DATA"]);
   const repeatNonCompliers = [...bySubject.entries()]
     .map(([subjectId, subjectRows]) => {
@@ -537,7 +593,7 @@ export async function programRiskOutlook(
         if (!FLAGGED.has(r.status)) break;
         streak++;
       }
-      const emp = employeeById(subjectId);
+      const emp = directory.employeeById(subjectId);
       return { externalId: subjectId, name: emp?.name ?? subjectId, site: emp?.site || "Unknown", measureName: measure.name, streakCount: streak };
     })
     .filter((r) => r.streakCount >= 3)

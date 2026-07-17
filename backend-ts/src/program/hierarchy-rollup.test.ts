@@ -18,6 +18,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { buildHierarchyRollup, type HierarchyNode } from "./hierarchy-rollup.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 /** Drill from the All-Systems root to the twh tenant's enterprise node (locations live under it). */
 function twhEnterprise(root: HierarchyNode): HierarchyNode {
@@ -129,6 +130,49 @@ test("?tenant=ihn (no seeded ihn outcomes) → empty tenant root with zeros", as
   assert.equal(sub.id, "ihn");
   assert.equal(sub.totals.evaluated, 0);
   assert.equal(sub.children.length, 0);
+});
+
+test("restart rehydrates unknown wc patients and reconciles All = sum of tenants", async () => {
+  const dbFile = join(tmpdir(), `workwell-hier-wc-${crypto.randomUUID()}.sqlite`);
+  try {
+    replaceLiveDirectory([]);
+    const s = await freshStores(dbFile);
+    const done = await s.runStore.createRun({
+      scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "manual", status: "COMPLETED",
+      requestedScope: { measureId: "audiogram" }, startedAt: "2026-07-17T00:00:00.000Z",
+      measurementPeriodStart: "2026-07-17T00:00:00.000Z", measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+    });
+    await s.outcomes.recordOutcome({ runId: done.id, subjectId: "wc|restart-hier-1", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    const failed = await s.runStore.createRun({
+      scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "manual", status: "FAILED",
+      requestedScope: { measureId: "audiogram" }, startedAt: "2026-07-18T00:00:00.000Z",
+      measurementPeriodStart: "2026-07-18T00:00:00.000Z", measurementPeriodEnd: "2026-07-18T23:59:59.999Z",
+    });
+    await s.outcomes.recordOutcome({ runId: failed.id, subjectId: "wc|failed-hier", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+
+    const root = await buildHierarchyRollup(
+      { outcomeStore: s.outcomes, caseStore: s.cases, webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" } },
+      { measureId: "audiogram" },
+    );
+    const wc = root.children.find((node) => node.id === "wc")!;
+    assert.ok(wc, "wc tenant is retained after registry loss");
+    assert.equal(wc.totals.evaluated, 1);
+    assert.equal(root.totals.evaluated, root.children.reduce((sum, tenant) => sum + tenant.totals.evaluated, 0));
+    const patient = wc.children[0]!.children[0]!.children[0]!.children[0]!;
+    assert.equal(patient.id, "wc|restart-hier-1");
+    assert.equal(patient.name, "restart-hier-1");
+    assertReconciles(root);
+
+    replaceLiveDirectory([{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "restart-hier-1", name: [{ given: ["Ravi"], family: "Shah" }] } }] }]);
+    const refreshed = await buildHierarchyRollup(
+      { outcomeStore: s.outcomes, caseStore: s.cases, webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" } },
+      { measureId: "audiogram", tenant: "wc" },
+    );
+    assert.equal(refreshed.children[0]!.children[0]!.children[0]!.children[0]!.name, "Ravi Shah");
+  } finally {
+    replaceLiveDirectory([]);
+    try { rmSync(dbFile, { force: true }); } catch { /* SQLite may still hold the Windows file handle */ }
+  }
 });
 
 // ---- deeper coverage (#74 E4 review): multi-child accumulation + open-case-only leaf ----

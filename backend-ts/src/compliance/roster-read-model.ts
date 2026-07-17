@@ -6,7 +6,9 @@
  * `latestRunRows`) and loads evidence per run via `listOutcomes` (cached by run id).
  */
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
-import { EMPLOYEES, employeeById, tenantById, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
+import { isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -55,6 +57,8 @@ export const rosterCellCache: RosterCellCache = new Map();
 
 export interface RosterDeps {
   outcomeStore: OutcomeStore;
+  /** Runtime environment consumed only through the existing isWebChartConfigured predicate. */
+  webChartEnv?: DataSourceEnv;
   /** Configured risk-group segments (E11.3). Drives the N/A applicability overlay + `segment` filter. */
   segments?: HydratedSegment[];
   /** Optional persistent derived-cell cache (perf #233). Omit in tests for per-call isolation. */
@@ -112,6 +116,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const popRows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus), // redundant guard: the store already applies both (defense-in-depth)
   );
+  const directory = directoryForRows(popRows, isWebChartConfigured(deps.webChartEnv ?? {}));
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of popRows) {
     if (!measureIds.includes(r.measureId)) continue;
@@ -160,7 +165,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   //    Then apply the E11.3 applicability overlay: a measure the subject is in NO enabled segment for
   //    becomes NOT_APPLICABLE (out-of-cohort wins over any real outcome; no evidenceRef). With zero
   //    enabled segments `isApplicable` is always true ⇒ no overlay (today's behavior).
-  let rows: RosterRow[] = EMPLOYEES.map((emp) => {
+  let rows: RosterRow[] = directory.employees.map((emp) => {
     const cells: Record<string, RosterCell> = {};
     for (const m of measureIds) {
       if (!isApplicable(emp, m, segments)) {
@@ -172,7 +177,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     return {
       subject: {
         externalId: emp.externalId, name: emp.name, role: emp.role, site: emp.site,
-        tenantId: emp.tenantId, tenantName: tenantById(emp.tenantId)?.name ?? emp.tenantId,
+        tenantId: emp.tenantId, tenantName: directory.tenantById(emp.tenantId)?.name ?? emp.tenantId,
       },
       cells,
     };
@@ -181,7 +186,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // 3b) segment filter: scope rows to the active segment's cohort (before site/role/search/status + paging).
   if (activeSegment) {
     rows = rows.filter((r) => {
-      const e = employeeById(r.subject.externalId);
+      const e = directory.employeeById(r.subject.externalId);
       return e ? matchesCohort(e, activeSegment) : false;
     });
   }

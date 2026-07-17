@@ -378,6 +378,25 @@ test("POST /api/cases/:id/rerun-to-verify for an unknown case → 404", async ()
   assert.equal((await post(`/api/cases/${crypto.randomUUID()}/rerun-to-verify`))?.status, 404);
 });
 
+test("POST /api/cases/:id/rerun-to-verify rejects wc CASE without mutation", async () => {
+  const db = env.DB as never;
+  const runStore = new SqliteRunStore(db);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-07-17T00:00:00.000Z", measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  const store = new SqliteCaseStore(db);
+  const wcCase = await store.upsertFromOutcome({ runId: run.id, subjectId: "wc|route-case", measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
+  const beforeRuns = (await runStore.listRuns(1000)).length;
+  const before = await store.getCase(wcCase!.id);
+
+  const response = await post(`/api/cases/${wcCase!.id}/rerun-to-verify`);
+  assert.equal(response?.status, 409);
+  assert.deepEqual(await response!.json(), { error: "unsupported_scope", message: "Live WebChart CASE rerun-to-verify is not supported until fetch-one-patient is available." });
+  assert.equal((await runStore.listRuns(1000)).length, beforeRuns);
+  assert.deepEqual(await store.getCase(wcCase!.id), before);
+});
+
 // ---- evidence + appointments + resolve (#108) -------------------------------
 
 // A 5-byte PNG signature is enough for magic-byte detection.

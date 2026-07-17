@@ -26,7 +26,7 @@ import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
-import { rerunToVerify, type RerunDeps } from "../case/case-rerun.ts";
+import { rerunToVerify, UnsupportedCaseRerunError, type RerunDeps } from "../case/case-rerun.ts";
 import { resolveChannel, isChannelType, type ChannelType, type OutreachChannel } from "../case/outreach-channel.ts";
 import {
   uploadEvidence,
@@ -41,6 +41,9 @@ import {
 import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
 import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
 import { resolveBucket } from "../case/resolve-bucket.ts";
+import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
+import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
+import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -60,6 +63,13 @@ interface CasesEnv {
   WORKWELL_EMAIL_SENDGRID_API_KEY?: string;
   WORKWELL_OUTREACH_DATACHASER_API_KEY?: string;
   WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
+  WORKWELL_WEBCHART_BASE_URL?: string;
+  WORKWELL_WEBCHART_API_KEY?: string;
+  WORKWELL_WEBCHART_CLIENT_ID?: string;
+  WORKWELL_WEBCHART_PRIVATE_KEY?: string;
+  WORKWELL_WEBCHART_TOKEN_URL?: string;
+  WORKWELL_WEBCHART_SCOPE?: string;
+  WORKWELL_WEBCHART_KID?: string;
 }
 
 async function caseStore(env: CasesEnv): Promise<CaseStore> {
@@ -155,8 +165,13 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     }
     const rerunId = url.pathname.match(/^\/api\/cases\/([^/]+)\/rerun-to-verify$/)?.[1];
     if (rerunId) {
-      const detail = await rerunToVerify(await rerunDeps(env), rerunId, actor);
-      return detail ? json(detail) : json({ error: "not_found", id: rerunId }, 404);
+      try {
+        const detail = await rerunToVerify(await rerunDeps(env), rerunId, actor);
+        return detail ? json(detail) : json({ error: "not_found", id: rerunId }, 404);
+      } catch (err) {
+        if (err instanceof UnsupportedCaseRerunError) return json({ error: err.code, message: err.message }, 409);
+        throw err;
+      }
     }
     // Evidence upload (multipart/form-data: file + optional description).
     const evidenceId = url.pathname.match(/^\/api\/cases\/([^/]+)\/evidence$/)?.[1];
@@ -274,7 +289,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const today = new Date().toISOString().slice(0, 10);
     const immunizationForecast =
       c.measureId === "adult_immunization" ? await resolveForecaster(env).forecast(c.employeeId, today) : undefined;
-    return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast));
+    const employeeLookup = isWebChartConfigured(env)
+      ? (externalId: string) => employeeById(externalId) ?? profileForId(externalId)
+      : employeeById;
+    return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast, employeeLookup));
   }
 
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;

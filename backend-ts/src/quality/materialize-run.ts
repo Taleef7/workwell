@@ -14,7 +14,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { QualitySnapshotInput, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { buildSnapshotRows, type ScaleGroup, type ScopeRef } from "./materialize-snapshot.ts";
-import { employeeById, providerById } from "../engine/synthetic/employee-catalog.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
 import { isCompletedRun } from "../program/rollup-shared.ts";
@@ -41,14 +41,6 @@ export interface MaterializeResult {
 
 const skip = (reason: string): MaterializeResult => ({ materialized: false, rows: 0, period: null, reason });
 
-/** Resolve a live subject to its tenant → site(location) → provider scope (mirrors hierarchy-rollup keying). */
-function resolveScope(subjectId: string): ScopeRef | null {
-  const emp = employeeById(subjectId);
-  if (!emp) return null;
-  const location = providerById(emp.providerId)?.location ?? "Unknown";
-  return { tenantId: emp.tenantId, site: location, providerId: emp.providerId };
-}
-
 /** ISO bounds of the calendar month `YYYY-MM`. */
 function monthBounds(period: string): { start: string; end: string } {
   const [y, m] = period.split("-").map(Number);
@@ -72,6 +64,14 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   // scale subjects — those live only under separate `seed:scale` runs and fold in via aggregation.
   const live = await deps.outcomeStore.listOutcomes(runId);
   if (live.length === 0) return skip("run has no outcomes");
+  const directory = directoryForRows(live);
+  /** Resolve through this run's one merged directory snapshot, including restart-rehydrated wc rows. */
+  const resolveScope = (subjectId: string): ScopeRef | null => {
+    const emp = directory.employeeById(subjectId);
+    if (!emp) return null;
+    const location = directory.providerById(emp.providerId)?.location ?? "Unknown";
+    return { tenantId: emp.tenantId, site: location, providerId: emp.providerId };
+  };
   const liveByMeasure = new Map<string, { subjectId: string; status: string }[]>();
   for (const o of live) {
     let arr = liveByMeasure.get(o.measureId);
