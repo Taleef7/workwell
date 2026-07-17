@@ -19,6 +19,25 @@ Verified facts this runbook builds on (probed 2026-07-16):
 - Client registration is manual, at the admin **JWT screen**: `…/webchart.cgi?f=admin&s=jwt`
   (it is the smart-configuration's `management_endpoint`)
 
+> **⚠ Live-execution finding (2026-07-16) — §§2–3 are blocked on MIE; do NOT expect to self-serve.**
+> A full browser walkthrough as System Owner established that client registration is **MIE-controlled**,
+> not owner-serviceable on this trial (independently corroborated by a second research pass over the
+> public `mieweb/docs` sources). Concretely, all of these were tried and failed:
+> - `?f=admin&s=jwt` and `?f=admin&subfunc=login_trusts` → **"Super user access required."**
+> - WebChart **"superuser" is NOT the "SuperUser" security role** and NOT the `Manage Login Trusts`
+>   ACL. Setting the account to the SuperUser role (security_role_id 12) and granting the ACL still
+>   gated. Per MIE docs, the Login Trusts editor lives under **"Control Panel → SuperUser"**, and
+>   superuser is a **session elevation requiring an MIE-issued master/unlock password** — held by
+>   MIE's internal accounts only (in the seeded dev DB the superuser accounts are `mie`/`cronjobs`,
+>   not any customer role).
+> - **RFC 7591 dynamic registration is OFF**: `POST …/webchart.cgi/register` and `…/oauth/register`
+>   both return the HTML login shell (not JSON); smart-configuration advertises no `registration_endpoint`.
+> - The **Application Entities editor is DICOM** (AE-titles), not an OAuth/FHIR client registry — dead end.
+>
+> **⇒ The `login_trusts` table is the only client registry, and writing it needs superuser. Steps 2–3
+> below cannot complete without MIE.** Send the sharpened ask in **"MIE ask"** (end of §3), then resume
+> at §3 once MIE either registers `workwell-backend` or grants superuser + the FHIR App Editor.
+
 ---
 
 ## 1. Generate the RS384 keypair (once, OUTSIDE the repo)
@@ -87,6 +106,30 @@ never prints key/assertion/token material. Three steps: discovery → the RS384 
 - **invalid_client / invalid_scope** → the probe prints a targeted hint (registration/JWKS
   mismatch vs scope form); adjust and re-run.
 
+### MIE ask (send this — §2 is MIE-gated, see the finding box up top)
+
+Because self-registration is blocked (superuser is MIE-controlled; RFC 7591 off), send MIE this
+request. It resolves the §254 A3 residual either way (they register us, or they grant superuser +
+the FHIR App Editor so we self-serve):
+
+> I am the verified System Owner of the WebChartNow trial `https://teatea.webchartnow.com/`. My
+> account has the SuperUser security role and the Manage Login Trusts permission, but both
+> client-registration routes return "Super user access required" (`?f=admin&s=jwt` and
+> `?f=admin&subfunc=login_trusts`). Please either **(1)** grant my System Owner account SMART/FHIR
+> app-registration access — the MIE-issued Super User unlock password + the FHIR App Editor — or
+> **(2)** register this SMART **Backend Services** client for me:
+> - Client name: `WorkWell Measure Studio` · preferred client id: `workwell-backend`
+> - Grant type: `client_credentials` · token-endpoint auth: `private_key_jwt` · alg: **RS384**
+> - JWKS URL: *(I will host the public JWKS at an HTTPS URL — the `webchart-teatea.pub.jwk.json` from §1)*
+> - Redirect/launch URI: **none** (backend service, no browser flow)
+> - Scopes: `system/*.read` (and `patient/*.rs` if supported for a backend context)
+>
+> Please confirm the assigned `client_id`, the pre-authorized scopes, that the token endpoint accepts
+> `client_credentials` + RS384 `private_key_jwt`, and whether smart-configuration will advertise
+> `client_credentials`. I will never share the private key — only the public JWKS URL.
+
+(I keep the private key in `~\.workwell\`; MIE only ever needs the **public** JWKS.)
+
 ## 4. Seed the synthetic population (~30 patients)
 
 FHIR on teatea is read-scoped, so data enters through WebChart's own import tooling / UI.
@@ -98,6 +141,20 @@ realistic dates so every outcome bucket appears):
 cd backend-ts
 pnpm generate:webchart-import --patients 30 --out ..\webchart-import
 ```
+
+> **✓ Live-verified 2026-07-16 (Data Import → "Validate File" dry-run on teatea).** The first validation
+> pass taught us the instance's exact Chart Data contract and the generator was corrected accordingly:
+> - **`patients.zip_code` is REQUIRED** and validated `12345`/`12345-6789` on **every** row — omitting it
+>   fails both the header ("does not match full list") and every data row. The generator now emits a
+>   synthetic demo ZIP (`46514`). *This was the whole cause of the first run's 451 validation issues.*
+> - `@patient_mrns.MR` is correct — **`MR` is a real partition** on teatea (confirmed in the partition
+>   list) — and `patients.first_name/last_name/birth_date/sex/email` all validated.
+> - The instance's own **Sample** (Data Import → Sample → `Sample_Chart_Data.csv`) is the authoritative
+>   header if a column is ever rejected; open it and match names.
+>
+> Always **Validate File** (non-destructive) before **Upload File** — it returns a per-row issue log and a
+> "Download Failed Test Data File" button. The Data Import modal is heavy; if it fails to open, reload the
+> page and reselect the row.
 
 This emits MIE's documented Data-Migration CSV formats (verified against the `mieweb/docs` repo
 sources, 2026-07-16 — the rendered docs live under
