@@ -18,10 +18,16 @@ import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-st
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
-import { executeManualRun, executeRerun, planManualRun, finishOrFail, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
+import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { AlertChannel, RunAlert } from "./alert-channel.ts";
+import { fixtureWebChartClient, type WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
+import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
+import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -202,6 +208,304 @@ test("ALL_PROGRAMS manual run evaluates every runnable measure × the whole popu
   assert.equal(run?.scopeType, "ALL_PROGRAMS");
   assert.equal(run?.scopeId, null);
   assert.equal((await deps.outcomeStore.listOutcomes(res.runId)).length, 56);
+});
+
+const WEBCHART_ENV = {
+  WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+  WORKWELL_WEBCHART_API_KEY: "fixture-key",
+};
+
+const patientOnly = (id: string, withDegradedMarker = false): unknown => ({
+  resourceType: "Bundle",
+  type: "collection",
+  entry: [
+    { resource: { resourceType: "Patient", id, name: [{ given: ["Live"], family: id }] } },
+    ...(withDegradedMarker
+      ? [{ resource: { resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing" }] } }]
+      : []),
+  ],
+});
+
+test("configured planning stays network-free, attaches only a descriptor, and seam-off work stays byte-identical", async () => {
+  let fetches = 0;
+  const client: WebChartClient = {
+    kind: "blocked-test",
+    async fetchPatientPayloads() {
+      fetches++;
+      return [patientOnly("should-not-load")];
+    },
+  };
+  const configured = await planManualRun(
+    { ...deps, webChartEnv: WEBCHART_ENV, webChartClient: client },
+    { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" },
+  );
+  assert.equal(fetches, 0, "planning never starts WebChart I/O");
+  assert.deepEqual(configured.livePopulation, {
+    host: "webchart.test",
+    pageSize: 100,
+    enrollmentJson: undefined,
+  });
+  assert.ok(!("bundles" in configured.livePopulation!), "descriptor never carries fetched clinical data");
+
+  const baseline = await planManualRun(deps, { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-06-01" });
+  const seamOff = await planManualRun(
+    { ...deps, webChartEnv: {} },
+    { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-06-01" },
+  );
+  const serializedResponse = (planned: typeof baseline) => JSON.stringify(
+    runningResponse({ ...planned, run: { id: "fixed-run-id" } }),
+  );
+  assert.equal(
+    serializedResponse(seamOff),
+    serializedResponse(baseline),
+    "all-unset WebChart variables preserve the complete serialized async route response",
+  );
+});
+
+test("configured WebChart SITE scope is rejected before run creation", async () => {
+  const countBefore = (await deps.runStore.listRuns(1000)).length;
+  await assert.rejects(
+    planManualRun(
+      { ...deps, webChartEnv: WEBCHART_ENV, webChartClient: fixtureWebChartClient([]) },
+      { scopeType: "SITE", site: "WebChart" },
+    ),
+    UnsupportedScopeError,
+  );
+  assert.equal((await deps.runStore.listRuns(1000)).length, countBefore, "unsupported scope creates no run");
+});
+
+test("configured WebChart EMPLOYEE scope is rejected before run creation", async () => {
+  const countBefore = (await deps.runStore.listRuns(1000)).length;
+  await assert.rejects(
+    planManualRun(
+      { ...deps, webChartEnv: WEBCHART_ENV },
+      { scopeType: "EMPLOYEE", employeeExternalId: "wc|live-employee" },
+    ),
+    UnsupportedScopeError,
+  );
+  assert.equal((await deps.runStore.listRuns(1000)).length, countBefore, "unsupported scope creates no run");
+});
+
+test("live bundles evaluate through the unchanged CQL engine and persist wc-prefixed outcomes", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const rawEmployee = { ...EMPLOYEES[4]!, externalId: "live-cql-1", name: "Live CQL" };
+    const rawBundle = buildSyntheticBundle(
+      rawEmployee,
+      deriveExamConfig(MEASURE_BINDINGS.audiogram!, "COMPLIANT"),
+      "2026-06-01",
+    );
+    const liveDeps: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: new CqlExecutionEngine(),
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([rawBundle]),
+    };
+    const result = await executeManualRun(liveDeps, {
+      scopeType: "MEASURE",
+      measureId: "audiogram",
+      evaluationDate: "2026-06-01",
+    });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(result.totalEvaluated, 1);
+    const rows = await outcomeStore.listOutcomes(result.runId);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.subjectId, "wc|live-cql-1");
+    assert.equal(rows[0]!.status, "COMPLIANT", "CQL alone derives the live outcome");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports degradedCount", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  const audits: unknown[] = [];
+  try {
+    const result = await executeManualRun({
+      runStore,
+      outcomeStore,
+      engine: new CqlExecutionEngine(),
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([patientOnly("degraded-patient", true)]),
+      events: { async appendAudit(input) { audits.push(input); } },
+    }, {
+      scopeType: "MEASURE",
+      measureId: "audiogram",
+      evaluationDate: "2026-06-01",
+    });
+
+    const rows = await outcomeStore.listOutcomes(result.runId);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.subjectId, "wc|degraded-patient");
+    assert.equal(rows[0]!.status, "MISSING_DATA", "the unchanged CQL engine owns the degraded outcome");
+    const terminal = audits.find((entry) =>
+      (entry as { eventType?: string }).eventType === "RUN_COMPLETED"
+    ) as { payload: { liveTenant?: { degradedCount?: number; status?: string } } } | undefined;
+    assert.equal(terminal?.payload.liveTenant?.degradedCount, 1);
+    assert.equal(terminal?.payload.liveTenant?.status, "COMPLETED");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("live enrollment uses explicit raw Patient ids when set and enroll-all when unset", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  const seen = new Map<string, unknown>();
+  const captureEngine: RunPipelineDeps["engine"] = {
+    async evaluate(input) {
+      seen.set((input.patientBundle as { entry: Array<{ resource: { id?: string; resourceType?: string } }> }).entry[0]!.resource.id!, input.patientBundle);
+      return {
+        subjectId: "ignored",
+        measure: "Audiogram",
+        outcome: "MISSING_DATA",
+        evidence: { expressionResults: [{ define: "Outcome Status", result: "MISSING_DATA" }] },
+      };
+    },
+  };
+  try {
+    const run = async (id: string, enrollmentJson?: string) => executeManualRun({
+      runStore,
+      outcomeStore,
+      engine: captureEngine,
+      employees: [],
+      webChartEnv: { ...WEBCHART_ENV, WORKWELL_WEBCHART_ENROLLMENT_JSON: enrollmentJson },
+      webChartClient: fixtureWebChartClient([patientOnly(id)]),
+    }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" });
+
+    await run("explicit-patient", JSON.stringify({ "explicit-patient": ["audiogram"] }));
+    await run("default-patient");
+    await run("omitted-patient", JSON.stringify({ "another-patient": ["audiogram"] }));
+    assert.ok(ROSTER_ELIGIBLE_MEASURES.has("audiogram"));
+    for (const id of ["explicit-patient", "default-patient"]) {
+      const resources = (seen.get(id) as { entry: Array<{ resource: { resourceType?: string } }> }).entry.map((entry) => entry.resource);
+      assert.ok(resources.some((resource) => resource.resourceType === "Condition"), `${id} received enrollment evidence`);
+    }
+    const omittedResources = (seen.get("omitted-patient") as {
+      entry: Array<{ resource: { resourceType?: string } }>;
+    }).entry.map((entry) => entry.resource);
+    assert.ok(
+      omittedResources.every((resource) => resource.resourceType !== "Condition"),
+      "explicit JSON omission remains unenrolled and is never broadened by the default policy",
+    );
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("live preparation failure finalizes FAILED before outcomes and preserves the prior successful population", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  const audits: Array<{ eventType: string; payload: unknown }> = [];
+  try {
+    const base: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([patientOnly("last-good")]),
+      events: { async appendAudit(input) { audits.push({ eventType: input.eventType, payload: input.payload }); } },
+    };
+    const success = await executeManualRun(base, { scopeType: "MEASURE", measureId: "audiogram" });
+    const failingClient: WebChartClient = {
+      kind: "failure-test",
+      async fetchPatientPayloads() { throw new Error("population unavailable"); },
+    };
+    const failedPlan = await planManualRun({ ...base, webChartClient: failingClient }, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail({ ...base, webChartClient: failingClient }, failedPlan);
+
+    assert.equal((await runStore.getRun(failedPlan.run.id))?.status, "FAILED");
+    assert.equal((await outcomeStore.listOutcomes(failedPlan.run.id)).length, 0, "preparation failure writes no new outcome");
+    const latest = await outcomeStore.listLatestPopulationOutcomes({ measureId: "audiogram" });
+    assert.ok(latest.length > 0 && latest.every((row) => row.runId === success.runId), "last successful population remains latest");
+    const failedAudit = audits.find((audit) =>
+      audit.eventType === "RUN_COMPLETED" &&
+      (audit.payload as { liveTenant?: { status?: string } }).liveTenant?.status === "FAILED"
+    );
+    assert.ok(failedAudit, "failure terminal is audited with live-tenant metadata");
+    const logs = await runStore.listLogs(failedPlan.run.id, 100);
+    assert.ok(logs.some((log) => /population unavailable/.test(log.message)));
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a successful WebChart response with zero usable Patients fails before swapping the directory or writing outcomes", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const base: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([patientOnly("last-good-empty-guard")]),
+    };
+    const success = await executeManualRun(base, { scopeType: "MEASURE", measureId: "audiogram" });
+    assert.equal(profileForId("wc|last-good-empty-guard")?.name, "Live last-good-empty-guard");
+
+    const emptyDeps = { ...base, webChartClient: fixtureWebChartClient([]) };
+    const planned = await planManualRun(emptyDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail(emptyDeps, planned);
+
+    assert.equal((await runStore.getRun(planned.run.id))?.status, "FAILED");
+    assert.equal((await outcomeStore.listOutcomes(planned.run.id)).length, 0);
+    assert.equal(
+      profileForId("wc|last-good-empty-guard")?.name,
+      "Live last-good-empty-guard",
+      "the last-known-good directory survives an empty normalized population",
+    );
+    const latest = await outcomeStore.listLatestPopulationOutcomes({ measureId: "audiogram" });
+    assert.ok(latest.length > 0 && latest.every((row) => row.runId === success.runId));
+  } finally {
+    replaceLiveDirectory([]);
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("invalid explicit enrollment JSON fails preparation without broadening enrollment", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const invalid: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: { ...WEBCHART_ENV, WORKWELL_WEBCHART_ENROLLMENT_JSON: "{not-json" },
+      webChartClient: fixtureWebChartClient([patientOnly("must-not-evaluate")]),
+    };
+    const planned = await planManualRun(invalid, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail(invalid, planned);
+    assert.equal((await runStore.getRun(planned.run.id))?.status, "FAILED");
+    assert.equal((await outcomeStore.listOutcomes(planned.run.id)).length, 0);
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a live preparation failure still finalizes FAILED when its terminal audit write rejects", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const failing: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: {
+        kind: "failure-test",
+        async fetchPatientPayloads() { throw new Error("population unavailable"); },
+      },
+      events: { async appendAudit() { throw new Error("audit unavailable"); } },
+    };
+    const planned = await planManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail(failing, planned);
+    assert.equal((await runStore.getRun(planned.run.id))?.status, "FAILED");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
 });
 
 test("a completed population run materializes quality-over-time snapshots when the snapshot deps are present (#E16)", async () => {

@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-runs-route-${crypto.randomUUID()}.sqlite`);
@@ -195,6 +197,95 @@ test("POST /api/runs/manual SITE runs async: 201 RUNNING immediately, then compl
   assert.equal(summary.totalEvaluated, 14 * 4, "14 runnable measures × 4 HQ employees evaluated in the background");
 });
 
+test("configured MEASURE schedules in waitUntil and returns 201 RUNNING before a blocked fetch settles", async () => {
+  const originalFetch = globalThis.fetch;
+  let release!: (response: Response) => void;
+  let calls = 0;
+  const blocked = new Promise<Response>((resolve) => { release = resolve; });
+  globalThis.fetch = (async () => {
+    calls++;
+    return blocked;
+  }) as typeof fetch;
+  const tasks: Promise<unknown>[] = [];
+  try {
+    const response = await Promise.race([
+      handleRuns(
+        new Request("http://x/api/runs/manual", {
+          method: "POST",
+          body: JSON.stringify({ scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" }),
+        }),
+        {
+          ...env,
+          WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+          WORKWELL_WEBCHART_API_KEY: "fixture-key",
+        } as never,
+        "system",
+        (promise) => tasks.push(promise),
+      ),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("foreground response waited for WebChart")), 200)),
+    ]);
+    assert.equal(response?.status, 201);
+    const body = (await response!.json()) as { status: string; totalEvaluated: number; message: string };
+    assert.equal(body.status, "RUNNING");
+    assert.equal(body.totalEvaluated, 150, "immediate count remains the known static population");
+    assert.match(body.message, /live population count pending/i);
+    assert.equal(tasks.length, 1);
+    assert.equal(calls, 1, "background preparation started exactly one population fetch");
+
+    release(new Response(JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [] }), {
+      status: 200,
+      headers: { "content-type": "application/fhir+json" },
+    }));
+    await Promise.allSettled(tasks);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("configured SITE=WebChart is a controlled unsupported scope", async () => {
+  const response = await handleRuns(
+    new Request("http://x/api/runs/manual", {
+      method: "POST",
+      body: JSON.stringify({ scopeType: "SITE", site: "WebChart" }),
+    }),
+    {
+      ...env,
+      WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+      WORKWELL_WEBCHART_API_KEY: "fixture-key",
+    } as never,
+  );
+  assert.equal(response?.status, 501);
+  assert.equal(((await response!.json()) as { error: string }).error, "unsupported_scope");
+});
+
+test("configured wc EMPLOYEE scope returns non-mutating 409 before run creation", async () => {
+  await get("/api/runs"); // initialize stores for isolated execution
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const eventStore = new SqliteCaseEventStore(env.DB as never);
+  const beforeRuns = (await runStore.listRuns(1000)).length;
+  const beforeOutcomes = (await outcomeStore.listOutcomesWithRun({})).length;
+  const beforeAudits = (await eventStore.listAuditEvents()).length;
+
+  const response = await handleRuns(
+    new Request("http://x/api/runs/manual", {
+      method: "POST",
+      body: JSON.stringify({ scopeType: "EMPLOYEE", employeeExternalId: "wc|route-live-employee" }),
+    }),
+    {
+      ...env,
+      WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+      WORKWELL_WEBCHART_API_KEY: "fixture-key",
+    } as never,
+  );
+
+  assert.equal(response?.status, 409);
+  assert.equal(((await response!.json()) as { error: string }).error, "unsupported_scope");
+  assert.equal((await runStore.listRuns(1000)).length, beforeRuns);
+  assert.equal((await outcomeStore.listOutcomesWithRun({})).length, beforeOutcomes);
+  assert.equal((await eventStore.listAuditEvents()).length, beforeAudits);
+});
+
 test("POST /api/runs/:id/rerun on a SITE run also goes async (RUNNING immediately, completes in background)", async () => {
   // Create a SITE run, then rerun it — the rerun must use the async waitUntil path too (a wide-scope
   // rerun carries the same fan-out), not block synchronously.
@@ -244,7 +335,11 @@ test("GET /api/runs honors status/scopeType/site filters", async () => {
   assert.equal((await ids("site=PLANT_Z")).length, 0, "an unmatched site filters all out (not ignored)");
   // both are QUEUED (not evaluated), so a QUEUED status filter returns both
   assert.equal((await ids("status=QUEUED")).filter((id) => id === aRun.id || id === bRun.id).length, 2);
-  assert.equal((await ids("status=FAILED")).length, 0);
+  assert.equal(
+    (await ids("status=FAILED")).filter((id) => id === aRun.id || id === bRun.id).length,
+    0,
+    "the two runs created by this test are not FAILED",
+  );
 });
 
 test("GET /api/runs/:id/logs returns the run's log timeline; unknown run detail → 404", async () => {

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   EMPLOYEES, employeeById, PROVIDERS, ENTERPRISE, providerById, providersForLocation,
-  TENANTS, tenantById, enterpriseForTenant, employeesForTenant,
+  TENANTS, tenantById, enterpriseForTenant, employeesForTenant, webChartTenant,
 } from "./employee-catalog.ts";
 
 test("the synthetic catalog has unique ids across both tenants", () => {
@@ -91,4 +91,31 @@ test("tenant 2 (ihn) adds ~50 employees with distinct ids/providers, partitionin
 test("enterpriseForTenant maps each tenant to its enterprise", () => {
   assert.equal(enterpriseForTenant("twh")?.id, "twh");
   assert.equal(enterpriseForTenant("ihn")?.name, "Indus Hospital Network");
+});
+
+test("WebChart catalog entries are conditional on the existing configured seam", () => {
+  const originalTenants = JSON.stringify(TENANTS);
+  const off = {};
+  const partial = { WORKWELL_WEBCHART_BASE_URL: "https://webchart.example.test" };
+  const on = {
+    WORKWELL_WEBCHART_BASE_URL: "https://webchart.example.test/webchart.cgi",
+    WORKWELL_WEBCHART_API_KEY: "fixture-key",
+  };
+
+  assert.equal(webChartTenant(off), null);
+  assert.equal(webChartTenant(partial), null);
+  assert.equal(tenantById("wc", off), null);
+  assert.equal(providerById("wc-provider-1", off), null);
+  assert.equal(enterpriseForTenant("wc", off), null);
+
+  assert.deepEqual(webChartTenant(on), { id: "wc", name: "WebChart (webchart.example.test)" });
+  assert.equal(tenantById("wc", on)?.name, "WebChart (webchart.example.test)");
+  assert.deepEqual(providerById("wc-provider-1", on), {
+    id: "wc-provider-1",
+    name: "WebChart Clinician",
+    location: "WebChart",
+    tenantId: "wc",
+  });
+  assert.deepEqual(enterpriseForTenant("wc", on), { id: "wc", name: "WebChart", tenantId: "wc" });
+  assert.equal(JSON.stringify(TENANTS), originalTenants, "TENANTS stays byte-for-byte unchanged");
 });
