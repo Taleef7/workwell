@@ -30,6 +30,8 @@ export function fixtureWebChartClient(payloads: unknown[]): WebChartClient {
 export interface HttpWebChartClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly pageSize?: number;
+  /** Reject a later Patient page failure instead of returning the pages already fetched. Default: false. */
+  readonly failOnPartialPage?: boolean;
   readonly maxRetries?: number;
   readonly retryDelaysMs?: readonly number[];
   readonly timeoutMs?: number;
@@ -178,6 +180,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   const base = cfg.baseUrl.replace(/\/+$/, "");
   const fetchImpl = options?.fetch ?? globalThis.fetch;
   const pageSize = Math.max(1, Math.floor(options?.pageSize ?? DEFAULT_PAGE_SIZE));
+  const failOnPartialPage = options?.failOnPartialPage ?? false;
   const maxRetries = Math.max(0, Math.floor(options?.maxRetries ?? DEFAULT_MAX_RETRIES));
   const retryDelaysMs = options?.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
@@ -258,10 +261,10 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
         page = await fetchJson(url);
       } catch (e) {
         // A FIRST-page failure is an outage, not an empty population — surface it so a scheduled
-        // run fails loudly instead of "succeeding" over zero subjects (review P3-2). A failed LATER
-        // page keeps the patients already listed (documented population semantics); the off-origin
-        // guard below still rejects hard.
-        if (firstPage) throw e;
+        // run fails loudly instead of "succeeding" over zero subjects (review P3-2). By default a
+        // failed LATER page keeps the patients already listed (the read-only CLI contract); an
+        // authoritative caller can opt into failOnPartialPage. The off-origin guard still rejects.
+        if (firstPage || failOnPartialPage) throw e;
         break;
       }
       firstPage = false;

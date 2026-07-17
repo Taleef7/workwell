@@ -46,6 +46,7 @@ import { authorize, extractPrincipal } from "./auth/authorize.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
+import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -88,9 +89,15 @@ export interface Env {
   /** DataChaser outreach seam (#75 E5). Inert stub unless both are set. */
   WORKWELL_OUTREACH_DATACHASER_API_KEY?: string;
   WORKWELL_OUTREACH_DATACHASER_BASE_URL?: string;
-  /** WebChart data-ingress seam (#184 E12). Inert stub unless both are set. */
+  /** WebChart data-ingress seam (#184 E12). Inert unless base URL + API key or SMART credentials are set. */
   WORKWELL_WEBCHART_BASE_URL?: string;
   WORKWELL_WEBCHART_API_KEY?: string;
+  WORKWELL_WEBCHART_CLIENT_ID?: string;
+  WORKWELL_WEBCHART_PRIVATE_KEY?: string;
+  WORKWELL_WEBCHART_TOKEN_URL?: string;
+  WORKWELL_WEBCHART_SCOPE?: string;
+  WORKWELL_WEBCHART_KID?: string;
+  WORKWELL_WEBCHART_ENROLLMENT_JSON?: string;
   /** Measure-executor seam (#78 E9; ADR-025). FHIR-native default; "sql-pushdown" is an inert opt-in stub. */
   WORKWELL_MEASURE_EXECUTOR?: string;
   /** VSAC value-set resolution (ADR-023). Inert (local-store-only) unless the key is set. */
@@ -251,7 +258,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (hierarchyResponse) return hierarchyResponse;
 
   // Tenants — WebChart system list for the multi-tenant selector (#185 E13 PR-1).
-  const tenantsResponse = await handleTenants(req);
+  const tenantsResponse = await handleTenants(req, env);
   if (tenantsResponse) return tenantsResponse;
 
   // Quality-over-time history — materialized snapshot time-series read (#E16 PR-2).
@@ -332,6 +339,10 @@ function logSeamInventoryOnce(env: Env): void {
   if (seamInventoryLogged) return;
   seamInventoryLogged = true;
   console.log(`[workwell] ${formatSeamLogLine(env)}`);
+  if (isWebChartConfigured(env)) {
+    const webChart = webChartConfigFromEnv(env)!;
+    console.log(`[workwell] webchart live tenant: enabled (host ${new URL(webChart.baseUrl).host})`);
+  }
 }
 
 export default {

@@ -21,3 +21,18 @@ test("non-matching path → null (not handled)", async () => {
 test("POST → null", async () => {
   assert.equal(await handleTenants(new Request("http://x/api/tenants", { method: "POST" })), null);
 });
+
+test("GET /api/tenants adds the host-labelled wc tenant only when WebChart is configured", async () => {
+  const req = new Request("http://x/api/tenants", { method: "GET" });
+  const off = await handleTenants(req, {});
+  const original = await handleTenants(new Request(req), undefined);
+  assert.equal(await off!.text(), await original!.text(), "seam-off response bytes stay identical");
+
+  const configured = await handleTenants(new Request(req), {
+    WORKWELL_WEBCHART_BASE_URL: "http://localhost:8081",
+    WORKWELL_WEBCHART_API_KEY: "local-dev",
+  });
+  const body = (await configured!.json()) as { id: string; name: string }[];
+  assert.deepEqual(body.at(-1), { id: "wc", name: "WebChart (localhost:8081)" });
+  assert.equal(body.filter((tenant) => tenant.id === "wc").length, 1);
+});

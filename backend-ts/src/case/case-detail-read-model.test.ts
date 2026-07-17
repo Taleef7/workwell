@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { toCaseDetail, deriveWhyFlagged, overdueDays } from "./case-detail-read-model.ts";
 import { simulatedForecaster } from "../engine/immunization/immunization-forecast.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
+import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const CASE: CaseRecord = {
   id: "case-001",
@@ -59,6 +60,21 @@ test("case status is identical with or without immunizationForecast (forecast is
 test("toCaseDetail spreads spread-omit pattern (undefined param → key absent, not null)", () => {
   const detail = toCaseDetail(CASE, null, [], null, undefined);
   assert.equal("immunizationForecast" in detail, false, "undefined param must not write the key at all");
+});
+
+test("toCaseDetail — configured wc profile lookup survives restart and refreshes to full name", () => {
+  const wcCase = { ...CASE, id: "case-wc", employeeId: "wc|restart-case-1" };
+  replaceLiveDirectory([]);
+  try {
+    const restarted = toCaseDetail(wcCase, null, [], null, undefined, profileForId);
+    assert.equal(restarted.employeeName, "restart-case-1");
+
+    replaceLiveDirectory([{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "restart-case-1", name: [{ given: ["Sara"], family: "Ali" }] } }] }]);
+    const refreshed = toCaseDetail(wcCase, null, [], null, undefined, profileForId);
+    assert.equal(refreshed.employeeName, "Sara Ali");
+  } finally {
+    replaceLiveDirectory([]);
+  }
 });
 
 // ---------------------------------------------------------------------------

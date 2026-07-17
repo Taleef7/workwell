@@ -336,6 +336,35 @@ export function outcomeStoreContract(
     assert.deepEqual(rows[0]!.evidence, evidence, "evidence carried for recency derivation");
   });
 
+  test(`[${label}] listOutcomesForMeasure can retain evidence while selecting only terminal population runs`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const completed = await runStore.createRun({ ...sampleRun("audiogram"), status: "COMPLETED" });
+    const partial = await runStore.createRun({ ...sampleRun("audiogram"), status: "PARTIAL_FAILURE" });
+    const failed = await runStore.createRun({ ...sampleRun("audiogram"), status: "FAILED" });
+    const running = await runStore.createRun({ ...sampleRun("audiogram"), status: "RUNNING" });
+    const caseRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "CASE", status: "COMPLETED" });
+    const completedEvidence = { source: "completed-population" };
+    const partialEvidence = { source: "partial-population" };
+
+    await outcomeStore.recordOutcomes([
+      { runId: completed.id, subjectId: "emp-completed", measureId: "audiogram", status: "COMPLIANT", evidence: completedEvidence },
+      { runId: partial.id, subjectId: "emp-partial", measureId: "audiogram", status: "OVERDUE", evidence: partialEvidence },
+      { runId: failed.id, subjectId: "emp-failed", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "failed" } },
+      { runId: running.id, subjectId: "emp-running", measureId: "audiogram", status: "MISSING_DATA", evidence: { source: "running" } },
+      { runId: caseRun.id, subjectId: "emp-case", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "case" } },
+      { runId: completed.id, subjectId: "mhn|L00|P00|1", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "scale" } },
+      { runId: completed.id, subjectId: "emp-other-measure", measureId: "hazwoper", status: "COMPLIANT", evidence: { source: "other" } },
+    ]);
+
+    const rows = await outcomeStore.listOutcomesForMeasure("audiogram", {
+      excludeScale: true,
+      successfulPopulationOnly: true,
+    });
+    assert.deepEqual(rows.map((row) => row.subjectId).sort(), ["emp-completed", "emp-partial"]);
+    assert.deepEqual(rows.find((row) => row.subjectId === "emp-completed")!.evidence, completedEvidence);
+    assert.deepEqual(rows.find((row) => row.subjectId === "emp-partial")!.evidence, partialEvidence);
+  });
+
   test(`[${label}] listOutcomesForEmployee returns the employee's outcomes newest-first, capped`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));

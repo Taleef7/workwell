@@ -18,6 +18,7 @@ import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.t
 import type { Stores } from "../stores/factory.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { fixtureWebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import {
   setSchedulerEnabled,
   runTick,
@@ -143,4 +144,27 @@ test("every fired scheduler tick records SCHEDULER_RUN_TRIGGERED in audit_events
   const events = await schedulerTriggerEvents(stores);
   assert.equal(events.length, 1);
   assert.equal(events[0]?.actor, "scheduler");
+});
+
+test("a configured scheduler tick includes the live WebChart population", async () => {
+  const stores = await freshStores();
+  const configured = {
+    ...deps(stores),
+    webChartEnv: {
+      WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+      WORKWELL_WEBCHART_API_KEY: "fixture-key",
+    },
+    webChartClient: fixtureWebChartClient([{
+      resourceType: "Bundle",
+      type: "collection",
+      entry: [{ resource: { resourceType: "Patient", id: "scheduled-live-1", name: [{ text: "Scheduled Live" }] } }],
+    }]),
+  };
+
+  setSchedulerEnabled(true);
+  const fired = await runTick(configured);
+
+  assert.equal(fired, true);
+  const rows = await stores.outcomes.listLatestPopulationOutcomes({ measureId: "audiogram" });
+  assert.ok(rows.some((row) => row.subjectId === "wc|scheduled-live-1"), "nightly population includes WebChart subjects");
 });

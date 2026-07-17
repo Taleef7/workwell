@@ -449,6 +449,7 @@ shows all services `Up`).
 | `WORKWELL_WEBCHART_SCOPE` | Backend | Optional OAuth scope (default `system/*.rs` — the documented bulk-registration grant; the sandbox also advertises v1-style `system/*.read`). |
 | `WORKWELL_WEBCHART_KID` | Backend | Optional JWK `kid` header for the client assertion (multi-key registered JWKS). |
 | `WORKWELL_WEBCHART_API_KEY` | Backend | Legacy static bearer key (pre-verified-contract mode; kept for fixtures/proxies). Ignored for auth selection when the SMART pair is set. |
+| `WORKWELL_WEBCHART_ENROLLMENT_JSON` | Backend | Optional JSON object `{ "raw-patient-id": ["measure_id"] }` controlling live-tenant enrollment. When unset, every live subject is enrolled in the fail-closed `ROSTER_ELIGIBLE_MEASURES` allowlist; clinical age/sex/diagnosis/visit gates in CQL remain authoritative. Inert unless the WebChart seam is configured. |
 | `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` | Dev/test only | Gates the self-skipping live-HTTP suite (`hapi-live.test.ts`) at a local HAPI "fake WebChart" (ADR-032). **Never set on a deployed stack** — deliberately distinct from `WORKWELL_WEBCHART_BASE_URL` so a runtime `.env` can't make `pnpm test` network-dependent. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
 | `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
@@ -465,6 +466,33 @@ shows all services `Up`).
 `*_TWH` GitHub secrets where applicable); `Where = Frontend` vars are build-args/env baked into
 the MIE frontend image. `.env.example` at repo root mirrors this list (without values). Env vars
 must be verified manually before deploy; the CI workflow does not validate deployment secrets.
+
+### Local HAPI live-tenant recipe (ADR-032 / ADR-033)
+
+The same runtime seam can point at local HAPI today and a configured WebChart host later; switching
+targets is environment-only and requires no code change:
+
+```powershell
+docker compose -f infra/docker-compose.yml up -d hapi-fhir
+Set-Location backend-ts
+corepack pnpm load:hapi
+$env:WORKWELL_WEBCHART_BASE_URL = "http://localhost:8081"
+$env:WORKWELL_WEBCHART_API_KEY = "local-dev"
+corepack pnpm dev
+```
+
+Trigger an `ALL_PROGRAMS` run, then verify 56 `wc|` rows in the compliance roster, a `wc` hierarchy
+tenant, and `All Systems = Σ tenants`. For the self-skipping real-HTTP/app tests, use only the dedicated
+test target (the test constructs runtime configuration internally and probes metadata for at most two
+seconds):
+
+```powershell
+$env:WORKWELL_WEBCHART_LIVE_TEST_BASE_URL = "http://localhost:8081"
+corepack pnpm exec node --import tsx --test src/engine/ingress/webchart/hapi-live.test.ts src/engine/ingress/webchart/hapi-app-live.test.ts
+```
+
+Do not set `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` on a deployed stack. With all runtime
+`WORKWELL_WEBCHART_*` variables unset, the feature is inert and the static demo behavior is unchanged.
 
 ### Email delivery (Sprint 6)
 

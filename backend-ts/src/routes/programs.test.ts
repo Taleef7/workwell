@@ -17,9 +17,10 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { handlePrograms } from "./programs.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const dbPath = join(tmpdir(), `workwell-programs-${crypto.randomUUID()}.sqlite`);
-let env: { DB: unknown };
+let env: { DB: unknown; WORKWELL_WEBCHART_BASE_URL?: string; WORKWELL_WEBCHART_API_KEY?: string };
 let latestRunId: string;
 
 const get = (qs = "") => handlePrograms(new Request(`http://x/api/programs${qs}`, { method: "GET" }), env as never);
@@ -120,6 +121,38 @@ test("GET /api/programs/sites lists distinct employee sites", async () => {
   assert.deepEqual([...sites].sort(), sites, "ascending");
 });
 
+test("GET /api/programs rehydrates WebChart rows only while the seam is configured", async () => {
+  replaceLiveDirectory([]);
+  try {
+    const runStore = new SqliteRunStore(env.DB as never);
+    const oc = new SqliteOutcomeStore(env.DB as never);
+    const run = await runStore.createRun({
+      scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", status: "COMPLETED",
+      requestedScope: { measureId: "mmr" }, measurementPeriodStart: "2026-07-17T00:00:00.000Z",
+      measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+    });
+    await oc.recordOutcome({ runId: run.id, subjectId: "wc|sites-restart-1", measureId: "mmr", status: "COMPLIANT", evidence: {} });
+
+    const offSites = (await get("/sites").then((response) => response!.json())) as string[];
+    assert.ok(!offSites.includes("WebChart"), "persisted wc rows stay invisible while seam-off");
+    const offMmr = ((await get("/overview?tenant=wc").then((response) => response!.json())) as Summary[])
+      .find((summary) => summary.measureId === "mmr")!;
+    assert.equal(offMmr.totalEvaluated, 0);
+
+    env.WORKWELL_WEBCHART_BASE_URL = "http://webchart.test";
+    env.WORKWELL_WEBCHART_API_KEY = "fixture-key";
+    const onSites = (await get("/sites").then((response) => response!.json())) as string[];
+    assert.ok(onSites.includes("WebChart"));
+    const onMmr = ((await get("/overview?tenant=wc").then((response) => response!.json())) as Summary[])
+      .find((summary) => summary.measureId === "mmr")!;
+    assert.equal(onMmr.totalEvaluated, 1);
+  } finally {
+    delete env.WORKWELL_WEBCHART_BASE_URL;
+    delete env.WORKWELL_WEBCHART_API_KEY;
+    replaceLiveDirectory([]);
+  }
+});
+
 test("GET /api/programs/:id/trend returns per-run points newest-first (compliance over runs)", async () => {
   const trend = (await get("/audiogram/trend").then((r) => r!.json())) as Array<{
     runId: string;
@@ -167,6 +200,7 @@ test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon + repeat non
       scopeType: "MEASURE",
       scopeId: "hazwoper",
       triggeredBy: "test",
+      status: "COMPLETED",
       requestedScope: { measureId: "hazwoper" },
       measurementPeriodStart: "2026-06-13T00:00:00.000Z",
       measurementPeriodEnd: "2026-06-13T00:00:00.000Z",

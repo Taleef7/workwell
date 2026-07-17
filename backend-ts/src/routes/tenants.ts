@@ -4,13 +4,16 @@
  *
  *   GET /api/tenants → { id, name }[]
  */
-import { TENANTS } from "../engine/synthetic/employee-catalog.ts";
+import { TENANTS, webChartTenant } from "../engine/synthetic/employee-catalog.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 const json = (data: unknown): Response =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 
-export async function handleTenants(req: Request): Promise<Response | null> {
+export async function handleTenants(req: Request, env?: DataSourceEnv): Promise<Response | null> {
   if (req.method !== "GET") return null;
   if (new URL(req.url).pathname !== "/api/tenants") return null;
-  return json(TENANTS.map((t) => ({ id: t.id, name: t.name })));
+  const live = env ? webChartTenant(env) : null;
+  const tenants = live ? [...TENANTS, live] : TENANTS;
+  return json(tenants.map((t) => ({ id: t.id, name: t.name })));
 }

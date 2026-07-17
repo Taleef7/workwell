@@ -13,7 +13,8 @@
 import type { OutcomeStore, OutcomeWithRun, ScaleGroupCount } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
-import { employeeById, providerById, tenantById, enterpriseForTenant } from "../engine/synthetic/employee-catalog.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { day, isCompletedRun, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
@@ -46,6 +47,8 @@ export interface HierarchyNode {
 export interface HierarchyDeps {
   outcomeStore: OutcomeStore;
   caseStore: CaseStore;
+  /** Runtime environment consumed only through the existing isWebChartConfigured predicate. */
+  webChartEnv?: DataSourceEnv;
   /** When present, the population-scale `mhn` tenant (seed:scale runs) is SQL-aggregated + merged in
    *  (E13 PR-2). Optional so existing callers/tests without scale data compile unchanged. */
   runStore?: RunStore;
@@ -86,9 +89,19 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   const active = MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id);
   const scopeMeasures = measureId ? (active.includes(measureId) ? [measureId] : []) : active;
 
+  // Build exactly one request-local directory view from the persisted latest population rows.
+  // This rehydrates unknown wc subjects after a worker restart while keeping the static seam-off
+  // lookup functions byte-identical.
+  const allRows = scopeMeasures.length > 0
+    ? (await deps.outcomeStore.listLatestPopulationOutcomes({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
+        (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
+      )
+    : [];
+  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv);
+
   const byPatient = new Map<string, MutableTotals>();
   const ensure = (subjectId: string): MutableTotals | null => {
-    if (!employeeById(subjectId)) return null;
+    if (!directory.employeeById(subjectId)) return null;
     return byPatient.get(subjectId) ?? byPatient.set(subjectId, zero()).get(subjectId)!;
   };
 
@@ -100,12 +113,6 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     // JS filter below does), so the ~1s over-fetch of every population run's rows across history is
     // gone. The JS filter + per-measure `latestRunRows` stay as defense-in-depth and a passthrough —
     // the store-contract asserts this returns exactly the pre-reduction path's result set.
-    const allRows = (await deps.outcomeStore.listLatestPopulationOutcomes({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
-      // Fable H7: require COMPLETED — every sibling read model (programs overview, roster, orders) does,
-      // and the scale branch below does too. Without it, `latestRunRows` can select an in-flight RUNNING
-      // run's PARTIAL rows, so /programs/hierarchy counts bounce and disagree with /programs mid-run.
-      (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
-    );
     const byMeasure = new Map<string, OutcomeWithRun[]>();
     for (const r of allRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scopeMeasures) {
@@ -135,9 +142,9 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 
   for (const [subjectId, t] of byPatient) {
     if (t.evaluated === 0 && t.openCases === 0) continue;
-    const emp = employeeById(subjectId)!;
+    const emp = directory.employeeById(subjectId)!;
     if (tenantFilter && emp.tenantId !== tenantFilter) continue;
-    const prov = providerById(emp.providerId);
+    const prov = directory.providerById(emp.providerId);
     const location = prov?.location ?? "Unknown";
     const provKey = `${emp.tenantId}|${emp.providerId}`;
     const locKey = `${emp.tenantId}|${location}`;
@@ -155,7 +162,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   const provsByLocKey = new Map<string, HierarchyNode[]>();
   for (const [provKey, patients] of patientsByProvKey) {
     const [tenantId, providerId] = provKey.split("|") as [string, string];
-    const prov = providerById(providerId);
+    const prov = directory.providerById(providerId);
     const location = prov?.location ?? "Unknown";
     const locKey = `${tenantId}|${location}`;
     const provNode: HierarchyNode = {
@@ -180,7 +187,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 
   // enterprise node (1 per tenant) wrapped in a tenant node
   const tenantNodes: HierarchyNode[] = [...tenantsSeen].sort().map((tenantId): HierarchyNode => {
-    const ent = enterpriseForTenant(tenantId);
+    const ent = directory.enterpriseForTenant(tenantId);
     const tenantTotals = seal(entTotals.get(tenantId)!);
     const locations = (locsByTenant.get(tenantId) ?? []).sort((a, b) => a.id.localeCompare(b.id));
     const enterpriseNode: HierarchyNode = {
@@ -188,7 +195,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
       totals: tenantTotals, children: locations,
     };
     return {
-      level: "tenant", id: tenantId, name: tenantById(tenantId)?.name ?? tenantId, parentId: "all",
+      level: "tenant", id: tenantId, name: directory.tenantById(tenantId)?.name ?? tenantId, parentId: "all",
       totals: tenantTotals, children: [enterpriseNode],
     };
   });
@@ -226,7 +233,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     }
     return (
       tenantNodes.find((t) => t.id === tenantFilter) ?? {
-        level: "tenant", id: tenantFilter, name: tenantById(tenantFilter)?.name ?? tenantFilter,
+        level: "tenant", id: tenantFilter, name: directory.tenantById(tenantFilter)?.name ?? tenantFilter,
         parentId: "all", totals: seal(zero()), children: [],
       }
     );
