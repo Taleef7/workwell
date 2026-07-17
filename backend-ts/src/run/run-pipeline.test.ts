@@ -432,6 +432,73 @@ test("live preparation failure finalizes FAILED before outcomes and preserves th
   }
 });
 
+test("a page-2 population failure finalizes FAILED, writes no outcomes, and preserves the prior population and directory", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const base: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([patientOnly("last-good-page-guard")]),
+    };
+    const success = await executeManualRun(base, { scopeType: "MEASURE", measureId: "audiogram" });
+    assert.equal(profileForId("wc|last-good-page-guard")?.name, "Live last-good-page-guard");
+
+    const pageTwoFailure: WebChartClient = {
+      kind: "page-2-failure-test",
+      async fetchPatientPayloads() {
+        throw new Error("WebChart Patient page 2 failed after page 1");
+      },
+    };
+    const failedDeps = { ...base, webChartClient: pageTwoFailure };
+    const failedPlan = await planManualRun(failedDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail(failedDeps, failedPlan);
+
+    assert.equal((await runStore.getRun(failedPlan.run.id))?.status, "FAILED");
+    assert.equal((await outcomeStore.listOutcomes(failedPlan.run.id)).length, 0, "truncated fetch writes no new outcome");
+    const latest = await outcomeStore.listLatestPopulationOutcomes({ measureId: "audiogram" });
+    assert.ok(latest.length > 0 && latest.every((row) => row.runId === success.runId), "prior successful population stays latest");
+    assert.equal(
+      profileForId("wc|last-good-page-guard")?.name,
+      "Live last-good-page-guard",
+      "the last-known-good directory survives a partial-page failure",
+    );
+  } finally {
+    replaceLiveDirectory([]);
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("synchronous configured execution finalizes FAILED before propagating a live preparation error", async () => {
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const failing: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: {
+        kind: "sync-preparation-failure-test",
+        async fetchPatientPayloads() { throw new Error("sync population unavailable"); },
+      },
+    };
+
+    await assert.rejects(
+      executeManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" }),
+      /sync population unavailable/,
+    );
+
+    const [run] = await runStore.listRuns(10);
+    assert.equal(run?.status, "FAILED", "the no-waitUntil path never leaves the created run RUNNING");
+    assert.equal((await outcomeStore.listOutcomes(run!.id)).length, 0);
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("a successful WebChart response with zero usable Patients fails before swapping the directory or writing outcomes", async () => {
   const { p, runStore, outcomeStore } = await freshPipelineDb();
   try {

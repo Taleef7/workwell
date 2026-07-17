@@ -16,6 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { handleEmployees } from "./employees.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const dbPath = join(tmpdir(), `workwell-employees-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -102,6 +103,60 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
 
 test("GET /api/employees/:id/profile → 404 for an unknown employee", async () => {
   assert.equal((await get("/api/employees/emp-999/profile"))?.status, 404);
+});
+
+test("configured live employee profile uses the cached identity and restart-safe outcome rehydration", async () => {
+  const db = env.DB as never;
+  const subjectId = "wc|employee-profile-live-1";
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    status: "COMPLETED",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-07-17T00:00:00.000Z",
+    measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+  });
+  await new SqliteOutcomeStore(db).recordOutcome({
+    runId: run.id,
+    subjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-07-17",
+    status: "OVERDUE",
+    evidence: {},
+  });
+  const configuredEnv = env as typeof env & Record<string, string>;
+  configuredEnv.WORKWELL_WEBCHART_BASE_URL = "http://webchart.test";
+  configuredEnv.WORKWELL_WEBCHART_API_KEY = "fixture-key";
+  replaceLiveDirectory([{
+    resourceType: "Bundle",
+    entry: [{ resource: { resourceType: "Patient", id: "employee-profile-live-1", name: [{ text: "Live Profile Name" }] } }],
+  }]);
+
+  try {
+    const live = await get(`/api/employees/${subjectId}/profile`);
+    assert.equal(live?.status, 200);
+    const liveProfile = (await live!.json()) as { externalId: string; name: string; site: string };
+    assert.deepEqual(
+      { externalId: liveProfile.externalId, name: liveProfile.name, site: liveProfile.site },
+      { externalId: subjectId, name: "Live Profile Name", site: "WebChart" },
+    );
+
+    replaceLiveDirectory([]);
+    const restarted = await get(`/api/employees/${subjectId}/profile`);
+    assert.equal(restarted?.status, 200);
+    const restartedProfile = (await restarted!.json()) as { name: string; site: string };
+    assert.equal(restartedProfile.name, "employee-profile-live-1");
+    assert.equal(restartedProfile.site, "WebChart");
+
+    delete configuredEnv.WORKWELL_WEBCHART_BASE_URL;
+    delete configuredEnv.WORKWELL_WEBCHART_API_KEY;
+    assert.equal((await get(`/api/employees/${subjectId}/profile`))?.status, 404, "seam-off hides persisted live identities");
+  } finally {
+    delete configuredEnv.WORKWELL_WEBCHART_BASE_URL;
+    delete configuredEnv.WORKWELL_WEBCHART_API_KEY;
+    replaceLiveDirectory([]);
+  }
 });
 
 test("GET /api/employees/search matches name/role; honors min-length + latest outcome", async () => {

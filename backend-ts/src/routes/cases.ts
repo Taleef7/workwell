@@ -128,6 +128,9 @@ const day = (s: string): string => s.slice(0, 10);
 
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
+  const employeeLookup = isWebChartConfigured(env)
+    ? (externalId: string) => employeeById(externalId) ?? profileForId(externalId)
+    : employeeById;
 
   // Case actions (POST) — assign / escalate / outreach send / outreach delivery.
   if (req.method === "POST") {
@@ -289,9 +292,6 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const today = new Date().toISOString().slice(0, 10);
     const immunizationForecast =
       c.measureId === "adult_immunization" ? await resolveForecaster(env).forecast(c.employeeId, today) : undefined;
-    const employeeLookup = isWebChartConfigured(env)
-      ? (externalId: string) => employeeById(externalId) ?? profileForId(externalId)
-      : employeeById;
     return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast, employeeLookup));
   }
 
@@ -344,7 +344,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // outreachRecordCount per case (derived from OUTREACH_SENT actions) — drives the
   // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.
   const counts = await (await getStores(env)).events.outreachSentCounts(rows.map((c) => c.id));
-  let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0));
+  let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0, employeeLookup));
   if (wantCurrentCycle) {
     // Keep only each measure's CURRENT cycle, by today + the measure's cadence (Codex P2): exact and
     // cadence-correct, so a stale row at another cadence's anchor can't appear and a rolled-over cycle

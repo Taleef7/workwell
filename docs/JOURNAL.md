@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-07-17 — PR #307 review hardening: fail-closed paging and complete live identity reads
+
+The review pass made authoritative WebChart population replacement fail closed: the in-app run now
+opts into strict Patient pagination, so any later-page transport failure finalizes FAILED before an
+outcome or directory swap and leaves the prior successful population authoritative. The read-only
+`evaluate:webchart-live` CLI retains the transport's lenient default. Scheduled ALL_PROGRAMS runs now
+receive the same runtime WebChart env/client path as manual runs, and synchronous hosts finalize live
+preparation failures instead of stranding RUNNING rows.
+
+Live employee-profile links and case-worklist name/site filters now resolve through the configured,
+restart-safe directory, and roster/hierarchy tenant labels consistently include the configured host
+(`WebChart (<host>)`). The risk-outlook query's `successfulPopulationOnly: true` behavior is also now an
+owned correctness decision: risk outlook reads terminal successful population runs only, matching the
+other population read models and avoiding unbounded per-run evidence hydration. This query-scope
+alignment does not introduce a new architectural seam, so ADR-033 remains sufficient.
+
 ## 2026-07-17 — Live WebChart tenant run pipeline and restart-safe read models (PR 6a + 6b)
 
 Completed the two-part live-tenant implementation behind the existing inert WebChart seam. PR 6a keeps

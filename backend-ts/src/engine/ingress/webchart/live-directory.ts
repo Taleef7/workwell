@@ -4,11 +4,13 @@ import {
   enterpriseForTenant as staticEnterpriseForTenant,
   providerById as staticProviderById,
   tenantById as staticTenantById,
+  webChartTenant as configuredWebChartTenant,
   type EmployeeProfile,
   type Enterprise,
   type Provider,
   type Tenant,
 } from "../../synthetic/employee-catalog.ts";
+import type { DataSourceEnv } from "../data-source.ts";
 
 const WEBCHART_PROVIDER: Provider = {
   id: "wc-provider-1",
@@ -109,8 +111,12 @@ export function profileForId(externalId: string): EmployeeProfile | null {
 export function directoryForRows(
   rows: readonly { subjectId: string }[],
   webChartConfigured = true,
+  webChartEnv?: DataSourceEnv,
 ): DirectorySnapshot {
   if (!webChartConfigured) return STATIC_DIRECTORY;
+  const webChartTenant = webChartEnv
+    ? configuredWebChartTenant(webChartEnv) ?? WEBCHART_TENANT
+    : WEBCHART_TENANT;
   const mergedById = new Map<string, EmployeeProfile>(EMPLOYEES.map((employee) => [employee.externalId, employee]));
   for (const employee of liveEmployees) mergedById.set(employee.externalId, employee);
   for (const row of rows) {
@@ -128,7 +134,7 @@ export function directoryForRows(
     employees,
     employeeById: (externalId) => mergedById.get(externalId) ?? (externalId.startsWith("wc|") ? minimalProfile(externalId) : null),
     providerById: (id) => id === WEBCHART_PROVIDER.id ? WEBCHART_PROVIDER : staticProviderById(id),
-    tenantById: (id) => id === WEBCHART_TENANT.id ? WEBCHART_TENANT : staticTenantById(id),
+    tenantById: (id) => id === webChartTenant.id ? webChartTenant : staticTenantById(id),
     enterpriseForTenant: (tenantId) => tenantId === "wc" ? WEBCHART_ENTERPRISE : staticEnterpriseForTenant(tenantId),
   };
 }

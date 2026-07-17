@@ -97,7 +97,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
         (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
       )
     : [];
-  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}));
+  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv);
 
   const byPatient = new Map<string, MutableTotals>();
   const ensure = (subjectId: string): MutableTotals | null => {

@@ -364,7 +364,13 @@ async function prepareLivePopulation(
     const explicitRoster = descriptor.enrollmentJson === undefined
       ? undefined
       : explicitEnrollmentRoster(descriptor.enrollmentJson);
-    const client = deps.webChartClient ?? httpWebChartClient(cfg, { pageSize: descriptor.pageSize });
+    const client = deps.webChartClient ?? httpWebChartClient(cfg, {
+      pageSize: descriptor.pageSize,
+      // This run supersedes the latest population read model. A truncated Patient list would erase
+      // every subject on the missing pages, so later-page transport failures are fatal here. The
+      // read-only live CLI keeps the transport's lenient default.
+      failOnPartialPage: true,
+    });
     const bundles = await webChartDataSource(cfg, client).loadBundles();
     fetchedCount = bundles.length;
     degradedCount = bundles.filter(isDegradedBundle).length;
@@ -691,9 +697,71 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   };
 }
 
+async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: unknown): Promise<void> {
+  const errMsg = String((err as Error)?.message ?? err);
+  const liveTenant = err instanceof LivePopulationPreparationError ? err.liveTenant : undefined;
+  const liveSuffix = liveTenant
+    ? ` [WebChart ${liveTenant.host}; fetched=${liveTenant.fetchedCount}; degraded=${liveTenant.degradedCount}; durationMs=${liveTenant.durationMs}]`
+    : "";
+  await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}${liveSuffix}`).catch(() => {});
+  if (liveTenant && deps.events) {
+    await deps.events
+      .appendAudit({
+        eventType: "RUN_COMPLETED",
+        entityType: "run",
+        entityId: planned.run.id,
+        actor: deps.actor ?? "system",
+        refRunId: planned.run.id,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: {
+          scopeType: planned.scopeType,
+          scopeLabel: planned.scopeLabel,
+          status: "FAILED",
+          totalEvaluated: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          failures: 0,
+          measuresExecuted: planned.measureIds,
+          liveTenant,
+          error: errMsg,
+        },
+      })
+      .catch(() => {
+        /* terminal audit is best-effort at this boundary; FAILED finalization must still be attempted */
+      });
+  }
+  await deps.runStore.finalizeRun(planned.run.id, "FAILED").catch(() => {
+    /* best effort — the host's waitUntil also logs the original rejection */
+  });
+  // Observability (#264): a hard FAILED (outside per-subject isolation) must not be silent.
+  // Best-effort — never rethrow from the alert path.
+  const alert = alertForTerminalRun({
+    status: "FAILED",
+    runId: planned.run.id,
+    scopeType: planned.scopeType,
+    scopeLabel: planned.scopeLabel,
+    totalEvaluated: 0,
+    failures: 0,
+    message: `Run failed: ${errMsg}${liveTenant ? ` (WebChart ${liveTenant.host})` : ""}`,
+  });
+  if (alert) {
+    await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
+  }
+}
+
 /** Plan + finish in one call — the synchronous manual run (MEASURE/EMPLOYEE, and the rerun path). */
 export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<ManualRunResponse> {
-  return finishManualRun(deps, await planManualRun(deps, req));
+  const planned = await planManualRun(deps, req);
+  try {
+    return await finishManualRun(deps, planned);
+  } catch (err) {
+    // Hosts without waitUntil use this synchronous path. A configured population preparation error
+    // happens before outcomes are written; finalize it exactly like the background path, then retain
+    // the synchronous caller's existing rejected-promise contract.
+    if (err instanceof LivePopulationPreparationError) await failPlannedRun(deps, planned, err);
+    throw err;
+  }
 }
 
 /**
@@ -706,56 +774,7 @@ export async function finishOrFail(deps: RunPipelineDeps, planned: PlannedRun): 
   try {
     await finishManualRun(deps, planned);
   } catch (err) {
-    const errMsg = String((err as Error)?.message ?? err);
-    const liveTenant = err instanceof LivePopulationPreparationError ? err.liveTenant : undefined;
-    const liveSuffix = liveTenant
-      ? ` [WebChart ${liveTenant.host}; fetched=${liveTenant.fetchedCount}; degraded=${liveTenant.degradedCount}; durationMs=${liveTenant.durationMs}]`
-      : "";
-    await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}${liveSuffix}`).catch(() => {});
-    if (liveTenant && deps.events) {
-      await deps.events
-        .appendAudit({
-          eventType: "RUN_COMPLETED",
-          entityType: "run",
-          entityId: planned.run.id,
-          actor: deps.actor ?? "system",
-          refRunId: planned.run.id,
-          refCaseId: null,
-          refMeasureVersionId: null,
-          payload: {
-            scopeType: planned.scopeType,
-            scopeLabel: planned.scopeLabel,
-            status: "FAILED",
-            totalEvaluated: 0,
-            compliant: 0,
-            nonCompliant: 0,
-            failures: 0,
-            measuresExecuted: planned.measureIds,
-            liveTenant,
-            error: errMsg,
-          },
-        })
-        .catch(() => {
-          /* terminal audit is best-effort at this boundary; FAILED finalization must still be attempted */
-        });
-    }
-    await deps.runStore.finalizeRun(planned.run.id, "FAILED").catch(() => {
-      /* best effort — the host's waitUntil also logs the original rejection */
-    });
-    // Observability (#264): a hard FAILED (outside per-subject isolation) must not be silent.
-    // Best-effort — never rethrow from the alert path.
-    const alert = alertForTerminalRun({
-      status: "FAILED",
-      runId: planned.run.id,
-      scopeType: planned.scopeType,
-      scopeLabel: planned.scopeLabel,
-      totalEvaluated: 0,
-      failures: 0,
-      message: `Run failed: ${errMsg}${liveTenant ? ` (WebChart ${liveTenant.host})` : ""}`,
-    });
-    if (alert) {
-      await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
-    }
+    await failPlannedRun(deps, planned, err);
   }
 }
 

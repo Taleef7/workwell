@@ -67,7 +67,11 @@ test("replaceLiveDirectory atomically replaces the last-known-good registry", ()
 
 test("directoryForRows merges static employees, cached profiles, and minimal wc row fallbacks", () => {
   replaceLiveDirectory([bundle({ resourceType: "Patient", id: "cached", name: [{ given: ["Cached"], family: "Person" }] })]);
-  const snapshot = directoryForRows([{ subjectId: "wc|cached" }, { subjectId: "wc|restart-only" }]);
+  const snapshot = directoryForRows(
+    [{ subjectId: "wc|cached" }, { subjectId: "wc|restart-only" }],
+    true,
+    { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+  );
 
   assert.equal(snapshot.employees.length, EMPLOYEES.length + 2);
   assert.equal(snapshot.employeeById("emp-001")?.externalId, "emp-001");
@@ -81,7 +85,7 @@ test("directoryForRows merges static employees, cached profiles, and minimal wc 
     providerId: "wc-provider-1",
   });
   assert.equal(snapshot.providerById("wc-provider-1")?.name, "WebChart Clinician");
-  assert.equal(snapshot.tenantById("wc")?.name, "WebChart");
+  assert.equal(snapshot.tenantById("wc")?.name, "WebChart (webchart.test)");
   assert.equal(snapshot.enterpriseForTenant("wc")?.tenantId, "wc");
   assert.equal(profileForId("wc|not-cached")?.name, "not-cached");
   assert.equal(profileForId("not-webchart"), null);

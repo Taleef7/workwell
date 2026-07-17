@@ -156,6 +156,7 @@ test("restart rehydrates unknown wc patients and reconciles All = sum of tenants
     );
     const wc = root.children.find((node) => node.id === "wc")!;
     assert.ok(wc, "wc tenant is retained after registry loss");
+    assert.equal(wc.name, "WebChart (webchart.test)");
     assert.equal(wc.totals.evaluated, 1);
     assert.equal(root.totals.evaluated, root.children.reduce((sum, tenant) => sum + tenant.totals.evaluated, 0));
     const patient = wc.children[0]!.children[0]!.children[0]!.children[0]!;

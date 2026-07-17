@@ -166,7 +166,7 @@ export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "web
   const rows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
-  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {})).employees);
+  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv).employees);
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -223,7 +223,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
   const rows = successfulRows.filter(
@@ -340,7 +340,7 @@ async function runsWithOutcomes(
   const successfulRows = persistedRows.filter((row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus));
   const hasWebChartRows = successfulRows.some((row) => row.subjectId.startsWith("wc|"));
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
   const rows = successfulRows.filter(
@@ -526,7 +526,7 @@ export async function programRiskOutlook(
     successfulPopulationOnly: true,
   });
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(rows, webChartConfigured);
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv);
   const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured));
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).

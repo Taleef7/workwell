@@ -100,7 +100,7 @@ test("buildRoster — restart rehydrates completed wc rows with raw ids, then re
     assert.equal(restarted.rows[0]!.subject.externalId, subjectId);
     assert.equal(restarted.rows[0]!.subject.name, "restart-patient-1");
     assert.equal(restarted.rows[0]!.subject.site, "WebChart");
-    assert.equal(restarted.rows[0]!.subject.tenantName, "WebChart");
+    assert.equal(restarted.rows[0]!.subject.tenantName, "WebChart (webchart.test)");
     assert.equal(restarted.rows[0]!.cells.mmr!.status, "COMPLIANT");
     assert.equal(restarted.rows.some((row) => row.subject.externalId === failedSubjectId), false, "FAILED population rows stay invisible");
 

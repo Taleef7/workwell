@@ -116,7 +116,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const popRows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus), // redundant guard: the store already applies both (defense-in-depth)
   );
-  const directory = directoryForRows(popRows, isWebChartConfigured(deps.webChartEnv ?? {}));
+  const directory = directoryForRows(popRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv);
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of popRows) {
     if (!measureIds.includes(r.measureId)) continue;

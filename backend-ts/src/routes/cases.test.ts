@@ -16,6 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { handleCases } from "./cases.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 // The open worklist is date-driven (today + the measure's cadence), so fixtures must sit on the
 // CURRENT cycle anchor to appear there. Annual (audiogram/hazwoper) → Jan 1 of this year; flu is
@@ -572,4 +573,47 @@ test("terminal tabs (excluded) show full history, not just the current cycle (Co
   // Open tab defaults to flu's current seasonal cycle only.
   const open = (await get("?status=open&measureId=flu_vaccine").then((r) => r!.json())) as Array<{ evaluationPeriod: string }>;
   assert.deepEqual(open.map((c) => c.evaluationPeriod), [FLU_CYCLE], "open tab stays on flu's current seasonal cycle");
+});
+
+test("configured case worklist resolves live names and sites for search and site filters", async () => {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: `${CYCLE}T00:00:00.000Z`,
+    measurementPeriodEnd: `${CYCLE}T23:59:59.999Z`,
+  });
+  const liveCase = await new SqliteCaseStore(db).upsertFromOutcome({
+    runId: run.id,
+    subjectId: "wc|case-worklist-live-1",
+    measureId: "audiogram",
+    evaluationPeriod: CYCLE,
+    outcomeStatus: "OVERDUE",
+  });
+  const configuredEnv = env as typeof env & Record<string, string>;
+  configuredEnv.WORKWELL_WEBCHART_BASE_URL = "http://webchart.test";
+  configuredEnv.WORKWELL_WEBCHART_API_KEY = "fixture-key";
+  replaceLiveDirectory([{
+    resourceType: "Bundle",
+    entry: [{ resource: { resourceType: "Patient", id: "case-worklist-live-1", name: [{ text: "Live Case Person" }] } }],
+  }]);
+
+  try {
+    const rows = (await get("?status=open&site=WebChart&search=live%20case").then((r) => r!.json())) as Array<{
+      caseId: string;
+      employeeName: string;
+      site: string;
+    }>;
+    assert.deepEqual(rows.map((row) => ({ caseId: row.caseId, employeeName: row.employeeName, site: row.site })), [{
+      caseId: liveCase!.id,
+      employeeName: "Live Case Person",
+      site: "WebChart",
+    }]);
+  } finally {
+    delete configuredEnv.WORKWELL_WEBCHART_BASE_URL;
+    delete configuredEnv.WORKWELL_WEBCHART_API_KEY;
+    replaceLiveDirectory([]);
+  }
 });
