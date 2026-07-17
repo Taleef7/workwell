@@ -1,5 +1,31 @@
 # Journal
 
+## 2026-07-16 — teatea runbook executed live: registration is MIE-gated, seed contract verified
+
+Ran the teatea trial runbook (`WEBCHART_TEATEA_RUNBOOK_2026-07-16.md`) end-to-end as System Owner.
+Two decisive outcomes:
+
+**§§2–3 (client registration + auth probe) are blocked on MIE — proven, not assumed.** The SMART
+Backend Services client registry is the `login_trusts` table, reachable only via the **superuser**-gated
+JWT / Login-Trusts screen. WebChart "superuser" is **not** the SuperUser security role and **not** the
+`Manage Login Trusts` ACL — both were set and the screen still returned "Super user access required";
+superuser is an MIE-issued session unlock (master password) held by MIE's internal accounts. **RFC 7591
+is off** (`/register` + `/oauth/register` return the login HTML; no `registration_endpoint`), and the
+Application-Entities editor is DICOM, not an OAuth registry. A second independent research pass over the
+public `mieweb/docs` sources reached the same conclusion. The sharpened MIE ask (register `workwell-backend`
+with our hosted JWKS, or grant superuser + the FHIR App Editor) is now recorded in the runbook §3 and the
+#254 answer log. §5 (live evaluation) is blocked behind this — nothing to read until a client exists.
+
+**§4 (synthetic seeding) contract verified live and the generator fixed.** teatea's Data Import →
+Chart Data CSV "Validate File" dry-run established the real contract: **`patients.zip_code` is required**
+(`12345`/`12345-6789`) on every row (the sole cause of the first run's 451 validation issues), partition
+`MR` is valid, and all `patients.*` demographic columns validate. `scripts/generate-webchart-import.ts`
+now emits a synthetic demo ZIP; typecheck green. The seed is ready to upload, but its payoff — a live FHIR
+read-back — still waits on the registration above, so the actual upload + `pnpm evaluate:webchart-live`
+run are deferred until MIE unblocks auth (no point seeding a population we can't yet read over FHIR).
+Keypair (§1) generated and kept in `~\.workwell\` (never committed). Docs-only change here; no runtime,
+schema, dependency, PHI, or Outcome Status behavior touched (ADR-008).
+
 ## 2026-07-16 — MIE manager outage: bounded, method-safe deploy retries
 
 The WebChart stack's final deploy exposed a pre-existing failure mode in

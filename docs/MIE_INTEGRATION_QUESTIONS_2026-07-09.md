@@ -227,6 +227,27 @@ what does its contract look like?
   confirm backend-services support on the sandbox. Details: `INTEGRATION_RESEARCH_2026-07-13.md`
   §1.1a. Meanwhile the transport itself is already rebuilt to the verified contract (E12 PR-2c
   branch; ADR-028) — only credentials stand between us and a live sandbox evaluation.
+- **2026-07-16 (teatea trial — live owner walkthrough; runbook §§1–5 executed).** Ran the teatea
+  runbook end-to-end as System Owner. Findings:
+  - **A3 residual is confirmed MIE-gated (not self-serviceable on the trial).** Client registration
+    lives in the `login_trusts` table, reachable only via the **superuser**-gated JWT / Login-Trusts
+    screen. WebChart "superuser" is **not** the SuperUser security role and **not** the
+    `Manage Login Trusts` ACL — both were set and the screen still returned "Super user access
+    required." Superuser is an **MIE-issued session unlock (master password)**, held by MIE's internal
+    accounts only. **RFC 7591 is OFF** (`/register` + `/oauth/register` return the login HTML; no
+    `registration_endpoint` advertised). The Application-Entities editor is DICOM, not an OAuth
+    registry. **⇒ The sharpened A3 ask stands and is now unavoidable:** *MIE must either register the
+    `workwell-backend` backend-services client (JWKS we host) or grant our System Owner the superuser
+    unlock + FHIR App Editor.* Exact ask text: `WEBCHART_TEATEA_RUNBOOK_2026-07-16.md` §3 "MIE ask."
+    §3 auth probe + §5 live evaluation are **blocked on this** (nothing to probe/read until a client
+    exists). **A2/A4/A5 (pagination / rate-limit / observation representation) remain pending the live
+    read** — they'll be recorded the moment MIE unblocks registration.
+  - **B12 / seeding contract — verified live (unblocks §4 independently of auth).** teatea's Data
+    Import → **Chart Data CSV API** requires a well-formed **`patients.zip_code`** (`12345`/`12345-6789`)
+    on every row; partition **`MR`** is valid; all `patients.*` demographic columns validate. The import
+    generator (`pnpm generate:webchart-import`) was corrected to emit the ZIP. Observation Import keys on
+    observation **name**, not LOINC (as documented). So synthetic seeding is ready to run — but its payoff
+    (a live FHIR read-back) still waits on the A3 registration above.
 - **2026-07-16 (Doug meeting 2026-07-15 + teatea trial probe):** **A1 CONFIRMED** (FHIR R4 is the
   surface), **A3 CONFIRMED** (SMART; registration is manual + self-serviceable on the trial via
   `webchart.cgi?f=admin&s=jwt`), **C13 ANSWERED** (trial instance `teatea.webchartnow.com`, System
