@@ -46,7 +46,7 @@ services:
     profiles: [wcdb]
     restart: unless-stopped
     ports:
-      - "33306:3306"
+      - "127.0.0.1:33306:3306" # loopback-only: root + published dev password must not face the LAN
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -uroot -ppmg2bhok --silent"]
       interval: 5s
@@ -62,7 +62,8 @@ services:
       WCDB_HOST: wcdb
       WCDB_PORT: "3306"
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085" # loopback-only: the shim is unauthenticated by design
+
     depends_on:
       wcdb:
         condition: service_healthy
