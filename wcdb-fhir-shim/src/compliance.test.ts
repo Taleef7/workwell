@@ -76,6 +76,10 @@ function stubDb(): ShimDb {
       }
       return PER_PATIENT_ROWS;
     },
+    execute: async () => ({}),
+    withTransaction: async () => {
+      throw new Error("read-only test stub");
+    },
     end: async () => {},
   };
 }

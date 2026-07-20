@@ -31,6 +31,12 @@ export interface ProcedureRow {
   dt: string | null; // YYYY-MM-DD or null
 }
 
+/** The read/write surface a transaction body sees — one connection, all-or-nothing. */
+export interface TxDb {
+  queryRows(sql: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
+  execute(sql: string, params: unknown[]): Promise<{ insertId?: number; affectedRows?: number }>;
+}
+
 export interface ShimDb {
   countPatients(): Promise<number>;
   listPatients(limit: number, offset: number): Promise<PatientRow[]>;
@@ -38,6 +44,13 @@ export interface ShimDb {
   proceduresForPatient(patId: number): Promise<ProcedureRow[]>;
   /** Execute one committed, generated statement (`sql/*.sql`) with bound `?` params (compliance API). */
   queryRows(sql: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
+  /** Execute a write statement with bound `?` params (the YAML ingest tool — dev DB only). */
+  execute(sql: string, params: unknown[]): Promise<{ insertId?: number; affectedRows?: number }>;
+  /**
+   * Run `fn` inside a single BEGIN…COMMIT on one pooled connection; any throw rolls the whole
+   * batch back (the ingest tool's writes are all-or-nothing — no partial patients on failure).
+   */
+  withTransaction<T>(fn: (tx: TxDb) => Promise<T>): Promise<T>;
   end(): Promise<void>;
 }
 
@@ -105,6 +118,40 @@ export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
     async queryRows(sql, params) {
       const [rows] = await pool.query(sql, params);
       return rows as Array<Record<string, unknown>>;
+    },
+    async execute(sql, params) {
+      const [result] = await pool.execute(sql, params as unknown[] as never);
+      const r = result as { insertId?: number; affectedRows?: number };
+      return { insertId: r.insertId, affectedRows: r.affectedRows };
+    },
+    async withTransaction(fn) {
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const tx: TxDb = {
+          async queryRows(sql, params) {
+            const [rows] = await conn.query(sql, params);
+            return rows as Array<Record<string, unknown>>;
+          },
+          async execute(sql, params) {
+            const [result] = await conn.execute(sql, params as unknown[] as never);
+            const r = result as { insertId?: number; affectedRows?: number };
+            return { insertId: r.insertId, affectedRows: r.affectedRows };
+          },
+        };
+        const out = await fn(tx);
+        await conn.commit();
+        return out;
+      } catch (err) {
+        try {
+          await conn.rollback();
+        } catch {
+          // the throw below is the real signal; a failed ROLLBACK on a dead connection adds nothing
+        }
+        throw err;
+      } finally {
+        conn.release();
+      }
     },
     async end() {
       await pool.end();

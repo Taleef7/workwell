@@ -39,7 +39,15 @@ mirrors Doug's "you don't even need security"). CQL remains the sole compliance 
 (ADR-008): SQL results serve only the shim's demo API until parity-gated per ADR-025.
 Reversal = delete the package + compose profile; backend-ts codegen additions are pure and inert.
 
-## ADR-033: Inject a schema-free live WebChart directory into population read models
+**Addendum (2026-07-20, PR #316 — YAML ingest):** the shim additionally takes **`yaml`** (parsing
+only, for the AI-patient ingest CLI) and moves **`tsx`** to runtime dependencies (it always executed
+the package; now the lockfile/Docker image pin it). Same scoping as `mysql2` — shim-only, never
+backend-ts, never the deployed stack. The ingest tool's safety contract: writes are
+model-catalog-validated (existence + declared type), transactional (one BEGIN…COMMIT per run),
+manifest-reversible (`<file>.ingested.json` records exactly the created pat_ids; `--rollback`
+refuses natural-key guessing), guarded to local `wc_*` targets, and logged to an append-only
+`ingest-audit.log` (the dev-tool analogue of the app's `audit_events` rule — the WCDB has no
+WorkWell audit table to write to).
 
 **Status:** Accepted (2026-07-17).
 

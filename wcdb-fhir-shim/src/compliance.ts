@@ -63,9 +63,9 @@ const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * True only for a real calendar date (Codex P2: `2026-02-31` must 400, not reach `CAST(? AS DATE)`).
  * Computed arithmetically — `Date.UTC` maps years 0–99 to 1900–1999, which would wrongly reject
- * valid low-year ISO dates (Codex P2 round 2).
+ * valid low-year ISO dates (Codex P2 round 2). Exported for the ingest tool's date validation.
  */
-function isRealCalendarDate(v: string): boolean {
+export function isRealCalendarDate(v: string): boolean {
   if (!DATE_SHAPE.test(v)) return false;
   const [y, m, d] = v.split("-").map(Number) as [number, number, number];
   if (y < 1 || m < 1 || m > 12 || d < 1) return false;

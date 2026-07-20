@@ -1,5 +1,49 @@
 # Journal
 
+## 2026-07-20 (night) — Codex gpt-5.6 review sweep over the whole wave (#308–#316), all findings fixed
+
+A second, deeper Codex pass (gpt-5.6-sol, high reasoning, one review per stacked PR against its
+stack parent) surfaced **8 P1 + 14 P2 + 1 P3**; every finding was fixed at its origin branch and
+cascade-merged up the stack. Highlights, by theme: **fail-closed everywhere** — the shim's
+compliance endpoints now 409 any measure not on a `PARITY_CERTIFIED` allowlist (ADR-025 belt-and-
+braces), and the parity suite FAILS (never skips) when its env var is set but the shim is
+unreachable; **ingest hardened** — manifest-exact rollback (a natural-key collision with a real
+WebChart patient can never be deleted), one transaction per run, `--dry-run`/`--rollback` mutual
+exclusion, a local-`wc_*`-only target guard, an append-only `ingest-audit.log`, strict YAML value
+typing, and model-catalog **type** validation (declared `data_type` per written field); **gate
+depth** — the drift guard pins all four measures to their hand-written CQL band literals, the
+freshness + parity suites reject orphaned SQL artifacts, non-vacuity asserts (band coverage + a
+date-shift requirement) close the "passes on a corpus that can't fail" hole; **Codify corrected**
+— the picked code now lands IN the created value set (`POST /api/value-sets` accepts validated
+`codes[]` via the existing `setCodes`; the prefilled OID is an honest local urn, not Codify's
+record key), the vendored component gains stale-response invalidation, worker-failure error
+states + Retry, and the index-URL override is actually deployable (Dockerfile ARG + workflow
+build-arg). Docs corrected in-PR (spec scope, seam env pair, ordering-vs-ADR-025 note; ADR-034
+addendum records `yaml`/`tsx`). Everything re-verified: shim 27/27, backend typecheck + touched
+suites green, frontend lint/vitest 178/178/build green, live parity 3/3 against the rebuilt
+container, and the full ingest loop re-run live (56→60→56, designed verdicts exact). Resolution
+comments posted on all seven PRs.
+
+## 2026-07-20 (evening) — YAML patient ingest into WebChart + model-catalog validation (PR-8)
+
+Doug's late WhatsApp additions ("ask ai to generate patient data in yaml → ingest → we can put
+into webchart"; "look at the table named model … it describes every object and field … easier to
+port") closed the loop the wave had left read-only. The shim gains `npm run ingest` (`ingest.ts` +
+CLI + the `yaml` package as its second dependency): a small YAML patient schema (an AI-generated
+`patients.example.yaml` ships with the generation prompt in its header), inserted into
+`patients` + `observations_current` with LOINCs resolved fail-closed against `observation_codes`
+(codes are never invented), idempotent by natural key, and exactly reversible via `--rollback`.
+Before any write, every touched field is validated against **WebChart's own `model` schema
+catalog** (`model-metadata.ts`; 685 objects / 7,630 fields in the dev seed) — Doug's
+portability point made operational rather than a talking point.
+
+**Live-verified end-to-end:** ingest → population 56→60 → the four designed outcomes band exactly
+as authored (Zainab COMPLIANT, Marcus DUE_SOON@349d, Priya OVERDUE, Omar MISSING_DATA) → **CQL and
+the generated SQL agree on all four** → re-run skips (idempotent) → rollback restores 56. 21 shim
+tests (5 new files' worth), typecheck green. Demo script gains beat 5 ("the full loop"); the live
+acceptance suites still pin the 56-patient seed, so the demo rolls back before running them.
+Dev-database only; no PHI; the deployed stack is untouched.
+
 ## 2026-07-20 (later) — Codify LIVE in Studio; all Codex review findings addressed
 
 **Codify is implemented, not just probed** (reversing the earlier same-day defer — the owner asked

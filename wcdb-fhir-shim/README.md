@@ -52,6 +52,39 @@ CQL remains the sole compliance authority (ADR-008); these results are demo/pari
 `PARITY_CERTIFIED` allowlist in `src/compliance.ts` — an artifact may exist on disk, but its SQL
 verdicts are served only after that measure's per-patient SQL-vs-CQL golden parity run is green.
 
+## YAML patient ingest (Doug: "ask ai to generate patient data in yaml … put into webchart")
+
+```bash
+npm run ingest -- --file patients.example.yaml --dry-run   # plan only, writes nothing
+npm run ingest -- --file patients.example.yaml             # insert into the dev-wcdb (+ manifest)
+npm run ingest -- --file patients.example.yaml --rollback  # delete exactly the manifest's rows
+```
+
+The WRITE half of the demo loop: AI-generated YAML patients (schema in `src/ingest.ts` /
+`patients.example.yaml`) are inserted into `patients` + `observations_current`, after which the
+whole read pipeline picks them up immediately — shim FHIR, CQL, generated SQL, dashboards.
+
+Safeties (all fail-closed):
+
+- Every touched field is validated against **WebChart's own `model` schema catalog** — both field
+  existence and declared `data_type` (`src/model-metadata.ts` — the self-describing schema Doug
+  pointed at, 685 objects / 7,630 fields in the dev seed) — before any write.
+- LOINCs must already exist in `observation_codes` (codes are never invented); observation values
+  must be YAML numbers (null/strings/booleans are rejected, never coerced to 0).
+- All writes for a run happen in **one transaction** — a mid-batch failure leaves nothing behind.
+- Idempotent by (firstName, lastName, birthDate): a re-run skips existing patients.
+- Ingest writes a **manifest** (`<file>.ingested.json`, gitignored) recording exactly the pat_ids
+  it created; `--rollback` deletes only those rows (natural-key re-verified first) and **refuses to
+  run without the manifest** — so a YAML patient that happened to collide with a pre-existing
+  WebChart patient (skipped at ingest) can never be deleted.
+- The CLI refuses non-local hosts and non-`wc_*` databases unless `WCDB_INGEST_UNSAFE_TARGET_OK=1`
+  is set explicitly; `--dry-run` and `--rollback` are mutually exclusive.
+- Every ingest/rollback appends who/when/where/what to `ingest-audit.log` (package root,
+  gitignored) — the dev-tool's durable audit trail.
+
+**Dev database only** — synthetic data, never a live WebChart. Note: the live acceptance suites
+pin the 56-patient seed population, so roll back before running them.
+
 ## FHIR mapping
 
 `src/fhir-mapping.ts` intentionally duplicates the shapes of
