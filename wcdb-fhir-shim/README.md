@@ -48,6 +48,9 @@ All endpoints are read-only — no state changes, hence no audit surface.
 `sql/*.sql` are **generated artifacts** (`cd backend-ts && pnpm generate:sql`, freshness-tested
 there) — never edited by hand and never assembled at request time; the shim only binds `?` params.
 CQL remains the sole compliance authority (ADR-008); these results are demo/parity surface only.
+**Fail-closed serving (ADR-025):** the compliance endpoints refuse (409) any measure not on the
+`PARITY_CERTIFIED` allowlist in `src/compliance.ts` — an artifact may exist on disk, but its SQL
+verdicts are served only after that measure's per-patient SQL-vs-CQL golden parity run is green.
 
 ## YAML patient ingest (Doug: "ask ai to generate patient data in yaml … put into webchart")
 

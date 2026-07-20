@@ -46,6 +46,9 @@ test("parsePeriod validates dates and defaults end to today", () => {
   assert.throws(() => parsePeriod(new URLSearchParams("end=0000-00-00"), today), ComplianceError);
   assert.throws(() => parsePeriod(new URLSearchParams("start=2026-13-01&end=2026-07-01"), today), ComplianceError);
   assert.doesNotThrow(() => parsePeriod(new URLSearchParams("end=2024-02-29"), today), "leap day is valid");
+  // Codex P2 round 2: Date.UTC maps years 0–99 to 1900–1999 — low-year ISO dates are still real dates.
+  assert.doesNotThrow(() => parsePeriod(new URLSearchParams("end=0099-12-31"), today), "year 99 is a real date");
+  assert.throws(() => parsePeriod(new URLSearchParams("end=0099-02-29"), today), ComplianceError, "99 is not a leap year");
 });
 
 // ---------- HTTP routes over a stubbed executor ----------
@@ -138,4 +141,34 @@ test("compliance API error surface: unknown measure 404, bad date 400, bad patie
   assert.equal((await getJson("/compliance/hypertension/cohort?end=junk")).status, 400);
   assert.equal((await getJson("/compliance/emp-006/hypertension?end=2024-06-01")).status, 400);
   assert.equal((await getJson("/compliance/wc-999/hypertension?end=2024-06-01")).status, 404);
+});
+
+test("ADR-025 fail-closed: a generated artifact whose measure is not parity-certified is refused with 409", async () => {
+  const withUncertified = loadMeasureSql();
+  withUncertified.set("brand_new_measure", { ...withUncertified.get("hypertension")!, measureId: "brand_new_measure" });
+  const gated = createShimServer({ db: stubDb(), measureSql: withUncertified, today: () => "2024-06-01" });
+  await new Promise<void>((resolve) => gated.listen(0, "127.0.0.1", resolve));
+  const gatedBase = `http://127.0.0.1:${(gated.address() as AddressInfo).port}`;
+  try {
+    const cohort = await fetch(`${gatedBase}/compliance/brand_new_measure/cohort?end=2024-06-01`);
+    assert.equal(cohort.status, 409, "SQL exists but parity has not certified it — refuse, never serve");
+    const body = (await cohort.json()) as { error: { message: string } };
+    assert.match(body.error.message, /parity gate/);
+    const single = await fetch(`${gatedBase}/compliance/wc-5/brand_new_measure?end=2024-06-01`);
+    assert.equal(single.status, 409);
+    const certified = await fetch(`${gatedBase}/compliance/hypertension/cohort?end=2024-06-01`);
+    assert.equal(certified.status, 200, "certified measures serve normally");
+  } finally {
+    await new Promise<void>((resolve) => gated.close(() => resolve()));
+  }
+});
+
+test("content-type: FHIR routes are fhir+json; compliance + health are plain application/json", async () => {
+  assert.match((await fetch(`${base}/fhir/metadata`)).headers.get("content-type") ?? "", /application\/fhir\+json/);
+  assert.match(
+    (await fetch(`${base}/compliance/hypertension/cohort?end=2024-06-01`)).headers.get("content-type") ?? "",
+    /^application\/json/,
+  );
+  assert.match((await fetch(`${base}/compliance/nope/cohort`)).headers.get("content-type") ?? "", /^application\/json/);
+  assert.match((await fetch(`${base}/health`)).headers.get("content-type") ?? "", /^application\/json/);
 });
