@@ -25,7 +25,10 @@
  *   COMPLIANT otherwise (includes future-dated events — CQL's Last() has no upper date bound)
  * Enrollment/waiver gates are not in the SQL: on the live WCDB path every subject is
  * roster-enrolled WorkWell-side and WCDB carries no waiver Conditions (see the wave spec §5).
- * Zero-dates (MariaDB '0000-00-00') are excluded exactly like the fixture exporter's date guard.
+ * The date guard is DELIBERATELY wider than the fixture exporter's zero-date strip: everything
+ * up to and including 1900-01-01 is treated as sentinel/garbage (the CQL side coalesces a
+ * missing date to @1900-01-01, so nothing real lives there); a genuine pre-1901 event date
+ * would band OVERDUE under CQL but MISSING_DATA here — accepted, parity would surface it.
  *
  * Descriptive only (ADR-008): the SQL classifies rows for the shim's demo compliance API; CQL
  * remains the sole `Outcome Status` authority in the product.
