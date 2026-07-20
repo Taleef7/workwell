@@ -68,6 +68,43 @@ test("the demo measure set derives its LOINC codes from the crosswalk (single so
   assert.deepEqual(hba1c?.rule, { type: "windowed-recency", windowDays: 180, dueSoonDays: 20 }, "hba1c bands read off its CQL (<=160/161-180/>180)");
 });
 
+test("DRIFT GUARD: WCDB_SQL_MEASURES thresholds match the canonical YAML rule blocks / CQL bands", () => {
+  // Codex P2: these params are copies — pin them to their authoritative sources so a YAML/CQL
+  // threshold change cannot leave stale committed SQL behind a green freshness test.
+  const measuresDir = fileURLToPath(new URL("../../../../measures", import.meta.url));
+  const read = (f: string): string => readFileSync(path.join(measuresDir, f), "utf8");
+  const byId = new Map(WCDB_SQL_MEASURES.map((m) => [m.measureId, m.rule]));
+
+  // hypertension + cholesterol_ldl: authoritative source = the YAML `rule:` block.
+  for (const [id, yamlFile] of [
+    ["hypertension", "hypertension.yaml"],
+    ["cholesterol_ldl", "cholesterol_ldl.yaml"],
+  ] as const) {
+    const yaml = read(yamlFile);
+    const windowDays = Number(/windowDays:\s*(\d+)/.exec(yaml)?.[1]);
+    const dueSoonDays = Number(/dueSoonDays:\s*(\d+)/.exec(yaml)?.[1]);
+    assert.ok(windowDays && dueSoonDays, `${yamlFile} carries a windowed-recency rule block`);
+    assert.equal(byId.get(id)?.windowDays, windowDays, `${id} windowDays == YAML`);
+    assert.equal(byId.get(id)?.dueSoonDays, dueSoonDays, `${id} dueSoonDays == YAML`);
+  }
+
+  // obesity_bmi + diabetes_hba1c: hand-written CQL — authoritative source = the band literals
+  // (`<= compliantMax`, `<= windowDays`, `> windowDays` on consecutive defines).
+  for (const [id, cqlFile] of [
+    ["obesity_bmi", "obesity_bmi.cql"],
+    ["diabetes_hba1c", "diabetes_hba1c.cql"],
+  ] as const) {
+    const cql = read(cqlFile);
+    const bands = [...cql.matchAll(/"Days Since [^"]+" <= (\d+)/g)].map((m) => Number(m[1]));
+    // bands = [compliantMax, windowDays] (the Compliant then Due Soon defines)
+    assert.equal(bands.length, 2, `${cqlFile} has the two windowed-recency band literals`);
+    const [compliantMax, windowDays] = bands as [number, number];
+    const rule = byId.get(id);
+    assert.equal(rule?.windowDays, windowDays, `${id} windowDays == CQL band`);
+    assert.equal(rule!.windowDays - rule!.dueSoonDays, compliantMax, `${id} compliantMax == CQL band`);
+  }
+});
+
 test("FRESHNESS: committed wcdb-fhir-shim/sql artifacts are byte-identical to a fresh render", () => {
   const outDir = fileURLToPath(new URL("../../../../../wcdb-fhir-shim/sql", import.meta.url));
   for (const [measureId, content] of renderAll()) {
