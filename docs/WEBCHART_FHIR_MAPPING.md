@@ -379,3 +379,20 @@ Authorization header path, timeouts/retries — everything the in-process shims 
 - Do **not** set `hapi.fhir.server_address`: HAPI derives `link[next]` from the request host
   (`localhost:8081`), which keeps pagination same-origin; an off-host server_address would trip the
   client's off-origin guard (a handy manual negative test, not a supported configuration).
+
+### 8.4 WCDB FHIR shim — SQL-backed "fake WebChart" (ADR-034, 2026-07-20; Doug directive)
+
+Doug's 2026-07-19 directive made the simulator one step more real: `wcdb-fhir-shim/` (standalone
+package, #309) serves the same client contract as §8.3 but answers each FHIR query by **running SQL
+against the dev-wcdb MariaDB live** — no fixture load step; the database is the source. Patients
+from `patients` (`is_patient=1`), Observations from `observations_current ⋈ observation_codes`
+(LOINC-coded, final), Procedures from `patient_procedures` (CPT/HCPCS, completed);
+Condition/Immunization/Encounter return valid empty searchsets (enrollment stays WorkWell-side,
+§8.1). Its `src/fhir-mapping.ts` intentionally duplicates this doc's §3 shapes as implemented by
+`scripts/webchart-devdb-export.ts` — **the drift guard is `hapi-live.test.ts` run against the shim**
+(`WORKWELL_WEBCHART_LIVE_TEST_BASE_URL=http://localhost:8085`), whose parity headline was verified
+green 2026-07-20: live SQL-backed HTTP evaluation == committed-fixture evaluation, bucket for
+bucket. Clinical resources carry deterministic minted ids (`{patientId}-{type}-{ordinal}`, the
+§8.3 scheme) because the client dedupes by `type/id`. Compose profile `wcdb` starts `wcdb` +
+`wcdb-fhir-shim` (:8085); recipe in DEPLOY.md. The shim also hosts the #292 CQL→SQL compliance
+API (executing generated, committed SQL — see the Doug-wave spec).

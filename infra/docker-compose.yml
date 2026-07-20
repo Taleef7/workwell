@@ -38,6 +38,35 @@ services:
         limits:
           memory: 3g
 
+  # WebChart dev database + the wcdb-fhir-shim FHIR facade over it (ADR-034, #309 — the 2026-07-19
+  # Doug directive). Profile-gated: `docker compose --profile wcdb up -d wcdb wcdb-fhir-shim` — the
+  # default stack is byte-identical without the profile. Synthetic dev data only; never deployed.
+  wcdb:
+    image: ghcr.io/mieweb/dev-wcdb:latest
+    profiles: [wcdb]
+    restart: unless-stopped
+    ports:
+      - "33306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -uroot -ppmg2bhok --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wcdb-fhir-shim:
+    build:
+      context: ../wcdb-fhir-shim
+    profiles: [wcdb]
+    restart: unless-stopped
+    environment:
+      WCDB_HOST: wcdb
+      WCDB_PORT: "3306"
+    ports:
+      - "8085:8085"
+    depends_on:
+      wcdb:
+        condition: service_healthy
+
   backend:
     build:
       context: ..
