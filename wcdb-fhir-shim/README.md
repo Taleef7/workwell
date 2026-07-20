@@ -39,9 +39,15 @@ Env: `WCDB_HOST` (localhost) · `WCDB_PORT` (33306) · `WCDB_DATABASE` (wc_miehr
 | `GET /fhir/Procedure?patient=wc-N` | `patient_procedures` → completed CPT/HCPCS Procedures |
 | `GET /fhir/{Condition\|Immunization\|Encounter}?patient=` | Valid **empty** searchsets (no coded WCDB source; enrollment Conditions are stamped WorkWell-side) |
 | `GET /health` | `{ok:true}` |
+| `GET /compliance/{measureId}/cohort?start=&end=` | #292 demo API: executes the committed generated SQL (`sql/{measureId}.sql`, bound params) → numerator/denominator + per-status counts + per-patient verdicts. `end` = evaluation date (default today); the window is the measure's rule (echoed in `period`) |
+| `GET /compliance/{patientId}/{measureId}?start=&end=` | Doug's question — "is this patient compliant for this measure, for this date range?" → `{outcomeStatus, compliant, lastEventDate, daysSince}` (`wc-N` or bare pat_id) |
 
 Auth: `Authorization` is accepted and ignored (Doug's "you don't even need security" dev posture).
 All endpoints are read-only — no state changes, hence no audit surface.
+
+`sql/*.sql` are **generated artifacts** (`cd backend-ts && pnpm generate:sql`, freshness-tested
+there) — never edited by hand and never assembled at request time; the shim only binds `?` params.
+CQL remains the sole compliance authority (ADR-008); these results are demo/parity surface only.
 
 ## FHIR mapping
 
