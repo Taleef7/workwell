@@ -2,8 +2,8 @@
 # Dev-grade by design: runs TypeScript directly via tsx (no build step), synthetic data only.
 FROM node:24-alpine
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev && npm install tsx typescript @types/node
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY tsconfig.json ./
 COPY src ./src
 COPY sql ./sql
