@@ -5,8 +5,11 @@
  * `backend-ts/src/engine/ingress/webchart/webchart-client.ts`):
  *   GET /fhir/metadata                          → CapabilityStatement (availability probe)
  *   GET /fhir/Patient?_count=&_offset=          → paged searchset; SAME-ORIGIN link[next]
- *   GET /fhir/{Observation|Procedure}?patient=  → per-patient searchsets (PR-3)
+ *   GET /fhir/{Observation|Procedure}?patient=  → per-patient searchsets
  *   GET /fhir/{Condition|Immunization|Encounter}?patient= → valid empty searchsets
+ * plus the CQL→SQL demo compliance API (#292 — see compliance.ts):
+ *   GET /compliance/{measureId}/cohort?start=&end=
+ *   GET /compliance/{patientId}/{measureId}?start=&end=
  *
  * `Authorization` is accepted but never enforced — Doug's "you don't even need security"
  * dev/demo posture; the header path of the static-bearer seam still gets exercised.
@@ -23,21 +26,43 @@ import {
   procedureToFhir,
   searchsetBundle,
 } from "./fhir-mapping.ts";
+import {
+  cohortCompliance,
+  ComplianceError,
+  loadMeasureSql,
+  parsePeriod,
+  patientCompliance,
+  type MeasureSql,
+} from "./compliance.ts";
 
 const DEFAULT_COUNT = 100;
 const MAX_COUNT = 500;
 
 export interface ShimDeps {
   db: ShimDb;
+  /** Committed generated SQL per measure (defaults to loading `../sql`); injectable for tests. */
+  measureSql?: Map<string, MeasureSql>;
+  /** Injectable clock for the compliance API's default evaluation date. */
+  today?: () => string;
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  contentType = "application/fhir+json; charset=utf-8",
+): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
-    "content-type": "application/fhir+json; charset=utf-8",
+    "content-type": contentType,
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+/** The compliance + health surfaces are NOT FHIR — plain JSON, so media-type dispatch is honest. */
+function sendPlainJson(res: ServerResponse, status: number, body: unknown): void {
+  sendJson(res, status, body, "application/json; charset=utf-8");
 }
 
 function operationOutcome(severity: "error" | "warning", code: string, diagnostics: string): unknown {
@@ -119,8 +144,19 @@ const CLINICAL_TYPES = new Set(["Observation", "Condition", "Procedure", "Immuni
 type ClinicalType = "Observation" | "Condition" | "Procedure" | "Immunization" | "Encounter";
 
 export function createShimServer(deps: ShimDeps): Server {
+  const resolved: Required<ShimDeps> = {
+    db: deps.db,
+    measureSql: deps.measureSql ?? loadMeasureSql(),
+    today: deps.today ?? (() => new Date().toISOString().slice(0, 10)),
+  };
   return createServer((req, res) => {
-    void route(deps, req, res).catch((err: unknown) => {
+    void route(resolved, req, res).catch((err: unknown) => {
+      if (err instanceof ComplianceError) {
+        // ComplianceError only arises on the (non-FHIR) /compliance routes — plain JSON error.
+        if (!res.headersSent) sendPlainJson(res, err.status, { error: { status: err.status, message: err.message } });
+        else res.end();
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) sendJson(res, 500, operationOutcome("error", "exception", message));
       else res.end();
@@ -128,7 +164,25 @@ export function createShimServer(deps: ShimDeps): Server {
   });
 }
 
-async function route(deps: ShimDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+/**
+ * /compliance router (#292 demo API):
+ *   GET /compliance/{measureId}/cohort?start=&end=
+ *   GET /compliance/{patientId}/{measureId}?start=&end=
+ */
+async function routeCompliance(deps: Required<ShimDeps>, url: URL, res: ServerResponse): Promise<boolean> {
+  const m = /^\/compliance\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+  if (!m) return false;
+  const [, first, second] = m;
+  const period = parsePeriod(url.searchParams, deps.today);
+  const body =
+    second === "cohort"
+      ? await cohortCompliance(deps.measureSql, deps.db, first!, period)
+      : await patientCompliance(deps.measureSql, deps.db, first!, second!, period);
+  sendPlainJson(res, 200, body);
+  return true;
+}
+
+async function route(deps: Required<ShimDeps>, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (req.method !== "GET") {
     sendJson(res, 405, operationOutcome("error", "not-supported", `${req.method} is not supported`));
@@ -148,8 +202,9 @@ async function route(deps: ShimDeps, req: IncomingMessage, res: ServerResponse):
     await handleClinicalSearch(deps, fhirMatch[1] as ClinicalType, url, res);
     return;
   }
+  if (url.pathname.startsWith("/compliance/") && (await routeCompliance(deps, url, res))) return;
   if (url.pathname === "/health") {
-    sendJson(res, 200, { ok: true });
+    sendPlainJson(res, 200, { ok: true });
     return;
   }
   sendJson(res, 404, operationOutcome("error", "not-found", `no route for ${url.pathname}`));

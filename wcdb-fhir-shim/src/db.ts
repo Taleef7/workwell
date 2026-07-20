@@ -36,6 +36,8 @@ export interface ShimDb {
   listPatients(limit: number, offset: number): Promise<PatientRow[]>;
   observationsForPatient(patId: number): Promise<ObservationRow[]>;
   proceduresForPatient(patId: number): Promise<ProcedureRow[]>;
+  /** Execute one committed, generated statement (`sql/*.sql`) with bound `?` params (compliance API). */
+  queryRows(sql: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
   end(): Promise<void>;
 }
 
@@ -99,6 +101,10 @@ export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
         [patId],
       );
       return rows as ProcedureRow[];
+    },
+    async queryRows(sql, params) {
+      const [rows] = await pool.query(sql, params);
+      return rows as Array<Record<string, unknown>>;
     },
     async end() {
       await pool.end();

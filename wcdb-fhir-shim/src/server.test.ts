@@ -32,6 +32,7 @@ function stubDb(): ShimDb {
     listPatients: async (limit, offset) => PATIENTS.slice(offset, offset + limit),
     observationsForPatient: async (patId) => OBS[patId] ?? [],
     proceduresForPatient: async (patId) => PROCS[patId] ?? [],
+    queryRows: async () => [],
     end: async () => {},
   };
 }
@@ -40,7 +41,7 @@ let server: Server;
 let base: string;
 
 before(async () => {
-  server = createShimServer({ db: stubDb() });
+  server = createShimServer({ db: stubDb(), measureSql: new Map() });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address() as AddressInfo;
   base = `http://127.0.0.1:${addr.port}`;
