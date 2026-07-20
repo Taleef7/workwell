@@ -25,10 +25,10 @@
  *   COMPLIANT otherwise (includes future-dated events — CQL's Last() has no upper date bound)
  * Enrollment/waiver gates are not in the SQL: on the live WCDB path every subject is
  * roster-enrolled WorkWell-side and WCDB carries no waiver Conditions (see the wave spec §5).
- * The date guard is DELIBERATELY wider than the fixture exporter's zero-date strip: everything
- * up to and including 1900-01-01 is treated as sentinel/garbage (the CQL side coalesces a
- * missing date to @1900-01-01, so nothing real lives there); a genuine pre-1901 event date
- * would band OVERDUE under CQL but MISSING_DATA here — accepted, parity would surface it.
+ * The date guard excludes ONLY MariaDB zero-dates (`< 0001-01-01`) — the exact analog of the
+ * FHIR path's `fhirDate` zero-date strip — so any real historical date (even pre-1901) flows
+ * through and bands OVERDUE on both paths (Codex P2: a wider guard would divert valid ancient
+ * dates to MISSING_DATA here while the CQL oracle reads them OVERDUE).
  *
  * Descriptive only (ADR-008): the SQL classifies rows for the shim's demo compliance API; CQL
  * remains the sole `Outcome Status` authority in the product.
@@ -90,7 +90,7 @@ LEFT JOIN (
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN (${loincs})
     AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) > DATE('1900-01-01')
+    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
 WHERE p.is_patient = 1`;
@@ -110,11 +110,11 @@ export function generateSql(input: GenerateSqlInput): GeneratedSql {
     singlePatient: `${base}\n  AND p.pat_id = ?;`,
     cohort: `SELECT
   COUNT(*) AS denominator,
-  SUM(outcome_status = 'COMPLIANT') AS numerator,
-  SUM(outcome_status = 'COMPLIANT') AS compliant,
-  SUM(outcome_status = 'DUE_SOON') AS due_soon,
-  SUM(outcome_status = 'OVERDUE') AS overdue,
-  SUM(outcome_status = 'MISSING_DATA') AS missing_data
+  COALESCE(SUM(outcome_status = 'COMPLIANT'), 0) AS numerator,
+  COALESCE(SUM(outcome_status = 'COMPLIANT'), 0) AS compliant,
+  COALESCE(SUM(outcome_status = 'DUE_SOON'), 0) AS due_soon,
+  COALESCE(SUM(outcome_status = 'OVERDUE'), 0) AS overdue,
+  COALESCE(SUM(outcome_status = 'MISSING_DATA'), 0) AS missing_data
 FROM (
 ${base
   .split("\n")
