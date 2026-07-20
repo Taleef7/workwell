@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-20 — Doug wave BUILT: shim live, CQL→SQL parity-proven, Codify probed (PRs #308–#315)
+
+The whole wave shipped same-day as a stacked PR chain, every gate green on first live runs:
+
+**Shim (#311).** `wcdb-fhir-shim/` — plain `node:http` + `mysql2` (the only MariaDB-driver home,
+ADR-034) serving the verified WebChart contract straight from dev-wcdb SQL. The existing
+`hapi-live.test.ts` acceptance passed against it **4/4 including bucket-for-bucket parity** with
+the committed-fixture evaluation; `hapi-app-live.test.ts` passed (full in-app ALL_PROGRAMS run,
+56 `wc|` subjects across roster/hierarchy/quality); `evaluate:webchart-live` produced 27 real
+non-MISSING_DATA outcomes (hypertension 3/0/6/47, obesity_bmi 5/0/8/43, diabetes_hba1c 0/0/4/52,
+cholesterol_ldl 0/0/1/55 as-of 2024-06-01). Compose profile `wcdb` (shim :8085, db :33306);
+default stack untouched. One real-HTTP lesson: node's 5s keepAliveTimeout races undici's pooled
+sockets (mid-suite ECONNRESET) — raised to 65s.
+
+**CQL→SQL (#312, #313, #314 — #292 activated).** `generateSql` beside `generateCql` (pure
+templating; the new `loincCodesForMeasure` crosswalk export is the shared code list), committed
+artifacts in `wcdb-fhir-shim/sql/` (freshness-tested), `pnpm generate:sql` as the live demo
+moment; the shim's compliance API (`/compliance/{patientId}/{measureId}` + cohort) executes them
+with bound params only. **The ADR-025 golden-parity gate is GREEN: 4 measures × 56 patients × 2
+evaluation dates, zero SQL-vs-CQL divergence** (`wcdb-sql-parity-live.test.ts`, self-skipping on
+`WCDB_SHIM_PARITY_BASE_URL`). Windowed-recency only by design (no WCDB immunization table ⇒
+series SQL unprovable there). Note: the suspected `WORKWELL_WEBCHART_ENROLLMENT_JSON` doc drift
+was a false positive (the var exists in `run-pipeline.ts`).
+
+**Codify (#310, this PR).** CodeLookup IS published — in `@mieweb/ui@0.6.1-dev.*` prereleases
+only (verified by scratch-install: `CodeLookup`/`CodifyResult`/`HealthSurveillance`; shard-index
+API with `occupational`+`quality` domains and an employer `programs.json` sidecar). Decision:
+document + ask (a dev-prerelease bump days before the demo is the wrong risk) —
+`docs/mieweb-ui-migration/CODELOOKUP_STATUS.md` carries the probe evidence + ready integration
+design (Studio Value Sets tab, admin terminology mappings); Thursday asks = a stable release with
+Healthcare components + the canonical Codify `indexUrl`. Demo script for the call (+ fallbacks +
+owner outreach checklist): `docs/DEMO_2026-07-23.md`.
+
 ## 2026-07-20 — Doug call: three directives; Doug-wave planned (ADR-034)
 
 Doug's 2026-07-19 call (transcripts local, `docs/doug_audio_transcript_*.txt`) reset the near-term
