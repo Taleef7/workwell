@@ -33,6 +33,7 @@ function stubDb(): ShimDb {
     observationsForPatient: async (patId) => OBS[patId] ?? [],
     proceduresForPatient: async (patId) => PROCS[patId] ?? [],
     queryRows: async () => [],
+    execute: async () => ({}),
     end: async () => {},
   };
 }

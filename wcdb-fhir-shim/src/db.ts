@@ -38,6 +38,8 @@ export interface ShimDb {
   proceduresForPatient(patId: number): Promise<ProcedureRow[]>;
   /** Execute one committed, generated statement (`sql/*.sql`) with bound `?` params (compliance API). */
   queryRows(sql: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
+  /** Execute a write statement with bound `?` params (the YAML ingest tool — dev DB only). */
+  execute(sql: string, params: unknown[]): Promise<{ insertId?: number; affectedRows?: number }>;
   end(): Promise<void>;
 }
 
@@ -105,6 +107,11 @@ export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
     async queryRows(sql, params) {
       const [rows] = await pool.query(sql, params);
       return rows as Array<Record<string, unknown>>;
+    },
+    async execute(sql, params) {
+      const [result] = await pool.execute(sql, params as unknown[] as never);
+      const r = result as { insertId?: number; affectedRows?: number };
+      return { insertId: r.insertId, affectedRows: r.affectedRows };
     },
     async end() {
       await pool.end();

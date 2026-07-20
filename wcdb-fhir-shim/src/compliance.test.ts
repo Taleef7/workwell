@@ -73,6 +73,7 @@ function stubDb(): ShimDb {
       }
       return PER_PATIENT_ROWS;
     },
+    execute: async () => ({}),
     end: async () => {},
   };
 }

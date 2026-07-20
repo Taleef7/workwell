@@ -225,6 +225,16 @@ what does its contract look like?
 
 *(record answers here, dated, as they arrive)*
 
+- **2026-07-20 (Doug, WhatsApp — two additions):** (1) *"ask ai to generate patient data in yaml →
+  ingest → we can put into webchart"* — implemented same-day as the shim's `npm run ingest`
+  (YAML schema + AI-generated example + idempotent insert into `patients`/`observations_current` +
+  exact rollback; dev-wcdb only). (2) *"look at the table named model … it has metadata
+  (object/field). it describes every object and field. we do this instead of doing in sql so it
+  makes it easier to port."* — confirmed in the dev seed (`model` = 685 objects / 7,630 fields,
+  plus `model_relation`/`model_doc`/…); the ingest tool now validates every field it writes
+  against that catalog (`model-metadata.ts`), making Doug's portability point operational. A
+  fuller model-driven schema layer (deriving the shim/SQL mapping from `model` instead of
+  hardcoding it) is the natural follow-up — noted on #309.
 - **2026-07-20 (Doug call 2026-07-19 — three directives; D17 superseded):** (1) build our **own
   FHIR R4 shim** directly over the WCDB MariaDB schema (dev-wcdb; patients + observations first,
   no auth needed) — the app consumes it through the existing WebChart seam; (2) **CQL→SQL is
