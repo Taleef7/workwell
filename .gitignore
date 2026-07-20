@@ -49,3 +49,6 @@ backend/src/test/resources/logback-test.xml
 docs/MCP_LOCAL.md
 docs/vision doc screenshots
 webchart-import/
+
+# Local-only call transcripts (personal/personnel content - never commit)
+docs/doug_audio_transcript_*.txt

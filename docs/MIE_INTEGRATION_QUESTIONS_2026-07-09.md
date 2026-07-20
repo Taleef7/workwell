@@ -195,6 +195,17 @@ whether data egress is a policy constraint.
 > remain formally parked. Data egress from WebChart to WorkWell is therefore the expected flow (the
 > C14 PHI/BAA posture governs *where* WorkWell may run when that data is real).
 
+> 🔄 **SUPERSEDED (Doug, 2026-07-19 call — transcripts on file):** CQL→SQL is now **un-parked and
+> directly requested** — "it would be very valuable to me if you made something that got that CQL
+> and turned it into SQL queries… running those SQL queries against the WebChart database itself,"
+> returning numerator/denominator behind a simple compliance API ("is this patient compliant for
+> this measure, for this date range?"). Doug also directed us to build our **own small FHIR shim
+> server over the WCDB SQL schema** (patients + observations first) — the layered/swappable-API
+> teaching point — rather than only consuming MIE's existing FHIR servers. The 07-15 data-flow
+> answer (WebChart→WorkWell, CQL our side) **still stands for the product integration path**; the
+> CQL→SQL track runs *alongside* it as the #292 epic, parity-gated per ADR-025 (the CQL engine
+> stays the correctness oracle). Recorded in ADR-034 + the 2026-07-20 Doug-wave spec/plan.
+
 **D18. ICE timeline.** Immunization data is routed via ICE per the 2026-07-03 decision (the WebChart
 adapter does not source immunizations). When is an ICE surface available to integrate against, and
 what does its contract look like?
@@ -214,6 +225,18 @@ what does its contract look like?
 
 *(record answers here, dated, as they arrive)*
 
+- **2026-07-20 (Doug call 2026-07-19 — three directives; D17 superseded):** (1) build our **own
+  FHIR R4 shim** directly over the WCDB MariaDB schema (dev-wcdb; patients + observations first,
+  no auth needed) — the app consumes it through the existing WebChart seam; (2) **CQL→SQL is
+  un-parked** ("very valuable to me"): CQL + WCDB schema → SQL returning numerator/denominator,
+  wrapped in a simple "is this patient compliant for this measure in this range?" API — #292
+  Phases 0–2 activated, parity-gated per ADR-025; (3) use MIE's **Codify** terminology DB (the
+  Storybook `Healthcare/CodeLookup` component), and propose WorkWell-built components upstream to
+  @mieweb/ui. Process: Nicole is the quality lead + primary hiring gate (target 3–4×/week
+  contact); Bridget schedules (call, don't email); Thursday 2026-07-23 call scheduled with a wider
+  group. Doug still owes an ELM-vs-FHIR working session. Paper trail: ADR-034,
+  `docs/superpowers/specs/2026-07-20-doug-wave-wcdb-shim-cql-sql-design.md`,
+  `docs/superpowers/plans/2026-07-20-doug-wave.md`.
 - **2026-07-13 (self-research, pending MIE confirmation):** provisional answers recorded inline
   above for A1 (FHIR R4/US Core 7/SMART, JSON-only), A2 (no `$everything`; per-resource
   `?patient=` composition + `Group/$export`; pagination still open), A3 (SMART Backend Services,
