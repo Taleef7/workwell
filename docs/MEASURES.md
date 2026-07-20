@@ -339,6 +339,17 @@ Each outcome evidence payload includes:
 
 ## Implementation Notes
 
+- **CQL→SQL (WCDB) demo translations (#292 / ADR-034, 2026-07-20 — descriptive only, ADR-008).**
+  Four observation-backed windowed-recency measures (`hypertension`, `cholesterol_ldl`,
+  `obesity_bmi`, `diabetes_hba1c`) also have **generated MariaDB SQL** against the WebChart dev-DB
+  schema: `pnpm generate:sql` (`engine/cql/codegen/generate-sql-cli.ts`) templates the same rule
+  params that compile to CQL (plus the crosswalk's LOINC sets, `loincCodesForMeasure`) into
+  parameterized per-patient / single-patient / cohort statements, committed under
+  `wcdb-fhir-shim/sql/` (freshness-tested) and executed only by the standalone shim's compliance
+  API. **CQL remains the sole `Outcome Status` authority** — the SQL is parity-gated per ADR-025
+  (the CQL engine over the shim's FHIR output is the oracle; cohort counts verified equal
+  2026-07-20) and serves nothing in the product. Series-completion SQL is deliberately absent
+  (WCDB has no immunization table to prove parity against).
 - **Live WebChart enrollment and groups (ADR-033).** When the live tenant seam is configured,
   `WORKWELL_WEBCHART_ENROLLMENT_JSON` may map raw Patient ids to explicitly enrolled measure ids.
   Otherwise the safe demo default enrolls every live subject in every `ROSTER_ELIGIBLE_MEASURES`
