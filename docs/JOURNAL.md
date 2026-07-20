@@ -1,5 +1,66 @@
 # Journal
 
+## 2026-07-20 (later) — Codify LIVE in Studio; all Codex review findings addressed
+
+**Codify is implemented, not just probed** (reversing the earlier same-day defer — the owner asked
+for it in, and two discoveries made it safe): MIE's Codify shard index is publicly served with open
+CORS at `ui.mieweb.org/codify`, and upstream's own source comments establish **consumer-side
+bundling as the designed path** (the tsup npm build can't ship the module worker; "Storybook (Vite)
+handles it natively" — so does Next). So `frontend/vendor/codelookup/` vendors the component
+byte-faithful from `mieweb/ui` (ADR-007 datavis playbook; marked edits only re-point `cn`/Card to
+stable `@mieweb/ui` and the icon re-export to `lucide-react` — **zero new deps**), wrapped by
+`CodifyCodeSearch` (`next/dynamic` ssr:false) in the **Studio → Value Sets** tab: pick a code →
+the value-set form prefills. **Browser-verified end-to-end**: on `/studio/cms125`, searching
+Doug's exact phrase "breast cancer screening" returns **"Breast cancer screening (mammography) —
+eCQM CMS125"** in ~39 ms and prefills the form. Upstream engine tests run in our vitest suite
+(178 pass); lint + production build green (the module worker bundles). Standing asks on #310
+narrow to: ship the npm release (then the vendor dir is deleted) + bless the index host.
+
+**All 12 Codex PR findings addressed** (beyond the earlier code-review pass): spec text corrected
+(wc-{pat_id} ids; the numerator is the CQL compliant cutoff — implementation was already right);
+codegen date-guard narrowed to zero-dates-only (valid pre-1901 events band OVERDUE on both paths),
+cohort SUMs COALESCE'd, and a **threshold drift-guard test** pins `WCDB_SQL_MEASURES` to the YAML
+rule blocks / CQL band literals; the compliance API rejects non-calendar dates (2026-02-31 → 400);
+the parity date-sensitivity test now runs **every** SQL measure at the shifted date (the claimed
+4 × 56 × 2 matrix is literally what runs — re-verified green live); demo-doc fallback commands
+fixed (HAPI path starts + repoints properly; the CLI line repeats its executable). Two findings
+were already fixed pre-review (Dockerfile `sql/` COPY; parity-list derivation). The demo prep
+block now records the two local-dev env requirements the browser dry-run surfaced
+(`WORKWELL_AUTH_*` pair; `NEXT_PUBLIC_API_BASE_URL`).
+
+## 2026-07-20 — Doug wave BUILT: shim live, CQL→SQL parity-proven, Codify probed (PRs #308–#315)
+
+The whole wave shipped same-day as a stacked PR chain, every gate green on first live runs:
+
+**Shim (#311).** `wcdb-fhir-shim/` — plain `node:http` + `mysql2` (the only MariaDB-driver home,
+ADR-034) serving the verified WebChart contract straight from dev-wcdb SQL. The existing
+`hapi-live.test.ts` acceptance passed against it **4/4 including bucket-for-bucket parity** with
+the committed-fixture evaluation; `hapi-app-live.test.ts` passed (full in-app ALL_PROGRAMS run,
+56 `wc|` subjects across roster/hierarchy/quality); `evaluate:webchart-live` produced 27 real
+non-MISSING_DATA outcomes (hypertension 3/0/6/47, obesity_bmi 5/0/8/43, diabetes_hba1c 0/0/4/52,
+cholesterol_ldl 0/0/1/55 as-of 2024-06-01). Compose profile `wcdb` (shim :8085, db :33306);
+default stack untouched. One real-HTTP lesson: node's 5s keepAliveTimeout races undici's pooled
+sockets (mid-suite ECONNRESET) — raised to 65s.
+
+**CQL→SQL (#312, #313, #314 — #292 activated).** `generateSql` beside `generateCql` (pure
+templating; the new `loincCodesForMeasure` crosswalk export is the shared code list), committed
+artifacts in `wcdb-fhir-shim/sql/` (freshness-tested), `pnpm generate:sql` as the live demo
+moment; the shim's compliance API (`/compliance/{patientId}/{measureId}` + cohort) executes them
+with bound params only. **The ADR-025 golden-parity gate is GREEN: 4 measures × 56 patients × 2
+evaluation dates, zero SQL-vs-CQL divergence** (`wcdb-sql-parity-live.test.ts`, self-skipping on
+`WCDB_SHIM_PARITY_BASE_URL`). Windowed-recency only by design (no WCDB immunization table ⇒
+series SQL unprovable there). Note: the suspected `WORKWELL_WEBCHART_ENROLLMENT_JSON` doc drift
+was a false positive (the var exists in `run-pipeline.ts`).
+
+**Codify (#310, this PR).** CodeLookup IS published — in `@mieweb/ui@0.6.1-dev.*` prereleases
+only (verified by scratch-install: `CodeLookup`/`CodifyResult`/`HealthSurveillance`; shard-index
+API with `occupational`+`quality` domains and an employer `programs.json` sidecar). Decision:
+document + ask (a dev-prerelease bump days before the demo is the wrong risk) —
+`docs/mieweb-ui-migration/CODELOOKUP_STATUS.md` carries the probe evidence + ready integration
+design (Studio Value Sets tab, admin terminology mappings); Thursday asks = a stable release with
+Healthcare components + the canonical Codify `indexUrl`. Demo script for the call (+ fallbacks +
+owner outreach checklist): `docs/DEMO_2026-07-23.md`.
+
 ## 2026-07-20 — Doug call: three directives; Doug-wave planned (ADR-034)
 
 Doug's 2026-07-19 call (transcripts local, `docs/doug_audio_transcript_*.txt`) reset the near-term

@@ -8,6 +8,24 @@ import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ValueSetRef } from "../types";
 import { valueSetBadgeClass } from "../utils";
 import { ValueSetGovernancePanel } from "./ValueSetGovernancePanel";
+import { CodifyCodeSearch, type CodifyResult } from "./CodifyCodeSearch";
+
+/** Canonical FHIR code-system URI for a Codify codetype (fallback: the codetype itself). */
+function codeSystemUri(codetype: string): string {
+  const uris: Record<string, string> = {
+    LOINC: "http://loinc.org",
+    SNOMED: "http://snomed.info/sct",
+    SNOMEDCT: "http://snomed.info/sct",
+    RXNORM: "http://www.nlm.nih.gov/research/umls/rxnorm",
+    CVX: "http://hl7.org/fhir/sid/cvx",
+    ICD10: "http://hl7.org/fhir/sid/icd-10-cm",
+    ICD10CM: "http://hl7.org/fhir/sid/icd-10-cm",
+    ICD10PCS: "http://hl7.org/fhir/sid/icd-10-pcs",
+    CPT: "http://www.ama-assn.org/go/cpt",
+    HCPCS: "urn:oid:2.16.840.1.113883.6.285",
+  };
+  return uris[codetype.toUpperCase()] ?? codetype;
+}
 
 type Props = {
   measure: MeasureDetail;
@@ -23,16 +41,33 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
   const [oid, setOid] = useState("");
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
+  const [picked, setPicked] = useState<CodifyResult | null>(null);
+
+  function onCodifyPick(result: CodifyResult) {
+    // Prefill the create form from the picked code (author reviews/edits before saving —
+    // Codify assists authoring, it never writes anything itself). The OID is a deterministic
+    // LOCAL identifier derived from the picked code — Codify's `fullid` is a search-record key,
+    // NOT a value-set OID (Codex P1); the author replaces it with a real VSAC OID when one exists.
+    setPicked(result);
+    setName(result.label);
+    setOid(`urn:workwell:codify:${result.codetype.toLowerCase()}:${result.fullcode}`);
+  }
 
   async function createValueSet() {
     onError("");
     try {
-      await api.post("/api/value-sets", { oid, name, version });
+      // The picked code is SENT with the create (Codex P1: previously discarded, leaving an empty,
+      // unresolvable set) — the new set starts with that code and reads Resolved in governance.
+      const codes = picked
+        ? [{ code: picked.fullcode, display: picked.label, system: codeSystemUri(picked.codetype) }]
+        : undefined;
+      await api.post("/api/value-sets", { oid, name, version, ...(codes ? { codes } : {}) });
       setOid("");
       setName("");
       setVersion("");
+      setPicked(null);
       onValueSetsChanged();
-      emitToast("Value set created");
+      emitToast(picked ? "Value set created with the picked code" : "Value set created");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Value set create failed");
     }
@@ -89,6 +124,25 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
       ) : (
         <p className="text-sm text-neutral-600 dark:text-neutral-400">No value sets attached yet.</p>
       )}
+
+      <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Find a code (Codify)</h3>
+      <p className="text-xs text-neutral-600 dark:text-neutral-400">
+        Search MIE&apos;s Codify terminology (ICD-10, SNOMED, LOINC, RxNorm, CVX, HCPCS…) and prefill the
+        form below — search runs in your browser against MIE&apos;s hosted index.
+      </p>
+      <CodifyCodeSearch onSelect={onCodifyPick} />
+      {picked ? (
+        <p aria-live="polite" className="text-xs text-neutral-700 dark:text-neutral-300">
+          Picked:{" "}
+          <span className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px]">
+            {picked.codetype} {picked.fullcode}
+          </span>{" "}
+          — {picked.label} <span className="text-neutral-500">(will be added to the new value set)</span>{" "}
+          <button type="button" className="underline underline-offset-2 hover:no-underline" onClick={() => setPicked(null)}>
+            clear
+          </button>
+        </p>
+      ) : null}
 
       <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Create Value Set</h3>
       <Input label="OID" hideLabel placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
