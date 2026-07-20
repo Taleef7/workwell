@@ -494,6 +494,27 @@ corepack pnpm exec node --import tsx --test src/engine/ingress/webchart/hapi-liv
 Do not set `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` on a deployed stack. With all runtime
 `WORKWELL_WEBCHART_*` variables unset, the feature is inert and the static demo behavior is unchanged.
 
+### Local WCDB shim live-tenant recipe (ADR-034) — SQL-backed alternative to HAPI
+
+`wcdb-fhir-shim/` serves the same WebChart FHIR contract **directly from the dev-wcdb MariaDB**
+(no fixture load step — the SQL *is* the source). Same seam, same verification, different backing
+store; both `wcdb` + shim are gated behind the compose `wcdb` profile so the default stack is
+untouched:
+
+```powershell
+docker compose -f infra/docker-compose.yml --profile wcdb up -d wcdb wcdb-fhir-shim
+Set-Location backend-ts
+$env:WORKWELL_WEBCHART_BASE_URL = "http://localhost:8085"
+$env:WORKWELL_WEBCHART_API_KEY = "local-dev"     # accepted, not enforced by the shim
+corepack pnpm dev
+```
+
+The self-skipping live suite runs against it identically
+(`$env:WORKWELL_WEBCHART_LIVE_TEST_BASE_URL = "http://localhost:8085"`) — verified 2026-07-20:
+all 4 tests pass including the bucket-for-bucket parity vs the committed-fixture evaluation.
+The shim also hosts the CQL→SQL compliance API (#292/#309; see `wcdb-fhir-shim/README.md`).
+Never deployed to the live stack; synthetic dev data only.
+
 ### Email delivery (Sprint 6)
 
 The demo stack runs `WORKWELL_EMAIL_PROVIDER=simulated`. Outreach actions never send a real
