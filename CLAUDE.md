@@ -84,7 +84,33 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-16 — WebChart live-integration wave; prior blocks below)
+## Current Focus (as of 2026-07-20 — Doug-directive wave; prior blocks below)
+
+**2026-07-20 — Doug call (07-19) reset the near-term direction; Thursday 2026-07-23 demo call is
+the target.** Three directives (transcripts local-only; D17's "CQL→SQL parked" is SUPERSEDED in
+the questions doc): **(1) a FHIR shim we own over the WCDB** — new standalone top-level
+**`wcdb-fhir-shim/`** package (plain `node:http` + `mysql2` — the ONLY package allowed a MariaDB
+driver, ADR-034; backend-ts stays driver-free) serving the verified WebChart client contract
+(`/fhir/metadata`, paged `Patient` with same-origin `link[next]`, per-resource `?patient=`
+composition) directly from the dev-wcdb MariaDB (56 patients; compose profile `wcdb`, shim :8085,
+db :33306) — a drop-in for the ADR-032 HAPI simulator, consumed via the existing
+`WORKWELL_WEBCHART_BASE_URL` seam (acceptance = `hapi-live.test.ts` pointed at the shim);
+**(2) CQL→SQL un-parked** ("very valuable to me") — #292 Phases 0–2 active: pure `generateSql`
+beside `generateCql` (windowed-recency only; WCDB has no immunization table), `pnpm generate:sql`
+→ committed `wcdb-fhir-shim/sql/*.sql`, shim `/compliance/{patientId}/{measureId}?start=&end=` +
+cohort endpoint execute them, and a self-skipping parity live test (SQL vs CQL-over-shim-FHIR per
+patient across 56) is the ADR-025 gate — CQL stays the sole authority (ADR-008);
+**(3) MIE ecosystem** — Codify/`Healthcare/CodeLookup` (in MIE's Storybook, NOT exported by
+`@mieweb/ui@0.6.1` — probe dev builds, else document + file the upstream publish ask) + propose
+WorkWell components upstream (ChartDataTable, chip tier, RosterMobileCards, NitroGrid seam,
+OshaReferenceCombobox). **Preflight verified:** wcdb boots, 56 patients, LOINC distinct-patient
+coverage BMI 13 / systolic 9 / HbA1c 4 / LDL 1 ⇒ observation-based demo measures (hypertension
+primary; obesity_bmi likely add; final gate at the codegen PR). **People:** Nicole = quality lead +
+hiring gate (3–4×/week cadence), Bridget schedules (call, don't email), Doug owes an ELM working
+session. Wave plan: `docs/superpowers/plans/2026-07-20-doug-wave.md`; spec:
+`docs/superpowers/specs/2026-07-20-doug-wave-wcdb-shim-cql-sql-design.md`; ADR-034.
+
+## Prior focus (2026-07-16 — WebChart live-integration wave)
 
 **2026-07-16 — Doug meeting (07-15) delivered #254 and unblocked M2.** Confirmed: **A1** — FHIR R4
 is the integration surface; **A3** — auth is SMART (Backend Services, matching ADR-028); **D17** —

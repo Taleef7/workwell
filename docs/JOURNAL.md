@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-07-20 — Doug call: three directives; Doug-wave planned (ADR-034)
+
+Doug's 2026-07-19 call (transcripts local, `docs/doug_audio_transcript_*.txt`) reset the near-term
+direction. Directive 1: build our **own FHIR R4 shim server** directly over the WebChart MariaDB
+dev DB (dev-wcdb, 56 synthetic patients) — the layered/swappable-API contract made concrete; the
+app consumes it through the existing `WORKWELL_WEBCHART_BASE_URL` seam, making the shim a drop-in
+for the ADR-032 HAPI simulator. Directive 2: **CQL→SQL is un-parked** ("very valuable to me") —
+generate SQL from CQL measures + the WCDB schema, run it against the WebChart database, return
+numerator/denominator behind a simple compliance API; this activates #292 Phases 0–2 with the
+ADR-025 parity gate intact (CQL engine over the shim's FHIR output = the golden oracle). Directive
+3: adopt MIE's **Codify** terminology surface (`Healthcare/CodeLookup`) and propose WorkWell
+components upstream to `@mieweb/ui`. The 07-15 D17 answer is superseded in the questions doc.
+
+Planned as a 7-PR stacked wave targeting the Thursday 2026-07-23 call (Dave + wider group;
+Nicole is the quality lead to win): docs gate (ADR-034 — standalone `wcdb-fhir-shim/` package owns
+`mysql2`; backend-ts stays driver-free; SQL generation pure in backend-ts, committed artifacts,
+shim executes) → shim scaffold + Patient paging → clinical endpoints (acceptance = the existing
+`hapi-live.test.ts` 56-patient parity suite pointed at the shim) → `generateSql` codegen +
+`pnpm generate:sql` → shim compliance API → SQL-vs-CQL parity live test → Codify spike + demo
+script. Preflight done: wcdb container boots; 56 patients; LOINC coverage counted (BMI 13 /
+systolic 9 / HbA1c 4 / LDL 1 distinct patients ⇒ observation-based demo measures, final set gated
+at the codegen PR). Spec: `docs/superpowers/specs/2026-07-20-doug-wave-wcdb-shim-cql-sql-design.md`;
+plan: `docs/superpowers/plans/2026-07-20-doug-wave.md`.
+
 ## 2026-07-17 — PR #307 review hardening: fail-closed paging and complete live identity reads
 
 The review pass made authoritative WebChart population replacement fail closed: the in-app run now
