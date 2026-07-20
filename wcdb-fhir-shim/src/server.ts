@@ -149,7 +149,7 @@ export function createShimServer(deps: ShimDeps): Server {
     measureSql: deps.measureSql ?? loadMeasureSql(),
     today: deps.today ?? (() => new Date().toISOString().slice(0, 10)),
   };
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     void route(resolved, req, res).catch((err: unknown) => {
       if (err instanceof ComplianceError) {
         // ComplianceError only arises on the (non-FHIR) /compliance routes — plain JSON error.
@@ -162,6 +162,12 @@ export function createShimServer(deps: ShimDeps): Server {
       else res.end();
     });
   });
+  // Outlive undici's default keep-alive reuse window: node's 5s default lets the server close an
+  // idle pooled socket exactly as a client (the WebChart client, the parity suite) reuses it —
+  // a mid-suite ECONNRESET race. 65s (> any client idle window here) removes it.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+  return server;
 }
 
 /**
