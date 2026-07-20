@@ -96,6 +96,30 @@ jobs:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
         run: pnpm test
 
+  wcdb-fhir-shim:
+    name: WCDB FHIR Shim — Typecheck & Test
+    runs-on: ubuntu-latest
+    # The standalone dev/demo shim (ADR-034, #309). Its unit tests run over a STUBBED DB — no
+    # Docker, no MariaDB — so CI stays container-free; the live parity/acceptance suites remain
+    # local-only self-skipping tests. Guards the @statement artifact-parsing contract against
+    # backend-ts's generate:sql output format drifting.
+    defaults:
+      run:
+        working-directory: wcdb-fhir-shim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: wcdb-fhir-shim/package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test (stubbed DB)
+        run: npm test
+
   e2e:
     name: Playwright E2E (manual)
     runs-on: ubuntu-latest
