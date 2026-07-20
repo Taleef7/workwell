@@ -1,5 +1,44 @@
 # Architecture Decision Records
 
+## ADR-034: Standalone WCDB FHIR shim package (`wcdb-fhir-shim/`) owns the MariaDB driver; CQL→SQL generation stays pure in backend-ts
+
+**Status:** Accepted (2026-07-20).
+
+**Context:** The 2026-07-19 Doug call gave two build directives that supersede the 2026-07-15 D17
+position ("CQL runs our side; CQL→SQL parked"): (1) build our **own** small FHIR R4 facade directly
+over the WebChart MariaDB dev database (`ghcr.io/mieweb/dev-wcdb`, 56 synthetic patients) — a "shim"
+proving the layered/swappable-API contract — and (2) translate CQL measures + the WCDB schema into
+**SQL that runs against the WebChart database itself**, returning numerator/denominator behind a
+simple compliance API ("is this patient compliant for this measure in this range?"). Directive (2)
+activates epic #292 (E9 Option B) ahead of its recorded trigger conditions — Doug's direct request
+plus the in-hand dev-wcdb schema satisfy the gate. Executing SQL requires a MySQL/MariaDB client,
+but backend-ts is deliberately driver-free (locked 2026-07-03: the dev-DB export shells
+`docker exec … mysql`), and the `MeasureExecutor` port (ADR-025) is bundle-in/DB-less by design —
+an impedance mismatch with set-at-a-time SQL.
+
+**Decision:** A new top-level **standalone package `wcdb-fhir-shim/`** hosts both directives'
+runtime: the FHIR facade (plain `node:http`; endpoints matching the verified WebChart client
+contract — `{base}/fhir` root, paged `Patient` search with same-origin `link[next]`, per-resource
+`?patient=` composition, `/fhir/metadata`) and the compliance API that executes generated SQL.
+**`mysql2` is approved as a dependency of this package only** — backend-ts remains
+MariaDB-driver-free. CQL→SQL **generation** (`generateSql`, sibling to `generateCql`) lives in
+backend-ts as pure, dependency-free templating over the existing rule-param shapes and terminology
+crosswalk; its output is committed as reviewed `.sql` artifacts in `wcdb-fhir-shim/sql/`
+(freshness-tested), which the shim executes with bound parameters. The bundle-shaped
+`sqlPushdownExecutor` stub stays inert; wiring SQL into the app's executor seam remains gated on
+per-measure golden parity (ADR-025), which this wave proves externally: the CQL engine evaluating
+the shim's FHIR output is the parity oracle for the SQL results over the same 56 patients.
+Scope v1 = windowed-recency measures only (WCDB has no immunization table, so series-completion
+SQL could never reach parity there).
+
+**Consequences:** The app is byte-identical when the WebChart seam is unset; the shim + `wcdb`
+containers join `infra/docker-compose.yml` under an opt-in `wcdb` profile. One new dependency
+(`mysql2`), isolated in a package the deployed stack never loads. The shim is dev/demo-grade by
+declared intent (no auth enforcement, synthetic data only, never deployed to the live stack —
+mirrors Doug's "you don't even need security"). CQL remains the sole compliance authority
+(ADR-008): SQL results serve only the shim's demo API until parity-gated per ADR-025.
+Reversal = delete the package + compose profile; backend-ts codegen additions are pure and inert.
+
 ## ADR-033: Inject a schema-free live WebChart directory into population read models
 
 **Status:** Accepted (2026-07-17).
