@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-07-20 (night) — Codex gpt-5.6 review sweep over the whole wave (#308–#316), all findings fixed
+
+A second, deeper Codex pass (gpt-5.6-sol, high reasoning, one review per stacked PR against its
+stack parent) surfaced **8 P1 + 14 P2 + 1 P3**; every finding was fixed at its origin branch and
+cascade-merged up the stack. Highlights, by theme: **fail-closed everywhere** — the shim's
+compliance endpoints now 409 any measure not on a `PARITY_CERTIFIED` allowlist (ADR-025 belt-and-
+braces), and the parity suite FAILS (never skips) when its env var is set but the shim is
+unreachable; **ingest hardened** — manifest-exact rollback (a natural-key collision with a real
+WebChart patient can never be deleted), one transaction per run, `--dry-run`/`--rollback` mutual
+exclusion, a local-`wc_*`-only target guard, an append-only `ingest-audit.log`, strict YAML value
+typing, and model-catalog **type** validation (declared `data_type` per written field); **gate
+depth** — the drift guard pins all four measures to their hand-written CQL band literals, the
+freshness + parity suites reject orphaned SQL artifacts, non-vacuity asserts (band coverage + a
+date-shift requirement) close the "passes on a corpus that can't fail" hole; **Codify corrected**
+— the picked code now lands IN the created value set (`POST /api/value-sets` accepts validated
+`codes[]` via the existing `setCodes`; the prefilled OID is an honest local urn, not Codify's
+record key), the vendored component gains stale-response invalidation, worker-failure error
+states + Retry, and the index-URL override is actually deployable (Dockerfile ARG + workflow
+build-arg). Docs corrected in-PR (spec scope, seam env pair, ordering-vs-ADR-025 note; ADR-034
+addendum records `yaml`/`tsx`). Everything re-verified: shim 27/27, backend typecheck + touched
+suites green, frontend lint/vitest 178/178/build green, live parity 3/3 against the rebuilt
+container, and the full ingest loop re-run live (56→60→56, designed verdicts exact). Resolution
+comments posted on all seven PRs.
+
 ## 2026-07-20 (evening) — YAML patient ingest into WebChart + model-catalog validation (PR-8)
 
 Doug's late WhatsApp additions ("ask ai to generate patient data in yaml → ingest → we can put
