@@ -1,2 +1,4 @@
 node_modules/
 shim.log
+*.ingested.json
+ingest-audit.log

@@ -34,6 +34,9 @@ function stubDb(): ShimDb {
     proceduresForPatient: async (patId) => PROCS[patId] ?? [],
     queryRows: async () => [],
     execute: async () => ({}),
+    withTransaction: async () => {
+      throw new Error("read-only test stub");
+    },
     end: async () => {},
   };
 }
