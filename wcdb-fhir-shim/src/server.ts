@@ -57,10 +57,17 @@ function parseOffset(url: URL): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
-/** Absolute same-origin URL for the next page, minted from the request's own Host header. */
+/**
+ * Absolute same-origin URL for the next page, minted from the request's own Host header (echoing
+ * the caller-supplied Host is what guarantees same-origin under the WebChart client's guard; a
+ * forged Host only mis-links the forger). Honors x-forwarded-proto so the link survives a TLS
+ * proxy — otherwise the scheme mismatch would read as off-origin and hard-fail pagination.
+ */
 function nextPageUrl(req: IncomingMessage, url: URL, count: number, nextOffset: number): string {
   const host = req.headers.host ?? "localhost";
-  const next = new URL(url.pathname, `http://${host}`);
+  const fwd = req.headers["x-forwarded-proto"];
+  const proto = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim() || "http";
+  const next = new URL(url.pathname, `${proto}://${host}`);
   for (const [k, v] of url.searchParams) if (k !== "_offset") next.searchParams.set(k, v);
   next.searchParams.set("_count", String(count));
   next.searchParams.set("_offset", String(nextOffset));
