@@ -60,13 +60,35 @@ export interface SqlExecutor {
 
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** True only for a real calendar date (Codex P2: `2026-02-31` must 400, not reach `CAST(? AS DATE)`). */
+/**
+ * True only for a real calendar date (Codex P2: `2026-02-31` must 400, not reach `CAST(? AS DATE)`).
+ * Computed arithmetically — `Date.UTC` maps years 0–99 to 1900–1999, which would wrongly reject
+ * valid low-year ISO dates (Codex P2 round 2).
+ */
 function isRealCalendarDate(v: string): boolean {
   if (!DATE_SHAPE.test(v)) return false;
   const [y, m, d] = v.split("-").map(Number) as [number, number, number];
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d && y >= 1;
+  if (y < 1 || m < 1 || m > 12 || d < 1) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]!;
+  return d <= daysInMonth;
 }
+
+/**
+ * ADR-025 fail-closed gate: a measure's generated SQL may SERVE only after its per-patient
+ * SQL-vs-CQL golden parity has been proven (the wave's live parity suite,
+ * `backend-ts/src/engine/ingress/webchart/wcdb-sql-parity-live.test.ts` — certified 2026-07-20:
+ * 4 measures × 56 patients × 2 evaluation dates, zero divergence). A committed artifact whose
+ * measure is NOT listed here still loads, but both compliance endpoints refuse it with 409 —
+ * generated SQL is never served on assertion alone. Adding a measure here requires a green parity
+ * run for that measure first.
+ */
+export const PARITY_CERTIFIED: ReadonlySet<string> = new Set([
+  "hypertension",
+  "obesity_bmi",
+  "diabetes_hba1c",
+  "cholesterol_ldl",
+]);
 
 export class ComplianceError extends Error {
   constructor(
@@ -107,6 +129,12 @@ export async function cohortCompliance(
 ): Promise<Record<string, unknown>> {
   const m = sqlByMeasure.get(measureId);
   if (!m) throw new ComplianceError(404, `no generated SQL for measure '${measureId}'`);
+  if (!PARITY_CERTIFIED.has(measureId)) {
+    throw new ComplianceError(
+      409,
+      `measure '${measureId}' has generated SQL but has not passed the ADR-025 SQL-vs-CQL parity gate — refusing to serve an unverified SQL verdict`,
+    );
+  }
   const [agg] = await executor.queryRows(m.statements["cohort"]!, [period.end]);
   const patients = await executor.queryRows(m.statements["per-patient"]!, [period.end]);
   const denominator = num(agg?.denominator);
@@ -143,6 +171,12 @@ export async function patientCompliance(
 ): Promise<Record<string, unknown>> {
   const m = sqlByMeasure.get(measureId);
   if (!m) throw new ComplianceError(404, `no generated SQL for measure '${measureId}'`);
+  if (!PARITY_CERTIFIED.has(measureId)) {
+    throw new ComplianceError(
+      409,
+      `measure '${measureId}' has generated SQL but has not passed the ADR-025 SQL-vs-CQL parity gate — refusing to serve an unverified SQL verdict`,
+    );
+  }
   const patMatch = /^(?:wc-)?(\d+)$/.exec(patientId);
   if (!patMatch) throw new ComplianceError(400, `patientId must be 'wc-<n>' or a numeric pat_id (got '${patientId}')`);
   const [row] = await executor.queryRows(m.statements["single-patient"]!, [period.end, Number(patMatch[1])]);
