@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-07-20 (evening) — YAML patient ingest into WebChart + model-catalog validation (PR-8)
+
+Doug's late WhatsApp additions ("ask ai to generate patient data in yaml → ingest → we can put
+into webchart"; "look at the table named model … it describes every object and field … easier to
+port") closed the loop the wave had left read-only. The shim gains `npm run ingest` (`ingest.ts` +
+CLI + the `yaml` package as its second dependency): a small YAML patient schema (an AI-generated
+`patients.example.yaml` ships with the generation prompt in its header), inserted into
+`patients` + `observations_current` with LOINCs resolved fail-closed against `observation_codes`
+(codes are never invented), idempotent by natural key, and exactly reversible via `--rollback`.
+Before any write, every touched field is validated against **WebChart's own `model` schema
+catalog** (`model-metadata.ts`; 685 objects / 7,630 fields in the dev seed) — Doug's
+portability point made operational rather than a talking point.
+
+**Live-verified end-to-end:** ingest → population 56→60 → the four designed outcomes band exactly
+as authored (Zainab COMPLIANT, Marcus DUE_SOON@349d, Priya OVERDUE, Omar MISSING_DATA) → **CQL and
+the generated SQL agree on all four** → re-run skips (idempotent) → rollback restores 56. 21 shim
+tests (5 new files' worth), typecheck green. Demo script gains beat 5 ("the full loop"); the live
+acceptance suites still pin the 56-patient seed, so the demo rolls back before running them.
+Dev-database only; no PHI; the deployed stack is untouched.
+
 ## 2026-07-20 (later) — Codify LIVE in Studio; all Codex review findings addressed
 
 **Codify is implemented, not just probed** (reversing the earlier same-day defer — the owner asked

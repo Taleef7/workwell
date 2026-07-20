@@ -61,7 +61,7 @@ export interface SqlExecutor {
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** True only for a real calendar date (Codex P2: `2026-02-31` must 400, not reach `CAST(? AS DATE)`). */
-function isRealCalendarDate(v: string): boolean {
+export function isRealCalendarDate(v: string): boolean {
   if (!DATE_SHAPE.test(v)) return false;
   const [y, m, d] = v.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, m - 1, d));

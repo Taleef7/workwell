@@ -49,6 +49,24 @@ All endpoints are read-only — no state changes, hence no audit surface.
 there) — never edited by hand and never assembled at request time; the shim only binds `?` params.
 CQL remains the sole compliance authority (ADR-008); these results are demo/parity surface only.
 
+## YAML patient ingest (Doug: "ask ai to generate patient data in yaml … put into webchart")
+
+```bash
+npm run ingest -- --file patients.example.yaml --dry-run   # plan only, writes nothing
+npm run ingest -- --file patients.example.yaml             # insert into the dev-wcdb
+npm run ingest -- --file patients.example.yaml --rollback  # delete exactly the file's patients
+```
+
+The WRITE half of the demo loop: AI-generated YAML patients (schema in `src/ingest.ts` /
+`patients.example.yaml`) are inserted into `patients` + `observations_current`, after which the
+whole read pipeline picks them up immediately — shim FHIR, CQL, generated SQL, dashboards.
+Safeties: every touched field is validated against **WebChart's own `model` schema catalog**
+(`src/model-metadata.ts` — the self-describing schema Doug pointed at, 685 objects / 7,630 fields
+in the dev seed) before any write; LOINCs must already exist in `observation_codes` (fail-closed —
+codes are never invented); idempotent by (firstName, lastName, birthDate); `--rollback` is exact.
+**Dev database only** — synthetic data, never a live WebChart. Note: the live acceptance suites
+pin the 56-patient seed population, so roll back before running them.
+
 ## FHIR mapping
 
 `src/fhir-mapping.ts` intentionally duplicates the shapes of
