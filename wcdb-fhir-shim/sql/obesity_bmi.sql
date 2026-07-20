@@ -24,7 +24,7 @@ LEFT JOIN (
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN ('39156-5')
     AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) > DATE('1900-01-01')
+    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
 WHERE p.is_patient = 1
@@ -50,7 +50,7 @@ LEFT JOIN (
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN ('39156-5')
     AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) > DATE('1900-01-01')
+    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
 WHERE p.is_patient = 1
@@ -59,11 +59,11 @@ WHERE p.is_patient = 1
 -- @statement cohort  (params: eval_date)
 SELECT
   COUNT(*) AS denominator,
-  SUM(outcome_status = 'COMPLIANT') AS numerator,
-  SUM(outcome_status = 'COMPLIANT') AS compliant,
-  SUM(outcome_status = 'DUE_SOON') AS due_soon,
-  SUM(outcome_status = 'OVERDUE') AS overdue,
-  SUM(outcome_status = 'MISSING_DATA') AS missing_data
+  COALESCE(SUM(outcome_status = 'COMPLIANT'), 0) AS numerator,
+  COALESCE(SUM(outcome_status = 'COMPLIANT'), 0) AS compliant,
+  COALESCE(SUM(outcome_status = 'DUE_SOON'), 0) AS due_soon,
+  COALESCE(SUM(outcome_status = 'OVERDUE'), 0) AS overdue,
+  COALESCE(SUM(outcome_status = 'MISSING_DATA'), 0) AS missing_data
 FROM (
   SELECT
     p.pat_id,
@@ -84,7 +84,7 @@ FROM (
     JOIN observation_codes oc ON oc.obs_code = o.obs_code
     WHERE oc.loinc_num IN ('39156-5')
       AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-      AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) > DATE('1900-01-01')
+      AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
     GROUP BY o.pat_id
   ) last_ev ON last_ev.pat_id = p.pat_id
   WHERE p.is_patient = 1
