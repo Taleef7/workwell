@@ -128,9 +128,38 @@ function toRef(vs: ValueSetRecord): ValueSetRef {
   };
 }
 
-export async function createValueSet(store: ValueSetStore, oid: string, name: string, version: string | null): Promise<string> {
+const MAX_CREATE_CODES = 200;
+
+export async function createValueSet(
+  store: ValueSetStore,
+  oid: string,
+  name: string,
+  version: string | null,
+  codes?: CodeEntry[],
+): Promise<string> {
   if (!oid?.trim() || !name?.trim()) throw new ValueSetError("oid and name are required");
-  return store.create(oid, name, version);
+  // Optional seed codes (the Studio Codify pick — Codex P1: a picked code must land IN the set,
+  // not be discarded). Validated strictly; an empty/absent array keeps the historical empty-set
+  // create. Reuses the existing setCodes surface — no schema, no new store method.
+  if (codes !== undefined) {
+    if (!Array.isArray(codes) || codes.length > MAX_CREATE_CODES) {
+      throw new ValueSetError(`codes must be an array of at most ${MAX_CREATE_CODES} entries`);
+    }
+    for (const c of codes) {
+      if (!c || typeof c.code !== "string" || !c.code.trim() || typeof c.system !== "string" || !c.system.trim()) {
+        throw new ValueSetError("each code entry requires non-empty string 'code' and 'system' (plus 'display')");
+      }
+      if (typeof c.display !== "string") throw new ValueSetError("each code entry requires a string 'display'");
+    }
+  }
+  const id = await store.create(oid, name, version);
+  if (codes && codes.length > 0) {
+    await store.setCodes(
+      id,
+      codes.map((c) => ({ code: c.code.trim(), display: c.display.trim(), system: c.system.trim() })),
+    );
+  }
+  return id;
 }
 
 export async function attachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string, actor = "system"): Promise<void> {

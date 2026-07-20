@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { generateSql, toSqlFile } from "./generate-sql.ts";
@@ -88,9 +88,14 @@ test("DRIFT GUARD: WCDB_SQL_MEASURES thresholds match the canonical YAML rule bl
     assert.equal(byId.get(id)?.dueSoonDays, dueSoonDays, `${id} dueSoonDays == YAML`);
   }
 
-  // obesity_bmi + diabetes_hba1c: hand-written CQL — authoritative source = the band literals
-  // (`<= compliantMax`, `<= windowDays`, `> windowDays` on consecutive defines).
+  // ALL FOUR measures: the hand-written CQL is the runtime build source (the YAML rule block is
+  // authoring metadata), so every measure's SQL bands are pinned to the band literals in its .cql
+  // (`<= compliantMax`, `<= windowDays`, `> windowDays` on consecutive defines) — a CQL threshold
+  // edit that skips the YAML can no longer leave stale committed SQL behind a green suite
+  // (Codex P2 round 2: the YAML-only pin missed exactly that path for hypertension/cholesterol).
   for (const [id, cqlFile] of [
+    ["hypertension", "hypertension.cql"],
+    ["cholesterol_ldl", "cholesterol_ldl.cql"],
     ["obesity_bmi", "obesity_bmi.cql"],
     ["diabetes_hba1c", "diabetes_hba1c.cql"],
   ] as const) {
@@ -105,8 +110,21 @@ test("DRIFT GUARD: WCDB_SQL_MEASURES thresholds match the canonical YAML rule bl
   }
 });
 
-test("FRESHNESS: committed wcdb-fhir-shim/sql artifacts are byte-identical to a fresh render", () => {
+test("FRESHNESS: committed wcdb-fhir-shim/sql artifacts are byte-identical to a fresh render, with NO extras", () => {
   const outDir = fileURLToPath(new URL("../../../../../wcdb-fhir-shim/sql", import.meta.url));
+  // Exact-set check first (Codex P2): a measure removed/renamed in WCDB_SQL_MEASURES must not
+  // leave its old artifact behind — the shim would keep loading and serving obsolete SQL.
+  const committedSet = readdirSync(outDir)
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => f.slice(0, -4))
+    .sort();
+  const renderedSet = [...renderAll().keys()].sort();
+  assert.deepEqual(
+    committedSet,
+    renderedSet,
+    "wcdb-fhir-shim/sql/ holds artifacts the registry no longer renders (or is missing some) — " +
+      "delete orphans / run 'pnpm generate:sql' and commit",
+  );
   for (const [measureId, content] of renderAll()) {
     let committed: string;
     try {

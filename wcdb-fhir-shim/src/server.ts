@@ -46,13 +46,23 @@ export interface ShimDeps {
   today?: () => string;
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  contentType = "application/fhir+json; charset=utf-8",
+): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
-    "content-type": "application/fhir+json; charset=utf-8",
+    "content-type": contentType,
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+/** The compliance + health surfaces are NOT FHIR — plain JSON, so media-type dispatch is honest. */
+function sendPlainJson(res: ServerResponse, status: number, body: unknown): void {
+  sendJson(res, status, body, "application/json; charset=utf-8");
 }
 
 function operationOutcome(severity: "error" | "warning", code: string, diagnostics: string): unknown {
@@ -142,7 +152,8 @@ export function createShimServer(deps: ShimDeps): Server {
   const server = createServer((req, res) => {
     void route(resolved, req, res).catch((err: unknown) => {
       if (err instanceof ComplianceError) {
-        if (!res.headersSent) sendJson(res, err.status, operationOutcome("error", "processing", err.message));
+        // ComplianceError only arises on the (non-FHIR) /compliance routes — plain JSON error.
+        if (!res.headersSent) sendPlainJson(res, err.status, { error: { status: err.status, message: err.message } });
         else res.end();
         return;
       }
@@ -173,7 +184,7 @@ async function routeCompliance(deps: Required<ShimDeps>, url: URL, res: ServerRe
     second === "cohort"
       ? await cohortCompliance(deps.measureSql, deps.db, first!, period)
       : await patientCompliance(deps.measureSql, deps.db, first!, second!, period);
-  sendJson(res, 200, body);
+  sendPlainJson(res, 200, body);
   return true;
 }
 
@@ -199,7 +210,7 @@ async function route(deps: Required<ShimDeps>, req: IncomingMessage, res: Server
   }
   if (url.pathname.startsWith("/compliance/") && (await routeCompliance(deps, url, res))) return;
   if (url.pathname === "/health") {
-    sendJson(res, 200, { ok: true });
+    sendPlainJson(res, 200, { ok: true });
     return;
   }
   sendJson(res, 404, operationOutcome("error", "not-found", `no route for ${url.pathname}`));
