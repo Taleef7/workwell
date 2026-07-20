@@ -242,11 +242,23 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
 
   // ---- lifecycle (POST) ----------------------------------------------------
   if (req.method === "POST") {
-    // Create a value set (Studio Value Sets tab) → { id }.
+    // Create a value set (Studio Value Sets tab) → { id }. Optional `codes` seeds the set (the
+    // Codify pick) — validated in createValueSet; absent keeps the historical empty-set create.
     if (pathname === "/api/value-sets") {
-      const body = (await req.json().catch(() => ({}))) as { oid?: string; name?: string; version?: string | null };
+      const body = (await req.json().catch(() => ({}))) as {
+        oid?: string;
+        name?: string;
+        version?: string | null;
+        codes?: Array<{ code: string; display: string; system: string }>;
+      };
       try {
-        const id = await createValueSet(await valueSetStore(env), body.oid ?? "", body.name ?? "", body.version ?? null);
+        const id = await createValueSet(
+          await valueSetStore(env),
+          body.oid ?? "",
+          body.name ?? "",
+          body.version ?? null,
+          body.codes,
+        );
         return json({ id });
       } catch (err) {
         if (err instanceof ValueSetError) return json({ error: "invalid_request", message: err.message }, 400);
