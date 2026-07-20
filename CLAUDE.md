@@ -110,6 +110,16 @@ hiring gate (3–4×/week cadence), Bridget schedules (call, don't email), Doug 
 session. Wave plan: `docs/superpowers/plans/2026-07-20-doug-wave.md`; spec:
 `docs/superpowers/specs/2026-07-20-doug-wave-wcdb-shim-cql-sql-design.md`; ADR-034.
 
+**STATUS 2026-07-20 EOD — the wave is BUILT; all gates green on first live runs (PRs #308–#315,
+stacked, awaiting owner review+merge).** Shim live against dev-wcdb (hapi-live 4/4 incl.
+fixture parity; hapi-app-live 1/1; CLI 27 real outcomes); **CQL→SQL parity-proven** —
+`pnpm generate:sql` → committed `wcdb-fhir-shim/sql/*.sql` → shim `/compliance` API →
+**ADR-025 golden gate GREEN (4 measures × 56 patients × 2 dates, zero divergence)**; Codify
+probed (CodeLookup exists in `@mieweb/ui` dev prereleases only — status doc + upstream asks in
+`docs/mieweb-ui-migration/CODELOOKUP_STATUS.md`). **Demo script:** `docs/DEMO_2026-07-23.md`
+(incl. fallbacks + the owner outreach checklist — message Doug re attendees, intro note to
+Nicole, dry-runs Wed PM). Remaining: owner PR reviews/merges, Wed dry-runs, outreach.
+
 ## Prior focus (2026-07-16 — WebChart live-integration wave)
 
 **2026-07-16 — Doug meeting (07-15) delivered #254 and unblocked M2.** Confirmed: **A1** — FHIR R4
