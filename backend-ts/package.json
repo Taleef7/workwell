@@ -27,6 +27,7 @@
     "generate:webchart-import": "tsx scripts/generate-webchart-import.ts",
     "compile-measures": "node scripts/compile-measures.mjs",
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
+    "generate:sql": "tsx src/engine/cql/codegen/generate-sql-bin.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
