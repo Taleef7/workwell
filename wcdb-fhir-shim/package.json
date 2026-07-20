@@ -10,12 +10,14 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "ingest": "tsx src/ingest-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "mysql2": "^3.14.1",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

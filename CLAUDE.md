@@ -121,10 +121,15 @@ mieweb/ui source per the ADR-007 playbook, zero new deps, searching MIE's hosted
 eCQM CMS125 entry in ~39 ms → form prefill; status/asks:
 `docs/mieweb-ui-migration/CODELOOKUP_STATUS.md`). **All 12 Codex PR findings addressed** (spec
 text, zero-date-only guard, COALESCE sums, threshold drift-guard test, calendar-date validation,
-full 4×56×2 parity matrix, demo-doc fallbacks; 2 were pre-fixed). **Demo script:**
-`docs/DEMO_2026-07-23.md` (incl. fallbacks + the owner outreach checklist — message Doug re
-attendees, intro note to Nicole, dry-runs Wed PM). Remaining: owner PR reviews/merges, Wed
-dry-runs, outreach.
+full 4×56×2 parity matrix, demo-doc fallbacks; 2 were pre-fixed). **The write loop is closed (PR #316,
+Doug's WhatsApp additions):** `npm run ingest` in the shim takes AI-generated YAML patients into
+the WebChart dev DB — every written field validated against WebChart's self-describing `model`
+schema catalog (685 objects / 7,630 fields), fail-closed LOINC resolution, idempotent, exact
+`--rollback`; live-verified 56→60→56 with CQL==SQL agreement on all four designed outcomes.
+**Demo script:**
+`docs/DEMO_2026-07-23.md` (5 beats incl. the full loop; fallbacks + the owner outreach
+checklist — message Doug re attendees, intro note to Nicole, dry-runs Wed PM). Remaining: owner
+PR reviews/merges (#308→#311→#312→#313→#314→#315→#316), Wed dry-runs, outreach.
 
 ## Prior focus (2026-07-16 — WebChart live-integration wave)
 
