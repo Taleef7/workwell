@@ -28,6 +28,8 @@ Transcripts: `docs/doug_audio_transcript_1.txt` / `_2.txt` (local-only). Three d
                     │        ▲                                   (parity ORACLE)     │
                     └────────┼──────────────────────────────────────────────────────┘
    WORKWELL_WEBCHART_BASE_URL=http://localhost:8085
+   + WORKWELL_WEBCHART_API_KEY=local-dev   (BOTH required — the seam
+     activates only with an auth mode; base URL alone stays inert)
                              │
 ┌─────────────── wcdb-fhir-shim/ (standalone, owns mysql2) ────────────────┐
 │  /fhir/metadata            /fhir/Patient?_count=N (same-origin link[next])│
@@ -47,9 +49,17 @@ Transcripts: `docs/doug_audio_transcript_1.txt` / `_2.txt` (local-only). Three d
   same acceptance tests (`hapi-live.test.ts` 56-patient parity), same in-app live-tenant pipeline.
 - **Generation vs execution split (ADR-034):** backend-ts generates SQL purely (no driver); the
   shim executes it with bound parameters. The bundle-shaped `sqlPushdownExecutor` stub stays inert.
-- **Parity (ADR-025):** per measure, per patient across the 56-patient cohort, the SQL verdict
-  must equal the CQL engine's verdict computed over the shim's own FHIR output. Divergence ⇒ fix
-  the SQL, never the oracle.
+- **Parity (ADR-025):** per measure, per patient across the whole cohort, on two evaluation
+  dates, the SQL verdict must equal the CQL engine's verdict computed over the shim's own FHIR
+  output. Divergence ⇒ fix the SQL, never the oracle. **Serving is fail-closed independent of PR
+  ordering** (Codex P1): the shim's compliance endpoints 409 any measure not on its
+  `PARITY_CERTIFIED` allowlist, so an artifact existing on disk never implies permission to serve —
+  a measure enters the allowlist only after its parity run is green. **Band coverage** (Codex P1
+  round 2): the seed corpus is asserted to exercise COMPLIANT/OVERDUE/MISSING_DATA; the DUE_SOON
+  band has no seed subject at the parity dates, so the designed ingest fixtures
+  (`patients.example.yaml` — Marcus Demoson lands DUE_SOON at 349 days) supply it: with them
+  ingested the suite hard-requires DUE_SOON, and it also asserts at least one subject changes
+  outcome between the two dates (an end-date-ignoring SQL bug cannot pass invisibly).
 
 ## 3. Shim contract details (verified from `webchart-client.ts`)
 
@@ -89,6 +99,12 @@ Data reality (verified 2026-07-20): LOINC by distinct patients — BMI `39156-5`
   `Rule` union + `validateRule` + `MEASURE_BINDINGS`/crosswalk LOINCs. Pure string templating,
   zero deps, parameterized (`?` placeholders) MariaDB SQL over
   `patients ⋈ observations_current ⋈ observation_codes`.
+- **Honest scope (Codex P2):** this is *rule-parameter→SQL templating*, not general CQL parsing.
+  `hypertension`/`cholesterol_ldl` carry YAML `rule:` blocks; `obesity_bmi`/`diabetes_hba1c` do
+  not — their registry params are pinned to the **hand-written CQL band literals** by the
+  drift-guard test (which, after review round 2, pins ALL FOUR measures to their `.cql` bands, the
+  runtime build source, in addition to the YAML where present). A threshold edit anywhere fails
+  the suite until the params and regenerated SQL follow.
 - Windowed-recency semantics mirror the CQL bands exactly: denominator = eligible patients
   (is_patient=1); **numerator = COMPLIANT only**, i.e. days-since-most-recent-event
   `<= windowDays − dueSoonDays` (the CQL "Compliant" cutoff — hypertension: ≤335). The full band
