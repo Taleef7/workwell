@@ -76,3 +76,53 @@ export function validateAgainstModel(
   const objects = Object.keys(touches).length;
   return `validated ${checked} field(s) across ${objects} object(s) against WebChart's model catalog`;
 }
+
+/** The value KIND a writer intends to store in a field — checked against the catalog's data_type. */
+export type ValueKind = "string" | "number" | "datetime";
+
+// Order matters: "datetime"/"timestamp" contain 'time' and must not fall through to the numeric
+// bucket; unknown data_type strings (a ported WebChart may extend the vocabulary) are skipped, not
+// failed — the field-existence check above remains the hard floor.
+const KIND_OF_DATA_TYPE: Array<[RegExp, ValueKind]> = [
+  [/date|time/i, "datetime"],
+  [/char|text|enum|blob/i, "string"],
+  [/int|dec|float|double|bit|num/i, "number"],
+];
+
+export function kindOfDataType(dataType: string): ValueKind | undefined {
+  for (const [re, kind] of KIND_OF_DATA_TYPE) if (re.test(dataType)) return kind;
+  return undefined;
+}
+
+/**
+ * Assert the catalog's declared data_type is compatible with the value kind a write plan intends
+ * for each field (dev seed vocabulary: varchar/int/smallint/decimal/datetime). Catches the "a
+ * ported/newer WebChart kept the field name but changed its type" case BEFORE any write, instead
+ * of as a mid-batch MariaDB error. Returns a summary line; throws listing every mismatch.
+ */
+export function validateFieldTypes(
+  catalog: Map<string, ModelField[]>,
+  expectations: Record<string, Record<string, ValueKind>>,
+): string {
+  const mismatches: string[] = [];
+  let checked = 0;
+  for (const [object, fields] of Object.entries(expectations)) {
+    const byField = new Map((catalog.get(object) ?? []).map((f) => [f.field, f]));
+    for (const [field, expected] of Object.entries(fields)) {
+      const entry = byField.get(field);
+      if (!entry) continue; // absence is validateAgainstModel's finding, not a type mismatch
+      const declared = kindOfDataType(entry.dataType);
+      if (declared === undefined) continue; // unknown vocabulary — stay lenient
+      checked++;
+      if (declared !== expected) {
+        mismatches.push(
+          `${object}.${field}: model declares ${entry.dataType} (${declared}) but ingest writes ${expected}`,
+        );
+      }
+    }
+  }
+  if (mismatches.length) {
+    throw new Error(`WebChart model-catalog TYPE validation failed:\n  ${mismatches.join("\n  ")}`);
+  }
+  return `type-checked ${checked} field(s) against the model catalog's declared data types`;
+}
