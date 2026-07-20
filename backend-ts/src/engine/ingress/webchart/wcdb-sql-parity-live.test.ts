@@ -24,11 +24,16 @@ import assert from "node:assert/strict";
 import { fixtureWebChartClient, httpWebChartClient } from "./webchart-client.ts";
 import { webChartDataSource } from "../data-source.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
+import { WCDB_SQL_MEASURES } from "../../cql/codegen/generate-sql-cli.ts";
 
 const BASE_URL = (process.env.WCDB_SHIM_PARITY_BASE_URL ?? "").trim().replace(/\/+$/, "");
 const PARITY_DATE = "2024-06-01"; // data-contemporaneous with the dev-wcdb seed (the devdb CLI default)
-/** Must stay in step with WCDB_SQL_MEASURES (generate-sql-cli.ts); the test fails loudly if the shim lacks one. */
-const SQL_MEASURES = ["hypertension", "cholesterol_ldl", "obesity_bmi", "diabetes_hba1c"];
+/**
+ * Derived from the codegen's own measure list (never a hand copy — review M1): a measure added to
+ * WCDB_SQL_MEASURES gets a committed, shim-executable artifact, and MUST enter this gate with it;
+ * per ADR-025 an artifact with no parity coverage would defeat the wave's central invariant.
+ */
+const SQL_MEASURES = WCDB_SQL_MEASURES.map((m) => m.measureId);
 
 async function shimReachable(): Promise<boolean> {
   if (!BASE_URL) return false;
@@ -109,6 +114,7 @@ test("parity date sensitivity: a shifted evaluation date still agrees (guards ba
   const res = await evaluateSourceWithRoster(src, "hypertension", roster, { evaluationDate: ALT_DATE });
   const oracle = new Map<string, string>();
   for (const r of res.results) if (r.ok && r.outcome) oracle.set(r.outcome.subjectId, r.outcome.outcome);
+  assert.equal(oracle.size, 56, "oracle covers the full population (a shrunken map would pass vacuously)");
 
   const cohort = (await (await fetch(`${BASE_URL}/compliance/hypertension/cohort?end=${ALT_DATE}`)).json()) as {
     patients: Array<{ subjectId: string; outcomeStatus: string }>;
