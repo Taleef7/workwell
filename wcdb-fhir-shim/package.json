@@ -1,0 +1,24 @@
+{
+  "name": "wcdb-fhir-shim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dev/demo FHIR R4 facade over the WebChart dev database (dev-wcdb MariaDB) — the 'shim' from the 2026-07-19 Doug directive (ADR-034). Serves the verified WebChart client contract straight from SQL; also hosts the CQL→SQL compliance API (#292/#309).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "mysql2": "^3.14.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}
