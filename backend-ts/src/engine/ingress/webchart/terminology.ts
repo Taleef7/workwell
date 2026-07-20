@@ -207,3 +207,13 @@ export function crosswalkMeasureIds(): string[] {
 export function cvxCodesForMeasure(measureId: string): string[] {
   return CROSSWALK_ROWS.filter((r) => r.system === SYSTEMS.CVX && r.measureId === measureId).map((r) => r.code);
 }
+
+/**
+ * Every LOINC code this crosswalk recognizes for a measure — the single source of truth for "which
+ * lab/vital result codes count toward this measure" on the WebChart read path. Consumed by the
+ * CQL→SQL codegen (`engine/cql/codegen/generate-sql.ts`, #292/ADR-034) so the generated WCDB SQL
+ * matches exactly the codes the FHIR/CQL oracle path reconciles — one code list, two executors.
+ */
+export function loincCodesForMeasure(measureId: string): string[] {
+  return CROSSWALK_ROWS.filter((r) => r.system === SYSTEMS.LOINC && r.measureId === measureId).map((r) => r.code);
+}
