@@ -54,8 +54,11 @@ Transcripts: `docs/doug_audio_transcript_1.txt` / `_2.txt` (local-only). Three d
 ## 3. Shim contract details (verified from `webchart-client.ts`)
 
 - FHIR root `{base}/fhir`; client appends `/fhir` to `WORKWELL_WEBCHART_BASE_URL`.
-- `GET /fhir/Patient?_count=N`: searchset Bundle, stable `Patient.id` (= `pat_id`), offset paging,
-  `link[relation=next]` built from the incoming Host header (same-origin guard in the client).
+- `GET /fhir/Patient?_count=N`: searchset Bundle, stable `Patient.id` = **`wc-{pat_id}`** (the
+  committed-fixture id scheme — the enrollment roster and `hapi-live.test.ts` key on `wc-5` etc.;
+  raw `pat_id` is used only at the SQL boundary), offset paging, `link[relation=next]` built from
+  the incoming Host header (same-origin guard in the client). *(Codex P1 on this spec: an earlier
+  draft said `Patient.id = pat_id` — the implementation always used `wc-{pat_id}`.)*
 - Per-patient composition (no `$everything`): `GET /fhir/{type}?patient={id}&_count=N` for
   Observation, Condition, Procedure, Immunization, Encounter. `entry.search.mode="match"`,
   `subject.reference="Patient/{id}"` must match the queried id (mismatch degrades the patient).
@@ -86,9 +89,14 @@ Data reality (verified 2026-07-20): LOINC by distinct patients — BMI `39156-5`
   `Rule` union + `validateRule` + `MEASURE_BINDINGS`/crosswalk LOINCs. Pure string templating,
   zero deps, parameterized (`?` placeholders) MariaDB SQL over
   `patients ⋈ observations_current ⋈ observation_codes`.
-- Windowed-recency semantics: denominator = eligible patients (is_patient=1); numerator = patients
-  whose most recent qualifying observation falls within `windowDays` of the period end
-  (grace folded in as `windowDays + gracePeriodDays`). Per-patient + cohort variants.
+- Windowed-recency semantics mirror the CQL bands exactly: denominator = eligible patients
+  (is_patient=1); **numerator = COMPLIANT only**, i.e. days-since-most-recent-event
+  `<= windowDays − dueSoonDays` (the CQL "Compliant" cutoff — hypertension: ≤335). The full band
+  set is emitted (`DUE_SOON` up to `windowDays + gracePeriodDays`, `OVERDUE` beyond, `MISSING_DATA`
+  on no event), so a DUE_SOON or OVERDUE patient is never counted compliant. Per-patient + cohort
+  variants. *(Codex P1 on this spec: an earlier draft described the numerator as "within
+  windowDays + grace" — the implementation always used the CQL compliant cutoff, and the ADR-025
+  parity gate proves it per patient.)*
 - `pnpm generate:sql` writes `wcdb-fhir-shim/sql/{measure}.sql` with a generated-file header;
   snapshot + freshness tests guard drift. **Run live on the call — the "boom" moment.**
 - AI framing: the translations were AI-derived from the CQL + schema, then locked as
