@@ -9,6 +9,7 @@
 
 /* 3b. Scan the vendored datavis (NITRO grid) source so Tailwind generates its utility classes */
 @source "../vendor/datavis/src";
+@source "../vendor/codelookup";
 
 /* 4. Dark mode variant (matches data-theme=dark and the .dark class) */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *, .dark, .dark *));

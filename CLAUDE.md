@@ -114,11 +114,17 @@ session. Wave plan: `docs/superpowers/plans/2026-07-20-doug-wave.md`; spec:
 stacked, awaiting owner review+merge).** Shim live against dev-wcdb (hapi-live 4/4 incl.
 fixture parity; hapi-app-live 1/1; CLI 27 real outcomes); **CQL→SQL parity-proven** —
 `pnpm generate:sql` → committed `wcdb-fhir-shim/sql/*.sql` → shim `/compliance` API →
-**ADR-025 golden gate GREEN (4 measures × 56 patients × 2 dates, zero divergence)**; Codify
-probed (CodeLookup exists in `@mieweb/ui` dev prereleases only — status doc + upstream asks in
-`docs/mieweb-ui-migration/CODELOOKUP_STATUS.md`). **Demo script:** `docs/DEMO_2026-07-23.md`
-(incl. fallbacks + the owner outreach checklist — message Doug re attendees, intro note to
-Nicole, dry-runs Wed PM). Remaining: owner PR reviews/merges, Wed dry-runs, outreach.
+**ADR-025 golden gate GREEN (4 measures × 56 patients × 2 dates, zero divergence)**; **Codify is
+LIVE in Studio** (Value Sets tab "Find a code" — vendored `frontend/vendor/codelookup/` from
+mieweb/ui source per the ADR-007 playbook, zero new deps, searching MIE's hosted
+`ui.mieweb.org/codify` index client-side; browser-verified: "breast cancer screening" → the
+eCQM CMS125 entry in ~39 ms → form prefill; status/asks:
+`docs/mieweb-ui-migration/CODELOOKUP_STATUS.md`). **All 12 Codex PR findings addressed** (spec
+text, zero-date-only guard, COALESCE sums, threshold drift-guard test, calendar-date validation,
+full 4×56×2 parity matrix, demo-doc fallbacks; 2 were pre-fixed). **Demo script:**
+`docs/DEMO_2026-07-23.md` (incl. fallbacks + the owner outreach checklist — message Doug re
+attendees, intro note to Nicole, dry-runs Wed PM). Remaining: owner PR reviews/merges, Wed
+dry-runs, outreach.
 
 ## Prior focus (2026-07-16 — WebChart live-integration wave)
 

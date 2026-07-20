@@ -8,6 +8,7 @@ import type { ApiClient } from "@/lib/api/client";
 import type { MeasureDetail, ValueSetRef } from "../types";
 import { valueSetBadgeClass } from "../utils";
 import { ValueSetGovernancePanel } from "./ValueSetGovernancePanel";
+import { CodifyCodeSearch, type CodifyResult } from "./CodifyCodeSearch";
 
 type Props = {
   measure: MeasureDetail;
@@ -23,6 +24,15 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
   const [oid, setOid] = useState("");
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
+  const [picked, setPicked] = useState<CodifyResult | null>(null);
+
+  function onCodifyPick(result: CodifyResult) {
+    // Prefill the create form from the picked code (author reviews/edits before saving —
+    // Codify assists authoring, it never writes anything itself).
+    setPicked(result);
+    setName(result.label);
+    setOid(result.fullid);
+  }
 
   async function createValueSet() {
     onError("");
@@ -89,6 +99,22 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
       ) : (
         <p className="text-sm text-neutral-600 dark:text-neutral-400">No value sets attached yet.</p>
       )}
+
+      <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Find a code (Codify)</h3>
+      <p className="text-xs text-neutral-600 dark:text-neutral-400">
+        Search MIE&apos;s Codify terminology (ICD-10, SNOMED, LOINC, RxNorm, CVX, HCPCS…) and prefill the
+        form below — search runs in your browser against MIE&apos;s hosted index.
+      </p>
+      <CodifyCodeSearch onSelect={onCodifyPick} />
+      {picked ? (
+        <p aria-live="polite" className="text-xs text-neutral-700 dark:text-neutral-300">
+          Picked:{" "}
+          <span className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px]">
+            {picked.codetype} {picked.fullcode}
+          </span>{" "}
+          — {picked.label}
+        </p>
+      ) : null}
 
       <h3 className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Create Value Set</h3>
       <Input label="OID" hideLabel placeholder="OID (e.g., urn:oid:...)" value={oid} onChange={(e) => setOid(e.target.value)} />
