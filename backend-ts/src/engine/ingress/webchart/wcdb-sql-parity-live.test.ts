@@ -97,8 +97,11 @@ test("GOLDEN PARITY: generated-SQL verdicts == CQL-oracle verdicts, per patient,
   assert.deepEqual(failures, [], `SQL/CQL divergence — fix the SQL template, never the oracle:\n${failures.join("\n")}`);
 });
 
-test("parity date sensitivity: a shifted evaluation date still agrees (guards banding boundaries)", { skip }, async () => {
-  // A second date exercises different DATEDIFF bandings (some subjects cross COMPLIANT→DUE_SOON/OVERDUE).
+test("parity date sensitivity: EVERY SQL measure agrees on a shifted evaluation date too", { skip }, async () => {
+  // A second date exercises different DATEDIFF bandings per measure (subjects cross
+  // COMPLIANT→DUE_SOON/OVERDUE at measure-specific thresholds — hba1c's 180/20 bands shift on a
+  // different cadence than the 365/30 measures, so the full matrix is 4 measures × 56 × 2 dates
+  // and no measure/date combination is claimed untested (Codex P2 ×2).
   const ALT_DATE = "2024-11-15";
   const cfg = { baseUrl: BASE_URL, apiKey: "parity-test" };
   const payloads = await httpWebChartClient(cfg).fetchPatientPayloads();
@@ -108,19 +111,25 @@ test("parity date sensitivity: a shifted evaluation date still agrees (guards ba
       return entry.find((e) => e.resource?.resourceType === "Patient")?.resource?.id;
     })
     .filter((id): id is string => typeof id === "string");
-  const roster = parseEnrollmentRoster(Object.fromEntries(subjectIds.map((id) => [id, ["hypertension"]])));
+  const roster = parseEnrollmentRoster(Object.fromEntries(subjectIds.map((id) => [id, SQL_MEASURES])));
 
-  const src = webChartDataSource(cfg, fixtureWebChartClient(payloads));
-  const res = await evaluateSourceWithRoster(src, "hypertension", roster, { evaluationDate: ALT_DATE });
-  const oracle = new Map<string, string>();
-  for (const r of res.results) if (r.ok && r.outcome) oracle.set(r.outcome.subjectId, r.outcome.outcome);
-  assert.equal(oracle.size, 56, "oracle covers the full population (a shrunken map would pass vacuously)");
+  for (const measureId of SQL_MEASURES) {
+    const src = webChartDataSource(cfg, fixtureWebChartClient(payloads));
+    const res = await evaluateSourceWithRoster(src, measureId, roster, { evaluationDate: ALT_DATE });
+    const oracle = new Map<string, string>();
+    for (const r of res.results) {
+      assert.ok(r.ok && r.outcome, `${measureId}@${ALT_DATE}: CQL evaluation failed for item #${r.index}`);
+      oracle.set(r.outcome!.subjectId, r.outcome!.outcome);
+    }
+    assert.equal(oracle.size, 56, `${measureId}@${ALT_DATE}: oracle covers the full population (no vacuous pass)`);
 
-  const cohort = (await (await fetch(`${BASE_URL}/compliance/hypertension/cohort?end=${ALT_DATE}`)).json()) as {
-    patients: Array<{ subjectId: string; outcomeStatus: string }>;
-  };
-  const sql = new Map(cohort.patients.map((p) => [p.subjectId, p.outcomeStatus]));
-  for (const [subjectId, cqlOutcome] of oracle) {
-    assert.equal(sql.get(subjectId), cqlOutcome, `hypertension@${ALT_DATE} ${subjectId}`);
+    const cohort = (await (await fetch(`${BASE_URL}/compliance/${measureId}/cohort?end=${ALT_DATE}`)).json()) as {
+      patients: Array<{ subjectId: string; outcomeStatus: string }>;
+    };
+    const sql = new Map(cohort.patients.map((p) => [p.subjectId, p.outcomeStatus]));
+    assert.equal(sql.size, 56, `${measureId}@${ALT_DATE}: SQL cohort covers the full population`);
+    for (const [subjectId, cqlOutcome] of oracle) {
+      assert.equal(sql.get(subjectId), cqlOutcome, `${measureId}@${ALT_DATE} ${subjectId}`);
+    }
   }
 });
