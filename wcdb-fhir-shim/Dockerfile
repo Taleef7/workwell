@@ -6,6 +6,7 @@ COPY package.json ./
 RUN npm install --omit=dev && npm install tsx typescript @types/node
 COPY tsconfig.json ./
 COPY src ./src
+COPY sql ./sql
 EXPOSE 8085
 ENV SHIM_PORT=8085
 CMD ["npx", "tsx", "src/main.ts"]
