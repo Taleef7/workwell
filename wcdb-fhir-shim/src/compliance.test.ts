@@ -41,6 +41,11 @@ test("parsePeriod validates dates and defaults end to today", () => {
   });
   assert.deepEqual(parsePeriod(new URLSearchParams(""), today), { start: undefined, end: "2026-07-20" });
   assert.throws(() => parsePeriod(new URLSearchParams("end=23-07-2026"), today), ComplianceError);
+  // Codex P2: shape-valid but non-calendar dates must 400, never reach CAST(? AS DATE).
+  assert.throws(() => parsePeriod(new URLSearchParams("end=2026-02-31"), today), ComplianceError);
+  assert.throws(() => parsePeriod(new URLSearchParams("end=0000-00-00"), today), ComplianceError);
+  assert.throws(() => parsePeriod(new URLSearchParams("start=2026-13-01&end=2026-07-01"), today), ComplianceError);
+  assert.doesNotThrow(() => parsePeriod(new URLSearchParams("end=2024-02-29"), today), "leap day is valid");
 });
 
 // ---------- HTTP routes over a stubbed executor ----------
