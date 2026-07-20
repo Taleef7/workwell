@@ -24,7 +24,11 @@ const CodeLookup = dynamic(() => import("@/vendor/codelookup/CodeLookup").then((
   ),
 });
 
-const INDEX_URL = process.env.NEXT_PUBLIC_CODIFY_INDEX_URL ?? "https://ui.mieweb.org/codify";
+// `||` (not `??`): NEXT_PUBLIC_* vars are inlined at build time, so an unset Docker ARG arrives
+// as the empty string — which must still fall back to MIE's hosted index (Codex P2). The override
+// is wired through frontend/Dockerfile + the deploy workflow's NEXT_PUBLIC_CODIFY_INDEX_URL
+// build-arg (repo variable; empty ⇒ this default).
+const INDEX_URL = process.env.NEXT_PUBLIC_CODIFY_INDEX_URL || "https://ui.mieweb.org/codify";
 
 type Props = {
   /** Fired when the author picks a code (e.g. to prefill a value-set / mapping form). */

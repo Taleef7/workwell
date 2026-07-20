@@ -200,6 +200,9 @@ export const CodeLookup = React.forwardRef<HTMLDivElement, CodeLookupProps>(
       parent: CodifyResult;
       results: CodifyResult[] | null; // null = loading
     } | null>(null);
+    // WORKWELL EDIT (Codex P2): a transient manifest/shard failure must not permanently disable
+    // the control — bumping this nonce re-runs the worker effect (the error-state Retry button).
+    const [workerNonce, setWorkerNonce] = React.useState(0);
     const workerRef = React.useRef<Worker | null>(null);
     const searchIdRef = React.useRef(0);
     const drillIdRef = React.useRef(0);
@@ -237,12 +240,28 @@ export const CodeLookup = React.forwardRef<HTMLDivElement, CodeLookupProps>(
       setActiveIndex(-1);
       setOpen(false);
       setDrill(null);
-      const worker = new Worker(
-        new URL('./codify.worker.ts', import.meta.url),
-        {
+      // WORKWELL EDIT (Codex P2): worker construction / chunk-load failures previously had no
+      // handler, leaving the control stuck at "Loading offline index… 0%" — surface the error
+      // state (which also renders the Retry affordance) instead.
+      let worker: Worker;
+      try {
+        worker = new Worker(new URL('./codify.worker.ts', import.meta.url), {
           type: 'module',
-        }
-      );
+        });
+      } catch (err) {
+        setStatus({
+          state: 'error',
+          message:
+            err instanceof Error ? err.message : 'search worker failed to start',
+        });
+        return;
+      }
+      worker.onerror = () => {
+        setStatus({
+          state: 'error',
+          message: 'search worker failed to load',
+        });
+      };
       workerRef.current = worker;
       worker.onmessage = (e: MessageEvent) => {
         const msg = e.data;
@@ -296,11 +315,16 @@ export const CodeLookup = React.forwardRef<HTMLDivElement, CodeLookupProps>(
         programsUrl,
       });
       return () => worker.terminate();
-    }, [indexUrl, locale, domainsKey, programsUrl]);
+      // WORKWELL EDIT (Codex P2): workerNonce re-runs this effect on Retry.
+    }, [indexUrl, locale, domainsKey, programsUrl, workerNonce]);
 
     // debounced search-as-you-type
     React.useEffect(() => {
       if (status.state !== 'ready') return;
+      // WORKWELL EDIT (Codex P2): invalidate any in-flight search the moment the query changes —
+      // without this, an older query's response arriving during the debounce window (its id still
+      // equals searchIdRef.current) would render under the newer input text.
+      searchIdRef.current++;
       if (skipSearchRef.current) {
         skipSearchRef.current = false;
         return;
@@ -666,13 +690,18 @@ export const CodeLookup = React.forwardRef<HTMLDivElement, CodeLookupProps>(
               </>
             )}
             {status.state === 'error' && (
+              // WORKWELL EDIT (Codex P2): offer recovery from a transient index failure instead of
+              // a permanently disabled control (upstream pointed at a rebuild README instead).
               <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
                 <AlertCircleIcon size={12} />
-                Index unavailable: {status.message}. See{' '}
-                <code className="font-mono">
-                  src/components/CodeLookup/README.md
-                </code>{' '}
-                to rebuild the index.
+                Index unavailable: {status.message}.{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:no-underline"
+                  onClick={() => setWorkerNonce((n) => n + 1)}
+                >
+                  Retry
+                </button>
               </span>
             )}
           </div>

@@ -101,6 +101,39 @@ for (const measureId of ["cholesterol_ldl", "diabetes_hba1c", "obesity_bmi", "hy
   });
 }
 
+test("create with seed codes (the Codify pick) yields a RESOLVED set; malformed codes 400", async () => {
+  const created = (await post("/api/value-sets", {
+    oid: "urn:workwell:codify:loinc:4548-4",
+    name: "HbA1c (Codify pick)",
+    version: "v1",
+    codes: [{ code: "4548-4", display: "Hemoglobin A1c/Hemoglobin.total in Blood", system: "http://loinc.org" }],
+  }).then((r) => r!.json())) as { id: string };
+  assert.ok(created.id, "created with codes");
+  // The catalog list hardcodes UNRESOLVED/0 (Java-faithful) — verify through the per-version read,
+  // which computes real resolvability from the stored codes.
+  const detail = (await get("/api/measures/tb_surveillance").then((r) => r!.json())) as { version: string };
+  const versionId = `tb_surveillance-${detail.version}`;
+  assert.equal((await post(`/api/measures/tb_surveillance/value-sets/${created.id}`))?.status, 200);
+  const linked = (await get(`/api/measures/versions/${versionId}/value-sets`).then((r) => r!.json())) as Array<{
+    id: string;
+    resolvabilityStatus: string;
+    codeCount: number;
+  }>;
+  const mine = linked.find((v) => v.id === created.id);
+  assert.equal(mine?.codeCount, 1, "the picked code landed in the set");
+  assert.equal(mine?.resolvabilityStatus, "RESOLVED", "a seeded set is resolvable, not an empty shell");
+  await del(`/api/measures/tb_surveillance/value-sets/${created.id}`);
+
+  const bad = await post("/api/value-sets", {
+    oid: "urn:test:vs:bad-codes",
+    name: "Bad",
+    codes: [{ code: "", display: "x", system: "http://loinc.org" }],
+  });
+  assert.equal(bad?.status, 400, "empty code string is rejected");
+  const notArray = await post("/api/value-sets", { oid: "urn:test:vs:bad2", name: "Bad2", codes: "4548-4" });
+  assert.equal(notArray?.status, 400, "non-array codes is rejected");
+});
+
 test("create → attach → detach a value set drives listByVersion", async () => {
   const detail = (await get("/api/measures/tb_surveillance").then((r) => r!.json())) as { version: string };
   const versionId = `tb_surveillance-${detail.version}`;
