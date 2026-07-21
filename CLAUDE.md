@@ -140,9 +140,16 @@ level; MeasureReport/QRDA/CSV exports all 200). **One real bug found + fixed (PR
 the parity suite's DUE_SOON non-vacuity assertion was self-contradicting — it evaluated at the 2024
 seed date while the ingest fixtures are authored as-of 2026-07-23, so `ingest → re-run parity` went
 red despite perfect parity; DUE_SOON moved to a new INGEST-FIXTURE test at `FIXTURE_DATE=2026-07-23`
-(self-skips on the bare seed) that also hardens the demo's exact CQL==SQL claim. Three LOW findings
-tracked post-demo (unvalidated `PUT /api/measures/:id/spec` body; `POST /api/runs/manual` 501-not-400
-on unknown scope; no security response headers). Remaining owner steps: Wed dry-runs, outreach.
+(self-skips on the bare seed) that also hardens the demo's exact CQL==SQL claim. **Two of the three
+LOW findings were fixed 2026-07-21 afternoon** (PRs #319 `POST /api/runs/manual` unknown scope →
+400-not-501; #320 `PUT /api/measures/:id/spec` body validated — was silently blanking the spec); the
+remaining one is no security response headers (deferred past the demo). Same afternoon: the maintained
+Playwright sweep is now tracked (PR #318, 35 tests / 8 files), **#295 VSAC release pinning +
+version-provenance + drift detection** shipped (PR #321 — `--manifest`/`--expansion`, SHA-256
+`expansion_hash`, `VALUE_SET_EXPANSION_CHANGED`), and the upstream `projecttacoma/fqm-execution#371`
+date-only-period-end bug we filed 07-15 was maintainer-confirmed (Chris/hossenlopp; PR offered). All
+four PRs Codex-reviewed (2 real correctness holes fixed) and merged. Remaining owner steps: Wed
+dry-runs, outreach.
 
 ## Prior focus (2026-07-16 — WebChart live-integration wave)
 
