@@ -1,5 +1,79 @@
 # Journal
 
+## 2026-07-21 (afternoon) — closed the sweep's two code findings + #295 VSAC release pinning
+
+Post-demo-prep work, four branches, none of it on the Thursday demo path.
+
+**Upstream: fqm-execution#371 acknowledged.** Chris (hossenlopp) confirmed the date-only
+`measurementPeriodEnd` bug we filed on 07-15 — *"All uses of fqm-execution manually pass in the
+measurement period, hence why this was overlooked"* — labelled it `bug` and backlogged it. We
+replied offering the PR with a proposed scope (normalize the date-only end where the period is
+resolved so it covers both the caller path and the `Measure.effectivePeriod.end` default; leave
+`measurementPeriodStart` alone; three tests) and the evidence we can validate against — our MADiE
+harness goes 119/121 → 121/121 with the normalization. Awaiting their answer; our own workaround
+(`literal-diff.ts`, `official-cases.ts`) stays until it lands. Tracked on #297.
+
+**The Playwright sweep is now in the repo** (`test/e2e-ui-sweep-suite`). The 07-21 E2E pass ran a
+maintained UI suite and recorded it green, but only `golden-path.spec.ts` was ever tracked — the
+seven sweep specs lived untracked on the machine, so a fresh clone could not reproduce the
+verification. Committed with their shared helper; `npx playwright test --list` discovers 35 tests
+across 8 files. (`audit-helpers.ts` was left untracked: nothing imports it and it duplicates
+`helpers.ts` — orphaned scaffolding, not worth committing as dead code.)
+
+**Both LOW findings from the adversarial sweep are fixed.**
+- *Unknown `scopeType` → 400, not 501* (`fix/run-manual-unknown-scope-400`). `resolveScope`'s
+  default branch conflated "a real scope this path declines" (CASE → rerun-to-verify; SITE=WebChart)
+  with "not a scope at all". The body is unvalidated JSON cast to `ManualRunRequest`, so garbage
+  reaches it at runtime despite the type; it now validates against `RUN_SCOPE_TYPES` up front. Both
+  deliberate 501s keep their regression coverage.
+- *`PUT /api/measures/:id/spec` validates its body* (`fix/measure-spec-validation`). This is a
+  REPLACE endpoint — `updateMeasureSpec` rebuilds the spec from the body and coerces absent fields
+  to `""`/`[]`, which is right for the Spec tab (it always posts the whole form) but meant an empty
+  or unrecognized body **silently erased the measure's spec behind a 200**. The sweep did exactly
+  that to the local audiogram. A pure `validateSpecUpdate` now rejects a body naming none of the
+  seven spec fields, and type-checks the ones present. Replace semantics unchanged. Worth noting how
+  the bug proved itself: the destructive probes in the new test broke two *unrelated* pre-existing
+  tests (traceability, data-readiness) while the fix was absent — that is the blast radius, and both
+  pass again.
+
+**#295 — VSAC release pinning + version provenance + drift detection** (`feat/vsac-manifest-pinning-295`,
+first four work items). `resolve-valuesets` expanded with no pin, so VSAC served *latest-active*: a
+republish silently changed our expansions — and therefore the CMS122/CMS125 literal-diff results —
+with nothing recorded to notice it by. Now: `--manifest`/`--expansion` (mutually exclusive) forwarded
+to every `$expand`; `ValueSet.version` written to the row it used to null out, with
+`expansion.identifier`/`timestamp` + the pin in the `VALUE_SETS_RESOLVED` audit payload;
+`expansion_hash` upgraded to SHA-256 over the members *and* the version provenance; and a re-import
+whose hash differs writes a distinct **`VALUE_SET_EXPANSION_CHANGED`** event. Two deliberate calls:
+**no default manifest** — the right one tracks the measure year being evaluated (v14 = 2026), an
+owner/standards decision rather than something to guess, so an unpinned run warns instead; and drift
+comparison is **algorithm-scoped** — writing the doc surfaced that comparing the new `sha256:` hash
+against legacy `h<hex>` rows would flag drift on *every* pre-existing row at first import, a false
+alarm that teaches operators to ignore the signal, so the two are never compared. No DDL, no new
+store method (drift reads the catalog once via `listAll`). Descriptive only (ADR-008/ADR-023) — the
+audiogram cross-mode parity guard still passes.
+
+Still open on #295: the design call reconciling runtime live-expansion against imported rows, and
+verifying the exact eCQM manifest canonical before the next live import.
+
+Deferred deliberately until after Thursday: security response headers (a global response-surface
+change plus a CSP two days before a demo is a bad trade) and #296, the `cqframework/cql-tests`
+conformance harness — the biggest item on the list and the likeliest source of the next upstream
+finding, but multi-day.
+
+**Codex review round on all four PRs (#318–#321), every finding addressed before merge.** Two were
+real correctness holes, not nits: (1) the spec guard triggered on *any* of seven "spec fields", but
+`oshaReferenceId` is audit-only (not persisted), so `{ oshaReferenceId }` alone still passed and
+blanked the spec — the presence check now requires a *persisted* field. (2) The VSAC drift hash
+included `expansion.identifier`, which FHIR R4 does not require stable across identical expansions, so
+a fresh identifier fired a false `VALUE_SET_EXPANSION_CHANGED`; and the ERROR path nulled the
+`expansion_hash`, destroying the drift baseline across a transient failure — both fixed (hash is
+members + `ValueSet.version` only; an ERROR carries the last-good hash forward), with the
+success→failure→changed-success sequence now tested. The three e2e P2s (clear demo-prefilled creds
+before the empty-input assertion; deep-link the run by `?runId=` so history can't hide it; skip the
+direct-API-probe tests when the backend is unreachable rather than throwing) were test-robustness and
+were taken. The journal P1s are this reconciliation — the morning findings line above is marked
+superseded.
+
 ## 2026-07-21 — full E2E test pass; fixed a self-contradicting parity band-coverage assertion
 
 Ran a comprehensive end-to-end pass over the merged wave (local full stack: backend :8080,
@@ -31,7 +105,8 @@ malformed-input probe returned 400/404 with no 500 and no stack trace. Only LOW/
 for post-demo, not blocking): `PUT /api/measures/:id/spec` accepts an unvalidated body (silently
 blanks spec fields — a probe dirtied the local audiogram spec, restored by an in-memory-store
 restart); `POST /api/runs/manual` returns 501 (not 400) for an unknown scope; no security response
-headers (`X-Content-Type-Options`/`X-Frame-Options`/CSP).
+headers (`X-Content-Type-Options`/`X-Frame-Options`/CSP). **[Superseded — the first two shipped the
+same afternoon (PRs #319, #320; see the entry above); only the security-headers item remains open.]**
 
 ## 2026-07-20 (night) — Codex gpt-5.6 review sweep over the whole wave (#308–#316), all findings fixed
 
