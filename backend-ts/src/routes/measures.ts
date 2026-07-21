@@ -36,7 +36,7 @@ import {
   validateMeasureTests,
   previewRule,
   saveRule,
-  type SpecUpdate,
+  validateSpecUpdate,
 } from "../measure/measure-authoring.ts";
 import type { Rule, CodegenBindings } from "../engine/cql/codegen/generate-cql.ts";
 import { listOshaReferences } from "../measure/osha-references.ts";
@@ -209,8 +209,9 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   if (req.method === "PUT") {
     const specId = pathname.match(/^\/api\/measures\/([^/]+)\/spec$/)?.[1];
     if (specId) {
-      const body = (await req.json().catch(() => ({}))) as SpecUpdate;
-      const ok = await updateMeasureSpec(await lifecycleDeps(env), specId, body, actor);
+      const parsed = validateSpecUpdate(await req.json().catch(() => null));
+      if (!parsed.ok) return json({ error: "invalid_request", message: parsed.message }, 400);
+      const ok = await updateMeasureSpec(await lifecycleDeps(env), specId, parsed.value, actor);
       return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: specId }, 404);
     }
     const cqlId = pathname.match(/^\/api\/measures\/([^/]+)\/cql$/)?.[1];
