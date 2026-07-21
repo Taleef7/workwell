@@ -144,3 +144,78 @@ test("httpVsacClient throws on a malformed response with no expansion object", a
     restore();
   }
 });
+
+// --- #295: release pinning + expansion provenance ----------------------------------------------
+
+test("httpVsacClient appends the manifest pin to every page request", async () => {
+  const { calls, restore } = installFetch([
+    { expansion: { total: 1, contains: [{ code: "X", system: "S" }] } },
+  ]);
+  try {
+    const client = httpVsacClient({ baseUrl: BASE, apiKey: "k" });
+    await client.expand(EXP_OID, { manifest: "Library/ecqm-update-2025-05-08" });
+    assert.match(calls[0]!.url, /[?&]manifest=Library%2Fecqm-update-2025-05-08/);
+  } finally {
+    restore();
+  }
+});
+
+test("httpVsacClient appends the expansion pin, and rejects both pins together", async () => {
+  const { calls, restore } = installFetch([{ expansion: { total: 1, contains: [{ code: "X", system: "S" }] } }]);
+  try {
+    const client = httpVsacClient({ baseUrl: BASE, apiKey: "k" });
+    await client.expand(EXP_OID, { expansion: "eCQM Update 2025" });
+    assert.match(calls[0]!.url, /[?&]expansion=eCQM%20Update%202025/);
+    await assert.rejects(
+      () => client.expand(EXP_OID, { manifest: "a", expansion: "b" }),
+      /mutually exclusive/,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("httpVsacClient omits the pin params entirely when unpinned (unchanged URL)", async () => {
+  const { calls, restore } = installFetch([{ expansion: { total: 1, contains: [{ code: "X", system: "S" }] } }]);
+  try {
+    await httpVsacClient({ baseUrl: BASE, apiKey: "k" }).expand(EXP_OID);
+    assert.doesNotMatch(calls[0]!.url, /manifest=|expansion=/);
+  } finally {
+    restore();
+  }
+});
+
+test("httpVsacClient captures ValueSet.version + expansion identifier/timestamp from the first page", async () => {
+  const { restore } = installFetch([
+    {
+      version: "20250508",
+      expansion: {
+        total: 2,
+        identifier: "urn:uuid:5f1b",
+        timestamp: "2025-05-08T12:00:00Z",
+        contains: [{ code: "A", system: "S" }],
+      },
+    },
+    // Second page repeats provenance; the first page's values must win (and not be clobbered).
+    { version: "IGNORED", expansion: { total: 2, identifier: "urn:uuid:other", contains: [{ code: "B", system: "S" }] } },
+  ]);
+  try {
+    const got = await httpVsacClient({ baseUrl: BASE, apiKey: "k" }).expand(EXP_OID);
+    assert.equal(got.version, "20250508");
+    assert.equal(got.expansionIdentifier, "urn:uuid:5f1b");
+    assert.equal(got.expansionTimestamp, "2025-05-08T12:00:00Z");
+    assert.equal(got.contains.length, 2, "paging still works");
+  } finally {
+    restore();
+  }
+});
+
+test("httpVsacClient omits provenance keys when the server sends none (no undefined noise)", async () => {
+  const { restore } = installFetch([{ expansion: { total: 1, contains: [{ code: "X", system: "S" }] } }]);
+  try {
+    const got = await httpVsacClient({ baseUrl: BASE, apiKey: "k" }).expand(EXP_OID);
+    assert.deepEqual(Object.keys(got).sort(), ["contains", "oid", "total"]);
+  } finally {
+    restore();
+  }
+});

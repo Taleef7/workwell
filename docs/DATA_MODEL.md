@@ -89,6 +89,17 @@ Demo value sets are seeded with fixed UUIDs (`a0000001-0000-0000-0000-0000000000
 > `expansion_hash`, `last_resolved_at`. **Existing columns only — NO DDL** (idempotent per-OID). Descriptive
 > only (ADR-008): membership feeds the CQL `CodeService`, never `Outcome Status`. Rollback:
 > `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` (schema-qualify on the Pg ceiling).
+>
+> **Provenance + drift (#295, 2026-07-21 — still NO DDL, existing columns only):** `version` now
+> carries the server's `ValueSet.version` instead of a hardcoded `null` (the column was always in the
+> `UNIQUE(oid, version)` key), and `expansion_hash` is **SHA-256** over the sorted `system|code` pairs
+> *plus* the version provenance, written with a `sha256:` prefix — pre-#295 rows hold 32-bit rolling
+> hashes (`h<hex>`) and are deliberately distinguishable so the two algorithms are never compared.
+> `expansion.identifier`/`timestamp` and the release pin ride in the `VALUE_SETS_RESOLVED` audit
+> payload (not columns). A re-import whose hash differs from the stored one additionally writes a
+> **`VALUE_SET_EXPANSION_CHANGED`** audit event. Drift comparison is **algorithm-scoped**: a stored
+> `h<hex>` is never compared against a `sha256:` hash, so the first import after #295 rewrites every
+> `expansion_hash` without raising false drift on legacy rows.
 
 > **CMS122 execution outcome diff (E14 PR-3, 2026-07-05 — NO schema change):** `GET
 > /api/measures/cms122/fidelity/diff` runs a **read-time**, subject-by-subject execution diff. It reads
