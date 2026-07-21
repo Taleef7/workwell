@@ -98,13 +98,17 @@ const HASH_PREFIX = "sha256:";
 
 async function expansionHash(
   codes: { code: string; system: string }[],
-  provenance: { version?: string; expansionIdentifier?: string },
+  provenance: { version?: string },
 ): Promise<string> {
+  // Deliberately NOT hashed: `expansion.identifier`. FHIR R4 does not require a server to reuse the
+  // same identifier for an unchanged expansion (fhir-modelinfo-4.0.1.xml `ValueSet.expansion.identifier`),
+  // so VSAC returning a fresh one for identical content would fire a false VALUE_SET_EXPANSION_CHANGED.
+  // The stable drift signal is the member set + ValueSet.version; the identifier is audit provenance only.
   const joined = codes
     .map((c) => `${c.system}|${c.code}`)
     .sort()
     .join(",");
-  const payload = `v=${provenance.version ?? ""};e=${provenance.expansionIdentifier ?? ""};${joined}`;
+  const payload = `v=${provenance.version ?? ""};${joined}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
   const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -194,6 +198,11 @@ export async function runResolve(deps: RunResolveDeps): Promise<ResolveResult> {
       resolved++;
     } catch (e) {
       const message = String((e as Error)?.message ?? e);
+      // Preserve the last-good comparable hash across a transient failure. The upsert adapters
+      // overwrite expansion_hash unconditionally (value-set-store-{sqlite,postgres}), so writing
+      // null here would erase the drift baseline — then a later success→failure→changed-success
+      // sequence would silently miss the drift. The ERROR row's codes are empty and its
+      // resolution_status flags it, so retaining the prior hash as a baseline is sound.
       await deps.valueSets.upsertResolvedValueSet({
         oid,
         name: NAME_BY_OID[oid] ?? oid,
@@ -202,7 +211,7 @@ export async function runResolve(deps: RunResolveDeps): Promise<ResolveResult> {
         codes: [],
         resolutionStatus: "ERROR",
         resolutionError: message,
-        expansionHash: null,
+        expansionHash: priorHash.get(oid) ?? null,
         lastResolvedAt: deps.now,
       });
       await deps.events.appendAudit({

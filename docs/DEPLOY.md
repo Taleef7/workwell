@@ -340,7 +340,9 @@ DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> \
 > warns when unpinned, forwards the pin to every `$expand`, and records the returned
 > `ValueSet.version` on the row (it used to hardcode `version: null`) plus
 > `expansion.identifier`/`timestamp` in the `VALUE_SETS_RESOLVED` audit payload. The expansion hash
-> is **SHA-256** over the sorted `system|code` pairs *and* the version provenance, prefixed
+> is **SHA-256** over the sorted `system|code` pairs *and* the `ValueSet.version` (the
+> non-load-bearing `expansion.identifier` is deliberately excluded — FHIR does not require it stable
+> across identical expansions, so hashing it would fire false drift), prefixed
 > `sha256:` so pre-#295 rolling hashes (`h<hex>`) are never compared across algorithms. When a
 > re-import's hash differs from the stored one, a distinct **`VALUE_SET_EXPANSION_CHANGED`** audit
 > event is written and the OIDs are listed on stderr — silent terminology drift is now loud.

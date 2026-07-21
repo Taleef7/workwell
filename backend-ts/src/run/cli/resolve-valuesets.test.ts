@@ -120,6 +120,86 @@ test("expansion hash is SHA-256 and is sensitive to the version, not just the me
   assert.equal(v1, await hashFor({ version: "20250508" }), "hash is deterministic");
 });
 
+test("a fresh expansion.identifier alone does NOT change the hash (Codex P2 — no false drift)", async () => {
+  // FHIR does not require a stable identifier for an unchanged expansion, so it must not feed the hash.
+  const hashFor = async (over: Partial<VsacExpansion>) => {
+    const { upserts, valueSets, events } = fakes();
+    await runResolve({
+      oids: [OID],
+      client: fixtureVsacClient({ [OID]: expansionOf({ version: "20250508", ...over }) }),
+      valueSets,
+      events,
+      now: "2026-07-21T00:00:00.000Z",
+    });
+    return upserts[0]!.expansionHash!;
+  };
+  assert.equal(
+    await hashFor({ expansionIdentifier: "urn:uuid:first" }),
+    await hashFor({ expansionIdentifier: "urn:uuid:SECOND" }),
+    "identical members + version → same hash regardless of expansion.identifier",
+  );
+});
+
+test("no false drift when only the expansion.identifier changed between imports (Codex P2)", async () => {
+  const first = fakes();
+  await runResolve({
+    oids: [OID],
+    client: fixtureVsacClient({ [OID]: expansionOf({ version: "20250508", expansionIdentifier: "urn:uuid:a" }) }),
+    valueSets: first.valueSets,
+    events: first.events,
+    now: "2026-07-21T00:00:00.000Z",
+  });
+  const hash = first.upserts[0]!.expansionHash!;
+
+  const second = fakes([{ oid: OID, expansionHash: hash }]);
+  const res = await runResolve({
+    oids: [OID],
+    client: fixtureVsacClient({ [OID]: expansionOf({ version: "20250508", expansionIdentifier: "urn:uuid:DIFFERENT" }) }),
+    valueSets: second.valueSets,
+    events: second.events,
+    now: "2026-07-22T00:00:00.000Z",
+  });
+  assert.deepEqual(res.changed, []);
+  assert.equal(second.audits.filter((a) => a.eventType === "VALUE_SET_EXPANSION_CHANGED").length, 0);
+});
+
+test("an ERROR import preserves the last-good hash so drift is still caught afterward (Codex P2)", async () => {
+  // success (H1) → transient failure → changed success (H2): drift must be detected.
+  const first = fakes();
+  await runResolve({
+    oids: [OID],
+    client: fixtureVsacClient({ [OID]: expansionOf({ version: "20250508" }) }),
+    valueSets: first.valueSets,
+    events: first.events,
+    now: "2026-07-21T00:00:00.000Z",
+  });
+  const h1 = first.upserts[0]!.expansionHash!;
+
+  // Failure: the client has no fixture for OID → rejects. The ERROR upsert must carry h1 forward.
+  const failed = fakes([{ oid: OID, expansionHash: h1 }]);
+  await runResolve({
+    oids: [OID],
+    client: fixtureVsacClient({}),
+    valueSets: failed.valueSets,
+    events: failed.events,
+    now: "2026-07-22T00:00:00.000Z",
+  });
+  const errRow = failed.upserts[0]!;
+  assert.equal(errRow.resolutionStatus, "ERROR");
+  assert.equal(errRow.expansionHash, h1, "the ERROR row keeps the last-good hash as the drift baseline");
+
+  // Changed success against that preserved baseline → drift.
+  const changedRun = fakes([{ oid: OID, expansionHash: errRow.expansionHash! }]);
+  const res = await runResolve({
+    oids: [OID],
+    client: fixtureVsacClient({ [OID]: expansionOf({ version: "20260508" }) }),
+    valueSets: changedRun.valueSets,
+    events: changedRun.events,
+    now: "2026-07-23T00:00:00.000Z",
+  });
+  assert.deepEqual(res.changed, [OID], "drift is caught despite the intervening failure");
+});
+
 test("a changed expansion audits VALUE_SET_EXPANSION_CHANGED and is reported", async () => {
   const { audits, valueSets, events } = fakes([{ oid: OID, expansionHash: "sha256:" + "0".repeat(64) }]);
   const client = fixtureVsacClient({ [OID]: expansionOf({ version: "20260508" }) });
