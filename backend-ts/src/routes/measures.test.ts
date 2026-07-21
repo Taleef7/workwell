@@ -394,6 +394,70 @@ test("PUT /api/measures/:id/spec → 404 unknown measure", async () => {
   assert.equal((await put("/api/measures/nope/spec", { description: "x" }))?.status, 404);
 });
 
+test("PUT /api/measures/:id/spec rejects a body carrying no spec field instead of blanking the spec", async () => {
+  // The 2026-07-21 sweep probed this endpoint with an empty body: every field defaulted to
+  // ""/[] and the spec was silently destroyed behind a 200 {status:"saved"}. A body with
+  // nothing recognizable in it is a client error, not an instruction to erase the measure.
+  const before = (await get("/api/measures/audiogram").then((r) => r!.json())) as { description: string };
+  assert.ok(before.description.length > 0, "precondition: audiogram has a description to lose");
+
+  // { oshaReferenceId } is included deliberately: it is a "spec field" that is NOT persisted
+  // (audit-only), so a body carrying only it would pass a naive presence check yet still blank
+  // every persisted field — it must be rejected like an empty body (Codex P1).
+  for (const body of [{}, { junk: 1 }, null, [], "nope", { oshaReferenceId: "osha-29-cfr-1910-95" }]) {
+    const res = await put("/api/measures/audiogram/spec", body);
+    assert.equal(res?.status, 400, `body ${JSON.stringify(body)} → 400`);
+    assert.equal(((await res!.json()) as { error: string }).error, "invalid_request");
+  }
+
+  const after = (await get("/api/measures/audiogram").then((r) => r!.json())) as { description: string };
+  assert.equal(after.description, before.description, "spec survived every rejected write");
+});
+
+test("PUT /api/measures/:id/spec rejects wrong-typed spec fields", async () => {
+  const cases: Array<Record<string, unknown>> = [
+    { description: 42 },
+    { complianceWindow: { annual: true } },
+    { eligibilityCriteria: "Welder" },
+    { eligibilityCriteria: { roleFilter: 7 } },
+    { exclusions: "Waiver" },
+    { exclusions: [{ label: "Waiver" }] }, // criteriaText missing
+    { exclusions: [{ label: 1, criteriaText: 2 }] },
+    { requiredDataElements: "Last audiogram date" },
+    { requiredDataElements: [1, 2] },
+    { policyRef: 3 },
+    { description: "ok", oshaReferenceId: 5 }, // osha type still validated alongside a persisted field
+  ];
+  for (const body of cases) {
+    const res = await put("/api/measures/audiogram/spec", body);
+    assert.equal(res?.status, 400, `body ${JSON.stringify(body)} → 400`);
+  }
+});
+
+test("PUT /api/measures/:id/spec still accepts a partial but well-formed body (replace semantics kept)", async () => {
+  const res = await put("/api/measures/audiogram/spec", { description: "partial save" });
+  assert.equal(res?.status, 200);
+  const detail = (await get("/api/measures/audiogram").then((r) => r!.json())) as { description: string };
+  assert.equal(detail.description, "partial save");
+
+  // Restore the full spec: this is a replace-semantics PUT, so a partial save legitimately
+  // blanks the other fields — later traceability/data-readiness tests read audiogram's spec.
+  assert.equal(
+    (
+      await put("/api/measures/audiogram/spec", {
+        policyRef: "OSHA 29 CFR 1910.95 — rev",
+        oshaReferenceId: "osha-29-cfr-1910-95",
+        description: "edited via spec tab",
+        eligibilityCriteria: { roleFilter: "Welder", siteFilter: "Plant A", programEnrollmentText: "HCP" },
+        exclusions: [{ label: "Waiver", criteriaText: "on file" }],
+        complianceWindow: "Annual",
+        requiredDataElements: ["Last audiogram date"],
+      })
+    )?.status,
+    200,
+  );
+});
+
 test("PUT /api/measures/:id/cql saves CQL; POST /cql/compile compiles + persists status", async () => {
   const saved = await put("/api/measures/audiogram/cql", { cqlText: "library AudiogramCQL version '1.0.0'" });
   assert.equal(saved?.status, 200);
