@@ -22,6 +22,21 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-21 — Doug-directive wave MERGED + deployed (PRs #308–#316), then a full E2E test pass.**
+  Doug's 2026-07-19 call superseded the earlier "CQL→SQL parked" direction. The wave shipped: a
+  self-owned **FHIR shim over the WebChart MariaDB dev-DB** (`wcdb-fhir-shim/`, the only `mysql2`
+  home — backend-ts stays driver-free, ADR-034), **CQL→SQL** (`pnpm generate:sql` → committed
+  `wcdb-fhir-shim/sql/*.sql` → the shim's `/compliance` API) gated by the **ADR-025 SQL-vs-CQL golden
+  parity** suite (4 measures × 56 patients × 2 dates, zero divergence; CQL stays the sole authority),
+  **Codify "Find a code"** live in Studio → Value Sets (vendored per ADR-007, searching MIE's hosted
+  index), and an **AI-generated-YAML → WebChart ingest** loop (model-catalog-validated, idempotent,
+  manifest-exact rollback). An E2E sweep (2026-07-21) verified it DEMO-SAFE: backend + shim regression
+  green, two independent RBAC/security sweeps (gates match `authorize.ts` exactly, no bypass, no 500s,
+  no client-bundle secret leak, shim gate fail-closed), the Playwright UI suite **34/34**, and the
+  full demo loop by hand (parity zero-divergence, 56→60→56 ingest with every designed verdict exact,
+  `generate:sql` freshness zero-diff, hierarchy reconciling All = Σ tenants, all exports 200). One
+  real test-only bug (a self-contradicting DUE_SOON band-coverage assertion) was fixed in **PR #317**;
+  three LOW hardening items are tracked post-demo. Demo script: `docs/DEMO_2026-07-23.md`.
 - **2026-07-14 — pre-meeting closeout: evidence is DURABLE (#167 closed, ADR-030) + nightly DB
   backups are live (#270).** A `resolveBucket` app seam (the 9th inert-unless-configured seam,
   `bucket-s3`) routes evidence bytes to the managed `workwell-twh-evidence` S3 bucket

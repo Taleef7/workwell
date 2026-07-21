@@ -110,8 +110,8 @@ hiring gate (3–4×/week cadence), Bridget schedules (call, don't email), Doug 
 session. Wave plan: `docs/superpowers/plans/2026-07-20-doug-wave.md`; spec:
 `docs/superpowers/specs/2026-07-20-doug-wave-wcdb-shim-cql-sql-design.md`; ADR-034.
 
-**STATUS 2026-07-20 EOD — the wave is BUILT; all gates green on first live runs (PRs #308–#315,
-stacked, awaiting owner review+merge).** Shim live against dev-wcdb (hapi-live 4/4 incl.
+**STATUS 2026-07-21 — the wave is MERGED + deployed (PRs #308–#316) and has passed a full E2E test
+sweep.** Shim live against dev-wcdb (hapi-live 4/4 incl.
 fixture parity; hapi-app-live 1/1; CLI 27 real outcomes); **CQL→SQL parity-proven** —
 `pnpm generate:sql` → committed `wcdb-fhir-shim/sql/*.sql` → shim `/compliance` API →
 **ADR-025 golden gate GREEN (4 measures × 56 patients × 2 dates, zero divergence)**; **Codify is
@@ -128,8 +128,21 @@ schema catalog (685 objects / 7,630 fields), fail-closed LOINC resolution, idemp
 `--rollback`; live-verified 56→60→56 with CQL==SQL agreement on all four designed outcomes.
 **Demo script:**
 `docs/DEMO_2026-07-23.md` (5 beats incl. the full loop; fallbacks + the owner outreach
-checklist — message Doug re attendees, intro note to Nicole, dry-runs Wed PM). Remaining: owner
-PR reviews/merges (#308→#311→#312→#313→#314→#315→#316), Wed dry-runs, outreach.
+checklist — message Doug re attendees, intro note to Nicole, dry-runs Wed PM). **E2E test pass
+(2026-07-21):** regression floor (backend `pnpm test` + shim tests green), two independent
+adversarial API/RBAC/security sweeps (DEMO-SAFE — RBAC matches `authorize.ts` exactly, no gate
+bypass, unauth→401, refresh rotation + reuse-detection, CORS rejects foreign origins, no client-bundle
+secret leak, shim gate two-tier fail-closed 404/409, every malformed input→400/404 with no 500),
+the maintained Playwright UI suite (**34/34** incl. Codify "Find a code"), and the full demo loop
+by hand (parity 4-measures×56×2-dates zero-divergence; 56→60→56 ingest with all four designed
+verdicts exact; `generate:sql` freshness zero-diff; hierarchy reconciles All=Σ tenants at every
+level; MeasureReport/QRDA/CSV exports all 200). **One real bug found + fixed (PR #317, test-only):**
+the parity suite's DUE_SOON non-vacuity assertion was self-contradicting — it evaluated at the 2024
+seed date while the ingest fixtures are authored as-of 2026-07-23, so `ingest → re-run parity` went
+red despite perfect parity; DUE_SOON moved to a new INGEST-FIXTURE test at `FIXTURE_DATE=2026-07-23`
+(self-skips on the bare seed) that also hardens the demo's exact CQL==SQL claim. Three LOW findings
+tracked post-demo (unvalidated `PUT /api/measures/:id/spec` body; `POST /api/runs/manual` 501-not-400
+on unknown scope; no security response headers). Remaining owner steps: Wed dry-runs, outreach.
 
 ## Prior focus (2026-07-16 — WebChart live-integration wave)
 
