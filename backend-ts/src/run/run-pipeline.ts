@@ -158,8 +158,17 @@ class LivePopulationPreparationError extends Error {
 
 const WEBCHART_PAGE_SIZE = 100;
 
+const RUN_SCOPE_TYPES: readonly RunScopeType[] = ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"];
+
 /** Resolve a scoped request into the (employee × measure) work items + run metadata. */
 function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[]) {
+  // The body is unvalidated JSON cast to ManualRunRequest, so scopeType can be anything at
+  // runtime. A value that is not a scope at all is a CLIENT error (400) — only a real scope
+  // this path declines to serve (CASE, below) is a 501.
+  if (!RUN_SCOPE_TYPES.includes(req.scopeType))
+    throw new InvalidRunRequestError(
+      `Unknown scopeType: ${JSON.stringify(req.scopeType)}. Expected one of ${RUN_SCOPE_TYPES.join(", ")}.`,
+    );
   switch (req.scopeType) {
     case "MEASURE": {
       const measureId = req.measureId;
@@ -213,7 +222,8 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: `Site: ${site}` };
     }
     default:
-      // CASE reruns go through rerun-to-verify (cases module), not the manual-run path.
+      // CASE is a real scope, served by rerun-to-verify (cases module) rather than here —
+      // genuinely "not implemented on this path" (501). Non-scopes were rejected above.
       throw new UnsupportedScopeError(`Scope ${req.scopeType} is not served by the manual-run path.`);
   }
 }

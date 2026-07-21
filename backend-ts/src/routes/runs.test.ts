@@ -279,6 +279,25 @@ test("configured SITE=WebChart is a controlled unsupported scope", async () => {
   assert.equal(((await response!.json()) as { error: string }).error, "unsupported_scope");
 });
 
+test("an unknown scopeType is a malformed request (400), not an unimplemented scope (501)", async () => {
+  // 501 means "this server knows the scope and does not serve it here" — true of CASE
+  // (rerun-to-verify) and SITE=WebChart. A scopeType that is not a scope at all is a
+  // client error: it must not read as a server-side gap.
+  for (const scopeType of ["BANANA", "", "all_programs", 42, null]) {
+    const res = await post("/api/runs/manual", { scopeType });
+    assert.equal(res?.status, 400, `scopeType ${JSON.stringify(scopeType)} → 400`);
+    const body = (await res!.json()) as { error: string; message: string };
+    assert.equal(body.error, "invalid_request");
+    assert.match(body.message, /scopeType/i);
+  }
+});
+
+test("CASE stays a known-but-unsupported scope on the manual-run path (501)", async () => {
+  const res = await post("/api/runs/manual", { scopeType: "CASE", caseId: crypto.randomUUID() });
+  assert.equal(res?.status, 501);
+  assert.equal(((await res!.json()) as { error: string }).error, "unsupported_scope");
+});
+
 test("configured wc EMPLOYEE scope returns non-mutating 409 before run creation", async () => {
   await get("/api/runs"); // initialize stores for isolated execution
   const runStore = new SqliteRunStore(env.DB as never);
