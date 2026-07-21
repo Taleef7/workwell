@@ -22,6 +22,24 @@ export interface VsacExpansion {
   /** expansion.total from the server (may exceed contains.length before paging). */
   total: number;
   contains: VsacCode[];
+  /** `ValueSet.version` as returned by the server — provenance for the imported row (#295). */
+  version?: string;
+  /** `ValueSet.expansion.identifier` — identifies THIS expansion, not the value set (#295). */
+  expansionIdentifier?: string;
+  /** `ValueSet.expansion.timestamp` — when the server computed the expansion (#295). */
+  expansionTimestamp?: string;
+}
+
+/**
+ * Release pinning (#295). Without one of these, VSAC serves *latest-active* semantics: a republish
+ * silently changes our expansions and therefore the CMS122/CMS125 literal results. Pinning makes an
+ * import reproducible.
+ */
+export interface VsacExpandOptions {
+  /** Pin to a VSAC release manifest, e.g. `Library/ecqm-update-2025-05-08`. */
+  manifest?: string;
+  /** Pin to a named expansion (mutually exclusive with `manifest`). */
+  expansion?: string;
 }
 
 export interface VsacClientConfig {
@@ -32,14 +50,20 @@ export interface VsacClientConfig {
 export interface VsacClient {
   readonly kind: string;
   /** Expand one value-set OID. Rejects on transport/HTTP error or an unknown-to-this-client OID. */
-  expand(oid: string): Promise<VsacExpansion>;
+  expand(oid: string, opts?: VsacExpandOptions): Promise<VsacExpansion>;
 }
 
-/** In-memory client for tests + offline fixtures. Rejects on an OID with no fixture. */
-export function fixtureVsacClient(fixtures: Record<string, VsacExpansion>): VsacClient {
+/** In-memory client for tests + offline fixtures. Rejects on an OID with no fixture.
+ *  `calls` records the (oid, opts) it was asked for, so callers can assert pin forwarding (#295). */
+export function fixtureVsacClient(
+  fixtures: Record<string, VsacExpansion>,
+): VsacClient & { readonly calls: Array<{ oid: string; opts?: VsacExpandOptions }> } {
+  const calls: Array<{ oid: string; opts?: VsacExpandOptions }> = [];
   return {
     kind: "fixture",
-    expand(oid: string): Promise<VsacExpansion> {
+    calls,
+    expand(oid: string, opts?: VsacExpandOptions): Promise<VsacExpansion> {
+      calls.push({ oid, opts });
       const hit = fixtures[oid];
       if (!hit) return Promise.reject(new Error(`fixtureVsacClient: no fixture for oid '${oid}'`));
       return Promise.resolve(hit);
@@ -62,25 +86,47 @@ export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
   const MAX_PAGES = 2000;
   return {
     kind: "http",
-    async expand(oid: string): Promise<VsacExpansion> {
+    async expand(oid: string, opts?: VsacExpandOptions): Promise<VsacExpansion> {
+      if (opts?.manifest && opts?.expansion) {
+        throw new Error(`VSAC $expand for oid '${oid}': manifest and expansion are mutually exclusive`);
+      }
+      // Release pin (#295). Absent, VSAC serves latest-active — reproducibility depends on this.
+      const pin = opts?.manifest
+        ? `&manifest=${encodeURIComponent(opts.manifest)}`
+        : opts?.expansion
+          ? `&expansion=${encodeURIComponent(opts.expansion)}`
+          : "";
       const contains: VsacCode[] = [];
       let offset = 0;
       let total = 0;
       let pages = 0;
       let sawExpansion = false;
+      let version: string | undefined;
+      let expansionIdentifier: string | undefined;
+      let expansionTimestamp: string | undefined;
       for (;;) {
         if (++pages > MAX_PAGES) {
           throw new Error(`VSAC $expand for oid '${oid}': exceeded max pages (offset not advancing?)`);
         }
-        const url = `${base}/ValueSet/${encodeURIComponent(oid)}/$expand?offset=${offset}&count=${PAGE}`;
+        const url = `${base}/ValueSet/${encodeURIComponent(oid)}/$expand?offset=${offset}&count=${PAGE}${pin}`;
         const res = await fetch(url, { headers: { Authorization: auth, Accept: "application/fhir+json" } });
         if (!res.ok) {
           throw new Error(`VSAC $expand failed for oid '${oid}': ${res.status} ${res.statusText}`);
         }
         const body = (await res.json()) as {
-          expansion?: { total?: number; contains?: Array<{ code?: string; system?: string; display?: string }> };
+          version?: string;
+          expansion?: {
+            total?: number;
+            identifier?: string;
+            timestamp?: string;
+            contains?: Array<{ code?: string; system?: string; display?: string }>;
+          };
         };
         if (body.expansion) sawExpansion = true;
+        // Provenance comes off the first page; later pages repeat it (#295).
+        version ??= body.version;
+        expansionIdentifier ??= body.expansion?.identifier;
+        expansionTimestamp ??= body.expansion?.timestamp;
         const page = body.expansion?.contains ?? [];
         total = body.expansion?.total ?? total;
         for (const c of page) {
@@ -97,7 +143,14 @@ export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
       if (total > 0 && contains.length === 0) {
         throw new Error(`VSAC $expand for oid '${oid}': server reported total=${total} but returned no members`);
       }
-      return { oid, total: total || contains.length, contains };
+      return {
+        oid,
+        total: total || contains.length,
+        contains,
+        ...(version !== undefined ? { version } : {}),
+        ...(expansionIdentifier !== undefined ? { expansionIdentifier } : {}),
+        ...(expansionTimestamp !== undefined ? { expansionTimestamp } : {}),
+      };
     },
   };
 }

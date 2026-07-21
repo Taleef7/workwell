@@ -327,8 +327,28 @@ DDL**; DATA_MODEL §3.4). Default target = the 21 CMS122v14 reference OIDs; `--o
 
 ```bash
 cd backend-ts
+# unpinned (latest-active — warns; kept for parity with the 2026-07-05 import)
 DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm resolve-valuesets
+# pinned to a VSAC release manifest — REPRODUCIBLE, preferred (#295)
+DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> \
+  pnpm resolve-valuesets --manifest Library/ecqm-update-2025-05-08
 ```
+
+> **Release pinning + drift detection (#295).** Without `--manifest <canonical>` (or `--expansion
+> <name>`; the two are mutually exclusive) VSAC serves **latest-active** semantics — a republish
+> silently changes our expansions and therefore the CMS122/CMS125 literal-diff results. The CLI now
+> warns when unpinned, forwards the pin to every `$expand`, and records the returned
+> `ValueSet.version` on the row (it used to hardcode `version: null`) plus
+> `expansion.identifier`/`timestamp` in the `VALUE_SETS_RESOLVED` audit payload. The expansion hash
+> is **SHA-256** over the sorted `system|code` pairs *and* the `ValueSet.version` (the
+> non-load-bearing `expansion.identifier` is deliberately excluded — FHIR does not require it stable
+> across identical expansions, so hashing it would fire false drift), prefixed
+> `sha256:` so pre-#295 rolling hashes (`h<hex>`) are never compared across algorithms. When a
+> re-import's hash differs from the stored one, a distinct **`VALUE_SET_EXPANSION_CHANGED`** audit
+> event is written and the OIDs are listed on stderr — silent terminology drift is now loud.
+> **Choosing the manifest is an owner/standards call**: it must match the measure year being
+> evaluated (CMS122v14/CMS125v14 = 2026), so the CLI ships **no default pin** rather than guessing
+> one. Verify the exact canonical against the VSAC FHIR API docs before the next import.
 
 **Descriptive only — changes no current outcome.** The runtime composite resolver still falls back to the
 local store for the synthetic measures' `urn:workwell:*` references, so importing VSAC codes does not shift
