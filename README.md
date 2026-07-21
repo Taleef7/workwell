@@ -22,6 +22,17 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-21 (afternoon) — post-sweep closeout (PRs #318–#321, all Codex-reviewed + merged).** The
+  maintained Playwright UI sweep is now tracked (#318, 35 tests / 8 files); two of the three LOW sweep
+  findings are fixed (#319 `POST /api/runs/manual` unknown scope → **400 not 501**; #320 `PUT
+  /api/measures/:id/spec` now **validates its body** — it was silently blanking the spec behind a 200);
+  and **#295 — VSAC release pinning** shipped (#321): `resolve-valuesets --manifest`/`--expansion`
+  (unpinned = latest-active, now warns), the returned `ValueSet.version` recorded on the row, a SHA-256
+  `expansion_hash`, and a distinct `VALUE_SET_EXPANSION_CHANGED` drift event. Codex flagged two real
+  correctness holes (an `oshaReferenceId`-only body slipping the spec guard; `expansion.identifier` in
+  the drift hash causing false drift) — both fixed with tests. The upstream
+  `projecttacoma/fqm-execution#371` bug we filed 07-15 was maintainer-confirmed and a fix PR offered.
+  Only the security-response-headers LOW remains, deferred past the demo.
 - **2026-07-21 — Doug-directive wave MERGED + deployed (PRs #308–#316), then a full E2E test pass.**
   Doug's 2026-07-19 call superseded the earlier "CQL→SQL parked" direction. The wave shipped: a
   self-owned **FHIR shim over the WebChart MariaDB dev-DB** (`wcdb-fhir-shim/`, the only `mysql2`
