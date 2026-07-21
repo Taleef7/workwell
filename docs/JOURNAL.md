@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-21 — full E2E test pass; fixed a self-contradicting parity band-coverage assertion
+
+Ran a comprehensive end-to-end pass over the merged wave (local full stack: backend :8080,
+frontend :3000, dev-wcdb :33306, shim :8085) — regression floor (backend `pnpm test` + shim tests,
+both green), two independent adversarial API/RBAC/security sweeps, a Playwright UI sweep, and the
+full demo loop live (shim FHIR contract, `generate:sql` freshness, `/compliance` per-patient +
+cohort, the ADR-025 parity gate, and the 56→60→56 ingest write loop with all four designed verdicts
+exact and manifest-exact rollback).
+
+**One real, demo-relevant bug found and fixed** (`wcdb-sql-parity-live.test.ts`): the DUE_SOON
+non-vacuity assertion (added in the gpt-5.6 sweep) was **self-contradicting**. Its own notice tells
+you to `npm run ingest` and re-run the suite for DUE_SOON coverage — but the assertion evaluated at
+`PARITY_DATE = 2024-06-01`, while the ingest fixtures (`patients.example.yaml`) are authored as-of
+**2026-07-23** (Marcus's DUE_SOON BP obs is dated 2025-08-08 — *in the future* at the 2024 seed
+date ⇒ MISSING_DATA there). So ingest-then-re-run went **red** on band coverage even though SQL==CQL
+parity was perfect. Fix: the seed's three reachable bands (COMPLIANT/OVERDUE/MISSING_DATA) stay
+asserted at `PARITY_DATE`; DUE_SOON moved to a new **INGEST-FIXTURE PARITY** test that runs only
+when the fixtures are present (population > seed) and self-skips with a notice on the bare seed. That
+new test evaluates at a `FIXTURE_DATE = 2026-07-23` constant and asserts **per-patient SQL==CQL AND
+DUE_SOON present** — so it now hardens the demo's exact claim ("ingest 4, and CQL and SQL agree —
+Zainab COMPLIANT, Marcus DUE_SOON, Priya OVERDUE, Omar MISSING_DATA"). Verified both ways: bare seed
+(56) → 4/4 with test 4 self-skipping; post-ingest (60) → 4/4 proving the claim; typecheck clean.
+
+**Adversarial sweeps: DEMO-SAFE.** RBAC matrix matches `authorize.ts` exactly on every surface ×
+role (no gate bypass), unauth → 401 everywhere, invalid/refresh-as-access tokens → 401, refresh
+rotation + reuse-detection work, CORS rejects foreign origins, no secrets in the client bundle, the
+shim gate is correctly two-tier fail-closed (404 no-SQL / 409 has-SQL-uncertified), and every
+malformed-input probe returned 400/404 with no 500 and no stack trace. Only LOW/INFO items (tracked
+for post-demo, not blocking): `PUT /api/measures/:id/spec` accepts an unvalidated body (silently
+blanks spec fields — a probe dirtied the local audiogram spec, restored by an in-memory-store
+restart); `POST /api/runs/manual` returns 501 (not 400) for an unknown scope; no security response
+headers (`X-Content-Type-Options`/`X-Frame-Options`/CSP).
+
 ## 2026-07-20 (night) — Codex gpt-5.6 review sweep over the whole wave (#308–#316), all findings fixed
 
 A second, deeper Codex pass (gpt-5.6-sol, high reasoning, one review per stacked PR against its

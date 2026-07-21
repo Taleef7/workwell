@@ -37,6 +37,11 @@ import { WCDB_SQL_MEASURES } from "../../cql/codegen/generate-sql-cli.ts";
 const BASE_URL = (process.env.WCDB_SHIM_PARITY_BASE_URL ?? "").trim().replace(/\/+$/, "");
 const PARITY_DATE = "2024-06-01"; // data-contemporaneous with the dev-wcdb seed (the devdb CLI default)
 const ALT_DATE = "2024-11-15"; // 5.5 months on — subjects cross band thresholds (asserted below)
+// The as-of date the ingest fixtures (`wcdb-fhir-shim/patients.example.yaml`) are AUTHORED against —
+// their observation dates make Zainab COMPLIANT / Marcus DUE_SOON / Priya OVERDUE / Omar MISSING_DATA
+// only at this date, NOT at the 2024 seed dates (Marcus's 2025-08-08 BP is in the future at PARITY_DATE
+// ⇒ MISSING_DATA there). So the DUE_SOON band is asserted here, at the fixtures' own date, not above.
+const FIXTURE_DATE = "2026-07-23";
 const SEED_POPULATION = 56;
 /**
  * Derived from the codegen's own measure list (never a hand copy — review M1): a measure added to
@@ -135,21 +140,12 @@ test("GOLDEN PARITY: generated-SQL verdicts == CQL-oracle verdicts, per patient,
 
   assert.deepEqual(failures, [], `SQL/CQL divergence — fix the SQL template, never the oracle:\n${failures.join("\n")}`);
 
-  // Non-vacuity: a gate whose oracle only ever says one thing proves nothing (Codex P2).
+  // Non-vacuity: a gate whose oracle only ever says one thing proves nothing (Codex P2). The seed
+  // exercises these three bands at PARITY_DATE; DUE_SOON is a fourth band the seed data does not
+  // reach at a seed-contemporaneous date, so it is asserted at FIXTURE_DATE below (where the ingest
+  // fixtures are designed to produce it) rather than forced here — the two "as-of" contexts differ.
   for (const required of ["COMPLIANT", "OVERDUE", "MISSING_DATA"]) {
     assert.ok(statusesSeen.has(required), `the population exercises the ${required} band (got: ${[...statusesSeen].join(", ")})`);
-  }
-  if (population > SEED_POPULATION) {
-    assert.ok(
-      statusesSeen.has("DUE_SOON"),
-      "with the designed ingest fixtures present, the DUE_SOON band must be exercised (Marcus Demoson)",
-    );
-  } else if (!statusesSeen.has("DUE_SOON")) {
-    console.log(
-      "notice: bare seed population — no DUE_SOON subject at this date; for full band coverage run " +
-        "`cd wcdb-fhir-shim && npm run ingest -- --file patients.example.yaml` and re-run this suite " +
-        "(roll back afterwards)",
-    );
   }
 });
 
@@ -195,4 +191,52 @@ test("parity date sensitivity: EVERY SQL measure agrees on a shifted evaluation 
         `is not exercising the date-banding logic; pick dates that move at least one subject across a band`,
     );
   }
+});
+
+// The DUE_SOON band + the demo's exact claim ("ingest 4 AI-generated patients, and CQL and SQL agree
+// on all four — Zainab COMPLIANT, Marcus DUE_SOON, Priya OVERDUE, Omar MISSING_DATA") are only true at
+// FIXTURE_DATE, the as-of date `patients.example.yaml` is authored against. This pass runs ONLY when the
+// ingest fixtures are present (population > seed) and self-skips (notice) on the bare seed, so a plain
+// `docker compose --profile wcdb up` run never fails for lack of an ingest. It proves per-patient
+// SQL==CQL parity at FIXTURE_DATE too and that DUE_SOON is genuinely exercised there.
+test("INGEST-FIXTURE PARITY: at the fixtures' as-of date, SQL==CQL per patient and DUE_SOON is exercised", { skip }, async () => {
+  await assertShimReachable();
+  const cfg = { baseUrl: BASE_URL, apiKey: "parity-test" };
+  const { payloads, roster, population } = await fetchPopulation(cfg);
+  if (population <= SEED_POPULATION) {
+    console.log(
+      `notice: bare seed population (${population}) — the DUE_SOON band + the demo's ingest claim are ` +
+        "asserted only when the designed fixtures are present. To exercise this pass run " +
+        "`cd wcdb-fhir-shim && npm run ingest -- --file patients.example.yaml`, re-run this suite, then " +
+        "roll back (`… --rollback`).",
+    );
+    return;
+  }
+
+  const failures: string[] = [];
+  const statusesSeen = new Set<string>();
+  for (const measureId of SQL_MEASURES) {
+    const src = webChartDataSource(cfg, fixtureWebChartClient(payloads));
+    const res = await evaluateSourceWithRoster(src, measureId, roster, { evaluationDate: FIXTURE_DATE });
+    const oracle = new Map<string, string>();
+    for (const r of res.results) {
+      if (r.ok && r.outcome) oracle.set(r.outcome.subjectId, r.outcome.outcome);
+      else failures.push(`${measureId}@${FIXTURE_DATE}: CQL failed for item #${r.index}: ${r.ok ? "no outcome" : r.error}`);
+    }
+    for (const status of oracle.values()) statusesSeen.add(status);
+
+    const sql = await fetchSqlVerdicts(measureId, FIXTURE_DATE);
+    assert.equal(sql.size, population, `${measureId}@${FIXTURE_DATE}: SQL cohort covers the full population`);
+    assert.equal(oracle.size, population, `${measureId}@${FIXTURE_DATE}: CQL oracle covers the full population`);
+    for (const [subjectId, cqlOutcome] of oracle) {
+      const sqlOutcome = sql.get(subjectId);
+      if (sqlOutcome !== cqlOutcome) failures.push(`${measureId} ${subjectId}@${FIXTURE_DATE}: SQL='${sqlOutcome}' CQL='${cqlOutcome}'`);
+    }
+  }
+
+  assert.deepEqual(failures, [], `SQL/CQL divergence at the ingest date — fix the SQL template, never the oracle:\n${failures.join("\n")}`);
+  assert.ok(
+    statusesSeen.has("DUE_SOON"),
+    `the ingest fixtures must exercise the DUE_SOON band at ${FIXTURE_DATE} (Marcus Demoson) — got: ${[...statusesSeen].join(", ")}`,
+  );
 });
