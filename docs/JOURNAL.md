@@ -60,6 +60,20 @@ change plus a CSP two days before a demo is a bad trade) and #296, the `cqframew
 conformance harness — the biggest item on the list and the likeliest source of the next upstream
 finding, but multi-day.
 
+**Codex review round on all four PRs (#318–#321), every finding addressed before merge.** Two were
+real correctness holes, not nits: (1) the spec guard triggered on *any* of seven "spec fields", but
+`oshaReferenceId` is audit-only (not persisted), so `{ oshaReferenceId }` alone still passed and
+blanked the spec — the presence check now requires a *persisted* field. (2) The VSAC drift hash
+included `expansion.identifier`, which FHIR R4 does not require stable across identical expansions, so
+a fresh identifier fired a false `VALUE_SET_EXPANSION_CHANGED`; and the ERROR path nulled the
+`expansion_hash`, destroying the drift baseline across a transient failure — both fixed (hash is
+members + `ValueSet.version` only; an ERROR carries the last-good hash forward), with the
+success→failure→changed-success sequence now tested. The three e2e P2s (clear demo-prefilled creds
+before the empty-input assertion; deep-link the run by `?runId=` so history can't hide it; skip the
+direct-API-probe tests when the backend is unreachable rather than throwing) were test-robustness and
+were taken. The journal P1s are this reconciliation — the morning findings line above is marked
+superseded.
+
 ## 2026-07-21 — full E2E test pass; fixed a self-contradicting parity band-coverage assertion
 
 Ran a comprehensive end-to-end pass over the merged wave (local full stack: backend :8080,
@@ -91,7 +105,8 @@ malformed-input probe returned 400/404 with no 500 and no stack trace. Only LOW/
 for post-demo, not blocking): `PUT /api/measures/:id/spec` accepts an unvalidated body (silently
 blanks spec fields — a probe dirtied the local audiogram spec, restored by an in-memory-store
 restart); `POST /api/runs/manual` returns 501 (not 400) for an unknown scope; no security response
-headers (`X-Content-Type-Options`/`X-Frame-Options`/CSP).
+headers (`X-Content-Type-Options`/`X-Frame-Options`/CSP). **[Superseded — the first two shipped the
+same afternoon (PRs #319, #320; see the entry above); only the security-headers item remains open.]**
 
 ## 2026-07-20 (night) — Codex gpt-5.6 review sweep over the whole wave (#308–#316), all findings fixed
 
