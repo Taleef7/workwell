@@ -401,7 +401,10 @@ test("PUT /api/measures/:id/spec rejects a body carrying no spec field instead o
   const before = (await get("/api/measures/audiogram").then((r) => r!.json())) as { description: string };
   assert.ok(before.description.length > 0, "precondition: audiogram has a description to lose");
 
-  for (const body of [{}, { junk: 1 }, null, [], "nope"]) {
+  // { oshaReferenceId } is included deliberately: it is a "spec field" that is NOT persisted
+  // (audit-only), so a body carrying only it would pass a naive presence check yet still blank
+  // every persisted field — it must be rejected like an empty body (Codex P1).
+  for (const body of [{}, { junk: 1 }, null, [], "nope", { oshaReferenceId: "osha-29-cfr-1910-95" }]) {
     const res = await put("/api/measures/audiogram/spec", body);
     assert.equal(res?.status, 400, `body ${JSON.stringify(body)} → 400`);
     assert.equal(((await res!.json()) as { error: string }).error, "invalid_request");
@@ -423,6 +426,7 @@ test("PUT /api/measures/:id/spec rejects wrong-typed spec fields", async () => {
     { requiredDataElements: "Last audiogram date" },
     { requiredDataElements: [1, 2] },
     { policyRef: 3 },
+    { description: "ok", oshaReferenceId: 5 }, // osha type still validated alongside a persisted field
   ];
   for (const body of cases) {
     const res = await put("/api/measures/audiogram/spec", body);
