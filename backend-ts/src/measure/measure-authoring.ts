@@ -40,10 +40,16 @@ export interface SpecUpdate {
 
 const s = (v: unknown): string => (v == null ? "" : String(v));
 
-/** The spec fields a PUT /spec body may carry. A body naming none of them is not a spec save. */
-const SPEC_FIELDS = [
+/**
+ * The spec fields a PUT /spec body may carry that actually PERSIST — `updateMeasureSpec` writes
+ * these into spec_json (or policyRef into its column). A body naming at least one of them is a real
+ * spec save. `oshaReferenceId` is deliberately excluded: the measure_versions floor has no
+ * osha_reference_id column, so it is audit-only and never persisted (see the file header) — a body
+ * carrying ONLY it would pass a naive presence check yet still blank every persisted field. It is
+ * still type-validated below when present.
+ */
+const PERSISTED_SPEC_FIELDS = [
   "policyRef",
-  "oshaReferenceId",
   "description",
   "eligibilityCriteria",
   "exclusions",
@@ -65,8 +71,13 @@ const isOptString = (v: unknown): boolean => v === undefined || typeof v === "st
  */
 export function validateSpecUpdate(body: unknown): { ok: true; value: SpecUpdate } | { ok: false; message: string } {
   if (!isObject(body)) return { ok: false, message: "Body must be a JSON object." };
-  if (!SPEC_FIELDS.some((f) => body[f] !== undefined))
-    return { ok: false, message: `Body carries no spec field; expected at least one of ${SPEC_FIELDS.join(", ")}.` };
+  // Require a field that actually persists — an oshaReferenceId-only body persists nothing yet would
+  // still blank every spec field, the exact data loss this guard exists to prevent.
+  if (!PERSISTED_SPEC_FIELDS.some((f) => body[f] !== undefined))
+    return {
+      ok: false,
+      message: `Body carries no persisted spec field; expected at least one of ${PERSISTED_SPEC_FIELDS.join(", ")}.`,
+    };
 
   const { policyRef, oshaReferenceId, description, eligibilityCriteria, exclusions, complianceWindow, requiredDataElements } = body;
 
