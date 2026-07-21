@@ -93,7 +93,8 @@ Demo value sets are seeded with fixed UUIDs (`a0000001-0000-0000-0000-0000000000
 > **Provenance + drift (#295, 2026-07-21 — still NO DDL, existing columns only):** `version` now
 > carries the server's `ValueSet.version` instead of a hardcoded `null` (the column was always in the
 > `UNIQUE(oid, version)` key), and `expansion_hash` is **SHA-256** over the sorted `system|code` pairs
-> *plus* the version provenance, written with a `sha256:` prefix — pre-#295 rows hold 32-bit rolling
+> *plus* the `ValueSet.version` (never `expansion.identifier` — not guaranteed stable, so it would
+> cause false drift), written with a `sha256:` prefix — pre-#295 rows hold 32-bit rolling
 > hashes (`h<hex>`) and are deliberately distinguishable so the two algorithms are never compared.
 > `expansion.identifier`/`timestamp` and the release pin ride in the `VALUE_SETS_RESOLVED` audit
 > payload (not columns). A re-import whose hash differs from the stored one additionally writes a
