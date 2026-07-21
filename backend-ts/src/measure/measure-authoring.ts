@@ -40,6 +40,77 @@ export interface SpecUpdate {
 
 const s = (v: unknown): string => (v == null ? "" : String(v));
 
+/**
+ * The spec fields a PUT /spec body may carry that actually PERSIST — `updateMeasureSpec` writes
+ * these into spec_json (or policyRef into its column). A body naming at least one of them is a real
+ * spec save. `oshaReferenceId` is deliberately excluded: the measure_versions floor has no
+ * osha_reference_id column, so it is audit-only and never persisted (see the file header) — a body
+ * carrying ONLY it would pass a naive presence check yet still blank every persisted field. It is
+ * still type-validated below when present.
+ */
+const PERSISTED_SPEC_FIELDS = [
+  "policyRef",
+  "description",
+  "eligibilityCriteria",
+  "exclusions",
+  "complianceWindow",
+  "requiredDataElements",
+] as const;
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isOptString = (v: unknown): boolean => v === undefined || typeof v === "string";
+
+/**
+ * Validate a PUT /api/measures/:id/spec body.
+ *
+ * This is a REPLACE endpoint — `updateMeasureSpec` rebuilds the whole spec from the body and
+ * coerces every absent field to ""/[]. That is correct for the Studio Spec tab (which always
+ * posts the complete form) but means an empty or unrecognized body silently erases the measure's
+ * spec behind a 200. So a body that names none of SPEC_FIELDS is rejected as a client error, and
+ * every field that IS present must be the right shape — no `String(42)` coercion into the spec.
+ */
+export function validateSpecUpdate(body: unknown): { ok: true; value: SpecUpdate } | { ok: false; message: string } {
+  if (!isObject(body)) return { ok: false, message: "Body must be a JSON object." };
+  // Require a field that actually persists — an oshaReferenceId-only body persists nothing yet would
+  // still blank every spec field, the exact data loss this guard exists to prevent.
+  if (!PERSISTED_SPEC_FIELDS.some((f) => body[f] !== undefined))
+    return {
+      ok: false,
+      message: `Body carries no persisted spec field; expected at least one of ${PERSISTED_SPEC_FIELDS.join(", ")}.`,
+    };
+
+  const { policyRef, oshaReferenceId, description, eligibilityCriteria, exclusions, complianceWindow, requiredDataElements } = body;
+
+  if (!isOptString(policyRef)) return { ok: false, message: "policyRef must be a string." };
+  if (!isOptString(description)) return { ok: false, message: "description must be a string." };
+  if (!isOptString(complianceWindow)) return { ok: false, message: "complianceWindow must be a string." };
+  if (!(oshaReferenceId === undefined || oshaReferenceId === null || typeof oshaReferenceId === "string"))
+    return { ok: false, message: "oshaReferenceId must be a string or null." };
+
+  if (eligibilityCriteria !== undefined) {
+    if (!isObject(eligibilityCriteria)) return { ok: false, message: "eligibilityCriteria must be an object." };
+    for (const k of ["roleFilter", "siteFilter", "programEnrollmentText"])
+      if (!isOptString(eligibilityCriteria[k])) return { ok: false, message: `eligibilityCriteria.${k} must be a string.` };
+  }
+
+  if (exclusions !== undefined) {
+    if (!Array.isArray(exclusions)) return { ok: false, message: "exclusions must be an array." };
+    for (const [i, e] of exclusions.entries()) {
+      if (!isObject(e)) return { ok: false, message: `exclusions[${i}] must be an object.` };
+      if (typeof e.label !== "string" || typeof e.criteriaText !== "string")
+        return { ok: false, message: `exclusions[${i}] requires string label and criteriaText.` };
+    }
+  }
+
+  if (requiredDataElements !== undefined) {
+    if (!Array.isArray(requiredDataElements)) return { ok: false, message: "requiredDataElements must be an array." };
+    if (requiredDataElements.some((d) => typeof d !== "string"))
+      return { ok: false, message: "requiredDataElements must be an array of strings." };
+  }
+
+  return { ok: true, value: body as SpecUpdate };
+}
+
 async function auditDraftSaved(deps: MeasureAuthoringDeps, r: MeasureRecord, actor: string, payload: Record<string, unknown>): Promise<void> {
   await deps.events.appendAudit({
     eventType: "MEASURE_VERSION_DRAFT_SAVED",
