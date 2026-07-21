@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN_EMAIL, DEMO_PASSWORD, API_BASE, loginAs } from "./helpers";
+import { ADMIN_EMAIL, DEMO_PASSWORD, API_BASE, apiReachable, loginAs } from "./helpers";
 
 async function gotoRuns(page: Page) {
   await loginAs(page, ADMIN_EMAIL);
@@ -55,6 +55,7 @@ test.describe("Runs page", () => {
   });
 
   test("completed single-measure run exposes MeasureReport + QRDA exports", async ({ page, request }) => {
+    test.skip(!(await apiReachable(request)), `backend API not reachable at ${API_BASE}`);
     // Discover a completed MEASURE-scope run via the API; skip when none exists yet
     // (population runs are owned by another agent on this stack — we never trigger one).
     const login = await request.post(`${API_BASE}/api/auth/login`, {
@@ -71,10 +72,12 @@ test.describe("Runs page", () => {
     const measureRun = runs.find((r) => r.scopeType === "MEASURE" && r.status === "COMPLETED");
     test.skip(!measureRun, "no COMPLETED MEASURE-scope run exists on the local stack yet");
 
-    await gotoRuns(page);
-    const runButton = page.getByRole("button", { name: `View run details for ${measureRun!.measureName}` }).first();
-    await expect(runButton).toBeVisible({ timeout: 30_000 });
-    await runButton.click();
+    // Deep-link the exact run via ?runId= (the page supports it) rather than a name-based button
+    // lookup — accumulated run history can push this run past the ~20 rows rendered initially, and
+    // the button would then never appear.
+    await loginAs(page, ADMIN_EMAIL);
+    await page.goto(`/runs?runId=${measureRun!.runId}`);
+    await expect(page.getByRole("heading", { name: /Run History/i })).toBeVisible({ timeout: 20_000 });
 
     const mrButton = page.getByRole("button", { name: "MeasureReport (FHIR)" });
     const qrdaButton = page.getByRole("button", { name: "QRDA III (XML)" });

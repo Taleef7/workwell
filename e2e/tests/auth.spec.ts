@@ -24,6 +24,11 @@ test.describe("Authentication", () => {
 
   test("empty credentials show a validation error", async ({ page }) => {
     await page.goto("/login");
+    // A NEXT_PUBLIC_DEMO_MODE=true build prefills both fields with valid demo credentials, which
+    // would log in instead of exercising the empty-input path — clear them first so the test holds
+    // in both demo-prefill and ordinary builds.
+    await page.locator("#email").fill("");
+    await page.locator("#password").fill("");
     await page.getByRole("button", { name: /sign in/i }).click();
     await expect(page.locator("p[role='alert']")).toContainText(/email and password/i);
     await expect(page).toHaveURL(/\/login/);

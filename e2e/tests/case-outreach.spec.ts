@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN_EMAIL, DEMO_PASSWORD, API_BASE, loginAs } from "./helpers";
+import { ADMIN_EMAIL, DEMO_PASSWORD, API_BASE, apiReachable, loginAs } from "./helpers";
 
 // Simulated send only (WORKWELL_EMAIL_PROVIDER=simulated on the local stack) — allowed.
 test.describe("Case outreach action", () => {
   test("send outreach with a channel selection updates the audit timeline", async ({ page, request }) => {
     test.setTimeout(120_000);
+    test.skip(!(await apiReachable(request)), `backend API not reachable at ${API_BASE}`);
 
     // Discover an OPEN case deterministically via the API (UI list ordering varies).
     const login = await request.post(`${API_BASE}/api/auth/login`, {
