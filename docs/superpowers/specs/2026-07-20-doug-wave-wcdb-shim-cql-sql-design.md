@@ -55,11 +55,20 @@ Transcripts: `docs/doug_audio_transcript_1.txt` / `_2.txt` (local-only). Three d
   ordering** (Codex P1): the shim's compliance endpoints 409 any measure not on its
   `PARITY_CERTIFIED` allowlist, so an artifact existing on disk never implies permission to serve —
   a measure enters the allowlist only after its parity run is green. **Band coverage** (Codex P1
-  round 2): the seed corpus is asserted to exercise COMPLIANT/OVERDUE/MISSING_DATA; the DUE_SOON
-  band has no seed subject at the parity dates, so the designed ingest fixtures
-  (`patients.example.yaml` — Marcus Demoson lands DUE_SOON at 349 days) supply it: with them
-  ingested the suite hard-requires DUE_SOON, and it also asserts at least one subject changes
-  outcome between the two dates (an end-date-ignoring SQL bug cannot pass invisibly).
+  round 2; corrected 2026-07-21, PR #317): the seed corpus is asserted to exercise
+  COMPLIANT/OVERDUE/MISSING_DATA at the parity dates, and the suite asserts at least one subject
+  changes outcome between the two dates (an end-date-ignoring SQL bug cannot pass invisibly). The
+  DUE_SOON band has no seed subject *at those 2024 parity dates* — the designed ingest fixtures
+  (`patients.example.yaml`) are authored **as-of `FIXTURE_DATE = 2026-07-23`** (Marcus Demoson lands
+  DUE_SOON at 349 days *there*; his 2025 BP observation is in the future at the 2024 parity dates, so
+  it reads MISSING_DATA then). So DUE_SOON is asserted by a **separate INGEST-FIXTURE PARITY test**
+  that runs only when the fixtures are present (population > seed) and self-skips with a notice on the
+  bare seed: it proves per-patient SQL==CQL **at `FIXTURE_DATE`** and that DUE_SOON is exercised —
+  hardening the demo's exact claim (Zainab COMPLIANT / Marcus DUE_SOON / Priya OVERDUE / Omar
+  MISSING_DATA, CQL and SQL agreeing). Coupling the DUE_SOON hard-requirement to the 2024 parity
+  dates was a self-contradiction (the test's own notice said "ingest and re-run for DUE_SOON" — which
+  then failed); the fixture-date pass resolves it and is strictly stronger (parity is now also proven
+  at the ingest date).
 
 ## 3. Shim contract details (verified from `webchart-client.ts`)
 
