@@ -67,4 +67,17 @@ describe("LoginPage", () => {
     });
     expect(mockLogin).toHaveBeenCalledWith("tok", "admin@workwell.dev", "ROLE_ADMIN");
   });
+
+  // Security regression guard: with demo mode off (the production build — NEXT_PUBLIC_DEMO_MODE=true
+  // fails the prod build), the login page must NOT advertise the admin demo credential. Previously the
+  // "Fill demo credentials" button and the "Demo: admin@workwell.dev" hint rendered unconditionally,
+  // leaking a one-click admin login onto the public production site.
+  it("does not expose the admin demo credential when demo mode is off", () => {
+    render(<LoginPage />);
+    expect(screen.queryByText(/fill demo credentials/i)).toBeNull();
+    expect(screen.queryByText(/admin@workwell\.dev/i)).toBeNull();
+    expect(screen.queryByText(/^Demo:/)).toBeNull();
+    // The read-only public sandbox link stays — it is safe (ROLE_VIEWER, blocked from all writes).
+    expect(screen.getByRole("link", { name: /open public sandbox/i })).toBeTruthy();
+  });
 });
