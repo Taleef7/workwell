@@ -1,5 +1,60 @@
 # Journal
 
+## 2026-07-22 — LIVE OUTAGE: Neon compute quota exhausted by idle scheduler polling
+
+**The live stack had been down for four days and nothing told us.** Every DB-backed page on
+`twh.os.mieweb.org` (`/programs`, `/compliance`, `/cases`, `/measures`, `/runs`) rendered
+`{"error":"internal_error"}`. `/api/tenants` still worked, which was the tell — it is the one
+route that touches no database.
+
+**Root cause — HTTP 402 from the Neon pooler:** *"Your account or project has exceeded the compute
+time quota."* Not a code bug in any of the failing routes; the compute simply refused to start, so
+every query failed and the worker surfaced its generic 500.
+
+**Why the quota burned.** `schedulerTick` ran every 5 minutes and, *before* it ever checked whether
+the scheduler was enabled or due, executed `ensureSegmentSeed` → `getStores` → `engineForEnv` →
+`listSegments` → `getLastRunByTriggeredBy` — 4–5 DB round trips, ~1,300 queries/day, to evaluate a
+**23.5-hour** debounce. Neon suspends after ~5 minutes idle; the tick period was also 5 minutes, so
+the compute was re-woken at exactly the moment it would have slept. **It never suspended and billed
+24/7.** The `schedulerEnabled` check living inside `runTick` rather than at the top of
+`schedulerTick` meant an opted-*out* deployment paid the same cost.
+
+The arithmetic matches the outage date precisely: 0.25 CU × 24 h = **6 CU-hours/day**, against the
+Free plan's **100 CU-hours/project/month**, starting 2026-07-01 ⇒ exhausted on **day ~17 = 07-18**.
+`compute_last_active_at` is 2026-07-18T04:34Z. Idle polling consumed the entire monthly allowance
+with zero user traffic.
+
+**Fix (this branch).** A DB-free due gate, `shouldSkipTickWithoutDb()`, is now the first statement
+in `schedulerTick`. It returns early when the scheduler is disabled, or when an in-memory
+`nextDueAtMs` says the next run is still hours away — so a tick that cannot fire costs **zero**
+database round trips and never wakes a suspended compute. The cache is deliberately **not**
+persisted: `null` means "consult the DB", so a restart re-derives cadence from the persisted
+scheduler runs and **#268 durability is untouched**. `setSchedulerEnabled` invalidates it so the
+admin toggle still takes effect promptly. `nextDueAtMs` is booked *before* the run starts, so a long
+ALL_PROGRAMS run cannot leave the gate open for a second tick. Tick period widened 5 → 15 min as
+defence in depth (it must stay above the DB's idle-suspend timeout).
+
+Net: ~1,300 DB round trips/day → **~1–2**. Idle compute ~182 CU-hours/month → **~0**. All six
+pre-existing scheduler tests (cadence, restart durability, missed-cycle backfill, audit invariant)
+still pass unchanged; five new tests pin the guardrail. Suite: **1,336 tests, 0 failures.**
+
+**Two process gaps this exposed, both worth more than the bug:**
+1. **The self-heal reconciler reported `success` every 15 minutes throughout.** It probes
+   `/actuator/health`, which is DB-free (`worker.ts:197`) — so our only always-on monitor is
+   structurally incapable of detecting a total database outage. It said green for four days.
+2. **The nightly `pg_dump` failed five nights running (07-18 → 07-22) and nobody looked.** That was
+   the one true signal. Last good dump: **2026-07-17**.
+
+The 07-21 E2E sweep passed because it ran against local stacks, not the live one — a green sweep and
+a dead production site coexisted comfortably.
+
+**Data was never at risk:** 258 MB still resident in Neon (branch auto-archived 07-19, restores on
+access) plus the 07-17 S3 dump.
+
+**Owner action:** Neon Launch upgrade (pay-as-you-go, no monthly minimum, $0.106/CU-hour) — this
+forces the long-pending plan decision and also lifts PITR from 6 h to 7 days (#270). Set a spending
+limit and lower the suspend timeout when upgrading; see DEPLOY.md → "Database compute cost".
+
 ## 2026-07-21 (afternoon) — closed the sweep's two code findings + #295 VSAC release pinning
 
 Post-demo-prep work, four branches, none of it on the Thursday demo path.
