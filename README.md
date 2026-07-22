@@ -22,6 +22,19 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-22 — live outage resolved: Neon compute quota exhausted by idle scheduler polling (PRs #322 + #323).**
+  Every DB-backed route returned `internal_error` for four days (07-18 → 07-22) — HTTP 402 from the
+  Neon pooler, not a bug in any failing route. The scheduler tick did 4–5 DB round trips every 5
+  minutes *before* checking whether it was enabled or due (~1,300/day, to evaluate a 23.5-hour
+  debounce); Neon suspends after ~5 minutes idle, so the compute never slept and billed 24/7,
+  consuming the entire Free-plan allowance with zero user traffic. Fixed with a DB-free due gate
+  (**~1,300 round trips/day → ~1–2**, idle compute **~182 CU-hours/month → ~0**), a single-flight
+  guard against overlapping ticks, and the cooldown booked only once a run is durably persisted.
+  Upgraded to Neon Launch; **no data lost** (180 runs / 126,692 outcomes / 629 cases intact,
+  hierarchy reconciling at All Systems = 72,100). The nightly `pg_dump` — the only always-on process
+  that opens a real DB connection, and the only thing that detected the outage — now auto-opens a
+  GitHub issue on failure and closes it on recovery. See `docs/JOURNAL.md` and `docs/DEPLOY.md` →
+  "Database compute cost".
 - **2026-07-21 (afternoon) — post-sweep closeout (PRs #318–#321, all Codex-reviewed + merged).** The
   maintained Playwright UI sweep is now tracked (#318, 35 tests / 8 files); two of the three LOW sweep
   findings are fixed (#319 `POST /api/runs/manual` unknown scope → **400 not 501**; #320 `PUT
