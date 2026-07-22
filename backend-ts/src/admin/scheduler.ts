@@ -61,6 +61,23 @@ let schedulerEnabled = false;
  */
 let nextDueAtMs: number | null = null;
 
+/**
+ * Single-flight guard: true while a tick is between its cadence read and its run creation.
+ *
+ * Separate from `nextDueAtMs` because the two solve different problems (Codex P2, #323 review).
+ * The due cache is a *cost* optimisation over the durable cadence and is only booked once a run is
+ * persisted; it therefore cannot bound CONCURRENCY. If a tick stalls inside appendAudit or
+ * planManualRun for longer than the timer period — the Postgres pool sets no query timeout, so a
+ * hung database does exactly that — the next timer callback would find the gate null and proceed.
+ * Both ticks may already have read "no prior scheduler run", so when the database recovers both
+ * append a trigger event and create an ALL_PROGRAMS run.
+ *
+ * Note this bounds overlap only WITHIN a process, which matches the single-container topology
+ * documented on the debounce below; a cross-process claim still needs the owner-gated DB mutex
+ * described there.
+ */
+let tickInFlight = false;
+
 /** Read WORKWELL_SCHEDULER_ENABLED from env once at startup and set the flag. */
 export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string }): void {
   const val = (env.WORKWELL_SCHEDULER_ENABLED ?? "").trim().toLowerCase();
@@ -184,6 +201,21 @@ export interface SchedulerTickDeps {
 export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Promise<boolean> {
   if (!schedulerEnabled) return false;
 
+  // Single-flight (Codex P2, #323): a stalled tick must not let the next timer callback in. The
+  // guard spans the cadence read AND the writes, because the double-fire comes from two ticks both
+  // observing "no prior run" before either has created one. Released in `finally` so a thrown tick
+  // never wedges the scheduler permanently.
+  if (tickInFlight) return false;
+  tickInFlight = true;
+  try {
+    return await runTickLocked(deps, nowMs);
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+/** The tick body proper. Only ever called with the single-flight guard held. */
+async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<boolean> {
   // Debounce (Fable M9 — known limitation): this read-then-write debounce serializes ticks WITHIN a
   // process (the single in-process setInterval), which is the live deployment (one `twh-api-ts`
   // container; the self-heal reconciler shares a concurrency group with the deploy so two containers
@@ -207,9 +239,13 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     }
   }
 
-  // From here the tick WILL fire. Book the next cycle now (rather than after the run completes)
-  // so that a long ALL_PROGRAMS run cannot leave the gate open and let a second tick double-fire.
-  nextDueAtMs = nowMs + minGapMs;
+  // NOTE: the due cache is deliberately NOT booked here (Codex P1, #322 review). Everything below
+  // this line can throw — appendAudit and planManualRun both write to the database, and a transient
+  // failure there is exactly the condition this guardrail exists to survive. Booking the cooldown
+  // before a run is durably persisted would make schedulerTick's catch swallow the error while every
+  // later tick skipped the DB for 23.5 h, silently losing a day's recompute with no run to show for
+  // it. The cache is an optimisation over the persisted cadence, so it may only be trusted once that
+  // cadence actually exists — see below, after planManualRun.
 
   // Write the audit event BEFORE creating the run (hard rule: every state change writes audit_event).
   const now = new Date();
@@ -247,6 +283,12 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     triggeredBy: "scheduler",
   });
 
+  // The run row now exists with triggeredBy='scheduler', so the persisted cadence itself would
+  // already debounce the next tick — booking the cache here just saves that DB round trip. Doing it
+  // BEFORE the (long) finishOrFail also means an overlapping tick during a slow ALL_PROGRAMS run
+  // cannot double-fire, without the cache ever running ahead of the durable state it summarises.
+  nextDueAtMs = nowMs + minGapMs;
+
   await finishOrFail(runDeps, planned);
   return true;
 }
@@ -283,6 +325,11 @@ export async function schedulerTick(
     const enabledSegments = allSegments.filter((s) => s.enabled);
     await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env });
   } catch (err) {
+    // Invalidate the due gate so the next tick re-consults the persisted cadence (Codex P1, #322
+    // review). runTick already avoids booking the cooldown before its run is durable; this is the
+    // belt-and-braces half — any failure anywhere in the tick path (store resolution, segment seed,
+    // engine construction) returns the scheduler to "ask the database", never to a silent skip.
+    nextDueAtMs = null;
     console.error("[scheduler] tick error:", err);
     // Observability (#264): a scheduler tick throw (store/plan failure before finishOrFail) must
     // not be silent. Best-effort — never rethrow; the tick is safe for ctx.waitUntil.
