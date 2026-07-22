@@ -84,7 +84,32 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-20 — Doug-directive wave; prior blocks below)
+## Current Focus (as of 2026-07-22 — live outage resolved; Doug wave below)
+
+**2026-07-22 — the live stack was DOWN for four days and the monitoring said green.** Every
+DB-backed route on `twh.os.mieweb.org` returned `{"error":"internal_error"}` from 07-18 to 07-22.
+Root cause: **Neon Free compute quota exhausted** (HTTP 402 from the pooler) — not a bug in any
+failing route. The scheduler tick ran every 5 min and did 4–5 DB round trips *before* checking
+whether it was enabled or due, ~1,300/day to evaluate a 23.5 h debounce; Neon suspends after ~5 min
+idle, so the compute never slept and billed 24/7. 0.25 CU × 24 h = 6 CU-h/day against Free's 100
+CU-h/month ⇒ exhausted day ~17 = 07-18, exactly. **Fixed in PRs #322 + #323** (merged + deployed):
+a DB-free `shouldSkipTickWithoutDb()` gate (~1,300 round trips/day → ~1–2; idle compute ~182 CU-h/mo
+→ ~0), a `tickInFlight` single-flight guard, and the cooldown booked only after the run is durably
+persisted. **Upgraded to Neon Launch** (pay-as-you-go, spending limit set, autoscaling capped back
+to 2 CU — Launch had silently raised it 2 → 8). Data was never at risk; all 126,692 outcomes intact.
+
+**Two hard rules this bought, both in DEPLOY.md → "Database compute cost":**
+- **Any recurring task that queries the DB must run less often than the idle-suspend timeout, or
+  gate itself behind a DB-free check.** A 5-minute poll against a 5-minute suspend timeout costs
+  ~$19/month of pure idle on Launch.
+- **Do NOT add a DB query to `/actuator/health`.** The 15-min self-heal reconciler probes it, so
+  that would rebuild the exact pinning loop. The consequence — accepted deliberately — is that the
+  reconciler *cannot* detect a DB outage; the nightly `pg_dump` is that signal, and it now
+  **auto-opens a GitHub issue** on failure and closes it on recovery.
+
+**Owner step:** raise Neon history retention 6 h → 7 days (~$0.02/month) to close #270's PITR gap.
+
+## Prior focus (as of 2026-07-20 — Doug-directive wave; prior blocks below)
 
 **2026-07-20 — Doug call (07-19) reset the near-term direction; Thursday 2026-07-23 demo call is
 the target.** Three directives (transcripts local-only; D17's "CQL→SQL parked" is SUPERSEDED in

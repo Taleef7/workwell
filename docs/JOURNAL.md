@@ -24,7 +24,7 @@ Free plan's **100 CU-hours/project/month**, starting 2026-07-01 ⇒ exhausted on
 `compute_last_active_at` is 2026-07-18T04:34Z. Idle polling consumed the entire monthly allowance
 with zero user traffic.
 
-**Fix (this branch).** A DB-free due gate, `shouldSkipTickWithoutDb()`, is now the first statement
+**Fix (PRs #322 + #323, both merged + deployed).** A DB-free due gate, `shouldSkipTickWithoutDb()`, is now the first statement
 in `schedulerTick`. It returns early when the scheduler is disabled, or when an in-memory
 `nextDueAtMs` says the next run is still hours away — so a tick that cannot fire costs **zero**
 database round trips and never wakes a suspended compute. The cache is deliberately **not**
@@ -62,15 +62,38 @@ still pass unchanged; five new tests pin the guardrail. Suite: **1,336 tests, 0 
 2. **The nightly `pg_dump` failed five nights running (07-18 → 07-22) and nobody looked.** That was
    the one true signal. Last good dump: **2026-07-17**.
 
+Gap 2 is now closed: `backup-neon-nightly.yml` raises a **GitHub issue** on failure (commenting on
+the existing one rather than piling up a duplicate per night) and **closes it automatically** on
+recovery. It reuses the DB connection that job already makes daily, so it costs no extra compute —
+a dedicated deep-health-check workflow was considered and rejected on that basis. Gap 1 is left
+deliberately open: adding a DB query to the 15-minute reconciler would rebuild the exact
+compute-pinning loop this incident was caused by.
+
 The 07-21 E2E sweep passed because it ran against local stacks, not the live one — a green sweep and
 a dead production site coexisted comfortably.
 
 **Data was never at risk:** 258 MB still resident in Neon (branch auto-archived 07-19, restores on
 access) plus the 07-17 S3 dump.
 
-**Owner action:** Neon Launch upgrade (pay-as-you-go, no monthly minimum, $0.106/CU-hour) — this
-forces the long-pending plan decision and also lifts PITR from 6 h to 7 days (#270). Set a spending
-limit and lower the suspend timeout when upgrading; see DEPLOY.md → "Database compute cost".
+**Resolution (same day).** Upgraded to **Neon Launch** (pay-as-you-go, no monthly minimum,
+$0.106/CU-hour) with a spending limit — this forced the long-pending plan decision. The archived
+branch restored on first access with **everything intact**: 180 runs, 126,692 outcomes, 629 cases,
+hierarchy reconciling at All Systems = 72,100. All previously-500 routes verified 200. Autoscaling
+was capped back to **2 CU** (Launch had silently raised the ceiling 2 → 8) and the nightly backup
+re-run green, closing the 5-day gap.
+
+**Three review findings, all real, all fixed** (Codex on #322/#323 — worth recording because each
+was a *different* failure mode introduced by the fix for the previous one):
+1. **P1** — the due cooldown was booked before the run was persisted, so a transient DB error would
+   silently lose a day's recompute. Now booked after `planManualRun`.
+2. **P2** — that fix opened a concurrency window: a stalled tick let the next one through and both
+   could create a run. Cost and concurrency are two gates; added `tickInFlight`.
+3. **P1** — the new backup alerting called `gh` in a workflow with no `actions/checkout`, so it
+   would have failed with *"not a git repository"* on every real failure — an alerting step that
+   never alerts. Fixed with `GH_REPO`; verified by reproducing the no-git-context condition.
+
+**Still open (owner):** raise history retention 6 h → 7 days (≈$0.02/month at the current 4 MB per
+6 h of history, billed $0.20/GB-month) to close #270's PITR gap.
 
 ## 2026-07-21 (afternoon) — closed the sweep's two code findings + #295 VSAC release pinning
 
