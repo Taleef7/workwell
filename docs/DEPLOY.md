@@ -649,6 +649,48 @@ Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost 
 > then — MIE-provided storage (C14), a paid-plan upgrade, or Cloudflare R2 free tier. Env-var-only
 > migration (see `docs/BACKUP_DR_RUNBOOK.md` §2 note).
 
+## Database compute cost (read before changing any polling interval)
+
+Neon compute is billed by **CU-hours**, and a compute that is merely *awake* bills whether or not it
+is serving anything. It suspends after an idle timeout (~5 min by default). The single most
+expensive mistake is therefore **a background timer that touches the database more often than the
+suspend timeout** — that pins the compute awake 24/7 and bills a constant 0.25 CU (~**182
+CU-hours/month**) with zero users.
+
+**This is not hypothetical — it took the live stack down for four days (2026-07-18 → 07-22).** The
+scheduler tick polled every 5 minutes against a 5-minute suspend timeout, exhausted the Free plan's
+100 CU-hours on day ~17 of the month, and every DB-backed route began returning
+`{"error":"internal_error"}` (HTTP 402 from the pooler). See `docs/JOURNAL.md` 2026-07-22.
+
+**The invariant, stated once:** *any* recurring task that queries the database must either run less
+frequently than the idle-suspend timeout, or gate itself behind a DB-free check so that a
+no-op cycle issues zero queries. `schedulerTick` does the latter via `shouldSkipTickWithoutDb()` —
+keep that as its first statement, and keep the `setInterval` period in `backend-ts/src/server.ts`
+comfortably above the suspend timeout.
+
+### Console settings that cap the bill
+
+Set these in the Neon console (Project → Settings); none are reachable from the deploy workflow:
+
+| Setting | Recommended | Why |
+|---|---|---|
+| **Spending limit** | Set one (e.g. $10–20/mo) | Launch is pay-as-you-go with no cap by default. This is the real backstop against a runaway loop. |
+| **Suspend timeout** | 60 s (from the 300 s default) | Cuts ~4 minutes of idle billing off the tail of every burst of activity. |
+| **Autoscaling max CU** | 1 CU to start (from 2) | Roster/hierarchy queries burst; 2 CU costs 8× the 0.25 idle floor while bursting. Raise only if a page is measurably slow. |
+| **Autoscaling min CU** | 0.25 (leave) | The floor while awake. |
+
+### Watch the right signal
+
+The self-heal reconciler probes `/actuator/health`, which is **deliberately DB-free** — do not
+"fix" this by adding a database query to it, or the 15-minute reconciler becomes the exact
+compute-pinning loop described above. It follows that **the reconciler cannot detect a database
+outage** and will report green through one.
+
+The signal that *does* catch it is the nightly `backup-neon-nightly.yml` job: it fails loudly the
+first night the database is unreachable. Treat a failed backup run as a production incident, not a
+backup problem — in the 07-18 outage it failed five nights running and was the only thing telling
+the truth.
+
 ## Neon (Postgres)
 
 1. Project `workwell-twh`, region us-east, **Postgres 16**
