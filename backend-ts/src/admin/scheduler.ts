@@ -207,9 +207,13 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     }
   }
 
-  // From here the tick WILL fire. Book the next cycle now (rather than after the run completes)
-  // so that a long ALL_PROGRAMS run cannot leave the gate open and let a second tick double-fire.
-  nextDueAtMs = nowMs + minGapMs;
+  // NOTE: the due cache is deliberately NOT booked here (Codex P1, #322 review). Everything below
+  // this line can throw — appendAudit and planManualRun both write to the database, and a transient
+  // failure there is exactly the condition this guardrail exists to survive. Booking the cooldown
+  // before a run is durably persisted would make schedulerTick's catch swallow the error while every
+  // later tick skipped the DB for 23.5 h, silently losing a day's recompute with no run to show for
+  // it. The cache is an optimisation over the persisted cadence, so it may only be trusted once that
+  // cadence actually exists — see below, after planManualRun.
 
   // Write the audit event BEFORE creating the run (hard rule: every state change writes audit_event).
   const now = new Date();
@@ -247,6 +251,12 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
     triggeredBy: "scheduler",
   });
 
+  // The run row now exists with triggeredBy='scheduler', so the persisted cadence itself would
+  // already debounce the next tick — booking the cache here just saves that DB round trip. Doing it
+  // BEFORE the (long) finishOrFail also means an overlapping tick during a slow ALL_PROGRAMS run
+  // cannot double-fire, without the cache ever running ahead of the durable state it summarises.
+  nextDueAtMs = nowMs + minGapMs;
+
   await finishOrFail(runDeps, planned);
   return true;
 }
@@ -283,6 +293,11 @@ export async function schedulerTick(
     const enabledSegments = allSegments.filter((s) => s.enabled);
     await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env });
   } catch (err) {
+    // Invalidate the due gate so the next tick re-consults the persisted cadence (Codex P1, #322
+    // review). runTick already avoids booking the cooldown before its run is durable; this is the
+    // belt-and-braces half — any failure anywhere in the tick path (store resolution, segment seed,
+    // engine construction) returns the scheduler to "ask the database", never to a silent skip.
+    nextDueAtMs = null;
     console.error("[scheduler] tick error:", err);
     // Observability (#264): a scheduler tick throw (store/plan failure before finishOrFail) must
     // not be silent. Best-effort — never rethrow; the tick is safe for ctx.waitUntil.
