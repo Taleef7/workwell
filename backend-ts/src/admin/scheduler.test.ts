@@ -238,3 +238,58 @@ test("re-enabling the scheduler clears the due cache so the toggle takes effect 
     "a re-enable must re-consult the persisted cadence rather than trust a stale cache",
   );
 });
+
+// ---------------------------------------------------------------------------
+// Codex P1 (#322 review): a failed tick must not poison the due gate.
+//
+// The due cache is an optimisation layered over the persisted cadence. If it is booked BEFORE the
+// run is durably created and the pre-run write then throws (a transient DB error — precisely the
+// condition this whole change is about), every later tick would skip the DB for 23.5 h and the
+// daily recompute would be silently lost with no run to show for it. The cache must only be
+// trusted once a scheduler run actually exists.
+// ---------------------------------------------------------------------------
+
+/** Stores whose audit append fails, simulating a transient DB error before the run is created. */
+function storesWithFailingAudit(stores: Stores): Stores {
+  const events = Object.create(stores.events) as Stores["events"];
+  events.appendAudit = async () => {
+    throw new Error("transient database error");
+  };
+  return { ...stores, events } as Stores;
+}
+
+test("a tick that fails before persisting its run leaves the gate open for a retry", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+
+  await assert.rejects(
+    () => runTick({ ...deps(stores), stores: storesWithFailingAudit(stores) }, now),
+    /transient database error/,
+  );
+
+  assert.equal(
+    (await stores.runs.listRuns()).length,
+    0,
+    "no scheduler run was persisted, so nothing justifies a 23.5 h cooldown",
+  );
+  assert.equal(
+    shouldSkipTickWithoutDb(now + 60_000),
+    false,
+    "a failed tick must not book the next cycle — the recompute would be lost for a full day",
+  );
+});
+
+test("the retry after a failed tick actually fires and records its run", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+
+  await assert.rejects(() => runTick({ ...deps(stores), stores: storesWithFailingAudit(stores) }, now));
+
+  // Next tick, database recovered.
+  const fired = await runTick(deps(stores), now + 60_000);
+  assert.equal(fired, true, "the daily recompute must survive a transient failure");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 1);
+  assert.equal(shouldSkipTickWithoutDb(now + 120_000), true, "and only then does the gate close");
+});
