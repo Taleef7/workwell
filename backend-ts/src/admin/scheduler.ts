@@ -61,6 +61,23 @@ let schedulerEnabled = false;
  */
 let nextDueAtMs: number | null = null;
 
+/**
+ * Single-flight guard: true while a tick is between its cadence read and its run creation.
+ *
+ * Separate from `nextDueAtMs` because the two solve different problems (Codex P2, #323 review).
+ * The due cache is a *cost* optimisation over the durable cadence and is only booked once a run is
+ * persisted; it therefore cannot bound CONCURRENCY. If a tick stalls inside appendAudit or
+ * planManualRun for longer than the timer period — the Postgres pool sets no query timeout, so a
+ * hung database does exactly that — the next timer callback would find the gate null and proceed.
+ * Both ticks may already have read "no prior scheduler run", so when the database recovers both
+ * append a trigger event and create an ALL_PROGRAMS run.
+ *
+ * Note this bounds overlap only WITHIN a process, which matches the single-container topology
+ * documented on the debounce below; a cross-process claim still needs the owner-gated DB mutex
+ * described there.
+ */
+let tickInFlight = false;
+
 /** Read WORKWELL_SCHEDULER_ENABLED from env once at startup and set the flag. */
 export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string }): void {
   const val = (env.WORKWELL_SCHEDULER_ENABLED ?? "").trim().toLowerCase();
@@ -184,6 +201,21 @@ export interface SchedulerTickDeps {
 export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Promise<boolean> {
   if (!schedulerEnabled) return false;
 
+  // Single-flight (Codex P2, #323): a stalled tick must not let the next timer callback in. The
+  // guard spans the cadence read AND the writes, because the double-fire comes from two ticks both
+  // observing "no prior run" before either has created one. Released in `finally` so a thrown tick
+  // never wedges the scheduler permanently.
+  if (tickInFlight) return false;
+  tickInFlight = true;
+  try {
+    return await runTickLocked(deps, nowMs);
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+/** The tick body proper. Only ever called with the single-flight guard held. */
+async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<boolean> {
   // Debounce (Fable M9 — known limitation): this read-then-write debounce serializes ticks WITHIN a
   // process (the single in-process setInterval), which is the live deployment (one `twh-api-ts`
   // container; the self-heal reconciler shares a concurrency group with the deploy so two containers

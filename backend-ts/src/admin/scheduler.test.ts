@@ -293,3 +293,58 @@ test("the retry after a failed tick actually fires and records its run", async (
   assert.equal((await schedulerTriggerEvents(stores)).length, 1);
   assert.equal(shouldSkipTickWithoutDb(now + 120_000), true, "and only then does the gate close");
 });
+
+// ---------------------------------------------------------------------------
+// Codex P2 (#323 review): overlapping ticks must not both create a run.
+//
+// The due cache alone cannot prevent this. If a tick stalls inside appendAudit/planManualRun for
+// longer than the timer period — the Postgres pool sets no query timeout, so a hung database does
+// exactly that — the next timer callback finds the gate null/expired and proceeds. Both ticks may
+// already have read "no prior scheduler run", so when the database recovers both append a trigger
+// event and create an ALL_PROGRAMS run. Concurrency needs its own single-flight guard.
+// ---------------------------------------------------------------------------
+
+test("a second tick is a no-op while an earlier tick is still in flight", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+
+  // Stall the first tick inside its pre-run write, mimicking a hung database.
+  let releaseStalledWrite!: () => void;
+  const stalled = new Promise<void>((resolve) => {
+    releaseStalledWrite = resolve;
+  });
+  const hangingEvents = Object.create(stores.events) as Stores["events"];
+  const realAppendAudit = stores.events.appendAudit.bind(stores.events);
+  hangingEvents.appendAudit = async (input) => {
+    await stalled;
+    return realAppendAudit(input);
+  };
+
+  const first = runTick({ ...deps(stores), stores: { ...stores, events: hangingEvents } as Stores }, now);
+
+  // Timer fires again while the first tick is still blocked on the database.
+  const second = await runTick(deps(stores), now + 15 * 60_000);
+  assert.equal(second, false, "an overlapping tick must not start a second ALL_PROGRAMS run");
+
+  releaseStalledWrite();
+  assert.equal(await first, true, "the original tick still completes normally");
+
+  assert.equal(
+    (await schedulerTriggerEvents(stores)).length,
+    1,
+    "exactly one SCHEDULER_RUN_TRIGGERED — a double-fire would write two",
+  );
+});
+
+test("the single-flight guard is released so the next cycle can still fire", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+
+  // A failing tick must release the guard, not wedge the scheduler permanently.
+  await assert.rejects(() => runTick({ ...deps(stores), stores: storesWithFailingAudit(stores) }, now));
+
+  const fired = await runTick(deps(stores), now + 60_000);
+  assert.equal(fired, true, "a thrown tick must not leave the scheduler permanently blocked");
+});
