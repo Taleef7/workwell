@@ -45,6 +45,22 @@ const SCHEDULER_RUN_INTERVAL_HOURS = 24;
 
 let schedulerEnabled = false;
 
+/**
+ * In-memory "next run is due at" cache — a COMPUTE-COST guardrail, not a correctness mechanism.
+ *
+ * `null` means "unknown, consult the DB". It is deliberately NOT persisted: the durable cadence
+ * still lives in the persisted scheduler runs (#268), so a restart resets this to null and the
+ * first tick re-derives the true next-due time from `getLastRunByTriggeredBy`. This cache only
+ * suppresses the ~287 redundant DB round trips per day between two daily runs.
+ *
+ * Why this matters: the tick fires every few minutes but the decision it makes changes once every
+ * 24 h. Waking a serverless Postgres (Neon suspends after ~5 min idle) on every tick pins the
+ * compute on 24/7 — roughly 182 CU-hours/month of pure idle polling, which exhausted the plan's
+ * monthly compute quota and took the live stack down 2026-07-18 → 07-22 (all DB-backed routes
+ * 500'd with HTTP 402 from the pooler). Keeping the DB untouched between runs lets it sleep.
+ */
+let nextDueAtMs: number | null = null;
+
 /** Read WORKWELL_SCHEDULER_ENABLED from env once at startup and set the flag. */
 export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string }): void {
   const val = (env.WORKWELL_SCHEDULER_ENABLED ?? "").trim().toLowerCase();
@@ -56,6 +72,22 @@ export function initSchedulerFromEnv(env: { WORKWELL_SCHEDULER_ENABLED?: string 
  */
 export function setSchedulerEnabled(enabled: boolean): void {
   schedulerEnabled = enabled;
+  // Invalidate the due cache: an operator toggle (or a restart re-running initSchedulerFromEnv)
+  // must re-consult the persisted cadence rather than honour a stale in-memory gate.
+  nextDueAtMs = null;
+}
+
+/**
+ * DB-free pre-check: may this tick skip ALL store work?
+ *
+ * Called at the top of `schedulerTick` so that a tick which cannot possibly fire costs zero
+ * database round trips — and therefore never wakes a suspended serverless compute. Returns
+ * `false` whenever the answer is not certain (cold cache), so the durable cadence read is
+ * always the fallback and correctness never depends on this cache.
+ */
+export function shouldSkipTickWithoutDb(nowMs = Date.now()): boolean {
+  if (!schedulerEnabled) return true;
+  return nextDueAtMs !== null && nowMs < nextDueAtMs;
 }
 
 /** Returns the current in-memory enabled state. */
@@ -163,12 +195,21 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
   // double-fire risk is low; the worst case is one extra idempotent ALL_PROGRAMS recompute.
   // P2-2 fix: targeted single-row query avoids the listRuns page cap.
   const lastSchedulerRun = await deps.stores.runs.getLastRunByTriggeredBy("scheduler");
+  const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
   if (lastSchedulerRun) {
     // Skip if the last scheduler run is less than (interval - 0.5 h) old.
-    const elapsed = nowMs - new Date(lastSchedulerRun.startedAt).getTime();
-    const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
-    if (elapsed < minGapMs) return false;
+    const lastStartedMs = new Date(lastSchedulerRun.startedAt).getTime();
+    const elapsed = nowMs - lastStartedMs;
+    if (elapsed < minGapMs) {
+      // Remember when this becomes due so the intervening ticks need no DB round trip at all.
+      nextDueAtMs = lastStartedMs + minGapMs;
+      return false;
+    }
   }
+
+  // From here the tick WILL fire. Book the next cycle now (rather than after the run completes)
+  // so that a long ALL_PROGRAMS run cannot leave the gate open and let a second tick double-fire.
+  nextDueAtMs = nowMs + minGapMs;
 
   // Write the audit event BEFORE creating the run (hard rule: every state change writes audit_event).
   const now = new Date();
@@ -223,6 +264,16 @@ export async function runTick(deps: SchedulerTickDeps, nowMs = Date.now()): Prom
 export async function schedulerTick(
   env: StoresEnv & WebChartRunEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string },
 ): Promise<void> {
+  // COMPUTE-COST GUARDRAIL (#322) — must stay the first statement in this function.
+  //
+  // Everything below (ensureSegmentSeed, getStores, engineForEnv, listSegments, and runTick's own
+  // getLastRunByTriggeredBy) issues database work. Running that on every tick meant ~1,300 queries
+  // a day to answer a question whose answer changes once a day, which kept a serverless Postgres
+  // permanently awake and burned the monthly compute quota. Note this ALSO used to run when the
+  // scheduler was disabled, because the `schedulerEnabled` check lived inside runTick — i.e. an
+  // opted-out deployment still paid the full polling cost.
+  if (shouldSkipTickWithoutDb()) return;
+
   const alertChannels = resolveAlertChannels(env);
   try {
     await ensureSegmentSeed(env);
