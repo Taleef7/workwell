@@ -74,7 +74,12 @@ async function main(): Promise<void> {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>
       console.error("[workwell] scheduler tick error", e instanceof Error ? e.message : e),
     );
-  }, 5 * 60 * 1000); // 5 minutes
+    // 15 minutes. Defence in depth behind schedulerTick's own DB-free due gate: the tick decides a
+    // 24-hour cadence, so sub-hour granularity buys nothing, and a longer period shortens the window
+    // in which a cold cache (fresh container) can wake a suspended serverless compute. Must stay
+    // comfortably ABOVE the database's idle-suspend timeout (Neon default ~5 min) so an idle stack
+    // can actually reach the suspended state instead of being re-woken on every period.
+  }, 15 * 60 * 1000);
 
   let stopping = false;
   const shutdown = (signal: string): void => {

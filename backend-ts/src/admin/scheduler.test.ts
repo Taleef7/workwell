@@ -22,6 +22,7 @@ import { fixtureWebChartClient } from "../engine/ingress/webchart/webchart-clien
 import {
   setSchedulerEnabled,
   runTick,
+  shouldSkipTickWithoutDb,
   type SchedulerTickDeps,
 } from "./scheduler.ts";
 
@@ -167,4 +168,73 @@ test("a configured scheduler tick includes the live WebChart population", async 
   assert.equal(fired, true);
   const rows = await stores.outcomes.listLatestPopulationOutcomes({ measureId: "audiogram" });
   assert.ok(rows.some((row) => row.subjectId === "wc|scheduled-live-1"), "nightly population includes WebChart subjects");
+});
+
+// ---------------------------------------------------------------------------
+// Compute-cost guardrail (#322): a tick must not touch the DB unless it may fire.
+//
+// Regression context: schedulerTick did ensureSegmentSeed + getStores + engineForEnv +
+// listSegments + getLastRunByTriggeredBy on EVERY 5-minute tick — ~1,300 DB round trips/day
+// to evaluate a 23.5 h debounce. Against Neon's 5-minute suspend timeout the compute never
+// suspended and billed 24/7, exhausting the plan's monthly compute quota (live outage
+// 2026-07-18 → 07-22). The gate below is what keeps the compute asleep between daily runs.
+// ---------------------------------------------------------------------------
+
+test("shouldSkipTickWithoutDb skips every tick while the scheduler is disabled (zero DB work)", () => {
+  setSchedulerEnabled(false);
+  assert.equal(shouldSkipTickWithoutDb(Date.now()), true);
+});
+
+test("shouldSkipTickWithoutDb consults the DB on the first tick after restart (#268 durability)", () => {
+  setSchedulerEnabled(true); // also clears the in-memory due cache
+  assert.equal(
+    shouldSkipTickWithoutDb(Date.now()),
+    false,
+    "a cold cache must fall through to the persisted last-run read",
+  );
+});
+
+test("after a debounced tick, later ticks skip the DB until the run is actually due", async () => {
+  const stores = await freshStores();
+  const startedAt = "2026-07-01T06:00:00.000Z";
+  await createPriorSchedulerRun(stores, startedAt);
+  setSchedulerEnabled(true);
+
+  const base = Date.parse(startedAt);
+  const fired = await runTick(deps(stores), base + 3 * 3_600_000);
+  assert.equal(fired, false, "3 h after the last run is well inside the 23.5 h cooldown");
+
+  // The tick learned when the next run is due, so intervening ticks cost zero DB round trips.
+  assert.equal(shouldSkipTickWithoutDb(base + 4 * 3_600_000), true);
+  assert.equal(shouldSkipTickWithoutDb(base + 23 * 3_600_000), true);
+
+  // ...and it stops skipping once the cooldown has elapsed, so cadence is preserved.
+  assert.equal(shouldSkipTickWithoutDb(base + 23.5 * 3_600_000), false);
+});
+
+test("after a fired tick, later ticks skip the DB until the next cycle is due", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+
+  const fired = await runTick(deps(stores), now);
+  assert.equal(fired, true, "no prior scheduler run — the first enabled tick fires");
+
+  assert.equal(shouldSkipTickWithoutDb(now + 3_600_000), true);
+  assert.equal(shouldSkipTickWithoutDb(now + 23.5 * 3_600_000), false);
+});
+
+test("re-enabling the scheduler clears the due cache so the toggle takes effect promptly", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  const now = Date.UTC(2026, 6, 1, 6, 0, 0);
+  await runTick(deps(stores), now);
+  assert.equal(shouldSkipTickWithoutDb(now + 3_600_000), true);
+
+  setSchedulerEnabled(true); // admin toggle / process restart
+  assert.equal(
+    shouldSkipTickWithoutDb(now + 3_600_000),
+    false,
+    "a re-enable must re-consult the persisted cadence rather than trust a stale cache",
+  );
 });
