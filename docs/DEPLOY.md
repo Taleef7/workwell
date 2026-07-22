@@ -686,10 +686,19 @@ The self-heal reconciler probes `/actuator/health`, which is **deliberately DB-f
 compute-pinning loop described above. It follows that **the reconciler cannot detect a database
 outage** and will report green through one.
 
-The signal that *does* catch it is the nightly `backup-neon-nightly.yml` job: it fails loudly the
-first night the database is unreachable. Treat a failed backup run as a production incident, not a
-backup problem — in the 07-18 outage it failed five nights running and was the only thing telling
-the truth.
+The signal that *does* catch it is the nightly `backup-neon-nightly.yml` job. It is the only
+always-on process that opens a **real connection to the real database**, which makes it our de-facto
+database health check — and it fails the first night the database is unreachable.
+
+**It now raises that failure as a GitHub issue** ("Nightly Neon backup is failing"), commenting on
+the existing issue rather than opening a new one each night, and **closing it automatically** on the
+next successful backup. Treat that issue as a production incident, not a backup problem: in the
+07-18 outage the job failed five nights running and was the only thing telling the truth, but a red
+scheduled workflow is invisible unless you go looking. Detection was never the gap — notification
+was.
+
+This deliberately reuses a database connection we already pay for once a day, so it adds **no**
+compute cost. A dedicated deep-health-check workflow was considered and rejected for that reason.
 
 ## Neon (Postgres)
 

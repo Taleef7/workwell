@@ -19,6 +19,11 @@ on:
 
 permissions:
   contents: read
+  # Raise an issue when the dump fails. This job is the only always-on process that opens a REAL
+  # connection to the REAL database every day, which makes it our de-facto database health check —
+  # the 15-minute self-heal reconciler probes /actuator/health, which is deliberately DB-free and
+  # therefore cannot detect a database outage (see docs/DEPLOY.md → "Database compute cost").
+  issues: write
 
 concurrency:
   group: backup-neon-nightly
@@ -92,3 +97,75 @@ jobs:
           key="db-dumps/workwell_spike-${stamp}.dump"
           aws s3 cp workwell_spike.dump "s3://${BACKUP_BUCKET}/${key}"
           echo "Uploaded s3://${BACKUP_BUCKET}/${key} ($(stat -c%s workwell_spike.dump) bytes)"
+
+      # ---------------------------------------------------------------------
+      # Make a failure impossible to miss (2026-07-22 incident).
+      #
+      # This job failed five nights running (07-18 → 07-22) while the database was quota-blocked and
+      # nobody noticed, because a red scheduled workflow is invisible unless you go looking. It had
+      # correctly detected a total production outage on night one. Detection was never the gap —
+      # notification was. So: surface it as an open issue, and close it automatically on recovery.
+      #
+      # Deliberately ONE issue that gets commented on, not a new issue per night — a nightly pile of
+      # duplicates is just a different flavour of noise nobody reads.
+      # ---------------------------------------------------------------------
+      - name: Open or update the backup-failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: "Nightly Neon backup is failing"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --search "$TITLE in:title" \
+            --json number,title --jq "[.[] | select(.title == env.TITLE)] | .[0].number // empty")"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing — [run ${GITHUB_RUN_ID}](${RUN_URL}) at $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo "Commented on existing issue #${existing}"
+          else
+            gh issue create --title "$TITLE" --body "$(cat <<EOF
+          The nightly \`pg_dump\` of \`workwell_spike\` failed: [run ${GITHUB_RUN_ID}](${RUN_URL}).
+
+          **Treat this as a production incident, not a backup problem.** This job is the only always-on
+          process that opens a real connection to the real database, so it is our de-facto database
+          health check. The 15-minute self-heal reconciler probes \`/actuator/health\`, which is
+          deliberately DB-free and **cannot** detect a database outage — do not "fix" that by adding a
+          query to it, or the reconciler becomes a compute-pinning loop (see \`docs/DEPLOY.md\` →
+          "Database compute cost").
+
+          Most likely causes, in order:
+
+          1. **Database unreachable** — check the Neon console. A \`402\` in the run log means the compute
+             quota is exhausted and *every* DB-backed route is already returning \`internal_error\`.
+          2. Rotated/expired \`DATABASE_URL_TWH\` or the backup IAM credentials.
+          3. \`pg_dump\` version drift against the server.
+
+          Quick check — if this returns 500s, the live site is down:
+
+          \`\`\`bash
+          curl -s -o /dev/null -w '%{http_code}\n' https://twh-api-ts.os.mieweb.org/api/version
+          \`\`\`
+
+          This issue closes automatically on the next successful backup.
+          EOF
+          )"
+            echo "Opened a new backup-failure issue"
+          fi
+
+      - name: Close the backup-failure issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: "Nightly Neon backup is failing"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --search "$TITLE in:title" \
+            --json number,title --jq "[.[] | select(.title == env.TITLE)] | .[0].number // empty")"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Recovered — backup succeeded in [run ${GITHUB_RUN_ID}](${RUN_URL})."
+            echo "Closed issue #${existing}"
+          else
+            echo "No open backup-failure issue; nothing to close."
+          fi

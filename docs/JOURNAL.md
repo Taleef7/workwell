@@ -30,9 +30,26 @@ in `schedulerTick`. It returns early when the scheduler is disabled, or when an 
 database round trips and never wakes a suspended compute. The cache is deliberately **not**
 persisted: `null` means "consult the DB", so a restart re-derives cadence from the persisted
 scheduler runs and **#268 durability is untouched**. `setSchedulerEnabled` invalidates it so the
-admin toggle still takes effect promptly. `nextDueAtMs` is booked *before* the run starts, so a long
-ALL_PROGRAMS run cannot leave the gate open for a second tick. Tick period widened 5 → 15 min as
-defence in depth (it must stay above the DB's idle-suspend timeout).
+admin toggle still takes effect promptly. Tick period widened 5 → 15 min as defence in depth (it
+must stay above the DB's idle-suspend timeout).
+
+**Cost and concurrency are two gates, not one** (both corrected in review — Codex P1 + P2 on the
+follow-up PR; the first cut conflated them):
+
+- **`nextDueAtMs` — the cost gate.** Booked only *after* `planManualRun` has persisted the run. The
+  first cut booked it as soon as the tick decided to fire, i.e. before `appendAudit`/`planManualRun`
+  had written anything. A transient DB error there would leave the gate booked 23.5 h ahead while
+  `schedulerTick`'s `catch` swallowed the exception — **silently losing a day's recompute with no run
+  to show for it**, and doing so precisely when the database is flaky, which is the condition the
+  guardrail exists to survive. The cache summarises durable state, so it may never run ahead of it.
+  `schedulerTick`'s `catch` also clears it, so any failure returns the scheduler to "ask the DB".
+- **`tickInFlight` — the concurrency gate.** The cost gate cannot bound overlap: if a tick stalls
+  inside its writes for longer than the timer period (the Postgres pool sets no query timeout, so a
+  hung DB does exactly that), the next callback finds the gate unbooked and proceeds — and both ticks
+  may already have read "no prior run", so both create an ALL_PROGRAMS run when the DB recovers. A
+  separate single-flight flag spans the cadence read *and* the writes, released in `finally`. It
+  bounds overlap **within a process** only; the cross-process claim still needs the owner-gated DB
+  mutex documented at the debounce (Fable M9).
 
 Net: ~1,300 DB round trips/day → **~1–2**. Idle compute ~182 CU-hours/month → **~0**. All six
 pre-existing scheduler tests (cadence, restart durability, missed-cycle backfill, audit invariant)
