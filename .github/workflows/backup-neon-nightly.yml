@@ -113,6 +113,10 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job never checks out the repo, so gh has no local git remote to infer the
+          # repository from and would exit before it could raise anything — an alerting step that
+          # silently fails is worse than none. GH_REPO supplies that context explicitly.
+          GH_REPO: ${{ github.repository }}
           TITLE: "Nightly Neon backup is failing"
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -157,6 +161,8 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # See the failure step above: no checkout, so gh needs the repository given to it.
+          GH_REPO: ${{ github.repository }}
           TITLE: "Nightly Neon backup is failing"
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
