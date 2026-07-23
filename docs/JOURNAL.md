@@ -43,9 +43,23 @@ still don't). **Live re-run: hypertension 0 → 7 OVERDUE; total 20 → 27 real 
 Demo/synthetic path unaffected (synthetic data carries `final` statuses). Branch
 `feat/webchart-count-capability-fallback`.
 
-**Next:** finish Phase 3 (a local teatea-backed `ALL_PROGRAMS` run so the `wc` tenant renders across
-`/compliance`, `/programs`, `/programs/hierarchy`), then Phase 4 (a separate deployed staging env wired to
-teatea — owner-gated on MIE hosting + `*_STAGING` secrets). Demo stack stays seam-off throughout.
+**Phase 3 capstone — a local teatea-backed `ALL_PROGRAMS` run, verified through the real run pipeline +
+dashboard-backing endpoints.** Booted the local backend with the WebChart seam → teatea, logged in, and
+triggered a live `ALL_PROGRAMS` run. It fetched the 28 teatea patients live (Phase-1 fallback), evaluated
+them (Phase-3 BP fix), and persisted: **totalEvaluated 2492 = 2100 synthetic (twh 100 + ihn 50 = 150 × 14)
++ 392 live wc (28 × 14)**. The dashboard data layer then surfaced it: `GET /api/tenants` lists **`wc` =
+"WebChart (teatea.webchartnow.com)"**; `GET /api/compliance/roster?tenant=wc` returns 28 wc rows with
+real chips (hypertension **8 OVERDUE / 20 MISSING**, obesity_bmi 12 OVERDUE, etc.); and
+`GET /api/hierarchy/rollup` **reconciles All Systems = Σ tenants (evaluated 178 = 100 + 50 + 28)** with the
+`wc` tenant folded in and `openCases: 0` (the wc case-creation guard holding — no live cases). So the full
+prod path — live WebChart fetch → CQL engine → persisted audited outcomes → roster/hierarchy read models —
+works against a real WebChart server. (A browser screenshot would add visual confirmation; the data layer
+the frontend consumes is definitively proven.)
+
+**Next: Phase 4** — a **separate** deployed staging env wired to teatea (new Neon project + MIE containers
++ `*_STAGING` secrets incl. the private key; scheduler off / DB-free-gated). Owner-gated on MIE hosting
+confirmation + secret provisioning. The demo stack stays seam-off throughout; branches remain unpushed
+pending review.
 
 ## 2026-07-23 — teatea WebChart client registered self-service; LIVE authenticated FHIR confirmed (A3 answered)
 
