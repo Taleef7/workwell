@@ -52,9 +52,11 @@ env:
   STAGING_WEBCHART_SCOPE: "system/*.read"
   STAGING_WEBCHART_KID: "workwell-2026-07"
   # teatea 403s a bare `GET /Patient`, so the client REQUIRES an explicit whole-population enumeration
-  # (it refuses to guess a demographic filter — PR #328). This query is verified to enumerate teatea's
-  # whole population; re-verify if the trial data changes, and update it if MIE moves the trial.
-  STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=gt1900-01-01"
+  # (it refuses to guess a demographic filter — PR #328). A WIDE upper bound catches all birthdates,
+  # including default/garbage-early ones: `le3000-01-01` returns teatea's full 35 patients, whereas
+  # `gt1900-01-01` silently dropped 7 (28/35 — records born on/before 1900-01-01). Cross-check its
+  # `Bundle.total` after any trial-data change; `Group/$export` is the only provably-complete enumeration.
+  STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=le3000-01-01"
 
 jobs:
   build-backend-ts:

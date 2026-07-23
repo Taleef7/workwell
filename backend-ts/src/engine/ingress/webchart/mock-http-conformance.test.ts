@@ -609,6 +609,37 @@ test("a server that rejects _count but serves a bare /Patient: the fallback drop
   assert.equal(bundles.length, patientResources.length, "dropping _count is a safe, complete fallback when a bare /Patient works");
 });
 
+test("completeness guard: a searchset reporting MORE Patients than it returns fails an authoritative run", async () => {
+  // total says 10 but only 3 entries with no next link — a silent truncation. An authoritative run must
+  // not "succeed" over a partial population (it would close out cases for the 7 missing subjects).
+  const fetchImpl = fetchShim((url) => {
+    if (url.pathname === "/fhir/Patient") {
+      return jsonResponse({ resourceType: "Bundle", type: "searchset", total: 10, entry: patientResources.slice(0, 3).map((resource) => ({ resource })), link: [] });
+    }
+    return new Response("nf", { status: 404 });
+  });
+  await assert.rejects(() => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage: true }).loadBundles(), /population incomplete|3 of 10/);
+});
+
+test("completeness guard: the lenient (read-only) path keeps what it fetched when the searchset over-reports (warns, no throw)", async () => {
+  const warned: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (m?: unknown) => warned.push(String(m));
+  try {
+    const fetchImpl = fetchShim((url, init) => {
+      if (url.pathname === "/fhir/Patient") {
+        return jsonResponse({ resourceType: "Bundle", type: "searchset", total: 10, entry: patientResources.slice(0, 3).map((resource) => ({ resource })), link: [] });
+      }
+      return devDbRoutes()(url, init);
+    });
+    const bundles = await httpSource(fetchImpl, { maxRetries: 0 }).loadBundles(); // failOnPartialPage defaults false
+    assert.equal(bundles.length, 3, "keeps the patients it fetched (does not throw on the lenient path)");
+    assert.ok(warned.some((m) => /population incomplete/.test(m)), "logs the shortfall loudly");
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("explicit quirk profile (disableCount + patientSearch): one Patient request, no probe round-trip", async () => {
   const counters = { patientRequests: 0 };
   const cfg = { ...CFG, disableCount: true, patientSearch: "birthdate=gt1900-01-01" };
