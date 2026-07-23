@@ -51,6 +51,10 @@ env:
   STAGING_WEBCHART_CLIENT_ID: "workwell"
   STAGING_WEBCHART_SCOPE: "system/*.read"
   STAGING_WEBCHART_KID: "workwell-2026-07"
+  # teatea 403s a bare `GET /Patient`, so the client REQUIRES an explicit whole-population enumeration
+  # (it refuses to guess a demographic filter — PR #328). This query is verified to enumerate teatea's
+  # whole population; re-verify if the trial data changes, and update it if MIE moves the trial.
+  STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=gt1900-01-01"
 
 jobs:
   build-backend-ts:
@@ -124,6 +128,8 @@ jobs:
       # is the registered JWKS. This is the ONLY WebChart secret — base URL / client id / scope / kid are
       # non-secret env constants above.
       WORKWELL_WEBCHART_PRIVATE_KEY: ${{ secrets.WORKWELL_WEBCHART_PRIVATE_KEY_STAGING }}
+      # The production DB URL, passed in ONLY to assert staging != prod below (never used as a connection).
+      PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +146,17 @@ jobs:
             echo "::error::Missing required staging secret(s): ${missing[*]}"
             exit 1
           fi
+          # SAFETY (Codex P1 #329): refuse to run staging against the PRODUCTION database. Neon projects
+          # have distinct endpoint hosts, so a copy-paste of DATABASE_URL_TWH into DATABASE_URL_STAGING is
+          # caught by comparing hosts — otherwise a live staging run would persist WebChart + synthetic
+          # outcomes into the demo DB, breaking the documented isolation.
+          host_of() { printf '%s' "$1" | sed -E 's#^(jdbc:)?[a-z]+://([^@]*@)?([^/:?]+).*#\3#'; }
+          stg_host="$(host_of "$DATABASE_URL")"
+          prod_host="$(host_of "$PROD_DATABASE_URL")"
+          if [ -n "$prod_host" ] && [ "$stg_host" = "$prod_host" ]; then
+            echo "::error::DATABASE_URL_STAGING resolves to the SAME host as the production DB ($stg_host) — refusing to contaminate the demo database. Provision a SEPARATE Neon project for staging."
+            exit 1
+          fi
 
       - name: Prepare staging backend environment variables
         id: backend-ts-env
@@ -148,8 +165,10 @@ jobs:
         #   - WORKWELL_SCHEDULER_ENABLED=false — no idle DB polling (the 2026-07-22 Neon-cost lesson; a
         #     staging env has no need for the nightly recompute).
         #   - the WORKWELL_WEBCHART_* block — this is what makes staging live against teatea.
-        # The _count/bare-Patient capability fallback is ADAPTIVE (unset DISABLE_COUNT/PATIENT_SEARCH), so
-        # staging continuously exercises the real-server probe path; pin them here if you prefer to skip it.
+        # teatea 400s `_count` and 403s a bare `/Patient`, so WORKWELL_WEBCHART_PATIENT_SEARCH supplies a
+        # verified whole-population enumeration (the client refuses to guess one — PR #328). The client
+        # still drops `_count` automatically on the first-page rejection. Requires the PR #328 client
+        # code, so dispatch this workflow from a branch/commit that contains it.
         run: |
           db_url="${DATABASE_URL#jdbc:}"
           case "$db_url" in
@@ -171,6 +190,7 @@ jobs:
               --arg wc_key "$WORKWELL_WEBCHART_PRIVATE_KEY" \
               --arg wc_scope "$STAGING_WEBCHART_SCOPE" \
               --arg wc_kid "$STAGING_WEBCHART_KID" \
+              --arg wc_patient_search "$STAGING_WEBCHART_PATIENT_SEARCH" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -188,7 +208,8 @@ jobs:
                 {key: "WORKWELL_WEBCHART_CLIENT_ID", value: $wc_client},
                 {key: "WORKWELL_WEBCHART_PRIVATE_KEY", value: $wc_key},
                 {key: "WORKWELL_WEBCHART_SCOPE", value: $wc_scope},
-                {key: "WORKWELL_WEBCHART_KID", value: $wc_kid}
+                {key: "WORKWELL_WEBCHART_KID", value: $wc_kid},
+                {key: "WORKWELL_WEBCHART_PATIENT_SEARCH", value: $wc_patient_search}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"
