@@ -18,7 +18,10 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 export default function EmployeeProfilePage() {
-  const { externalId } = useParams<{ externalId: string }>();
+  const { externalId: rawExternalId } = useParams<{ externalId: string }>();
+  // useParams returns the segment still percent-encoded; live WebChart ids contain "|" (wc%7Cwc-6),
+  // so decode once here and let each fetch re-encode for transport.
+  const externalId = decodeURIComponent(rawExternalId ?? '');
   const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
 
   if (loading) {

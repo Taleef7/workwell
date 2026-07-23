@@ -20,6 +20,138 @@ copy-paste can't contaminate the demo database. (P1) this journal entry. (P2) th
 `WORKWELL_WEBCHART_PATIENT_SEARCH` (teatea 403s a bare `/Patient` and the PR #328 client refuses to guess
 a demographic filter), and DEPLOY.md records that dispatching depends on the PR #328 client code.
 
+## 2026-07-23 (afternoon) — live WebChart productionization: `_count` capability fallback shipped + proven end-to-end against teatea
+
+Followed the registration success (below) with the plan's Phase 1 + Phase 2
+(`docs/superpowers/plans/2026-07-23-webchart-live-productionization.md`).
+
+**Phase 1 — the one real code gap, fixed.** `httpWebChartClient` listed the population with
+`Patient?_count=N` and set `_count` on every per-patient search. A real WebChart server rejects both:
+teatea 403s a bare `GET /Patient` and 400s `_count` (verified 2026-07-23), so a live run failed on the
+very first page (fatal under `failOnPartialPage`). The client now **probes the standard shape and, on a
+400/403 first Patient page, falls back once** — drops `_count`, enumerates via an accepted indexed search
+(`birthdate=gt1900-01-01`, overridable via `cfg.patientSearch`) — for the list AND the per-patient
+searches. `WebChartNonRetryableError` now carries the HTTP status so the capability quirk (400/403) is
+distinguished from a genuine outage (still thrown loudly). Operators can pin the profile up front via
+`WORKWELL_WEBCHART_DISABLE_COUNT` / `WORKWELL_WEBCHART_PATIENT_SEARCH`. **Standard servers (HAPI, the WCDB
+shim) never hit the fallback — byte-identical**, guarded by a test asserting the first request still
+carries `_count` and no enumeration. 6 new conformance tests over a teatea-like server; full backend
+suite **1349 tests, 1335 pass, 0 fail, 14 self-skip**; typecheck clean. Branch
+`feat/webchart-count-capability-fallback` (not merged — owner reviews).
+
+**Phase 2 — proven live against teatea (read-only CLI, `pnpm evaluate:webchart-live`).** The population
+listed clean — **28 patients over SMART Backend Services**, which by itself proves the Phase-1 fallback
+fired (teatea's `_count`/bare-`/Patient` rejections would otherwise have failed the first page). Evaluated
+through the unchanged CQL engine as-of 2026-07-23: **20 real (non-MISSING_DATA) outcomes across 5
+measures** — diabetes_hba1c 4 OVERDUE, obesity_bmi 11 OVERDUE, cholesterol_ldl 1 OVERDUE, cms125 4
+OVERDUE (24 MISSING each; the recency windows age real-but-old observations to OVERDUE, expected). Also:
+the login-trust "Acardi, Sergio" mystery is solved — it's simply Patient id 46 in the population.
+
+**Phase 3 (real-server hardening) — the BP finding, diagnosed live and FIXED.** `hypertension` returned
+**0 real outcomes (all 28 MISSING_DATA)** while every other observation measure worked. A read-only live
+diagnostic against teatea showed real BP is a **panel Observation** (LOINC `85354-9`, systolic/diastolic
+in `component[]`, no top-level value) with **`status: "unknown"`**. The measure is recency-only
+(retrieves a `[Procedure]` by `.performed`, no value read) and the crosswalk already maps `85354-9` → the
+synthetic `bp-screen` Procedure — so the **sole blocker was the normalize status gate**, which accepted
+only `final|amended|corrected` and dropped `unknown` before reconciliation. FHIR `unknown` = "source
+doesn't know the workflow status", NOT an invalidity marker (`cancelled`/`entered-in-error`), and real
+WebChart exports legitimate BP panels that way — so `normalize.ts` now accepts `unknown` **for
+Observations only** (Immunization has no `unknown` in R4; a `unknown` Procedure stays ambiguous; a truly
+*missing* status is still non-final, conservatively). Guarded by 2 new tests (an `unknown` BP panel
+reconciles + synthesizes the dated Procedure; `cancelled`/`entered-in-error`/`registered`/`preliminary`
+still don't). **Live re-run: hypertension 0 → 7 OVERDUE; total 20 → 27 real outcomes across 5 measures.**
+Demo/synthetic path unaffected (synthetic data carries `final` statuses). Branch
+`feat/webchart-count-capability-fallback`.
+
+**Phase 3 capstone — a local teatea-backed `ALL_PROGRAMS` run, verified through the real run pipeline +
+dashboard-backing endpoints.** Booted the local backend with the WebChart seam → teatea, logged in, and
+triggered a live `ALL_PROGRAMS` run. It fetched the 28 teatea patients live (Phase-1 fallback), evaluated
+them (Phase-3 BP fix), and persisted: **totalEvaluated 2492 = 2100 synthetic (twh 100 + ihn 50 = 150 × 14)
++ 392 live wc (28 × 14)**. The dashboard data layer then surfaced it: `GET /api/tenants` lists **`wc` =
+"WebChart (teatea.webchartnow.com)"**; `GET /api/compliance/roster?tenant=wc` returns 28 wc rows with
+real chips (hypertension **8 OVERDUE / 20 MISSING**, obesity_bmi 12 OVERDUE, etc.); and
+`GET /api/hierarchy/rollup` **reconciles All Systems = Σ tenants (evaluated 178 = 100 + 50 + 28)** with the
+`wc` tenant folded in and `openCases: 0` (the wc case-creation guard holding — no live cases). So the full
+prod path — live WebChart fetch → CQL engine → persisted audited outcomes → roster/hierarchy read models —
+works against a real WebChart server. (A browser screenshot would add visual confirmation; the data layer
+the frontend consumes is definitively proven.)
+
+**Next: Phase 4** — a **separate** deployed staging env wired to teatea (new Neon project + MIE containers
++ `*_STAGING` secrets incl. the private key; scheduler off / DB-free-gated). Owner-gated on MIE hosting
+confirmation + secret provisioning. The demo stack stays seam-off throughout; branches remain unpushed
+pending review.
+
+## 2026-07-23 — teatea WebChart client registered self-service; LIVE authenticated FHIR confirmed (A3 answered)
+
+**WorkWell is now authenticated against a real WebChart instance and pulling live FHIR data over the
+verified SMART Backend Services contract — self-served, end to end.** Dave gave superuser access on the
+`teatea.webchartnow.com` trial and pointed us at the FHIR App Setup form + Inferno docs; we completed
+the registration and verified the token + read path ourselves during the meeting window.
+
+**Keypair + JWKS.** Local RS384 keypair (private `~\.workwell\webchart-teatea.key`, PKCS#8 PEM —
+**never committed, never pasted, never logged**); the matching public key is published as a JWKS at a
+gist raw URL (kid `workwell-2026-07`, single RSA key, `alg: RS384`). Registered on teatea via
+`webchart.cgi?f=admin&s=jwt` → **FHIR App Setup**: Connection Type = FHIR Backend Services (JWT),
+Client ID `workwell`, **JSON Web Key Set URL = the gist raw URL** (WebChart fetches the JWKS from the
+URL — you paste the URL, not the JSON), Entity Chart = Tamsal (audit attribution). One caution worth
+recording: do **not** paste Inferno's own JWKS (from the g(10) harness docs) — that key set belongs to
+the test harness; using it would let Inferno authenticate as us. Our client must present **our** gist
+JWKS, matching our local private key.
+
+**A3 ANSWERED — the biggest M2 unknown is resolved.** `pnpm webchart:probe-auth` (the one-shot probe)
+ran `private_key_jwt` (RS384) → `client_credentials` grant and **GRANT SUCCEEDED**: `token_type: Bearer`,
+`expires_in: 108000` (30 h), scope expanding to the per-resource `system/<Resource>.read` list +
+`system/*.read`. This is despite teatea's `/.well-known/smart-configuration` advertising **only**
+`authorization_code` in its grant list — so a **manually-registered backend-services client DOES receive
+a client_credentials grant** even though discovery doesn't advertise it. That was the single largest open
+question gating live transport (M2 / #262).
+
+**Live authenticated FHIR reads verified** (with the granted Bearer, per-resource `?patient=`
+composition — the exact ADR-028 contract `httpWebChartClient` was built for): `Patient/12` → 200 (US
+Core); `Observation?patient=12` → **total 239**; `Condition?patient=12` → 2; `Immunization?patient=12`
+→ 4; `Encounter?patient=12` → 6. Population enumeration: **`Patient?birthdate=gt1900-01-01` → total 28**
+(teatea's whole population). Every per-patient resource composition works live; only the population
+*listing* query shape needs adaptation.
+
+**Two live quirks (teatea-specific) — the one real code follow-up.** teatea rejects `_count` as an
+*invalid search parameter* (400 "invalid search parameters") and **403s a bare unparameterized
+`GET /Patient`** ("doesn't have update permission" — a mislabeled deny). Our `httpWebChartClient` pages
+the Patient list with `_count`, so it needs a small post-demo adaptation: fall back to an accepted
+indexed search (`Patient?birthdate=gt1900-01-01` returns everyone) or make the listing query
+configurable — before a live teatea-backed population run. The per-patient composition path is
+unaffected. (Filed as a follow-up; see the plan below.)
+
+**Registration state on teatea** (superuser view): FHIR Apps shows 1 record — domain `workwell`, desc
+TWH, JWK Set Url = our gist, Connected Chart Tamsal; a new `workwell` FHIR-type Login Trust now exists
+(its "Associated Patient" column reads "Acardi, Sergio" — unexplained; ask Dave). **Open questions for
+Dave while access lasts:** (1) is bulk `Group/$export` the intended population-enumeration path for
+backend clients, or can unfiltered `/Patient` search / `_count` be enabled? (2) what is the
+"Acardi, Sergio" associated patient on the login trust? (3) does the superuser access persist for future
+self-serve registrations?
+
+**Guardrails unchanged.** teatea is a **trial instance with synthetic data** — no PHI. The demo Neon
+stack keeps all `WORKWELL_WEBCHART_*` **unset** (seam off, byte-identical). The private key stays local;
+the probe's success output is whitelisted (token_type / scope / expires_in only) and never prints the
+token or key.
+
+**Meeting outcomes (2026-07-23, with Doug / Nicole / Dave / Doug's team).** (1) **teatea trial extended
+30 days → ~3 months** — Dave is arranging it via Cornwell, so the live integration has real runway (not
+weeks). (2) Dave's config guidance: **feed teatea's CapabilityStatement to the AI to drive
+configuration** (it's the authoritative source for supported search params — grounds the `_count`
+fallback design), and consider a WorkWell **admin-configurable WebChart endpoint** (system URL + FHIR
+endpoint + our `workwell` domain) so pointing at a WebChart system is config, not a redeploy. (3) Dave to
+**zip + share WebChart's layout-manager folder** — schema mapping for FHIR output; feeds the **CQL→SQL /
+WCDB shim track (ADR-034/#292)**, not this live-FHIR path. (4) Doug asked Taleef to **attend the HL7
+Clinical Quality Information (CQI) Work Group** (for Nicole) and report back; Nicole to share the link.
+(5) Strategic horizon surfaced: payer / prior-auth interoperability (Da Vinci CRD/DTR/PAS, Inferno,
+Drummond; clearinghouses Availity/Change/Edifecs; vendors Smile/Onyx/ZeOmega/Medplum) — context, not
+current scope.
+
+**Next: the productionization plan** — `docs/superpowers/plans/2026-07-23-webchart-live-productionization.md`
+(Phase 1 `_count`/`/Patient` capability fallback → Phase 2 live teatea CLI proof → Phase 3 live-tenant
+real-server verification → Phase 4 a **separate** deployed staging env wired to teatea; the demo stack
+stays seam-off throughout, CI never touches teatea).
+
 ## 2026-07-22 (evening) — removed the admin demo credential from the production login
 
 Demo-prep finding: the **public production** login page (`twh.os.mieweb.org/login`) displayed

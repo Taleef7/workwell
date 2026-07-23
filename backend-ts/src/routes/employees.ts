@@ -35,8 +35,14 @@ export async function handleEmployees(req: Request, env: EmployeesEnv): Promise<
     return json(await searchEmployees(await deps(env), q, limit));
   }
 
-  const profileId = pathname.match(/^\/api\/employees\/([^/]+)\/profile$/)?.[1];
-  if (profileId) {
+  const rawProfileId = pathname.match(/^\/api\/employees\/([^/]+)\/profile$/)?.[1];
+  if (rawProfileId) {
+    let profileId: string;
+    try {
+      profileId = decodeURIComponent(rawProfileId); // live wc| ids arrive %7C-encoded from the browser
+    } catch {
+      return json({ error: "not_found", externalId: rawProfileId }, 404); // malformed %-encoding → unknown id
+    }
     const profile = await getEmployeeProfile(await deps(env), profileId);
     return profile ? json(profile) : json({ error: "not_found", externalId: profileId }, 404);
   }

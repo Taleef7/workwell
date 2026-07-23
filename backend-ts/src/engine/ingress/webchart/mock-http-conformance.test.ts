@@ -536,3 +536,111 @@ test("empty population: resolves to an empty bucket and evaluates without throwi
   assert.equal(res.total, 0);
   assert.equal(res.failed, 0);
 });
+
+/**
+ * A teatea-like WebChart server (verified quirks, 2026-07-23): 400s ANY `_count`, 403s a bare
+ * `GET /Patient`, but serves `Patient?birthdate=...` and the per-resource `?patient=` searches (no
+ * `_count`). Counts total `/fhir/Patient` requests.
+ */
+function teateaRoutes(counters?: { patientRequests: number }): (url: URL, init: FetchInit) => Response {
+  return (url) => {
+    if (url.pathname === "/fhir/Patient" && counters) counters.patientRequests++;
+    if (url.searchParams.has("_count")) {
+      return jsonResponse(
+        { resourceType: "OperationOutcome", issue: [{ severity: "error", code: "invalid", diagnostics: "invalid search parameters" }] },
+        { status: 400 },
+      );
+    }
+    if (url.pathname === "/fhir/Patient") {
+      const narrowed = [...url.searchParams.keys()].some((k) => k !== "_offset");
+      if (!narrowed) return new Response("doesn't have update permission", { status: 403 }); // bare /Patient
+      return jsonResponse(searchsetPage(patientResources, url, patientResources.length));
+    }
+    const match = RESOURCE_ROUTE.exec(url.pathname);
+    if (match) {
+      const patientId = url.searchParams.get("patient") ?? "";
+      if (!payloadById.has(patientId)) return new Response("unknown patient", { status: 404 });
+      return jsonResponse(searchsetPage(resourcesOf(patientId, match[1]!), url, 1000));
+    }
+    return new Response("not found", { status: 404 });
+  };
+}
+
+/** A server that rejects `_count` (400) but DOES serve a bare `GET /Patient` — the fallback needs no config. */
+function countRejectingRoutes(): (url: URL, init: FetchInit) => Response {
+  return (url) => {
+    if (url.searchParams.has("_count")) return new Response("bad _count", { status: 400 });
+    if (url.pathname === "/fhir/Patient") return jsonResponse(searchsetPage(patientResources, url, patientResources.length));
+    const match = RESOURCE_ROUTE.exec(url.pathname);
+    if (match) {
+      const patientId = url.searchParams.get("patient") ?? "";
+      if (!payloadById.has(patientId)) return new Response("unknown patient", { status: 404 });
+      return jsonResponse(searchsetPage(resourcesOf(patientId, match[1]!), url, 1000));
+    }
+    return new Response("not found", { status: 404 });
+  };
+}
+
+test("teatea quirks: a server that also 403s a bare /Patient REQUIRES an explicit enumeration (no silent demographic guess)", async () => {
+  // Without WORKWELL_WEBCHART_PATIENT_SEARCH the client must NOT guess `birthdate=…` (it could silently
+  // drop no-birthDate / pre-1900 subjects on an authoritative run) — it throws an actionable error
+  // instead (Codex P1 #328).
+  await assert.rejects(
+    () => httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }).loadBundles(),
+    /WORKWELL_WEBCHART_PATIENT_SEARCH/,
+  );
+});
+
+test("teatea quirks: with an explicit patientSearch, the fallback fetches the whole population + fixture-identical outcomes", async () => {
+  const cfg = { ...CFG, patientSearch: "birthdate=gt1900-01-01" };
+  const counters = { patientRequests: 0 };
+  const bundles = await httpSource(fetchShim(teateaRoutes(counters)), { maxRetries: 0 }, cfg).loadBundles();
+  assert.equal(bundles.length, patientResources.length, "the full population is fetched via the operator-supplied enumeration");
+  assert.equal(counters.patientRequests, 2, "one _count probe (rejected) + one enumeration retry");
+  for (const measureId of WHITELIST) {
+    const expected = await outcomes(fixtureSource(), measureId);
+    const actual = await outcomes(httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }, cfg), measureId);
+    assert.deepEqual(actual, expected, `${measureId}: enumeration-fallback outcomes must match fixture outcomes`);
+  }
+});
+
+test("a server that rejects _count but serves a bare /Patient: the fallback drops _count automatically (no config needed)", async () => {
+  const bundles = await httpSource(fetchShim(countRejectingRoutes()), { maxRetries: 0 }).loadBundles();
+  assert.equal(bundles.length, patientResources.length, "dropping _count is a safe, complete fallback when a bare /Patient works");
+});
+
+test("explicit quirk profile (disableCount + patientSearch): one Patient request, no probe round-trip", async () => {
+  const counters = { patientRequests: 0 };
+  const cfg = { ...CFG, disableCount: true, patientSearch: "birthdate=gt1900-01-01" };
+  const source = webChartDataSource(
+    cfg,
+    httpWebChartClient(cfg, { fetch: fetchShim(teateaRoutes(counters)), pageSize: 7, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 }),
+  );
+  const bundles = await source.loadBundles();
+  assert.equal(bundles.length, patientResources.length);
+  assert.equal(counters.patientRequests, 1, "a pinned profile sends the enumeration directly — no _count probe");
+});
+
+test("standard server: the first Patient request still carries _count and no enumeration (compliant servers unchanged)", async () => {
+  let firstPatientQuery: string | undefined;
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === "/fhir/Patient" && firstPatientQuery === undefined) firstPatientQuery = url.search;
+    return routes(url, init);
+  });
+  await httpSource(fetchImpl).loadBundles();
+  assert.match(firstPatientQuery ?? "", /[?&]_count=7\b/, "a compliant server still gets _count");
+  assert.doesNotMatch(firstPatientQuery ?? "", /birthdate/, "no enumeration fallback on a compliant server");
+});
+
+test("a genuine first-page outage (500) is NOT masked by the capability fallback", async () => {
+  const fetchImpl = fetchShim((url) =>
+    url.pathname === "/fhir/Patient" ? new Response("down", { status: 500 }) : new Response("nf", { status: 404 }),
+  );
+  await assert.rejects(() => httpSource(fetchImpl, { maxRetries: 0 }).loadBundles(), /500|request failed/i);
+});
+
+test("a non-quirk first-page error (404) is surfaced, not treated as a capability quirk", async () => {
+  const fetchImpl = fetchShim(() => new Response("nope", { status: 404 }));
+  await assert.rejects(() => httpSource(fetchImpl, { maxRetries: 0 }).loadBundles(), /404|request failed/i);
+});
