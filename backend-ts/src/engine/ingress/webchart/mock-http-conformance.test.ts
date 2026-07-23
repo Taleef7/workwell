@@ -98,6 +98,9 @@ function searchsetPage(resources: Json[], url: URL, defaultCount: number): unkno
   return {
     resourceType: "Bundle",
     type: "searchset",
+    // FHIR `total` is the FULL match count, not the page size (mirrors wcdb-fhir-shim's mapping). Emitting
+    // it means every test in this file exercises the population completeness guard's happy path for free.
+    total: resources.length,
     entry: slice.map((resource) => ({ resource })),
     link: nextOffset < resources.length ? [{ relation: "next", url: `${next.pathname}${next.search}` }] : [],
   };
@@ -607,6 +610,63 @@ test("teatea quirks: with an explicit patientSearch, the fallback fetches the wh
 test("a server that rejects _count but serves a bare /Patient: the fallback drops _count automatically (no config needed)", async () => {
   const bundles = await httpSource(fetchShim(countRejectingRoutes()), { maxRetries: 0 }).loadBundles();
   assert.equal(bundles.length, patientResources.length, "dropping _count is a safe, complete fallback when a bare /Patient works");
+});
+
+test("completeness guard: an accurate multi-page searchset does NOT trip it (conformant servers unaffected)", async () => {
+  // The regression the guard must never break: real paging, accurate `total`, authoritative run.
+  const bundles = await httpSource(devDbHttpFetch({ pageSize: 5 }), { maxRetries: 0, failOnPartialPage: true, pageSize: 5 }).loadBundles();
+  assert.equal(bundles.length, patientResources.length, "every patient is fetched across pages with no false shortfall");
+});
+
+test("completeness guard: an _include'd Patient is not admitted and does not mask a real shortfall", async () => {
+  // `Bundle.total` counts MATCHES only. An include'd Patient must neither become a population subject nor
+  // inflate the fetched count into a false 'complete' (review H2).
+  const [a, b] = patientResources;
+  const included = { resourceType: "Patient", id: "zz-included-not-a-subject" };
+  const fetchImpl = fetchShim((url) => {
+    if (url.pathname === "/fhir/Patient") {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        total: 3, // three matched, but only two match entries are returned → a genuine shortfall
+        entry: [
+          { search: { mode: "match" }, resource: a! },
+          { search: { mode: "match" }, resource: b! },
+          { search: { mode: "include" }, resource: included },
+        ],
+        link: [],
+      });
+    }
+    return new Response("nf", { status: 404 });
+  });
+  await assert.rejects(
+    () => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage: true }).loadBundles(),
+    /population incomplete: fetched 2 distinct/,
+    "the include'd Patient must not pad 2 matches up to the reported 3",
+  );
+});
+
+test("completeness guard: cross-page duplicates are reported as repeats, not silently counted as coverage", async () => {
+  // page1 [a,b] then page2 [b,c] — 4 match entries, 3 distinct, total says 4 → genuinely missing one.
+  const [a, b, c] = patientResources;
+  const fetchImpl = fetchShim((url) => {
+    if (url.pathname === "/fhir/Patient") {
+      const second = url.searchParams.has("_offset");
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        total: 4,
+        entry: (second ? [b!, c!] : [a!, b!]).map((resource) => ({ search: { mode: "match" }, resource })),
+        link: second ? [] : [{ relation: "next", url: "/fhir/Patient?_offset=1" }],
+      });
+    }
+    return new Response("nf", { status: 404 });
+  });
+  await assert.rejects(
+    () => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage: true }).loadBundles(),
+    /3 distinct \(4 match entries across 2 page\(s\)\) of 4 reported/,
+    "the message must separate distinct-vs-entries so a repeat is distinguishable from a truncation",
+  );
 });
 
 test("completeness guard: a searchset reporting MORE Patients than it returns fails an authoritative run", async () => {
