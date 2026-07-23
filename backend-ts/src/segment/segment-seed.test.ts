@@ -18,6 +18,8 @@ import { seedSegments, DEMO_SEGMENTS } from "./segment-seed.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { EMPLOYEES, employeesForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { isApplicable } from "./segment-applicability.ts";
+import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 
 const baselineRule = () => DEMO_SEGMENTS.find((s) => s.name === "All Employees")!.rule;
 
@@ -95,4 +97,39 @@ test("demo seed covers every Active runnable measure (no measure orphaned)", () 
   // And every seeded measure id must be a real runnable measure (no typos).
   const unknown = [...covered].filter((id) => !(id in MEASURES));
   assert.deepEqual(unknown, [], `demo cohorts reference unknown measure ids: ${unknown.join(", ")}`);
+});
+
+// ---------------------------------------------------------------------------
+// Demo-readiness (#): the universal baseline must cover the live WebChart site.
+//
+// The live WebChart tenant places every subject at the fixed site "WebChart", added at runtime when
+// the tenant loads — so the boot-time seed's directory-derived site list (twh/ihn only) never
+// covers it, and every WebChart roster cell reads NOT_APPLICABLE (the applicability overlay only
+// counts sites named by an ENABLED segment). Since the demo runs the app against the shim, the
+// baseline must include the live site out of the box, with no manual admin step to forget.
+// ---------------------------------------------------------------------------
+
+test("the All Employees baseline covers the live WebChart site (roster shows real chips, not N-A)", async () => {
+  const rule = baselineRule();
+  const siteCond = rule.conditions.find((c) => c.attr === "site" && c.op === "in");
+  assert.ok(siteCond, "baseline matches by site IN a list");
+  const sites = siteCond.value as string[];
+  assert.ok(
+    sites.includes(WEBCHART_LIVE_SITE),
+    `baseline site list must include "${WEBCHART_LIVE_SITE}" so live WebChart subjects are applicable`,
+  );
+
+  // A live WebChart subject must be applicable to a baseline wellness measure (i.e. NOT overlaid N-A).
+  const wcSubject = { externalId: "wc|wc-5", name: "Jane Doe", role: "employee", tenantId: "wc", site: WEBCHART_LIVE_SITE, providerId: "wc-provider-1" };
+  const baseline = DEMO_SEGMENTS.find((s) => s.name === "All Employees")!;
+  const seg: HydratedSegment = {
+    id: "seg-baseline", name: baseline.name, description: baseline.description ?? "",
+    enabled: true, rule: baseline.rule, measureIds: baseline.measureIds, overrides: [],
+    createdBy: "test", createdAt: "2026-07-22T00:00:00Z", updatedAt: "2026-07-22T00:00:00Z",
+  };
+  assert.equal(
+    isApplicable(wcSubject, "hypertension", [seg]),
+    true,
+    "a live WebChart subject must be applicable to the baseline wellness panel",
+  );
 });

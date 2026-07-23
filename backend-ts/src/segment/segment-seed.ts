@@ -11,10 +11,16 @@
 import type { CreateSegmentInput, SegmentStore, SegmentRule } from "../stores/segment-store.ts";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts";
 
 /** Every distinct site across ALL tenants — so the universal baseline auto-covers a new tenant's
- *  sites without hand-editing this list (E13 PR-1: the IHN campuses join twh's sites here). */
-const ALL_SITES: string[] = [...new Set(EMPLOYEES.map((e) => e.site))].sort((a, b) => a.localeCompare(b));
+ *  sites without hand-editing this list (E13 PR-1: the IHN campuses join twh's sites here). The live
+ *  WebChart tenant's fixed site is included explicitly: it is not in the static directory (added at
+ *  runtime when the seam loads), so without it every WebChart roster cell would read NOT_APPLICABLE.
+ *  Harmless when the seam is off — no subject carries that site, so it is just an unused list entry. */
+const ALL_SITES: string[] = [
+  ...new Set([...EMPLOYEES.map((e) => e.site), WEBCHART_LIVE_SITE]),
+].sort((a, b) => a.localeCompare(b));
 
 const BASELINE_NAME = "All Employees";
 /** The universal baseline cohort rule — matches every employee by site, across all tenants. */
