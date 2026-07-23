@@ -102,13 +102,18 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   // the source date being null (CqlEvaluationService#buildEvidenceJson) and left both fields null
   // on that path; we do the same by suppressing unless the recency date is present/non-null.
   const recentDefine = ers.find((r) => /^most recent .*date$/i.test(r.define));
-  const hadExam = recentDefine != null && recentDefine.result != null;
+  // OVERDUE/DUE_SOON/COMPLIANT structurally prove a real record exists (MISSING_DATA is the
+  // no-record bucket in every recurring measure's CQL), so when the recency define serialized
+  // null (seen on the WebChart live path) the canonical status still authorizes the days-since
+  // fallback below — without it an OVERDUE cell reads the contradictory "no record on file".
+  const statusProvesRecord = ["OVERDUE", "DUE_SOON", "COMPLIANT"].includes(outcomeStatus);
+  const hadExam = (recentDefine != null && recentDefine.result != null) || statusProvesRecord;
   const daysDefine = ers.find((r) => /^days since/i.test(r.define));
   const days = hadExam && typeof daysDefine?.result === "number" ? daysDefine.result : null;
 
   let lastExamDate: string | null = null;
-  if (hadExam && typeof recentDefine!.result === "string") {
-    lastExamDate = recentDefine!.result.slice(0, 10);
+  if (hadExam && typeof recentDefine?.result === "string") {
+    lastExamDate = recentDefine.result.slice(0, 10);
   } else if (days !== null) {
     // Fallback: derive from days-since only when we know an exam happened.
     const d = new Date(`${evaluationPeriod.slice(0, 10)}T00:00:00Z`);
