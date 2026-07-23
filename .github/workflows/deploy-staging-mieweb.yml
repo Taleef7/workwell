@@ -52,9 +52,13 @@ env:
   STAGING_WEBCHART_SCOPE: "system/*.read"
   STAGING_WEBCHART_KID: "workwell-2026-07"
   # teatea 403s a bare `GET /Patient`, so the client REQUIRES an explicit whole-population enumeration
-  # (it refuses to guess a demographic filter — PR #328). This query is verified to enumerate teatea's
-  # whole population; re-verify if the trial data changes, and update it if MIE moves the trial.
-  STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=gt1900-01-01"
+  # (it refuses to guess a demographic filter — PR #328). `le9999-12-31` is the FHIR maximum date, so the
+  # bound spans the entire representable range — that matters because sentinel birthdates cluster at BOTH
+  # ends (`gt1900-01-01` dropped 7 of 35 early/default records; a `le3000` style bound would likewise miss
+  # the common `9999-12-31` "unknown" sentinel). Verified 2026-07-23: teatea returns 35 with a numeric
+  # `Bundle.total`, so the client's completeness guard is live here. Re-check the total after any
+  # trial-data change. NOTE: no birthdate bound can reach a record with NO birthDate at all — see DEPLOY.md.
+  STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=le9999-12-31"
 
 jobs:
   build-backend-ts:
