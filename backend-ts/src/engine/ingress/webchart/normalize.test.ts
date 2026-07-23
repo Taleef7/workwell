@@ -165,7 +165,7 @@ test("normalizeWebChartBundle: an `unknown`-status BP panel reconciles (real Web
   );
 });
 
-test("normalizeWebChartBundle: cancelled / entered-in-error / registered / preliminary Observations stay non-final (only `unknown` is newly accepted)", () => {
+test("normalizeWebChartBundle: cancelled / entered-in-error / registered / preliminary BP panels stay non-final (the `unknown` exception is status-specific)", () => {
   for (const status of ["cancelled", "entered-in-error", "registered", "preliminary"]) {
     const raw = {
       resourceType: "Bundle",
@@ -175,6 +175,30 @@ test("normalizeWebChartBundle: cancelled / entered-in-error / registered / preli
     assert.equal(out.length, 1, `${status}: no Procedure synthesized`);
     assert.equal(codings(out[0]!, "code").length, 1, `${status}: Observation coding unchanged (not reconciled)`);
   }
+});
+
+test("normalizeWebChartBundle: an `unknown`-status LAB (non-BP) stays non-final — the exception is BP-panel-only (never falsely compliant)", () => {
+  // An HbA1c (LOINC 4548-4) with a real value but status `unknown` must NOT synthesize a completed
+  // Procedure — an unverified lab result can't read as compliant (Codex P1 #328). Only the BP panel is
+  // exempted from the final-status gate for `unknown`.
+  const raw = {
+    resourceType: "Bundle",
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "unknown",
+          effectiveDateTime: "2026-05-01T00:00:00Z",
+          code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
+          valueQuantity: { value: 6.5, unit: "%" },
+        },
+      },
+    ],
+  };
+  const out = normalizeWebChartBundle(raw).entry.map((e) => e.resource as AnyRec);
+  assert.equal(out.length, 1, "no Procedure synthesized from an unknown-status lab");
+  assert.ok(!out.some((r) => r.resourceType === "Procedure"), "an unknown-status lab must not synthesize a completed Procedure");
+  assert.equal(codings(out[0]!, "code").length, 1, "unknown-status lab coding unchanged (not reconciled)");
 });
 
 test("normalizeWebChartBundle: does not mutate its input", () => {

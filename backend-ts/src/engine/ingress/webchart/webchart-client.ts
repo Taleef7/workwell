@@ -9,10 +9,12 @@
  * Backend Services (`smart-backend-auth.ts`) when a client id + private key are configured, or the
  * legacy static bearer key otherwise. `_count` + `link[next]` are the standard-FHIR conservative
  * default, but a real WebChart server can reject them: teatea (verified 2026-07-23) 403s a bare
- * `GET /Patient` and 400s `_count`. The client therefore probes the standard shape and, on a 400/403
- * first Patient page, falls back to an accepted enumeration (drop `_count`, add `cfg.patientSearch` /
- * `birthdate=gt1900-01-01`) for the list AND the per-patient searches — or an operator can pin that
- * profile up front via `cfg.disableCount` / `cfg.patientSearch`. Standard servers never hit the fallback.
+ * `GET /Patient` and 400s `_count`. On a 400/403 first Patient page the client drops `_count` and retries
+ * once (for the list AND the per-patient searches); if the server ALSO refuses a bare `/Patient` it does
+ * NOT guess a demographic filter (that could silently drop subjects) — it throws an actionable error
+ * telling the operator to supply a verified-complete enumeration via `cfg.patientSearch`
+ * (`WORKWELL_WEBCHART_PATIENT_SEARCH`, e.g. `birthdate=gt1900-01-01`). Pin `cfg.disableCount` /
+ * `cfg.patientSearch` up front to skip the probe. Standard servers never hit the fallback.
  *
  * No new dependency: HTTP uses the global `fetch`; signing uses WebCrypto. Transport lives here at
  * the ingress edge, keeping `evaluate-bundle.ts` / `normalize.ts` I/O-free and portable.
@@ -61,12 +63,6 @@ const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_DELAYS_MS = [50, 100] as const;
 const DEFAULT_TIMEOUT_MS = 10_000;
-/**
- * Fallback Patient-enumeration search for servers that reject a bare `/Patient` and/or `_count`
- * (verified against teatea 2026-07-23): every patient has a birthDate, so this indexed search returns
- * the whole population. Overridable per-endpoint with `cfg.patientSearch`.
- */
-const DEFAULT_PATIENT_ENUMERATION = "birthdate=gt1900-01-01";
 
 class WebChartNonRetryableError extends Error {
   readonly status?: number;
@@ -289,23 +285,54 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     return u.toString();
   }
 
-  async function listPopulation(): Promise<PatientRef[]> {
-    let url: string | undefined = patientListUrl();
-    let page: unknown;
+  /**
+   * When no explicit patientSearch is configured, turn a `_count`/bare-`/Patient` rejection into an
+   * ACTIONABLE error instead of silently substituting a demographic guess. A guess like
+   * `birthdate=gt1900-01-01` can drop no-birthDate / pre-1900 patients, and `listPopulation` can't detect
+   * the omission — so an authoritative run would silently miss subjects (Codex P1 #328). Completeness is
+   * the operator's to own via `WORKWELL_WEBCHART_PATIENT_SEARCH`.
+   */
+  function enumerationRequired(e: unknown): WebChartNonRetryableError | undefined {
+    if (patientEnumeration) return undefined; // the operator's own query failed — that's a real error
+    const status = e instanceof WebChartNonRetryableError ? e.status : undefined;
+    return new WebChartNonRetryableError(
+      `WebChart rejected 'Patient?_count' and a bare 'GET /Patient'${status ? ` (status ${status})` : ""}. ` +
+        `This server requires a narrowing Patient search: set WORKWELL_WEBCHART_PATIENT_SEARCH to a query ` +
+        `you have verified enumerates the whole population (e.g. 'birthdate=gt1900-01-01').`,
+    );
+  }
+
+  /**
+   * Fetch the first Patient page, handling the capability quirk. Attempt 1 is the standard (or pinned)
+   * shape. On a 400/403 quirk we retry ONCE with `_count` dropped (any explicit patientSearch stays
+   * applied) — never auto-injecting a demographic filter. If the server still refuses (it also 403s a
+   * bare `/Patient`) and no patientSearch was configured, throw the actionable error above; any non-quirk
+   * failure is a real outage and propagates loudly (review P3-2).
+   */
+  async function fetchFirstPopulationPage(): Promise<unknown> {
     try {
-      page = await fetchJson(url);
+      return await fetchJson(patientListUrl());
     } catch (e) {
-      // A server that rejects `_count` (400) or a bare `/Patient` (403) — teatea does both — needs the
-      // capability fallback: drop `_count` and enumerate via an accepted indexed search, then retry the
-      // FIRST page (once). Remember it (`countDisabled`) for the per-patient searches too. Any other
-      // first-page failure — or a failure after the fallback is already engaged — is a real outage, so
-      // surface it loudly instead of "succeeding" over zero subjects (review P3-2).
-      if (!isCapabilityQuirk(e) || (countDisabled && patientEnumeration)) throw e;
-      countDisabled = true;
-      patientEnumeration = patientEnumeration ?? DEFAULT_PATIENT_ENUMERATION;
-      url = patientListUrl();
-      page = await fetchJson(url); // a second failure is a genuine error — propagate
+      if (!isCapabilityQuirk(e)) throw e;
+      if (!countDisabled) {
+        countDisabled = true; // also drops `_count` from the per-patient searches
+        try {
+          return await fetchJson(patientListUrl());
+        } catch (e2) {
+          if (isCapabilityQuirk(e2)) throw enumerationRequired(e2) ?? e2;
+          throw e2;
+        }
+      }
+      // `_count` was already off (explicit disableCount) and the search still failed.
+      throw enumerationRequired(e) ?? e;
     }
+  }
+
+  async function listPopulation(): Promise<PatientRef[]> {
+    let page = await fetchFirstPopulationPage();
+    // `url` reflects the profile actually used (countDisabled may have flipped) so relative `link[next]`
+    // resolution + the off-origin guard stay correct.
+    let url: string | undefined = patientListUrl();
 
     const patients: PatientRef[] = [];
     const seen = new Set<string>();
