@@ -236,15 +236,18 @@ export default function LoginPage() {
               )}
             </button>
 
-            {/* Demo fill */}
-            <button
-              type="button"
-              onClick={fillDemoCredentials}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
-            >
-              <Zap aria-hidden="true" className="h-3.5 w-3.5 text-amber-500" />
-              Fill demo credentials
-            </button>
+            {/* Demo fill — gated behind demo mode so the admin credential is never advertised on a
+                production build (NEXT_PUBLIC_DEMO_MODE=true fails the prod build, so this is off there). */}
+            {demoMode && (
+              <button
+                type="button"
+                onClick={fillDemoCredentials}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              >
+                <Zap aria-hidden="true" className="h-3.5 w-3.5 text-amber-500" />
+                Fill demo credentials
+              </button>
+            )}
           </form>
 
           {/* Divider + sandbox link */}
@@ -263,10 +266,15 @@ export default function LoginPage() {
           </Link>
 
           <div className="mt-6 flex items-center justify-between gap-2 text-xs text-slate-600">
-            <span className="flex items-center gap-1.5">
-              <KeyRound aria-hidden="true" className="h-3.5 w-3.5" />
-              Demo: <span className="text-slate-600">{DEMO_EMAIL}</span>
-            </span>
+            {/* The demo credential is shown only in demo mode — never advertised on production. */}
+            {demoMode ? (
+              <span className="flex items-center gap-1.5">
+                <KeyRound aria-hidden="true" className="h-3.5 w-3.5" />
+                Demo: <span className="text-slate-600">{DEMO_EMAIL}</span>
+              </span>
+            ) : (
+              <span />
+            )}
             <Link href="/" className="text-slate-500 transition hover:text-slate-950">
               ← Home
             </Link>

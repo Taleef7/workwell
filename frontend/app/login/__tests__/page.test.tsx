@@ -37,6 +37,7 @@ describe("LoginPage", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs(); // the demo-mode guard stubs NEXT_PUBLIC_DEMO_MODE — never let it leak
   });
 
   it("posts login with credentials included so refresh cookie can be persisted", async () => {
@@ -66,5 +67,36 @@ describe("LoginPage", () => {
       credentials: "include",
     });
     expect(mockLogin).toHaveBeenCalledWith("tok", "admin@workwell.dev", "ROLE_ADMIN");
+  });
+
+  // Security regression guard: with demo mode off (the production build — NEXT_PUBLIC_DEMO_MODE=true
+  // fails the prod build), the login page must NOT advertise the admin demo credential. Previously the
+  // "Fill demo credentials" button and the "Demo: admin@workwell.dev" hint rendered unconditionally,
+  // leaking a one-click admin login onto the public production site.
+  //
+  // demoMode is captured at module import, so force the env OFF and re-import a fresh module rather
+  // than relying on the caller's NEXT_PUBLIC_DEMO_MODE (Codex P2: the test must pass even when the
+  // suite is run in the supported local `NEXT_PUBLIC_DEMO_MODE=true` configuration).
+  it("does not expose the admin demo credential when demo mode is off", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEMO_MODE", "");
+    vi.resetModules();
+    const { default: FreshLoginPage } = await import("../page");
+    render(<FreshLoginPage />);
+    expect(screen.queryByText(/fill demo credentials/i)).toBeNull();
+    expect(screen.queryByText(/admin@workwell\.dev/i)).toBeNull();
+    expect(screen.queryByText(/^Demo:/)).toBeNull();
+    // The read-only public sandbox link stays — it is safe (ROLE_VIEWER, blocked from all writes).
+    expect(screen.getByRole("link", { name: /open public sandbox/i })).toBeTruthy();
+  });
+
+  // The complementary direction: with demo mode ON, the controls DO appear (so the guard above is
+  // proving a real conditional, not just that the strings never render).
+  it("shows the demo credential controls when demo mode is on", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEMO_MODE", "true");
+    vi.resetModules();
+    const { default: FreshLoginPage } = await import("../page");
+    render(<FreshLoginPage />);
+    expect(screen.getByRole("button", { name: /fill demo credentials/i })).toBeTruthy();
+    expect(screen.getByText(/admin@workwell\.dev/i)).toBeTruthy();
   });
 });
