@@ -830,6 +830,68 @@ test("reversibility: with zero enabled segments, the same scenario DOES create a
   assert.equal(mine.length, 1, "no segments ⇒ a case IS created for the non-compliant outcome");
 });
 
+test("live WebChart subjects are display-applicable but never open cases (Codex P2 #325)", async () => {
+  // A wc| subject with a non-compliant outcome and NO segments (⇒ everyone applicable, the fresh-DB
+  // demo state where the baseline now covers the WebChart site) must still create no case — because
+  // rerun-to-verify returns 409 for wc| subjects, so a created case would be un-closeable.
+  const liveEmployee = { ...employeeById("emp-005")!, externalId: "wc|live-overdue-1", tenantId: "wc", site: "WebChart" };
+  const wcDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [liveEmployee],
+    segments: [], // zero enabled ⇒ display-applicable to everything (the contrast case created a case)
+  };
+  const res = await executeManualRun(wcDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-05-05" });
+
+  // The outcome is still persisted (CQL stays authoritative — ADR-008).
+  const outcomes = await deps.outcomeStore.listOutcomes(res.runId);
+  assert.equal(outcomes.length, 1, "the OVERDUE outcome is persisted");
+  assert.equal(outcomes[0]!.subjectId, "wc|live-overdue-1");
+  assert.equal(outcomes[0]!.status, "OVERDUE");
+
+  // But NO case — the wc| guard skips case creation even though the subject is display-applicable.
+  const cases = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.lastRunId === res.runId && c.employeeId === "wc|live-overdue-1",
+  );
+  assert.equal(cases.length, 0, "a live WebChart subject opens no case even when applicable");
+});
+
+test("an EXISTING WebChart case is still resolved by a COMPLIANT run (close-only runs for wc; Codex P2 #325)", async () => {
+  // Simulate a wc case an owner opened earlier (e.g. by adding WebChart to an enabled group before
+  // the create-guard existed): seed a non-compliant OVERDUE case directly, then a COMPLIANT run for the
+  // same (subject, measure, period) must RESOLVE it — the create-guard must not strand it active,
+  // since rerun-to-verify also 409s for wc|.
+  const wcId = "wc|live-resolve-1";
+  const wcEmp = { ...employeeById("emp-006")!, externalId: wcId, tenantId: "wc", site: "WebChart" };
+  const period = "2094-06-06";
+  // Seed the pre-existing OVERDUE case straight through the store (the owner-repair scenario).
+  const seedRun = await executeManualRun(
+    { ...deps, engine: overdueEngine, employees: [wcEmp], segments: [] },
+    { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: period },
+  );
+  // The create-guard means the seed run itself opened no case — open one explicitly to model the
+  // pre-existing-case state the guard must still be able to close.
+  await deps.caseStore!.upsertFromOutcome({
+    runId: seedRun.runId, subjectId: wcId, measureId: "audiogram",
+    evaluationPeriod: bucketPeriodForMeasure("audiogram", period), outcomeStatus: "OVERDUE",
+  });
+  const openBefore = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.employeeId === wcId && c.measureId === "audiogram" && c.status !== "RESOLVED",
+  );
+  assert.equal(openBefore.length, 1, "precondition: an active wc case exists");
+
+  // Now a COMPLIANT run for the same subject/period must close it (close-only bypass runs for wc).
+  const res = await executeManualRun(
+    { ...deps, engine: compliantEngine, employees: [wcEmp], segments: [] },
+    { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: period },
+  );
+  const stillOpen = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.employeeId === wcId && c.measureId === "audiogram" && c.status !== "RESOLVED",
+  );
+  assert.equal(stillOpen.length, 0, "the existing wc case was resolved, not stranded active");
+  assert.ok(res.status === "COMPLETED");
+});
+
 // --- M10 (cycle rollover) + M11 (resolve is not gated) ---------------------
 const compliantEngine: RunPipelineDeps["engine"] = {
   async evaluate() {

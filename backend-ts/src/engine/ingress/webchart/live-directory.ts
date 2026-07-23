@@ -12,10 +12,18 @@ import {
 } from "../../synthetic/employee-catalog.ts";
 import type { DataSourceEnv } from "../data-source.ts";
 
+/**
+ * The fixed site/location the live WebChart tenant places every subject at (there is no site
+ * dimension in the WebChart FHIR feed, so all `wc|` subjects share one placeholder site). Exported
+ * so the demo-segment baseline can cover it — otherwise every WebChart roster cell reads
+ * NOT_APPLICABLE (the applicability overlay only counts sites named by an enabled segment).
+ */
+export const WEBCHART_LIVE_SITE = "WebChart";
+
 const WEBCHART_PROVIDER: Provider = {
   id: "wc-provider-1",
   name: "WebChart Clinician",
-  location: "WebChart",
+  location: WEBCHART_LIVE_SITE,
   tenantId: "wc",
 };
 const WEBCHART_TENANT: Tenant = { id: "wc", name: "WebChart" };
@@ -64,7 +72,7 @@ function minimalProfile(externalId: string): EmployeeProfile {
     name: rawPatientId(externalId),
     role: "employee",
     tenantId: "wc",
-    site: "WebChart",
+    site: WEBCHART_LIVE_SITE,
     providerId: "wc-provider-1",
   };
 }
@@ -85,7 +93,7 @@ function profileFromPatient(patient: Record<string, unknown>): EmployeeProfile {
     ...(typeof patient.birthDate === "string" ? { dateOfBirth: patient.birthDate } : {}),
     role: "employee",
     tenantId: "wc",
-    site: "WebChart",
+    site: WEBCHART_LIVE_SITE,
     providerId: "wc-provider-1",
   };
 }
