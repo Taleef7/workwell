@@ -13,7 +13,8 @@
  * once (for the list AND the per-patient searches); if the server ALSO refuses a bare `/Patient` it does
  * NOT guess a demographic filter (that could silently drop subjects) — it throws an actionable error
  * telling the operator to supply a verified-complete enumeration via `cfg.patientSearch`
- * (`WORKWELL_WEBCHART_PATIENT_SEARCH`, e.g. `birthdate=gt1900-01-01`). Pin `cfg.disableCount` /
+ * (`WORKWELL_WEBCHART_PATIENT_SEARCH`, a query verified to return the WHOLE population — e.g. a wide
+ * bound like `birthdate=le9999-12-31`, and cross-checked against `Bundle.total`). Pin `cfg.disableCount` /
  * `cfg.patientSearch` up front to skip the probe. Standard servers never hit the fallback.
  *
  * No new dependency: HTTP uses the global `fetch`; signing uses WebCrypto. Transport lives here at
@@ -36,7 +37,12 @@ export function fixtureWebChartClient(payloads: unknown[]): WebChartClient {
 export interface HttpWebChartClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly pageSize?: number;
-  /** Reject a later Patient page failure instead of returning the pages already fetched. Default: false. */
+  /**
+   * Treat an incomplete population as fatal (authoritative runs). Two behaviors: reject a later Patient
+   * page FAILURE instead of returning the pages already fetched, AND throw when the fetch ends with fewer
+   * distinct Patients than the searchset's `Bundle.total` (a silent truncation, no page error). The
+   * read-only CLI leaves this false and warns instead. Default: false.
+   */
   readonly failOnPartialPage?: boolean;
   readonly maxRetries?: number;
   readonly retryDelaysMs?: readonly number[];
@@ -77,13 +83,31 @@ function isCapabilityQuirk(e: unknown): boolean {
   return e instanceof WebChartNonRetryableError && (e.status === 400 || e.status === 403);
 }
 
-/** Merge a raw FHIR query string (e.g. `birthdate=gt1900-01-01`) into a URL's search params. */
+/** Merge a raw FHIR query string (e.g. `birthdate=le9999-12-31`) into a URL's search params. */
 function applyRawQuery(u: URL, rawQuery: string): void {
   for (const [k, v] of new URLSearchParams(rawQuery)) u.searchParams.append(k, v);
 }
 
 function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * The searchset's advertised match count (`Bundle.total`), when present — used to detect a truncated
+ * fetch. Absent or malformed ⇒ undefined (fail-open: a server that omits `total` disables the guard
+ * rather than blocking every run), but a present-but-non-numeric `total` is called out so the hole
+ * isn't silent (review L3). Verified 2026-07-23: teatea DOES return a numeric `total`.
+ */
+function bundleTotal(bundle: unknown): number | undefined {
+  if (!isObject(bundle)) return undefined;
+  const total = bundle.total;
+  if (typeof total === "number") return total;
+  if (total !== undefined) {
+    console.warn(
+      `WebChart searchset reported a non-numeric Bundle.total (${typeof total}) — population completeness cannot be verified for this fetch.`,
+    );
+  }
+  return undefined;
 }
 
 function fhirUrl(base: string, path: string): URL {
@@ -102,7 +126,15 @@ function patientsFromSearchset(bundle: unknown): PatientRef[] {
   if (!isObject(bundle) || bundle.resourceType !== "Bundle" || !Array.isArray(bundle.entry)) return [];
   const patients: PatientRef[] = [];
   for (const entry of bundle.entry) {
-    const resource = isObject(entry) ? entry.resource : undefined;
+    if (!isObject(entry)) continue;
+    // Only `match`-mode entries are population members (mirrors resourcesFromSearchset's rule). An
+    // `_include`/`_revinclude`d Patient — a linked record, a server that includes by default, or an
+    // operator-supplied `patientSearch` carrying `_include=` — is NOT a subject. Admitting it would both
+    // evaluate a non-member AND inflate the fetched count, masking a genuine shortfall from the
+    // completeness guard below (review H2). `Bundle.total` counts matches only, so the two must agree.
+    const mode = isObject(entry.search) ? entry.search.mode : undefined;
+    if (typeof mode === "string" && mode !== "match") continue;
+    const resource = entry.resource;
     if (isObject(resource) && resource.resourceType === "Patient" && typeof resource.id === "string") {
       patients.push({ id: resource.id, resource });
     }
@@ -288,9 +320,11 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   /**
    * When no explicit patientSearch is configured, turn a `_count`/bare-`/Patient` rejection into an
    * ACTIONABLE error instead of silently substituting a demographic guess. A guess like
-   * `birthdate=gt1900-01-01` can drop no-birthDate / pre-1900 patients, and `listPopulation` can't detect
-   * the omission — so an authoritative run would silently miss subjects (Codex P1 #328). Completeness is
-   * the operator's to own via `WORKWELL_WEBCHART_PATIENT_SEARCH`.
+   * `birthdate=gt1900-01-01` can drop patients (verified on teatea: it returns 28 of 35 — it misses
+   * records born on/before 1900-01-01, incl. default/garbage birthdates), and `listPopulation` can only
+   * detect a paging shortfall, not a query that under-matches — so an authoritative run would silently
+   * miss subjects (Codex P1 #328). Completeness is the operator's to own via
+   * `WORKWELL_WEBCHART_PATIENT_SEARCH`; `Group/$export` is the only provably-complete enumeration.
    */
   function enumerationRequired(e: unknown): WebChartNonRetryableError | undefined {
     if (patientEnumeration) return undefined; // the operator's own query failed — that's a real error
@@ -298,7 +332,8 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     return new WebChartNonRetryableError(
       `WebChart rejected 'Patient?_count' and a bare 'GET /Patient'${status ? ` (status ${status})` : ""}. ` +
         `This server requires a narrowing Patient search: set WORKWELL_WEBCHART_PATIENT_SEARCH to a query ` +
-        `you have verified enumerates the whole population (e.g. 'birthdate=gt1900-01-01').`,
+        `you have verified returns the WHOLE population (compare its Bundle.total; e.g. a wide bound like ` +
+        `'birthdate=le9999-12-31', not 'gt1900-01-01' which drops early/default birthdates).`,
     );
   }
 
@@ -330,14 +365,21 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
 
   async function listPopulation(): Promise<PatientRef[]> {
     let page = await fetchFirstPopulationPage();
+    // Capture the searchset's advertised match count BEFORE the paging loop reassigns `page`.
+    const reportedTotal = bundleTotal(page);
     // `url` reflects the profile actually used (countDisabled may have flipped) so relative `link[next]`
     // resolution + the off-origin guard stay correct.
     let url: string | undefined = patientListUrl();
 
     const patients: PatientRef[] = [];
     const seen = new Set<string>();
+    let matchEntries = 0; // match-mode Patient entries seen BEFORE dedup — separates truncation from repeats
+    let pages = 0;
     for (;;) {
-      for (const patient of patientsFromSearchset(page)) {
+      pages++;
+      const pageMatches = patientsFromSearchset(page);
+      matchEntries += pageMatches.length;
+      for (const patient of pageMatches) {
         if (!seen.has(patient.id)) {
           seen.add(patient.id);
           patients.push(patient);
@@ -353,6 +395,27 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
         // authoritative caller opts into failOnPartialPage to reject a truncated population instead.
         if (failOnPartialPage) throw e;
         break;
+      }
+    }
+
+    // Completeness guard: the searchset advertises how many Patients matched. If we fetched fewer, a page
+    // was silently dropped/truncated — on an authoritative run that's an incomplete population, not a
+    // success (a partial run would wrongly close out cases for the missing subjects), so fail loudly.
+    // The message carries match-entries vs deduped vs total vs pages so an operator can tell a genuine
+    // truncation from cross-page repeats or an estimated `total` at a glance (review M1).
+    // NOTE: `total` counts the QUERY's matches, so this cannot detect that the enumeration query itself
+    // excludes patients (e.g. a `birthdate=` bound missing a record with no/sentinel birthDate) — see
+    // docs/DEPLOY.md for the residual gap and the bulk-export follow-up.
+    if (typeof reportedTotal === "number") {
+      const detail = `${patients.length} distinct (${matchEntries} match entr${matchEntries === 1 ? "y" : "ies"} across ${pages} page(s)) of ${reportedTotal} reported`;
+      if (patients.length < reportedTotal) {
+        const msg = `WebChart population incomplete: fetched ${detail}.`;
+        if (failOnPartialPage) throw new WebChartNonRetryableError(msg);
+        console.warn(msg);
+      } else if (patients.length > reportedTotal) {
+        // More distinct subjects than the server said matched — a non-conformant searchset (or entries
+        // that slipped the match-mode filter). Never fatal, but it means the guard can't be trusted here.
+        console.warn(`WebChart population over-reported: fetched ${detail} — completeness cannot be verified.`);
       }
     }
     return patients;
