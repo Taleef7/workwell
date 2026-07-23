@@ -1,5 +1,44 @@
 # Journal
 
+## 2026-07-23 (afternoon) — live WebChart productionization: `_count` capability fallback shipped + proven end-to-end against teatea
+
+Followed the registration success (below) with the plan's Phase 1 + Phase 2
+(`docs/superpowers/plans/2026-07-23-webchart-live-productionization.md`).
+
+**Phase 1 — the one real code gap, fixed.** `httpWebChartClient` listed the population with
+`Patient?_count=N` and set `_count` on every per-patient search. A real WebChart server rejects both:
+teatea 403s a bare `GET /Patient` and 400s `_count` (verified 2026-07-23), so a live run failed on the
+very first page (fatal under `failOnPartialPage`). The client now **probes the standard shape and, on a
+400/403 first Patient page, falls back once** — drops `_count`, enumerates via an accepted indexed search
+(`birthdate=gt1900-01-01`, overridable via `cfg.patientSearch`) — for the list AND the per-patient
+searches. `WebChartNonRetryableError` now carries the HTTP status so the capability quirk (400/403) is
+distinguished from a genuine outage (still thrown loudly). Operators can pin the profile up front via
+`WORKWELL_WEBCHART_DISABLE_COUNT` / `WORKWELL_WEBCHART_PATIENT_SEARCH`. **Standard servers (HAPI, the WCDB
+shim) never hit the fallback — byte-identical**, guarded by a test asserting the first request still
+carries `_count` and no enumeration. 6 new conformance tests over a teatea-like server; full backend
+suite **1349 tests, 1335 pass, 0 fail, 14 self-skip**; typecheck clean. Branch
+`feat/webchart-count-capability-fallback` (not merged — owner reviews).
+
+**Phase 2 — proven live against teatea (read-only CLI, `pnpm evaluate:webchart-live`).** The population
+listed clean — **28 patients over SMART Backend Services**, which by itself proves the Phase-1 fallback
+fired (teatea's `_count`/bare-`/Patient` rejections would otherwise have failed the first page). Evaluated
+through the unchanged CQL engine as-of 2026-07-23: **20 real (non-MISSING_DATA) outcomes across 5
+measures** — diabetes_hba1c 4 OVERDUE, obesity_bmi 11 OVERDUE, cholesterol_ldl 1 OVERDUE, cms125 4
+OVERDUE (24 MISSING each; the recency windows age real-but-old observations to OVERDUE, expected). Also:
+the login-trust "Acardi, Sergio" mystery is solved — it's simply Patient id 46 in the population.
+
+**One real-data finding → Phase 3.** `hypertension` returned **0 real outcomes (all 28 MISSING_DATA)**
+while every other observation measure worked. The crosswalk maps top-level LOINC `85354-9`/`8480-6`, but
+real WebChart BP is almost certainly a **panel Observation with the systolic value in `component[]`**
+(the top-level panel carries no `valueQuantity`), so the measure finds no value. That's a terminology/
+normalize gap for real BP data — the first Phase-3 real-server hardening item (needs a live BP-coding
+diagnostic + a `component[]`-aware crosswalk, TDD). No demo/synthetic path is affected (synthetic BP is a
+standalone valued observation).
+
+**Next:** Phase 3 (real-server hardening — starting with the BP fix + a local teatea-backed `ALL_PROGRAMS`
+run so the `wc` tenant renders in the dashboards), then Phase 4 (a separate deployed staging env wired to
+teatea — owner-gated on MIE hosting + `*_STAGING` secrets). Demo stack stays seam-off throughout.
+
 ## 2026-07-23 — teatea WebChart client registered self-service; LIVE authenticated FHIR confirmed (A3 answered)
 
 **WorkWell is now authenticated against a real WebChart instance and pulling live FHIR data over the
