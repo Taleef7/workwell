@@ -102,21 +102,25 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   // the source date being null (CqlEvaluationService#buildEvidenceJson) and left both fields null
   // on that path; we do the same by suppressing unless the recency date is present/non-null.
   const recentDefine = ers.find((r) => /^most recent .*date$/i.test(r.define));
-  const hadExam = recentDefine != null && recentDefine.result != null;
+  // OVERDUE/DUE_SOON/COMPLIANT structurally prove a real record exists (MISSING_DATA is the
+  // no-record bucket in every recurring measure's CQL), so when the recency define serialized
+  // null (seen on the WebChart live path) the canonical status still authorizes the days-since
+  // fallback below — without it an OVERDUE cell reads the contradictory "no record on file".
+  const statusProvesRecord = ["OVERDUE", "DUE_SOON", "COMPLIANT"].includes(outcomeStatus);
+  const hadExam = (recentDefine != null && recentDefine.result != null) || statusProvesRecord;
   const daysDefine = ers.find((r) => /^days since/i.test(r.define));
   const days = hadExam && typeof daysDefine?.result === "number" ? daysDefine.result : null;
 
   let lastExamDate: string | null = null;
-  if (hadExam && typeof recentDefine!.result === "string") {
-    lastExamDate = recentDefine!.result.slice(0, 10);
-  } else if (days !== null) {
-    // Fallback: derive from days-since only when we know an exam happened.
-    const d = new Date(`${evaluationPeriod.slice(0, 10)}T00:00:00Z`);
-    if (!Number.isNaN(d.getTime())) {
-      d.setUTCDate(d.getUTCDate() - days);
-      lastExamDate = d.toISOString().slice(0, 10);
-    }
+  if (typeof recentDefine?.result === "string") {
+    lastExamDate = recentDefine.result.slice(0, 10);
   }
+  // When the recency define didn't serialize a real date string, do NOT reconstruct one: the "Days Since"
+  // define is anchored to the run's Now(), not to `evaluationPeriod` (a per-cycle anchor that can be
+  // months earlier — the run pipeline stores e.g. 2026-01-01 while computing day-diffs as of the run
+  // date), so subtracting days from that anchor would fabricate a last_exam_date months too early
+  // (Codex P1 #327). `days_overdue` below still comes from the CQL "Days Since", which IS correctly
+  // anchored — so an OVERDUE cell shows the accurate overdue count without inventing an exam date.
   return {
     last_exam_date: lastExamDate,
     compliance_window_days: window,

@@ -36,6 +36,15 @@ export interface WebChartConfig {
   scope?: string;
   /** Optional JWK `kid` header for a multi-key registered JWKS. */
   kid?: string;
+  /**
+   * Server-capability tuning (adaptive by default). Some WebChart servers reject `_count` and/or a
+   * bare `GET /Patient` (teatea rejects both — verified 2026-07-23). `disableCount` pins the client to
+   * never send `_count`; `patientSearch` is the raw query the Patient-list root carries so the
+   * population is enumerated via an accepted indexed search (e.g. `birthdate=gt1900-01-01`). Left
+   * unset, the client probes the standard shape and falls back automatically on a 400/403 first page.
+   */
+  disableCount?: boolean;
+  patientSearch?: string;
 }
 
 /**
@@ -66,6 +75,10 @@ export interface DataSourceEnv {
   WORKWELL_WEBCHART_TOKEN_URL?: string;
   WORKWELL_WEBCHART_SCOPE?: string;
   WORKWELL_WEBCHART_KID?: string;
+  /** `"true"` pins the client to never send `_count` (for servers that reject it, e.g. teatea). */
+  WORKWELL_WEBCHART_DISABLE_COUNT?: string;
+  /** Raw Patient-list query for servers that reject a bare `/Patient` (e.g. `birthdate=gt1900-01-01`). */
+  WORKWELL_WEBCHART_PATIENT_SEARCH?: string;
 }
 
 /**
@@ -100,6 +113,8 @@ export function webChartConfigFromEnv(env: DataSourceEnv): WebChartConfig | unde
     tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
     scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
     kid: trimmed(env.WORKWELL_WEBCHART_KID),
+    disableCount: (env.WORKWELL_WEBCHART_DISABLE_COUNT ?? "").trim().toLowerCase() === "true" || undefined,
+    patientSearch: trimmed(env.WORKWELL_WEBCHART_PATIENT_SEARCH),
   };
 }
 
