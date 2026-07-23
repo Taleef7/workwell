@@ -540,8 +540,7 @@ test("empty population: resolves to an empty bucket and evaluates without throwi
 /**
  * A teatea-like WebChart server (verified quirks, 2026-07-23): 400s ANY `_count`, 403s a bare
  * `GET /Patient`, but serves `Patient?birthdate=...` and the per-resource `?patient=` searches (no
- * `_count`). Counts total `/fhir/Patient` requests so a test can prove the adaptive probe-then-fallback
- * (2 requests) vs. an explicitly-pinned profile (1 request, no probe).
+ * `_count`). Counts total `/fhir/Patient` requests.
  */
 function teateaRoutes(counters?: { patientRequests: number }): (url: URL, init: FetchInit) => Response {
   return (url) => {
@@ -567,19 +566,47 @@ function teateaRoutes(counters?: { patientRequests: number }): (url: URL, init: 
   };
 }
 
-test("teatea quirks: adaptive fallback probes _count, gets 400/403, then enumerates the whole population", async () => {
-  const counters = { patientRequests: 0 };
-  const bundles = await httpSource(fetchShim(teateaRoutes(counters)), { maxRetries: 0 }).loadBundles();
-  assert.equal(bundles.length, patientResources.length, "the full population must be fetched despite the _count/bare-Patient rejections");
-  assert.equal(counters.patientRequests, 2, "one _count probe (rejected) + one enumeration fallback");
+/** A server that rejects `_count` (400) but DOES serve a bare `GET /Patient` — the fallback needs no config. */
+function countRejectingRoutes(): (url: URL, init: FetchInit) => Response {
+  return (url) => {
+    if (url.searchParams.has("_count")) return new Response("bad _count", { status: 400 });
+    if (url.pathname === "/fhir/Patient") return jsonResponse(searchsetPage(patientResources, url, patientResources.length));
+    const match = RESOURCE_ROUTE.exec(url.pathname);
+    if (match) {
+      const patientId = url.searchParams.get("patient") ?? "";
+      if (!payloadById.has(patientId)) return new Response("unknown patient", { status: 404 });
+      return jsonResponse(searchsetPage(resourcesOf(patientId, match[1]!), url, 1000));
+    }
+    return new Response("not found", { status: 404 });
+  };
+}
+
+test("teatea quirks: a server that also 403s a bare /Patient REQUIRES an explicit enumeration (no silent demographic guess)", async () => {
+  // Without WORKWELL_WEBCHART_PATIENT_SEARCH the client must NOT guess `birthdate=…` (it could silently
+  // drop no-birthDate / pre-1900 subjects on an authoritative run) — it throws an actionable error
+  // instead (Codex P1 #328).
+  await assert.rejects(
+    () => httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }).loadBundles(),
+    /WORKWELL_WEBCHART_PATIENT_SEARCH/,
+  );
 });
 
-test("teatea quirks: adaptive-fallback outcomes are identical to the fixture WebChart path", async () => {
+test("teatea quirks: with an explicit patientSearch, the fallback fetches the whole population + fixture-identical outcomes", async () => {
+  const cfg = { ...CFG, patientSearch: "birthdate=gt1900-01-01" };
+  const counters = { patientRequests: 0 };
+  const bundles = await httpSource(fetchShim(teateaRoutes(counters)), { maxRetries: 0 }, cfg).loadBundles();
+  assert.equal(bundles.length, patientResources.length, "the full population is fetched via the operator-supplied enumeration");
+  assert.equal(counters.patientRequests, 2, "one _count probe (rejected) + one enumeration retry");
   for (const measureId of WHITELIST) {
     const expected = await outcomes(fixtureSource(), measureId);
-    const actual = await outcomes(httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }), measureId);
-    assert.deepEqual(actual, expected, `${measureId}: teatea-like HTTP outcomes must match fixture outcomes`);
+    const actual = await outcomes(httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }, cfg), measureId);
+    assert.deepEqual(actual, expected, `${measureId}: enumeration-fallback outcomes must match fixture outcomes`);
   }
+});
+
+test("a server that rejects _count but serves a bare /Patient: the fallback drops _count automatically (no config needed)", async () => {
+  const bundles = await httpSource(fetchShim(countRejectingRoutes()), { maxRetries: 0 }).loadBundles();
+  assert.equal(bundles.length, patientResources.length, "dropping _count is a safe, complete fallback when a bare /Patient works");
 });
 
 test("explicit quirk profile (disableCount + patientSearch): one Patient request, no probe round-trip", async () => {
