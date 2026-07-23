@@ -392,9 +392,12 @@ it**:
 / PR #328 before it merges) — a `workflow_dispatch` builds the selected ref, so staging can validate
 unmerged WebChart work. **The workflow depends on the PR #328 client code:** teatea 400s `_count` and 403s
 a bare `GET /Patient`, and the client refuses to guess a demographic filter, so the workflow sets
-`WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=gt1900-01-01` (a verified whole-population enumeration — update
-it in the workflow env if the trial data changes). Dispatching from a branch WITHOUT that client code (e.g.
-`main` before #328 merges) will fail the population fetch — land #328 first, or dispatch from its branch.
+`WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=le3000-01-01` — a **wide upper bound** that catches every
+birthdate (teatea returns its full **35** patients; the narrower `gt1900-01-01` silently dropped 7).
+Cross-check the query's `Bundle.total` after any trial-data change; **`Group/$export` (bulk data) is the
+only provably-complete WebChart enumeration** — a demographic query still can't reach a no-`birthDate`
+record (a follow-up). Dispatching from a branch WITHOUT the PR #328 client code (e.g. `main` before #328
+merges) will fail the population fetch — land #328 first, or dispatch from its branch.
 
 **Owner setup required before the first dispatch (one-time):**
 
@@ -523,7 +526,7 @@ shows all services `Up`).
 | `WORKWELL_WEBCHART_KID` | Backend | Optional JWK `kid` header for the client assertion (multi-key registered JWKS). |
 | `WORKWELL_WEBCHART_API_KEY` | Backend | Legacy static bearer key (pre-verified-contract mode; kept for fixtures/proxies). Ignored for auth selection when the SMART pair is set. |
 | `WORKWELL_WEBCHART_DISABLE_COUNT` | Backend | Optional `"true"` to pin the client to never send FHIR `_count` — for servers that reject it (teatea rejects `_count` with a 400, verified 2026-07-23). Left unset, the client probes the standard `_count` shape and falls back automatically on a 400/403 first Patient page, so this is only needed to skip the one-time probe round-trip on a known-quirky server. |
-| `WORKWELL_WEBCHART_PATIENT_SEARCH` | Backend | Raw FHIR query for the population-listing request, **required** for servers that 403 a bare `GET /Patient` (teatea does — verified 2026-07-23). The client drops `_count` automatically on a 400/403, but it will **not** guess a demographic filter (that could silently drop no-`birthDate`/pre-1900 subjects) — so when a bare `/Patient` is also refused it errors unless this is set. Use a query you have verified enumerates the **whole** population, e.g. `birthdate=gt1900-01-01`. |
+| `WORKWELL_WEBCHART_PATIENT_SEARCH` | Backend | Raw FHIR query for the population-listing request, **required** for servers that 403 a bare `GET /Patient` (teatea does — verified 2026-07-23). The client drops `_count` automatically on a 400/403, but it will **not** guess a demographic filter (that could silently drop subjects) — so when a bare `/Patient` is also refused it errors unless this is set. Use a query you have verified returns the **whole** population by comparing its `Bundle.total`: prefer a **wide upper bound** like `birthdate=le3000-01-01` (teatea = 35) over `birthdate=gt1900-01-01` (drops records born on/before 1900-01-01 → only 28/35). The client also fails an authoritative run if it fetches fewer than `Bundle.total` (paging truncation), but it **cannot** detect a query that under-matches — `Group/$export` (bulk) is the only provably-complete enumeration. |
 | `WORKWELL_WEBCHART_ENROLLMENT_JSON` | Backend | Optional JSON object `{ "raw-patient-id": ["measure_id"] }` controlling live-tenant enrollment. When unset, every live subject is enrolled in the fail-closed `ROSTER_ELIGIBLE_MEASURES` allowlist; clinical age/sex/diagnosis/visit gates in CQL remain authoritative. Inert unless the WebChart seam is configured. |
 | `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` | Dev/test only | Gates the self-skipping live-HTTP suite (`hapi-live.test.ts`) at a local HAPI "fake WebChart" (ADR-032). **Never set on a deployed stack** — deliberately distinct from `WORKWELL_WEBCHART_BASE_URL` so a runtime `.env` can't make `pnpm test` network-dependent. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |

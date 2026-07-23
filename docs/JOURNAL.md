@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-07-23 — WebChart population-enumeration completeness (the shipped `gt1900` query undercounted 20%)
+
+Phase-5 real-server hardening surfaced a real bug in the just-merged live path. Probing teatea while
+auditing the 14-measure live evaluation: `Patient?birthdate=gt1900-01-01` returns **28**, but
+`Patient?birthdate=ge1900-01-01` returns **32** and `Patient?birthdate=le3000-01-01` returns **35** — so
+the `gt1900-01-01` enumeration I used in Phase 2/3 and shipped in the staging workflow (#329) **silently
+dropped 7 of 35 patients** (4 born exactly 1900-01-01 + 3 with default/garbage pre-1000 birthdates). This
+is exactly the "demographic guess drops subjects" hazard Codex flagged on #328 — and it was live.
+
+**Fixes (branch `fix/webchart-population-completeness`):**
+- **Client completeness guard** (`webchart-client.ts`): `listPopulation` now captures the searchset's
+  `Bundle.total` and, if it fetches fewer Patients than reported, **throws on an authoritative run**
+  (`failOnPartialPage`) / warns otherwise — so a paging truncation can never "succeed" over a partial
+  population (which would close out cases for the missing subjects). It can't detect a query that
+  *under-matches* (total reflects the query), so the docs point at `Group/$export` as the only
+  provably-complete enumeration.
+- **Corrected the shipped query**: staging workflow + DEPLOY.md now use a **wide upper bound**
+  `birthdate=le3000-01-01` (catches all birthdates incl. default/early ones → teatea's full 35) instead
+  of `gt1900-01-01`, and instruct operators to cross-check `Bundle.total`.
+- **Live-verified**: the corrected query lists **35** (was 28); 2 new guard tests; typecheck + conformance
+  25/25 green. `Group/$export` bulk enumeration is filed as the proper follow-up.
+
 ## 2026-07-23 — staging deploy workflow for a live-WebChart (teatea) environment
 
 Added `.github/workflows/deploy-staging-mieweb.yml` — a **`workflow_dispatch`-only** deploy of a
