@@ -512,14 +512,17 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       status === "COMPLIANT" ||
       (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
     // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
-    // open cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
-    // lands, so a created wc case would be un-closeable. Case ELIGIBILITY is therefore separated from
-    // display APPLICABILITY here — the outcome is still persisted (CQL stays authoritative, ADR-008),
-    // only the case upsert is skipped. (Before the baseline covered the WebChart site this was an
-    // accidental side-effect of the NOT_APPLICABLE overlay; making it explicit keeps the documented
-    // "no live cases by default" behavior once the site is covered.) Codex P2 (#325).
+    // OPEN cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
+    // lands, so a newly-created wc case would be un-closeable. Case CREATION eligibility is therefore
+    // separated from display APPLICABILITY — the `!isLiveWebChartSubject` guard sits ONLY on the
+    // create-capable `isApplicable` branch, not on `closeOnly`. The close-only bypass (COMPLIANT — a
+    // no-op when no case exists; EXCLUDED — only when an active case already exists) still runs for a
+    // `wc|` subject, so an existing wc case (e.g. one an owner opened by adding WebChart to a group)
+    // can still be RESOLVED by a later COMPLIANT/EXCLUDED run rather than being stranded active forever
+    // (rerun-to-verify can't close it either). Neither close-only branch can create a wc case. The
+    // outcome is always persisted regardless (CQL stays authoritative, ADR-008). Codex P2 (#325).
     const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
-    if (deps.caseStore && !isLiveWebChartSubject && (closeOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
+    if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
         subjectId: item.employee.externalId,

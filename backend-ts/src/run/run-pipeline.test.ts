@@ -856,6 +856,42 @@ test("live WebChart subjects are display-applicable but never open cases (Codex 
   assert.equal(cases.length, 0, "a live WebChart subject opens no case even when applicable");
 });
 
+test("an EXISTING WebChart case is still resolved by a COMPLIANT run (close-only runs for wc; Codex P2 #325)", async () => {
+  // Simulate a wc case an owner opened earlier (e.g. by adding WebChart to an enabled group before
+  // the create-guard existed): seed a non-compliant OVERDUE case directly, then a COMPLIANT run for the
+  // same (subject, measure, period) must RESOLVE it — the create-guard must not strand it active,
+  // since rerun-to-verify also 409s for wc|.
+  const wcId = "wc|live-resolve-1";
+  const wcEmp = { ...employeeById("emp-006")!, externalId: wcId, tenantId: "wc", site: "WebChart" };
+  const period = "2094-06-06";
+  // Seed the pre-existing OVERDUE case straight through the store (the owner-repair scenario).
+  const seedRun = await executeManualRun(
+    { ...deps, engine: overdueEngine, employees: [wcEmp], segments: [] },
+    { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: period },
+  );
+  // The create-guard means the seed run itself opened no case — open one explicitly to model the
+  // pre-existing-case state the guard must still be able to close.
+  await deps.caseStore!.upsertFromOutcome({
+    runId: seedRun.runId, subjectId: wcId, measureId: "audiogram",
+    evaluationPeriod: bucketPeriodForMeasure("audiogram", period), outcomeStatus: "OVERDUE",
+  });
+  const openBefore = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.employeeId === wcId && c.measureId === "audiogram" && c.status !== "RESOLVED",
+  );
+  assert.equal(openBefore.length, 1, "precondition: an active wc case exists");
+
+  // Now a COMPLIANT run for the same subject/period must close it (close-only bypass runs for wc).
+  const res = await executeManualRun(
+    { ...deps, engine: compliantEngine, employees: [wcEmp], segments: [] },
+    { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: period },
+  );
+  const stillOpen = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.employeeId === wcId && c.measureId === "audiogram" && c.status !== "RESOLVED",
+  );
+  assert.equal(stillOpen.length, 0, "the existing wc case was resolved, not stranded active");
+  assert.ok(res.status === "COMPLETED");
+});
+
 // --- M10 (cycle rollover) + M11 (resolve is not gated) ---------------------
 const compliantEngine: RunPipelineDeps["engine"] = {
   async evaluate() {
