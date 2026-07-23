@@ -830,6 +830,32 @@ test("reversibility: with zero enabled segments, the same scenario DOES create a
   assert.equal(mine.length, 1, "no segments ⇒ a case IS created for the non-compliant outcome");
 });
 
+test("live WebChart subjects are display-applicable but never open cases (Codex P2 #325)", async () => {
+  // A wc| subject with a non-compliant outcome and NO segments (⇒ everyone applicable, the fresh-DB
+  // demo state where the baseline now covers the WebChart site) must still create no case — because
+  // rerun-to-verify returns 409 for wc| subjects, so a created case would be un-closeable.
+  const liveEmployee = { ...employeeById("emp-005")!, externalId: "wc|live-overdue-1", tenantId: "wc", site: "WebChart" };
+  const wcDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [liveEmployee],
+    segments: [], // zero enabled ⇒ display-applicable to everything (the contrast case created a case)
+  };
+  const res = await executeManualRun(wcDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-05-05" });
+
+  // The outcome is still persisted (CQL stays authoritative — ADR-008).
+  const outcomes = await deps.outcomeStore.listOutcomes(res.runId);
+  assert.equal(outcomes.length, 1, "the OVERDUE outcome is persisted");
+  assert.equal(outcomes[0]!.subjectId, "wc|live-overdue-1");
+  assert.equal(outcomes[0]!.status, "OVERDUE");
+
+  // But NO case — the wc| guard skips case creation even though the subject is display-applicable.
+  const cases = (await deps.caseStore!.listCases({})).filter(
+    (c) => c.lastRunId === res.runId && c.employeeId === "wc|live-overdue-1",
+  );
+  assert.equal(cases.length, 0, "a live WebChart subject opens no case even when applicable");
+});
+
 // --- M10 (cycle rollover) + M11 (resolve is not gated) ---------------------
 const compliantEngine: RunPipelineDeps["engine"] = {
   async evaluate() {

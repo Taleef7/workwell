@@ -511,7 +511,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     const closeOnly =
       status === "COMPLIANT" ||
       (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
-    if (deps.caseStore && (closeOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
+    // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
+    // open cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
+    // lands, so a created wc case would be un-closeable. Case ELIGIBILITY is therefore separated from
+    // display APPLICABILITY here — the outcome is still persisted (CQL stays authoritative, ADR-008),
+    // only the case upsert is skipped. (Before the baseline covered the WebChart site this was an
+    // accidental side-effect of the NOT_APPLICABLE overlay; making it explicit keeps the documented
+    // "no live cases by default" behavior once the site is covered.) Codex P2 (#325).
+    const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
+    if (deps.caseStore && !isLiveWebChartSubject && (closeOnly || isApplicable(item.employee, item.measureId, deps.segments ?? []))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
         runId: run.id,
         subjectId: item.employee.externalId,

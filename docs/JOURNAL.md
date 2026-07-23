@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-07-22 (evening) — made the live WebChart roster demoable in the UI (real chips, not N/A)
+
+Demo-prep finding: with the WebChart shim seam configured, a population run correctly fetched and
+CQL-evaluated the 56 dev-DB patients (the shim's own `/compliance` API proves real outcomes), but
+`/compliance` (System = WebChart) rendered **every cell grey NOT_APPLICABLE**. Cause: the demo
+`All Employees` segment derives its site list from the static directory (twh/ihn sites only), and the
+live tenant places every subject at the fixed site `WebChart`, added at *runtime* — so the boot-time
+seed never covered it and the applicability overlay greyed out all 56.
+
+**Fix:** export `WEBCHART_LIVE_SITE` from `live-directory.ts` and fold it into the baseline seed's
+site list. On any **fresh** DB (a local demo, a new instance) WebChart subjects are now applicable and
+the roster shows their real per-measure chips (OVERDUE / MISSING_DATA / COMPLIANT) with no manual
+admin step. Byte-identical when the seam is off (no subject carries that site) and irrelevant on the
+live Neon stack (seam off). An **already-seeded** DB keeps its old baseline — seeding is
+name-idempotent and never auto-mutates an operator's segment — so the owner-gated `/admin → Groups`
+repair (add site `WebChart`, audited `SEGMENT_UPDATED`) still applies there.
+
+**Display applicability ≠ case eligibility (Codex P2).** Making wc subjects applicable also flowed
+into `finishManualRun`'s case-creation gate, which reuses the same `isApplicable`. That would have
+opened cases for noncompliant `wc|` outcomes — but rerun-to-verify returns a non-mutating 409 for
+`wc|` subjects, so those cases would be un-closeable, and it contradicts the documented "no live cases
+by default." (That behavior had been an accidental side-effect of the NOT_APPLICABLE overlay, never an
+explicit guard.) Added an explicit guard in the run pipeline: a `wc|` subject is display-applicable
+but never opens a case; the outcome is still persisted (CQL stays authoritative, ADR-008). A
+regression test proves a noncompliant wc subject with zero segments persists its outcome but creates
+no case.
+
+Verified end-to-end against the shim: fresh boot → `ALL_PROGRAMS` run → 56 `wc|` rows with real
+statuses, hierarchy reconciling **All Systems = 206 = twh 100 + ihn 50 + wc 56**. Suite: 1,342 tests,
+0 failures. Docs: MEASURES.md (baseline covers the live site; the manual repair is now scoped to
+already-seeded DBs) and DEMO_2026-07-23.md (machine-prep hardened — start clean, pre-warm blocks the
+local host ~2–3 min so do it before the call and last, select the Wellness panel, never trigger a run
+live). PR #325.
+
 ## 2026-07-22 — LIVE OUTAGE: Neon compute quota exhausted by idle scheduler polling
 
 **The live stack had been down for four days and nothing told us.** Every DB-backed page on
