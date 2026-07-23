@@ -7,8 +7,14 @@
  * paging), and — because the CapabilityStatement exposes NO `Patient/$everything` — each patient's
  * clinical data composed from per-resource `GET /fhir/{type}?patient={id}` searches. Auth is SMART
  * Backend Services (`smart-backend-auth.ts`) when a client id + private key are configured, or the
- * legacy static bearer key otherwise. Pagination semantics remain unverified with MIE (#254 A2), so
- * `_count` + `link[next]` are standard-FHIR conservative.
+ * legacy static bearer key otherwise. `_count` + `link[next]` are the standard-FHIR conservative
+ * default, but a real WebChart server can reject them: teatea (verified 2026-07-23) 403s a bare
+ * `GET /Patient` and 400s `_count`. On a 400/403 first Patient page the client drops `_count` and retries
+ * once (for the list AND the per-patient searches); if the server ALSO refuses a bare `/Patient` it does
+ * NOT guess a demographic filter (that could silently drop subjects) — it throws an actionable error
+ * telling the operator to supply a verified-complete enumeration via `cfg.patientSearch`
+ * (`WORKWELL_WEBCHART_PATIENT_SEARCH`, e.g. `birthdate=gt1900-01-01`). Pin `cfg.disableCount` /
+ * `cfg.patientSearch` up front to skip the probe. Standard servers never hit the fallback.
  *
  * No new dependency: HTTP uses the global `fetch`; signing uses WebCrypto. Transport lives here at
  * the ingress edge, keeping `evaluate-bundle.ts` / `normalize.ts` I/O-free and portable.
@@ -58,7 +64,23 @@ const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_DELAYS_MS = [50, 100] as const;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-class WebChartNonRetryableError extends Error {}
+class WebChartNonRetryableError extends Error {
+  readonly status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** A bare-`/Patient` 403 or a `_count`-rejecting 400 — the signature that triggers the capability fallback. */
+function isCapabilityQuirk(e: unknown): boolean {
+  return e instanceof WebChartNonRetryableError && (e.status === 400 || e.status === 403);
+}
+
+/** Merge a raw FHIR query string (e.g. `birthdate=gt1900-01-01`) into a URL's search params. */
+function applyRawQuery(u: URL, rawQuery: string): void {
+  for (const [k, v] of new URLSearchParams(rawQuery)) u.searchParams.append(k, v);
+}
 
 function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -187,6 +209,13 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   const resourceTypes = options?.resourceTypes ?? COMPOSED_RESOURCE_TYPES;
   const auth = authProviderFor(cfg, fetchImpl, timeoutMs);
 
+  // Server-capability profile — adaptive by default, or pinned via cfg. `countDisabled` governs BOTH
+  // the Patient list and the per-patient searches; `patientEnumeration` is the extra query the
+  // Patient-list root carries. Both start from explicit cfg and may be set once by the first-page
+  // fallback in listPopulation (which runs before any per-patient search, so the flag is settled).
+  let countDisabled = cfg.disableCount ?? false;
+  let patientEnumeration = cfg.patientSearch?.trim() || undefined;
+
   async function fetchJson(url: string): Promise<unknown> {
     let attempt = 0;
     let retried401 = false;
@@ -212,7 +241,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
             continue;
           }
           const message = `WebChart request failed: ${response.status} ${response.statusText}`.trim();
-          throw shouldRetryStatus(response.status) ? new Error(message) : new WebChartNonRetryableError(message);
+          throw shouldRetryStatus(response.status) ? new Error(message) : new WebChartNonRetryableError(message, response.status);
         }
         return await response.json();
       } catch (e) {
@@ -248,33 +277,83 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     return resolved.toString();
   }
 
-  async function listPopulation(): Promise<PatientRef[]> {
-    const first = fhirUrl(base, "/fhir/Patient");
-    first.searchParams.set("_count", String(pageSize));
-    const patients: PatientRef[] = [];
-    let url: string | undefined = first.toString();
-    const seen = new Set<string>();
-    let firstPage = true;
-    while (url) {
-      let page: unknown;
-      try {
-        page = await fetchJson(url);
-      } catch (e) {
-        // A FIRST-page failure is an outage, not an empty population — surface it so a scheduled
-        // run fails loudly instead of "succeeding" over zero subjects (review P3-2). By default a
-        // failed LATER page keeps the patients already listed (the read-only CLI contract); an
-        // authoritative caller can opt into failOnPartialPage. The off-origin guard still rejects.
-        if (firstPage || failOnPartialPage) throw e;
-        break;
+  /** The Patient-list root URL for the current capability profile. */
+  function patientListUrl(): string {
+    const u = fhirUrl(base, "/fhir/Patient");
+    if (patientEnumeration) applyRawQuery(u, patientEnumeration);
+    if (!countDisabled) u.searchParams.set("_count", String(pageSize));
+    return u.toString();
+  }
+
+  /**
+   * When no explicit patientSearch is configured, turn a `_count`/bare-`/Patient` rejection into an
+   * ACTIONABLE error instead of silently substituting a demographic guess. A guess like
+   * `birthdate=gt1900-01-01` can drop no-birthDate / pre-1900 patients, and `listPopulation` can't detect
+   * the omission — so an authoritative run would silently miss subjects (Codex P1 #328). Completeness is
+   * the operator's to own via `WORKWELL_WEBCHART_PATIENT_SEARCH`.
+   */
+  function enumerationRequired(e: unknown): WebChartNonRetryableError | undefined {
+    if (patientEnumeration) return undefined; // the operator's own query failed — that's a real error
+    const status = e instanceof WebChartNonRetryableError ? e.status : undefined;
+    return new WebChartNonRetryableError(
+      `WebChart rejected 'Patient?_count' and a bare 'GET /Patient'${status ? ` (status ${status})` : ""}. ` +
+        `This server requires a narrowing Patient search: set WORKWELL_WEBCHART_PATIENT_SEARCH to a query ` +
+        `you have verified enumerates the whole population (e.g. 'birthdate=gt1900-01-01').`,
+    );
+  }
+
+  /**
+   * Fetch the first Patient page, handling the capability quirk. Attempt 1 is the standard (or pinned)
+   * shape. On a 400/403 quirk we retry ONCE with `_count` dropped (any explicit patientSearch stays
+   * applied) — never auto-injecting a demographic filter. If the server still refuses (it also 403s a
+   * bare `/Patient`) and no patientSearch was configured, throw the actionable error above; any non-quirk
+   * failure is a real outage and propagates loudly (review P3-2).
+   */
+  async function fetchFirstPopulationPage(): Promise<unknown> {
+    try {
+      return await fetchJson(patientListUrl());
+    } catch (e) {
+      if (!isCapabilityQuirk(e)) throw e;
+      if (!countDisabled) {
+        countDisabled = true; // also drops `_count` from the per-patient searches
+        try {
+          return await fetchJson(patientListUrl());
+        } catch (e2) {
+          if (isCapabilityQuirk(e2)) throw enumerationRequired(e2) ?? e2;
+          throw e2;
+        }
       }
-      firstPage = false;
+      // `_count` was already off (explicit disableCount) and the search still failed.
+      throw enumerationRequired(e) ?? e;
+    }
+  }
+
+  async function listPopulation(): Promise<PatientRef[]> {
+    let page = await fetchFirstPopulationPage();
+    // `url` reflects the profile actually used (countDisabled may have flipped) so relative `link[next]`
+    // resolution + the off-origin guard stay correct.
+    let url: string | undefined = patientListUrl();
+
+    const patients: PatientRef[] = [];
+    const seen = new Set<string>();
+    for (;;) {
       for (const patient of patientsFromSearchset(page)) {
         if (!seen.has(patient.id)) {
           seen.add(patient.id);
           patients.push(patient);
         }
       }
-      url = resolveNext(page, url);
+      const next = resolveNext(page, url!); // off-origin links throw (outside the fetch try) — never followed
+      if (!next) break;
+      url = next;
+      try {
+        page = await fetchJson(url);
+      } catch (e) {
+        // A failed LATER page keeps the patients already listed (the read-only CLI contract); an
+        // authoritative caller opts into failOnPartialPage to reject a truncated population instead.
+        if (failOnPartialPage) throw e;
+        break;
+      }
     }
     return patients;
   }
@@ -283,7 +362,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   async function searchResources(resourceType: string, patientId: string): Promise<Json[]> {
     const first = fhirUrl(base, `/fhir/${resourceType}`);
     first.searchParams.set("patient", patientId);
-    first.searchParams.set("_count", String(pageSize));
+    if (!countDisabled) first.searchParams.set("_count", String(pageSize));
     const resources: Json[] = [];
     let url: string | undefined = first.toString();
     while (url) {

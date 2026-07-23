@@ -46,23 +46,44 @@ function reconciledHolder(holder: unknown): { holder: unknown; codings: Coding[]
   return { holder: { ...holder, coding: codings }, codings };
 }
 
-// Only clinically-final events drive compliance. A non-final / errored WebChart event — a `not-done`
-// or `entered-in-error` Procedure/Immunization, a `preliminary`/`cancelled`/`entered-in-error`
-// Observation — must NOT be reconciled to a measure coding or synthesized into a `completed` Procedure,
-// or the recency CQL (which matches only code + date, not status) would count it as compliant (Codex P2).
-// A missing/unknown status is treated as NOT final — conservative for a compliance system (worst case a
-// subject reads MISSING_DATA and a human follows up; never falsely compliant). Real-feed status semantics
-// are confirmed against the live contract in PR-2c.
+// Only clinically-final events drive compliance. A cancelled/errored WebChart event — a `not-done` or
+// `entered-in-error` Procedure/Immunization, a `preliminary`/`registered`/`cancelled`/`entered-in-error`
+// Observation — must NOT be reconciled to a measure coding or synthesized into a `completed` Procedure, or
+// the recency CQL (which matches only code + date, not status) would count it as compliant (Codex P2).
+// A missing status is treated as non-final (conservative; the line-130 test guards it).
 const FINAL_STATUS: Record<string, ReadonlySet<string>> = {
   Procedure: new Set(["completed"]),
   Immunization: new Set(["completed"]),
   Observation: new Set(["final", "amended", "corrected"]),
 };
 
+// BP panel LOINCs. teatea (verified 2026-07-23) exports the blood-pressure PANEL with status `unknown`
+// (systolic/diastolic in component[], no top-level value) — `unknown` = FHIR "source doesn't know the
+// workflow status", NOT an invalidity marker. We accept `unknown` ONLY for this verified shape.
+const BP_PANEL_LOINC = new Set(["85354-9", "55284-4"]);
+
+function isBpPanel(resource: Json): boolean {
+  const code = resource.code;
+  if (!isObject(code) || !Array.isArray(code.coding)) return false;
+  return code.coding.some(
+    (c) =>
+      isObject(c) &&
+      typeof c.code === "string" &&
+      BP_PANEL_LOINC.has(c.code) &&
+      (typeof c.system !== "string" || /loinc/i.test(c.system)),
+  );
+}
+
 function isFinalEvent(resource: Json): boolean {
   const allowed = FINAL_STATUS[resource.resourceType as string];
   if (!allowed) return true; // non-event resources aren't status-gated (their codings don't reconcile anyway)
-  return typeof resource.status === "string" && allowed.has(resource.status);
+  const status = typeof resource.status === "string" ? resource.status : undefined;
+  if (status && allowed.has(status)) return true;
+  // Narrow exception: a BP PANEL with status `unknown` IS final (real WebChart BP shape). Scoped to the
+  // verified BP shape so an unknown-status LAB (HbA1c/LDL) — where `unknown` could mean an unverified
+  // result — can never synthesize a completed Procedure and read as compliant (AGENTS.md: never falsely
+  // compliant; Codex P1 #328).
+  return status === "unknown" && resource.resourceType === "Observation" && isBpPanel(resource);
 }
 
 /** The best effective instant for a lab Observation → a synthesized Procedure's `performedDateTime`. */
