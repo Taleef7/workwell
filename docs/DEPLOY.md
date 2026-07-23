@@ -389,11 +389,12 @@ it**:
 | Self-heal | reconcile-twh-mieweb.yml (`:latest`) | **none** — re-dispatch to recover |
 
 **Dispatch it from the branch whose code you want to test** (e.g. `feat/webchart-count-capability-fallback`
-before it merges) — a `workflow_dispatch` builds the selected ref, so staging can validate unmerged WebChart
-work. The `_count`/bare-`/Patient` capability fallback runs **adaptive** in staging (the pins are unset), so
-it continuously exercises the real-server probe path; pin `WORKWELL_WEBCHART_DISABLE_COUNT=true` +
-`WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=gt1900-01-01` in the workflow env if you prefer to skip the
-probe round-trip.
+/ PR #328 before it merges) — a `workflow_dispatch` builds the selected ref, so staging can validate
+unmerged WebChart work. **The workflow depends on the PR #328 client code:** teatea 400s `_count` and 403s
+a bare `GET /Patient`, and the client refuses to guess a demographic filter, so the workflow sets
+`WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=gt1900-01-01` (a verified whole-population enumeration — update
+it in the workflow env if the trial data changes). Dispatching from a branch WITHOUT that client code (e.g.
+`main` before #328 merges) will fail the population fetch — land #328 first, or dispatch from its branch.
 
 **Owner setup required before the first dispatch (one-time):**
 
