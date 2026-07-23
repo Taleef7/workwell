@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-07-22 (evening) — removed the admin demo credential from the production login
+
+Demo-prep finding: the **public production** login page (`twh.os.mieweb.org/login`) displayed
+`admin@workwell.dev` with a one-click **"Fill demo credentials"** button. The demo password is
+documented publicly in the README, so that was a one-click login to the production **admin** account
+for anyone on the internet.
+
+Cause: only the field *prefill* (`useState(demoMode ? DEMO_EMAIL : "")`) was gated behind demo mode;
+the "Fill demo credentials" button and the "Demo: …" hint rendered **unconditionally**, so they
+leaked into the production build (which is built with `NEXT_PUBLIC_DEMO_MODE` off — setting it `true`
+fails the prod build). Gated both behind `demoMode`. Production now shows a clean sign-in:
+email/password + the read-only public-sandbox link — which is safe to keep, since the sandbox signs
+in as `viewer@workwell.dev` = **ROLE_VIEWER** (verified read-only: reads 200, every write 403, admin
+403). The demo-fill convenience remains on local demo-mode builds.
+
+Not a bug (confirmed while investigating): the sandbox itself works — it failed in a screenshot only
+because the backend was in an auth-*disabled* state at that instant (login 503 → the frontend renders
+a generic "Invalid email or password"); with auth enabled the viewer login returns 200. And the
+hardcoded accounts are by design (CLAUDE.md: accounts are hardcoded, no SSO) — the issue was
+*advertising* the admin one on a public page, not its existence.
+
+Regression guard: with demo mode off the login page must render neither the button, the admin
+address, nor the "Demo:" hint (the sandbox link stays); a complementary test asserts they DO render
+with demo mode on. The test forces `NEXT_PUBLIC_DEMO_MODE` off and re-imports a fresh module so it
+passes even when the suite runs under the supported local `NEXT_PUBLIC_DEMO_MODE=true` config (Codex
+P2). Frontend build compiles clean; 180 frontend tests pass. PR #326.
+
 ## 2026-07-22 (evening) — made the live WebChart roster demoable in the UI (real chips, not N/A)
 
 Demo-prep finding: with the WebChart shim seam configured, a population run correctly fetched and
