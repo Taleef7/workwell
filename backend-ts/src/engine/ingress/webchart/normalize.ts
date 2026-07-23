@@ -46,17 +46,21 @@ function reconciledHolder(holder: unknown): { holder: unknown; codings: Coding[]
   return { holder: { ...holder, coding: codings }, codings };
 }
 
-// Only clinically-final events drive compliance. A non-final / errored WebChart event — a `not-done`
-// or `entered-in-error` Procedure/Immunization, a `preliminary`/`cancelled`/`entered-in-error`
-// Observation — must NOT be reconciled to a measure coding or synthesized into a `completed` Procedure,
-// or the recency CQL (which matches only code + date, not status) would count it as compliant (Codex P2).
-// A missing/unknown status is treated as NOT final — conservative for a compliance system (worst case a
-// subject reads MISSING_DATA and a human follows up; never falsely compliant). Real-feed status semantics
-// are confirmed against the live contract in PR-2c.
+// Only clinically-final events drive compliance. A cancelled/errored WebChart event — a `not-done` or
+// `entered-in-error` Procedure/Immunization, a `preliminary`/`registered`/`cancelled`/`entered-in-error`
+// Observation — must NOT be reconciled to a measure coding or synthesized into a `completed` Procedure, or
+// the recency CQL (which matches only code + date, not status) would count it as compliant (Codex P2).
+// Observation `unknown` IS accepted — VERIFIED against the live teatea contract 2026-07-23: real WebChart
+// BP panels (LOINC 85354-9, systolic/diastolic in component[]) are exported with status `unknown`, the FHIR
+// "source doesn't know the workflow status" value — NOT an invalidity marker like cancelled/entered-in-error.
+// Dropping it lost every real BP screening as false MISSING_DATA (hypertension read 0/28). A truly *missing*
+// status is still non-final (conservative; the line-130 test guards it) — only an explicit `unknown` counts.
+// Immunization has no `unknown` in R4, and a `unknown` Procedure is genuinely ambiguous, so both stay
+// `completed`-only; the recency lab/vital measures reconcile through Observations regardless.
 const FINAL_STATUS: Record<string, ReadonlySet<string>> = {
   Procedure: new Set(["completed"]),
   Immunization: new Set(["completed"]),
-  Observation: new Set(["final", "amended", "corrected"]),
+  Observation: new Set(["final", "amended", "corrected", "unknown"]),
 };
 
 function isFinalEvent(resource: Json): boolean {
