@@ -40,7 +40,9 @@ export interface WebChartConfig {
    * Server-capability tuning (adaptive by default). Some WebChart servers reject `_count` and/or a
    * bare `GET /Patient` (teatea rejects both — verified 2026-07-23). `disableCount` pins the client to
    * never send `_count`; `patientSearch` is the raw query the Patient-list root carries so the
-   * population is enumerated via an accepted indexed search (e.g. `birthdate=gt1900-01-01`). Left
+   * population is enumerated via an accepted indexed search VERIFIED to return everyone (e.g. the
+   * full-range `birthdate=le9999-12-31`; a narrow bound like `gt1900-01-01` silently drops sentinel
+   * birthdates). Left
    * unset, the client probes the standard shape and falls back automatically on a 400/403 first page.
    */
   disableCount?: boolean;
@@ -77,7 +79,7 @@ export interface DataSourceEnv {
   WORKWELL_WEBCHART_KID?: string;
   /** `"true"` pins the client to never send `_count` (for servers that reject it, e.g. teatea). */
   WORKWELL_WEBCHART_DISABLE_COUNT?: string;
-  /** Raw Patient-list query for servers that reject a bare `/Patient` (e.g. `birthdate=gt1900-01-01`). */
+  /** Raw Patient-list query for servers that reject a bare `/Patient` (e.g. `birthdate=le9999-12-31`). */
   WORKWELL_WEBCHART_PATIENT_SEARCH?: string;
 }
 

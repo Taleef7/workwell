@@ -19,8 +19,36 @@ is exactly the "demographic guess drops subjects" hazard Codex flagged on #328 �
 - **Corrected the shipped query**: staging workflow + DEPLOY.md now use a **wide upper bound**
   `birthdate=le3000-01-01` (catches all birthdates incl. default/early ones → teatea's full 35) instead
   of `gt1900-01-01`, and instruct operators to cross-check `Bundle.total`.
-- **Live-verified**: the corrected query lists **35** (was 28); 2 new guard tests; typecheck + conformance
-  25/25 green. `Group/$export` bulk enumeration is filed as the proper follow-up.
+- **Live-verified**: the corrected query lists **35** (was 28).
+
+**Code review (PR #330) — 2 High + 4 Medium/Low addressed; the review caught a bug I'd have shipped.**
+- **H1 — the fix mirrored the original bug at the other end.** `le3000-01-01` is an arbitrary bound;
+  FHIR dates run to **9999-12-31**, and `9999-12-31` is one of the most common EMR "unknown birthdate"
+  sentinels — the same family of garbage values as the pre-1000 dates that caused the incident. Moved to
+  the full range **`birthdate=le9999-12-31`** (workflow, DEPLOY.md, both client docstrings). Live-checked:
+  same 35 today, but strictly wider and no arbitrary constant. Also removed two false claims ("catches all
+  birthdates"; "teatea's **full** 35" — 35 is the largest any query returns, not confirmed ground truth).
+- **H2 — the guard was defeatable, and the population pollutable.** `patientsFromSearchset` admitted
+  *every* Patient in `entry[]` regardless of `search.mode`, unlike its resource-side twin. An
+  `_include`d Patient would be evaluated as a population subject **and** pad the fetched count to mask a
+  genuine shortfall (`Bundle.total` counts matches only). Added the match-mode filter + a test.
+- **H3 — the guard's premise was unrecorded.** Nothing in-repo showed WebChart returns `Bundle.total`
+  (the existing probe reads it from a request teatea 400s). **Verified + recorded 2026-07-23: teatea
+  returns a numeric `total` (35)**, so the guard is genuinely live there. `bundleTotal` now also warns on
+  a present-but-non-numeric total instead of silently disabling itself.
+- **M1 (partial)** — the failure message now carries `distinct / match-entries / pages / total` so an
+  operator can tell a real truncation from cross-page repeats or an estimated `total`; an over-report
+  (fetched > total) warns rather than passing silently. A retry + env escape hatch remain follow-ups.
+- **M2** — the shared mock never emitted `total`, so the guard was inert in every pre-existing test.
+  `searchsetPage` now emits it (FHIR-correct), so the whole suite exercises the happy path, plus 3 new
+  tests: accurate multi-page must NOT trip it, the `_include` case, and cross-page duplicates.
+- **M3/L1** — swept stale `gt1900-01-01` examples out of `data-source.ts` + the plan doc (marked
+  SUPERSEDED), and softened the `Group/$export` claim: WebChart advertises only **Group**-level export
+  (a curated cohort, not provably everyone), and **teatea exposes no `$export` at all** (verified: no
+  operations advertised; `Patient/$export` → 404, `/$export` → 403). Complete enumeration stays an open
+  item, stated honestly in DEPLOY.md rather than hand-waved.
+
+Suite after the review fixes: typecheck clean, conformance **28/28**.
 
 ## 2026-07-23 — staging deploy workflow for a live-WebChart (teatea) environment
 

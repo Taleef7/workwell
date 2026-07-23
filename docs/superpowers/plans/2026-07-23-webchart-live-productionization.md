@@ -7,7 +7,9 @@
 **Context.** As of 2026-07-23, WorkWell holds an authenticated SMART Backend Services client against a
 **real WebChart instance** (`teatea.webchartnow.com`, a synthetic trial). `pnpm webchart:probe-auth`
 proved `client_credentials` works (Bearer, 30 h) and per-patient FHIR composition reads live
-(`Patient/12` → 239 Observations, etc.; population = 28 via `Patient?birthdate=gt1900-01-01`). The full
+(`Patient/12` → 239 Observations, etc.; population = 28 via `Patient?birthdate=gt1900-01-01` — **SUPERSEDED
+2026-07-23: that query undercounts; the population is 35 via the full-range `birthdate=le9999-12-31`. See
+JOURNAL + PR #330**). The full
 transport + live-tenant machine (`smart-backend-auth.ts`, `webchart-client.ts`, `live-directory.ts`, the
 `finishManualRun` live hook, roster/hierarchy/quality read models) is **already merged to `main`** and
 green against HAPI/the WCDB shim — it has simply never met a real WebChart server. See
@@ -76,12 +78,13 @@ fallback," not a one-line Patient tweak.
 **Design — an adaptive client (works against any server, zero config):**
 - On the first `listPopulation` page, attempt the standard `Patient?_count=N`. On a non-retryable
   **400 or 403**, engage a fallback profile: drop `_count` and enumerate via an accepted indexed search
-  (default `birthdate=gt1900-01-01`, the teatea-verified enumeration returning all subjects), set a
+  (**SUPERSEDED by PR #328/#330**: the client never auto-guesses a demographic filter — the operator must
+  supply a verified-complete `patientSearch`; `gt1900-01-01` was NOT complete), set a
   process-local `countRejected` flag, and re-attempt. If the fallback also fails, throw (still loud).
 - Thread `countRejected` into `searchResources` so per-patient searches drop `_count` on the same server.
 - Keep `resolveNext` + the off-origin guard unchanged (teatea may still page or may return one page).
 - **Explicit overrides** (for deterministic deployed behavior, so staging need not rely on a runtime
-  probe): `WORKWELL_WEBCHART_PATIENT_SEARCH` (e.g. `birthdate=gt1900-01-01`) and
+  probe): `WORKWELL_WEBCHART_PATIENT_SEARCH` (use the full-range `birthdate=le9999-12-31`) and
   `WORKWELL_WEBCHART_DISABLE_COUNT=true` pin the quirk profile up front. Unset ⇒ adaptive probe/fallback.
 - **HAPI/shim stay byte-identical** — the fallback only engages when the standard shape is rejected;
   standard servers never hit it.
