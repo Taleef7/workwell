@@ -133,6 +133,50 @@ test("normalizeWebChartBundle: an event with a missing status is treated as non-
   assert.equal(codings(proc, "code").length, 1, "no measure coding appended without a final status");
 });
 
+test("normalizeWebChartBundle: an `unknown`-status BP panel reconciles (real WebChart BP shape, verified against teatea)", () => {
+  // teatea 2026-07-23: a real BP reading is a panel (LOINC 85354-9) with systolic/diastolic in
+  // component[], no top-level value, status "unknown". hypertension retrieves [Procedure] by date, so a
+  // dated Procedure carrying the bp-screen coding must be synthesized — the values are irrelevant to it.
+  const raw = {
+    resourceType: "Bundle",
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "unknown",
+          subject: { reference: "Patient/13" },
+          effectiveDateTime: "2006-04-09T13:45:00Z",
+          code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+          component: [
+            { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 130, unit: "mmHg" } },
+            { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 80, unit: "mmHg" } },
+          ],
+        },
+      },
+    ],
+  };
+  const out = normalizeWebChartBundle(raw).entry.map((e) => e.resource as AnyRec);
+  const proc = out.find((r) => r.resourceType === "Procedure");
+  assert.ok(proc, "a dated Procedure is synthesized from the unknown-status BP panel");
+  assert.equal(proc!.performedDateTime, "2006-04-09T13:45:00Z");
+  assert.ok(
+    codings(proc!, "code").some((c) => c.code === MEASURE_BINDINGS["hypertension"]!.event.code),
+    "the synthesized Procedure carries the hypertension bp-screen coding",
+  );
+});
+
+test("normalizeWebChartBundle: cancelled / entered-in-error / registered / preliminary Observations stay non-final (only `unknown` is newly accepted)", () => {
+  for (const status of ["cancelled", "entered-in-error", "registered", "preliminary"]) {
+    const raw = {
+      resourceType: "Bundle",
+      entry: [{ resource: { resourceType: "Observation", status, effectiveDateTime: "2026-05-01T00:00:00Z", code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] } } }],
+    };
+    const out = normalizeWebChartBundle(raw).entry.map((e) => e.resource as AnyRec);
+    assert.equal(out.length, 1, `${status}: no Procedure synthesized`);
+    assert.equal(codings(out[0]!, "code").length, 1, `${status}: Observation coding unchanged (not reconciled)`);
+  }
+});
+
 test("normalizeWebChartBundle: does not mutate its input", () => {
   const raw = {
     resourceType: "Bundle",

@@ -27,16 +27,24 @@ measures** — diabetes_hba1c 4 OVERDUE, obesity_bmi 11 OVERDUE, cholesterol_ldl
 OVERDUE (24 MISSING each; the recency windows age real-but-old observations to OVERDUE, expected). Also:
 the login-trust "Acardi, Sergio" mystery is solved — it's simply Patient id 46 in the population.
 
-**One real-data finding → Phase 3.** `hypertension` returned **0 real outcomes (all 28 MISSING_DATA)**
-while every other observation measure worked. The crosswalk maps top-level LOINC `85354-9`/`8480-6`, but
-real WebChart BP is almost certainly a **panel Observation with the systolic value in `component[]`**
-(the top-level panel carries no `valueQuantity`), so the measure finds no value. That's a terminology/
-normalize gap for real BP data — the first Phase-3 real-server hardening item (needs a live BP-coding
-diagnostic + a `component[]`-aware crosswalk, TDD). No demo/synthetic path is affected (synthetic BP is a
-standalone valued observation).
+**Phase 3 (real-server hardening) — the BP finding, diagnosed live and FIXED.** `hypertension` returned
+**0 real outcomes (all 28 MISSING_DATA)** while every other observation measure worked. A read-only live
+diagnostic against teatea showed real BP is a **panel Observation** (LOINC `85354-9`, systolic/diastolic
+in `component[]`, no top-level value) with **`status: "unknown"`**. The measure is recency-only
+(retrieves a `[Procedure]` by `.performed`, no value read) and the crosswalk already maps `85354-9` → the
+synthetic `bp-screen` Procedure — so the **sole blocker was the normalize status gate**, which accepted
+only `final|amended|corrected` and dropped `unknown` before reconciliation. FHIR `unknown` = "source
+doesn't know the workflow status", NOT an invalidity marker (`cancelled`/`entered-in-error`), and real
+WebChart exports legitimate BP panels that way — so `normalize.ts` now accepts `unknown` **for
+Observations only** (Immunization has no `unknown` in R4; a `unknown` Procedure stays ambiguous; a truly
+*missing* status is still non-final, conservatively). Guarded by 2 new tests (an `unknown` BP panel
+reconciles + synthesizes the dated Procedure; `cancelled`/`entered-in-error`/`registered`/`preliminary`
+still don't). **Live re-run: hypertension 0 → 7 OVERDUE; total 20 → 27 real outcomes across 5 measures.**
+Demo/synthetic path unaffected (synthetic data carries `final` statuses). Branch
+`feat/webchart-count-capability-fallback`.
 
-**Next:** Phase 3 (real-server hardening — starting with the BP fix + a local teatea-backed `ALL_PROGRAMS`
-run so the `wc` tenant renders in the dashboards), then Phase 4 (a separate deployed staging env wired to
+**Next:** finish Phase 3 (a local teatea-backed `ALL_PROGRAMS` run so the `wc` tenant renders across
+`/compliance`, `/programs`, `/programs/hierarchy`), then Phase 4 (a separate deployed staging env wired to
 teatea — owner-gated on MIE hosting + `*_STAGING` secrets). Demo stack stays seam-off throughout.
 
 ## 2026-07-23 — teatea WebChart client registered self-service; LIVE authenticated FHIR confirmed (A3 answered)
