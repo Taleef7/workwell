@@ -104,6 +104,24 @@ test("deriveWhyFlagged — non-excluded immunization case with Has Contraindicat
   assert.equal(wf.outcome_status, "MISSING_DATA");
 });
 
+test("deriveWhyFlagged — a null recency define on an OVERDUE outcome does NOT fabricate an exam date (Codex P1 #327)", () => {
+  // The live WebChart path can leave "Most Recent … Date" serialized null while the status is OVERDUE
+  // (which structurally proves a record). "Days Since" is anchored to the run's Now(), NOT to the cycle
+  // anchor stored in evaluationPeriod — so last_exam_date must stay null (no reconstruction from the wrong
+  // anchor), while days_overdue is still computed from the CQL "Days Since".
+  const evidence = {
+    expressionResults: [
+      { define: "Most Recent BP Screening Date", result: null },
+      { define: "Days Since Last BP Screening", result: 7000 },
+      { define: "Outcome Status", result: "OVERDUE" },
+    ],
+  };
+  const wf = deriveWhyFlagged(evidence, "hypertension", "2026-01-01", "OVERDUE");
+  assert.equal(wf.last_exam_date, null, "must NOT reconstruct an exam date from the cycle-anchor evaluationPeriod");
+  assert.equal(wf.days_overdue, 7000 - 365, "days_overdue still comes from the correctly-anchored CQL Days Since");
+  assert.equal(wf.outcome_status, "OVERDUE");
+});
+
 test("overdueDays is grace-aware: overdue is measured past windowDays + gracePeriodDays (E11.2a)", () => {
   // No grace (default 0) — pre-grace behavior, unchanged.
   assert.equal(overdueDays(400, 365), 35); // 400 - 365
