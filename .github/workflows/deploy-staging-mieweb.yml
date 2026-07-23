@@ -1,0 +1,246 @@
+name: Deploy TWH Staging (live WebChart / teatea)
+
+# A SEPARATE, non-demo staging environment that runs the app LIVE against the teatea WebChart trial
+# (synthetic data — no PHI). It is deliberately distinct from the production demo stack in every way:
+# different hostnames, a different Neon database, a different JWT secret, its own concurrency group, and
+# the WebChart seam CONFIGURED (the demo stack leaves it unset). This exists to exercise the real
+# WebChart FHIR integration (#262) on a deployed URL before/independent of any real-PHI environment
+# (#267, which stays blocked on MIE C14/BAA).
+#
+# workflow_dispatch ONLY (never on push): staging deploys are explicit. Dispatch it from the branch whose
+# code you want to test — e.g. feat/webchart-count-capability-fallback before it merges — so staging can
+# validate unmerged WebChart work. There is no self-heal reconciler for staging (the production
+# reconcile-twh-mieweb.yml only heals the twh/twh-api-ts hostnames from :latest); re-dispatch to recover.
+#
+# ⚠ teatea is a TRIAL instance (extended to ~3 months, 2026-07-23). When it expires the seam simply stops
+# resolving (the run fails and the prior population stays authoritative); it holds only synthetic data.
+
+on:
+  workflow_dispatch:
+    inputs:
+      replace_existing:
+        description: Delete and recreate the staging containers if the hostnames already exist.
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+# A DISTINCT concurrency group (NOT the production twh-mieweb-container-ops) so a staging deploy never
+# queues behind or blocks a production deploy/heal, and vice versa — they operate on different containers.
+concurrency:
+  group: twh-staging-mieweb-container-ops
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
+  BACKEND_TS_URL: https://twh-staging-api-ts.os.mieweb.org
+  API_TS_HOSTNAME: twh-staging-api-ts
+  FRONTEND_IMAGE: ghcr.io/taleef7/workwell-twh-frontend
+  FRONTEND_URL: https://twh-staging.os.mieweb.org
+  FRONTEND_HOSTNAME: twh-staging
+  SITE_ID: 1
+  APP_NAME: "WorkWell TWH (Staging — live WebChart)"
+  APP_TAGLINE: "Staging: live against the teatea WebChart trial (synthetic data)."
+  APP_DESCRIPTION: "A non-demo staging environment running the live WebChart FHIR integration against the teatea trial."
+  # WebChart seam — NON-secret config (only the private key is a secret). The base URL + kid track the
+  # teatea trial; update here if MIE moves the trial. Client id is the registered backend-services client.
+  STAGING_WEBCHART_BASE_URL: "https://teatea.webchartnow.com/webchart.cgi"
+  STAGING_WEBCHART_CLIENT_ID: "workwell"
+  STAGING_WEBCHART_SCOPE: "system/*.read"
+  STAGING_WEBCHART_KID: "workwell-2026-07"
+
+jobs:
+  build-backend-ts:
+    name: Build backend-ts image (staging tag)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./backend-ts/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_TS_IMAGE }}:staging-latest
+            ${{ env.BACKEND_TS_IMAGE }}:staging-sha-${{ github.sha }}
+
+  build-frontend:
+    name: Build staging frontend image (points at the staging backend)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          # NEXT_PUBLIC_API_URL is inlined at BUILD time, so staging needs its own image aimed at the
+          # staging backend. DEMO_MODE stays OFF (a production-like build fails if it is true).
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.BACKEND_TS_URL }}
+            NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
+            NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}
+            NEXT_PUBLIC_APP_DESCRIPTION=${{ env.APP_DESCRIPTION }}
+            NEXT_PUBLIC_CODIFY_INDEX_URL=${{ vars.NEXT_PUBLIC_CODIFY_INDEX_URL }}
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:staging-latest
+            ${{ env.FRONTEND_IMAGE }}:staging-sha-${{ github.sha }}
+
+  deploy-backend-ts:
+    name: Deploy staging backend (live WebChart → teatea)
+    runs-on: ubuntu-latest
+    needs: build-backend-ts
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      # A SEPARATE Neon project — never the production DATABASE_URL_TWH.
+      DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_STAGING }}
+      # The RS384 PKCS#8 PEM for the teatea backend-services client (multi-line secret). Its public half
+      # is the registered JWKS. This is the ONLY WebChart secret — base URL / client id / scope / kid are
+      # non-secret env constants above.
+      WORKWELL_WEBCHART_PRIVATE_KEY: ${{ secrets.WORKWELL_WEBCHART_PRIVATE_KEY_STAGING }}
+      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_STAGING")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_STAGING")
+          [ -z "$WORKWELL_WEBCHART_PRIVATE_KEY" ] && missing+=("WORKWELL_WEBCHART_PRIVATE_KEY_STAGING")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required staging secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare staging backend environment variables
+        id: backend-ts-env
+        # Same runtime shape as production (MIEWEB_TARGET=local, WORKWELL_ENVIRONMENT=production keeps the
+        # startup fail-fast on), plus the WebChart seam CONFIGURED. Two deliberate differences vs prod:
+        #   - WORKWELL_SCHEDULER_ENABLED=false — no idle DB polling (the 2026-07-22 Neon-cost lesson; a
+        #     staging env has no need for the nightly recompute).
+        #   - the WORKWELL_WEBCHART_* block — this is what makes staging live against teatea.
+        # The _count/bare-Patient capability fallback is ADAPTIVE (unset DISABLE_COUNT/PATIENT_SEARCH), so
+        # staging continuously exercises the real-server probe path; pin them here if you prefer to skip it.
+        run: |
+          db_url="${DATABASE_URL#jdbc:}"
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_STAGING must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg database_url "$db_url" \
+              --arg openai_api_key "$OPENAI_API_KEY" \
+              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontend_url "$FRONTEND_URL" \
+              --arg wc_base "$STAGING_WEBCHART_BASE_URL" \
+              --arg wc_client "$STAGING_WEBCHART_CLIENT_ID" \
+              --arg wc_key "$WORKWELL_WEBCHART_PRIVATE_KEY" \
+              --arg wc_scope "$STAGING_WEBCHART_SCOPE" \
+              --arg wc_kid "$STAGING_WEBCHART_KID" \
+              '[
+                {key: "MIEWEB_TARGET", value: "local"},
+                {key: "WORKWELL_ENVIRONMENT", value: "production"},
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
+                {key: "WORKWELL_INSTANCE", value: "twh"},
+                {key: "WORKWELL_SCHEDULER_ENABLED", value: "false"},
+                {key: "WORKWELL_WEBCHART_BASE_URL", value: $wc_base},
+                {key: "WORKWELL_WEBCHART_CLIENT_ID", value: $wc_client},
+                {key: "WORKWELL_WEBCHART_PRIVATE_KEY", value: $wc_key},
+                {key: "WORKWELL_WEBCHART_SCOPE", value: $wc_scope},
+                {key: "WORKWELL_WEBCHART_KID", value: $wc_kid}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy staging backend through Create-a-Container API
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.BACKEND_TS_IMAGE }}:staging-sha-${{ github.sha }}
+          INTERNAL_PORT: 8080
+          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
+
+  deploy-frontend:
+    name: Deploy staging frontend
+    runs-on: ubuntu-latest
+    needs: [build-frontend, deploy-backend-ts]
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare staging frontend environment variables
+        id: frontend-env
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg backend_url "$BACKEND_TS_URL" \
+              '[
+                {key: "NODE_ENV", value: "production"},
+                {key: "NEXT_PUBLIC_API_URL", value: $backend_url},
+                {key: "NEXT_PUBLIC_API_BASE_URL", value: $backend_url}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy staging frontend through Create-a-Container API
+        env:
+          CONTAINER_HOSTNAME: ${{ env.FRONTEND_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.FRONTEND_IMAGE }}:staging-sha-${{ github.sha }}
+          INTERNAL_PORT: 3000
+          CONTAINER_ENV_VARS_JSON: ${{ steps.frontend-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh

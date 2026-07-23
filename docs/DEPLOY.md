@@ -369,6 +369,58 @@ DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
 
+### Staging environment — live WebChart against teatea (separate stack; NOT the demo)
+
+`deploy-staging-mieweb.yml` provisions a **separate, non-demo** environment that runs the app **live
+against the teatea WebChart trial** (synthetic data — no PHI), so the real WebChart FHIR integration
+(#262) is exercised on a deployed URL. It is distinct from the demo stack in every way and **cannot touch
+it**:
+
+| | Demo (production) | Staging |
+|---|---|---|
+| Frontend | `twh.os.mieweb.org` | `twh-staging.os.mieweb.org` |
+| Backend | `twh-api-ts.os.mieweb.org` | `twh-staging-api-ts.os.mieweb.org` |
+| Database | `DATABASE_URL_TWH` (Neon `workwell-twh`) | `DATABASE_URL_STAGING` (a **separate** Neon project) |
+| Image tags | `:latest` / `:sha-*` | `:staging-latest` / `:staging-sha-*` |
+| WebChart seam | **unset** (byte-identical) | **configured → teatea** |
+| Scheduler | `WORKWELL_SCHEDULER_ENABLED=true` | **`false`** (no idle DB polling — the 2026-07-22 Neon-cost lesson) |
+| Concurrency group | `twh-mieweb-container-ops` | `twh-staging-mieweb-container-ops` (separate) |
+| Trigger | push to `main` + dispatch | **`workflow_dispatch` only** |
+| Self-heal | reconcile-twh-mieweb.yml (`:latest`) | **none** — re-dispatch to recover |
+
+**Dispatch it from the branch whose code you want to test** (e.g. `feat/webchart-count-capability-fallback`
+before it merges) — a `workflow_dispatch` builds the selected ref, so staging can validate unmerged WebChart
+work. The `_count`/bare-`/Patient` capability fallback runs **adaptive** in staging (the pins are unset), so
+it continuously exercises the real-server probe path; pin `WORKWELL_WEBCHART_DISABLE_COUNT=true` +
+`WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=gt1900-01-01` in the workflow env if you prefer to skip the
+probe round-trip.
+
+**Owner setup required before the first dispatch (one-time):**
+
+1. **MIE hosting confirmation** — confirm with Doug/Dave that MIE will host a **second** container set
+   (`twh-staging` + `twh-staging-api-ts`) alongside the demo stack. (Provisioning new containers is an MIE
+   ask; the deploy uses the same Container Manager API + `LAUNCHPAD_*` secrets.)
+2. **A separate Neon project** for staging → its pooled connection string as the `DATABASE_URL_STAGING`
+   GitHub secret. **Never** point staging at the `workwell-twh` demo DB.
+3. **GitHub secrets** (repo → Settings → Secrets):
+   - `DATABASE_URL_STAGING` — the staging Neon pooled URL.
+   - `WORKWELL_AUTH_JWT_SECRET_STAGING` — a strong random secret (distinct from production).
+   - `WORKWELL_WEBCHART_PRIVATE_KEY_STAGING` — the **RS384 PKCS#8 PEM** for the teatea backend-services
+     client (multi-line). Its public half is the registered JWKS. This is the **only** WebChart secret —
+     the base URL / client id (`workwell`) / scope (`system/*.read`) / kid (`workwell-2026-07`) are
+     non-secret env constants in the workflow (update them there if MIE moves the trial).
+   - `LAUNCHPAD_API_URL` / `LAUNCHPAD_API_KEY` / `OPENAI_API_KEY` — reused from the demo stack.
+
+Then run **Actions → Deploy TWH Staging (live WebChart / teatea) → Run workflow** (`replace_existing:true`).
+Verify: the staging backend boots with `webchart=on` in the seam-inventory line; a staging `ALL_PROGRAMS`
+run pulls the live teatea population and the dashboards render the `wc` tenant (reconciling
+`All Systems = Σ tenants`); and the **demo** stack's seam-inventory line still reads `webchart=off`.
+
+> **teatea trial runway:** extended to ~3 months (Dave → Cornwell, 2026-07-23). When it lapses the seam
+> stops resolving — a live run FAILS and the prior successful population stays authoritative; no PHI is
+> involved. **The demo stack is unaffected by anything in this section** (it leaves every
+> `WORKWELL_WEBCHART_*` unset).
+
 ### Service startup & reboot policy
 
 > "What happens if the server reboots — does WorkWell come back up on its own?"
