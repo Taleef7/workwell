@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-07-23 — staging deploy workflow for a live-WebChart (teatea) environment
+
+Added `.github/workflows/deploy-staging-mieweb.yml` — a **`workflow_dispatch`-only** deploy of a
+**separate, non-demo** staging stack that runs the app **live against the teatea WebChart trial**
+(synthetic data, no PHI), so the real WebChart FHIR integration (#262) is exercised on a deployed URL
+independent of any real-PHI environment (#267, still MIE-gated on C14/BAA). It is distinct from the demo
+stack in every way and **cannot touch it**: hostnames `twh-staging` / `twh-staging-api-ts`, a **separate
+Neon project** via `DATABASE_URL_STAGING`, distinct `*_STAGING` secrets, `staging-*` image tags, its own
+`twh-staging-mieweb-container-ops` concurrency group, and no push trigger. The WebChart seam is configured
+→ teatea; the scheduler is **off** (the 2026-07-22 Neon idle-cost lesson). `docs/DEPLOY.md` documents the
+one-time owner setup (MIE hosting confirmation, the staging Neon project, the `*_STAGING` secrets incl. the
+RS384 private key). Owner-gated — nothing deploys until the secrets are provisioned and it is dispatched;
+the demo stack leaves every `WORKWELL_WEBCHART_*` unset and is unaffected.
+
+**Codex review (PR #329) — 2 P1 + 1 P2 addressed:** (P1) the deploy job now refuses to run when
+`DATABASE_URL_STAGING` resolves to the **same host** as the production DB (`DATABASE_URL_TWH`), so a
+copy-paste can't contaminate the demo database. (P1) this journal entry. (P2) the workflow now sets
+`WORKWELL_WEBCHART_PATIENT_SEARCH` (teatea 403s a bare `/Patient` and the PR #328 client refuses to guess
+a demographic filter), and DEPLOY.md records that dispatching depends on the PR #328 client code.
+
 ## 2026-07-23 (afternoon) — live WebChart productionization: `_count` capability fallback shipped + proven end-to-end against teatea
 
 Followed the registration success (below) with the plan's Phase 1 + Phase 2
