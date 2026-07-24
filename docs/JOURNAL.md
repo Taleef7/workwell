@@ -1,5 +1,52 @@
 # Journal
 
+## 2026-07-24 — staging is LIVE; the multi-line PEM does not survive the container env transport
+
+The staging env (#329) went from merged-but-dormant to **deployed and serving**. Two findings, one of
+which invalidates a documented assumption and one of which is a real transport bug.
+
+**The MIE hosting ask was never needed.** DEPLOY.md listed "confirm with Doug/Dave that MIE will host a
+second container set" as owner step 1, blocking the first dispatch on a human round-trip. But the deploy
+provisions containers *programmatically* through the same Container Manager API and `LAUNCHPAD_*` secrets
+production already uses — so it was a quota question testable in five minutes, not a permission question.
+Dispatched from `main` @ `8bb9685`: all four jobs green, `twh-staging` + `twh-staging-api-ts` created,
+both 200, **production untouched** (`twh` + `twh-api-ts` still 200, seam still `webchart=off`). Step 1 is
+now struck from the runbook. Courtesy note to Doug/Dave, not a gate.
+
+**Neon staging:** `workwell-staging` / `damp-hill-78058027` — PG16, us-east-1, 0.25–2 CU, deliberately
+matching production on all three. The first attempt (created via MCP, which exposes no version parameter)
+came out **PG17 on a fixed 1 CU** and was deleted: a staging env on a different Postgres major cannot
+validate planner-dependent work, and #233's whole fix was coaxing the PG16 planner onto
+`spike_outcomes_run_id_idx`. The console path (explicit PG16) is the one to use — same trap DEPLOY.md
+already documents for `neonctl`.
+
+**Then the live run failed in 985 ms: `Invalid keyData`.** The key and the code were both already proven
+— the same file drove a successful 392-subject live run locally on 07-23 — so the only new variable was
+the GitHub-secret → Container-Manager transport. A multi-line PEM does not survive it.
+
+Worth recording *how* the diagnosis narrowed, because the first hypothesis was wrong. Newlines arriving
+escaped as literal `\n` looked like the obvious culprit, and the parser's `\s+` strip genuinely doesn't
+remove backslash-n. But reproducing that shape throws `Invalid character` from `atob` — a *different*
+error than the one staging reported. `Invalid keyData` comes from `importKey`, meaning base64 decoding
+had already **succeeded**. That only fits **truncation at the first newline**: body → empty string →
+`atob("")` → 0 bytes → `Invalid keyData`. The error message was the evidence; taking it literally is what
+distinguished the two hypotheses.
+
+**Fixes (branch `fix/webchart-key-b64-transport`):**
+- **`WORKWELL_WEBCHART_PRIVATE_KEY_B64`** — the key travels base64-encoded, single-line, so there is no
+  newline between the secret store and `crypto.subtle.importKey`. Takes precedence over the raw var;
+  the GitHub secret stays a plain PEM and the workflow does the encoding (`base64 -w0`).
+- **A malformed `_B64` throws instead of degrading to inert.** `isWebChartConfigured` keys on the
+  *presence* of a key, not its validity — otherwise a bad encoding reads `webchart=off` and the deploy
+  looks healthy while the live integration is silently switched off. Wrong answers must be loud.
+- **`Invalid keyData` is no longer the symptom.** `pemToPkcs8` rejects an implausibly short body with a
+  message naming the variable, the likely truncation, and the fix. That message is the whole cost of this
+  incident, repaid.
+- Escaped-`\n` tolerance kept as belt-and-braces — explicitly *not* the staging cause, and labelled so in
+  both the code and the test, since a comment that misattributes a bug is worse than no comment.
+
+28/28 on the two affected suites; typecheck clean; seam inventory 30/30.
+
 ## 2026-07-23 — WebChart population-enumeration completeness (the shipped `gt1900` query undercounted 20%)
 
 Phase-5 real-server hardening surfaced a real bug in the just-merged live path. Probing teatea while
