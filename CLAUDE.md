@@ -114,7 +114,7 @@ cases only, never reproduced NCQA specs (DUA).
 narrow port (engine no longer imports the 30-method `ValueSetStore`), `UnconfiguredEngine` +
 `engine-factory.ts` moved to the new **`src/wiring/`** app-composition layer (5 importers repointed),
 and the `engine/engine-boundary.test.ts` arch guard (no production engine file may import `stores/` or
-`@mieweb/*`). Zero behavior change — full suite 1407/0/14, typecheck clean. Next: PR-2 (physical
+`@mieweb/*`). Zero behavior change — full suite 1408/0/14, typecheck clean. Next: PR-2 (physical
 `packages/measure-engine` extraction) per the roadmap's §7.4 sequence.
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
@@ -145,7 +145,7 @@ to 2 CU — Launch had silently raised it 2 → 8). Data was never at risk; all 
 ## Prior focus (as of 2026-07-20 — Doug-directive wave; prior blocks below)
 
 **2026-07-20 — Doug call (07-19) reset the near-term direction; Thursday 2026-07-23 demo call is
-the target.** Three directives (transcripts local-only; D17's "CQL→SQL parked" is SUPERSEDED in
+the target.** Three directives (D17's "CQL→SQL parked" is SUPERSEDED in
 the questions doc): **(1) a FHIR shim we own over the WCDB** — new standalone top-level
 **`wcdb-fhir-shim/`** package (plain `node:http` + `mysql2` — the ONLY package allowed a MariaDB
 driver, ADR-034; backend-ts stays driver-free) serving the verified WebChart client contract

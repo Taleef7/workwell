@@ -16,7 +16,7 @@ before saving — Codify assists authoring, never writes).
 
 **Browser-verified 2026-07-20** on `/studio/cms125` → Value Sets: index loads ("Offline index
 ready"), searching **"breast cancer screening"** returns **"Breast cancer screening (mammography)
-— eCQM CMS125"** in ~39 ms (the `quality` domain maps Doug's exact transcript phrase to the very
+— eCQM CMS125"** in ~39 ms (the `quality` domain maps Doug's exact phrasing to the very
 measure we run), and selection prefills OID `CMS.125` + the name.
 
 ## Why vendored (not an npm import)

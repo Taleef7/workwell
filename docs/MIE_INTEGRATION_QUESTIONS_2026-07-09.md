@@ -195,7 +195,7 @@ whether data egress is a policy constraint.
 > remain formally parked. Data egress from WebChart to WorkWell is therefore the expected flow (the
 > C14 PHI/BAA posture governs *where* WorkWell may run when that data is real).
 
-> 🔄 **SUPERSEDED (Doug, 2026-07-19 call — transcripts on file):** CQL→SQL is now **un-parked and
+> 🔄 **SUPERSEDED (Doug, 2026-07-19 call):** CQL→SQL is now **un-parked and
 > directly requested** — "it would be very valuable to me if you made something that got that CQL
 > and turned it into SQL queries… running those SQL queries against the WebChart database itself,"
 > returning numerator/denominator behind a simple compliance API ("is this patient compliant for
