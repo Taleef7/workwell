@@ -150,6 +150,52 @@ test("discovery + token exchange: posts a valid RS384 private_key_jwt assertion"
   assert.equal(verified, true, "assertion signature must verify against the public key");
 });
 
+/**
+ * The failure that actually took down the first staging deploy (2026-07-24): the multi-line PEM
+ * reached the container truncated at its first newline. An empty base64 body decodes without
+ * complaint, so the only symptom was WebCrypto's `Invalid keyData` — which names neither the variable
+ * nor the cause, and cost a diagnosis cycle. The error must identify itself.
+ */
+test("a PEM truncated at the first newline fails with a message that names the cause", async () => {
+  const { pem } = await testKeyPair();
+  const truncated = pem.split("\n")[0]!; // "-----BEGIN PRIVATE KEY-----"
+  const shim = authServerShim();
+  const auth = smartBackendServicesAuth(cfgWith(truncated, { tokenUrl: TOKEN_URL }), { fetch: shim.fetchImpl });
+
+  await assert.rejects(() => auth.authorizationHeader(), /not a usable PKCS#8 PEM|truncated|_B64/);
+  assert.equal(shim.tokenRequests.length, 0, "must fail before dialing the token endpoint");
+});
+
+/**
+ * A different mangling a hand-set env var can suffer: newlines surviving as the two-character
+ * sequence `\n`. Not the staging cause (that fails earlier, inside `atob`), but cheap to tolerate.
+ */
+test("a PEM whose newlines arrived escaped as literal \\n still signs", async () => {
+  const { pem, publicKey } = await testKeyPair();
+  const mangled = pem.replace(/\n/g, "\\n");
+  assert.ok(!mangled.includes("\n"), "the fixture must contain no real newlines");
+
+  const shim = authServerShim();
+  const auth = smartBackendServicesAuth(cfgWith(mangled, { tokenUrl: TOKEN_URL }), { fetch: shim.fetchImpl });
+  assert.equal(await auth.authorizationHeader(), "Bearer tok-1");
+
+  // Signed by the true key, not merely parsed without throwing.
+  const [headerPart, claimsPart, sigPart] = shim.tokenRequests[0]!.form.get("client_assertion")!.split(".") as [
+    string,
+    string,
+    string,
+  ];
+  assert.equal(
+    await crypto.subtle.verify(
+      "RSASSA-PKCS1-v1_5",
+      publicKey,
+      b64urlToBytes(sigPart).buffer as ArrayBuffer,
+      new TextEncoder().encode(`${headerPart}.${claimsPart}`),
+    ),
+    true,
+  );
+});
+
 test("tokenUrl config skips discovery entirely", async () => {
   const { pem } = await testKeyPair();
   const shim = authServerShim();

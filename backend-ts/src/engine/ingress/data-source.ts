@@ -72,8 +72,13 @@ export interface DataSourceEnv {
   WORKWELL_WEBCHART_BASE_URL?: string;
   WORKWELL_WEBCHART_API_KEY?: string;
   WORKWELL_WEBCHART_CLIENT_ID?: string;
-  /** PKCS#8 PEM (multi-line env value). */
+  /** PKCS#8 PEM (multi-line env value). Prefer the `_B64` form below on a deployed stack. */
   WORKWELL_WEBCHART_PRIVATE_KEY?: string;
+  /**
+   * Base64 of the WHOLE PKCS#8 PEM file — single-line, and therefore immune to env-var transports
+   * that mangle embedded newlines. Takes precedence over the raw form when both are set.
+   */
+  WORKWELL_WEBCHART_PRIVATE_KEY_B64?: string;
   WORKWELL_WEBCHART_TOKEN_URL?: string;
   WORKWELL_WEBCHART_SCOPE?: string;
   WORKWELL_WEBCHART_KID?: string;
@@ -84,15 +89,52 @@ export interface DataSourceEnv {
 }
 
 /**
+ * The PKCS#8 PEM, from whichever transport form is set — `_B64` wins when both are.
+ *
+ * A deployed stack should always use `_B64`. A multi-line env value does not survive every container
+ * runtime intact: through MIE's Create-a-Container the raw PEM reached the container truncated at its
+ * first newline, and WebCrypto rejected the empty body with the opaque `Invalid keyData` (staging,
+ * 2026-07-24). Base64 is single-line, so there is no newline to truncate at between the secret store
+ * and `crypto.subtle.importKey`.
+ *
+ * Throws (rather than degrading to inert) when `_B64` is set but unusable: a silent fall-through to
+ * synthetic data would look like a working deploy while the live integration was simply off.
+ */
+export function webChartPrivateKeyFromEnv(env: DataSourceEnv): string | undefined {
+  const b64 = (env.WORKWELL_WEBCHART_PRIVATE_KEY_B64 ?? "").trim();
+  if (b64) {
+    let decoded: string;
+    try {
+      decoded = atob(b64.replace(/\s+/g, ""));
+    } catch {
+      throw new Error(
+        "WORKWELL_WEBCHART_PRIVATE_KEY_B64 is not valid base64 — set it to the base64 encoding of the whole PKCS#8 PEM file.",
+      );
+    }
+    if (!decoded.includes("BEGIN PRIVATE KEY")) {
+      throw new Error(
+        "WORKWELL_WEBCHART_PRIVATE_KEY_B64 did not decode to a PKCS#8 PEM (no '-----BEGIN PRIVATE KEY-----') — base64-encode the key FILE, headers included.",
+      );
+    }
+    return decoded;
+  }
+  return (env.WORKWELL_WEBCHART_PRIVATE_KEY ?? "").trim() || undefined;
+}
+
+/**
  * Pure predicate for whether the WebChart source is selected — BASE_URL plus either the legacy
  * API_KEY or the SMART pair (CLIENT_ID + PRIVATE_KEY, the verified contract — PR-2c).
  * The single source of truth for `resolveDataSource` and the boot-time seam inventory (#260).
+ *
+ * Keyed on the PRESENCE of a private key, not its validity, so a malformed `_B64` still selects the
+ * seam and surfaces as the explicit error above instead of silently reading `webchart=off`.
  */
 export function isWebChartConfigured(env: DataSourceEnv): boolean {
   const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
   const apiKey = (env.WORKWELL_WEBCHART_API_KEY ?? "").trim();
   const clientId = (env.WORKWELL_WEBCHART_CLIENT_ID ?? "").trim();
-  const privateKey = (env.WORKWELL_WEBCHART_PRIVATE_KEY ?? "").trim();
+  const privateKey =
+    (env.WORKWELL_WEBCHART_PRIVATE_KEY_B64 ?? "").trim() || (env.WORKWELL_WEBCHART_PRIVATE_KEY ?? "").trim();
   return Boolean(baseUrl && (apiKey || (clientId && privateKey)));
 }
 
@@ -111,7 +153,7 @@ export function webChartConfigFromEnv(env: DataSourceEnv): WebChartConfig | unde
     baseUrl: (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim(),
     apiKey: trimmed(env.WORKWELL_WEBCHART_API_KEY),
     clientId: trimmed(env.WORKWELL_WEBCHART_CLIENT_ID),
-    privateKeyPem: trimmed(env.WORKWELL_WEBCHART_PRIVATE_KEY),
+    privateKeyPem: webChartPrivateKeyFromEnv(env),
     tokenUrl: trimmed(env.WORKWELL_WEBCHART_TOKEN_URL),
     scope: trimmed(env.WORKWELL_WEBCHART_SCOPE),
     kid: trimmed(env.WORKWELL_WEBCHART_KID),

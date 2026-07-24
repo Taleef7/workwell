@@ -67,9 +67,33 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** PEM (PKCS#8) → DER bytes. `atob` exists on node-24 and every worker target. */
+/** Smallest plausible PKCS#8 RSA-2048 body; anything shorter is a mangled env value, not a key. */
+const MIN_PKCS8_B64_LEN = 512;
+
+/**
+ * PEM (PKCS#8) → DER bytes. `atob` exists on node-24 and every worker target.
+ *
+ * Two transport defenses, both learned from the first staging deploy (2026-07-24), which failed every
+ * token request with WebCrypto's opaque `Invalid keyData`:
+ *
+ *  - **Truncation.** The multi-line PEM did not reach the container intact — an empty/short body
+ *    decodes fine and only blows up inside `importKey`, which names neither the variable nor the
+ *    cause. The explicit length check below turns that into a message that says what to fix. (The
+ *    deployed path now carries the key base64-encoded, so there is no newline left to truncate at.)
+ *  - **Escaped newlines.** A separate shape a hand-set env var can take: `\n` surviving as backslash-n.
+ *    Those are not whitespace, so `\s+` leaves them in the body. Not what happened in staging — that
+ *    fails earlier, in `atob` — but cheap to tolerate and easy to hit.
+ */
 function pemToPkcs8(pem: string): Uint8Array {
-  const b64 = pem.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, "");
+  const unescaped = pem.replace(/\\r\\n|\\n/g, "\n");
+  const b64 = unescaped.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, "");
+  if (b64.length < MIN_PKCS8_B64_LEN) {
+    throw new Error(
+      `WebChart private key is not a usable PKCS#8 PEM: only ${b64.length} base64 characters after ` +
+        `stripping headers. A multi-line PEM often arrives truncated at the first newline through a ` +
+        `container env transport — supply it base64-encoded via WORKWELL_WEBCHART_PRIVATE_KEY_B64.`,
+    );
+  }
   const raw = atob(b64);
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
