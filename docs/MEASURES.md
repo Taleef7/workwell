@@ -339,6 +339,14 @@ Each outcome evidence payload includes:
 
 ## Implementation Notes
 
+- **Incremental/delta evaluation (#263 / ADR-035, 2026-07-24 — descriptive only, ADR-008).** A recurring
+  population run may reuse a subject's prior `Outcome Status` (copy-forward) instead of re-running the CQL,
+  when the subject's data + measure logic are unchanged and the status cannot have moved. This never
+  changes any measure's semantics or authored CQL — it decides only *whether* to re-ask the engine, and a
+  reused subject's outcome is byte-identical to a fresh run (proven by the parity suite). Only
+  windowed-recency + PERMANENT measures get across-day reuse; `flu_vaccine` (seasonal) and
+  `cms122`/`cms125` (measurement-period) are same-day-only, since their status is not a monotone function
+  of days-since-event. Inert unless `WORKWELL_INCREMENTAL_EVAL=true`. See DATA_MODEL §3.27, ARCHITECTURE.
 - **CQL→SQL (WCDB) demo translations (#292 / ADR-034, 2026-07-20 — descriptive only, ADR-008).**
   Four observation-backed windowed-recency measures (`hypertension`, `cholesterol_ldl`,
   `obesity_bmi`, `diabetes_hba1c`) also have **generated MariaDB SQL** against the WebChart dev-DB

@@ -149,11 +149,14 @@ Public API actions derive audit identity from the authenticated security context
 - Incremental/delta evaluation is descriptive (#263 / ADR-035): the `eval_state` cache decides only
   WHETHER to re-run CQL, never the answer. A reused subject still gets an outcome row (copy-forward with
   date-corrected evidence), so every "latest run per measure" read model is untouched; a cache miss on
-  ANY uncertainty (no row, `data_hash`/`logic_version` mismatch, past `next_transition_at`, source outcome
-  gone) falls back to a full evaluation. The `run/incremental/parity.test.ts` suite proves an incremental
-  run is byte-identical to a full run on unchanged data and re-evaluates exactly when the answer could
-  have changed. Inert unless `WORKWELL_INCREMENTAL_EVAL=true`; scoped to `finishManualRun` (not the scale
-  path), so the demo/default loop is byte-identical (ADR-008/ADR-035).
+  ANY uncertainty (no row, `data_hash`/`logic_version` mismatch, a **backdated** date `evalDate <
+  source_eval_date`, past `next_transition_at`, source outcome gone) falls back to a full evaluation.
+  `logic_version` reflects the **engine-selected** library (base vs `expansionLibrary`) plus referenced
+  value sets' store `expansion_hash`, so a VSAC toggle/re-import or value-set edit invalidates reuse. The
+  `run/incremental/parity.test.ts` suite proves an incremental run is byte-identical to a full run on
+  unchanged data and re-evaluates exactly when the answer could have changed. Inert unless
+  `WORKWELL_INCREMENTAL_EVAL=true`; scoped to `finishManualRun` (not the scale path), so the demo/default
+  loop is byte-identical (ADR-008/ADR-035).
 - Measure execution is pluggable behind the `MeasureExecutor` seam (E9 / ADR-025) but the default `fhirNativeExecutor` delegates to the unchanged CQL→ELM engine (no second evaluation path; parity-tested against the direct engine path), and the `sqlPushdownExecutor` alternative is an inert stub selected only on explicit opt-in. Any future SQL-pushdown executor must pass golden parity vs the FHIR-native oracle, per measure, before it serves — the executor never sets or overrides `Outcome Status` (ADR-008/ADR-025).
 - VSAC value-set expansion is descriptive (ADR-023): the composite resolver falls back to the local
   `StoreValueSetResolver` for `urn:workwell:*` references, so enabling `WORKWELL_VSAC_API_KEY` does not
