@@ -27,6 +27,7 @@ import { SqliteWaiverStore } from "./waiver-store-sqlite.ts";
 import { SqliteSegmentStore } from "./segment-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "./quality-snapshot-store-sqlite.ts";
 import { SqlitePersonLinkStore } from "./person-link-store-sqlite.ts";
+import { SqliteEvalStateStore } from "./eval-state-store-sqlite.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -41,6 +42,7 @@ import {
   segmentStoreContract,
   qualitySnapshotStoreContract,
   personLinkStoreContract,
+  evalStateStoreContract,
 } from "../store-contract.ts";
 
 const created: string[] = [];
@@ -93,6 +95,7 @@ segmentStoreContract("sqlite", async () => new SqliteSegmentStore(await freshDb(
 
 qualitySnapshotStoreContract("sqlite", async () => new SqliteQualitySnapshotStore(await freshDb()));
 personLinkStoreContract("sqlite", async () => new SqlitePersonLinkStore(await freshDb()));
+evalStateStoreContract("sqlite", async () => new SqliteEvalStateStore(await freshDb()));
 
 test("getRun surfaces the measurement period", async () => {
   const db = await freshDb();

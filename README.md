@@ -22,6 +22,19 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-24 — #263 incremental/delta batch evaluation (PR #332, on `feat/263-incremental-eval`; ADR-035).**
+  A recurring population run reuses a subject's prior CQL outcome (copy-forward with date-corrected
+  evidence) instead of spending ~68 ms of CQL, when its data (`data_hash`) + logic (`logic_version`,
+  reflecting the engine-selected library + value-set expansion hashes) are unchanged and its status can't
+  have moved (`next_transition_at` — a threshold table **golden-verified against the real CQL engine**;
+  `flu_vaccine`/`cms122`/`cms125` excluded as non-monotone). A reused subject still gets an outcome row,
+  so every read model is untouched. **Inert unless `WORKWELL_INCREMENTAL_EVAL=true`** (the 10th
+  boot-inventory seam) and scoped to `finishManualRun` (live tenants; the scale path is not wired), so the
+  demo/default stack is byte-identical. Owner-approved `eval_state` cache (reversible; `DELETE FROM
+  eval_state`). Descriptive only (ADR-008): reuse decides only WHETHER to re-run CQL, never the answer —
+  proven by `run/incremental/parity.test.ts`. Two code-review P1s fixed pre-merge (backdated-run reuse;
+  `logic_version` value-set/expansion coverage). `pnpm test`: **1406 pass / 0 fail / 14 skipped**;
+  typecheck clean. Tier 1 (`Group/$export?_since=` transport pre-filter) stays MIE-gated and unbuilt.
 - **2026-07-22 — live outage resolved: Neon compute quota exhausted by idle scheduler polling (PRs #322 + #323).**
   Every DB-backed route returned `internal_error` for four days (07-18 → 07-22) — HTTP 402 from the
   Neon pooler, not a bug in any failing route. The scheduler tick did 4–5 DB round trips every 5

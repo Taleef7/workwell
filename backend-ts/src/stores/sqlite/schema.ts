@@ -359,6 +359,30 @@ CREATE TABLE IF NOT EXISTS person_links (
   created_at     TEXT NOT NULL,
   UNIQUE (a_tenant_id, a_external_id, b_tenant_id, b_external_id)
 );
+
+/* Incremental-evaluation cache (#263 Phase 2b). One row per (subject, measure, period): the
+   change-signal fingerprint (data_hash + logic_version) of the last REAL CQL evaluation, the status it
+   produced, the earliest date that status can change on unchanged data (next_transition_at; NULL =
+   terminal), and a pointer to the source outcome row to copy forward. A pure CACHE — dropping it just
+   makes the next run a full run; no outcome/case/audit row references it, which is why it is safe to
+   add. Reuse decides only WHETHER to re-run CQL, never the answer (ADR-008).
+   OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (#263 Phase 2b) — the AGENTS.md
+   schema-owner rule is satisfied; additive (CREATE IF NOT EXISTS), reversible (DELETE FROM eval_state). */
+CREATE TABLE IF NOT EXISTS eval_state (
+  id                 TEXT PRIMARY KEY,
+  subject_id         TEXT NOT NULL,
+  measure_id         TEXT NOT NULL,
+  period             TEXT NOT NULL,
+  data_hash          TEXT NOT NULL,
+  logic_version      TEXT NOT NULL,
+  next_transition_at TEXT,
+  last_status        TEXT NOT NULL,
+  source_outcome_id  TEXT NOT NULL,
+  source_eval_date   TEXT NOT NULL,
+  last_evaluated_at  TEXT NOT NULL,
+  UNIQUE (subject_id, measure_id, period)
+);
+CREATE INDEX IF NOT EXISTS eval_state_measure_period_idx ON eval_state (measure_id, period);
 `;
 
 /**
