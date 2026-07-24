@@ -209,6 +209,27 @@ not-in-IPP. A future refinement may distinguish those cases using the persisted 
 evidence. Revisit the count interpretation if the final published QM IG materially differs from the
 cited ballot-branch clarification.
 
+**Amendment (2026-07-24, roadmap §7.4 PR-3) — membership is evidence-first.** Point 2 above does not
+scale: it needs one hand-written binding flag per measure, and the eight incoming official CMS measures
+would each need one guessed from their CQL. It also cannot express DENEXCEP/NUMEX, and it inverts for
+lower-is-better measures (cms122's numerator is poor control, so an official NUMER subject carries the
+workflow status OVERDUE). So `membershipFor(outcome, measureId)` now reads
+`evidence_json.official.populationResults` **first** and uses it verbatim when present — that is the
+measure's own logic reporting its own populations, and it is authoritative over any status heuristic.
+When absent (every measure today, and every authored measure forever) the point-2 rule applies
+unchanged, so this amendment is **behavior-neutral until the official flip**; malformed evidence
+degrades to the status rule rather than throwing inside an export. `denominator-exception` is emitted
+and subtracted from the effective score denominator in **both** MeasureReport and QRDA III, but only
+when non-zero — so authored exports remain byte-identical. Two deliberate limits: (a)
+`populationCountsFromStatus`, the bounded histogram behind 120k `seed:scale` summaries, has no
+per-subject evidence and stays valid for authored measures only; (b) keying out-of-IPP off each
+measure's own `"Initial Population"` define — which **is** persisted for all 16 measures — was
+considered and **rejected for now**: it would change exported IPP/DENOM for the 12 OSHA/HEDIS measures
+(e.g. audiogram's IPP is `In Hearing Conservation Program or Has Active Waiver`, so non-enrolled
+subjects currently inflate the denominator) *and* break the documented 1:1 reconciliation with the
+histogram path. That is a real correctness finding, but it is a deliberate reporting change that
+deserves its own decision, not a silent side effect of this one.
+
 ## ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
 
 **Status:** Accepted (2026-07-14).

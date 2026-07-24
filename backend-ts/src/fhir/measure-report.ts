@@ -38,22 +38,83 @@ export interface MeasureReportBundle {
   entry: Array<{ fullUrl: string; resource: MeasureReport }>;
 }
 
-export interface PopulationCounts { ipp: number; denom: number; denex: number; numer: number; }
+export interface PopulationCounts {
+  ipp: number;
+  denom: number;
+  denex: number;
+  numer: number;
+  /** Denominator exceptions (CMS68-class). Absent from authored measures; always present as a number. */
+  denexcep: number;
+}
 
-const zeroCounts = (): PopulationCounts => ({ ipp: 0, denom: 0, denex: 0, numer: 0 });
+const zeroCounts = (): PopulationCounts => ({ ipp: 0, denom: 0, denex: 0, numer: 0, denexcep: 0 });
 
 const missingDataMeansOutOfPopulation = (measureId: string): boolean =>
   MEASURE_BINDINGS[measureId]?.missingDataMeansOutOfPopulation === true;
 
+/**
+ * Per-subject population membership as the measure's own logic reported it (roadmap §7.3).
+ * Official-routed outcomes persist `evidence_json.official.populationResults`; that IS the regulatory
+ * truth and must win over any status heuristic, because the 5-bucket `OutcomeStatus` is a *workflow*
+ * vocabulary that deliberately cannot express DENEXCEP/NUMEX, and for an inverse measure (cms122:
+ * numerator = poor control) the workflow status is the opposite of numerator membership.
+ */
+export interface PopulationMembership {
+  ipp: boolean; denom: boolean; denex: boolean; numer: boolean; denexcep: boolean;
+}
+
+const bool = (v: unknown): boolean => v === true;
+
+/**
+ * Read official population membership off an outcome's evidence, or `null` when this outcome was not
+ * produced by the official executor (every authored measure today). Deliberately tolerant: evidence is
+ * persisted JSON, and a malformed payload must degrade to the authored rule rather than throw inside an
+ * export.
+ */
+export function officialMembership(evidence: unknown): PopulationMembership | null {
+  const official = (evidence as { official?: { populationResults?: unknown } } | null | undefined)?.official;
+  const results = official?.populationResults;
+  if (!results || typeof results !== "object" || Array.isArray(results)) return null;
+  const r = results as Record<string, unknown>;
+  if (typeof r["ipp"] !== "boolean") return null; // not the shape we write — fall back.
+  return {
+    ipp: bool(r["ipp"]),
+    denom: bool(r["denom"]),
+    denex: bool(r["denex"]),
+    numer: bool(r["numer"]),
+    denexcep: bool(r["denexcep"]),
+  };
+}
+
+/**
+ * Membership for one outcome: official evidence first, else the authored status rule (ADR-031) —
+ * unchanged for every measure that has no official evidence, which today is all of them.
+ */
+export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence">, measureId: string): PopulationMembership {
+  const official = officialMembership(outcome.evidence);
+  if (official) return official;
+  if (missingDataMeansOutOfPopulation(measureId) && outcome.status === "MISSING_DATA") {
+    return { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  }
+  return {
+    ipp: true,
+    denom: true,
+    denex: outcome.status === "EXCLUDED",
+    numer: outcome.status === "COMPLIANT",
+    denexcep: false,
+  };
+}
+
 /** Reduce outcome buckets to proportion-population membership-label counts (the reconciliation contract). */
 export function countPopulations(outcomes: OutcomeRecord[], measureId: string): PopulationCounts {
-  const missingIsOut = missingDataMeansOutOfPopulation(measureId);
   return outcomes.reduce((counts, outcome) => {
-    if (missingIsOut && outcome.status === "MISSING_DATA") return counts;
+    const m = membershipFor(outcome, measureId);
+    if (!m.ipp) return counts;
     counts.ipp += 1;
-    counts.denom += 1;
-    if (outcome.status === "EXCLUDED") counts.denex += 1;
-    if (outcome.status === "COMPLIANT") counts.numer += 1;
+    if (m.denom) counts.denom += 1;
+    if (m.denex) counts.denex += 1;
+    if (m.numer) counts.numer += 1;
+    if (m.denexcep) counts.denexcep += 1;
     return counts;
   }, zeroCounts());
 }
@@ -62,6 +123,13 @@ export function countPopulations(outcomes: OutcomeRecord[], measureId: string): 
  * The same proportion counts derived from a bounded `GROUP BY status` histogram instead of the
  * per-subject rows (Fable H4) — so the summary MeasureReport + QRDA can be built for a 120k `seed:scale`
  * run without materializing its 1.68M rows. Reconciles 1:1 with {@link countPopulations}.
+ *
+ * **Scope limit (PR-3).** A status histogram carries no per-subject evidence, so this path cannot see
+ * `evidence_json.official.populationResults` and is therefore valid ONLY for authored measures — which
+ * is exactly what it is used for: `seed:scale` is synthetic demo data and is never official-routed.
+ * If an official-routed run ever needs a bounded summary, the histogram must be widened to group by
+ * population membership, not status; do not silently reuse this. A guard test pins the reconciliation
+ * for authored measures so the two paths cannot drift apart unnoticed.
  */
 export function populationCountsFromStatus(counts: OutcomeStatusCount[], measureId: string): PopulationCounts {
   const missingIsOut = missingDataMeansOutOfPopulation(measureId);
@@ -98,6 +166,9 @@ const populations = (c: PopulationCounts): Population[] => [
   pop("numerator", c.numer),
   pop("denominator", c.denom),
   pop("denominator-exclusion", c.denex),
+  // Emitted only when the measure actually has exceptions, so every authored measure's report is
+  // byte-identical to before this change.
+  ...(c.denexcep > 0 ? [pop("denominator-exception", c.denexcep)] : []),
 ];
 
 export function buildSummaryMeasureReport(
@@ -117,7 +188,9 @@ export function buildSummaryMeasureReportFromCounts(
   generatedAt: string,
 ): MeasureReport {
   const group: MeasureReport["group"][number] = { population: populations(c) };
-  const effectiveDenominator = c.denom - c.denex;
+  // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
+  // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
+  const effectiveDenominator = c.denom - c.denex - c.denexcep;
   if (effectiveDenominator > 0) group.measureScore = { value: c.numer / effectiveDenominator };
   return {
     resourceType: "MeasureReport",
@@ -131,14 +204,17 @@ export function buildSummaryMeasureReportFromCounts(
   };
 }
 
-/** Per-subject population membership (0/1). Unknown statuses fall back to a denominator gap. */
-const MEMBERSHIP: Record<string, PopulationCounts> = {
-  COMPLIANT: { ipp: 1, denom: 1, denex: 0, numer: 1 },
-  DUE_SOON: { ipp: 1, denom: 1, denex: 0, numer: 0 },
-  OVERDUE: { ipp: 1, denom: 1, denex: 0, numer: 0 },
-  MISSING_DATA: { ipp: 1, denom: 1, denex: 0, numer: 0 },
-  EXCLUDED: { ipp: 1, denom: 1, denex: 1, numer: 0 },
-};
+/** One subject's membership as 0/1 counts — the individual report is the same reduction over n=1. */
+const asCounts = (m: PopulationMembership): PopulationCounts =>
+  m.ipp
+    ? {
+        ipp: 1,
+        denom: m.denom ? 1 : 0,
+        denex: m.denex ? 1 : 0,
+        numer: m.numer ? 1 : 0,
+        denexcep: m.denexcep ? 1 : 0,
+      }
+    : zeroCounts();
 
 export function buildIndividualMeasureReport(
   outcome: OutcomeRecord,
@@ -146,9 +222,7 @@ export function buildIndividualMeasureReport(
   measureId: string,
   generatedAt: string,
 ): MeasureReport {
-  const c = missingDataMeansOutOfPopulation(measureId) && outcome.status === "MISSING_DATA"
-    ? zeroCounts()
-    : MEMBERSHIP[outcome.status] ?? { ipp: 1, denom: 1, denex: 0, numer: 0 };
+  const c = asCounts(membershipFor(outcome, measureId));
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
