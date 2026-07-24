@@ -21,7 +21,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
-import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import { engineForEnv } from "../wiring/engine-factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
 import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";

@@ -12,11 +12,15 @@
  *     if Node ELM fails golden parity. "Java where absolutely necessary."
  *
  * Invariant (carried over from the Java backend): the engine NEVER guesses a
- * status. An unconfigured/unsupported binding raises UnsupportedBindingError —
- * the same discipline as "AI never decides compliance; CQL `Outcome Status` is
- * the sole source of truth." The real implementations land in Phase 3 (#106).
+ * status. An unconfigured/unsupported binding refuses (see the app-side
+ * `UnconfiguredEngine` in `src/wiring/unconfigured-engine.ts`) — the same
+ * discipline as "AI never decides compliance; CQL `Outcome Status` is the sole
+ * source of truth."
+ *
+ * BOUNDARY (extraction PR-1): this module is part of the publishable engine
+ * surface and imports NOTHING from the app layer (stores/, @mieweb/*) — enforced
+ * by the engine-boundary arch test.
  */
-import { UnsupportedBindingError, type CloudTarget } from "@mieweb/cloud";
 
 /** Normalized outcome bucket — identical taxonomy to the Java engine. */
 export type OutcomeStatus =
@@ -66,17 +70,4 @@ export interface EvaluateMeasureInput {
  */
 export interface EvaluateMeasureBinding {
   evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome>;
-}
-
-/** Fallback binding when no engine is configured: refuse, never guess. */
-export class UnconfiguredEngine implements EvaluateMeasureBinding {
-  constructor(private readonly target: CloudTarget = "local") {}
-
-  evaluate(_input: EvaluateMeasureInput): Promise<MeasureOutcome> {
-    throw new UnsupportedBindingError(
-      "EvaluateMeasure",
-      this.target,
-      "no CQL engine binding configured",
-    );
-  }
 }

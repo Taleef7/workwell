@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-07-24 (later) — Nicole recalibration → strategic plan approved → engine-boundary severance (extraction PR-1, branch `feat/engine-boundary-severance`)
+
+**The Nicole meeting (transcript: `docs/nicole_audio_transcript.txt`) reset the near-term direction** —
+the sharpest external correction the project has had: (1) for official CMS eCQMs, **download and run the
+official published CQL**, don't reauthor ("if the CQL exists, use it… other than maybe as an educational
+exercise"); (2) the real EHR proof path is **QRDA-I ingest → calculate → regenerate QRDA-I/III → Cypress
+→ ONC** (MADiE is authoring tooling, not how an EHR verifies); (3) her 8 priority measures: **CMS2, 68,
+122, 125, 130, 138, 165, 951** (MIE is ONC-certified on ~33/49); (4) self-authored CQL is the value
+exactly where no official definition exists — occupational/OSHA + HEDIS-insight (payer black-box) — and
+MIE could steward occupational measures through the NCQA community process; (5) DEQM/quality-on-FHIR is
+the direction but CMS/QPP has no endpoints yet (~2030). CQI WG meets Fridays.
+
+**Strategic plan written + owner-approved same day** (deep-research pass over the Vision Doc charters,
+Doug transcripts, Connectathon research, two codebase audits, and an architecture design agent) —
+**committed in-repo as `docs/ROADMAP_2026-07-24.md`** (supersedes ROADMAP_2026-07-09.md as the active
+direction; working copy also at `~/.claude/plans/snappy-herding-journal.md`). Headlines: 5 milestones — **M-A official-first execution**
+(promote the fqm-execution literal machinery to a per-measure-routed `officialMeasureExecutor` behind
+`WORKWELL_OFFICIAL_MEASURES`, MADiE cases as permanent CI gates, authored cms122/125 subsets retire to
+the fidelity lab), **M-B QRDA-I/III + Cypress CVU+ validated loop**, **M-C pnpm-workspace extraction
+publishing `@workwell/*`** (measure-engine w/ only cql-execution+cql-exec-fhir deps; official-executor as
+the fqm quarantine package), **M-D WebChart breadth + the compliance API contract**, **M-E occupational
+content pack published in the community `dqm-content` shape + CQI WG cadence**. Verified en route: all 8
+priority measures have official QICore v1.0.000 artifacts + MADiE test cases in
+`cqframework/dqm-content-qicore-2025`; Cypress/CVU+ is open-source and Docker-runnable; QI-Core STU7 = US
+Core 7 = exactly WebChart's verified FHIR surface. Two-track posture is deliberate: execute on the
+FHIR/QI-Core column, report on the current QRDA column; QDM appears only as a translation at the QRDA
+boundary.
+
+**Extraction PR-1 shipped (this branch) — sever the engine's app-layer imports, zero behavior change:**
+(1) new narrow **`ValueSetSource`** port in `engine/cql/value-set-resolver.ts` — the engine consumed
+exactly one method (`listAll()`) of the 30-method `ValueSetStore`; the store satisfies the port
+structurally so no call site changed; (2) **`UnconfiguredEngine`** (the only `@mieweb/cloud` consumer on
+the eval surface, zero importers) moved to `src/wiring/unconfigured-engine.ts`; (3)
+**`engine-factory.ts` + test moved to `src/wiring/`** (git mv — it is app composition, the one
+`getStores` value-coupling; 5 importers repointed); (4) new **`engine/engine-boundary.test.ts`** arch
+guard (fqm-isolation pattern): no production file under `src/engine/` may import `stores/` or
+`@mieweb/*`. After this, `src/engine/`'s runtime coupling is exactly `cql-execution` + `cql-exec-fhir` —
+the shape `packages/measure-engine` extracts in PR-2. Typecheck clean; full suite **1407 pass / 0 fail /
+14 skipped** (byte-identical).
+
 ## 2026-07-24 — #263 incremental/delta batch evaluation, Phases 2a + 2b (branch `feat/263-incremental-eval`)
 
 Built the incremental-evaluation feature end-to-end on a feature branch (owner said "proceed with #263";

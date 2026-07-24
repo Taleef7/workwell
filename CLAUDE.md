@@ -84,7 +84,40 @@
 - @docs/PRODUCTION_READINESS_2026-07.md — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
 - @README.md — quickstart
 
-## Current Focus (as of 2026-07-22 — live outage resolved; Doug wave below)
+## Current Focus (as of 2026-07-24 — Nicole recalibration; approved strategic roadmap)
+
+**2026-07-24 — the Nicole meeting reset direction; `docs/ROADMAP_2026-07-24.md` is the APPROVED active
+plan (supersedes ROADMAP_2026-07-09.md).** Her corrections: **(1) run the OFFICIAL published CQL for
+official CMS eCQMs — never reauthor** ("if the CQL exists, use it"); **(2)** the real EHR proof path is
+**QRDA-I ingest → calculate → QRDA-I/III export → Cypress → ONC** (MADiE is authoring tooling, not EHR
+verification); **(3)** priority measures **CMS2, 68, 122, 125, 130, 138, 165, 951** (MIE ONC-certified
+~33/49); **(4)** self-authored CQL is the value only where no official definition exists — occupational/
+OSHA + HEDIS-insight — and MIE could steward occupational measures through NCQA; **(5)** DEQM/FHIR
+reporting is the direction but CMS/QPP has no endpoints (~2030). CQI WG = Fridays.
+
+**Five milestones (details, architecture, and the PR-sized migration sequence in the roadmap doc):**
+**M-A** official-first execution (promote the fqm-execution literal machinery to a per-measure-routed
+`officialMeasureExecutor` behind `WORKWELL_OFFICIAL_MEASURES`; MADiE cases = PERMANENT CI gates; authored
+cms122/125 subsets retire to the fidelity lab; all 8 measures verified present in
+`cqframework/dqm-content-qicore-2025` w/ test cases) · **M-B** QRDA-I/III + Cypress **CVU+**-validated
+loop (QRDA-I import AND export — the certification rehearsal; Cypress is open-source/Docker) · **M-C**
+pnpm-workspace extraction publishing **`@workwell/*`** (`measure-engine` = cql-execution+cql-exec-fhir
+only; `official-executor` = the fqm quarantine package; pitch Doug on `@mieweb/*` once proven) · **M-D**
+WebChart breadth (Condition/Encounter/med paths via the #316 ingest loop) + the versioned **compliance
+API** contract (Doug's question-shape) · **M-E** occupational content pack **published in the community
+`dqm-content` shape** + NCQA stewardship + CQI WG Fridays. **Two-track posture:** execute on the
+FHIR/QI-Core column (QI-Core STU7 = US Core 7 = WebChart's exact surface), report on the current QRDA
+column; QDM only ever appears as a translation at the QRDA boundary. HEDIS guardrail: own spec text +
+cases only, never reproduced NCQA specs (DUA).
+
+**STATUS:** extraction **PR-1 shipped** (branch `feat/engine-boundary-severance`): `ValueSetSource`
+narrow port (engine no longer imports the 30-method `ValueSetStore`), `UnconfiguredEngine` +
+`engine-factory.ts` moved to the new **`src/wiring/`** app-composition layer (5 importers repointed),
+and the `engine/engine-boundary.test.ts` arch guard (no production engine file may import `stores/` or
+`@mieweb/*`). Zero behavior change — full suite 1407/0/14, typecheck clean. Next: PR-2 (physical
+`packages/measure-engine` extraction) per the roadmap's §7.4 sequence.
+
+## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 
 **2026-07-22 — the live stack was DOWN for four days and the monitoring said green.** Every
 DB-backed route on `twh.os.mieweb.org` returned `{"error":"internal_error"}` from 07-18 to 07-22.

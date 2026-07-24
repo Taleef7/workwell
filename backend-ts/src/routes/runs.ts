@@ -25,7 +25,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import { engineForEnv } from "../wiring/engine-factory.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
