@@ -8,7 +8,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { jsonBucketDataSource, webChartDataSource, resolveDataSource, evaluateSource } from "./data-source.ts";
+import {
+  jsonBucketDataSource,
+  webChartDataSource,
+  resolveDataSource,
+  evaluateSource,
+  webChartConfigFromEnv,
+} from "./data-source.ts";
 import { fixtureWebChartClient } from "./webchart/webchart-client.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
@@ -73,6 +79,64 @@ test("resolveDataSource: the SMART pair (CLIENT_ID + PRIVATE_KEY) also selects W
     resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_CLIENT_ID: " ", WORKWELL_WEBCHART_PRIVATE_KEY: " " }, { a: 1 }).kind,
     "json",
   );
+});
+
+/**
+ * The base64 key transport (2026-07-24). The first staging deploy died on `Invalid keyData`: a
+ * multi-line PEM does not survive MIE's Create-a-Container env transport intact. `_B64` is single-line,
+ * so no newline handling sits between the secret store and `crypto.subtle.importKey`.
+ */
+test("webChartConfigFromEnv: PRIVATE_KEY_B64 decodes to the PEM and wins over the raw form", () => {
+  const PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
+  const b64 = Buffer.from(PEM, "utf8").toString("base64");
+
+  const fromB64 = webChartConfigFromEnv({
+    WORKWELL_WEBCHART_BASE_URL: "x",
+    WORKWELL_WEBCHART_CLIENT_ID: "c",
+    WORKWELL_WEBCHART_PRIVATE_KEY_B64: b64,
+  });
+  assert.equal(fromB64?.privateKeyPem, PEM);
+
+  // Both set → the deploy-safe form wins, so a stale raw var can't silently shadow the real key.
+  const both = webChartConfigFromEnv({
+    WORKWELL_WEBCHART_BASE_URL: "x",
+    WORKWELL_WEBCHART_CLIENT_ID: "c",
+    WORKWELL_WEBCHART_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nSTALE\n-----END PRIVATE KEY-----",
+    WORKWELL_WEBCHART_PRIVATE_KEY_B64: b64,
+  });
+  assert.equal(both?.privateKeyPem, PEM);
+
+  // _B64 alone satisfies the SMART pair, so the seam selects and the inventory reads webchart=on.
+  assert.equal(
+    resolveDataSource({
+      WORKWELL_WEBCHART_BASE_URL: "x",
+      WORKWELL_WEBCHART_CLIENT_ID: "c",
+      WORKWELL_WEBCHART_PRIVATE_KEY_B64: b64,
+    }).kind,
+    "webchart",
+  );
+});
+
+test("webChartConfigFromEnv: a malformed PRIVATE_KEY_B64 throws rather than degrading to inert", () => {
+  const env = { WORKWELL_WEBCHART_BASE_URL: "x", WORKWELL_WEBCHART_CLIENT_ID: "c" };
+
+  // Not base64 at all. Silently falling back to JSON ingress would look like a healthy deploy while
+  // the live integration was simply off — the failure has to be loud.
+  assert.throws(
+    () => webChartConfigFromEnv({ ...env, WORKWELL_WEBCHART_PRIVATE_KEY_B64: "!!!not base64!!!" }),
+    /not valid base64/,
+  );
+
+  // Valid base64 of the wrong thing (e.g. the body with its headers stripped).
+  assert.throws(
+    () => webChartConfigFromEnv({ ...env, WORKWELL_WEBCHART_PRIVATE_KEY_B64: Buffer.from("abc").toString("base64") }),
+    /did not decode to a PKCS#8 PEM/,
+  );
+
+  // Whitespace/line-wrapped base64 still decodes — some secret stores wrap long values.
+  const PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
+  const wrapped = Buffer.from(PEM, "utf8").toString("base64").replace(/(.{8})/g, "$1\n");
+  assert.equal(webChartConfigFromEnv({ ...env, WORKWELL_WEBCHART_PRIVATE_KEY_B64: wrapped })?.privateKeyPem, PEM);
 });
 
 test("webChartDataSource: the default HTTP transport constructs only on the gated WebChart path", () => {

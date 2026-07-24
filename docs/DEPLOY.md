@@ -412,18 +412,26 @@ merges) will fail the population fetch — land #328 first, or dispatch from its
 
 **Owner setup required before the first dispatch (one-time):**
 
-1. **MIE hosting confirmation** — confirm with Doug/Dave that MIE will host a **second** container set
-   (`twh-staging` + `twh-staging-api-ts`) alongside the demo stack. (Provisioning new containers is an MIE
-   ask; the deploy uses the same Container Manager API + `LAUNCHPAD_*` secrets.)
+1. ~~**MIE hosting confirmation**~~ — **not required** (settled 2026-07-24). The deploy provisions both
+   containers programmatically through the same Container Manager API and `LAUNCHPAD_*` secrets the
+   production deploy uses; the first staging dispatch created `twh-staging` + `twh-staging-api-ts` with no
+   MIE involvement. Tell Doug/Dave as a courtesy, not as a gate.
 2. **A separate Neon project** for staging → its pooled connection string as the `DATABASE_URL_STAGING`
-   GitHub secret. **Never** point staging at the `workwell-twh` demo DB.
+   GitHub secret. **Never** point staging at the `workwell-twh` demo DB (the deploy hard-fails if the two
+   resolve to the same host). Match production deliberately: **Postgres 16** (the Neon console and CLI
+   both default to a newer major — a staging env on a different major cannot validate planner-dependent
+   work like the #233 index fix), **AWS us-east-1**, autoscaling **0.25–2 CU**. Live staging project:
+   `workwell-staging` / `damp-hill-78058027`, created 2026-07-24.
 3. **GitHub secrets** (repo → Settings → Secrets):
    - `DATABASE_URL_STAGING` — the staging Neon pooled URL.
    - `WORKWELL_AUTH_JWT_SECRET_STAGING` — a strong random secret (distinct from production).
    - `WORKWELL_WEBCHART_PRIVATE_KEY_STAGING` — the **RS384 PKCS#8 PEM** for the teatea backend-services
-     client (multi-line). Its public half is the registered JWKS. This is the **only** WebChart secret —
-     the base URL / client id (`workwell`) / scope (`system/*.read`) / kid (`workwell-2026-07`) are
-     non-secret env constants in the workflow (update them there if MIE moves the trial).
+     client, stored as a plain multi-line PEM (the workflow base64-encodes it before handing it to the
+     container — see `WORKWELL_WEBCHART_PRIVATE_KEY_B64` below for why). Its public half is the registered
+     JWKS. This is the **only** WebChart secret — the base URL / client id (`workwell`) / scope
+     (`system/*.read`) / kid (`workwell-2026-07`) are non-secret env constants in the workflow (update
+     them there if MIE moves the trial). Set it from the key file rather than by pasting, so the newlines
+     survive exactly: `Get-Content key.pem -Raw | gh secret set WORKWELL_WEBCHART_PRIVATE_KEY_STAGING`.
    - `LAUNCHPAD_API_URL` / `LAUNCHPAD_API_KEY` / `OPENAI_API_KEY` — reused from the demo stack.
 
 Then run **Actions → Deploy TWH Staging (live WebChart / teatea) → Run workflow** (`replace_existing:true`).
@@ -531,7 +539,8 @@ shows all services `Up`).
 | `WORKWELL_EMAIL_FROM_NAME` | Backend | From display name (default `WorkWell Measure Studio`). |
 | `WORKWELL_WEBCHART_BASE_URL` | Backend | WebChart origin+app path (e.g. `https://<practice>.webchartnow.com/webchart.cgi`; the FHIR root is `{base}/fhir`). **Inert unless paired with an auth mode below — the demo stack leaves all `WORKWELL_WEBCHART_*` unset** (JSON-bucket ingress stays selected). |
 | `WORKWELL_WEBCHART_CLIENT_ID` | Backend | SMART Backend Services client id (the verified contract, PR-2c/ADR-028). Selects SMART auth together with `WORKWELL_WEBCHART_PRIVATE_KEY`. |
-| `WORKWELL_WEBCHART_PRIVATE_KEY` | Backend | PKCS#8 PEM private key for the RS384 `private_key_jwt` client assertion (multi-line env value; the matching public key is registered as the client's JWKS). |
+| `WORKWELL_WEBCHART_PRIVATE_KEY` | Backend | PKCS#8 PEM private key for the RS384 `private_key_jwt` client assertion (multi-line env value; the matching public key is registered as the client's JWKS). **Local/dev only — on a deployed stack use the `_B64` form below.** |
+| `WORKWELL_WEBCHART_PRIVATE_KEY_B64` | Backend | The same key, base64-encoded **whole file, headers included** — single-line, and therefore the form any deployed stack must use. Takes precedence over the raw variable when both are set. A multi-line env value does **not** survive the Create-a-Container transport: the first staging deploy (2026-07-24) reached the container truncated at the PEM's first newline, and every token request died on WebCrypto's opaque `Invalid keyData`. Encode with `base64 -w0 key.pem` (the staging workflow does this from the plain-PEM GitHub secret, so the stored secret stays a normal PEM). A too-short body now fails with an error that names the cause. |
 | `WORKWELL_WEBCHART_TOKEN_URL` | Backend | Optional token-endpoint override; when unset it is discovered from `{base}/fhir/.well-known/smart-configuration`. |
 | `WORKWELL_WEBCHART_SCOPE` | Backend | Optional OAuth scope (default `system/*.rs` — the documented bulk-registration grant; the sandbox also advertises v1-style `system/*.read`). |
 | `WORKWELL_WEBCHART_KID` | Backend | Optional JWK `kid` header for the client assertion (multi-key registered JWKS). |
