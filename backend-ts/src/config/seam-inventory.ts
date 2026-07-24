@@ -1,7 +1,7 @@
 /**
  * Inert-seam inventory + boot-time active-seam log line (#260/#264).
  *
- * The repo has 9 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030 + #264 alert webhook):
+ * The repo has 10 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030 + #264 alert webhook):
  * each has a simulated or store-backed default and an inert/stub adapter that only activates when its
  * env var(s) are set. Individually each is correct and reviewed; collectively they're untested-in-anger
  * surface that can rot silently (a var typo'd in a deploy secret, a seam nobody remembers exists). This
@@ -26,6 +26,7 @@ import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data
 import { isSqlPushdownSelected, type MeasureExecutorEnv } from "../engine/measure-executor.ts";
 import { isVsacConfigured, type VsacEnv } from "../engine/cql/resolve-value-set-resolver.ts";
 import { isAlertWebhookConfigured, type AlertEnv } from "../run/alert-channel.ts";
+import { isIncrementalEnabled, type IncrementalEnv } from "../run/incremental/incremental-eval.ts";
 
 /** The union of every seam's env-var shape (all optional — assignable from the worker's `Env`). */
 export type SeamEnv = EmailEnv &
@@ -36,7 +37,8 @@ export type SeamEnv = EmailEnv &
   MeasureExecutorEnv &
   VsacEnv &
   AlertEnv &
-  BucketSeamEnv;
+  BucketSeamEnv &
+  IncrementalEnv;
 
 export interface SeamStatus {
   /** Short, stable, log-line-friendly seam name. */
@@ -59,6 +61,7 @@ export function describeSeams(env: SeamEnv): SeamStatus[] {
     { name: "vsac", active: isVsacConfigured(env) },
     { name: "alert-webhook", active: isAlertWebhookConfigured(env) },
     { name: "bucket-s3", active: isS3BucketConfigured(env) },
+    { name: "incremental-eval", active: isIncrementalEnabled(env) },
   ];
 }
 

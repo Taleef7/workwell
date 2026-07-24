@@ -26,6 +26,7 @@ import {
   type RunPipelineDeps,
   type WebChartRunEnv,
 } from "../run/run-pipeline.ts";
+import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import type { WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert-channel.ts";
 
@@ -188,6 +189,8 @@ export interface SchedulerTickDeps {
   webChartClient?: WebChartClient;
   /** Alert fan-out for FAILED runs + tick errors (#264). Default = console-only. */
   alertChannels?: readonly AlertChannel[];
+  /** #263 — reuse unchanged subjects' prior outcomes on the nightly run. Inert unless the flag is set. */
+  incremental?: boolean;
 }
 
 /**
@@ -276,6 +279,8 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     events: deps.stores.events,
     actor: "scheduler", // system-initiated: audit rows attribute to the scheduler, not a user (Codex P1)
     alertChannels, // #264 — FAILED/PARTIAL_FAILURE from the nightly run is not silent
+    evalState: deps.stores.evalState, // #263 incremental cache (inert unless deps.incremental)
+    incremental: deps.incremental,
   };
 
   const planned = await planManualRun(runDeps, {
@@ -304,7 +309,7 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
  * Errors are logged but never rethrown — safe to hand to ctx.waitUntil.
  */
 export async function schedulerTick(
-  env: StoresEnv & WebChartRunEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string },
+  env: StoresEnv & WebChartRunEnv & { WORKWELL_ALERT_WEBHOOK_URL?: string; WORKWELL_INCREMENTAL_EVAL?: string },
 ): Promise<void> {
   // COMPUTE-COST GUARDRAIL (#322) — must stay the first statement in this function.
   //
@@ -323,7 +328,7 @@ export async function schedulerTick(
     const engine = await engineForEnv(env);
     const allSegments = await stores.segments.listSegments();
     const enabledSegments = allSegments.filter((s) => s.enabled);
-    await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env });
+    await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env, incremental: isIncrementalEnabled(env) });
   } catch (err) {
     // Invalidate the due gate so the next tick re-consults the persisted cadence (Codex P1, #322
     // review). runTick already avoids booking the cooldown before its run is durable; this is the

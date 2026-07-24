@@ -654,6 +654,53 @@ person_links (
 The read-time note in §3.25 (identity resolved from the synthetic directory, no table in PR-1) still holds
 for the auto grouping; PR-2 adds only this overrides table.
 
+### 3.27 Incremental-evaluation cache — `eval_state` (#263 Phase 2b) — NEW owner-approved table
+
+A pure CACHE that lets a recurring population run **skip re-evaluating a subject whose answer cannot have
+changed** and copy the prior outcome forward instead of spending ~68 ms of CQL. One row per
+(subject, measure, period) on the floor (`stores/sqlite/schema.ts`) + ceiling
+(`stores/postgres/schema-pg.ts`, `workwell_spike`); TEXT id (`crypto.randomUUID()`).
+
+```sql
+eval_state (
+  id                 TEXT PRIMARY KEY,
+  subject_id         TEXT NOT NULL,
+  measure_id         TEXT NOT NULL,
+  period             TEXT NOT NULL,          -- bucketPeriodForMeasure — same key as case idempotency
+  data_hash          TEXT NOT NULL,          -- sha256:<hex> of the canonicalized evaluated bundle
+  logic_version      TEXT NOT NULL,          -- sha256:<hex> of (measure ELM + referenced VS expansion hashes)
+  next_transition_at TEXT,                   -- YYYY-MM-DD: earliest date the status can change; NULL = terminal
+  last_status        TEXT NOT NULL,          -- the CQL Outcome Status to copy forward
+  source_outcome_id  TEXT NOT NULL,          -- the outcomes row whose evidence is copied forward
+  source_eval_date   TEXT NOT NULL,          -- YYYY-MM-DD run date of the source evaluation (evidence-recompute anchor)
+  last_evaluated_at  <ts> NOT NULL,          -- wall-clock ISO of the last real evaluation (audit)
+  UNIQUE (subject_id, measure_id, period)
+)
+-- index: (measure_id, period)  [floor eval_state_measure_period_idx / ceiling spike_eval_state_measure_period_idx]
+```
+
+- **Written** only on a REAL evaluation (an `IncrementalCache.commit`); a reuse never writes here, so
+  `source_outcome_id` always points at a genuine evaluation. `next_transition_at` uses TEXT `YYYY-MM-DD`
+  in **both** floor and ceiling so the reuse comparison (`evalDate < next_transition_at`) is lexicographic =
+  chronological and identical across stores. Ported behind `EvalStateStore` (floor + ceiling + store
+  contract, wired in `factory.ts`).
+- **Reuse rule** (in the run pipeline): reuse the prior outcome when `data_hash` **and** `logic_version`
+  match **and** the status can't have moved — `next_transition_at IS NULL` (terminal: OVERDUE / no-exam
+  MISSING_DATA / a PERMANENT series) OR `evalDate < next_transition_at` (before the boundary) OR
+  `source_eval_date == evalDate` (same day). On any uncertainty (no row, hash/logic mismatch, past the
+  boundary, source outcome gone) it re-evaluates — the cache can only make a run *slower*, never *wrong*.
+- **A pure cache** — dropping it just makes the next run a full run; no `outcomes`/`cases`/`audit` row
+  references it, which is why it is safe to add. **No FK** on `subject_id`/`measure_id` (same as
+  `person_links`/`quality_snapshots`). Descriptive only — reuse decides only WHETHER to re-run CQL, never
+  the answer (ADR-008/ADR-035).
+- **Inert unless `WORKWELL_INCREMENTAL_EVAL=true`** and scoped to the live-tenant run pipeline
+  (`finishManualRun`); the scale path (`batch-evaluate-scale.ts`) is not wired. On the demo/default stack
+  no `eval_state` row is ever written and the run loop is byte-identical to today.
+- **Reversible** (schema-qualify on the Pg ceiling): `DELETE FROM workwell_spike.eval_state;`
+
+OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (#263 Phase 2b); additive
+(`CREATE … IF NOT EXISTS`), reversible, no data migration.
+
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 
