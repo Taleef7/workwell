@@ -40,6 +40,17 @@ guard (fqm-isolation pattern): no production file under `src/engine/` may import
 the shape `packages/measure-engine` extracts in PR-2. Typecheck clean; full suite **1407 pass / 0 fail /
 14 skipped** (byte-identical).
 
+**Review round (PR #333, Codex P2 — a real hole, fixed).** The guard matched two import *shapes*
+(`from "x"` and `import("x")`), so a side-effect `import "@mieweb/cloud";` or a CJS `require("../stores/…")`
+would have restored a forbidden runtime dependency **while the test stayed green** — an arch fence that
+silently passes is worse than none. Rewrote it to extract EVERY module specifier (static `from`,
+side-effect `import "x"`, dynamic `import("x")`, `require("x")`, `export … from "x"`, quote-agnostic) and
+test the specifier itself against the forbidden targets. The matcher is now **unit-tested against all
+nine forms plus six clean controls** (including `@mieweb/cloud` mentioned in prose, and `restores/` which
+must not match `stores/`), and a planted-violation probe confirmed the tree walk fails end-to-end on the
+exact form the original regex missed. Also stripped the Windows trailing separator so violation labels
+read `src/engine/x.ts`, not `src/engine//x.ts`.
+
 ## 2026-07-24 — #263 incremental/delta batch evaluation, Phases 2a + 2b (branch `feat/263-incremental-eval`)
 
 Built the incremental-evaluation feature end-to-end on a feature branch (owner said "proceed with #263";
