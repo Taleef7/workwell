@@ -7,6 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   countPopulations,
+  officialMembership,
+  membershipFor,
   populationCountsFromStatus,
   buildSummaryMeasureReport,
   buildIndividualMeasureReport,
@@ -38,7 +40,7 @@ const countOf = (mr: { group: Array<{ population: Array<{ code: { coding: Array<
 };
 
 test("countPopulations: IPP/DENEX/DENOM/NUMER from buckets", () => {
-  assert.deepEqual(countPopulations(outcomes, "audiogram"), { ipp: 10, denex: 1, denom: 10, numer: 6 });
+  assert.deepEqual(countPopulations(outcomes, "audiogram"), { ipp: 10, denex: 1, denom: 10, numer: 6, denexcep: 0 });
 });
 
 test("summary: counts + measureScore reconcile; conformant", () => {
@@ -74,11 +76,11 @@ test("cms122/cms125 MISSING_DATA is out of population in row and histogram count
   ];
 
   for (const measureId of ["cms122", "cms125"]) {
-    assert.deepEqual(countPopulations(cmsOutcomes, measureId), { ipp: 3, denom: 3, denex: 1, numer: 1 });
-    assert.deepEqual(populationCountsFromStatus(histogram, measureId), { ipp: 3, denom: 3, denex: 1, numer: 1 });
+    assert.deepEqual(countPopulations(cmsOutcomes, measureId), { ipp: 3, denom: 3, denex: 1, numer: 1, denexcep: 0 });
+    assert.deepEqual(populationCountsFromStatus(histogram, measureId), { ipp: 3, denom: 3, denex: 1, numer: 1, denexcep: 0 });
   }
-  assert.deepEqual(countPopulations(cmsOutcomes, "audiogram"), { ipp: 4, denom: 4, denex: 1, numer: 1 });
-  assert.deepEqual(populationCountsFromStatus(histogram, "audiogram"), { ipp: 4, denom: 4, denex: 1, numer: 1 });
+  assert.deepEqual(countPopulations(cmsOutcomes, "audiogram"), { ipp: 4, denom: 4, denex: 1, numer: 1, denexcep: 0 });
+  assert.deepEqual(populationCountsFromStatus(histogram, "audiogram"), { ipp: 4, denom: 4, denex: 1, numer: 1, denexcep: 0 });
 });
 
 test("individual: subject ref + 0/1 membership; no measureScore", () => {
@@ -145,4 +147,184 @@ test("bundle: summary + one individual per outcome; individuals sum to summary",
   assert.equal(sum("numerator"), 6);
   assert.equal(sum("denominator"), 10);
   assert.equal(sum("denominator-exclusion"), 1);
+});
+
+/**
+ * PR-3 (roadmap §7.4) — evidence-first population membership, so the exporter is ready for
+ * official-routed outcomes BEFORE the flip, without a hardcoded per-measure flag for each of the
+ * eight incoming CMS measures.
+ */
+const officialOc = (
+  status: string,
+  populationResults: Record<string, boolean>,
+  measureId = "cms122",
+): OutcomeRecord => ({
+  id: `oo${++n}`, runId: "run-1", subjectId: `emp-o${n}`, measureId,
+  evaluationPeriod: "2026-06-12", status,
+  evidence: { official: { ecqmId: "CMS122v14", version: "1.0.000", engine: "fqm-execution", populationResults } },
+  evaluatedAt: "2026-06-12T00:01:00.000Z",
+});
+
+test("PR-3: official populationResults drive membership, not the outcome status", () => {
+  // An official NUMER subject whose workflow status is OVERDUE (cms122 is an inverse measure:
+  // numerator = poor control). Status-based counting would call this a non-numerator.
+  const counts = countPopulations(
+    [officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true })],
+    "cms122",
+  );
+  assert.deepEqual(counts, { ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 });
+});
+
+test("PR-3: official ipp=false is out of population regardless of status", () => {
+  const counts = countPopulations(
+    [officialOc("COMPLIANT", { ipp: false, denom: false, denex: false, numer: false })],
+    "cms122",
+  );
+  assert.deepEqual(counts, { ipp: 0, denom: 0, denex: 0, numer: 0, denexcep: 0 });
+});
+
+test("PR-3: DENEXCEP maps to the exception count without a sixth outcome bucket", () => {
+  // CMS68-class: an excepted subject is in DENOM, subtracted for the score — the vocabulary
+  // decision (roadmap §7.3) is that this rides in evidence, never a new OutcomeStatus.
+  const counts = countPopulations(
+    [officialOc("EXCLUDED", { ipp: true, denom: true, denex: false, denexcep: true, numer: false }, "cms68")],
+    "cms68",
+  );
+  assert.equal(counts.ipp, 1);
+  assert.equal(counts.denom, 1);
+  assert.equal(counts.denexcep, 1);
+  assert.equal(counts.denex, 0);
+});
+
+test("PR-3: individual MeasureReport uses official membership too", () => {
+  const report = buildIndividualMeasureReport(
+    officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true }),
+    run,
+    "cms122",
+    GENERATED_AT,
+  );
+  const pop = (code: string) =>
+    report.group[0]?.population.find((p) => p.code.coding[0]?.code === code)?.count;
+  assert.equal(pop("numerator"), 1);
+  assert.equal(pop("initial-population"), 1);
+});
+
+test("PR-3: authored outcomes are UNCHANGED — no official evidence means the status rule still applies", () => {
+  // The zero-behavior-change guarantee for this PR: every authored measure keeps today's counts.
+  const authored = [oc("COMPLIANT"), oc("OVERDUE"), oc("EXCLUDED"), oc("MISSING_DATA")];
+  assert.deepEqual(countPopulations(authored, "audiogram"), { ipp: 4, denom: 4, denex: 1, numer: 1, denexcep: 0 });
+  // cms122 keeps its binding-driven MISSING_DATA-is-out-of-population behavior (ADR-031).
+  assert.deepEqual(countPopulations(authored, "cms122"), { ipp: 3, denom: 3, denex: 1, numer: 1, denexcep: 0 });
+});
+
+test("PR-3: malformed official evidence falls back to the status rule rather than throwing", () => {
+  const bad: OutcomeRecord = {
+    id: "bad", runId: "run-1", subjectId: "emp-bad", measureId: "cms122",
+    evaluationPeriod: "2026-06-12", status: "COMPLIANT",
+    evidence: { official: { populationResults: "not-an-object" } },
+    evaluatedAt: "2026-06-12T00:01:00.000Z",
+  };
+  assert.deepEqual(countPopulations([bad], "cms122"), { ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 });
+});
+
+
+/** Silence the deliberate WORKWELL_ALERT lines while asserting the degrade paths. */
+function quietly<T>(fn: () => T): T {
+  const original = console.error;
+  console.error = () => {};
+  try { return fn(); } finally { console.error = original; }
+}
+
+test("PR-3 parser: accepts the fqm-native array shape (what the writer most naturally produces)", () => {
+  const m = officialMembership({
+    official: {
+      populationResults: [
+        { populationType: "initial-population", result: true },
+        { populationType: "denominator", result: true },
+        { populationType: "denominator-exclusion", result: false },
+        { populationType: "numerator", result: true },
+      ],
+    },
+  });
+  assert.deepEqual(m, { ipp: true, denom: true, denex: false, numer: true, denexcep: false });
+});
+
+test("PR-3 parser: accepts denominator-exception from the array shape", () => {
+  const m = officialMembership({
+    official: {
+      populationResults: [
+        { populationType: "initial-population", result: true },
+        { populationType: "denominator", result: true },
+        { populationType: "denominator-exception", result: true },
+        { populationType: "numerator", result: false },
+      ],
+    },
+  });
+  assert.equal(m?.denexcep, true);
+});
+
+test("PR-3 parser: a partially-spelled keyed payload is REJECTED, not read as all-false", () => {
+  // The silent-misread hazard: `denominator`/`numerator` spelled out would otherwise yield
+  // DENOM 0 / NUMER 0 with no signal - a plausible-looking but wrong regulatory artifact.
+  const m = quietly(() =>
+    officialMembership({ official: { populationResults: { ipp: true, denominator: true, numerator: true } } }),
+  );
+  assert.equal(m, null);
+});
+
+test("PR-3 parser: absent official evidence is silent; present-but-unreadable is LOUD", () => {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (msg: unknown) => { lines.push(String(msg)); };
+  try {
+    assert.equal(officialMembership({ expressionResults: [] }), null, "authored evidence -> null");
+    assert.equal(lines.length, 0, "an authored outcome must not alert");
+    officialMembership({ official: { populationResults: "nope" } });
+    assert.equal(lines.length, 1, "unreadable official evidence must alert");
+    assert.match(lines[0] ?? "", /WORKWELL_ALERT.*OFFICIAL_POPULATION_RESULTS_UNREADABLE/);
+  } finally {
+    console.error = original;
+  }
+});
+
+test("PR-3 parser: membership violating numer within denom within ipp is clamped, not emitted", () => {
+  // A non-conformant report (numerator 1 / denominator 0) would be rejected by Cypress.
+  const m = quietly(() =>
+    officialMembership({ official: { populationResults: { ipp: true, denom: false, denex: false, numer: true } } }),
+  );
+  assert.deepEqual(m, { ipp: true, denom: false, denex: false, numer: false, denexcep: false });
+});
+
+test("PR-3: official individuals still sum exactly to the official summary (ADR-031 reconciliation)", () => {
+  const officialOutcomes = [
+    officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true }),
+    officialOc("COMPLIANT", { ipp: true, denom: true, denex: false, numer: false }),
+    officialOc("EXCLUDED", { ipp: true, denom: true, denex: true, numer: false }),
+    officialOc("MISSING_DATA", { ipp: false, denom: false, denex: false, numer: false }),
+  ];
+  const summary = countPopulations(officialOutcomes, "cms122");
+  const summed = officialOutcomes
+    .map((o) => membershipFor(o, "cms122"))
+    .reduce(
+      (acc, m) => ({
+        ipp: acc.ipp + (m.ipp ? 1 : 0),
+        denom: acc.denom + (m.denom ? 1 : 0),
+        denex: acc.denex + (m.denex ? 1 : 0),
+        numer: acc.numer + (m.numer ? 1 : 0),
+        denexcep: acc.denexcep + (m.denexcep ? 1 : 0),
+      }),
+      { ipp: 0, denom: 0, denex: 0, numer: 0, denexcep: 0 },
+    );
+  assert.deepEqual(summary, summed);
+  assert.deepEqual(summary, { ipp: 3, denom: 3, denex: 1, numer: 1, denexcep: 0 });
+});
+
+test("PR-3: the histogram path CANNOT see official evidence - the divergence is pinned, not assumed", () => {
+  // This is why routes/runs.ts sends official-routed measures down the row path
+  // (wiring/official-routing.ts). Pin the trap concretely so prose is never the only guard.
+  const officialOutcomes = [officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true })];
+  const rowBased = countPopulations(officialOutcomes, "cms122");
+  const histogram = populationCountsFromStatus([{ status: "OVERDUE", count: 1, latestEvaluatedAt: "2026-06-12T00:01:00.000Z" }], "cms122");
+  assert.equal(rowBased.numer, 1, "official evidence says this subject IS the numerator");
+  assert.equal(histogram.numer, 0, "the status histogram cannot know that - hence the routing guard");
 });

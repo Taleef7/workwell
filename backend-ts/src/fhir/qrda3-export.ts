@@ -28,6 +28,9 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
   { code: "DENOM", label: "denominator" },
   { code: "DENEX", label: "denominator-exclusion" },
   { code: "NUMER", label: "numerator" },
+  // Exceptions exist only for official-routed measures (CMS68-class); the observation is emitted
+  // only when the count is non-zero, so every authored measure's QRDA stays byte-identical.
+  { code: "DENEXCEP", label: "denominator-exception" },
 ];
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
@@ -36,14 +39,18 @@ export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: 
 
 /** QRDA III from pre-aggregated proportion counts (the bounded Fable H4 path). */
 export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, c: PopulationCounts): string {
-  const counts: Record<string, number> = { IPOP: c.ipp, DENOM: c.denom, DENEX: c.denex, NUMER: c.numer };
+  const counts: Record<string, number> = {
+    IPOP: c.ipp, DENOM: c.denom, DENEX: c.denex, NUMER: c.numer, DENEXCEP: c.denexcep,
+  };
   const now = hl7Ts(new Date().toISOString());
   const low = hl7Ts(run.measurementPeriodStart);
   const high = hl7Ts(run.measurementPeriodEnd);
-  const effectiveDenominator = c.denom - c.denex;
+  // Must match `buildSummaryMeasureReportFromCounts` exactly — the two exporters describe the same
+  // run and are compared against each other by the certification loop (M-B).
+  const effectiveDenominator = c.denom - c.denex - c.denexcep;
   const perfRate = effectiveDenominator > 0 ? (c.numer / effectiveDenominator).toFixed(4) : "0";
 
-  const populationObs = POPULATIONS.map(
+  const populationObs = POPULATIONS.filter(({ code }) => code !== "DENEXCEP" || c.denexcep > 0).map(
     ({ code, label }) => `
           <component>
             <observation classCode="OBS" moodCode="EVN">
