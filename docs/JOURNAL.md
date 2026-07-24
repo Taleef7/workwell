@@ -1,5 +1,43 @@
 # Journal
 
+## 2026-07-24 (later still) — PR-3: evidence-first population membership (branch `feat/measure-report-ipp-generalization`)
+
+Roadmap §7.4 PR-3, the last exporter change that must land **before** the official flip so shadow diffs
+run against a clean exporter. ADR-031 keyed out-of-population off a hand-written per-measure binding flag
+(`missingDataMeansOutOfPopulation`, set on cms122/cms125 only). That does not scale to the eight incoming
+official measures — each would need a flag guessed from its CQL — and it structurally cannot express
+DENEXCEP/NUMEX, nor survive an inverse measure (cms122's numerator is poor control, so an official NUMER
+subject carries the workflow status OVERDUE).
+
+**`membershipFor(outcome, measureId)` now reads `evidence_json.official.populationResults` first** and
+uses it verbatim — the measure's own logic reporting its own populations, authoritative over any status
+heuristic. Absent that evidence (every measure today) the ADR-031 rule applies unchanged, so this is
+**behavior-neutral until the flip**; malformed evidence degrades to the status rule rather than throwing
+inside an export. `denominator-exception` is emitted and subtracted from the effective score denominator
+in **both** MeasureReport and QRDA III — but only when non-zero, so authored exports stay byte-identical.
+QRDA III was fixed in the same pass: it hardcoded four populations and `denom - denex`, so it would have
+silently disagreed with MeasureReport the moment exceptions existed.
+
+**Two findings recorded rather than acted on.** (1) The obvious reading of "key off persisted
+`inInitialPopulation`" is a trap: **every** measure defines `"Initial Population"` and it is already
+persisted, but adopting it would change exported IPP/DENOM for the 12 OSHA/HEDIS measures (audiogram's
+IPP is `In Hearing Conservation Program or Has Active Waiver` — non-enrolled subjects inflate today's
+denominator) **and** break the documented 1:1 reconciliation with the histogram path. Real correctness
+finding, but it deserves its own decision, not a silent side effect — recorded in the ADR-031 amendment.
+(2) `populationCountsFromStatus` (the bounded `GROUP BY status` histogram behind 120k `seed:scale`
+summaries) has no per-subject evidence, so it is now explicitly scoped to authored measures.
+
+**PR-2 resequenced.** A dependency-closure scan settled what `packages/measure-engine` actually is: **29
+files (9 TS + 20 ELM) reaching nothing outside `src/engine/`** — exactly §7.1's list. `resolveDataSource`
++ the WebChart adapter would inflate it to 38 and drag in the whole synthetic corpus (via
+`webchart/terminology.ts` → `synthetic/measure-bindings.ts`), so by the PR-1 precedent they stay behind
+as app composition. The physical move is a ~53-file import rewrite with zero externally-visible value,
+and PR-1's containment test freezes the boundary so it cannot regress while it waits — so it now lands
+with M-C, carrying PR-4's workspace scaffolding. Also noted: the four `*-cli.ts` files export library
+values consumed by 8+ modules, so "move the CLIs out" is a real refactor, not a `git mv`.
+
+Typecheck clean; full suite **1415 pass / 0 fail / 14 skipped** (+7 tests, no regressions).
+
 ## 2026-07-24 (later) — Nicole recalibration → strategic plan approved → engine-boundary severance (extraction PR-1, branch `feat/engine-boundary-severance`)
 
 **The Nicole meeting reset the near-term direction** —
