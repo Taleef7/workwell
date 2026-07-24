@@ -319,6 +319,48 @@ test("live bundles evaluate through the unchanged CQL engine and persist wc-pref
   }
 });
 
+test("a _B64-only SMART env drives the live path (the scheduled-run selector, #331)", async () => {
+  // The scheduler threads env by hand (server.ts). A deployment following the deploy guidance sets
+  // ONLY WORKWELL_WEBCHART_PRIVATE_KEY_B64, so the run pipeline — reached identically by a manual run
+  // and by schedulerTick -> runTick — must select WebChart on the encoded form alone. Otherwise the
+  // nightly ALL_PROGRAMS run silently recomputes the SYNTHETIC population (Codex P2). The injected
+  // client means the key is never signed with here; presence is all the selector needs.
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const rawEmployee = { ...EMPLOYEES[4]!, externalId: "b64-1", name: "B64 Live" };
+    const rawBundle = buildSyntheticBundle(
+      rawEmployee,
+      deriveExamConfig(MEASURE_BINDINGS.audiogram!, "COMPLIANT"),
+      "2026-06-01",
+    );
+    const smartB64Env = {
+      WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+      WORKWELL_WEBCHART_CLIENT_ID: "workwell",
+      WORKWELL_WEBCHART_PRIVATE_KEY_B64: Buffer.from(
+        "-----BEGIN PRIVATE KEY-----\nZml4dHVyZQ==\n-----END PRIVATE KEY-----",
+        "utf8",
+      ).toString("base64"),
+    };
+    const result = await executeManualRun(
+      {
+        runStore,
+        outcomeStore,
+        engine: new CqlExecutionEngine(),
+        employees: [],
+        webChartEnv: smartB64Env,
+        webChartClient: fixtureWebChartClient([rawBundle]),
+      },
+      { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" },
+    );
+    assert.equal(result.status, "COMPLETED");
+    const rows = await outcomeStore.listOutcomes(result.runId);
+    assert.equal(rows.length, 1, "the live population was fetched, not the synthetic one");
+    assert.equal(rows[0]!.subjectId, "wc|b64-1", "wc-prefixed => the WebChart path ran");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports degradedCount", async () => {
   const { p, runStore, outcomeStore } = await freshPipelineDb();
   const audits: unknown[] = [];

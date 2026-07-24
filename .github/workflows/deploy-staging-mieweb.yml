@@ -174,6 +174,12 @@ jobs:
         # still drops `_count` automatically on the first-page rejection. Requires the PR #328 client
         # code, so dispatch this workflow from a branch/commit that contains it.
         run: |
+          # The PEM is carried to the container BASE64-ENCODED. A multi-line env value does not survive
+          # the Create-a-Container transport intact — the first staging deploy (2026-07-24) reached the
+          # container with mangled newlines and every token request died on `Invalid keyData`. base64 -w0
+          # is single-line, so nothing between the GitHub secret and crypto.subtle.importKey touches a
+          # newline. The GitHub secret itself stays a plain PEM; the encoding happens here.
+          wc_key_b64="$(printf '%s' "$WORKWELL_WEBCHART_PRIVATE_KEY" | base64 -w0)"
           db_url="${DATABASE_URL#jdbc:}"
           case "$db_url" in
             postgres://*|postgresql://*) : ;;
@@ -191,7 +197,7 @@ jobs:
               --arg frontend_url "$FRONTEND_URL" \
               --arg wc_base "$STAGING_WEBCHART_BASE_URL" \
               --arg wc_client "$STAGING_WEBCHART_CLIENT_ID" \
-              --arg wc_key "$WORKWELL_WEBCHART_PRIVATE_KEY" \
+              --arg wc_key_b64 "$wc_key_b64" \
               --arg wc_scope "$STAGING_WEBCHART_SCOPE" \
               --arg wc_kid "$STAGING_WEBCHART_KID" \
               --arg wc_patient_search "$STAGING_WEBCHART_PATIENT_SEARCH" \
@@ -210,7 +216,7 @@ jobs:
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "false"},
                 {key: "WORKWELL_WEBCHART_BASE_URL", value: $wc_base},
                 {key: "WORKWELL_WEBCHART_CLIENT_ID", value: $wc_client},
-                {key: "WORKWELL_WEBCHART_PRIVATE_KEY", value: $wc_key},
+                {key: "WORKWELL_WEBCHART_PRIVATE_KEY_B64", value: $wc_key_b64},
                 {key: "WORKWELL_WEBCHART_SCOPE", value: $wc_scope},
                 {key: "WORKWELL_WEBCHART_KID", value: $wc_kid},
                 {key: "WORKWELL_WEBCHART_PATIENT_SEARCH", value: $wc_patient_search}

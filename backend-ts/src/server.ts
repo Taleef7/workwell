@@ -65,9 +65,16 @@ async function main(): Promise<void> {
     WORKWELL_WEBCHART_API_KEY: process.env.WORKWELL_WEBCHART_API_KEY,
     WORKWELL_WEBCHART_CLIENT_ID: process.env.WORKWELL_WEBCHART_CLIENT_ID,
     WORKWELL_WEBCHART_PRIVATE_KEY: process.env.WORKWELL_WEBCHART_PRIVATE_KEY,
+    // The deployed key form (single-line base64). Must be threaded alongside the raw var or a
+    // scheduled run under a _B64-only deployment sees isWebChartConfigured=false and silently
+    // recomputes the SYNTHETIC population instead of WebChart (Codex P2, #331). Likewise
+    // DISABLE_COUNT / PATIENT_SEARCH — a server that needs them for a manual run needs them here too.
+    WORKWELL_WEBCHART_PRIVATE_KEY_B64: process.env.WORKWELL_WEBCHART_PRIVATE_KEY_B64,
     WORKWELL_WEBCHART_TOKEN_URL: process.env.WORKWELL_WEBCHART_TOKEN_URL,
     WORKWELL_WEBCHART_SCOPE: process.env.WORKWELL_WEBCHART_SCOPE,
     WORKWELL_WEBCHART_KID: process.env.WORKWELL_WEBCHART_KID,
+    WORKWELL_WEBCHART_DISABLE_COUNT: process.env.WORKWELL_WEBCHART_DISABLE_COUNT,
+    WORKWELL_WEBCHART_PATIENT_SEARCH: process.env.WORKWELL_WEBCHART_PATIENT_SEARCH,
     WORKWELL_WEBCHART_ENROLLMENT_JSON: process.env.WORKWELL_WEBCHART_ENROLLMENT_JSON,
   };
   const schedulerInterval = setInterval(() => {
