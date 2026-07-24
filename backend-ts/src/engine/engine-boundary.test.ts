@@ -16,15 +16,43 @@ import { fileURLToPath } from "node:url";
  * Test files are exempt: integration tests legitimately wire real SQLite stores + `@mieweb/cloud-local`
  * fixtures to prove engine behavior against the app's adapters. The rule protects what would ship.
  *
- * Same grep-the-tree mechanics as `standards/fqm-isolation.test.ts` (the proven pattern).
+ * Same grep-the-tree mechanics as `standards/fqm-isolation.test.ts` (the proven pattern), with one
+ * hardening (Codex review, PR #333): rather than matching two import *shapes*, extract EVERY module
+ * specifier — `from "x"`, side-effect `import "x"`, dynamic `import("x")`, `require("x")`,
+ * `export … from "x"` — and test the specifier itself. A guard that silently passes is worse than no
+ * guard, so `findForbiddenImports` is itself unit-tested against every import form below.
  */
 const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)); // .../backend-ts/src/engine/
 
-// Any import/require of the app's store layer (relative, any depth) or any @mieweb package.
-const FORBIDDEN_RES: { name: string; re: RegExp }[] = [
-  { name: "stores/ (app persistence layer)", re: /(?:from\s*|import\s*\(\s*)["'](?:\.\.\/)+stores\// },
-  { name: "@mieweb/* (platform layer)", re: /(?:from\s*|import\s*\(\s*)["']@mieweb\// },
+/**
+ * Every module-specifier position TypeScript/ESM/CJS offers. The `\bimport\s+["']` alternative is
+ * what catches a bare side-effect import (`import "@mieweb/cloud";`); `\bfrom\s*` covers static and
+ * `export … from` re-exports (including `import type`, which still declares a package dependency).
+ */
+const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(["'])([^"']+)\1/g;
+
+const FORBIDDEN: { name: string; matches: (specifier: string) => boolean }[] = [
+  {
+    name: "stores/ (app persistence layer)",
+    matches: (s) => /^(?:\.\.\/)+stores\//.test(s),
+  },
+  {
+    name: "@mieweb/* (platform layer)",
+    matches: (s) => s.startsWith("@mieweb/"),
+  },
 ];
+
+/** Returns one label per forbidden import found in `source` (empty = clean). */
+function findForbiddenImports(source: string): string[] {
+  const found: string[] = [];
+  for (const match of source.matchAll(SPECIFIER_RE)) {
+    const specifier = match[2] ?? "";
+    for (const { name, matches } of FORBIDDEN) {
+      if (matches(specifier)) found.push(`${name} via "${specifier}"`);
+    }
+  }
+  return found;
+}
 
 function walk(dir: string, out: string[]): void {
   for (const name of readdirSync(dir)) {
@@ -38,19 +66,51 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
+test("the boundary matcher catches every import form (guard self-test)", () => {
+  const violating = [
+    'import { getStores } from "../../stores/factory.ts";',
+    'import type { ValueSetStore } from "../stores/value-set-store.ts";',
+    'import "@mieweb/cloud";', // side-effect — the form the original regex missed
+    'import{UnsupportedBindingError}from"@mieweb/cloud";', // no spaces
+    'const cloud = require("@mieweb/cloud");',
+    'const { getStores } = require("../../stores/factory.ts");',
+    'const cloud = await import("@mieweb/cloud");',
+    'export * from "../../stores/factory.ts";',
+    "export { getStores } from '../../stores/factory.ts';", // single quotes
+  ];
+  for (const source of violating) {
+    assert.ok(
+      findForbiddenImports(source).length > 0,
+      `matcher missed a forbidden import: ${source}`,
+    );
+  }
+
+  const clean = [
+    'import { CqlCode } from "./cql/value-set-resolver.ts";',
+    'import { readFileSync } from "node:fs";',
+    'import { Library } from "cql-execution";',
+    " * portable across every @mieweb/cloud target", // prose in a doc comment, not an import
+    " * imports NOTHING from the app layer (stores/, @mieweb/*)",
+    'import { restoreStore } from "./restores/helper.ts";', // "restores/" must not match "stores/"
+  ];
+  for (const source of clean) {
+    assert.deepEqual(findForbiddenImports(source), [], `matcher false-positived on: ${source}`);
+  }
+});
+
 test("src/engine/ production code imports nothing from stores/ or @mieweb/* (engine package boundary)", () => {
   const files: string[] = [];
-  walk(ENGINE_ROOT.replace(/\/$/, ""), files);
+  // fileURLToPath yields a trailing OS separator (a backslash on Windows) — strip either form so
+  // the joined paths, and therefore the violation labels below, stay single-separator.
+  walk(ENGINE_ROOT.replace(/[\\/]$/, ""), files);
   const production = files.filter((f) => !f.endsWith(".test.ts"));
+  assert.ok(production.length > 20, "engine tree walk found suspiciously few files");
 
   const violations: string[] = [];
   for (const file of production) {
-    const source = readFileSync(file, "utf8");
-    for (const { name, re } of FORBIDDEN_RES) {
-      if (re.test(source)) {
-        const rel = file.replace(/\\/g, "/");
-        violations.push(`${rel.slice(rel.lastIndexOf("/src/") + 1)} imports ${name}`);
-      }
+    for (const label of findForbiddenImports(readFileSync(file, "utf8"))) {
+      const rel = file.replace(/\\/g, "/");
+      violations.push(`${rel.slice(rel.lastIndexOf("/src/") + 1)} imports ${label}`);
     }
   }
 
