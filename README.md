@@ -33,7 +33,7 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
   stewardship. First step shipped same day: **extraction PR-1** (`feat/engine-boundary-severance`) —
   `src/engine/` production code now imports nothing from `stores/` or `@mieweb/*` (new `ValueSetSource`
   port; `engine-factory`/`UnconfiguredEngine` → the new `src/wiring/` layer; enforced by an
-  `engine-boundary` arch test). Zero behavior change: 1407 pass / 0 fail / 14 skipped.
+  `engine-boundary` containment test). Zero behavior change: 1408 pass / 0 fail / 14 skipped.
 - **2026-07-24 — #263 incremental/delta batch evaluation (PR #332, on `feat/263-incremental-eval`; ADR-035).**
   A recurring population run reuses a subject's prior CQL outcome (copy-forward with date-corrected
   evidence) instead of spending ~68 ms of CQL, when its data (`data_hash`) + logic (`logic_version`,

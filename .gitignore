@@ -50,5 +50,9 @@ docs/MCP_LOCAL.md
 docs/vision doc screenshots
 webchart-import/
 
-# Local-only call transcripts (personal/personnel content - never commit)
-docs/doug_audio_transcript_*.txt
+# Local-only call transcripts (personal/personnel content - never commit, never reference in docs).
+# Any depth, any of the formats a recorder/transcriber emits.
+**/*transcript*.txt
+**/*transcript*.md
+**/*transcript*.vtt
+**/*transcript*.srt
