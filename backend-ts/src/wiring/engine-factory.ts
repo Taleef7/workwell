@@ -26,9 +26,9 @@
  * value sets. Engine construction is cheap (FHIRHelpers ELM is a bundled lookup, not a parse), and VSAC's
  * own value sets are externally immutable, so the per-run VSAC memoization within the resolver suffices.
  */
-import { CqlExecutionEngine } from "./cql-execution-engine.ts";
-import { resolveValueSetResolver, type VsacEnv } from "./resolve-value-set-resolver.ts";
-import { getStores, type StoresEnv } from "../../stores/factory.ts";
+import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { resolveValueSetResolver, type VsacEnv } from "../engine/cql/resolve-value-set-resolver.ts";
+import { getStores, type StoresEnv } from "../stores/factory.ts";
 
 // Unkeyed default (and the not-yet-seeded fallback): a single shared, stateless engine (no resolver →
 // inline path). It holds no env-specific or value-set state, so one instance is correct for every env and

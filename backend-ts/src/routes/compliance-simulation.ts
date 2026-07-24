@@ -5,7 +5,7 @@
  * (all roles, like the immunization forecast). Writes nothing; no schema. handleEmployees only matches
  * `/profile` + `/search`, so this `/simulate` path is not intercepted.
  */
-import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import { engineForEnv } from "../wiring/engine-factory.ts";
 import type { StoresEnv } from "../stores/factory.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { simulateComplianceAsOf } from "../run/employee-compliance-snapshot.ts";
