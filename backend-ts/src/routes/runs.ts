@@ -46,7 +46,14 @@ import {
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
-import { buildMeasureReportBundle, buildSummaryMeasureReportFromCounts, populationCountsFromStatus } from "../fhir/measure-report.ts";
+import type { PopulationCounts } from "../fhir/measure-report.ts";
+import {
+  buildMeasureReportBundle,
+  buildSummaryMeasureReportFromCounts,
+  countPopulations,
+  populationCountsFromStatus,
+} from "../fhir/measure-report.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
@@ -135,6 +142,43 @@ const json = (data: unknown, status = 200): Response =>
 /** Cap on subjects for a per-subject (individual/bundle) MeasureReport — a 120k seed:scale run would
  *  otherwise build a 120k-entry document (Fable H4). The summary report is the aggregate above this. */
 const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
+
+/**
+ * Aggregate population counts for a completed single-measure run.
+ *
+ * Authored measures use the bounded `GROUP BY status` histogram (Fable H4) — a 120k `seed:scale` run
+ * must never materialize its 1.68M rows. An OFFICIAL-routed measure cannot: its populations live in
+ * per-subject `evidence_json.official.populationResults`, which a status histogram cannot see, and
+ * deriving them from the workflow status would invert the numerator for a lower-is-better measure.
+ * So official runs read rows, bounded by the same subject cap the individual/bundle reports use;
+ * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
+ */
+async function aggregateCountsForRun(
+  os: Awaited<ReturnType<typeof outcomes>>,
+  runId: string,
+  measureId: string,
+  env: RunsEnv,
+): Promise<{ counts: PopulationCounts } | { error: Response }> {
+  if (!isOfficialRouted(measureId, env as unknown as Record<string, unknown>)) {
+    return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId) };
+  }
+  const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);
+  if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
+    return {
+      error: json(
+        {
+          error: "run_too_large",
+          message:
+            `Official-routed measure "${measureId}" reports populations from per-subject evidence, ` +
+            `which is limited to ${MAX_INDIVIDUAL_REPORT_SUBJECTS} subjects; this run has ${total}.`,
+        },
+        422,
+      ),
+    };
+  }
+  return { counts: countPopulations(await os.listOutcomes(runId), measureId) };
+}
+
 
 /** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
  *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
@@ -439,8 +483,9 @@ export async function handleRuns(
     const fmt = url.searchParams.get("format") ?? "xml";
     if (fmt !== "xml") return json({ error: "invalid_format", message: "QRDA III is XML only" }, 400);
     const measureId = measureIds[0]!;
-    const counts = populationCountsFromStatus(await os.countOutcomesByStatus(qrdaId), measureId);
-    return new Response(buildQrda3DocumentFromCounts(run, measureId, counts), {
+    const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
+    if ("error" in aggregate) return aggregate.error;
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -474,8 +519,9 @@ export async function handleRuns(
       });
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
-      const counts = populationCountsFromStatus(await os.countOutcomesByStatus(mrId), measureId);
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, counts, generatedAt));
+      const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
+      if ("error" in aggregate) return aggregate.error;
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt));
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
     // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.
