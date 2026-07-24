@@ -59,6 +59,9 @@ import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore } from "./quality-snapshot-store.ts";
 import type { PersonLinkStore } from "./person-link-store.ts";
+import type { EvalStateStore } from "./eval-state-store.ts";
+import { SqliteEvalStateStore } from "./sqlite/eval-state-store-sqlite.ts";
+import { PgEvalStateStore } from "./postgres/eval-state-store-postgres.ts";
 import type { CampaignStore } from "./campaign-store.ts";
 import { AuditBackedCampaignStore } from "./audit-campaign-store.ts";
 
@@ -79,6 +82,8 @@ export interface Stores {
   qualitySnapshots: QualitySnapshotStore;
   /** Cross-system identity links (#187 E15 PR-2) — human-confirmed CONFIRMED/BROKEN record pairs. */
   personLinks: PersonLinkStore;
+  /** Incremental-evaluation cache (#263) — per (subject, measure, period) change-signal fingerprint. */
+  evalState: EvalStateStore;
   /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
   campaigns: CampaignStore;
 }
@@ -150,6 +155,7 @@ async function buildPostgres(url: string): Promise<Stores> {
     segments: new PgSegmentStore(pool),
     qualitySnapshots: new PgQualitySnapshotStore(pool),
     personLinks: new PgPersonLinkStore(pool),
+    evalState: new PgEvalStateStore(pool),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }
@@ -190,6 +196,7 @@ async function buildSqlite(db: CloudDatabase): Promise<Stores> {
     segments: new SqliteSegmentStore(db),
     qualitySnapshots: new SqliteQualitySnapshotStore(db),
     personLinks: new SqlitePersonLinkStore(db),
+    evalState: new SqliteEvalStateStore(db),
     campaigns: new AuditBackedCampaignStore(events),
   };
 }

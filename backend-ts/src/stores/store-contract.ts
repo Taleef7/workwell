@@ -22,6 +22,7 @@ import type { WaiverStore } from "./waiver-store.ts";
 import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
 import type { PersonLinkStore } from "./person-link-store.ts";
+import type { EvalStateStore, UpsertEvalStateInput } from "./eval-state-store.ts";
 import type { OutcomeMeasureFilter, OutcomeWithRun } from "./outcome-store.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 
@@ -1514,5 +1515,69 @@ export function personLinkStoreContract(label: string, freshStore: () => Promise
     await store.upsertLink({ a: ref("twh", "emp-007"), b: ref("ihn", "ihn-emp-002"), linkType: "CONFIRMED", createdBy: "cm" });
     await store.upsertLink({ a: ref("twh", "emp-005"), b: ref("ihn", "ihn-emp-050"), linkType: "CONFIRMED", createdBy: "cm" });
     assert.equal((await store.listLinks()).length, 2);
+  });
+}
+
+/** Registers the EvalStateStore contract for one backend (#263 Phase 2b). */
+export function evalStateStoreContract(label: string, freshStore: () => Promise<EvalStateStore>): void {
+  const input = (over: Partial<UpsertEvalStateInput> = {}): UpsertEvalStateInput => ({
+    subjectId: "emp-001",
+    measureId: "audiogram",
+    period: "2026-01-01",
+    dataHash: "sha256:aaa",
+    logicVersion: "sha256:logic",
+    nextTransitionAt: "2026-11-01",
+    lastStatus: "COMPLIANT",
+    sourceOutcomeId: "out-1",
+    sourceEvalDate: "2026-06-15",
+    lastEvaluatedAt: "2026-06-15T12:00:00.000Z",
+    ...over,
+  });
+
+  test(`[${label}] eval_state: upsert + getEvalState reads back all fields`, async () => {
+    const store = await freshStore();
+    await store.upsertEvalState(input());
+    const row = await store.getEvalState("emp-001", "audiogram", "2026-01-01");
+    assert.ok(row);
+    assert.equal(row!.dataHash, "sha256:aaa");
+    assert.equal(row!.logicVersion, "sha256:logic");
+    assert.equal(row!.nextTransitionAt, "2026-11-01");
+    assert.equal(row!.lastStatus, "COMPLIANT");
+    assert.equal(row!.sourceOutcomeId, "out-1");
+    assert.equal(row!.sourceEvalDate, "2026-06-15");
+  });
+
+  test(`[${label}] eval_state: NULL next_transition_at round-trips (terminal status)`, async () => {
+    const store = await freshStore();
+    await store.upsertEvalState(input({ subjectId: "emp-002", lastStatus: "OVERDUE", nextTransitionAt: null }));
+    const row = await store.getEvalState("emp-002", "audiogram", "2026-01-01");
+    assert.equal(row!.nextTransitionAt, null);
+  });
+
+  test(`[${label}] eval_state: re-upsert on the (subject,measure,period) key is last-write-wins, no dup`, async () => {
+    const store = await freshStore();
+    await store.upsertEvalState(input({ dataHash: "sha256:aaa", lastStatus: "COMPLIANT" }));
+    await store.upsertEvalState(input({ dataHash: "sha256:bbb", lastStatus: "DUE_SOON", nextTransitionAt: "2026-12-01" }));
+    const rows = await store.listEvalStatesForMeasurePeriod("audiogram", "2026-01-01");
+    assert.equal(rows.length, 1, "one row per (subject,measure,period)");
+    assert.equal(rows[0]!.dataHash, "sha256:bbb");
+    assert.equal(rows[0]!.lastStatus, "DUE_SOON");
+    assert.equal(rows[0]!.nextTransitionAt, "2026-12-01");
+  });
+
+  test(`[${label}] eval_state: listEvalStatesForMeasurePeriod scopes to (measure, period)`, async () => {
+    const store = await freshStore();
+    await store.upsertEvalState(input({ subjectId: "emp-001" }));
+    await store.upsertEvalState(input({ subjectId: "emp-002" }));
+    await store.upsertEvalState(input({ subjectId: "emp-003", measureId: "hazwoper" })); // other measure
+    await store.upsertEvalState(input({ subjectId: "emp-004", period: "2025-01-01" })); // other period
+    const rows = await store.listEvalStatesForMeasurePeriod("audiogram", "2026-01-01");
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((r) => r.subjectId).sort(), ["emp-001", "emp-002"]);
+  });
+
+  test(`[${label}] eval_state: getEvalState returns null for an unknown key`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.getEvalState("nobody", "audiogram", "2026-01-01"), null);
   });
 }
