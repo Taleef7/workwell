@@ -38,6 +38,33 @@ values consumed by 8+ modules, so "move the CLIs out" is a real refactor, not a 
 
 Typecheck clean; full suite **1415 pass / 0 fail / 14 skipped** (+7 tests, no regressions).
 
+**Review round (PR #334).** A differential harness (main vs branch, 16 measure ids × 11 status strings ×
+17 evidence shapes, plus empty-list and zero-denominator cases) confirmed the byte-identity claim on
+every surface incl. QRDA XML — and found four real gaps, all fixed:
+**(1) the production aggregate path could never see official evidence.** `routes/runs.ts` builds both
+QRDA III and the summary MeasureReport from the status histogram, so at the flip the summary and the
+per-subject bundle would have reported *inverted* numerators for the same cms122 run — and QRDA III,
+the artifact M-B feeds to Cypress/CVU+, would have carried the status-derived numbers. My code comment
+named the trap but nothing enforced it. Added `src/wiring/official-routing.ts`
+(`WORKWELL_OFFICIAL_MEASURES`, the PR-7 allowlist landed early as a read-only guard) and routed
+official measures to the evidence-aware row path, bounded by the same subject cap (422 over it, rather
+than emitting a wrong regulatory artifact). A test now *pins* the divergence instead of describing it.
+**(2) shape drift between the two halves of the contract:** the reader accepted only a keyed object,
+while everywhere else in the repo fqm population results are an **array** of `{populationType, result}`
+— the most natural writer would have been silently rejected. Now both shapes are accepted, the type is
+exported, and PR-7's obligation is written into the roadmap.
+**(3) silent-misread hazards:** a partially-spelled payload (`denominator` instead of `denom`) used to
+read as all-false (DENOM 0 / NUMER 0, no signal) — now rejected; `official` present-but-unreadable is
+now **loud** (`WORKWELL_ALERT OFFICIAL_POPULATION_RESULTS_UNREADABLE`) because for an inverse measure a
+silent degrade turns the artifact into its opposite; and membership violating `numer ⊆ denom ⊆ ipp` is
+clamped + alerted rather than emitted as a non-conformant report Cypress would reject.
+**(4) the `improvementNotation`/canonical coupling** that `measure-report.ts` explicitly forbids
+breaking is now a *stated PR-7 obligation*: official membership inverts cms122's numerator, so canonical
++ notation must flip with it. Also corrected six-vs-eight measure counts, the "16 measures" claim (16
+`.cql` artifacts, 14 runnable), and a stale ARCHITECTURE line claiming QRDA aggregates via
+`countPopulations`. Full suite **1426 pass / 0 fail / 14 skipped**.
+
+
 ## 2026-07-24 (later) — Nicole recalibration → strategic plan approved → engine-boundary severance (extraction PR-1, branch `feat/engine-boundary-severance`)
 
 **The Nicole meeting reset the near-term direction** —

@@ -43,7 +43,7 @@ export interface PopulationCounts {
   denom: number;
   denex: number;
   numer: number;
-  /** Denominator exceptions (CMS68-class). Absent from authored measures; always present as a number. */
+  /** Denominator exceptions (CMS68-class). Always present; `0` for every authored measure. */
   denexcep: number;
 }
 
@@ -66,29 +66,125 @@ export interface PopulationMembership {
 const bool = (v: unknown): boolean => v === true;
 
 /**
+ * The persisted contract between the official executor (the writer, PR-7) and these exporters (the
+ * reader). Both shapes below are accepted so the halves cannot drift:
+ *
+ *  - the **fqm-native array** `[{ populationType, result }]`, which is what `fqm-execution` hands back
+ *    and what `standards/{literal-diff,official-cases}.ts` already work in — the shape the most obvious
+ *    writer implementation produces; and
+ *  - the **keyed object** `{ ipp, denom, denex, numer, denexcep }`, the compact normalized form.
+ */
+export type OfficialPopulationResults =
+  | Array<{ populationType?: unknown; result?: unknown }>
+  | Record<string, unknown>;
+
+/** fqm/FHIR population codes → our membership keys. */
+const POPULATION_CODE_TO_KEY: Record<string, keyof PopulationMembership> = {
+  "initial-population": "ipp",
+  denominator: "denom",
+  "denominator-exclusion": "denex",
+  "denominator-exception": "denexcep",
+  numerator: "numer",
+};
+
+/**
+ * An `official` block that is present but unreadable is LOUD, not silent (review finding). For a
+ * lower-is-better measure the authored fallback is the logical INVERSE of the official numerator
+ * (cms122: numerator = poor control), so silently degrading would turn a regulatory artifact into its
+ * opposite with no signal. We still do not throw — an export is an on-demand read and must return
+ * something — but the greppable alert line the repo already uses for run failures is emitted.
+ */
+function alertUnreadableOfficialEvidence(reason: string, results: unknown): void {
+  console.error(
+    `WORKWELL_ALERT ${JSON.stringify({
+      kind: "OFFICIAL_POPULATION_RESULTS_UNREADABLE",
+      reason,
+      received: typeof results === "object" ? Object.keys(results ?? {}).slice(0, 12) : typeof results,
+    })}`,
+  );
+}
+
+/**
+ * Enforce the subset semantics a proportion measure guarantees (`numer ⊆ denom ⊆ ipp`,
+ * `denex`/`denexcep ⊆ denom`). The old status rule made these true by construction; reading membership
+ * from evidence does not, and an inverted pair would emit a non-conformant MeasureReport that Cypress
+ * would reject. Violations are clamped and alerted rather than trusted.
+ */
+function normalizeMembership(m: PopulationMembership): PopulationMembership {
+  const denom = m.denom && m.ipp;
+  const normalized: PopulationMembership = {
+    ipp: m.ipp,
+    denom,
+    denex: m.denex && denom,
+    denexcep: m.denexcep && denom,
+    numer: m.numer && denom,
+  };
+  if (
+    normalized.ipp !== m.ipp || normalized.denom !== m.denom || normalized.denex !== m.denex ||
+    normalized.denexcep !== m.denexcep || normalized.numer !== m.numer
+  ) {
+    alertUnreadableOfficialEvidence("population membership violates numer/denex ⊆ denom ⊆ ipp", m);
+  }
+  return normalized;
+}
+
+/**
  * Read official population membership off an outcome's evidence, or `null` when this outcome was not
- * produced by the official executor (every authored measure today). Deliberately tolerant: evidence is
- * persisted JSON, and a malformed payload must degrade to the authored rule rather than throw inside an
- * export.
+ * produced by the official executor (every authored measure today).
  */
 export function officialMembership(evidence: unknown): PopulationMembership | null {
   const official = (evidence as { official?: { populationResults?: unknown } } | null | undefined)?.official;
-  const results = official?.populationResults;
-  if (!results || typeof results !== "object" || Array.isArray(results)) return null;
+  if (official === undefined || official === null) return null; // authored outcome — silent, expected.
+  const results = official.populationResults;
+  if (!results || typeof results !== "object") {
+    alertUnreadableOfficialEvidence("populationResults is not an object or array", results);
+    return null;
+  }
+
+  const raw: PopulationMembership = { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  if (Array.isArray(results)) {
+    let recognized = 0;
+    for (const entry of results) {
+      const key = POPULATION_CODE_TO_KEY[String((entry as { populationType?: unknown })?.populationType)];
+      if (!key) continue;
+      recognized += 1;
+      raw[key] = bool((entry as { result?: unknown })?.result);
+    }
+    if (recognized === 0) {
+      alertUnreadableOfficialEvidence("no recognized populationType in the results array", results);
+      return null;
+    }
+    return normalizeMembership(raw);
+  }
+
   const r = results as Record<string, unknown>;
-  if (typeof r["ipp"] !== "boolean") return null; // not the shape we write — fall back.
-  return {
+  // Require the full keyed shape: a partially-spelled payload (e.g. `denominator` instead of `denom`)
+  // must NOT be read as "everything else is false" — that silently reports DENOM 0 / NUMER 0.
+  const keys: Array<keyof PopulationMembership> = ["ipp", "denom", "denex", "numer"];
+  if (keys.some((k) => typeof r[k] !== "boolean")) {
+    alertUnreadableOfficialEvidence("keyed populationResults is missing a required boolean", results);
+    return null;
+  }
+  return normalizeMembership({
     ipp: bool(r["ipp"]),
     denom: bool(r["denom"]),
     denex: bool(r["denex"]),
     numer: bool(r["numer"]),
     denexcep: bool(r["denexcep"]),
-  };
+  });
 }
 
 /**
  * Membership for one outcome: official evidence first, else the authored status rule (ADR-031) —
  * unchanged for every measure that has no official evidence, which today is all of them.
+ *
+ * MIXED PROVENANCE (accepted, documented): within one official-routed run, a subject whose official
+ * evaluation errored persists `{evaluationError}` evidence and no `official` block, so it is counted by
+ * the authored status rule while its peers are counted by official membership. For a lower-is-better
+ * measure those are opposite numerator semantics inside one denominator. This is the same per-subject
+ * error-isolation trade-off the run pipeline already makes (a failed subject becomes MISSING_DATA rather
+ * than failing the run); PR-8's shadow period is where a run with any errored subject must be surfaced,
+ * since only there can it be compared against a clean official run.
  */
 export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence">, measureId: string): PopulationMembership {
   const official = officialMembership(outcome.evidence);
@@ -146,6 +242,14 @@ export function populationCountsFromStatus(counts: OutcomeStatusCount[], measure
 // WorkWell's numerator is compliance-oriented (including inverted CMS122 logic), so this MUST remain
 // the WorkWell canonical. Switching to an official CMS canonical is forbidden unless the numerator
 // orientation and improvementNotation are changed together to match that official Measure.
+//
+// PR-3 NOTE — this coupling is now a PR-7 OBLIGATION, not just a prohibition. Evidence-first membership
+// means an official-routed outcome's numerator is the OFFICIAL one (for cms122: poor glycemic control),
+// while `measureCanonical`/`improvementNotation` below still emit the WorkWell canonical and
+// `increase`. A report that declares higher-is-better over a poor-control numerator is
+// self-contradictory, so the measure that flips MUST switch all three together — canonical,
+// improvementNotation, and membership — sourced from the vendored official manifest (PR-5). Today no
+// outcome carries official evidence, so the trio is still consistent; the guard test below pins that.
 const measureCanonical = (measureId: string): string => `urn:workwell:measure:${measureId}`;
 
 const improvementNotation = (measureId: string): "increase" | "decrease" =>
