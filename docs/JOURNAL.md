@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
+
+Roadmap §7.4 PR-4. ADR-026 quarantined `fqm-execution` (axios/handlebars/moment/lodash) behind a
+**file-allowlist** arch test, because those deps must never reach the worker's cold-start or request
+path. That allowlist could not survive official-first execution, where fqm legitimately becomes a
+*production* evaluation path (PR-7) — so the quarantine is now **structural**: the dependency lives in
+`backend-ts/packages/official-executor` (`@workwell/official-executor`, pinned 1.8.5) and nowhere else,
+and that package's entry imports it only through a lazy `await import`.
+
+**What the package owns** — the fqm-facing machinery that was **duplicated across both call sites** and
+could silently have drifted: the lazy calculator loader, the executable-bundle check (a Measure + ELM on
+*every* Library), ELM value-set introspection, the `valueSetCache` builder (empty-but-present on a failed
+expansion — a missing value set aborts the whole batch), the calculate options, and `calculateOfficial`
+batching. Two of those options are load-bearing and easy to get wrong: `calculateHTML: false` (fqm 1.8.5
+has **no** `disableHTMLGeneration` — a plausible name that silently does nothing) and the **fqm#371**
+date-only-period-end fix (parsed as start-of-day, dropping the period's last day; without it the CMS125
+MADiE deck scores 64/66). Both now have exactly one definition.
+
+**What deliberately stays in the app:** reading vendored bundle bytes (the package is filesystem-free, so
+the vendoring convention stays PR-5's business), VSAC expansion (injected `expand(oid)`), and the
+population→`OutcomeStatus` mapping (WorkWell policy, not measure execution).
+
+**Three tests replace the one allowlist**, each harder to defeat than a grep: **manifest** (the app
+declares no fqm dep; the package declares the pin), **app tree** (no `src/` file imports it directly),
+and **module graph** (importing the package pulls no fqm into the module cache — and under pnpm's strict
+linking the app cannot even *resolve* it, which is the strongest form of the guard).
+
+Also lands the `packages/*` workspace member and the `pnpm test` glob covering it — the scaffolding PR-2
+reuses when `measure-engine` extracts. The real-fqm end-to-end literal-diff test and the ADR-008 guard
+both still pass, so the official path is provably unchanged. Typecheck clean; full suite **1436 pass /
+0 fail / 14 skipped** (+10).
+
 ## 2026-07-24 (later still) — PR-3: evidence-first population membership (branch `feat/measure-report-ipp-generalization`)
 
 Roadmap §7.4 PR-3, the last exporter change that must land **before** the official flip so shadow diffs

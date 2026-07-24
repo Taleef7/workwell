@@ -32,6 +32,9 @@ importers:
       '@mieweb/cloud-types':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-types
+      '@workwell/official-executor':
+        specifier: workspace:*
+        version: link:packages/official-executor
       better-sqlite3:
         specifier: ^12.0.0
         version: 12.10.0
@@ -41,9 +44,6 @@ importers:
       cql-execution:
         specifier: ^3.3.2
         version: 3.3.2
-      fqm-execution:
-        specifier: 1.8.5
-        version: 1.8.5(typescript@5.9.3)
       pg:
         specifier: ^8.21.0
         version: 8.21.0
@@ -133,6 +133,12 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+
+  packages/official-executor:
+    dependencies:
+      fqm-execution:
+        specifier: 1.8.5
+        version: 1.8.5(typescript@5.9.3)
 
 packages:
 

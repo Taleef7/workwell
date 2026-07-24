@@ -400,6 +400,19 @@ commits (the `WebChartClient` port is unchanged).
 
 **Consequences:** The literal official CMS122v14 QICore artifact now runs as a real, subject-by-subject execution diff — no translator, no VSAC key, **no schema**. New dependency `fqm-execution@1.8.5` (owner-pre-approved for the diagnostic path via the 2026-07-09 roadmap; this ADR records the terms). Reversible: revert the PR (drop the dep + the vendored bundle + `literal-diff.ts`); the ladder degrades to subset/estimate exactly as before. **#251 is superseded/closeable.** Full suite green — 1065 pass / 1 pg-skip / 0 fail. Known bounds: literal diff is **CMS122-only**; gate attribution is population-level; the vendored measure is v0.5.000 (the 2026-reporting-year MADiE FHIR draft), not a separately-numbered "v14" export.
 
+**Amendment (2026-07-24, roadmap §7.4 PR-4) — the quarantine is now a PACKAGE BOUNDARY.** The invariant
+was never "fqm-execution is diagnostic-only"; it was **"its heavy transitive deps must not reach the
+worker's cold-start or request path, and CQL remains the sole outcome authority."** A file allowlist was
+the cheapest way to express that at the time, but it could not survive official-first execution, where
+fqm legitimately becomes a *production* evaluation path (PR-7). The dependency now lives in
+**`@workwell/official-executor`** — one `package.json`, pinned `1.8.5` — whose entry point imports it only
+through a lazy `await import`, so consuming the package costs nothing until something calculates. The
+single allowlist test is replaced by three that are harder to defeat than one grep: the **manifest** (the
+app declares no fqm dep; the package declares the pin), the **app tree** (no `src/` file imports it
+directly), and the **module graph** (importing the package pulls no fqm into the module cache; under
+pnpm's strict linking the app cannot even resolve it). Both original protections therefore survive, and
+the "diagnostic-only" framing is retired rather than the invariant.
+
 ## ADR-025: Measure execution is pluggable behind a `MeasureExecutor` seam; FHIR-native is the default + correctness oracle, CQL→SQL is a parity-gated future executor — E9 (#78)
 
 **Status:** Accepted (2026-07-08). Supersedes the *Deferred-to-Doug* status of **ADR-014**; makes concrete the "opt-in second executor as future work" that **ADR-017** parked.
