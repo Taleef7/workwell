@@ -20,7 +20,7 @@ import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import { engineForEnv } from "../wiring/engine-factory.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";

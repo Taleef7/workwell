@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { StoreValueSetResolver } from "./value-set-resolver.ts";
 import { CompositeValueSetResolver } from "./composite-value-set-resolver.ts";
 import { resolveValueSetResolver } from "./resolve-value-set-resolver.ts";
-import type { ValueSetStore } from "../../stores/value-set-store.ts";
+import type { ValueSetSource } from "./value-set-resolver.ts";
 
-// Minimal ValueSetStore stub — only listAll is exercised by the resolvers.
-const store = { listAll: () => Promise.resolve([]) } as unknown as ValueSetStore;
+// A ValueSetSource is exactly the surface the resolvers exercise — no cast needed (PR-1 severance).
+const store: ValueSetSource = { listAll: () => Promise.resolve([]) };
 
 test("no VSAC key → plain StoreValueSetResolver (inert; today's behavior)", () => {
   const r = resolveValueSetResolver({}, store);
