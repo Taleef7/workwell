@@ -1,5 +1,81 @@
 # Journal
 
+## 2026-07-24 (later) — Nicole recalibration → strategic plan approved → engine-boundary severance (extraction PR-1, branch `feat/engine-boundary-severance`)
+
+**The Nicole meeting reset the near-term direction** —
+the sharpest external correction the project has had: (1) for official CMS eCQMs, **download and run the
+official published CQL**, don't reauthor ("if the CQL exists, use it… other than maybe as an educational
+exercise"); (2) the real EHR proof path is **QRDA-I ingest → calculate → regenerate QRDA-I/III → Cypress
+→ ONC** (MADiE is authoring tooling, not how an EHR verifies); (3) her 8 priority measures: **CMS2, 68,
+122, 125, 130, 138, 165, 951** (MIE is ONC-certified on ~33/49); (4) self-authored CQL is the value
+exactly where no official definition exists — occupational/OSHA + HEDIS-insight (payer black-box) — and
+MIE could steward occupational measures through the NCQA community process; (5) DEQM/quality-on-FHIR is
+the direction but CMS/QPP has no endpoints yet (~2030). CQI WG meets Fridays.
+
+**Strategic plan written + owner-approved same day** (deep-research pass over the Vision Doc charters,
+the prior Doug meetings, Connectathon research, two codebase audits, and an architecture design agent) —
+**committed in-repo as `docs/ROADMAP_2026-07-24.md`** (supersedes ROADMAP_2026-07-09.md as the active
+direction; working copy also at `~/.claude/plans/snappy-herding-journal.md`). Headlines: 5 milestones — **M-A official-first execution**
+(promote the fqm-execution literal machinery to a per-measure-routed `officialMeasureExecutor` behind
+`WORKWELL_OFFICIAL_MEASURES`, MADiE cases as permanent CI gates, authored cms122/125 subsets retire to
+the fidelity lab), **M-B QRDA-I/III + Cypress CVU+ validated loop**, **M-C pnpm-workspace extraction
+publishing `@workwell/*`** (measure-engine w/ only cql-execution+cql-exec-fhir deps; official-executor as
+the fqm quarantine package), **M-D WebChart breadth + the compliance API contract**, **M-E occupational
+content pack published in the community `dqm-content` shape + CQI WG cadence**. Verified en route: all 8
+priority measures have official QICore v1.0.000 artifacts + MADiE test cases in
+`cqframework/dqm-content-qicore-2025`; Cypress/CVU+ is open-source and Docker-runnable; QI-Core STU7 = US
+Core 7 = exactly WebChart's verified FHIR surface. Two-track posture is deliberate: execute on the
+FHIR/QI-Core column, report on the current QRDA column; QDM appears only as a translation at the QRDA
+boundary.
+
+**Extraction PR-1 shipped (this branch) — sever the engine's app-layer imports, zero behavior change:**
+(1) new narrow **`ValueSetSource`** port in `engine/cql/value-set-resolver.ts` — the engine consumed
+exactly one method (`listAll()`) of the 30-method `ValueSetStore`; the store satisfies the port
+structurally so no call site changed; (2) **`UnconfiguredEngine`** (the only `@mieweb/cloud` consumer on
+the eval surface, zero importers) moved to `src/wiring/unconfigured-engine.ts`; (3)
+**`engine-factory.ts` + test moved to `src/wiring/`** (git mv — it is app composition, the one
+`getStores` value-coupling; 5 importers repointed); (4) new **`engine/engine-boundary.test.ts`** arch
+guard (fqm-isolation pattern): no production file under `src/engine/` may import `stores/` or
+`@mieweb/*`. After this the engine tree reaches **nothing outside itself** — verified by an exhaustive
+specifier scan of all 43 production files, not just the two severed targets. Its third-party surface is
+`cql-execution` + `cql-exec-fhir` (the evaluation core) **plus two items of extraction debt PR-2 clears**:
+`@cqframework/cql/cql-to-elm` in `cql/cql-translator.ts` (the ELM Explorer — reached from
+`routes/measures.ts`, so a real runtime dep today; PR-2 moves that file to the app) and `node:fs`/`path`/`url`
+confined to the four `*-cli.ts` entrypoints. Typecheck clean; full suite **1408 pass / 0 fail / 14 skipped**
+(byte-identical outcomes).
+
+**Review round (PR #333, Codex P2 — a real hole, fixed).** The guard matched two import *shapes*
+(`from "x"` and `import("x")`), so a side-effect `import "@mieweb/cloud";` or a CJS `require("../stores/…")`
+would have restored a forbidden runtime dependency **while the test stayed green** — an arch fence that
+silently passes is worse than none. Rewrote it to extract EVERY module specifier (static `from`,
+side-effect `import "x"`, dynamic `import("x")`, `require("x")`, `export … from "x"`, quote-agnostic) and
+test the specifier itself against the forbidden targets. The matcher is now **unit-tested against all
+nine forms plus six clean controls** (including `@mieweb/cloud` mentioned in prose, and `restores/` which
+must not match `stores/`), and a planted-violation probe confirmed the tree walk fails end-to-end on the
+exact form the original regex missed. Also stripped the Windows trailing separator so violation labels
+read `src/engine/x.ts`, not `src/engine//x.ts`.
+
+**Self-review round (whole-branch) — the guard became a CONTAINMENT rule.** The review's headline finding
+was that forbidding two specifier *targets* is the wrong rule for a package boundary: it passes a one-hop
+indirection. `import { engineForEnv } from "../wiring/engine-factory.ts"` inside the engine was green —
+yet `wiring/engine-factory.ts` imports `getStores` and `wiring/unconfigured-engine.ts` imports
+`@mieweb/cloud`, so the extraction is blocked while the fence built to prevent exactly that says fine.
+Rewrote it to the rule PR-2 actually needs: **every relative import must resolve inside `src/engine/`**
+(path-resolved, so `./../../` and non-normalized forms can't dodge it) **and every bare import must be on
+an allowlist that IS the package's dependency manifest** (an interpolated `${…}` specifier is rejected as
+unverifiable). Probes confirmed both new classes now fail: the wiring indirection and an undeclared
+`axios`. Comment stripping was added because the old matcher tripped on doc comments that quote import
+paths — a real false positive in a repo this comment-heavy. Second finding, also real: the claim
+*"runtime coupling is exactly cql-execution + cql-exec-fhir"* was **false today** — an exhaustive scan of
+all 43 production files found `@cqframework/cql/cql-to-elm` (in `cql-translator.ts`, reached from
+`routes/measures.ts`) and `node:fs`/`path`/`url` in four `*-cli.ts` files. Rather than soften the docs,
+the allowlist **pins both as scoped exceptions** (translator: that one file; `node:*`: `*-cli.ts` only),
+which converts ARCHITECTURE's "file I/O only at the CLI edge" from prose into an enforced invariant, and
+ROADMAP §7.4 PR-2 now explicitly owns clearing both. Also: pinned the tree-walk count (a walk finding half
+the tree used to pass), documented `UnconfiguredEngine` as deliberately unreferenced (the refusal contract
+for an unwired target — zero importers on `main` too, so not a regression), and corrected 1407→1408 across
+CLAUDE.md/README/JOURNAL.
+
 ## 2026-07-24 — #263 incremental/delta batch evaluation, Phases 2a + 2b (branch `feat/263-incremental-eval`)
 
 Built the incremental-evaluation feature end-to-end on a feature branch (owner said "proceed with #263";
@@ -672,7 +748,7 @@ owner outreach checklist): `docs/DEMO_2026-07-23.md`.
 
 ## 2026-07-20 — Doug call: three directives; Doug-wave planned (ADR-034)
 
-Doug's 2026-07-19 call (transcripts local, `docs/doug_audio_transcript_*.txt`) reset the near-term
+Doug's 2026-07-19 call reset the near-term
 direction. Directive 1: build our **own FHIR R4 shim server** directly over the WebChart MariaDB
 dev DB (dev-wcdb, 56 synthetic patients) — the layered/swappable-API contract made concrete; the
 app consumes it through the existing `WORKWELL_WEBCHART_BASE_URL` seam, making the shim a drop-in

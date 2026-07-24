@@ -5,7 +5,7 @@ for the Thursday 2026-07-23 MIE call (Dave + Nicole/Bridget expected).
 
 ## 1. Why (the Doug directives, 2026-07-19 call)
 
-Transcripts: `docs/doug_audio_transcript_1.txt` / `_2.txt` (local-only). Three directives:
+Three directives:
 
 1. **Build our own FHIR shim over the WCDB.** Not one of MIE's six FHIR servers — a tiny facade we
    control, directly over the WebChart MariaDB schema: "a simple server that if I do a FHIR query

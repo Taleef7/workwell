@@ -4,12 +4,11 @@
  * (VSAC for real OIDs, local fallback for urn:workwell:*) only when WORKWELL_VSAC_API_KEY is set.
  * Inert-unless-configured: setting the key never changes a current measure's outcome (parity-tested).
  */
-import type { ValueSetResolver } from "./value-set-resolver.ts";
+import type { ValueSetResolver, ValueSetSource } from "./value-set-resolver.ts";
 import { StoreValueSetResolver } from "./value-set-resolver.ts";
 import { VsacValueSetResolver } from "./vsac-value-set-resolver.ts";
 import { CompositeValueSetResolver } from "./composite-value-set-resolver.ts";
 import { httpVsacClient } from "./vsac-client.ts";
-import type { ValueSetStore } from "../../stores/value-set-store.ts";
 
 export interface VsacEnv {
   WORKWELL_VSAC_API_KEY?: string;
@@ -27,7 +26,7 @@ export function isVsacConfigured(env: VsacEnv): boolean {
   return Boolean((env.WORKWELL_VSAC_API_KEY ?? "").trim());
 }
 
-export function resolveValueSetResolver(env: VsacEnv, store: ValueSetStore): ValueSetResolver {
+export function resolveValueSetResolver(env: VsacEnv, store: ValueSetSource): ValueSetResolver {
   const storeResolver = new StoreValueSetResolver(store);
   if (!isVsacConfigured(env)) return storeResolver;
   const apiKey = (env.WORKWELL_VSAC_API_KEY ?? "").trim();

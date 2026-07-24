@@ -17,7 +17,7 @@ import type { Stores, StoresEnv } from "../stores/factory.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
-import { engineForEnv } from "../engine/cql/engine-factory.ts";
+import { engineForEnv } from "../wiring/engine-factory.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import {
