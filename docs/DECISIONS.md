@@ -223,7 +223,8 @@ and subtracted from the effective score denominator in **both** MeasureReport an
 when non-zero — so authored exports remain byte-identical. Two deliberate limits: (a)
 `populationCountsFromStatus`, the bounded histogram behind 120k `seed:scale` summaries, has no
 per-subject evidence and stays valid for authored measures only; (b) keying out-of-IPP off each
-measure's own `"Initial Population"` define — which **is** persisted for all 16 measures — was
+measure's own `"Initial Population"` define — which **is** persisted, and is defined by all 16
+`.cql` artifacts (the 14 runnable measures plus `cms122_official`/`audiogram_vs`) — was
 considered and **rejected for now**: it would change exported IPP/DENOM for the 12 OSHA/HEDIS measures
 (e.g. audiogram's IPP is `In Hearing Conservation Program or Has Active Waiver`, so non-enrolled
 subjects currently inflate the denominator) *and* break the documented 1:1 reconciliation with the

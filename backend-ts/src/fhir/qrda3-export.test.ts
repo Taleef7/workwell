@@ -60,12 +60,12 @@ test("PR-3: exceptions are absent for authored measures and emitted + scored for
   const authored = { ipp: 10, denom: 10, denex: 2, numer: 4, denexcep: 0 };
   const xml = buildQrda3DocumentFromCounts(run, "audiogram", authored);
   assert.ok(!xml.includes("DENEXCEP"), "authored QRDA must stay byte-identical (no exception observation)");
-  assert.ok(xml.includes("<value>0.5000</value>") || xml.includes("0.5000"), "4 / (10-2) = 0.5000");
+  assert.ok(xml.includes('value="0.5000"'), "4 / (10-2) = 0.5000");
 
   const official = { ipp: 10, denom: 10, denex: 2, numer: 4, denexcep: 3 };
   const officialXml = buildQrda3DocumentFromCounts(run, "cms68", official);
   assert.ok(officialXml.includes('code="DENEXCEP"'), "official QRDA must carry the exception count");
   // Score must subtract exceptions too: 4 / (10 - 2 - 3) = 0.8000 — and must equal what the
   // MeasureReport reports for the same counts.
-  assert.ok(officialXml.includes("0.8000"), "exceptions must leave the effective denominator");
+  assert.ok(officialXml.includes('value="0.8000"'), "exceptions must leave the effective denominator");
 });
