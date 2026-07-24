@@ -146,6 +146,17 @@ Public API actions derive audit identity from the authenticated security context
 - Quality-over-time snapshots are a materialized AGGREGATE of a completed population run's outcomes (#E16): `buildSnapshotRows` reconciles All = Σ tenants = Σ sites = Σ providers at every (measure, month); materialization is idempotent on (measure, period, scope), audited (`QUALITY_SNAPSHOT_MATERIALIZED`), best-effort (never fails the run), aggregate-only (no per-employee row), and **never sets or overrides `Outcome Status`** — it only counts CQL's decisions (ADR-008/ADR-021).
 - Cross-system identity (E15 PR-1) is a read-time resolution layer: `resolvePeople`/`mergedComplianceTimeline` group and follow a person across systems but never set or override `Outcome Status` (ADR-008/ADR-022), and never re-aggregate tenant counts — each source record still belongs to exactly one tenant, so All = Σ tenants (ADR-019) holds (guard test). Match-don't-auto-merge: the reconcile write path is owner-gated (E15 PR-2).
 - CQL `Outcome Status` is the only compliance classification source.
+- Incremental/delta evaluation is descriptive (#263 / ADR-035): the `eval_state` cache decides only
+  WHETHER to re-run CQL, never the answer. A reused subject still gets an outcome row (copy-forward with
+  date-corrected evidence), so every "latest run per measure" read model is untouched; a cache miss on
+  ANY uncertainty (no row, `data_hash`/`logic_version` mismatch, a **backdated** date `evalDate <
+  source_eval_date`, past `next_transition_at`, source outcome gone) falls back to a full evaluation.
+  `logic_version` reflects the **engine-selected** library (base vs `expansionLibrary`) plus referenced
+  value sets' store `expansion_hash`, so a VSAC toggle/re-import or value-set edit invalidates reuse. The
+  `run/incremental/parity.test.ts` suite proves an incremental run is byte-identical to a full run on
+  unchanged data and re-evaluates exactly when the answer could have changed. Inert unless
+  `WORKWELL_INCREMENTAL_EVAL=true`; scoped to `finishManualRun` (not the scale path), so the demo/default
+  loop is byte-identical (ADR-008/ADR-035).
 - Measure execution is pluggable behind the `MeasureExecutor` seam (E9 / ADR-025) but the default `fhirNativeExecutor` delegates to the unchanged CQL→ELM engine (no second evaluation path; parity-tested against the direct engine path), and the `sqlPushdownExecutor` alternative is an inert stub selected only on explicit opt-in. Any future SQL-pushdown executor must pass golden parity vs the FHIR-native oracle, per measure, before it serves — the executor never sets or overrides `Outcome Status` (ADR-008/ADR-025).
 - VSAC value-set expansion is descriptive (ADR-023): the composite resolver falls back to the local
   `StoreValueSetResolver` for `urn:workwell:*` references, so enabling `WORKWELL_VSAC_API_KEY` does not
@@ -290,7 +301,7 @@ No microservice decomposition is used in MVP; package boundaries are the future 
 
 ## 10) Inert-seam inventory
 
-The repo has accumulated 9 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030 + #264
+The repo has accumulated 10 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030/035 + #264
 alert webhook) — each correct and individually reviewed when it shipped, but collectively an untested-in-anger
 surface that can rot silently (a deploy secret typo, a seam nobody remembers is there). Issue #260 adds
 cheap insurance: a single pure `describeSeams(env)` (`backend-ts/src/config/seam-inventory.ts`) that
@@ -304,7 +315,7 @@ once per worker instance, mirroring the existing auth-handler memoization patter
 configuration observable:
 
 ```
-seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off bucket-s3=off
+seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off bucket-s3=off incremental-eval=off
 ```
 
 Descriptive only — this inventory makes no decisions and never selects a seam; it reports what the
@@ -329,6 +340,7 @@ fails the run — Fable-H1 pattern). Run metrics on `/api/runs` already surface 
 | `vsac` | `backend-ts/src/engine/cql/resolve-value-set-resolver.ts` (`resolveValueSetResolver`, `isVsacConfigured`) + `engine-factory.ts` (`engineForEnv` key-gating) | `WORKWELL_VSAC_API_KEY` (base URL optional, defaults to the NLM FHIR terminology service) | off (local `StoreValueSetResolver` only) | 2026-07-09 | `backend-ts/src/engine/cql/resolve-value-set-resolver.test.ts`, `backend-ts/src/engine/cql/engine-factory.test.ts`, `backend-ts/src/engine/cql/audiogram-vsac-parity.test.ts` |
 | `alert-webhook` | `backend-ts/src/run/alert-channel.ts` (`webhookAlertChannel`, `resolveAlertChannels`, `isAlertWebhookConfigured`) | `WORKWELL_ALERT_WEBHOOK_URL` | off (console `WORKWELL_ALERT` line always-on) | 2026-07-10 | `backend-ts/src/run/alert-channel.test.ts` |
 | `bucket-s3` | `backend-ts/src/case/resolve-bucket.ts` (`resolveBucket`, `isS3BucketConfigured`) | `WORKWELL_BUCKET_S3_BUCKET` **and** `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` **and** `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` (all three; region/endpoint optional) | off (in-container `fs` BUCKET binding) — **ON on the live TWH stack since 2026-07-14** (#167/ADR-030) | 2026-07-14 | `backend-ts/src/case/resolve-bucket.test.ts` |
+| `incremental-eval` | `backend-ts/src/run/incremental/incremental-eval.ts` (`isIncrementalEnabled`, `IncrementalCache`) + wired in `run/run-pipeline.ts` `finishManualRun` | `WORKWELL_INCREMENTAL_EVAL=true` | off (every subject re-evaluated) | 2026-07-24 | `backend-ts/src/run/incremental/*.test.ts` (parity + golden) |
 
 The inventory itself is covered by `backend-ts/src/config/seam-inventory.test.ts` (flips each of the 9
 seams on/off with the correct env combination, including the both-vars-required pairs above, plus the

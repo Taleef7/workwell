@@ -76,6 +76,9 @@ async function main(): Promise<void> {
     WORKWELL_WEBCHART_DISABLE_COUNT: process.env.WORKWELL_WEBCHART_DISABLE_COUNT,
     WORKWELL_WEBCHART_PATIENT_SEARCH: process.env.WORKWELL_WEBCHART_PATIENT_SEARCH,
     WORKWELL_WEBCHART_ENROLLMENT_JSON: process.env.WORKWELL_WEBCHART_ENROLLMENT_JSON,
+    // #263 incremental evaluation opt-in — the nightly run must see the flag too, or a scheduled run
+    // would always do a full evaluation while a manual run reuses.
+    WORKWELL_INCREMENTAL_EVAL: process.env.WORKWELL_INCREMENTAL_EVAL,
   };
   const schedulerInterval = setInterval(() => {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>

@@ -1,5 +1,57 @@
 # Architecture Decision Records
 
+## ADR-035: Incremental/delta batch evaluation is a descriptive, inert-unless-configured cache (#263)
+
+**Status:** Accepted (2026-07-24). Owner-approved the `eval_state` DDL + the scope decisions in-session.
+
+**Context.** A recurring population run re-evaluates every subject × measure whether or not anything
+changed — ~1.68M CQL evaluations at the 120k scale, ≈68 ms each (#253). Most of that recomputes an
+answer that cannot have moved. #263's design (`docs/superpowers/specs/2026-07-13-e263-incremental-evaluation-design.md`)
+was gated on WebChart's change signal; the 2026-07-13 research answered enough to build the
+content-hash tier now.
+
+**Decision.**
+1. **Reuse the EVALUATION, never the OUTCOME ROW.** Every read model reads "the outcomes of the latest
+   run per measure"; skipping rows would break them all. A reused subject still gets an outcome row
+   (copy-forward: prior status + date-corrected evidence, new run id), so every read model is untouched
+   and DB write volume is unchanged — we save only the ~68 ms of CQL, the cost that matters.
+2. **Two tiers.** `data_hash` (canonical hash of the evaluated bundle) + `logic_version` (hash of the
+   measure ELM + referenced value-set expansion hashes) gate reuse; **status-boundary caching**
+   (`next_transition_at`) extends it across days for measures whose status is a monotone step function of
+   days-since-event (windowed-recency OSHA/wellness + PERMANENT series). `flu_vaccine` (seasonal) and
+   `cms122`/`cms125` (period-based) are EXCLUDED from across-day reuse — same-day-hash only — because a
+   stale copy could ship a wrong status when the season/period rolls. The `next_transition_at` threshold
+   table is **golden-verified against the real CQL engine** so it can never silently drift.
+3. **Copy-forward evidence is date-corrected, not verbatim** (design §3 option 1): each `"Days Since …"`
+   define is advanced by the elapsed days (measure-agnostic; same-day copy is byte-identical), so
+   `deriveWhyFlagged`'s `days_overdue` stays honest and the parity guarantee holds.
+4. **Inert-unless-configured** (`WORKWELL_INCREMENTAL_EVAL=true`; the 10th boot-inventory seam) and
+   **scoped to the live-tenant pipeline** (`finishManualRun`) — the scale batch path and the demo/default
+   stack are byte-identical to today (no `eval_state` row is ever written).
+5. **The `eval_state` table is a pure cache** (DATA_MODEL §3.27): reversible with `DELETE FROM eval_state`,
+   no row references it.
+
+**Correctness invariant (ADR-008).** Reuse decides only WHETHER to re-ask the CQL engine, never the
+answer. A cache miss on ANY uncertainty falls back to a full evaluation. The acceptance criterion is the
+parity suite (`run/incremental/parity.test.ts`): on identical data an incremental run is byte-identical
+to a full run, and it re-evaluates exactly when (and only when) the answer could have changed.
+
+**Two correctness holes caught in code review (both P1, fixed pre-merge) — worth recording because they
+are the non-obvious ways this feature can go wrong:**
+- **Backdated runs.** The whole `next_transition_at` scheme assumes the clock only moves forward. A
+  rerun of an *older* run (which reuses that run's persisted `evaluationDate`) after a newer run advanced
+  the cache would otherwise copy a future-computed status backward (July's OVERDUE into a June rerun).
+  Fix: reuse requires `evalDate >= source_eval_date`; a backdated run always re-evaluates.
+- **`logic_version` must reflect the EXECUTED library + value-set membership.** Hashing only the base ELM
+  would let a VSAC toggle/re-import or an operator value-set edit slip through (same `data_hash`, same
+  base ELM, different codes). Fix: hash the engine-selected library (base vs `expansionLibrary`) plus the
+  referenced value sets' store `expansion_hash`. Byte-identical on the demo/scoped path.
+
+**Scope decisions (owner, 2026-07-24):** live tenants only (exclude the synthetic scale tenant — ~2,100
+rows vs ~1.7M of no-real-value cache); build `next_transition_at` (the ~90% saving, vs ~21% hash-only);
+recompute evidence at copy time. Tier 1 (`Group/$export?_since=` transport pre-filter) remains MIE-gated
+and unbuilt.
+
 ## ADR-034: Standalone WCDB FHIR shim package (`wcdb-fhir-shim/`) owns the MariaDB driver; CQL→SQL generation stays pure in backend-ts
 
 **Status:** Accepted (2026-07-20).
