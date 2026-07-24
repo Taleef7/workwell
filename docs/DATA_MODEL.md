@@ -685,10 +685,17 @@ eval_state (
   chronological and identical across stores. Ported behind `EvalStateStore` (floor + ceiling + store
   contract, wired in `factory.ts`).
 - **Reuse rule** (in the run pipeline): reuse the prior outcome when `data_hash` **and** `logic_version`
-  match **and** the status can't have moved — `next_transition_at IS NULL` (terminal: OVERDUE / no-exam
-  MISSING_DATA / a PERMANENT series) OR `evalDate < next_transition_at` (before the boundary) OR
-  `source_eval_date == evalDate` (same day). On any uncertainty (no row, hash/logic mismatch, past the
-  boundary, source outcome gone) it re-evaluates — the cache can only make a run *slower*, never *wrong*.
+  match, the requested date is **not before** the cached evaluation (`evalDate >= source_eval_date` — a
+  backdated run must never copy a future-computed status backward), **and** the status can't have moved:
+  `next_transition_at IS NULL` (terminal: OVERDUE / no-exam MISSING_DATA / a PERMANENT series) OR
+  `evalDate < next_transition_at` (before the boundary) OR `source_eval_date == evalDate` (same day). On
+  any uncertainty (no row, hash/logic mismatch, a backdated date, past the boundary, source outcome gone)
+  it re-evaluates — the cache can only make a run *slower*, never *wrong*.
+- **`logic_version` reflects the ENGINE-SELECTED library**, not just the base one: it hashes the ELM the
+  engine actually executes (base vs `expansionLibrary`, mirroring `CqlExecutionEngine`'s selection given
+  whether a value-set resolver is active) plus the store `expansion_hash` of each referenced value set —
+  so a VSAC toggle/re-import or an operator value-set edit invalidates reuse for an expanding measure. On
+  the demo/scoped path (inline `urn:workwell` codes, no expansion) it is exactly `hash(base ELM)`.
 - **A pure cache** — dropping it just makes the next run a full run; no `outcomes`/`cases`/`audit` row
   references it, which is why it is safe to add. **No FK** on `subject_id`/`measure_id` (same as
   `person_links`/`quality_snapshots`). Descriptive only — reuse decides only WHETHER to re-run CQL, never

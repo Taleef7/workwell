@@ -37,8 +37,20 @@ date-corrected evidence matching a full run, boundary-crossing re-evaluation wit
 flip, data-change + logic-version invalidation, terminal (OVERDUE) reuse across a year, and PERMANENT
 reuse. 7/7.
 
-Typecheck clean; the incremental + touched-area suites are green. Tier 1 (`Group/$export?_since=`
-transport pre-filter) stays MIE-gated and unbuilt. Next: full-suite gate, then PR + Codex review.
+Typecheck clean; full `pnpm test` **1406 pass / 0 fail / 14 skipped**. Opened **PR #332**. Both an
+independent code-reviewer (superpowers) and Codex reviewed it and **converged on the same two P1s**, now
+fixed pre-merge (commit after the two feat commits):
+- **Backdated-run reuse** — the `next_transition_at` scheme assumes the clock only moves forward; a rerun
+  of an *older* run (reusing its persisted `evaluationDate`) after the cache advanced would copy a
+  future-computed status backward (July's OVERDUE into a June rerun). Fixed: reuse now requires
+  `evalDate >= source_eval_date`; parity test added.
+- **`logic_version` coverage** — it hashed only the base ELM, so a VSAC toggle/re-import or an operator
+  value-set edit wouldn't invalidate reuse for an expanding measure. Fixed: hash the engine-selected
+  library (base vs `expansionLibrary`) + fold in referenced value sets' store `expansion_hash`; threaded
+  `expansionActive`/`valueSets` through routes + scheduler; byte-identical on the demo path; 4 unit tests.
+Plus two LOWs (silent `plan()` failures → run WARN; canonical-hash over-strip → level-scoped). Both Codex
+threads replied + resolved; self-review summary posted on the PR. Tier 1 (`Group/$export?_since=`)
+stays MIE-gated and unbuilt. Ready for owner merge.
 
 ## 2026-07-24 — staging is LIVE; the multi-line PEM does not survive the container env transport
 

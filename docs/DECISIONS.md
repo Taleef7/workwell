@@ -36,6 +36,17 @@ answer. A cache miss on ANY uncertainty falls back to a full evaluation. The acc
 parity suite (`run/incremental/parity.test.ts`): on identical data an incremental run is byte-identical
 to a full run, and it re-evaluates exactly when (and only when) the answer could have changed.
 
+**Two correctness holes caught in code review (both P1, fixed pre-merge) — worth recording because they
+are the non-obvious ways this feature can go wrong:**
+- **Backdated runs.** The whole `next_transition_at` scheme assumes the clock only moves forward. A
+  rerun of an *older* run (which reuses that run's persisted `evaluationDate`) after a newer run advanced
+  the cache would otherwise copy a future-computed status backward (July's OVERDUE into a June rerun).
+  Fix: reuse requires `evalDate >= source_eval_date`; a backdated run always re-evaluates.
+- **`logic_version` must reflect the EXECUTED library + value-set membership.** Hashing only the base ELM
+  would let a VSAC toggle/re-import or an operator value-set edit slip through (same `data_hash`, same
+  base ELM, different codes). Fix: hash the engine-selected library (base vs `expansionLibrary`) plus the
+  referenced value sets' store `expansion_hash`. Byte-identical on the demo/scoped path.
+
 **Scope decisions (owner, 2026-07-24):** live tenants only (exclude the synthetic scale tenant — ~2,100
 rows vs ~1.7M of no-real-value cache); build `next_transition_at` (the ~90% saving, vs ~21% hash-only);
 recompute evidence at copy time. Tier 1 (`Group/$export?_since=` transport pre-filter) remains MIE-gated
