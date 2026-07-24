@@ -16,8 +16,9 @@
  */
 import type { EvalStateStore } from "../../stores/eval-state-store.ts";
 import type { OutcomeStore } from "../../stores/outcome-store.ts";
-import { MEASURES } from "../../engine/cql/measure-registry.ts";
+import { MEASURES, type MeasureMeta } from "../../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../../engine/cql/elm/index.ts";
+import { isVsacOid } from "../../engine/cql/composite-value-set-resolver.ts";
 import { hashBundle } from "./canonical-hash.ts";
 import { computeLogicVersion } from "./logic-version.ts";
 import { computeNextTransition } from "./next-transition.ts";
@@ -38,6 +39,21 @@ export interface IncrementalDeps {
   outcomes: Pick<OutcomeStore, "getOutcomeById">;
   /** The run's evaluation date, `YYYY-MM-DD`. */
   evalDate: string;
+  /**
+   * Whether a value-set RESOLVER is attached to the runtime engine (i.e. `isVsacConfigured(env)` — the
+   * key-gated expansion path). It changes WHICH ELM library the engine executes for a measure that
+   * declares non-OID value sets (base vs `expansionLibrary`), so it must feed `logic_version`. Default
+   * `false` (the demo/scoped path — the engine runs the inline base library, byte-identical to before).
+   */
+  expansionActive?: boolean;
+  /**
+   * Store `expansion_hash` per value-set reference (canonical URL AND/OR OID → hash), built once per run
+   * from `ValueSetStore.listAll()`. Folded into `logic_version` for a measure that expands, so a VSAC
+   * re-import or an operator value-set edit (which moves the stored `expansion_hash`) invalidates reuse
+   * (review #3 / Codex P1). Default empty — the scoped live tenants use inline `urn:workwell` codes with
+   * no expansion, so nothing is folded and the result equals `hash(base ELM)`.
+   */
+  valueSetExpansionHashes?: ReadonlyMap<string, string>;
 }
 
 /** A reuse plan: copy this prior status/evidence forward instead of re-running CQL. */
@@ -74,17 +90,47 @@ export class IncrementalCache {
 
   constructor(private readonly deps: IncrementalDeps) {}
 
-  /** `logic_version` for a measure (cached per run) — hash of its compiled ELM (+ future VSAC expansions). */
+  /**
+   * `logic_version` for a measure (cached per run) — hash of the ELM the engine ACTUALLY executes plus
+   * the store expansion hashes of the value sets it expands. Mirrors `CqlExecutionEngine`'s library
+   * selection exactly (base vs `expansionLibrary`), so a VSAC toggle, a re-import, or an operator
+   * value-set edit all change the result and force re-evaluation (review #3 / Codex P1). Byte-identical
+   * to `hash(base ELM)` on the scoped/demo path (no expansion active, no value-set hashes).
+   */
   private async logicVersion(measureId: string): Promise<string> {
     const cached = this.logicCache.get(measureId);
     if (cached) return cached;
     const meta = MEASURES[measureId];
-    const elm = meta ? ELM_LIBRARIES[meta.library] : undefined;
-    // Live tenants use inline urn:workwell codes (no expanded value sets) → no expansion hashes. When
-    // VSAC expansion is enabled for a measure, its expansion hashes would be folded in here (future).
-    const lv = await computeLogicVersion(elm ?? { unknownMeasure: measureId }, []);
+    if (!meta) {
+      const lv = await computeLogicVersion({ unknownMeasure: measureId }, []);
+      this.logicCache.set(measureId, lv);
+      return lv;
+    }
+    const { libraryName, expand } = this.selectLibrary(meta);
+    const elm = ELM_LIBRARIES[libraryName];
+    // When the measure expands, fold in the store expansion_hash of each value set it references (by
+    // canonical URL or bare OID). An OID with no store row (offline-bundled eCQM expansion) contributes
+    // nothing — a narrow documented residual: it changes only with a redeploy of the vendored bundle, and
+    // those measures (cms122/cms125) are non-boundary-safe (same-day-only reuse). urn:workwell references
+    // resolve to their store expansion_hash when present.
+    const map = this.deps.valueSetExpansionHashes;
+    const expansionHashes: string[] = expand && map
+      ? (meta.valueSets ?? [])
+          .map((u) => map.get(u) ?? map.get(u.replace(/^urn:oid:/, "")))
+          .filter((h): h is string => typeof h === "string" && h.length > 0)
+      : [];
+    const lv = await computeLogicVersion(elm ?? { missingElm: libraryName }, expansionHashes);
     this.logicCache.set(measureId, lv);
     return lv;
+  }
+
+  /** Replicate `CqlExecutionEngine`'s library selection (base vs expansion) for the current env. */
+  private selectLibrary(meta: MeasureMeta): { libraryName: string; expand: boolean } {
+    const wantsExpand = meta.valueSets != null && meta.valueSets.length > 0;
+    const canExpandOffline = wantsExpand && meta.valueSets!.every((u) => /^(urn:oid:)?2\.16\./.test(u) || isVsacOid(u));
+    const expand = wantsExpand && ((this.deps.expansionActive ?? false) || canExpandOffline);
+    const libraryName = expand && meta.expansionLibrary != null ? meta.expansionLibrary : meta.library;
+    return { libraryName, expand };
   }
 
   private async primeMeasure(measureId: string, period: string): Promise<void> {
@@ -111,10 +157,19 @@ export class IncrementalCache {
     if (row.dataHash !== dataHash || row.logicVersion !== logicVersion) return evaluate; // data or logic changed
 
     const { evalDate } = this.deps;
+    // The whole next_transition_at scheme assumes the clock only moves FORWARD (days-since only grows as
+    // Now() advances). A BACKDATED run (`evalDate < sourceEvalDate`) breaks that: a terminal row would
+    // reuse unconditionally and a pre-boundary row would pass `evalDate < nextTransitionAt` too, copying a
+    // status computed in the FUTURE into an earlier date (e.g. July's OVERDUE into a June rerun) — a wrong
+    // answer a full run would not produce (Codex P1 / review #1). Rerunning an older run reuses its
+    // persisted evaluationDate, so this is a normal path once a newer run has advanced the cache. Require
+    // the source evaluation to be no later than the requested date; a backdated run then always
+    // re-evaluates (correct + cheap). `>=` also subsumes the same-day case.
     const temporalOk =
-      row.nextTransitionAt === null || // terminal status on unchanged data
-      evalDate < row.nextTransitionAt || // still before the status boundary
-      row.sourceEvalDate === evalDate; // same-day reuse (covers non-boundary-safe measures)
+      evalDate >= row.sourceEvalDate &&
+      (row.nextTransitionAt === null || // terminal status on unchanged data
+        evalDate < row.nextTransitionAt || // still before the status boundary
+        row.sourceEvalDate === evalDate); // same-day reuse (covers non-boundary-safe measures)
     if (!temporalOk) return evaluate;
 
     const src = await this.deps.outcomes.getOutcomeById(row.sourceOutcomeId);

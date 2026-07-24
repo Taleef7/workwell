@@ -44,6 +44,7 @@ import {
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
+import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import { buildMeasureReportBundle, buildSummaryMeasureReportFromCounts, populationCountsFromStatus } from "../fhir/measure-report.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
@@ -57,6 +58,9 @@ interface RunsEnv extends DataSourceEnv {
   WORKWELL_WEBCHART_ENROLLMENT_JSON?: string;
   /** #263 incremental evaluation opt-in. Inert unless "true". */
   WORKWELL_INCREMENTAL_EVAL?: string;
+  /** #263 — folds value-set membership into logic_version when VSAC expansion is active. */
+  WORKWELL_VSAC_API_KEY?: string;
+  WORKWELL_VSAC_BASE_URL?: string;
 }
 
 // A run in one of these statuses has finished — its outcomes are final. Read models treat a terminal
@@ -253,6 +257,8 @@ export async function handleRuns(
       webChartEnv: env,
       evalState: (await getStores(env)).evalState, // #263 incremental cache (inert unless the flag is set)
       incremental: isIncrementalEnabled(env),
+      expansionActive: isVsacConfigured(env), // #263 — folds value-set membership into logic_version
+      valueSets: (await getStores(env)).valueSets,
     };
     try {
       const running = await scheduleAsyncRun(deps, body, waitUntil);
@@ -305,6 +311,8 @@ export async function handleRuns(
       webChartEnv: env,
       evalState: (await getStores(env)).evalState, // #263 incremental cache (inert unless the flag is set)
       incremental: isIncrementalEnabled(env),
+      expansionActive: isVsacConfigured(env), // #263 — folds value-set membership into logic_version
+      valueSets: (await getStores(env)).valueSets,
     };
     try {
       // Wide-scope reruns (ALL_PROGRAMS/SITE) carry the same ~1000-eval fan-out as a fresh run,

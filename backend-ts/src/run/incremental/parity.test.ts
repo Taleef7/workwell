@@ -173,6 +173,22 @@ test("§8 terminal statuses (OVERDUE) reuse across a long gap with date-correcte
   assert.equal(daysSinceOf(reused.evidence), daysSinceOf(await fullEvalEvidence("audiogram", bundle, later)), "Days Since advanced to match a full run");
 });
 
+test("review#1/Codex-P1: a BACKDATED run never reuses a future-computed outcome (matches a full run)", async () => {
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400); // OVERDUE at 2026-06-15 (terminal, next_transition_at = null)
+  const first = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15");
+  assert.equal(first.status, "OVERDUE");
+  // Rerun the SAME (subject, measure, period) at an EARLIER date (e.g. a rerun of an older run after the
+  // cache advanced). The exam (~2025-05-11) is only ~35 days before, so a full run is COMPLIANT — reuse
+  // must NOT copy the future OVERDUE backward.
+  const earlier = "2025-06-15";
+  const run2 = await incrementalRun(stores, "audiogram", "s1", bundle, earlier);
+  assert.equal(run2.reused, false, "a backdated run re-evaluates (evalDate < sourceEvalDate)");
+  assert.equal(run2.status, await fullEvalStatus("audiogram", bundle, earlier));
+  assert.equal(run2.status, "COMPLIANT");
+  assert.notEqual(run2.status, first.status, "would have been the wrong (future) status under naive reuse");
+});
+
 test("§8 a PERMANENT measure (series complete) reuses across days (date-invariant)", async () => {
   const stores = await freshStores();
   const config: ExamConfig = { binding: MEASURE_BINDINGS["mmr"]!, daysSinceLastExam: 3000, hasWaiver: false, programEnrolled: true, observationValue: null, refused: false, doseCount: 2 };
