@@ -44,8 +44,10 @@ import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/l
 import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
+import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { materializeRun } from "../quality/materialize-run.ts";
+import { IncrementalCache } from "./incremental/incremental-eval.ts";
 import {
   alertForTerminalRun,
   emitAlert,
@@ -111,6 +113,15 @@ export interface RunPipelineDeps {
   webChartEnv?: WebChartRunEnv;
   /** Verified client seam for tests/offline callers; production uses httpWebChartClient. */
   webChartClient?: WebChartClient;
+  /**
+   * Incremental-evaluation cache (#263). When `incremental` is true AND `evalState` is present, the loop
+   * reuses a prior CQL outcome for a subject whose data + logic are unchanged and whose status can't have
+   * moved (copy-forward), instead of re-running the ~68 ms CQL. Inert-unless-configured
+   * (`WORKWELL_INCREMENTAL_EVAL`): both absent/false ⇒ the loop is byte-identical to today. Descriptive
+   * only — the CQL engine still authors every status it's asked for (ADR-008).
+   */
+  evalState?: EvalStateStore;
+  incremental?: boolean;
 }
 
 export interface WebChartRunEnv extends DataSourceEnv {
@@ -445,6 +456,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let compliant = 0;
   let nonCompliant = 0;
   let failures = 0;
+  let skipped = 0; // #263: subjects whose prior outcome was copied forward (evaluation skipped)
+
+  // #263 incremental cache — inert unless BOTH the flag and the store are present (byte-identical
+  // otherwise). Scope = this live-tenant pipeline only; the scale path is not wired.
+  const incremental =
+    deps.incremental && deps.evalState
+      ? new IncrementalCache({ evalState: deps.evalState, outcomes: deps.outcomeStore, evalDate })
+      : undefined;
 
   // Active cases that exist at run start, keyed `subject|measure|period` (Codex P2). An out-of-cohort
   // EXCLUDED outcome must be able to CLOSE/UPDATE an EXISTING active case (a fresh waiver on someone who
@@ -480,19 +499,36 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     const period = bucketPeriodForMeasure(item.measureId, evalDate);
     let status: string;
     let evidence: unknown;
-    try {
-      const result = await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate });
-      status = result.outcome;
-      evidence = result.evidence;
-    } catch (err) {
-      // One subject's failure must not abort the run (runtime invariant): persist it as
-      // MISSING_DATA with the error, but flag the run PARTIAL_FAILURE so it isn't reported
-      // as fully successful.
-      status = "MISSING_DATA";
-      evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
-      failures++;
+    // #263: ask the incremental cache whether this subject can be reused (data + logic unchanged and the
+    // status can't have moved). A REUSE copies the prior CQL outcome forward with date-corrected evidence
+    // and skips the ~68 ms evaluation; anything else (or the cache disabled) is a full evaluation. The
+    // cache never authors a status — it only decides whether to re-ask the engine (ADR-008).
+    const plan = incremental
+      ? await incremental.plan(item.measureId, item.employee.externalId, period, bundle).catch(() => null)
+      : null;
+    let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
+    let evaluationFailed = false;
+    if (plan?.action === "reuse") {
+      status = plan.status;
+      evidence = plan.evidence;
+      evaluatedNow = false;
+      skipped++;
+    } else {
+      try {
+        const result = await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate });
+        status = result.outcome;
+        evidence = result.evidence;
+      } catch (err) {
+        // One subject's failure must not abort the run (runtime invariant): persist it as
+        // MISSING_DATA with the error, but flag the run PARTIAL_FAILURE so it isn't reported
+        // as fully successful.
+        status = "MISSING_DATA";
+        evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
+        failures++;
+        evaluationFailed = true;
+      }
     }
-    await deps.outcomeStore.recordOutcome({
+    const recorded = await deps.outcomeStore.recordOutcome({
       runId: run.id,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
@@ -500,6 +536,19 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       status,
       evidence,
     });
+    // #263: cache the fingerprint of a SUCCESSFUL real evaluation so a future run can reuse it. Never
+    // cache an engine-failure MISSING_DATA (we must not copy an error forward), and never re-cache a
+    // reuse (its fingerprint is already stored, pointing at the original evaluation). Best-effort — a
+    // cache-write failure must not fail an otherwise-complete run.
+    if (incremental && plan?.action === "evaluate" && evaluatedNow && !evaluationFailed) {
+      await incremental
+        .commit(item.measureId, item.employee.externalId, period, status, recorded.id, evidence, plan)
+        .catch((err) =>
+          deps.runStore
+            .appendLog(run.id, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
+            .catch(() => {}),
+        );
+    }
     // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
     // out-of-cohort (subject, measure) does NOT open a case. Two bypasses that only ever CLOSE/UPDATE an
     // existing case (never create) run even out-of-cohort, so a subject who leaves a cohort still has
@@ -662,6 +711,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           compliant,
           nonCompliant,
           failures,
+          // #263 accounting (issue acceptance criterion): evaluated vs skipped-unchanged. Only present
+          // when the incremental cache was active, so a normal run's payload is unchanged.
+          ...(incremental ? { evaluated: items.length - skipped, skippedUnchanged: skipped } : {}),
           measuresExecuted: measureIds,
           ...(liveTenant ? { liveTenant } : {}),
         },
@@ -691,6 +743,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // finalize in logs. Default channels = console-only when the caller did not inject any.
   const runMessage =
     `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
+    (incremental ? ` ${items.length - skipped} re-evaluated, ${skipped} reused-unchanged (#263).` : "") +
     (failures > 0 ? ` ${failures} evaluation failure(s).` : "");
   const alert = alertForTerminalRun({
     status: terminalStatus,

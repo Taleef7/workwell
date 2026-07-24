@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-07-24 — #263 incremental/delta batch evaluation, Phases 2a + 2b (branch `feat/263-incremental-eval`)
+
+Built the incremental-evaluation feature end-to-end on a feature branch (owner said "proceed with #263";
+owner decisions taken up front: **live tenants only** — exclude the synthetic scale tenant; **build
+`next_transition_at`** status-boundary caching; **recompute evidence** at copy time; DDL approved). The
+whole thing is **inert unless `WORKWELL_INCREMENTAL_EVAL=true`** (the 10th boot-inventory seam) and
+scoped to the live-tenant run pipeline (`finishManualRun`) — the demo/default stack and the scale path
+are byte-identical. Descriptive only: reuse decides only WHETHER to re-run CQL, never the answer
+(ADR-035).
+
+**Verified the design against the real code first** (owner asked me to double-check architectural fit)
+and found three corrections worth recording: (1) persisted evidence is exactly `{ expressionResults }` —
+the design/DATA_MODEL `why_flagged`/`evaluatedResource` shape is Java-era aspirational; `why_flagged` is
+DERIVED on read by `deriveWhyFlagged`, which reads `days_overdue` from the stored `"Days Since"` define,
+so copy-forward must recompute exactly that define. (2) `next_transition_at` is only *provably safe* for
+measures whose status is a monotone step function of days-since-event — `flu_vaccine` (seasonal) and
+`cms122`/`cms125` (period-based) are EXCLUDED (same-day-hash only), or a stale copy could ship a wrong
+status. (3) Wiring only `finishManualRun` gives the "exclude scale" decision for free.
+
+**Phase 2a — pure change-signal functions (`backend-ts/src/run/incremental/`), all golden-tested:**
+`canonical-hash` (data_hash over the canonicalized evaluated bundle), `logic-version` (ELM + VS-expansion
+hash), `evidence-copy-forward` (advances each `"Days Since"` by elapsed days — same-day copy is
+byte-identical), and `next-transition` (BOUNDARY_SAFE threshold table **golden-verified against the real
+`CqlExecutionEngine`** — all 8 windowed measures flip exactly where tabled, first try). 38 tests.
+
+**Phase 2b — store + wiring + parity:** owner-approved `eval_state` DDL (floor + ceiling, DATA_MODEL
+§3.27), `EvalStateStore` port + 2 adapters + store-contract (5 tests), `factory.ts` wiring, the
+`IncrementalCache` orchestrator, copy-forward in `finishManualRun` (reuse-or-evaluate + never cache an
+engine-failure), run accounting (evaluated-vs-skipped in the `RUN_COMPLETED` payload + run log line),
+env-threaded through routes + scheduler + `server.ts`, and the 10th seam in the inventory. The
+**parity suite** (`parity.test.ts`, the acceptance criterion) runs the real engine + real SQLite
+`eval_state`/`outcomes` against fixed bundles (modelling real WebChart data whose exam dates don't shift
+per run date) and proves all six §8 scenarios: same-day byte-identical reuse, across-day reuse with
+date-corrected evidence matching a full run, boundary-crossing re-evaluation with the correct status
+flip, data-change + logic-version invalidation, terminal (OVERDUE) reuse across a year, and PERMANENT
+reuse. 7/7.
+
+Typecheck clean; the incremental + touched-area suites are green. Tier 1 (`Group/$export?_since=`
+transport pre-filter) stays MIE-gated and unbuilt. Next: full-suite gate, then PR + Codex review.
+
 ## 2026-07-24 — staging is LIVE; the multi-line PEM does not survive the container env transport
 
 The staging env (#329) went from merged-but-dormant to **deployed and serving**. Two findings, one of

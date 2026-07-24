@@ -1,5 +1,5 @@
 /**
- * Inert-seam inventory tests (#260/#264): describeSeams flips each of the 9 seams on/off with the
+ * Inert-seam inventory tests (#260/#264): describeSeams flips each of the 10 seams on/off with the
  * correct env combination, preserving both-vars-required semantics where the underlying resolver
  * requires it (WebChart, DataChaser, ICE, EH-FHIR all need BOTH vars; SendGrid needs provider=sendgrid
  * AND a key; sql-executor is a single explicit opt-in; VSAC is a single key; alert-webhook is a single
@@ -20,7 +20,7 @@ test("describeSeams: everything off with no env vars set", () => {
   const seams = describeSeams({});
   assert.deepEqual(
     seams.map((s) => s.name),
-    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac", "alert-webhook", "bucket-s3"],
+    ["sendgrid", "datachaser", "ice", "eh-fhir", "webchart", "sql-executor", "vsac", "alert-webhook", "bucket-s3", "incremental-eval"],
   );
   for (const s of seams) assert.equal(s.active, false, `${s.name} should default off`);
 });
@@ -28,7 +28,7 @@ test("describeSeams: everything off with no env vars set", () => {
 test("formatSeamLogLine: all-off shape matches the documented boot log line", () => {
   assert.equal(
     formatSeamLogLine({}),
-    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off bucket-s3=off",
+    "seams: sendgrid=off datachaser=off ice=off eh-fhir=off webchart=off sql-executor=off vsac=off alert-webhook=off bucket-s3=off incremental-eval=off",
   );
 });
 
@@ -241,9 +241,10 @@ test("formatSeamLogLine: all-on shape when every seam is configured", () => {
     WORKWELL_BUCKET_S3_BUCKET: "workwell-twh-evidence",
     WORKWELL_BUCKET_S3_ACCESS_KEY_ID: "AKIA",
     WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: "s",
+    WORKWELL_INCREMENTAL_EVAL: "true",
   };
   assert.equal(
     formatSeamLogLine(allOn),
-    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on alert-webhook=on bucket-s3=on",
+    "seams: sendgrid=on datachaser=on ice=on eh-fhir=on webchart=on sql-executor=on vsac=on alert-webhook=on bucket-s3=on incremental-eval=on",
   );
 });

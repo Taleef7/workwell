@@ -1,8 +1,12 @@
 # Incremental / delta batch evaluation — design (#263, Phase 1)
 
-**Status:** **Draft — pending owner review. Contains an owner-gated DDL proposal (§6); no code is to
-be written until that is signed off** (the issue's own acceptance criteria).
-**Date:** 2026-07-13.
+**Status:** **APPROVED + IMPLEMENTED (Phases 2a + 2b), 2026-07-24 — ADR-035.** Owner signed off the §6
+DDL and the §10 decisions in-session. Built on `feat/263-incremental-eval`; see JOURNAL 2026-07-24.
+Corrections found against the real code during implementation (evidence is `{expressionResults}` only;
+`why_flagged` is derived-on-read; `next_transition_at` is safe only for monotone-in-days measures, so
+`flu_vaccine`/`cms122`/`cms125` are excluded from across-day reuse) are reflected in the code + ADR-035.
+Tier 1 (`Group/$export?_since=`) remains MIE-gated and unbuilt.
+**Date:** 2026-07-13 (design); 2026-07-24 (approval + build).
 **Context:** #263 was gated on "what change signal does WebChart expose?" (#254 Q A6). The 2026-07-13
 research pass (`docs/INTEGRATION_RESEARCH_2026-07-13.md`) answered most of it from public sources, so
 this design is now writable. Companion: ADR-020 (scale), ADR-026, #253 (the cost profile this is
@@ -330,14 +334,16 @@ provably unable to change an answer.
 5. **Later, MIE-gated:** `Group/$export?_since=` as a transport pre-filter (Tier 1), **with the
    verification run in §2** before trusting it.
 
-## 10. Open questions for the owner
+## 10. Open questions for the owner — RESOLVED 2026-07-24
 
-1. **Is the §6 DDL approved?** (Blocks all code.)
-2. **Scale tenant in or out?** ~1.7M `eval_state` rows on the cost-capped Neon vs ~2,100 for the live
-   tenants only.
-3. **Is `next_transition_at` (§3) in scope for Phase 2?** Without it, the daily saving is ~21% (PERMANENT
-   measures only) and the feature is arguably not worth its complexity. With it, it is ~90% — but it
-   requires the engine to also emit the transition date, which is a real (if small) engine change.
-4. **Stale-evidence handling on a copied row (§3):** recompute the date-dependent defines at copy time
-   (recommended — honest evidence, ~0 cost), or label them (`evidenceComputedAsOf`) and push the problem
-   to every reader? This is a correctness/auditability call, not a performance one.
+1. **Is the §6 DDL approved?** ✅ **Approved in-session.** `eval_state` shipped (DATA_MODEL §3.27), plus a
+   `source_eval_date` column the recompute needs.
+2. **Scale tenant in or out?** ✅ **OUT — live tenants only** (~2,100 rows). Achieved for free by wiring
+   only `finishManualRun`; the scale path (`batch-evaluate-scale.ts`) is untouched.
+3. **Is `next_transition_at` in scope?** ✅ **YES — built.** Implemented WITHOUT an engine change: the
+   thresholds live in a TS table (`next-transition.ts`) that is GOLDEN-VERIFIED against the real CQL
+   engine (sweeps `daysSinceLastExam`, asserts the CQL flips exactly at each boundary), so it can't drift.
+   Only monotone-in-days measures get across-day reuse; `flu_vaccine`/`cms122`/`cms125` are excluded.
+4. **Stale-evidence handling?** ✅ **Recompute (option 1).** Each `"Days Since"` define is advanced by the
+   elapsed days at copy time (measure-agnostic; same-day copy is byte-identical). The §8 parity test
+   asserts the copied `"Days Since"` equals a full run's for the later date.
