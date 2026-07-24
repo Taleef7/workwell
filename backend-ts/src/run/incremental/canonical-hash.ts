@@ -21,31 +21,58 @@
  */
 
 /**
- * Volatile fields stripped before hashing — server/transport metadata the CQL engine never reads, so
- * their churn must not invalidate the cache. Kept deliberately minimal: stripping too much would hide a
- * *real* change (design §5), so only fields provably invisible to CQL evaluation are listed here.
- *   - `meta.lastUpdated` / `meta.versionId` — server modification metadata (WebChart doesn't even expose
- *     resource versioning; design §2).
- *   - `Bundle.timestamp` — when the bundle was assembled, not clinical content.
- *   - `entry[].fullUrl` — a server-assigned/absolute reference wrapper; the resource's own `id` is kept.
+ * Recursively strip only `meta.lastUpdated` / `meta.versionId` — server modification metadata invisible
+ * to CQL, volatile on ANY resource (nested or contained), so stripping it at any depth is correct.
+ * Everything else is preserved so a real change stays visible (design §5). `Bundle.timestamp` and
+ * `entry[].fullUrl` are handled level-scoped by `canonicalizeForHash` below, NOT here — stripping a field
+ * merely NAMED `timestamp`/`fullUrl` at arbitrary depth could hide a real change if a future measure ever
+ * read such an element (review #4).
  */
-const stripVolatile = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stripVolatile);
+const stripMeta = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripMeta);
   if (value === null || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (k === "fullUrl" || k === "timestamp") continue; // Bundle.timestamp + entry.fullUrl
     if (k === "meta" && v !== null && typeof v === "object" && !Array.isArray(v)) {
       const meta: Record<string, unknown> = {};
       for (const [mk, mv] of Object.entries(v as Record<string, unknown>)) {
         if (mk === "lastUpdated" || mk === "versionId") continue;
-        meta[mk] = stripVolatile(mv);
+        meta[mk] = stripMeta(mv);
       }
       // Drop an emptied `meta` entirely so `{meta:{}}` and absent-meta canonicalize identically.
       if (Object.keys(meta).length > 0) out[k] = meta;
       continue;
     }
-    out[k] = stripVolatile(v);
+    out[k] = stripMeta(v);
+  }
+  return out;
+};
+
+/**
+ * Level-scoped strip of the two transport-wrapper fields, applied only where FHIR actually places them:
+ * `Bundle.timestamp` at the Bundle root, and `fullUrl` on each `Bundle.entry`. A non-Bundle input (a bare
+ * resource) is returned meta-stripped only.
+ */
+const stripVolatile = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return stripMeta(value);
+  const obj = value as Record<string, unknown>;
+  if (obj.resourceType !== "Bundle") return stripMeta(value);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "timestamp") continue; // Bundle.timestamp — assembly time, not clinical content
+    if (k === "entry" && Array.isArray(v)) {
+      out[k] = v.map((entry) => {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return stripMeta(entry);
+        const e: Record<string, unknown> = {};
+        for (const [ek, ev] of Object.entries(entry as Record<string, unknown>)) {
+          if (ek === "fullUrl") continue; // entry.fullUrl — server-assigned wrapper; resource.id is kept
+          e[ek] = stripMeta(ev);
+        }
+        return e;
+      });
+      continue;
+    }
+    out[k] = stripMeta(v);
   }
   return out;
 };

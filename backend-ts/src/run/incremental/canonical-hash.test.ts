@@ -96,6 +96,13 @@ test("inner arrays keep order — reordering Observation.component IS a change",
   assert.notEqual(await hashBundle(a), await hashBundle(b));
 });
 
+test("volatile strip is LEVEL-SCOPED — a resource-level field named timestamp/fullUrl still counts (review #4)", async () => {
+  // A `timestamp`/`fullUrl` NESTED inside a resource is clinical data the CQL could read, so a change
+  // there must move the hash (only Bundle.timestamp + entry.fullUrl are transport wrappers).
+  const withField = (v: string) => bundle([{ resource: { resourceType: "Observation", id: "o1", timestamp: v, fullUrl: v } }]);
+  assert.notEqual(await hashBundle(withField("a")), await hashBundle(withField("b")));
+});
+
 test("output is the house sha256:<hex> format", async () => {
   const h = await hashBundle(bundle([patient]));
   assert.match(h, /^sha256:[0-9a-f]{64}$/);

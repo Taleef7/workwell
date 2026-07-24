@@ -45,6 +45,7 @@ import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
+import type { ValueSetStore } from "../stores/value-set-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { materializeRun } from "../quality/materialize-run.ts";
 import { IncrementalCache } from "./incremental/incremental-eval.ts";
@@ -122,6 +123,13 @@ export interface RunPipelineDeps {
    */
   evalState?: EvalStateStore;
   incremental?: boolean;
+  /**
+   * #263 — whether the runtime value-set resolver is active (`isVsacConfigured(env)`). Feeds
+   * `logic_version` so a VSAC toggle/re-import invalidates reuse. Default undefined ⇒ false (demo path).
+   */
+  expansionActive?: boolean;
+  /** #263 — value-set store, read once to fold `expansion_hash` into `logic_version` (only when `expansionActive`). */
+  valueSets?: Pick<ValueSetStore, "listAll">;
 }
 
 export interface WebChartRunEnv extends DataSourceEnv {
@@ -459,10 +467,32 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let skipped = 0; // #263: subjects whose prior outcome was copied forward (evaluation skipped)
 
   // #263 incremental cache — inert unless BOTH the flag and the store are present (byte-identical
-  // otherwise). Scope = this live-tenant pipeline only; the scale path is not wired.
+  // otherwise). Scope = this live-tenant pipeline only; the scale path is not wired. When value-set
+  // expansion is active (VSAC/resolver on), build a url/oid → expansion_hash map once so logic_version
+  // reflects value-set membership too (review #3 / Codex P1); on the demo path it stays undefined.
+  let vsExpansionHashes: Map<string, string> | undefined;
+  if (deps.incremental && deps.evalState && deps.expansionActive && deps.valueSets) {
+    vsExpansionHashes = new Map();
+    try {
+      for (const vs of await deps.valueSets.listAll()) {
+        if (vs.expansionHash) {
+          if (vs.canonicalUrl) vsExpansionHashes.set(vs.canonicalUrl, vs.expansionHash);
+          if (vs.oid) vsExpansionHashes.set(vs.oid, vs.expansionHash);
+        }
+      }
+    } catch {
+      /* a value-set read failure just means no hashes folded — logic_version falls back to ELM-only */
+    }
+  }
   const incremental =
     deps.incremental && deps.evalState
-      ? new IncrementalCache({ evalState: deps.evalState, outcomes: deps.outcomeStore, evalDate })
+      ? new IncrementalCache({
+          evalState: deps.evalState,
+          outcomes: deps.outcomeStore,
+          evalDate,
+          expansionActive: deps.expansionActive,
+          valueSetExpansionHashes: vsExpansionHashes,
+        })
       : undefined;
 
   // Active cases that exist at run start, keyed `subject|measure|period` (Codex P2). An out-of-cohort
@@ -504,7 +534,17 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // and skips the ~68 ms evaluation; anything else (or the cache disabled) is a full evaluation. The
     // cache never authors a status — it only decides whether to re-ask the engine (ADR-008).
     const plan = incremental
-      ? await incremental.plan(item.measureId, item.employee.externalId, period, bundle).catch(() => null)
+      ? await incremental
+          .plan(item.measureId, item.employee.externalId, period, bundle)
+          .catch((err) => {
+            // A plan failure (eval_state / getOutcomeById read error) safely falls back to a full
+            // evaluation, but must not be silent — an under-performing incremental run would otherwise be
+            // invisible (review #2). Best-effort WARN, mirroring the commit path below.
+            void deps.runStore
+              .appendLog(run.id, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
+              .catch(() => {});
+            return null;
+          })
       : null;
     let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
     let evaluationFailed = false;
