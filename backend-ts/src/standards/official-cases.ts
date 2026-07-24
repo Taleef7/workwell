@@ -6,6 +6,11 @@
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  calculationOptions as officialCalculationOptions,
+  hasRetrieveSignal as officialHasRetrieveSignal,
+  loadCalculator,
+} from "@workwell/official-executor";
 
 export const POPULATION_CODES = [
   "initial-population",
@@ -401,27 +406,16 @@ export interface OfficialMeasureRun {
   draftDrift?: Cms122DraftDrift;
 }
 
+/**
+ * The option block + the fqm#371 date-only period-end fix are owned by `@workwell/official-executor`
+ * so the MADiE harness and the live literal diff can never drift apart on them.
+ */
 function calculationOptions(period: MeasurementPeriod, trustMetaProfile: boolean): FqmCalculationOptions {
-  return {
-    measurementPeriodStart: period.start,
-    measurementPeriodEnd: /^\d{4}-\d{2}-\d{2}$/.test(period.end)
-      ? `${period.end}T23:59:59.999Z`
-      : period.end,
-    calculateSDEs: false,
-    calculateHTML: false,
-    calculateClauseCoverage: false,
-    calculateRAVs: false,
-    trustMetaProfile,
-    verboseCalculationResults: true,
-  };
+  return officialCalculationOptions(period, { trustMetaProfile }) as unknown as FqmCalculationOptions;
 }
 
 function hasRetrieveSignal(output: FqmOutput): boolean {
-  return (output.results ?? []).some((result) => {
-    const hasNonPatientResource = result.evaluatedResource?.some((resource) => resource.resourceType !== "Patient") ?? false;
-    const hasPopulationMembership = result.detailedResults?.[0]?.populationResults?.some((population) => population.result) ?? false;
-    return hasNonPatientResource || hasPopulationMembership;
-  });
+  return officialHasRetrieveSignal(output as never);
 }
 
 function actualPopulationCounts(populations: FqmPopulationResult[]): PopulationCounts {
@@ -459,7 +453,7 @@ export async function runOfficialMeasureCases(
   options: RunOfficialMeasureOptions = {},
 ): Promise<OfficialMeasureRun> {
   const calculate: FqmCalculate =
-    options.calculate ?? (await import("fqm-execution")).Calculator.calculate as unknown as FqmCalculate;
+    options.calculate ?? ((await loadCalculator()) as unknown as FqmCalculate);
   const validCases = loaded.cases.filter(
     (item): item is OfficialCase & Required<Pick<OfficialCase, "patientId" | "patientBundle" | "expected">> =>
       !item.loadError && !!item.patientId && !!item.patientBundle && !!item.expected,
@@ -564,7 +558,7 @@ export async function runCms122DraftDrift(
     throw new Error("CMS122 draft drift requires a CMS122 official load and run");
   }
   const calculate: FqmCalculate =
-    options.calculate ?? (await import("fqm-execution")).Calculator.calculate as unknown as FqmCalculate;
+    options.calculate ?? ((await loadCalculator()) as unknown as FqmCalculate);
   const validCases = loaded.cases.filter(
     (item): item is OfficialCase & Required<Pick<OfficialCase, "patientId" | "patientBundle">> =>
       !item.loadError && !!item.patientId && !!item.patientBundle,
