@@ -1,0 +1,42 @@
+{
+  "catalogId": "cms122",
+  "measureName": "CMS122FHIRDiabetesAssessGT9Pct",
+  "version": "1.0.000",
+  "cmsId": "122FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS122FHIRDiabetesAssessGT9Pct",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS122FHIRDiabetesAssessGT9Pct/CMS122FHIRDiabetesAssessGT9Pct-bundle.json",
+    "rawSha256": "sha256:d1f31f8dcd7c84e131d983e47687bbe3c395c29332929a8861d126930e641363"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": false,
+    "strippedValueSets": true,
+    "rawBytes": 16786509,
+    "vendoredBytes": 10533266
+  },
+  "sha256": "sha256:d853e4a8957a06e32e6290884db8d3a14402de52caaf89d18ff2f87e600464ea"
+}

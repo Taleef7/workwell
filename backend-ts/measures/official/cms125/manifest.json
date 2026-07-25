@@ -1,0 +1,42 @@
+{
+  "catalogId": "cms125",
+  "measureName": "CMS125FHIRBreastCancerScreen",
+  "version": "1.0.000",
+  "cmsId": "125FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS125FHIRBreastCancerScreen/CMS125FHIRBreastCancerScreen-bundle.json",
+    "rawSha256": "sha256:b8d5ec6664cf339bf83a27ec66c009bd50fd87ed537eaf3b62f3696455598384"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": false,
+    "strippedValueSets": true,
+    "rawBytes": 17085208,
+    "vendoredBytes": 10676819
+  },
+  "sha256": "sha256:d8f9ba629b9ecf39d39221ad88027e0e4f76e79890a20587d1f1933816af68c5"
+}

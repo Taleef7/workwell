@@ -9,6 +9,7 @@ import {
   CMS122_PALLIATIVE_OID,
 } from "./cms122-official.ts";
 import { CMS122V14 } from "./references/cms122v14.ts";
+import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
@@ -66,7 +67,10 @@ test("literal diff: injected calculate → per-subject mapping, gate attribution
   assert.equal(report.mode, "literal");
   assert.equal(report.runId, "run-lit-1");
   assert.equal(report.subjects.length, 12);
-  assert.equal(report.officialMeasure.version, "0.5.000");
+  // Read from the manifest, never a literal: spelling the version into a test is the same staleness
+  // trap that let the vendored artifact sit at v0.5.000 while upstream had moved on (PR-5).
+  assert.equal(report.officialMeasure.version, loadOfficialArtifact("cms122")?.manifest.version);
+  assert.match(report.officialMeasure.version, /^\d+\.\d+\.\d+$/);
   // Official outcomes span the mapped vocabulary.
   const outs = new Set(report.subjects.map((s) => s.officialOutcome));
   assert.ok(outs.has("OVERDUE") && outs.has("COMPLIANT") && outs.has("EXCLUDED") && outs.has("OUT_OF_POPULATION"));
