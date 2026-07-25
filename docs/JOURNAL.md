@@ -1,5 +1,68 @@
 # Journal
 
+## 2026-07-25 (later) — PR-6a: the gate pays for itself — 86% smaller artifacts, proven neutral (branch `feat/strip-elm-annotations`)
+
+The first thing the new gate was built to decide. `--strip-elm-annotations` has existed in
+`pnpm vendor:official` since PR-5 but stayed off, because `localId` is what fqm-execution uses for clause
+coverage and an unproven size optimisation is exactly what the deploy job-poll window has already been
+burned by once (PR #283). With the gate green there was finally a way to *ask* rather than argue.
+
+Re-vendored both measures with the flag: **16.0MB raw → 2.4MB vendored, 86% smaller** (it was 10.5MB
+unstripped). Re-ran the gate: **121/121, and the reduction check reports 0/55 (CMS122) and 0/66 (CMS125)
+cases changed population vector.** All 8 priority measures now project to **~19MB of deploy image
+instead of ~80MB**, which is what makes the remaining six safe to land.
+
+**What that check does and does not compare, precisely.** It executes our stripped artifact against the
+**full upstream bundle** over the same 121-case deck. So it proves *stripped ≡ upstream*, not directly
+*stripped ≡ unstripped* — the second follows by transitivity through the previous commit's report, which
+recorded 0/55 + 0/66 for the unstripped artifact against the same upstream. Worth stating because this
+PR overwrites that file, so half the chain now lives only in git history. It also compares **population
+membership only** (the four codes), and reads `detailedResults[0]`, which is fine for two single-group
+measures and would silently compare group 0 alone the day a multi-group measure is vendored.
+
+**Probed what is actually lost rather than assuming**, since PR-7 will persist fqm's output as
+`evidence_json.official` and a surprise there would be found late. With annotations stripped, a CMS122
+case returns `populationResults` complete with `criteriaExpression`/`populationId`, and **419 named
+`statementResults` with `final` values** (CMS125: 423) — the shape PR-7 needs. Gone: `clauseResults`
+(already `0` — `calculateClauseCoverage` and `calculateHTML` are both off), per-statement `localId`, and
+`locator`, which is what fqm error text uses to point at a position in the ELM, so a runtime failure in
+an official measure can no longer be localized. That last one is a real if small diagnostic cost.
+
+**The statement-result claim is now enforced rather than written down.** A one-off probe frozen as prose
+in three files is exactly how a future re-vendor or fqm bump breaks PR-7 with the gate still green — so
+the reduction check counts statement results per measure, the report records the number, and a
+default-suite test fails if it ever reads zero. Getting that count right took two wrong answers first:
+de-duplicating by bare statement name reads **138** and by library-qualified name **150**, because these
+measures include 9–10 libraries that reuse names like `Numerator` and `SDE Sex`. The number that means
+what it says is the per-subject count — 419 and 423, matching an independent count of the ELM statement
+definitions.
+
+The flag stays opt-in at the CLI — an unstripped artifact is one command away if clause-level debugging
+is ever needed — but every measure vendored for production use passes it, and the README says so.
+
+**One thing regenerating the report exposed: it was evidence about nothing in particular.** With the
+stripped artifacts in place, the report came out **byte-identical** apart from its date — which is the
+neutrality result, and also the problem. Every reduction setting produces a *v1.0.000* artifact, and the
+report only ever named the version, so re-vendoring at different settings would have left the committed
+evidence looking equally green while proving nothing about the bytes that ship. The reduction check now
+records the artifact it executed:
+
+> Artifact proven: `sha256:c0d99a8e…` (2.4 MB, ELM annotations stripped). Compared on population
+> membership (…) only; the artifact also returned 419 named statement results per subject.
+
+The hash is computed in the CLI over the file on disk rather than read from `manifest.json` — quoting
+the manifest's own hash back would make the evidence circular. The descriptive *"stripped"* label can
+only come from the manifest, so it is reported **only when the manifest's hash matches the bytes we just
+hashed**: corroboration, not authority. A manifest describing some other artifact, or an unreadable one,
+renders "unverified" — the first cut printed an affirmative *"retained"*, which is a false claim about a
+stripped artifact, and the accompanying comment described a behaviour the code did not have.
+
+A default-suite guard then pins each measure's reduction-check section to its committed artifact, so
+re-vendoring without re-proving fails locally, and CI's staleness check catches it too. Verified by
+appending one byte: the guard fails with the on-disk hash in the message.
+
+Typecheck clean; full suite **1456 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-25 — PR-6: the official MADiE gate runs in CI, and PR-5's reduction proof is discharged (branch `feat/madie-ci-gate`)
 
 Roadmap §7.4 PR-6. A new `official-cases` CI job fetches the pinned upstream content and runs
