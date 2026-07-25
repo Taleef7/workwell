@@ -48,6 +48,7 @@ import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import type { PopulationCounts } from "../fhir/measure-report.ts";
 import {
+  officialMembership,
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
   countPopulations,
@@ -153,13 +154,38 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
  * So official runs read rows, bounded by the same subject cap the individual/bundle reports use;
  * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
  */
+/**
+ * Did THIS run's outcomes come from the official executor? One row settles it: `evidence.official` is
+ * written only by that executor, and a run evaluates one measure with one engine. Bounded on purpose —
+ * this sits in front of a path that must stay O(1) for a 120k `seed:scale` run.
+ */
+async function runProducedOfficialEvidence(
+  os: Awaited<ReturnType<typeof outcomes>>,
+  runId: string,
+): Promise<boolean> {
+  const [first] = await os.listOutcomes(runId, { limit: 1 });
+  return officialMembership(first?.evidence) !== null;
+}
+
 async function aggregateCountsForRun(
   os: Awaited<ReturnType<typeof outcomes>>,
   runId: string,
   measureId: string,
   env: RunsEnv,
 ): Promise<{ counts: PopulationCounts } | { error: Response }> {
-  if (!isOfficialRouted(measureId, env as unknown as Record<string, unknown>)) {
+  // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
+  // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
+  // now means that turning the flag off — the documented rollback — silently reinterprets every
+  // historical official run through the status histogram, reversing cms122's numerator (its official
+  // numerator is poor control, and the workflow status inverts it). An export of a past run must not
+  // change meaning because of a config change made after it.
+  //
+  // The env flag is still consulted first, as a cheap way to skip a read for the overwhelmingly common
+  // case; when it is off, one bounded row settles it. `evidence.official` is written only by the
+  // official executor, and a run evaluates one measure with one engine, so a single row is decisive.
+  const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
+  const official = routedNow || (await runProducedOfficialEvidence(os, runId));
+  if (!official) {
     return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId) };
   }
   const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);

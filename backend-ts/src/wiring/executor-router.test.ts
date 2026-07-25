@@ -230,3 +230,34 @@ test("boot reports a bad configuration loudly, because everything else about it 
   );
   assert.match(worker, /OFFICIAL_ROUTING_MISCONFIGURED/, "and emit a greppable WORKWELL_ALERT for it");
 });
+
+test("an export of a PAST official run keeps its meaning after the flag is turned off", async () => {
+  // The documented rollback for PR-9 is "unset the flag". If provenance came from the current config,
+  // that rollback would silently reinterpret every historical official run through the status
+  // histogram — reversing cms122's numerator, since its official numerator is poor control and the
+  // workflow status inverts it. A regulatory export of a finished run must not change meaning because
+  // of a configuration change made afterwards.
+  const { officialMembership } = await import("../fhir/measure-report.ts");
+  const officialOutcome = {
+    evidence: {
+      expressionResults: [],
+      official: {
+        ecqmId: "122FHIR",
+        version: "1.0.000",
+        engine: "fqm-execution",
+        artifactSha256: "sha256:x",
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  };
+  // The signal the export path keys on is in the ROW, and is readable with the flag unset.
+  assert.ok(
+    officialMembership(officialOutcome.evidence),
+    "a stored official outcome is self-describing — no env var required to interpret it",
+  );
+  assert.equal(officialMembership({ expressionResults: [] }), null, "and an authored one is not");
+});
