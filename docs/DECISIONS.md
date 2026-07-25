@@ -407,10 +407,12 @@ the cheapest way to express that at the time, but it could not survive official-
 fqm legitimately becomes a *production* evaluation path (PR-7). The dependency now lives in
 **`@workwell/official-executor`** — one `package.json`, pinned `1.8.5` — whose entry point imports it only
 through a lazy `await import`, so consuming the package costs nothing until something calculates. The
-single allowlist test is replaced by three that are harder to defeat than one grep: the **manifest** (the
-app declares no fqm dep; the package declares the pin), the **app tree** (no `src/` file imports it
-directly), and the **module graph** (importing the package pulls no fqm into the module cache; under
-pnpm's strict linking the app cannot even resolve it). Both original protections therefore survive, and
+single allowlist test is replaced by three that are harder to defeat than one grep: the **manifest**
+(no workspace package other than the executor may declare fqm; the app declares none), the **app tree**
+(no `src/` file — nor any other package's source — imports it directly), and the **lazy-import check**
+(every fqm reference in the package entry, comments stripped, must be the dynamic `import(...)` form, so
+the multi-line `import { … } from "fqm-execution"` shape a formatter produces cannot slip past — plus a
+positive assertion that the app cannot even *resolve* fqm under pnpm's strict linking). Both original protections therefore survive, and
 the "diagnostic-only" framing is retired rather than the invariant.
 
 ## ADR-025: Measure execution is pluggable behind a `MeasureExecutor` seam; FHIR-native is the default + correctness oracle, CQL→SQL is a parity-gated future executor — E9 (#78)

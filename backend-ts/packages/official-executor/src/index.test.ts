@@ -46,14 +46,13 @@ test("isExecutableMeasureBundle requires a Measure and ELM on EVERY library", ()
   }
 });
 
-test("referencedValueSetUrls unions across libraries and survives one unparseable library", () => {
+test("referencedValueSetUrls unions across libraries", () => {
   const bundle = {
     resourceType: "Bundle",
     entry: [
       { resource: { resourceType: "Measure" } },
       elmLibrary(["http://cts.nlm.nih.gov/fhir/ValueSet/1.2.3", "http://cts.nlm.nih.gov/fhir/ValueSet/4.5.6"]),
       elmLibrary(["http://cts.nlm.nih.gov/fhir/ValueSet/1.2.3"]), // duplicate → unioned
-      { resource: { resourceType: "Library", content: [{ contentType: "application/elm+json", data: "!!not-base64-json" }] } },
     ],
   } as unknown as MeasureBundle;
   assert.deepEqual(referencedValueSetUrls(bundle).sort(), [
@@ -153,4 +152,47 @@ test("calculateOfficial batches once and keys membership by patient id", async (
   assert.deepEqual([...bySubject.keys()].sort(), ["a", "b"]);
   assert.equal(bySubject.get("a")?.["numerator"], true);
   assert.equal(bySubject.get("b")?.["numerator"], false);
+});
+
+test("referencedValueSetUrls FAILS FAST on unparseable ELM rather than silently dropping retrieves", () => {
+  // Swallowing this would trade a precise parse error for an opaque cql-execution "ValueSet not found"
+  // deep inside the fqm batch — the pre-extraction code threw, and so does this.
+  const bundle = {
+    resourceType: "Bundle",
+    entry: [
+      { resource: { resourceType: "Measure" } },
+      { resource: { resourceType: "Library", content: [{ contentType: "application/elm+json", data: "!!not-json" }] } },
+    ],
+  } as unknown as MeasureBundle;
+  assert.throws(() => referencedValueSetUrls(bundle));
+});
+
+test("isExecutableMeasureBundle rejects a bundle with a null/resource-less entry (sound narrowing)", () => {
+  // The guard is the precondition referencedValueSetUrls trusts when it dereferences entry.resource.
+  const withNull = {
+    resourceType: "Bundle",
+    entry: [{ resource: { resourceType: "Measure" } }, elmLibrary([]), null],
+  };
+  assert.equal(isExecutableMeasureBundle(withNull), false);
+  assert.equal(isExecutableMeasureBundle({ resourceType: "Bundle", entry: [{ resource: { resourceType: "Measure" } }, elmLibrary([]), {}] }), false);
+});
+
+test("populationMembership resolves duplicate populationTypes FIRST-wins (pre-extraction semantics)", () => {
+  const membership = populationMembership([
+    { populationType: "numerator", result: true },
+    { populationType: "numerator", result: false },
+  ]);
+  assert.equal(membership["numerator"], true, "a later duplicate must not overwrite the first");
+});
+
+test("calculateOfficial can express trustMetaProfile, so both consumers can share it", async () => {
+  let seen: Record<string, unknown> = {};
+  await calculateOfficial({
+    bundle: { resourceType: "Bundle", entry: [] } as unknown as MeasureBundle,
+    patientBundles: [],
+    period: { start: "2026-01-01", end: "2026-12-31" },
+    options: { trustMetaProfile: true },
+    calculate: async (_b, _p, options) => { seen = options as Record<string, unknown>; return { results: [] }; },
+  });
+  assert.equal(seen["trustMetaProfile"], true);
 });

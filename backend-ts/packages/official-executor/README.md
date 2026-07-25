@@ -30,7 +30,7 @@ the module graph.
 |---|---|---|
 | Reading vendored bundle bytes | app (`standards/`) | Keeps the package filesystem-free; the vendoring convention (paths, manifests, hashes) is the app's business. |
 | Value-set expansion / VSAC | app (injected `expand(oid)`) | No terminology store dependency. |
-| Mapping populations → `OutcomeStatus` | app (`fhir/measure-report.ts`) | That mapping is WorkWell policy, not measure execution. |
+| Mapping populations → `OutcomeStatus` | app — `officialOutcome` in `standards/literal-diff.ts` (and `fhir/measure-report.ts` on the export path) | That mapping is WorkWell policy, not measure execution. |
 
 ## Usage
 

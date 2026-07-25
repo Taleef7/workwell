@@ -130,7 +130,8 @@ export interface LiteralDiffDeps {
 const DISCLAIMER =
   "LITERAL execution diff: the official multi-library QICore CMS122v14 artifact (MADiE FHIR export), " +
   "executed from its PRE-COMPILED ELM via fqm-execution (no translation), per subject against WorkWell's " +
-  "authored measure. fqm-execution is a diagnostic-only dependency (ADR-026). Descriptive only — CQL " +
+  "authored measure. fqm-execution is quarantined behind the @workwell/official-executor package " +
+  "boundary and lazily imported (ADR-026 as amended). Descriptive only — CQL " +
   "Outcome Status remains the sole compliance authority (ADR-008).";
 
 /**
@@ -203,7 +204,8 @@ export async function computeLiteralDiff(
       workwellBySubject.set(row.subjectId, workwell.outcome);
     } catch {
       errored.add(row.subjectId);
-      // still push a minimal bundle so the id stays alignable; but mark as errored → ERROR row below
+      // No bundle is pushed for this subject: results are aligned by patientId, not by position, and the
+      // ERROR row below is emitted from `errored`.
     }
   }
 
