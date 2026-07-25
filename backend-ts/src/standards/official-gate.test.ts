@@ -80,12 +80,14 @@ test("the committed evidence report shows real case coverage for every gated mea
     // PR-7 persists fqm's named statement results as `evidence_json.official`. Stripping ELM
     // annotations was proven not to remove them, and this keeps that true: zero would mean the
     // reduction check is green on population membership while the evidence payload has vanished.
-    const statements = /returned (\d+) named statement results per subject/.exec(report.slice(
+    // The recorded number is the WORST subject's, so a non-zero floor means EVERY subject produced a
+    // payload — not that the healthiest one did.
+    const statements = /returned (\d+) named statement results for every subject/.exec(report.slice(
       report.indexOf(`### ${catalogId.toUpperCase()} reduction check`),
     ));
     assert.ok(
       statements && Number(statements[1]) > 0,
-      `${catalogId}: the report must record a non-zero per-subject statement-result count`,
+      `${catalogId}: the report must record a non-zero statement-result count for every subject`,
     );
   }
 });

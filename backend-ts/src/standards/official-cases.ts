@@ -567,7 +567,7 @@ export interface Cms122DraftDrift {
   artifactVersion: string;
   artifact?: ReductionArtifactIdentity;
   valueSetMode: "official-v1-bundle-cache";
-  /** Named statement results the VENDORED artifact produced for a single subject (0 if the run errored). */
+  /** Named statement results the VENDORED artifact produced for the WORST subject (0 if the run errored). */
   namedStatementResults: number;
   total: number;
   changedCases: number;
@@ -661,15 +661,20 @@ export async function runCms122DraftDrift(
   // subjects: these measures include 9-10 libraries that reuse statement names, so any dedupe rule
   // undercounts (138 by bare name, 150 by library-qualified name) and records a number that means
   // something other than what it says.
-  const statementResults = Math.max(
-    0,
-    ...(output.results ?? []).map(
+  //
+  // The MINIMUM across subjects, not the maximum: a max lets one subject with an empty payload hide
+  // behind fifty-four healthy ones, leaving the report's floor green while PR-7 would persist nothing
+  // for that subject. Subjects with no `detailedResults` at all are excluded because the population
+  // comparison already fails them ("vendored-artifact result unavailable" -> errors -> exit 1).
+  const perSubjectStatements = (output.results ?? [])
+    .filter((result) => result.detailedResults?.[0])
+    .map(
       (result) =>
         (result.detailedResults?.[0]?.statementResults ?? []).filter(
           (statement) => typeof statement.statementName === "string",
         ).length,
-    ),
-  );
+    );
+  const statementResults = perSubjectStatements.length > 0 ? Math.min(...perSubjectStatements) : 0;
   return {
     artifactVersion,
     ...(options.artifact ? { artifact: options.artifact } : {}),
@@ -822,7 +827,7 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
                       : "retained"
                 }). Compared on population membership ` +
                 `(${POPULATION_CODES.join("/")}) only; the artifact also returned ` +
-                `${run.draftDrift.namedStatementResults} named statement results per subject.`,
+                `${run.draftDrift.namedStatementResults} named statement results for every subject.`,
               "",
             ]
           : []),

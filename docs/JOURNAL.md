@@ -31,11 +31,13 @@ an official measure can no longer be localized. That last one is a real if small
 **The statement-result claim is now enforced rather than written down.** A one-off probe frozen as prose
 in three files is exactly how a future re-vendor or fqm bump breaks PR-7 with the gate still green — so
 the reduction check counts statement results per measure, the report records the number, and a
-default-suite test fails if it ever reads zero. Getting that count right took two wrong answers first:
+default-suite test fails if it ever reads zero. Getting that count right took three wrong answers first:
 de-duplicating by bare statement name reads **138** and by library-qualified name **150**, because these
-measures include 9–10 libraries that reuse names like `Numerator` and `SDE Sex`. The number that means
-what it says is the per-subject count — 419 and 423, matching an independent count of the ELM statement
-definitions.
+measures include 9–10 libraries that reuse names like `Numerator` and `SDE Sex`; and taking the *maximum*
+across subjects (Codex) lets one subject with an empty payload hide behind fifty-four healthy ones while
+the floor stays green — the very failure the floor exists to catch. It records the **minimum**, so a
+non-zero count means every subject produced a payload. That reads **419** and **423**, matching an
+independent count of the ELM statement definitions.
 
 The flag stays opt-in at the CLI — an unstripped artifact is one command away if clause-level debugging
 is ever needed — but every measure vendored for production use passes it, and the README says so.
