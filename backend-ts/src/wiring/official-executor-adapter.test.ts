@@ -8,12 +8,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  evidenceStatements,
   expandArtifactTerminology,
   officialMeasureExecutor,
   outcomeFromPopulations,
+  populationExpressionResults,
   requiredOids,
 } from "./official-executor-adapter.ts";
+import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { OFFICIAL_MEASURE_SEMANTICS, officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import type { FqmCalculate } from "@workwell/official-executor";
@@ -97,31 +98,54 @@ test("DUE_SOON is never emitted — official CQL has no forecast define", () => 
   assert.deepEqual([...buckets].sort(), ["COMPLIANT", "EXCLUDED", "MISSING_DATA", "OVERDUE"]);
 });
 
-test("evidence keeps the measure's own library statements, not its includes", () => {
-  const statements = [
-    { libraryName: "CMS122FHIRDiabetesAssessGT9Pct", statementName: "Numerator", final: "TRUE" },
-    { libraryName: "CMS122FHIRDiabetesAssessGT9Pct", statementName: "Denominator", final: "TRUE" },
-    { libraryName: "FHIRHelpers", statementName: "ToInterval", final: "NA" },
-    { libraryName: "Hospice", statementName: "Has Hospice Services", final: "FALSE" },
-    { libraryName: "CMS122FHIRDiabetesAssessGT9Pct", final: "TRUE" }, // unnamed → dropped
-  ];
-  assert.deepEqual(evidenceStatements(statements, "CMS122FHIRDiabetesAssessGT9Pct"), [
-    { define: "official:Numerator", result: "TRUE" },
-    { define: "official:Denominator", result: "TRUE" },
-  ]);
+test("evidence is derived from POPULATION results, because statement values do not survive vendoring", () => {
+  // Measured, not assumed: we strip ELM annotations when vendoring (PR-6a, an 86% size cut), which
+  // removes `localId`; fqm resolves a statement's `raw` BY localId, so `raw` is always undefined and
+  // `final` collapses to NA|UNHIT|FALSE. Over six real CMS122 MADiE cases, 0 of 96 root statements read
+  // TRUE — including for subjects the measure places in the NUMERATOR. Persisting those would put
+  // `official:Numerator = "FALSE"` beside `populationResults: [{numerator, result: true}]` in one
+  // regulatory record, with the false half being what the Evidence Explorer and auditor packet render.
+  assert.deepEqual(
+    populationExpressionResults([
+      { populationType: "initial-population", result: true },
+      { populationType: "numerator", result: false },
+    ]),
+    [
+      { define: "official:initial-population", result: true },
+      { define: "official:numerator", result: false },
+    ],
+  );
 });
 
-test("define names are prefixed so why_flagged cannot misread fqm's TRUE/FALSE enum as a date", () => {
-  // CMS122's root library really does define "Most Recent Glycemic Status Date", and deriveWhyFlagged
-  // matches /^most recent .*date$/i then slices the result as a date. fqm's `final` is the enum
-  // TRUE|FALSE|NA|UNHIT (`raw` is a live object graph; `pretty` renders "FALSE (undefined)"), so an
-  // unprefixed name would put "Last completed TRUE" on the roster and in the outcomes CSV.
-  const [row] = evidenceStatements(
-    [{ libraryName: "L", statementName: "Most Recent Glycemic Status Date", final: "TRUE" }],
-    "L",
+test("official evidence cannot be misread by the REAL why_flagged deriver", () => {
+  // Calling deriveWhyFlagged rather than re-implementing its regex: a copy of the pattern would keep
+  // passing if the real one were ever unanchored, which is exactly the change that would break this.
+  const authored = deriveWhyFlagged(
+    { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2026-01-02T00:00:00Z" }] },
+    "audiogram",
+    "2026-07",
+    "OVERDUE",
   );
-  assert.equal(row?.define, "official:Most Recent Glycemic Status Date");
-  assert.ok(!/^most recent .*date$/i.test(row!.define), "the anchored why_flagged match must not fire");
+  assert.equal(authored.last_exam_date, "2026-01-02", "sanity: the deriver really does read that shape");
+
+  const official = deriveWhyFlagged(
+    {
+      expressionResults: populationExpressionResults([
+        { populationType: "numerator", result: true },
+        { populationType: "denominator-exclusion", result: true },
+      ]),
+    },
+    "cms122",
+    "2026-07",
+    "EXCLUDED",
+  );
+  assert.equal(official.last_exam_date, null, "no official define may be mistaken for an exam date");
+  assert.equal(official.days_overdue, null, "nor for a days-since count");
+  // The unanchored waiver matcher DOES fire on "official:denominator-exclusion" — and correctly, now
+  // that the result is a real boolean rather than fqm's constant "FALSE" string. A DENEX subject
+  // genuinely has an exclusion on file. Asserted rather than left to chance: the match is incidental,
+  // and an incidental behaviour nobody has written down is one nobody will preserve.
+  assert.equal(official.waiver_status, "active");
 });
 
 test("every vendored measure has recorded semantics — the table cannot silently fall behind", () => {
@@ -292,7 +316,10 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
   assert.equal(outcome.outcome, "COMPLIANT", "cms125's numerator (a mammogram) means compliant");
   assert.equal(outcome.inInitialPopulation, true);
   assert.deepEqual(outcome.evidence.expressionResults, [
-    { define: "official:Numerator", result: "TRUE" },
+    { define: "official:initial-population", result: true },
+    { define: "official:denominator", result: true },
+    { define: "official:denominator-exclusion", result: false },
+    { define: "official:numerator", result: true },
   ]);
   assert.deepEqual(outcome.evidence.official, {
     ecqmId: "999FHIR",
@@ -419,4 +446,18 @@ test("the measurement period is the authored engine's, quirk for quirk", async (
   });
   await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: {}, evaluationDate: "2024-02-29" }));
   assert.equal(seen[0], "2023-03-01", "non-clamping overflow, exactly as the authored engine does it");
+});
+
+test("a malformed expander still produces the DIAGNOSTIC refusal, not a raw TypeError", async () => {
+  // It would fail closed either way — buildValueSetCache calls .map() outside its try — but as an
+  // opaque "Cannot read properties of undefined", losing the message that names the OIDs and the CLI
+  // that fixes them. That message is the entire value of this refusal.
+  const artifact = fakeArtifact("fake", ["2.16.1"]);
+  for (const bad of [undefined, null, {}, "codes"]) {
+    await assert.rejects(
+      () => expandArtifactTerminology(artifact, (async () => bad) as never),
+      /1 of 1 value sets could not be expanded/,
+      `an expander returning ${JSON.stringify(bad) ?? "undefined"} must still name the OIDs`,
+    );
+  }
 });

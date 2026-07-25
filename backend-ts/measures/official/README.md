@@ -28,12 +28,16 @@ over the same deck and reports **0/55 (CMS122) and 0/66 (CMS125) cases changed p
 121/121 still passing — on **population membership**, which is what the check compares.
 
 What that costs: `clauseResults` (already empty — `calculateClauseCoverage` and `calculateHTML` are both
-off), per-statement `localId`, and `locator`, which is what cql-execution/fqm error text uses to point at
-a position in the ELM, so a runtime failure in an official measure can no longer be localized. What it
-keeps: `populationResults`, and fqm's named `statementResults` — the shape PR-7 persists as
-`evidence_json.official`. The reduction check counts those per measure (CMS122 419, CMS125 423) and the
-evidence report records the count, so a future re-vendor or fqm bump that loses them fails visibly
-instead of quietly breaking PR-7.
+off), `locator` (so fqm error text can no longer point at a position in the ELM), and per-statement
+`localId` — **which costs more than it first appeared**. fqm resolves a statement's `raw` value by
+`localId`, so with annotations stripped every `raw` is `undefined` and `final` collapses to
+`NA | UNHIT | FALSE`: measured over six CMS122 MADiE cases, **0 of 96 root statements ever read `TRUE`**,
+including for subjects the measure puts in the numerator. Statement **names and count** survive; statement
+**values** do not. The reduction check's per-measure count (CMS122 419, CMS125 423) verifies the former
+and is invariant under stripping — it must not be read as proving the latter.
+
+What it keeps, and what the claim actually rests on: `populationResults` — which is what the reduction
+check compares (0/55 and 0/66 cases changed) and what `evidence_json.official` persists.
 
 ## Adding or updating a measure
 

@@ -51,6 +51,15 @@
  *   `outcome` and `evidence`, and MISSING_DATA opens a case — so today every out-of-IPP subject would
  *   become a case. True of the authored path too, but official routing over a live population makes the
  *   volume matter.
+ * - **The display vocabulary lies about official EXCLUDED and OVERDUE.** `roster-vocabulary.ts`
+ *   hardcodes "Contraindication / exemption on file" for every EXCLUDED — but this adapter routes three
+ *   distinct conditions there (DENEX, DENEXCEP, out-of-denominator), and only the first is an exemption.
+ *   Worse, it renders OVERDUE as "no record on file", which for cms122 is the factual opposite: OVERDUE
+ *   means a *recorded* HbA1c above 9%. Both strings are written for authored recency measures and need
+ *   an official-aware branch before anything renders an official outcome to an operator.
+ * - **Only group 1 is read.** `detailedResults[0]`, like every existing consumer. Both vendored measures
+ *   have exactly one group; several of the roadmap's remaining six do not, and a multi-group artifact
+ *   deserves a refusal alongside the scoring guard rather than silently reporting its first group.
  */
 import {
   buildValueSetCache,
@@ -113,10 +122,14 @@ export function outcomeFromPopulations(
   }
   // In the initial population but NOT the denominator: the measure does not score this subject, so
   // there is nothing to chase. Reading only IPP would call them OVERDUE (or COMPLIANT for an inverse
-  // measure) and open a case, while `normalizeMembership` in the exporter clamps them out of DENOM —
-  // roster and MeasureReport would then disagree about the same person. Latent for cms122/cms125,
-  // where DENOM equals IPP, and reachable for measures whose denominator is a strict subset.
-  if (populations["denominator"] === false) return { outcome: "EXCLUDED", inInitialPopulation: true };
+  // measure) and open a case they should never have. Latent for cms122/cms125, where DENOM equals IPP,
+  // and reachable for measures whose denominator is a strict subset.
+  //
+  // `!== true`, matching the IPP check above rather than `=== false`. The caller has already refused
+  // any non-proportion measure, so a proportion measure with no `denominator` population is a contract
+  // violation — and falling through to the numerator branch on a missing key would be exactly the
+  // guess this file refuses to make everywhere else.
+  if (populations["denominator"] !== true) return { outcome: "EXCLUDED", inInitialPopulation: true };
   const inNumerator = populations["numerator"] === true;
   const compliant = inNumerator === numeratorMeansCompliant;
   return { outcome: compliant ? "COMPLIANT" : "OVERDUE", inInitialPopulation: true };
@@ -133,23 +146,37 @@ export function outcomeFromPopulations(
  */
 export const OFFICIAL_DEFINE_PREFIX = "official:";
 
-export function evidenceStatements(
-  statements: readonly FqmStatementResult[],
-  rootLibraryName: string,
+/**
+ * `expressionResults` for an official outcome: the POPULATION results, not the statement results.
+ *
+ * This is the second thing on this branch to be settled by measurement rather than reasoning, and the
+ * answer inverted the design. The intent was to persist fqm's per-statement results the way the authored
+ * engine persists CQL defines. They cannot carry values, because we strip ELM annotations when vendoring
+ * (PR-6a, an 86% size cut) and `localId` goes with them — fqm resolves a statement's `raw` value BY
+ * `localId`, so `raw` is always `undefined`, and `final` collapses to `NA | UNHIT | FALSE`. Measured on
+ * the committed CMS122 artifact over six MADiE cases: **0 of 96 root statements ever read `TRUE`**, and a
+ * subject the measure places in the numerator persists `official:Numerator = "FALSE"` beside
+ * `populationResults: [{numerator, result: true}]` — two contradictory statements in one regulatory
+ * record, with the false one being what the Evidence Explorer, the auditor packet and the AI explain
+ * prompt render.
+ *
+ * So statement results are not persisted at all. `expressionResults` is derived from the population
+ * membership instead: it cannot contradict `official.populationResults` because it IS
+ * `official.populationResults`, and it gives the existing evidence surfaces something true to show.
+ * Names are prefixed `official:` — honest (these are populations, not authored defines) and it keeps
+ * them clear of `deriveWhyFlagged`'s anchored `/^most recent .*date$/i` and `/^days since/i` matchers.
+ *
+ * If per-statement values are ever genuinely wanted, the cost is explicit: vendor that measure
+ * unstripped (~10.5MB instead of ~2.4MB) and revisit. PR-8 must not read `expressionResults` on an
+ * official outcome expecting statement-level detail.
+ */
+export function populationExpressionResults(
+  populationResults: readonly { populationType: string; result: boolean }[],
 ): ExpressionResult[] {
-  return statements
-    .filter((s) => s.libraryName === rootLibraryName && typeof s.statementName === "string")
-    // The recorded result is fqm's `final`, which is the ENUM `TRUE|FALSE|NA|UNHIT` — not a value.
-    // (`raw` is a live cql-execution object graph and `pretty` renders as "FALSE (undefined)", so
-    // neither is a usable substitute.) That matters because `deriveWhyFlagged` pattern-matches define
-    // NAMES: CMS122's root library defines "Most Recent Glycemic Status Date", which matches
-    // /^most recent .*date$/i, and the roster would print "Last completed TRUE" and hand the string to
-    // the outcomes CSV's lastExamDate column. Prefixing the names defeats that anchored match, and is
-    // honest anyway — these are official-executor statement results, not authored CQL defines.
-    .map((s) => ({
-      define: `${OFFICIAL_DEFINE_PREFIX}${s.statementName as string}`,
-      result: s.final ?? null,
-    }));
+  return populationResults.map((p) => ({
+    define: `${OFFICIAL_DEFINE_PREFIX}${p.populationType}`,
+    result: p.result,
+  }));
 }
 
 /**
@@ -190,13 +217,23 @@ export async function expandArtifactTerminology(
       unusable.add(oid);
       return [];
     }
-    if (!Array.isArray(codes) || codes.length === 0) unusable.add(oid);
+    // Returning a non-array would fail closed anyway — but as a raw TypeError from inside
+    // `buildValueSetCache`'s `.map`, losing the diagnostic that names the OIDs and the CLI that fixes
+    // them, which is the entire value of this refusal. Normalize to `[]` so the real message wins.
+    if (!Array.isArray(codes) || codes.length === 0) {
+      unusable.add(oid);
+      return [];
+    }
     return codes;
   });
   if (unusable.size > 0) {
     const oids = [...unusable];
+    // Both sides are counted as distinct OIDs. `referenced` holds canonical URLs, and two canonicals
+    // can collapse to one OID — comparing the sets directly would under-report the failure ("1 of 3"
+    // for two failing canonicals).
+    const referencedOids = new Set(referenced.map(oidFromValueSetUrl)).size;
     throw new Error(
-      `${artifact.manifest.catalogId}: ${unusable.size} of ${referenced.length} value sets could not be ` +
+      `${artifact.manifest.catalogId}: ${unusable.size} of ${referencedOids} value sets could not be ` +
         `expanded (${oids.slice(0, 5).join(", ")}${oids.length > 5 ? ", …" : ""}). Official execution ` +
         `would report every subject out-of-population. Import them with 'pnpm resolve-valuesets' ` +
         `before routing ${artifact.manifest.catalogId} officially.`,
@@ -274,8 +311,10 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): EvaluateMea
         // denominator — the same empty-population catastrophe the terminology preflight above refuses,
         // through a different door. For a WebChart-derived bundle (no `meta.profile` at all) it is worse:
         // the Patient retrieve THROWS. `standards/literal-diff.ts` runs this same artifact over these
-        // same bundles with the default (false), and it is the configuration the 121/121 gate exercises
-        // for our own data shape.
+        // same bundles with the default (false) — that is the precedent, and the honest statement of
+        // it. NOT "the 121/121 gate proves false works": the MADiE harness starts at false and RETRIES
+        // at true when no retrieve matches, so the green gate run lands on true for the profile-tagged
+        // test-case bundles. It says nothing about our own data shape either way.
       });
 
       const [subjectId, result] = [...results][0] ?? [];
@@ -295,7 +334,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): EvaluateMea
         outcome,
         inInitialPopulation,
         evidence: {
-          expressionResults: evidenceStatements(result.statements, artifact.manifest.measureName),
+          expressionResults: populationExpressionResults(result.populationResults),
           // The regulatory truth, verbatim and lossless. MeasureReport/QRDA read THIS (ADR-031/PR-3),
           // never the workflow bucket above — the bucket cannot express DENEXCEP and inverts for an
           // inverse measure.

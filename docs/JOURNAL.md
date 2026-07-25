@@ -97,7 +97,46 @@ prefixed `official:` to defeat that anchored match. No scoring guard existed, so
 periods on a leap day — matching the engine's quirk beats improving on it when the entire purpose is
 comparability.
 
-Typecheck clean; full suite **1473 pass / 0 fail / 14 skipped**.
+### Second review round — the evidence design was built on a premise that is false
+
+The one that matters, and it inverted the design. The intent was to persist fqm's per-statement results
+the way the authored engine persists CQL defines. **They cannot carry values, because of PR-6a.**
+Stripping ELM annotations removes `localId`; fqm resolves a statement's `raw` value *by* `localId`, so
+`raw` is always `undefined` and `final` collapses to `NA | UNHIT | FALSE`. Measured on the committed
+CMS122 artifact over six MADiE cases: **0 of 96 root statements ever read `TRUE`** — including for
+subjects the measure places in the numerator. A numerator member would have persisted:
+
+```jsonc
+"expressionResults": [{ "define": "official:Numerator", "result": "FALSE" }],
+"official": { "populationResults": [{ "populationType": "numerator", "result": true }] }
+```
+
+Two contradictory statements in one regulatory record, and the **false** half is what the Evidence
+Explorer, the auditor packet, and the AI explain prompt render. So `expressionResults` is now derived
+from the population results instead: it cannot contradict `official.populationResults` because it *is*
+`official.populationResults`, and the existing evidence surfaces get something true to show.
+
+This retroactively narrows a PR-6a claim. That PR said stripping "keeps fqm's named `statementResults`,
+the shape PR-7 persists", enforced by a per-measure count in the evidence report. The count is real and
+the names survive — but the count is **invariant under stripping**, so it never could have caught this.
+Names and count survive; values do not. Both the vendor script's header and `measures/official/README.md`
+now say that, in those words.
+
+Six smaller things came with it: the terminology refusal produced a raw `TypeError` instead of its own
+diagnostic when an expander returned a non-array (fails closed either way, but loses the message naming
+the OIDs and the CLI); it counted failing OIDs against canonical URLs, under-reporting when two
+canonicals share an OID; the `denominator` guard used `=== false` where every neighbour uses `=== true`,
+so an absent key fell through to the numerator branch — a guess, in a file whose whole discipline is
+refusing to guess; and the claim that the 121/121 gate "exercises `trustMetaProfile: false` for our own
+data shape" was wrong (the MADiE harness starts false and **retries true**, so the green run lands on
+true for profile-tagged test bundles — it proves nothing either way about our bundles).
+
+Two consequences of this PR's mapping are now written into the PR-7b obligations block rather than left
+to be rediscovered: `roster-vocabulary.ts` renders **every** EXCLUDED as "Contraindication / exemption on
+file" though this adapter routes three distinct conditions there, and renders OVERDUE as "no record on
+file" — which for cms122 is the factual opposite, since OVERDUE means a *recorded* HbA1c above 9%.
+
+Typecheck clean; full suite **1474 pass / 0 fail / 14 skipped**.
 
 ## 2026-07-25 (later) — PR-6a: the gate pays for itself — 86% smaller artifacts, proven neutral (branch `feat/strip-elm-annotations`)
 
