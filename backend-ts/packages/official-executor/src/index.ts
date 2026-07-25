@@ -74,8 +74,12 @@ export async function loadCalculator(): Promise<FqmCalculate> {
 export function isExecutableMeasureBundle(bundle: unknown): bundle is MeasureBundle {
   const b = bundle as MeasureBundle | null | undefined;
   if (!b || b.resourceType !== "Bundle" || !Array.isArray(b.entry)) return false;
-  const libraries = b.entry.filter((e) => e?.resource?.["resourceType"] === "Library");
-  const hasMeasure = b.entry.some((e) => e?.resource?.["resourceType"] === "Measure");
+  // Every entry must actually carry a resource object. This guard is the precondition the rest of the
+  // package trusts (referencedValueSetUrls dereferences `entry.resource` unconditionally), so a guard
+  // that narrowed while tolerating a null entry would be handing downstream code a lie.
+  if (!b.entry.every((e) => !!e && typeof e.resource === "object" && e.resource !== null)) return false;
+  const libraries = b.entry.filter((e) => e.resource["resourceType"] === "Library");
+  const hasMeasure = b.entry.some((e) => e.resource["resourceType"] === "Measure");
   const everyLibraryHasElm =
     libraries.length > 0 &&
     libraries.every((l) =>
@@ -100,15 +104,14 @@ export function referencedValueSetUrls(bundle: MeasureBundle): string[] {
     if (resource.resourceType !== "Library") continue;
     const data = resource.content?.find((c) => c.contentType === "application/elm+json")?.data;
     if (!data) continue;
-    try {
-      const elm = JSON.parse(Buffer.from(data, "base64").toString("utf8")) as {
-        library?: { valueSets?: { def?: Array<{ id: string }> } };
-      };
-      for (const def of elm.library?.valueSets?.def ?? []) urls.add(def.id);
-    } catch {
-      // A single unparseable library must not sink the whole cache build; its retrieves will simply
-      // find no cached expansion, which the empty-but-present policy below already handles safely.
-    }
+    // Deliberately NOT tolerant, matching the pre-extraction behavior: a library whose ELM will not
+    // parse means the value sets it retrieves are missing from the cache, and fqm/cql-execution errors
+    // on an unresolvable value set anyway - so swallowing this would only trade a precise parse error
+    // for an opaque failure deep inside the batch.
+    const elm = JSON.parse(Buffer.from(data, "base64").toString("utf8")) as {
+      library?: { valueSets?: { def?: Array<{ id: string }> } };
+    };
+    for (const def of elm.library?.valueSets?.def ?? []) urls.add(def.id);
   }
   return [...urls];
 }
@@ -174,6 +177,22 @@ export interface CalculationPeriod {
   end: string;
 }
 
+/**
+ * The exact option set we pass to fqm-execution. Literal types on the flags that must never change
+ * silently: they are all on by default in fqm and are pure cost, and `calculateHTML` is the one with a
+ * plausible-looking impostor (`disableHTMLGeneration`, which does nothing).
+ */
+export interface FqmCalculationOptions {
+  measurementPeriodStart: string;
+  measurementPeriodEnd: string;
+  calculateSDEs: false;
+  calculateHTML: false;
+  calculateClauseCoverage: false;
+  calculateRAVs: false;
+  trustMetaProfile: boolean;
+  verboseCalculationResults: true;
+}
+
 export interface CalculationOptionOverrides {
   /**
    * Retrieve by `meta.profile` instead of by base resource type. FALSE for plain-FHIR bundles (ours);
@@ -195,7 +214,7 @@ export interface CalculationOptionOverrides {
 export function calculationOptions(
   period: CalculationPeriod,
   overrides: CalculationOptionOverrides = {},
-): Record<string, unknown> {
+): FqmCalculationOptions {
   return {
     measurementPeriodStart: period.start,
     measurementPeriodEnd: normalizePeriodEnd(period.end),
@@ -215,7 +234,10 @@ export type PopulationMembership = Record<string, boolean>;
 export function populationMembership(results: FqmPopulationResult[]): PopulationMembership {
   const membership: PopulationMembership = {};
   for (const population of results) {
-    if (typeof population?.populationType === "string") {
+    // FIRST wins, matching the pre-extraction `.find()` semantics. A ratio or multi-observation measure
+    // can legitimately repeat a populationType within a group; last-wins would silently pick a
+    // different one than the code this was extracted from.
+    if (typeof population?.populationType === "string" && !(population.populationType in membership)) {
       membership[population.populationType] = population.result === true;
     }
   }
@@ -229,6 +251,8 @@ export interface OfficialCalculationInput {
   valueSetCache?: unknown[];
   /** Injectable calculator (tests / alternate runtimes). Defaults to the lazily-imported real one. */
   calculate?: FqmCalculate;
+  /** Option overrides - notably `trustMetaProfile` for profile-tagged official test-case bundles. */
+  options?: CalculationOptionOverrides;
 }
 
 /**
@@ -244,7 +268,7 @@ export async function calculateOfficial(
   const output = await calculate(
     input.bundle,
     input.patientBundles,
-    calculationOptions(input.period),
+    calculationOptions(input.period, input.options),
     input.valueSetCache,
   );
   const bySubject = new Map<string, PopulationMembership>();

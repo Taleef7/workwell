@@ -10,6 +10,9 @@ import {
   calculationOptions as officialCalculationOptions,
   hasRetrieveSignal as officialHasRetrieveSignal,
   loadCalculator,
+  type FqmCalculationOptions,
+  type FqmCalculationResult,
+  type FqmPopulationResult,
 } from "@workwell/official-executor";
 
 export const POPULATION_CODES = [
@@ -342,10 +345,9 @@ export function classifyPopulationAgreement(
   };
 }
 
-interface FqmPopulationResult {
-  populationType: string;
-  result: boolean;
-}
+// Re-exported from the package rather than redeclared: a local copy is exactly the drift the
+// extraction exists to prevent.
+export type { FqmPopulationResult };
 
 interface FqmExecutionResult {
   patientId?: string;
@@ -358,16 +360,9 @@ interface FqmOutput {
   withErrors?: unknown[];
 }
 
-export interface FqmCalculationOptions {
-  measurementPeriodStart: string;
-  measurementPeriodEnd: string;
-  calculateSDEs: false;
-  calculateHTML: false;
-  calculateClauseCoverage: false;
-  calculateRAVs: false;
-  trustMetaProfile: boolean;
-  verboseCalculationResults: true;
-}
+// Re-exported from the package rather than redeclared - a local copy is exactly the drift the
+// extraction exists to prevent.
+export type { FqmCalculationOptions };
 
 export type FqmCalculate = (
   measureBundle: unknown,
@@ -411,11 +406,11 @@ export interface OfficialMeasureRun {
  * so the MADiE harness and the live literal diff can never drift apart on them.
  */
 function calculationOptions(period: MeasurementPeriod, trustMetaProfile: boolean): FqmCalculationOptions {
-  return officialCalculationOptions(period, { trustMetaProfile }) as unknown as FqmCalculationOptions;
+  return officialCalculationOptions(period, { trustMetaProfile });
 }
 
 function hasRetrieveSignal(output: FqmOutput): boolean {
-  return officialHasRetrieveSignal(output as never);
+  return officialHasRetrieveSignal(output as FqmCalculationResult);
 }
 
 function actualPopulationCounts(populations: FqmPopulationResult[]): PopulationCounts {
