@@ -41,11 +41,17 @@
  * executes the stripped artifact against the full upstream bundle over the same deck.
  *
  * Lost: `clauseResults` (already empty — `calculateClauseCoverage`/`calculateHTML` are both off),
- * per-statement `localId`, and `locator`, which is what cql-execution/fqm error text uses to point at a
- * position in the ELM — so a runtime failure in an official measure can no longer be localized.
- * Retained: `populationResults` and fqm's **named `statementResults`**, the shape PR-7 persists as
- * `evidence_json.official`; the reduction check counts them per measure and the evidence report records
- * the count, so this is enforced rather than asserted here.
+ * `locator`, which is what fqm error text uses to point at a position in the ELM, and per-statement
+ * `localId` — **which costs more than it first appeared** (found in PR-7a review). fqm resolves a
+ * statement's `raw` value BY `localId`, so with annotations stripped every `raw` is `undefined` and
+ * `final` collapses to `NA | UNHIT | FALSE`: measured over six CMS122 MADiE cases, **0 of 96 root
+ * statements ever read `TRUE`**, including for subjects the measure places in the numerator. Statement
+ * NAMES and COUNT survive the strip (which is what the reduction check's per-measure count verifies —
+ * that check is invariant under stripping and should not be read as proving more); statement VALUES do
+ * not. PR-7a therefore persists population results as evidence, not statement results.
+ *
+ * Retained and load-bearing: `populationResults`, and population membership is what the reduction
+ * check actually compares — 0/55 and 0/66 cases changed, which is the claim this flag rests on.
  *
  * The flag stays opt-in at the CLI so an unstripped artifact remains one command away if clause-level
  * debugging is ever needed; every measure vendored for production use passes it.
