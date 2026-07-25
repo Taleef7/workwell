@@ -17,7 +17,7 @@ import type { Stores, StoresEnv } from "../stores/factory.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
-import { engineForEnv } from "../wiring/engine-factory.ts";
+import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import {
@@ -330,7 +330,7 @@ export async function schedulerTick(
   try {
     await ensureSegmentSeed(env);
     const stores = await getStores(env);
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     const allSegments = await stores.segments.listSegments();
     const enabledSegments = allSegments.filter((s) => s.enabled);
     await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env, incremental: isIncrementalEnabled(env), expansionActive: isVsacConfigured(env) });

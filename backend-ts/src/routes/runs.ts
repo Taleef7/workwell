@@ -25,7 +25,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { engineForEnv } from "../wiring/engine-factory.ts";
+import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
@@ -287,7 +287,7 @@ export async function handleRuns(
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     body.triggeredBy = externalTriggeredBy(body.triggeredBy); // Fable M1: no forged seed:*/scheduler labels
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     const deps = {
       runStore: await store(env),
       outcomeStore: await outcomes(env),
@@ -320,7 +320,7 @@ export async function handleRuns(
   const rerunId = pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/)?.[1];
   if (rerunId && req.method === "POST") {
     const runStore = await store(env);
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     // A CASE run reruns through rerun-to-verify (the case scope), reading the caseId
     // persisted in requested_scope — matches Java's rerunSameScope CASE branch. Other
     // scopes go through executeRerun.
@@ -418,7 +418,7 @@ export async function handleRuns(
     // A run being processed must leave the QUEUED claim path so it isn't re-handed
     // to a worker (QUEUED → RUNNING; idempotent for already-running runs).
     await runStore.markRunning(evalId);
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,

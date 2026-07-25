@@ -5,7 +5,7 @@
  * (all roles, like the immunization forecast). Writes nothing; no schema. handleEmployees only matches
  * `/profile` + `/search`, so this `/simulate` path is not intercepted.
  */
-import { engineForEnv } from "../wiring/engine-factory.ts";
+import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { StoresEnv } from "../stores/factory.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { simulateComplianceAsOf } from "../run/employee-compliance-snapshot.ts";
@@ -35,7 +35,7 @@ export async function handleComplianceSimulation(req: Request, env: StoresEnv): 
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const engine = await engineForEnv(env);
+  const engine = await routedEngineForEnv(env);
   const snapshot = await simulateComplianceAsOf(externalId, asOf ?? today, { engine, today });
   if (!snapshot) return json({ error: "not_found", externalId }, 404);
   return json(snapshot);
