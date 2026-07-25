@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param(
-  [string]$ContentDir = (Join-Path $PSScriptRoot "..\.official-content"),
+  # Multi-argument Join-Path rather than a "..\.official-content" literal. The literal DID work on the
+  # ubuntu runner (PowerShell's filesystem provider normalizes the backslash, then GetFullPath collapses
+  # the ".."), but it worked by relying on that normalization: .NET itself treats only "/" as a separator
+  # on Unix, so the string is one segment as far as System.IO is concerned. This form does not depend on
+  # which layer normalizes it.
+  [string]$ContentDir = (Join-Path $PSScriptRoot ".." ".official-content"),
   # Upstream revision the committed docs/OFFICIAL_TESTCASE_REPORT_2026-07.md was generated against.
   # Pass -Ref master (or another SHA) to test newer content; the committed report is only
   # reproducible at this pin.
