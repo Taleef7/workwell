@@ -1,5 +1,76 @@
 # Journal
 
+## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
+
+Roadmap §7.4 PR-4. ADR-026 quarantined `fqm-execution` (axios/handlebars/moment/lodash) behind a
+**file-allowlist** arch test, because those deps must never reach the worker's cold-start or request
+path. That allowlist could not survive official-first execution, where fqm legitimately becomes a
+*production* evaluation path (PR-7) — so the quarantine is now **structural**: the dependency lives in
+`backend-ts/packages/official-executor` (`@workwell/official-executor`, pinned 1.8.5) and nowhere else,
+and that package's entry imports it only through a lazy `await import`.
+
+**What the package owns** — the fqm-facing machinery that was **duplicated across both call sites** and
+could silently have drifted: the lazy calculator loader, the executable-bundle check (a Measure + ELM on
+*every* Library), ELM value-set introspection, the `valueSetCache` builder (empty-but-present on a failed
+expansion — a missing value set aborts the whole batch), the calculate options, and `calculateOfficial`
+batching. Two of those options are load-bearing and easy to get wrong: `calculateHTML: false` (fqm 1.8.5
+has **no** `disableHTMLGeneration` — a plausible name that silently does nothing) and the **fqm#371**
+date-only-period-end fix (parsed as start-of-day, dropping the period's last day; without it the CMS125
+MADiE deck scores 64/66). Both now have exactly one definition.
+
+**What deliberately stays in the app:** reading vendored bundle bytes (the package is filesystem-free, so
+the vendoring convention stays PR-5's business), VSAC expansion (injected `expand(oid)`), and the
+population→`OutcomeStatus` mapping (WorkWell policy, not measure execution).
+
+**Three tests replace the one allowlist**, each harder to defeat than a grep: **manifest** (no workspace
+package but the executor may declare fqm), **app tree** (no `src/` file — nor any other package's source
+— imports it directly), and a **lazy-import check** (every fqm reference in the package entry, comments
+stripped, must be the dynamic `import(...)` form, plus a positive assertion that the app cannot even
+*resolve* fqm under pnpm's strict linking).
+
+Also lands the `packages/*` workspace member and the `pnpm test` glob covering it — the scaffolding PR-2
+reuses when `measure-engine` extracts. The real-fqm end-to-end literal-diff test and the ADR-008 guard
+both still pass, so the official path is provably unchanged. Typecheck clean; full suite **1436 pass /
+0 fail / 14 skipped** (+10).
+
+**Review round (PR #335) — the guard I called "structural" was a line-based grep.** The review's P1 was
+that test 3/3 detected static imports **line by line**, so the shape any formatter produces once the
+import list grows —
+`import {` / `  Calculator,` / `} from "fqm-execution";` — has no single line matching both predicates and
+sails through. Worse, the runtime `require.cache` assertion that would have caught it was wrapped in
+`if (fqmEntry !== null)`, and fqm is deliberately unresolvable from the app — so that branch never ran,
+here or in CI. **PR-7 is the most likely author of exactly that import.** Rewritten to scan the whole
+source (comments stripped) with the same multi-line-capable regex test 2/3 uses, assert every fqm
+reference is the dynamic `import(...)` form, and assert non-resolvability *positively* instead of
+treating it as a reason to skip. Verified by planting the defeating multi-line import: it now fails.
+Fixing it immediately exposed the sibling bug — test 2/3 then flagged the illustrative comment inside
+test 3/3, so both now strip comments (the lesson the engine-boundary guard already learned). Tests 1 and
+2 also generalized to **all** workspace packages, so PR-2's `measure-engine` cannot quietly take the
+dependency on. Other fixes: `isExecutableMeasureBundle` narrowed unsoundly (a null entry passed the
+guard, then `referencedValueSetUrls` threw on it — and PR-5 is about to feed it two new bundles);
+unparseable ELM now **fails fast** as it did pre-extraction, rather than degrading to an opaque
+"ValueSet not found" inside the fqm batch; `populationMembership` restored to **first-wins** duplicate
+resolution (matching the `.find()` it replaced — ratio measures can repeat a populationType);
+`calculateOfficial` gained the `trustMetaProfile` override its second consumer needed; the `as never`
+casts and the app's duplicate `FqmCalculationOptions`/`FqmPopulationResult` declarations are gone (that
+duplication was precisely the drift the extraction exists to end); and `tsconfig` now typechecks package
+sources, which previously included no package test file at all. Five doc inaccuracies corrected, incl. a
+`DISCLAIMER` string that **ships in the API response** still calling fqm "diagnostic-only", and a
+Dockerfile comment claiming fqm is a backend-ts dependency — `pnpm list --prod --depth 3` confirms it
+survives the deploy prune transitively through the workspace package. Full suite 1440 pass / 0 fail / 14 skipped. Two further escapes, both found by Codex and neither by me: **(a) nothing guarded who may
+import the PACKAGE** — a route or run-pipeline module could import `@workwell/official-executor` and call
+`loadCalculator()`, putting the heavy graph on a request path with all guards green; the executor-import
+allowlist was written into roadmap §7.1 and simply not implemented. **(b) the package scan read only
+`index.ts`**, so a helper module with a static fqm import, imported by `index.ts`, would load the graph at
+cold start unseen — and the `createRequire` rooted in `src/` could not resolve a dependency nested beside
+`packages/`, so the cache assertion skipped rather than ran. Now five guards: manifest, app tree, **every**
+package source file, module graph (resolving **from the package**, so the cache check runs unconditionally,
+while asserting the app cannot resolve it), and a **consumer allowlist**. Both escapes verified caught by
+planting them. The allowlist also corrected a wrong assumption of mine: `run/cli/official-cases.ts` does
+NOT import the package — it goes through `standards/official-cases.ts`, which is the layering the list
+exists to preserve. Full suite **1442 pass / 0 fail / 14 skipped**.
+
+
 ## 2026-07-24 (later still) — PR-3: evidence-first population membership (branch `feat/measure-report-ipp-generalization`)
 
 Roadmap §7.4 PR-3, the last exporter change that must land **before** the official flip so shadow diffs

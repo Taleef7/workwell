@@ -36,7 +36,9 @@ RUN pnpm install --frozen-lockfile
 # Slim to production dependencies for a smaller runtime image.
 # tsx is listed as a devDependency but is REQUIRED at runtime (CMD uses `node --import tsx`).
 # Promote it to dependencies image-locally (never committed), then reinstall --prod so the lockfile
-# in this layer stays consistent. fqm-execution is already a real production dependency and stays.
+# in this layer stays consistent. fqm-execution is NOT a backend-ts dependency any more (extraction
+# PR-4) - it is a production dependency of the linked workspace package @workwell/official-executor,
+# so --prod still keeps it. Verified with `pnpm list --prod --depth 3`.
 # CI=true is required: pnpm refuses module-dir surgery without a TTY unless CI is set.
 RUN node --input-type=commonjs -e "\
 const fs = require('fs');\

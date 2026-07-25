@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "WorkWell TypeScript backend (worker-style) on @mieweb/cloud — Phase 0 skeleton for issue #96 (ADR-008). Replaces the Java/Spring backend incrementally (strangler-fig).",
+  "description": "WorkWell TypeScript backend (worker-style) on @mieweb/cloud \u2014 Phase 0 skeleton for issue #96 (ADR-008). Replaces the Java/Spring backend incrementally (strangler-fig).",
   "engines": {
     "node": ">=22.16.0"
   },
@@ -28,7 +28,7 @@
     "compile-measures": "node scripts/compile-measures.mjs",
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
     "generate:sql": "tsx src/engine/cql/codegen/generate-sql-bin.ts",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"packages/*/src/**/*.test.ts\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1067.0",
@@ -38,10 +38,10 @@
     "@mieweb/cloud-local": "workspace:*",
     "@mieweb/cloud-os": "workspace:*",
     "@mieweb/cloud-types": "workspace:*",
+    "@workwell/official-executor": "workspace:*",
     "better-sqlite3": "^12.0.0",
     "cql-exec-fhir": "^2.1.6",
     "cql-execution": "^3.3.2",
-    "fqm-execution": "1.8.5",
     "pg": "^8.21.0"
   },
   "devDependencies": {

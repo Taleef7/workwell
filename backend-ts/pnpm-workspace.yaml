@@ -7,8 +7,10 @@
 # those internal `workspace:*` references). Including them as members below lets
 # pnpm resolve the whole @mieweb/cloud graph from source.
 #
-# Phase 2 (#104) graduates the reusable parts (cloud-postgres, measure-engine)
-# into top-level `packages/*` here.
+# `packages/*` are WorkWell's own extractable libraries (roadmap 2026-07-24 M-C).
+# First member: @workwell/official-executor — the fqm-execution quarantine (ADR-026).
+# measure-engine follows once the official-first flip has landed.
 packages:
   - "."
+  - "packages/*"
   - "../external/mieweb-cloud/packages/*"
