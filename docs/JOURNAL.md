@@ -1,5 +1,68 @@
 # Journal
 
+## 2026-07-25 (later still) — PR-7a: the official executor adapter, and the failure mode it refuses (branch `feat/official-executor-adapter`)
+
+Roadmap §7.2/§7.3. The adapter that runs a measure by executing the **official published artifact**
+instead of WorkWell's authored CQL — Nicole's first correction made executable. It implements the same
+`EvaluateMeasureBinding` the authored engine does, so PR-7b's router dispatches per measure with no
+signature change downstream. **Nothing routes here yet**; the flag lands in 7b, the shadow comparison in
+PR-8, the flip in PR-9.
+
+**The failure this adapter exists to refuse.** `buildValueSetCache` emits a canonical it cannot expand as
+*empty but present*, because fqm aborts the whole batch on a genuinely missing value set. Empty is the
+right call for a diagnostic and a catastrophe in production: a retrieve against an empty set matches
+nothing, so a measure whose OIDs were never imported reports **every subject out-of-population** — which
+reads downstream exactly like a genuinely ineligible roster. Nothing errors, nothing alerts, the numbers
+are just wrong. So the adapter expands *first* and throws if any referenced set comes back empty, naming
+the OIDs and the CLI that fixes it.
+
+**That is not hypothetical — it blocks CMS125's flip today.** `pnpm resolve-valuesets` defaults to the 21
+CMS122 reference OIDs and has only ever imported those. CMS125's artifact references **32** value sets,
+none of them imported. Without the preflight, flipping cms125 would have produced a clean-looking run in
+which nobody was eligible for breast cancer screening. The adapter exports `requiredOids(artifact)` so the
+import CLI can be pointed at a vendored artifact directly — the obvious next step, and an owner action
+before PR-9.
+
+**The numerator's meaning cannot be derived, so it is a reviewed table.** `official-measure-semantics.ts`
+records, per measure, whether being in the numerator is the good outcome, with the reasoning. The
+tempting derivation — `Measure.improvementNotation` — is *wrong*: CMS122's artifact declares `increase`
+even though its numerator is poor glycemic control. PR-5 deliberately recorded that discrepancy rather
+than correcting it during vendoring, and a test now asserts the contradiction so nobody later
+"simplifies" the table by reading the artifact. Getting this backwards reports every poorly-controlled
+diabetic as compliant. A measure with no entry is **refused**, not defaulted — there is no safe default
+in either direction.
+
+**Vocabulary, per the roadmap: the five-bucket enum does not grow.** Out-of-IPP → `MISSING_DATA` paired
+with `inInitialPopulation: false` (the L17 signal — "out of scope" vs "eligible, no data"); DENEX and
+**DENEXCEP** both → `EXCLUDED`, which is what unblocks CMS68-class measures with zero enum change, since
+the only question this vocabulary answers is whether someone needs chasing. The reporting distinction
+survives losslessly in the new `evidence_json.official.populationResults`, which is what MeasureReport and
+QRDA read (ADR-031/PR-3). `DUE_SOON` is never emitted — official CQL has no forecast define and inventing
+one would be authoring logic on top of the steward's.
+
+**Two smaller decisions worth recording.** The measurement period matches the authored path (12 months
+back from the evaluation date) rather than the artifact's `effectivePeriod`, so PR-8's shadow diff
+isolates the *logic* difference instead of confounding it with a period change; whether production should
+use an eCQM's calendar period is a real question left to PR-9. And evidence keeps only the measure's
+**own** library statements: a full CMS122 evaluation returns 419, which at ~25 KB per outcome row against
+~1–3 KB for an authored measure is not something to put on a database that has already caused one outage.
+
+**PR-3's warning was right, and the first cut of this adapter tripped it.** That PR shipped the exporter
+half months-of-work early and said explicitly that `populationResults` must arrive in one of two shapes,
+with a third being *rejected and alerted* rather than tolerated. The adapter first persisted the reduced
+code→boolean map — a third shape. `officialMembership` refuses it ("missing a required boolean") and
+degrades the report to status-derived membership, which is exactly the failure evidence-first exporting
+exists to prevent, and nothing would have said so. It now persists fqm's population **array verbatim**
+(also better: the reduced map drops duplicate population types, legal for ratio measures), and a
+round-trip test runs the adapter's output straight through `officialMembership`. A shape assertion would
+not have caught this; only the round trip does.
+
+The fqm boundary guard caught the new consumer immediately and made me add it to the allowlist by hand —
+which is the point. This is the **first production-path** consumer of the executor package; the three
+before it were two diagnostics and a file loader.
+
+Typecheck clean; full suite **1469 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-25 (later) — PR-6a: the gate pays for itself — 86% smaller artifacts, proven neutral (branch `feat/strip-elm-annotations`)
 
 The first thing the new gate was built to decide. `--strip-elm-annotations` has existed in
