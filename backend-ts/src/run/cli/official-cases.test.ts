@@ -87,7 +87,7 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
     load: () => fakeLoaded,
     run: () => Promise.resolve(fakeRun as never),
     loadDraftBundle: (path) => {
-      assert.equal(path, resolve(testCwd, "measures", "official", "cms122v14", "CMS122FHIR-v0.5.000-FHIR.json"));
+      assert.equal(path, resolve(testCwd, "measures", "official", "cms122", "bundle.json"));
       return { resourceType: "Bundle", entry: [] } as never;
     },
     runDraftDrift: () => {

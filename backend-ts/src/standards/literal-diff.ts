@@ -24,46 +24,28 @@ import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { seededTargetFor } from "../run/distribution.ts";
-import { readFileSync } from "node:fs";
 import {
   buildValueSetCache,
   calculateOfficial,
-  isExecutableMeasureBundle,
   type FqmCalculate,
   type MeasureBundle,
   type PopulationMembership,
 } from "@workwell/official-executor";
+import { loadOfficialArtifact, officialArtifactAvailable } from "../wiring/official-artifacts.ts";
 
-/** Provenance of the vendored official artifact (see measures/official/cms122v14/README.md). */
-export const OFFICIAL_CMS122 = {
-  name: "CMS122FHIRDiabetesAssessGreaterThan9Percent",
-  version: "0.5.000",
-  url: "https://madie.cms.gov/Measure/CMS122FHIRDiabetesAssessGreaterThan9Percent",
-  bundleFile: "CMS122FHIR-v0.5.000-FHIR.json",
-} as const;
-
-const BUNDLE_URL = new URL(`../../measures/official/cms122v14/${OFFICIAL_CMS122.bundleFile}`, import.meta.url);
+/** The catalog id whose vendored artifact this diff executes. */
+const OFFICIAL_CATALOG_ID = "cms122";
 
 type FhirBundle = { resourceType: "Bundle"; type?: string; entry: Array<{ resource: Record<string, unknown> }> };
 
-/** Parse + cache the vendored measure bundle once. Returns null if absent/corrupt (→ tier falls back). */
-let bundleCache: FhirBundle | null | undefined;
+/** The vendored official artifact, or null when it is absent/unusable (→ the tier falls back). */
 export function loadOfficialCms122Bundle(): FhirBundle | null {
-  if (bundleCache !== undefined) return bundleCache;
-  try {
-    const b = JSON.parse(readFileSync(BUNDLE_URL, "utf8")) as FhirBundle;
-    // "Executable" = has a Measure and EVERY Library carries pre-compiled ELM. Owned by the package,
-    // because that is the precondition for running an official artifact without translating it.
-    bundleCache = isExecutableMeasureBundle(b) ? b : null;
-  } catch {
-    bundleCache = null;
-  }
-  return bundleCache;
+  return (loadOfficialArtifact(OFFICIAL_CATALOG_ID)?.bundle as FhirBundle | undefined) ?? null;
 }
 
-/** True when the literal tier can be attempted (vendored bundle present + every library carries ELM). */
+/** True when the literal tier can be attempted (vendored artifact present + every library carries ELM). */
 export function literalDiffAvailable(): boolean {
-  return loadOfficialCms122Bundle() !== null;
+  return officialArtifactAvailable(OFFICIAL_CATALOG_ID);
 }
 
 /**
@@ -173,8 +155,16 @@ export async function computeLiteralDiff(
   const runId = rows[0]?.runId ?? null;
   if (runId && cache.has(runId)) return cache.get(runId)!;
 
-  const bundle = deps.officialBundle ?? loadOfficialCms122Bundle();
-  if (!bundle) throw new Error("literal-diff: official CMS122 bundle unavailable");
+  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+  const bundle = deps.officialBundle ?? (artifact?.bundle as FhirBundle | undefined);
+  if (!bundle) throw new Error("literal-diff: official CMS122 artifact unavailable");
+  // Provenance for the report. An injected test bundle has no manifest, so fall back to the vendored
+  // one's metadata when present, and to honest placeholders when it is not.
+  const official = artifact?.manifest ?? {
+    measureName: "CMS122FHIRDiabetesAssessGT9Pct",
+    version: "unknown",
+    url: "https://madie.cms.gov/Measure/CMS122FHIRDiabetesAssessGT9Pct",
+  };
 
   // Pre-expand the official measure's value sets from the imported VSAC rows.
   const expansions: Expansions = new Map<string, CqlCode[]>();
@@ -260,12 +250,12 @@ export async function computeLiteralDiff(
     byGate,
     subjects,
     headline:
-      `Executed the LITERAL official ${ref.ecqmId} (${OFFICIAL_CMS122.name} v${OFFICIAL_CMS122.version}, ` +
+      `Executed the LITERAL official ${ref.ecqmId} (${official.measureName} v${official.version}, ` +
       `pre-compiled ELM via fqm-execution) against ${subjects.length} subjects of the latest ${ref.measureId} ` +
       `run: ${totalDivergent} diverge from the official age/visit/exclusion/numerator criteria` +
       (totalErrors > 0 ? `; ${totalErrors} could not be evaluated (excluded from the divergence count).` : "."),
     disclaimer: DISCLAIMER,
-    officialMeasure: { name: OFFICIAL_CMS122.name, version: OFFICIAL_CMS122.version, url: OFFICIAL_CMS122.url },
+    officialMeasure: { name: official.measureName, version: official.version, url: official.url },
   };
   if (runId) {
     if (cache.size >= 16) cache.clear();

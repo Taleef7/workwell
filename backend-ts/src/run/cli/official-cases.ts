@@ -140,13 +140,11 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       const loaded = deps.load(contentDir, measure);
       const run = await deps.run(loaded);
       if (measure === "cms122") {
-        const draftPath = resolve(
-          deps.cwd,
-          "measures",
-          "official",
-          "cms122v14",
-          "CMS122FHIR-v0.5.000-FHIR.json",
-        );
+        // Compares the upstream measure bundle (from the fetched content) against OUR vendored,
+        // reduced artifact at the same version. Formerly this measured drift from a stale v0.5.000
+        // draft; now that both sides are v1.0.000 it proves something better - that stripping CQL,
+        // ELM XML, narratives, and value sets during vendoring changes no population result.
+        const draftPath = resolve(deps.cwd, "measures", "official", "cms122", "bundle.json");
         run.draftDrift = await deps.runDraftDrift(loaded, run, deps.loadDraftBundle(draftPath));
       }
       runs.push(run);

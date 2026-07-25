@@ -1,5 +1,43 @@
 # Journal
 
+## 2026-07-24 (late) — PR-5: vendored official artifacts at v1.0.000, and a licensing rule (branch `feat/vendor-official-measures`)
+
+Roadmap §7.4 PR-5. `measures/official/<catalogId>/{bundle.json,manifest.json}`, written by
+`pnpm vendor:official`. CMS122 re-vendored **v0.5.000 → v1.0.000** and CMS125 vendored for the first
+time; `cms122v14/` deleted along with the `OFFICIAL_CMS122` constant. That hardcoding **was** the
+staleness bug — the version lived in a filename and a literal, so nothing could notice upstream had
+moved on. It now lives in a manifest, with a SHA-256 over the bytes we actually execute.
+
+**A licensing rule came out of inspecting the upstream bundles, and it binds the remaining six.** Each
+ships all 26 ValueSets with full expansions, and those expansions contain **AMA CPT** and SNOMED CT
+codes. This repo is public and Apache-2.0, so redistributing them is not on. Vendoring therefore keeps
+**only `Measure` + `Library` (`application/elm+json`)**; terminology continues to come from our own VSAC
+import at runtime, under our UMLS licence. Checking the previously-committed v0.5.000 bundle showed it
+already contained no ValueSets — the right thing was being done incidentally, and is now explicit,
+documented, and asserted by a test. 16MB raw → ~10MB vendored per measure.
+
+**The size lever is measured but deliberately not pulled.** `--strip-elm-annotations` removes ELM
+`annotation`/`locator`/`localId` for a **79% cut** (9.8MB → 2.1MB of ELM on CMS122), which matters
+because all 8 measures at the current setting is ~80MB and the deploy job-poll window has already had
+to be raised once for image growth (PR #283). It stays off until PR-6's MADiE suite proves it
+outcome-neutral: `localId` is what fqm uses for clause coverage, so this is exactly the kind of thing
+to prove rather than assume.
+
+**Two things repurposed rather than deleted.** The official-cases CLI's "draft drift" check used to
+compare the fetched bundle against our stale v0.5.000; both sides are now v1.0.000, so it proves
+something better — that stripping CQL, ELM XML, narratives and value sets changes no population result.
+And the literal-diff test asserted `version === "0.5.000"` as a literal; it now reads the manifest, so
+the test cannot re-acquire the staleness it was written to catch.
+
+**Finding for PR-7:** CMS122's official artifact declares `improvementNotation: increase`, even though
+it is the inverse measure (numerator = poor glycemic control, so a lower rate is better and eCQI
+describes it as decrease-is-improvement). The manifest records what the artifact declares rather than
+correcting it during vendoring — PR-7 owns what an exported report claims, and whether this is worth
+raising upstream the way fqm#371 was.
+
+The real-fqm end-to-end literal-diff test and the ADR-008 guard both pass against the new v1.0.000
+artifact. Typecheck clean; full suite **1448 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
 
 Roadmap §7.4 PR-4. ADR-026 quarantined `fqm-execution` (axios/handlebars/moment/lodash) behind a
