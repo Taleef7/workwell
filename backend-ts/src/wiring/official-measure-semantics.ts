@@ -57,5 +57,10 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
  * compliant, and assuming `false` reports every screened woman as overdue.
  */
 export function officialMeasureSemantics(catalogId: string): OfficialMeasureSemantics | undefined {
-  return OFFICIAL_MEASURE_SEMANTICS[catalogId];
+  // `Object.hasOwn`, not a bare index: PR-7b calls this with an OPERATOR-supplied id, and a plain object
+  // literal resolves inherited keys — `officialMeasureSemantics("constructor")` would otherwise return a
+  // truthy non-semantics value whose `numeratorMeansCompliant` is `undefined`, i.e. everyone OVERDUE.
+  return Object.hasOwn(OFFICIAL_MEASURE_SEMANTICS, catalogId)
+    ? OFFICIAL_MEASURE_SEMANTICS[catalogId]
+    : undefined;
 }

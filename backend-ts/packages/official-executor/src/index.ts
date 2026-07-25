@@ -24,10 +24,15 @@
  *   `OutcomeStatus` is a WorkWell policy decision and lives in the app.
  */
 
-/** One population's membership as fqm-execution reports it. */
+/**
+ * One population's membership as fqm-execution reports it. The index signature is deliberate: fqm also
+ * carries `criteriaExpression`, `populationId`, and observation payloads on these entries, and consumers
+ * persist the object verbatim as regulatory evidence — so the type must not imply those fields are gone.
+ */
 export interface FqmPopulationResult {
   populationType: string;
   result: boolean;
+  [key: string]: unknown;
 }
 
 /** One CQL statement's result, as fqm reports it with `verboseCalculationResults`. */

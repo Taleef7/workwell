@@ -28,6 +28,13 @@ test("population -> workflow bucket, for a normal measure (numerator = the good 
   const map = (p: Record<string, boolean>) => outcomeFromPopulations(p, true);
 
   assert.deepEqual(map({ [IPP]: false }), { outcome: "MISSING_DATA", inInitialPopulation: false });
+  // In the IPP but out of the DENOMINATOR: the measure does not score them, so there is nothing to
+  // chase. Reading only IPP would call this OVERDUE and open a case, while the exporter's
+  // normalizeMembership clamps the same subject out of DENOM - the two would disagree about a person.
+  assert.deepEqual(map({ [IPP]: true, [DENOM]: false, [NUMER]: false }), {
+    outcome: "EXCLUDED",
+    inInitialPopulation: true,
+  });
   assert.deepEqual(map({ [IPP]: true, [DENOM]: true, [NUMER]: true }), {
     outcome: "COMPLIANT",
     inInitialPopulation: true,
@@ -72,14 +79,16 @@ test("DUE_SOON is never emitted — official CQL has no forecast define", () => 
   const buckets = new Set<string>();
   for (const numeratorMeansCompliant of [true, false]) {
     for (const ipp of [true, false]) {
-      for (const denex of [true, false]) {
-        for (const numer of [true, false]) {
-          buckets.add(
-            outcomeFromPopulations(
-              { [IPP]: ipp, [DENEX]: denex, [NUMER]: numer },
-              numeratorMeansCompliant,
-            ).outcome,
-          );
+      for (const denom of [true, false]) {
+        for (const denex of [true, false]) {
+          for (const numer of [true, false]) {
+            buckets.add(
+              outcomeFromPopulations(
+                { [IPP]: ipp, [DENOM]: denom, [DENEX]: denex, [NUMER]: numer },
+                numeratorMeansCompliant,
+              ).outcome,
+            );
+          }
         }
       }
     }
@@ -97,9 +106,22 @@ test("evidence keeps the measure's own library statements, not its includes", ()
     { libraryName: "CMS122FHIRDiabetesAssessGT9Pct", final: "TRUE" }, // unnamed → dropped
   ];
   assert.deepEqual(evidenceStatements(statements, "CMS122FHIRDiabetesAssessGT9Pct"), [
-    { define: "Numerator", result: "TRUE" },
-    { define: "Denominator", result: "TRUE" },
+    { define: "official:Numerator", result: "TRUE" },
+    { define: "official:Denominator", result: "TRUE" },
   ]);
+});
+
+test("define names are prefixed so why_flagged cannot misread fqm's TRUE/FALSE enum as a date", () => {
+  // CMS122's root library really does define "Most Recent Glycemic Status Date", and deriveWhyFlagged
+  // matches /^most recent .*date$/i then slices the result as a date. fqm's `final` is the enum
+  // TRUE|FALSE|NA|UNHIT (`raw` is a live object graph; `pretty` renders "FALSE (undefined)"), so an
+  // unprefixed name would put "Last completed TRUE" on the roster and in the outcomes CSV.
+  const [row] = evidenceStatements(
+    [{ libraryName: "L", statementName: "Most Recent Glycemic Status Date", final: "TRUE" }],
+    "L",
+  );
+  assert.equal(row?.define, "official:Most Recent Glycemic Status Date");
+  assert.ok(!/^most recent .*date$/i.test(row!.define), "the anchored why_flagged match must not fire");
 });
 
 test("every vendored measure has recorded semantics — the table cannot silently fall behind", () => {
@@ -181,7 +203,19 @@ test("a value set that expands to nothing REFUSES the evaluation rather than nar
   const artifact = fakeArtifact("fake", ["2.16.1", "2.16.2"]);
   await assert.rejects(
     () => expandArtifactTerminology(artifact, async (oid) => (oid === "2.16.1" ? [{ code: "a", system: "s" }] : [])),
-    /1 of 2 value sets expanded to zero codes.*2\.16\.2.*resolve-valuesets/s,
+    /1 of 2 value sets could not be expanded[\s\S]*2\.16\.2[\s\S]*resolve-valuesets/,
+  );
+
+  // And when the expander THROWS - the likeliest production trigger, a transient store failure.
+  // buildValueSetCache catches that internally and substitutes an empty expansion, so recording
+  // emptiness only on the success path let this through silently. It must refuse identically.
+  await assert.rejects(
+    () =>
+      expandArtifactTerminology(artifact, async (oid) => {
+        if (oid === "2.16.1") return [{ code: "a", system: "s" }];
+        throw new Error("value_sets read failed");
+      }),
+    /1 of 2 value sets could not be expanded/,
   );
 
   // Fully imported terminology passes and yields one cache entry per referenced canonical.
@@ -257,7 +291,9 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
 
   assert.equal(outcome.outcome, "COMPLIANT", "cms125's numerator (a mammogram) means compliant");
   assert.equal(outcome.inInitialPopulation, true);
-  assert.deepEqual(outcome.evidence.expressionResults, [{ define: "Numerator", result: "TRUE" }]);
+  assert.deepEqual(outcome.evidence.expressionResults, [
+    { define: "official:Numerator", result: "TRUE" },
+  ]);
   assert.deepEqual(outcome.evidence.official, {
     ecqmId: "999FHIR",
     version: "1.0.000",
@@ -285,8 +321,9 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
   );
   assert.equal(
     options["trustMetaProfile"],
-    true,
-    "official artifacts retrieve by QICore profile; base-type retrieval finds nothing",
+    false,
+    "profile-filtered retrieval matches NOTHING against our bundles' profiles (and throws on a " +
+      "WebChart bundle with none) - literal-diff runs this same artifact with the default",
   );
 });
 
@@ -331,4 +368,55 @@ test("what the adapter WRITES is what the exporter READS — the two halves cann
   // And the workflow bucket disagrees with the report, correctly: an excepted patient needs no outreach
   // (EXCLUDED), while the report still counts them in the denominator with an exception.
   assert.equal(outcome.outcome, "EXCLUDED");
+});
+
+test("non-proportion scoring, and an artifact whose id does not match, are both refused", async () => {
+  const base = fakeArtifact("cms125", ["2.16.1"]);
+  const withScoring = (scoring: string, catalogId = "cms125") => ({
+    ...base,
+    manifest: { ...base.manifest, scoring, catalogId },
+  });
+  const run = (artifact: OfficialArtifact) =>
+    officialMeasureExecutor({
+      expand: async () => [{ code: "a", system: "s" }],
+      loadArtifact: () => artifact,
+      calculate: async () => ({ results: [] }),
+    }).evaluate({ measureId: "cms125", patientBundle: {} });
+
+  // A cohort measure has no numerator population at all, so populations["numerator"] is undefined and
+  // the mapping would call every subject COMPLIANT (or every subject OVERDUE) on one flag.
+  await assert.rejects(() => run(withScoring("cohort")), /scoring 'cohort' is not supported/);
+  await assert.rejects(
+    () => run(withScoring("proportion", "cms122")),
+    /loaded artifact declares catalogId 'cms122'/,
+  );
+});
+
+test("the semantics lookup does not resolve inherited object keys", () => {
+  // PR-7b calls this with an OPERATOR-supplied id. A bare index on an object literal returns
+  // Object.prototype.constructor for "constructor" — truthy, with numeratorMeansCompliant undefined,
+  // which maps every subject to OVERDUE.
+  for (const inherited of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    assert.equal(officialMeasureSemantics(inherited), undefined, `${inherited} must not resolve`);
+  }
+});
+
+test("the measurement period is the authored engine's, quirk for quirk", async () => {
+  // subtractMonths is duplicated from cql-execution-engine.ts deliberately, overflow included: the
+  // first cut "improved" it by clamping, which silently gave the two paths different periods on a leap
+  // day — a divergence PR-8 would then report as a logic difference.
+  const seen: string[] = [];
+  const executor = officialMeasureExecutor({
+    expand: async () => [{ code: "a", system: "s" }],
+    loadArtifact: () => ({
+      ...fakeArtifact("cms122", ["2.16.1"]),
+      manifest: { ...fakeArtifact("cms122", ["2.16.1"]).manifest, catalogId: "cms122" },
+    }),
+    calculate: async (_b, _p, options) => {
+      seen.push(String((options as Record<string, unknown>)["measurementPeriodStart"]));
+      return { results: [] };
+    },
+  });
+  await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: {}, evaluationDate: "2024-02-29" }));
+  assert.equal(seen[0], "2023-03-01", "non-clamping overflow, exactly as the authored engine does it");
 });
