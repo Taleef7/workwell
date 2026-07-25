@@ -33,10 +33,10 @@
       "application/elm+json"
     ],
     "strippedNarratives": true,
-    "strippedElmAnnotations": false,
+    "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 17085208,
-    "vendoredBytes": 10676818
+    "vendoredBytes": 2468662
   },
-  "sha256": "sha256:df84760e7c204d12d8c687365e3ed07d321c806333307755bb6423fcf424954a"
+  "sha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"
 }

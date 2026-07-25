@@ -135,3 +135,42 @@ test("PR-5: reduction drift FAILS the command (it is the only proof vendoring is
   // Absent drift (any measure other than cms122) must stay passing.
   assert.equal(exitCodeForRuns([{ summary: { unexpectedMismatches: 0, errors: 0 }, draftDrift: undefined } as never]), 0);
 });
+
+test("readArtifactIdentity hashes the bytes on disk, not the manifest's claim about them", async () => {
+  const { readArtifactIdentity } = await import("./official-cases.ts");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { createHash } = await import("node:crypto");
+
+  const body = '{"resourceType":"Bundle"}';
+  const realHash = `sha256:${createHash("sha256").update(Buffer.from(body)).digest("hex")}`;
+  const withManifest = (manifest: unknown) => {
+    const dir = mkdtempSync(resolve(tmpdir(), "ww-artifact-"));
+    const bundlePath = resolve(dir, "bundle.json");
+    writeFileSync(bundlePath, body, "utf8");
+    if (manifest !== undefined) writeFileSync(resolve(dir, "manifest.json"), JSON.stringify(manifest), "utf8");
+    return { dir, bundlePath };
+  };
+
+  // A manifest describing THESE bytes corroborates its own label, so the label is reported.
+  const good = withManifest({ sha256: realHash, reduction: { strippedElmAnnotations: true } });
+  const identity = readArtifactIdentity(good.bundlePath);
+  assert.equal(identity?.sha256, realHash, "the hash is computed over the bytes, never quoted from the manifest");
+  assert.equal(identity?.vendoredBytes, Buffer.byteLength(body));
+  assert.equal(identity?.strippedElmAnnotations, true);
+
+  // A manifest describing SOME OTHER artifact says nothing about this one. Reporting its label would
+  // print an affirmative "retained"/"stripped" claim sourced from a file about different bytes.
+  const stale = withManifest({ sha256: "sha256:deadbeef", reduction: { strippedElmAnnotations: false } });
+  assert.equal(readArtifactIdentity(stale.bundlePath)?.strippedElmAnnotations, undefined);
+
+  // Absent and malformed manifests degrade the same way — unverified, not "retained".
+  assert.equal(readArtifactIdentity(withManifest(undefined).bundlePath)?.strippedElmAnnotations, undefined);
+  const malformed = mkdtempSync(resolve(tmpdir(), "ww-artifact-bad-"));
+  writeFileSync(resolve(malformed, "bundle.json"), body, "utf8");
+  writeFileSync(resolve(malformed, "manifest.json"), "{not json", "utf8");
+  assert.equal(readArtifactIdentity(resolve(malformed, "bundle.json"))?.strippedElmAnnotations, undefined);
+
+  // A missing artifact is absent identity, not a thrown gate.
+  assert.equal(readArtifactIdentity(resolve(malformed, "nope.json")), undefined);
+});

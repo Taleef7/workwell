@@ -31,13 +31,24 @@
  *   image would be dead weight.
  * - **Dropped: narratives** (`resource.text`) — display-only.
  *
- * ## The size lever we are NOT pulling yet
+ * ## `--strip-elm-annotations` — proven, and now the default for vendored artifacts
  *
- * `--strip-elm-annotations` removes ELM `annotation`/`locator`/`localId`, which measures **79% smaller**
- * (9.8 MB → 2.1 MB of ELM for CMS122). It is OFF by default on purpose: `localId` is what fqm-execution
- * uses for clause coverage and detailed results, so this must be proven by the official MADiE test-case
- * gate (PR-6) before it goes anywhere near the deploy image. The deploy window has bitten this project
- * once already (PR #283); an unproven size optimisation is not worth a second time.
+ * Removing ELM `annotation`/`locator`/`localId` takes a measure from ~16 MB raw to ~2.4 MB vendored
+ * (**86% smaller**, vs 37% without it). It was held back until the official MADiE gate could prove it,
+ * because `localId` is what fqm-execution uses for clause coverage and the deploy window has bitten this
+ * project once already (PR #283). PR-6 made that gate real and it now says, on both vendored measures:
+ * **121/121 cases pass and 0/55 + 0/66 cases changed population vector** in the reduction check, which
+ * executes the stripped artifact against the full upstream bundle over the same deck.
+ *
+ * Lost: `clauseResults` (already empty — `calculateClauseCoverage`/`calculateHTML` are both off),
+ * per-statement `localId`, and `locator`, which is what cql-execution/fqm error text uses to point at a
+ * position in the ELM — so a runtime failure in an official measure can no longer be localized.
+ * Retained: `populationResults` and fqm's **named `statementResults`**, the shape PR-7 persists as
+ * `evidence_json.official`; the reduction check counts them per measure and the evidence report records
+ * the count, so this is enforced rather than asserted here.
+ *
+ * The flag stays opt-in at the CLI so an unstripped artifact remains one command away if clause-level
+ * debugging is ever needed; every measure vendored for production use passes it.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -204,7 +215,9 @@ mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "bundle.json"), bundleJson);
 writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
-const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
+// Decimal MB, matching the evidence report's own formatting — the two printed the same file at
+// different sizes when this divided by 1048576 and the report divided by 1e6.
+const mb = (n) => `${(n / 1e6).toFixed(1)} MB`;
 console.log(`  ${manifest.measureName} v${manifest.version} (${manifest.cmsId ?? "no cmsId"})`);
 console.log(`  scoring=${manifest.scoring} improvementNotation=${manifest.improvementNotation}`);
 console.log(`  ${mb(manifest.reduction.rawBytes)} → ${mb(manifest.reduction.vendoredBytes)}` +

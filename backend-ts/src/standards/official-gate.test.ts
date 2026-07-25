@@ -15,6 +15,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { OFFICIAL_GATED_MEASURES, officialMeasureName } from "./official-cases.ts";
@@ -75,6 +76,43 @@ test("the committed evidence report shows real case coverage for every gated mea
       report,
       new RegExp(`0/${required} cases changed population vector`),
       `${catalogId}: the report must show all ${required} cases reduction-checked with zero drift`,
+    );
+    // PR-7 persists fqm's named statement results as `evidence_json.official`. Stripping ELM
+    // annotations was proven not to remove them, and this keeps that true: zero would mean the
+    // reduction check is green on population membership while the evidence payload has vanished.
+    const statements = /returned (\d+) named statement results per subject/.exec(report.slice(
+      report.indexOf(`### ${catalogId.toUpperCase()} reduction check`),
+    ));
+    assert.ok(
+      statements && Number(statements[1]) > 0,
+      `${catalogId}: the report must record a non-zero per-subject statement-result count`,
+    );
+  }
+});
+
+test("the evidence report proves the artifact that is actually committed, not some earlier one", () => {
+  // The reduction check says "0/N cases changed population vector" about a specific set of bytes. Every
+  // reduction setting produces a v1.0.000 artifact, so without pinning the hash a re-vendor at different
+  // settings would leave the committed report looking equally green while proving nothing about what
+  // ships. This is the no-network half of that: the hash in the report must be the hash on disk.
+  const report = readFileSync(new URL("../../../docs/OFFICIAL_TESTCASE_REPORT_2026-07.md", import.meta.url), "utf8");
+  for (const catalogId of OFFICIAL_GATED_MEASURES) {
+    const onDisk = createHash("sha256")
+      .update(readFileSync(`${ARTIFACT_ROOT}${catalogId}/bundle.json`))
+      .digest("hex");
+    // Scoped to THIS measure's section, not the whole document: a wiring slip that attributed CMS125's
+    // identity to CMS122's reduction check would satisfy a document-wide search while being wrong in
+    // exactly the way this test exists to catch.
+    const start = report.indexOf(`### ${catalogId.toUpperCase()} reduction check`);
+    assert.ok(start >= 0, `${catalogId}: no reduction-check section in the committed report`);
+    const nextHeading = report.indexOf("\n## ", start);
+    const section = report.slice(start, nextHeading === -1 ? undefined : nextHeading);
+    // `assert.ok`, not `assert.match`: a failing match dumps the whole section into the output, which
+    // buries the one line that matters.
+    assert.ok(
+      section.includes(`Artifact proven: \`sha256:${onDisk}\``),
+      `${catalogId}: its reduction-check section does not prove the committed artifact (on disk: ` +
+        `sha256:${onDisk}) — re-run 'pnpm test:official-cases' after re-vendoring`,
     );
   }
 });
