@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
 /**
@@ -10,8 +10,9 @@ import { createRequire } from "node:module";
  * `fqm-execution` (and its heavy transitive deps — axios/handlebars/moment/lodash) must never reach the
  * worker's cold-start or request path. That used to be guarded by a file allowlist here; it is now a
  * package boundary: the dependency lives in `@workwell/official-executor` alone, and that package loads
- * it through a lazy `await import`. Three tests replace the allowlist — they check the *manifest*, the
- * *app tree*, and the *module graph*, so a regression has to defeat all three rather than one grep.
+ * it through a lazy `await import`. Five tests replace the allowlist — they check the *manifest*, the
+ * *app tree*, the *package source*, the *module graph*, and *who may import the package at all* — so a
+ * regression has to defeat five checks rather than one grep.
  */
 const SRC_ROOT = fileURLToPath(new URL("../", import.meta.url)); // .../backend-ts/src/
 const BACKEND_ROOT = fileURLToPath(new URL("../../", import.meta.url)); // .../backend-ts/
@@ -41,7 +42,7 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-test("1/3 manifest: fqm-execution is declared by @workwell/official-executor and NOBODY else", () => {
+test("1/5 manifest: fqm-execution is declared by @workwell/official-executor and NOBODY else", () => {
   const appPkg = JSON.parse(readFileSync(`${BACKEND_ROOT}package.json`, "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
@@ -86,7 +87,7 @@ test("1/3 manifest: fqm-execution is declared by @workwell/official-executor and
   );
 });
 
-test("2/3 app tree: no file under src/ (or any OTHER package) imports fqm-execution directly", () => {
+test("2/5 app tree: no file under src/ (or any OTHER package) imports fqm-execution directly", () => {
   const files: string[] = [];
   walk(SRC_ROOT.replace(/[\\/]$/, ""), files);
   // Every workspace package except the executor itself is held to the same rule, so a future package
@@ -107,45 +108,101 @@ test("2/3 app tree: no file under src/ (or any OTHER package) imports fqm-execut
   );
 });
 
-test("3/3 module graph: the package reaches fqm-execution ONLY through a lazy import", async () => {
-  // The property that actually protects worker cold start: a static import anywhere in the package
-  // entry pulls axios/handlebars/moment/lodash into the graph of every consumer, and the static chain
-  // worker.ts → routes/measures.ts → literal-diff.ts → this package means that reaches cold start.
+test("3/5 package source: every fqm reference in the package is a LAZY dynamic import", () => {
+  // Scan EVERY production file in the package, not just index.ts: a helper module with a static import,
+  // imported by index.ts, would load the heavy graph at cold start while a single-file check saw nothing.
   //
-  // Scan the WHOLE source with the same multi-line-capable regex test 2/3 uses — a line-based check
-  // misses the shape any formatter produces once the import list grows:
+  // And scan the whole file, not line by line — the shape a formatter produces once the import list
+  // grows has no single line matching both predicates:
   //     import {
   //       Calculator,
   //     } from "fqm-execution";
-  const source = readFileSync(`${BACKEND_ROOT}packages/official-executor/src/index.ts`, "utf8");
-  const withoutComments = stripComments(source);
+  const packageSrc = `${BACKEND_ROOT}packages/official-executor/src`;
+  const files: string[] = [];
+  walk(packageSrc, files);
+  const production = files.filter((f) => !f.endsWith(".test.ts"));
+  assert.ok(production.length > 0, "sanity: the package has source files to scan");
 
-  const references = [...withoutComments.matchAll(new RegExp(FQM_IMPORT_RE, "g"))].map((m) => m[0]);
-  assert.ok(references.length > 0, "sanity: the package must reference fqm-execution somewhere");
-  for (const reference of references) {
-    assert.match(
-      reference,
-      /import\s*\(\s*["']fqm-execution["']/,
-      `fqm-execution must be reached only via a lazy dynamic import; found a static reference: ${reference}`,
-    );
+  let lazyImports = 0;
+  for (const file of production) {
+    const source = stripComments(readFileSync(file, "utf8"));
+    for (const match of source.matchAll(new RegExp(FQM_IMPORT_RE, "g"))) {
+      const reference = match[0];
+      assert.match(
+        reference,
+        /import\s*\(\s*["']fqm-execution["']/,
+        `${file.replace(/\\/g, "/")}: fqm-execution must be reached only via a lazy dynamic import, found: ${reference}`,
+      );
+      lazyImports += 1;
+    }
   }
-  assert.match(withoutComments, /await import\("fqm-execution"\)/, "the lazy import must still be there");
+  assert.ok(lazyImports > 0, "sanity: the package must reference fqm-execution somewhere");
+});
 
-  // Assert non-resolvability positively rather than treating it as a reason to skip: under pnpm's
-  // strict linking the app genuinely cannot load fqm-execution now that it is not an app dependency.
-  const require = createRequire(import.meta.url);
-  let resolved: string | null = null;
-  try {
-    resolved = require.resolve("fqm-execution");
-  } catch {
-    resolved = null;
-  }
-  assert.equal(
-    resolved,
-    null,
-    "fqm-execution must NOT be resolvable from the app — if it is, it leaked back into app node_modules",
+test("4/5 module graph: fqm resolves FROM the package, not from the app, and stays unloaded", async () => {
+  // Resolve from the package's own location — rooting `createRequire` in src/ (as this test first did)
+  // cannot see a dependency nested beside packages/official-executor, so the check silently skipped.
+  const fromPackage = createRequire(
+    pathToFileURL(`${BACKEND_ROOT}packages/official-executor/src/index.ts`).href,
   );
+  let packageEntry: string | null = null;
+  try {
+    packageEntry = fromPackage.resolve("fqm-execution");
+  } catch {
+    packageEntry = null;
+  }
+  assert.notEqual(packageEntry, null, "fqm-execution must be installed FOR the executor package");
 
+  // ...and must NOT be reachable from the app, which is what makes the quarantine real rather than
+  // merely declared.
+  const fromApp = createRequire(import.meta.url);
+  let appEntry: string | null = null;
+  try {
+    appEntry = fromApp.resolve("fqm-execution");
+  } catch {
+    appEntry = null;
+  }
+  assert.equal(appEntry, null, "fqm-execution must NOT be resolvable from the app — it leaked back in");
+
+  const loadedBefore = Object.keys(fromPackage.cache).includes(packageEntry!);
   const pkg = await import("@workwell/official-executor");
   assert.equal(typeof pkg.loadCalculator, "function", "sanity: the package entry loaded");
+  assert.equal(
+    Object.keys(fromPackage.cache).includes(packageEntry!),
+    loadedBefore,
+    "importing the package entry must not have pulled fqm-execution into the module graph",
+  );
+});
+
+/**
+ * The executor package is the ONLY door to fqm-execution, so who may open that door is itself part of
+ * the quarantine (roadmap §7.1). Without this, a route or run-pipeline module could import the package
+ * and call `loadCalculator()` — putting the heavy graph on a request path while all the tests above
+ * still pass, since none of them looks for imports of the PACKAGE.
+ */
+const EXECUTOR_IMPORTERS_ALLOWLIST = [
+  "standards/literal-diff.ts",
+  "standards/official-cases.ts",
+  // NOT run/cli/official-cases.ts — that shell reaches fqm only through standards/official-cases.ts,
+  // which is exactly the layering this list is meant to preserve.
+  // PR-7 adds "wiring/executor-router.ts" here — deliberately a conscious edit, not an open door.
+];
+
+test("5/5 consumers: only the approved app layers may import @workwell/official-executor", () => {
+  const files: string[] = [];
+  walk(SRC_ROOT.replace(/[\\/]$/, ""), files);
+  const executorImport = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']@workwell\/official-executor["']/;
+  const importers = files
+    .filter((f) => !f.endsWith(".test.ts"))
+    .filter((f) => executorImport.test(stripComments(readFileSync(f, "utf8"))))
+    .map((f) => f.replace(/\\/g, "/"))
+    .map((f) => f.slice(f.lastIndexOf("/src/") + "/src/".length))
+    .sort();
+
+  assert.deepEqual(
+    importers,
+    EXECUTOR_IMPORTERS_ALLOWLIST,
+    "a new consumer of the executor package must be added to EXECUTOR_IMPORTERS_ALLOWLIST deliberately — " +
+      "it is the door to fqm-execution, and must never be opened from a route or the run pipeline",
+  );
 });
