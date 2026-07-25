@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-07-15
+**Generated:** 2026-07-25
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -106,7 +106,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 | IPPass NutritionServices | `f64a63d1-cdc9-4486-a4d5-1d140a4f07e1` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
 | IPPass InitialOfficeVisit | `fccb9758-ea26-4a1e-98cf-3942102295b8` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
 
-### CMS122 v1.0.000 vs vendored draft v0.5.000
+### CMS122 reduction check — upstream bundle vs vendored artifact v1.0.000
 
 Using the official v1 Bundle ValueSets as the external cache, 0/55 cases changed population vector; 0 drift errors.
 
