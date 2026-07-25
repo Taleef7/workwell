@@ -2,6 +2,7 @@
  * DB-less CLI orchestration for the official MADiE diagnostic harness.
  * fqm-execution is reached only through @workwell/official-executor; neither this shell nor any src/ file imports it.
  */
+import { createHash } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
@@ -16,6 +17,7 @@ import {
   type OfficialMeasureId,
   type OfficialMeasureRun,
   type OfficialReportMetadata,
+  type ReductionArtifactIdentity,
 } from "../../standards/official-cases.ts";
 
 export const USAGE =
@@ -108,6 +110,47 @@ export function readContentRevision(contentDir: string): string {
   }
 }
 
+/**
+ * Identify the artifact bytes the reduction check is about to execute.
+ *
+ * The SHA-256 is computed HERE, over the file on disk, rather than read from `manifest.json` — the
+ * manifest's hash is written by `vendor:official` about itself, so quoting it back would make the
+ * evidence report circular.
+ *
+ * The `strippedElmAnnotations` label is descriptive and can only come from the manifest, so it is
+ * reported **only when the manifest's own `sha256` matches the bytes we just hashed**. That uses the
+ * manifest as corroboration rather than as authority: if the hashes disagree, the manifest describes
+ * some other artifact and its label means nothing about this one. Absent/malformed/mismatched all
+ * collapse to `undefined` — rendered as "unverified", never as the affirmative "retained", which would
+ * be a false claim about a stripped artifact.
+ */
+export function readArtifactIdentity(bundlePath: string): ReductionArtifactIdentity | undefined {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(bundlePath);
+  } catch {
+    return undefined;
+  }
+  const sha256 = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  let strippedElmAnnotations: boolean | undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(bundlePath), "manifest.json"), "utf8")) as {
+      sha256?: unknown;
+      reduction?: { strippedElmAnnotations?: unknown };
+    };
+    if (manifest.sha256 === sha256) {
+      strippedElmAnnotations = manifest.reduction?.strippedElmAnnotations === true;
+    }
+  } catch {
+    // absent or malformed: the label stays unverified; the hash and size still identify the artifact
+  }
+  return {
+    sha256,
+    ...(strippedElmAnnotations === undefined ? {} : { strippedElmAnnotations }),
+    vendoredBytes: bytes.byteLength,
+  };
+}
+
 export interface OfficialCasesCliDeps {
   cwd: string;
   load: (contentDir: string, measure: OfficialMeasureId) => LoadedOfficialMeasure;
@@ -115,10 +158,12 @@ export interface OfficialCasesCliDeps {
   render: (runs: OfficialMeasureRun[], metadata: OfficialReportMetadata) => string;
   sourceRevision: (contentDir: string) => string;
   loadDraftBundle: (path: string) => FhirBundle;
+  artifactIdentity: (bundlePath: string) => ReductionArtifactIdentity | undefined;
   runDraftDrift: (
     loaded: LoadedOfficialMeasure,
     officialRun: OfficialMeasureRun,
     draftBundle: FhirBundle,
+    artifact?: ReductionArtifactIdentity,
   ) => Promise<Cms122DraftDrift>;
   generatedDate: string;
   writeReport: (path: string, markdown: string) => void;
@@ -134,7 +179,9 @@ function defaultDeps(): OfficialCasesCliDeps {
     render: renderOfficialCaseReport,
     sourceRevision: readContentRevision,
     loadDraftBundle: loadFhirBundleFile,
-    runDraftDrift: runCms122DraftDrift,
+    artifactIdentity: readArtifactIdentity,
+    runDraftDrift: (loaded, officialRun, draftBundle, artifact) =>
+      runCms122DraftDrift(loaded, officialRun, draftBundle, { ...(artifact ? { artifact } : {}) }),
     generatedDate: new Date().toISOString().slice(0, 10),
     writeReport: (path, markdown) => writeFileSync(path, markdown, "utf8"),
     log: console.log,
@@ -167,7 +214,12 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       // executes our reduced artifact against the upstream bundle, so a measure without it has its
       // vendoring guarded by nothing but a self-consistent SHA-256 that vendor:official wrote itself.
       const artifactPath = resolve(deps.cwd, "measures", "official", measure, "bundle.json");
-      run.draftDrift = await deps.runDraftDrift(loaded, run, deps.loadDraftBundle(artifactPath));
+      run.draftDrift = await deps.runDraftDrift(
+        loaded,
+        run,
+        deps.loadDraftBundle(artifactPath),
+        deps.artifactIdentity(artifactPath),
+      );
       runs.push(run);
     }
     const markdown = deps.render(runs, {
