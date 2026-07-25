@@ -110,7 +110,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 
 Using the official v1 Bundle ValueSets as the external cache, 0/55 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 419 named statement results per subject.
+Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 419 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
@@ -193,7 +193,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; ref
 
 Using the official v1 Bundle ValueSets as the external cache, 0/66 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 423 named statement results per subject.
+Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 423 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
