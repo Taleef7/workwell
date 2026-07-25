@@ -183,6 +183,7 @@ test("4/5 module graph: fqm resolves FROM the package, not from the app, and sta
 const EXECUTOR_IMPORTERS_ALLOWLIST = [
   "standards/literal-diff.ts",
   "standards/official-cases.ts",
+  "wiring/official-artifacts.ts",
   // NOT run/cli/official-cases.ts — that shell reaches fqm only through standards/official-cases.ts,
   // which is exactly the layering this list is meant to preserve.
   // PR-7 adds "wiring/executor-router.ts" here — deliberately a conscious edit, not an open door.
