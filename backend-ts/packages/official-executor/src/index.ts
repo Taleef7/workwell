@@ -30,9 +30,20 @@ export interface FqmPopulationResult {
   result: boolean;
 }
 
+/** One CQL statement's result, as fqm reports it with `verboseCalculationResults`. */
+export interface FqmStatementResult {
+  statementName?: string;
+  libraryName?: string;
+  /** fqm's rendered value — "TRUE"/"FALSE"/"NA"/"UNHIT", or a formatted value for non-boolean defines. */
+  final?: unknown;
+}
+
 export interface FqmSubjectResult {
   patientId?: string;
-  detailedResults?: Array<{ populationResults?: FqmPopulationResult[] }>;
+  detailedResults?: Array<{
+    populationResults?: FqmPopulationResult[];
+    statementResults?: FqmStatementResult[];
+  }>;
   /** Resources the engine actually retrieved — the signal that a retrieve matched anything at all. */
   evaluatedResource?: Array<{ resourceType?: string }>;
 }
@@ -264,6 +275,34 @@ export interface OfficialCalculationInput {
 export async function calculateOfficial(
   input: OfficialCalculationInput,
 ): Promise<Map<string, PopulationMembership>> {
+  const detailed = await calculateOfficialDetailed(input);
+  return new Map([...detailed].map(([subject, result]) => [subject, result.populations]));
+}
+
+/** Population membership plus the per-statement results the caller persists as evidence. */
+export interface OfficialSubjectResult {
+  /** Reduced code→boolean map — convenient for deciding things. */
+  populations: PopulationMembership;
+  /**
+   * fqm's population array, VERBATIM. Kept alongside the reduced map because the map is lossy: it drops
+   * duplicate population types (legal for ratio and multi-observation measures) and any field beyond
+   * `populationType`/`result`. Callers persisting regulatory evidence should write this one.
+   */
+  populationResults: FqmPopulationResult[];
+  statements: FqmStatementResult[];
+}
+
+/**
+ * As `calculateOfficial`, but also returns each subject's statement results.
+ *
+ * Kept as the richer primitive with `calculateOfficial` derived from it, because a caller that persists
+ * evidence needs both and running the measure twice to get them would be absurd. The statements are
+ * returned RAW — deciding which of a measure's ~420 statements are worth persisting is a WorkWell
+ * storage-cost decision, not something this package should presume.
+ */
+export async function calculateOfficialDetailed(
+  input: OfficialCalculationInput,
+): Promise<Map<string, OfficialSubjectResult>> {
   const calculate = input.calculate ?? (await loadCalculator());
   const output = await calculate(
     input.bundle,
@@ -271,11 +310,15 @@ export async function calculateOfficial(
     calculationOptions(input.period, input.options),
     input.valueSetCache,
   );
-  const bySubject = new Map<string, PopulationMembership>();
+  const bySubject = new Map<string, OfficialSubjectResult>();
   for (const subject of output.results ?? []) {
-    const populations = subject.detailedResults?.[0]?.populationResults;
-    if (subject.patientId && populations) {
-      bySubject.set(subject.patientId, populationMembership(populations));
+    const detailed = subject.detailedResults?.[0];
+    if (subject.patientId && detailed?.populationResults) {
+      bySubject.set(subject.patientId, {
+        populations: populationMembership(detailed.populationResults),
+        populationResults: detailed.populationResults,
+        statements: detailed.statementResults ?? [],
+      });
     }
   }
   return bySubject;

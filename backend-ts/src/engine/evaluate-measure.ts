@@ -36,6 +36,28 @@ export interface ExpressionResult {
   result: unknown;
 }
 
+/**
+ * Provenance + REGULATORY population truth for an outcome produced by running the official published
+ * artifact (roadmap §7.3). Present only on official-routed outcomes.
+ *
+ * `populationResults` is the lossless record of what the measure's own CQL decided. Exporters read it in
+ * preference to `outcome`, because the five-bucket status is a WORKFLOW vocabulary: it cannot express
+ * denominator-exception, and it inverts for a measure whose numerator counts failures (ADR-031, PR-3).
+ */
+export interface OfficialEvidence {
+  ecqmId: string | null;
+  version: string;
+  engine: string;
+  artifactSha256: string;
+  /**
+   * The executor's population array, verbatim. This is one of exactly two shapes the exporter's
+   * `officialMembership` accepts, and a third shape is not "close enough": it is rejected and alerted,
+   * which degrades the report to status-derived membership — the very thing evidence-first exporting
+   * exists to prevent. A round-trip test pins the two halves together.
+   */
+  populationResults: Array<{ populationType: string; result: boolean }>;
+}
+
 export interface MeasureOutcome {
   subjectId: string;
   measure: string;
@@ -49,7 +71,7 @@ export interface MeasureOutcome {
    * Descriptive only (ADR-008): it never changes `outcome`.
    */
   inInitialPopulation?: boolean;
-  evidence: { expressionResults: ExpressionResult[] };
+  evidence: { expressionResults: ExpressionResult[]; official?: OfficialEvidence };
 }
 
 export interface EvaluateMeasureInput {
