@@ -1,5 +1,36 @@
 # Journal
 
+## 2026-07-25 — PR-6: the official MADiE gate runs in CI, and PR-5's reduction proof is discharged (branch `feat/madie-ci-gate`)
+
+Roadmap §7.4 PR-6. A new `official-cases` CI job fetches the pinned upstream content and runs
+`pnpm test:official-cases`, so the project's only **external** ground truth — the measure stewards' own
+expected results — gates every push instead of being a command someone remembers to run. It is a
+separate job rather than part of `pnpm test` because it clones ~34MB from GitHub; a developer offline
+still gets a green local run, and CI always pays the cost. The job also fails if the **committed
+evidence report is stale**, so `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` cannot drift from what the
+harness actually produces.
+
+**THE RULE is now enforced in code, not prose.** "No measure enters `WORKWELL_OFFICIAL_MEASURES` without
+a green gate" was a sentence in the roadmap; `official-gate.test.ts` makes it a test, in the default
+suite, with no network: the gated set must be **exactly** the vendored artifact set. Both failure
+directions are real — vendor an artifact and forget to gate it and it could be flipped to official with
+no external validation at all (precisely what the rule exists to prevent); gate one with no artifact and
+CI fails confusingly. Verified by planting an ungated `cms165/` artifact: the test fails. It also pins
+each gated measure's upstream name to its manifest (a mismatch would surface as a silent "no cases
+found" in CI) and checks the evidence report actually mentions every gated measure.
+
+**PR-5's open proof is discharged.** That PR argued reduction-neutrality from mechanism and left the
+end-to-end proof to this one. Ran it: **121/121 (CMS122 55/55, CMS125 66/66)** and, from the report,
+*"0/55 cases changed population vector; 0 drift errors"* — dropping CQL source, ELM XML, narratives and
+ValueSet expansions during vendoring changes nothing the measure computes. Combined with the Codex fix
+that made drift fail the command, a bad `vendor:official` now fails CI instead of shipping quietly.
+
+**Next, and now cheap:** with the gate green and the content already fetched, prove
+`--strip-elm-annotations` (measured 79% smaller — 9.8MB → 2.1MB of ELM per measure) the same way. That
+is the unlock before the remaining six measures take the image toward ~80MB.
+
+Typecheck clean; full suite **1453 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-24 (late) — PR-5: vendored official artifacts at v1.0.000, and a licensing rule (branch `feat/vendor-official-measures`)
 
 Roadmap §7.4 PR-5. `measures/official/<catalogId>/{bundle.json,manifest.json}`, written by

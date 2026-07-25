@@ -25,6 +25,18 @@ export type PopulationCode = (typeof POPULATION_CODES)[number];
 export type OfficialMeasureId = "cms122" | "cms125";
 export type PopulationCounts = Record<PopulationCode, number>;
 
+/**
+ * The measures covered by the official MADiE test-case gate (roadmap §7.4 PR-6). THE RULE: a measure
+ * may not enter `WORKWELL_OFFICIAL_MEASURES` until this gate is green for it, so this set must stay
+ * identical to the vendored artifact set — `official-gate.test.ts` enforces that, in the default suite.
+ */
+export const OFFICIAL_GATED_MEASURES: readonly OfficialMeasureId[] = ["cms122", "cms125"];
+
+/** The upstream measure name the harness locates the fetched bundle by. Pinned to the manifest. */
+export function officialMeasureName(catalogId: string): string | undefined {
+  return MEASURES[catalogId as OfficialMeasureId]?.name;
+}
+
 const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> = {
   cms122: {
     name: "CMS122FHIRDiabetesAssessGT9Pct",
