@@ -293,3 +293,30 @@ test("--official derives the import target from the artifact the executor actual
   assert.throws(() => officialArtifactOids("cms999"), /no vendored artifact/);
   assert.throws(() => parseArgs(["--official"]), /needs a catalog id/);
 });
+
+test("a failed expansion keeps the artifact's alias — an ERROR row must not be renamed to a bare OID", async () => {
+  const { runResolve } = await import("./resolve-valuesets.ts");
+  const f = fakes();
+  const client = {
+    expand: async (oid: string) => {
+      if (oid === "2.16.999") throw new Error("VSAC timeout");
+      return { contains: [{ code: "a", system: "s", display: "A" }], version: "1" } as VsacExpansion;
+    },
+  };
+  const res = await runResolve({
+    oids: ["2.16.111", "2.16.999"],
+    names: { "2.16.111": "Hospice Encounter", "2.16.999": "Palliative Care Intervention" },
+    client: client as never,
+    valueSets: f.valueSets,
+    events: f.events,
+    now: "2026-07-25T00:00:00Z",
+  });
+
+  assert.equal(res.resolved, 1);
+  assert.equal(res.errors, 1);
+  // Partial failure is a supported outcome of a bulk import, so the error branch is not a rare corner:
+  // writing the bare OID would overwrite a good alias on any transient VSAC blip, leaving an operator
+  // looking at a row named 2.16.999 with no way to know it ever had a name.
+  const errorRow = f.upserts.find((u) => u.resolutionStatus === "ERROR");
+  assert.equal(errorRow?.name, "Palliative Care Intervention");
+});

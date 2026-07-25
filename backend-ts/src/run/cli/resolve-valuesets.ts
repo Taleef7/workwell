@@ -251,7 +251,12 @@ export async function runResolve(deps: RunResolveDeps): Promise<ResolveResult> {
       // resolution_status flags it, so retaining the prior hash as a baseline is sound.
       await deps.valueSets.upsertResolvedValueSet({
         oid,
-        name: NAME_BY_OID[oid] ?? oid,
+        // The SAME name fallback as the success path. Partial failure is an explicitly supported outcome
+        // of this bulk import, so the error branch is not a rare corner: writing the bare OID here would
+        // overwrite a good alias with a worse one on any transient VSAC failure, and the operator would
+        // be looking at a catalog row named `2.16.840.1.113883.3.464...` with no way to know it once had
+        // a name.
+        name: deps.names?.[oid] ?? NAME_BY_OID[oid] ?? oid,
         version: null,
         source: "VSAC",
         codes: [],
