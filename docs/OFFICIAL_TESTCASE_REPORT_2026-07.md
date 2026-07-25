@@ -187,6 +187,14 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; ref
 | DENEXFail BilateralMastDxOnJan1AfterMP | `f9de4c72-b2ed-4c8f-94fe-8c934e42e0a0` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
 | DENEXFail PalliativeCareObsOnDec31B4Interval | `ffbb03e1-7188-42ef-8deb-c6cf3f790bfe` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
 
+### CMS125 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Using the official v1 Bundle ValueSets as the external cache, 0/66 cases changed population vector; 0 drift errors.
+
+| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
 ## Interpretation rules
 
 - `PASS` = exact agreement with the committed MADiE expected population counts.
