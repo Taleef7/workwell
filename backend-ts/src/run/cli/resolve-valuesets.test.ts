@@ -259,3 +259,64 @@ test("a first-ever import is not drift (no prior row to compare)", async () => {
   assert.deepEqual(res.changed, []);
   assert.equal(audits.filter((a) => a.eventType === "VALUE_SET_EXPANSION_CHANGED").length, 0);
 });
+
+test("--official derives the import target from the artifact the executor actually refuses on", async () => {
+  const { parseArgs, officialArtifactOids } = await import("./resolve-valuesets.ts");
+  const { loadOfficialArtifact } = await import("../../wiring/official-artifacts.ts");
+  const { requiredOids } = await import("../../wiring/official-executor-adapter.ts");
+
+  // The point of the flag: the SAME ELM that makes the executor refuse a measure decides what gets
+  // fetched. A hand-kept list is how CMS122 came to be "imported" while 5 of its 26 canonicals were
+  // missing — so assert the two agree by construction, not by coincidence.
+  for (const catalogId of ["cms122", "cms125"]) {
+    const artifact = loadOfficialArtifact(catalogId)!;
+    const parsed = parseArgs(["--official", catalogId]);
+    assert.deepEqual(
+      [...(parsed.oids ?? [])].sort(),
+      [...new Set(requiredOids(artifact))].sort(),
+      `${catalogId}: the import target must be exactly what the executor requires`,
+    );
+    // Names come from the ELM's CQL aliases, so the value-set catalog is readable rather than a
+    // column of bare OIDs.
+    assert.ok(
+      Object.values(parsed.names ?? {}).some((n) => /[a-z]/i.test(n)),
+      `${catalogId}: artifact-derived rows must carry their CQL alias`,
+    );
+  }
+
+  // The two measures overlap heavily (shared hospice / palliative / frailty / encounter sets), so
+  // expanding a shared canonical twice would double-write the row and double-count the summary.
+  const both = parseArgs(["--official", "cms122", "--official", "cms125"]);
+  assert.equal(both.oids!.length, new Set(both.oids).size, "targets must be de-duplicated");
+  assert.equal(both.oids!.length, 35, "26 + 32 with 23 shared — one import covers both measures");
+
+  assert.throws(() => officialArtifactOids("cms999"), /no vendored artifact/);
+  assert.throws(() => parseArgs(["--official"]), /needs a catalog id/);
+});
+
+test("a failed expansion keeps the artifact's alias — an ERROR row must not be renamed to a bare OID", async () => {
+  const { runResolve } = await import("./resolve-valuesets.ts");
+  const f = fakes();
+  const client = {
+    expand: async (oid: string) => {
+      if (oid === "2.16.999") throw new Error("VSAC timeout");
+      return { contains: [{ code: "a", system: "s", display: "A" }], version: "1" } as VsacExpansion;
+    },
+  };
+  const res = await runResolve({
+    oids: ["2.16.111", "2.16.999"],
+    names: { "2.16.111": "Hospice Encounter", "2.16.999": "Palliative Care Intervention" },
+    client: client as never,
+    valueSets: f.valueSets,
+    events: f.events,
+    now: "2026-07-25T00:00:00Z",
+  });
+
+  assert.equal(res.resolved, 1);
+  assert.equal(res.errors, 1);
+  // Partial failure is a supported outcome of a bulk import, so the error branch is not a rare corner:
+  // writing the bare OID would overwrite a good alias on any transient VSAC blip, leaving an operator
+  // looking at a row named 2.16.999 with no way to know it ever had a name.
+  const errorRow = f.upserts.find((u) => u.resolutionStatus === "ERROR");
+  assert.equal(errorRow?.name, "Palliative Care Intervention");
+});

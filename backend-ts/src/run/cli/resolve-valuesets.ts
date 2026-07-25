@@ -4,7 +4,11 @@
  * A failed expand writes an ERROR row and continues. Owner-run ON DEMAND, NOT on deploy. Local (SQLite
  * floor) or Neon (export DATABASE_URL + WORKWELL_VSAC_API_KEY). Default target = the CMS122 reference set.
  *
- *   pnpm resolve-valuesets [--oid <oid> ...] [--measure cms122]
+ *   pnpm resolve-valuesets [--oid <oid> ...] [--measure cms122] [--official <catalogId>]
+ *
+ * `--official cms122 --official cms125` imports exactly what the vendored official artifacts retrieve
+ * (35 canonicals, de-duplicated) — the list the official executor refuses to run without. Prefer it to
+ * the hand-kept default, which covers 21 of the 26 CMS122 needs and 18 of the 32 CMS125 ones.
  *
  * ROLLBACK (reversible; schema-qualify on Postgres): DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';
  *
@@ -13,13 +17,40 @@
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
 import { httpVsacClient, type VsacClient } from "../../engine/cql/vsac-client.ts";
 import { CMS122V14 } from "../../standards/references/cms122v14.ts";
+import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
+import { requiredValueSets } from "../../wiring/official-executor-adapter.ts";
 import type { CaseEventStore } from "../../stores/case-event-store.ts";
 import type { ValueSetStore } from "../../stores/value-set-store.ts";
 
 export const USAGE =
-  "Usage: pnpm resolve-valuesets [--oid <oid> ...] [--measure cms122] [--manifest <canonical> | --expansion <name>]";
+  "Usage: pnpm resolve-valuesets [--oid <oid> ...] [--measure cms122] [--official <catalogId>] " +
+  "[--manifest <canonical> | --expansion <name>]";
 export const DEFAULT_OIDS: string[] = [...new Set(CMS122V14.valueSets.map((v) => v.oid))];
 const NAME_BY_OID: Record<string, string> = Object.fromEntries(CMS122V14.valueSets.map((v) => [v.oid, v.name]));
+
+/**
+ * `--official <catalogId>`: import exactly the value sets the VENDORED OFFICIAL ARTIFACT retrieves,
+ * read from its compiled ELM.
+ *
+ * The hand-kept `CMS122V14.valueSets` table (21 OIDs) is how this CLI has always chosen targets, and it
+ * was wrong in a way nobody could see: CMS122's own artifact references **26** canonicals and CMS125's
+ * references **32**, so the official executor refuses both measures on terminology today. Deriving the
+ * list from the artifact puts the importer and the executor's refusal in agreement by construction —
+ * the same ELM decides what must be present and what gets fetched.
+ *
+ * Deliberately imports everything referenced, including the four SupplementalDataElements sets that
+ * `calculateSDEs: false` never retrieves. They are cheap, and an importer that second-guesses which
+ * references "really" matter is how the two lists drift apart again.
+ */
+export function officialArtifactOids(catalogId: string): Array<{ oid: string; name?: string }> {
+  const artifact = loadOfficialArtifact(catalogId);
+  if (!artifact) {
+    throw new ResolveCliUsageError(
+      `--official ${catalogId}: no vendored artifact (see measures/official/)\n${USAGE}`,
+    );
+  }
+  return requiredValueSets(artifact);
+}
 
 export class ResolveCliUsageError extends Error {
   override readonly name = "ResolveCliUsageError";
@@ -27,6 +58,8 @@ export class ResolveCliUsageError extends Error {
 
 export interface ResolveArgs {
   oids?: string[];
+  /** Display names for artifact-derived OIDs, so imported rows are not named by bare OID. */
+  names?: Record<string, string>;
   /** Release pin (#295) — forwarded to $expand; mutually exclusive. */
   manifest?: string;
   expansion?: string;
@@ -34,6 +67,7 @@ export interface ResolveArgs {
 
 export function parseArgs(args: string[]): ResolveArgs {
   const oids: string[] = [];
+  const names: Record<string, string> = {};
   let manifest: string | undefined;
   let expansion: string | undefined;
   for (let i = 0; i < args.length; i++) {
@@ -42,6 +76,13 @@ export function parseArgs(args: string[]): ResolveArgs {
       const v = args[++i];
       if (!v) throw new ResolveCliUsageError(`--oid needs a value\n${USAGE}`);
       oids.push(v);
+    } else if (a === "--official") {
+      const catalogId = args[++i];
+      if (!catalogId) throw new ResolveCliUsageError(`--official needs a catalog id\n${USAGE}`);
+      for (const vs of officialArtifactOids(catalogId)) {
+        oids.push(vs.oid);
+        if (vs.name) names[vs.oid] = vs.name;
+      }
     } else if (a === "--measure") {
       const m = args[++i];
       if (m !== "cms122") throw new ResolveCliUsageError(`--measure only supports 'cms122' today\n${USAGE}`);
@@ -63,7 +104,10 @@ export function parseArgs(args: string[]): ResolveArgs {
   if (manifest && expansion)
     throw new ResolveCliUsageError(`--manifest and --expansion are mutually exclusive\n${USAGE}`);
   return {
-    ...(oids.length ? { oids } : {}),
+    // De-duplicated: `--official cms122 --official cms125` shares 18 canonicals, and expanding one
+    // twice would write the row twice and count it twice in the summary.
+    ...(oids.length ? { oids: [...new Set(oids)] } : {}),
+    ...(Object.keys(names).length ? { names } : {}),
     ...(manifest ? { manifest } : {}),
     ...(expansion ? { expansion } : {}),
   };
@@ -71,6 +115,8 @@ export function parseArgs(args: string[]): ResolveArgs {
 
 export interface RunResolveDeps {
   oids: string[];
+  /** Display names by OID (artifact-derived); falls back to the CMS122 table, then the bare OID. */
+  names?: Record<string, string>;
   client: VsacClient;
   valueSets: ValueSetStore;
   events: CaseEventStore;
@@ -142,7 +188,7 @@ export async function runResolve(deps: RunResolveDeps): Promise<ResolveResult> {
       const drifted = before !== undefined && before !== hash;
       await deps.valueSets.upsertResolvedValueSet({
         oid,
-        name: NAME_BY_OID[oid] ?? oid,
+        name: deps.names?.[oid] ?? NAME_BY_OID[oid] ?? oid,
         version: exp.version ?? null,
         source: "VSAC",
         codes,
@@ -205,7 +251,12 @@ export async function runResolve(deps: RunResolveDeps): Promise<ResolveResult> {
       // resolution_status flags it, so retaining the prior hash as a baseline is sound.
       await deps.valueSets.upsertResolvedValueSet({
         oid,
-        name: NAME_BY_OID[oid] ?? oid,
+        // The SAME name fallback as the success path. Partial failure is an explicitly supported outcome
+        // of this bulk import, so the error branch is not a rare corner: writing the bare OID here would
+        // overwrite a good alias with a worse one on any transient VSAC failure, and the operator would
+        // be looking at a catalog row named `2.16.840.1.113883.3.464...` with no way to know it once had
+        // a name.
+        name: deps.names?.[oid] ?? NAME_BY_OID[oid] ?? oid,
         version: null,
         source: "VSAC",
         codes: [],
@@ -274,6 +325,7 @@ export async function main(argv: string[]): Promise<number> {
     valueSets: stores.valueSets,
     events: stores.events,
     now: new Date().toISOString(),
+    ...(parsed.names ? { names: parsed.names } : {}),
     ...(parsed.manifest ? { manifest: parsed.manifest } : {}),
     ...(parsed.expansion ? { expansion: parsed.expansion } : {}),
   });

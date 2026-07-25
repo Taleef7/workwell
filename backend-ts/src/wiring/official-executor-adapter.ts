@@ -65,6 +65,7 @@ import {
   buildValueSetCache,
   calculateOfficialDetailed,
   normalizePeriodEnd,
+  referencedValueSets,
   referencedValueSetUrls,
   oidFromValueSetUrl,
   type ExpandedCode,
@@ -245,6 +246,22 @@ export async function expandArtifactTerminology(
 /** The bare OIDs an artifact needs expanded — for preflight reporting and the import CLI. */
 export function requiredOids(artifact: OfficialArtifact): string[] {
   return referencedValueSetUrls(artifact.bundle).map(oidFromValueSetUrl);
+}
+
+/**
+ * The value sets an artifact needs, with the CQL alias each is declared under.
+ *
+ * This is what `pnpm resolve-valuesets --official <catalogId>` imports. Deriving the target list from
+ * the artifact — rather than a hand-kept OID table — is what keeps the importer and the executor's
+ * refusal in agreement: the same ELM that decides "this measure cannot run without these" decides what
+ * gets fetched. A hand-kept list is exactly how CMS122 ended up importable while 5 of its 26 canonicals
+ * were missing.
+ */
+export function requiredValueSets(artifact: OfficialArtifact): Array<{ oid: string; name?: string }> {
+  return referencedValueSets(artifact.bundle).map((v) => ({
+    oid: oidFromValueSetUrl(v.url),
+    ...(v.name ? { name: v.name } : {}),
+  }));
 }
 
 /**
