@@ -71,8 +71,16 @@ reads; and ADR-026 records that the artifact changed **source repository**, not 
 (`ecqm-content-cms-2025` → `dqm-content-qicore-2025`), which the "v0.5.000 → v1.0.000" framing hid.
 **Honest scope note:** outcome-neutrality of the reduction is argued from mechanism (fqm matches
 libraries by `resourceType`, reads scoring from group extensions, and never reads `fullUrl`) and proven
-end-to-end only by the drift check, which is not yet a CI gate — that is PR-6. Full suite **1449 pass /
-0 fail / 14 skipped**.
+end-to-end only by the drift check, which is not yet a CI gate — that is PR-6. **Codex found a third hole neither review caught:** `exitCodeForRuns` read only
+`run.summary`, so the reduction-drift check could report changed population vectors and the command
+would still **exit 0** — meaning PR-6's CI gate would have been built on a command that cannot fail for
+the one thing the drift check exists to prove. Fixed, with a test pinning both failure modes; the
+existing fixture's `changedCases: 3` was also semantically stale (it meant "expected drift from the old
+v0.5.000 draft"; now any change means our reduction altered a result) and is now 0. Codex's other two
+were already fixed in the prior commit, except that ADR-026's original body still read as current before
+a reader reached the amendment — the stale bullets now carry inline SUPERSEDED markers rather than being
+rewritten, preserving the decision record. Full suite
+**1450 pass / 0 fail / 14 skipped**.
 
 
 ## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)

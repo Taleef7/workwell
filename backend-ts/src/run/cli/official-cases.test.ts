@@ -79,7 +79,10 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
     measure: "cms122",
     summary: { total: 55, expectedAgreements: 55, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
   };
-  const fakeDrift = { total: 55, changedCases: 3, errors: 0 };
+  // changedCases MUST be 0 now: since PR-5 both sides of this comparison are v1.0.000, so any change
+  // means our vendoring reduction altered a population result — which fails the command (see the
+  // reduction-drift test below). It formerly compared a stale v0.5.000 draft, where drift was expected.
+  const fakeDrift = { total: 55, changedCases: 0, errors: 0 };
   const testCwd = resolve("test-repo", "backend-ts");
 
   const code = await module.main(["--measure", "cms122"], {
@@ -108,4 +111,23 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
   assert.equal(code, 0);
   assert.equal(driftCalls, 1);
   assert.equal(renderedDrift, fakeDrift);
+});
+
+test("PR-5: reduction drift FAILS the command (it is the only proof vendoring is outcome-neutral)", async () => {
+  const module = await import("./official-cases.ts").catch(() => null);
+  assert.ok(module, "module must load");
+  const exitCodeForRuns = module.exitCodeForRuns;
+  const clean = { summary: { unexpectedMismatches: 0, errors: 0 } } as never;
+  assert.equal(exitCodeForRuns([clean]), 0);
+
+  // A drift check that reports changed population vectors while the command exits 0 would let a
+  // broken vendored artifact straight through PR-6's CI gate.
+  const changed = { summary: { unexpectedMismatches: 0, errors: 0 }, draftDrift: { changedCases: 1, errors: 0 } } as never;
+  assert.equal(exitCodeForRuns([changed]), 1, "a changed population vector must fail");
+
+  const errored = { summary: { unexpectedMismatches: 0, errors: 0 }, draftDrift: { changedCases: 0, errors: 2 } } as never;
+  assert.equal(exitCodeForRuns([errored]), 1, "a drift execution error must fail");
+
+  // Absent drift (any measure other than cms122) must stay passing.
+  assert.equal(exitCodeForRuns([{ summary: { unexpectedMismatches: 0, errors: 0 }, draftDrift: undefined } as never]), 0);
 });

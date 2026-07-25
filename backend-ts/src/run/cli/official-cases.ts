@@ -54,8 +54,20 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
   return { measures: measure ? [measure] : ["cms122", "cms125"], ...(contentDir ? { contentDir } : {}) };
 }
 
-export function exitCodeForRuns(runs: Array<Pick<OfficialMeasureRun, "summary">>): 0 | 1 {
-  return runs.some((run) => run.summary.unexpectedMismatches > 0 || run.summary.errors > 0) ? 1 : 0;
+export function exitCodeForRuns(
+  runs: Array<Pick<OfficialMeasureRun, "summary"> & Partial<Pick<OfficialMeasureRun, "draftDrift">>>,
+): 0 | 1 {
+  const officialFailed = runs.some(
+    (run) => run.summary.unexpectedMismatches > 0 || run.summary.errors > 0,
+  );
+  // The reduction drift check MUST be able to fail this command. It is the only thing that proves
+  // vendoring (dropping CQL, ELM XML, narratives, ValueSets) changes no population result, and PR-6
+  // builds a CI gate on top of this exit code — a check that reports drift while exiting 0 would let
+  // a broken vendored artifact through the gate that exists to catch it.
+  const reductionDrifted = runs.some(
+    (run) => (run.draftDrift?.changedCases ?? 0) > 0 || (run.draftDrift?.errors ?? 0) > 0,
+  );
+  return officialFailed || reductionDrifted ? 1 : 0;
 }
 
 function gitDirectory(contentDir: string): string {

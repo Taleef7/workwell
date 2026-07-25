@@ -420,7 +420,7 @@ Each outcome evidence payload includes:
   clause — ADR-026)** The fidelity diff now has a **three-tier ladder** — `literal → subset → estimate` —
   surfaced by an additive `mode` field in the response. The **literal** tier executes the *actual official
   multi-library QICore CMS122v14 artifact* (MADiE FHIR export `CMS122FHIRDiabetesAssessGreaterThan9Percent`
-  v0.5.000, `using QICore '6.0.0'`, 8 included libraries — the exact CQL ADR-024 proved un-compilable under
+  v0.5.000 *(historical — re-vendored to v1.0.000 from `dqm-content-qicore-2025` in PR-5, 2026-07-24)*, `using QICore '6.0.0'`, 8 included libraries — the exact CQL ADR-024 proved un-compilable under
   the pinned JS translator) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the
   bundle's `Library.content` (`application/elm+json`) — **no translation happens**. The bundle is vendored
   with provenance under `backend-ts/measures/official/cms122/`; value sets are supplied from the imported
