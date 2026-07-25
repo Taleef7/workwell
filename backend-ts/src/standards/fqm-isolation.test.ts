@@ -191,8 +191,9 @@ const EXECUTOR_IMPORTERS_ALLOWLIST = [
   // until a measure is actually flipped.
   "wiring/official-executor-adapter.ts",
   // NOT run/cli/official-cases.ts — that shell reaches fqm only through standards/official-cases.ts,
-  // which is exactly the layering this list is meant to preserve.
-  // PR-7b adds "wiring/executor-router.ts" here — deliberately a conscious edit, not an open door.
+  // which is exactly the layering this list is meant to preserve. Same for PR-7b's
+  // `wiring/executor-router.ts`: it consumes the ADAPTER, so the package stays one hop away from the
+  // thing production routes through. Adding it here pre-emptively was wrong, and this guard said so.
 ];
 
 test("5/5 consumers: only the approved app layers may import @workwell/official-executor", () => {

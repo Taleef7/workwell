@@ -25,7 +25,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { engineForEnv } from "../wiring/engine-factory.ts";
+import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
@@ -48,6 +48,7 @@ import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import type { PopulationCounts } from "../fhir/measure-report.ts";
 import {
+  officialMembership,
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
   countPopulations,
@@ -153,13 +154,38 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
  * So official runs read rows, bounded by the same subject cap the individual/bundle reports use;
  * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
  */
+/**
+ * Did THIS run's outcomes come from the official executor? One row settles it: `evidence.official` is
+ * written only by that executor, and a run evaluates one measure with one engine. Bounded on purpose —
+ * this sits in front of a path that must stay O(1) for a 120k `seed:scale` run.
+ */
+async function runProducedOfficialEvidence(
+  os: Awaited<ReturnType<typeof outcomes>>,
+  runId: string,
+): Promise<boolean> {
+  const [first] = await os.listOutcomes(runId, { limit: 1 });
+  return officialMembership(first?.evidence) !== null;
+}
+
 async function aggregateCountsForRun(
   os: Awaited<ReturnType<typeof outcomes>>,
   runId: string,
   measureId: string,
   env: RunsEnv,
 ): Promise<{ counts: PopulationCounts } | { error: Response }> {
-  if (!isOfficialRouted(measureId, env as unknown as Record<string, unknown>)) {
+  // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
+  // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
+  // now means that turning the flag off — the documented rollback — silently reinterprets every
+  // historical official run through the status histogram, reversing cms122's numerator (its official
+  // numerator is poor control, and the workflow status inverts it). An export of a past run must not
+  // change meaning because of a config change made after it.
+  //
+  // The env flag is still consulted first, as a cheap way to skip a read for the overwhelmingly common
+  // case; when it is off, one bounded row settles it. `evidence.official` is written only by the
+  // official executor, and a run evaluates one measure with one engine, so a single row is decisive.
+  const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
+  const official = routedNow || (await runProducedOfficialEvidence(os, runId));
+  if (!official) {
     return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId) };
   }
   const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);
@@ -287,7 +313,7 @@ export async function handleRuns(
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     body.triggeredBy = externalTriggeredBy(body.triggeredBy); // Fable M1: no forged seed:*/scheduler labels
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     const deps = {
       runStore: await store(env),
       outcomeStore: await outcomes(env),
@@ -320,7 +346,7 @@ export async function handleRuns(
   const rerunId = pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/)?.[1];
   if (rerunId && req.method === "POST") {
     const runStore = await store(env);
-    const engine = await engineForEnv(env);
+    const engine = await routedEngineForEnv(env);
     // A CASE run reruns through rerun-to-verify (the case scope), reading the caseId
     // persisted in requested_scope — matches Java's rerunSameScope CASE branch. Other
     // scopes go through executeRerun.
@@ -415,10 +441,13 @@ export async function handleRuns(
     // period, then today, mirroring that default.
     const evaluationPeriod =
       body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    // Build the engine BEFORE claiming the run. `routedEngineForEnv` validates official-measure
+    // configuration and can throw; doing that after markRunning would leave an orphaned RUNNING run for
+    // `recoverStuckRuns` to sweep, for a failure that has nothing to do with the run.
+    const engine = await routedEngineForEnv(env);
     // A run being processed must leave the QUEUED claim path so it isn't re-handed
     // to a worker (QUEUED → RUNNING; idempotent for already-running runs).
     await runStore.markRunning(evalId);
-    const engine = await engineForEnv(env);
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,

@@ -87,6 +87,19 @@ import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 /** Expand one VSAC OID to its codes — the app supplies this from the imported `value_sets` rows. */
 export type ExpandValueSet = (oid: string) => Promise<ExpandedCode[]>;
 
+/**
+ * Re-exported so the ROUTER can key its expander by the same rule `buildValueSetCache` looks up by,
+ * without becoming a direct consumer of the executor package. Two normalizations that merely agree on
+ * VSAC canonicals is a bug waiting for the first canonical of another shape; a second import of the
+ * package into production wiring is a hole in the fqm quarantine. This is how to have neither.
+ */
+export { oidFromValueSetUrl, type FqmCalculate };
+
+/** An `EvaluateMeasureBinding` that can also be asked to prove a measure is runnable before a run. */
+export interface OfficialMeasureExecutor extends EvaluateMeasureBinding {
+  preflight(measureId: string): Promise<void>;
+}
+
 export interface OfficialExecutorDeps {
   expand: ExpandValueSet;
   /** Injectable for tests; defaults to the real (lazily imported) fqm calculator. */
@@ -271,8 +284,47 @@ export function requiredValueSets(artifact: OfficialArtifact): Array<{ oid: stri
  * costs an ELM parse per subject, which is why PR-7b adds measure-major iteration and batches subjects
  * through one `calculateOfficialDetailed` call — the package's batch entry point already exists for it.
  */
-export function officialMeasureExecutor(deps: OfficialExecutorDeps): EvaluateMeasureBinding {
+export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMeasureExecutor {
+  /**
+   * Terminology is expanded once per measure per EXECUTOR INSTANCE — and an instance lives as long as
+   * the router that built it, which is **at most** one run: per run-POST and per scheduled tick, but
+   * per HTTP request at the read routes (`/simulate`, impact-preview, `/evaluate`). Shorter is always
+   * SAFE — freshness is the property that matters — but it is not free: each construction pays a
+   * `valueSets.listAll()` and an ELM walk per routed measure, and `/simulate` is a date scrubber that
+   * fires once per drag. Worth revisiting when a read route is actually routed officially.
+   *
+   * The scoping is the point, not an implementation detail. A process-lifetime cache would freeze the
+   * value-set snapshot and re-introduce the bug `engineForEnv` documents at length — an operator's
+   * value-set edit serving stale expansions until restart. Per-CALL was the other extreme: a
+   * 150-subject run re-parsing a 2.4MB bundle's ELM twice per subject and hitting the store thousands
+   * of times.
+   */
+  const terminology = new Map<string, Promise<unknown[]>>();
+  const cacheFor = (artifact: OfficialArtifact): Promise<unknown[]> => {
+    const key = artifact.manifest.catalogId;
+    let pending = terminology.get(key);
+    if (!pending) {
+      pending = expandArtifactTerminology(artifact, deps.expand);
+      // A rejected promise must not be cached: the likeliest cause is a transient store failure, and
+      // caching it would turn one bad read into a whole run's worth of refusals.
+      pending.catch(() => terminology.delete(key));
+      terminology.set(key, pending);
+    }
+    return pending;
+  };
+
   return {
+    /**
+     * Expand a measure's terminology now rather than at first evaluation. The router calls this at
+     * construction so an operator who flips a measure whose OIDs were never imported learns it from a
+     * failed run start, not from a run that quietly reports nobody as eligible.
+     */
+    async preflight(measureId: string): Promise<void> {
+      const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
+      if (!artifact) throw new Error(`${measureId}: no executable official artifact is vendored`);
+      await cacheFor(artifact);
+    },
+
     async evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
       const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(input.measureId);
       if (!artifact) {
@@ -312,7 +364,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): EvaluateMea
         end: normalizePeriodEnd(evaluationDate),
       };
 
-      const valueSetCache = await expandArtifactTerminology(artifact, deps.expand);
+      const valueSetCache = await cacheFor(artifact);
       const results = await calculateOfficialDetailed({
         bundle: artifact.bundle,
         patientBundles: [input.patientBundle],

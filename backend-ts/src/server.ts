@@ -79,6 +79,12 @@ async function main(): Promise<void> {
     // #263 incremental evaluation opt-in — the nightly run must see the flag too, or a scheduled run
     // would always do a full evaluation while a manual run reuses.
     WORKWELL_INCREMENTAL_EVAL: process.env.WORKWELL_INCREMENTAL_EVAL,
+    // PR-7b, and the THIRD instance of the bug the two comments above describe. Without this the
+    // nightly ALL_PROGRAMS run — the one that actually populates /compliance, /programs and
+    // quality_snapshots — evaluates cms122 with the AUTHORED CQL while a manual run evaluates it
+    // officially: two engines, two answers for the same measure, latest-run-wins, with
+    // `official-measures=on` on the boot line the whole time.
+    WORKWELL_OFFICIAL_MEASURES: process.env.WORKWELL_OFFICIAL_MEASURES,
   };
   const schedulerInterval = setInterval(() => {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>
