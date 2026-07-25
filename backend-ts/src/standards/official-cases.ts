@@ -366,7 +366,12 @@ export type { FqmPopulationResult };
 interface FqmExecutionResult {
   patientId?: string;
   evaluatedResource?: FhirResource[];
-  detailedResults?: Array<{ populationResults?: FqmPopulationResult[] }>;
+  detailedResults?: Array<{
+    populationResults?: FqmPopulationResult[];
+    /** Named per-statement results. PR-7 persists these as `evidence_json.official`, so the reduction
+     *  check counts them — otherwise "stripping keeps statement results" is prose nothing enforces. */
+    statementResults?: Array<{ statementName?: string; libraryName?: string }>;
+  }>;
 }
 
 interface FqmOutput {
@@ -543,9 +548,27 @@ export interface DraftDriftCase {
   error?: string;
 }
 
+/**
+ * Which artifact bytes the reduction check actually executed. Without this the report proves only
+ * "some v1.0.000 artifact was neutral" — and every reduction setting produces a v1.0.000 artifact, so
+ * a re-vendor at different settings would leave the committed evidence byte-identical and CI green.
+ * The SHA-256 is over the file as it sits on disk, so it is a fact about the bytes rather than a claim
+ * the manifest makes about itself.
+ */
+export interface ReductionArtifactIdentity {
+  sha256: string;
+  vendoredBytes: number;
+  /** Undefined when no manifest corroborates these exact bytes — reported as "unverified", never as a
+   *  positive claim in either direction. */
+  strippedElmAnnotations?: boolean;
+}
+
 export interface Cms122DraftDrift {
   artifactVersion: string;
+  artifact?: ReductionArtifactIdentity;
   valueSetMode: "official-v1-bundle-cache";
+  /** Named statement results the VENDORED artifact produced for the WORST subject (0 if the run errored). */
+  namedStatementResults: number;
   total: number;
   changedCases: number;
   errors: number;
@@ -554,6 +577,7 @@ export interface Cms122DraftDrift {
 
 export interface RunDraftDriftOptions {
   calculate?: FqmCalculate;
+  artifact?: ReductionArtifactIdentity;
 }
 
 /**
@@ -595,7 +619,9 @@ export async function runCms122DraftDrift(
     const cases = validCases.map((item) => ({ uuid: item.uuid, name: item.name, differences: [], error: message }));
     return {
       artifactVersion,
+      ...(options.artifact ? { artifact: options.artifact } : {}),
       valueSetMode: "official-v1-bundle-cache",
+      namedStatementResults: 0,
       total: cases.length,
       changedCases: 0,
       errors: cases.length,
@@ -627,9 +653,33 @@ export async function runCms122DraftDrift(
       differences: POPULATION_CODES.filter((code) => official[code] !== draft[code]),
     };
   });
+  // PR-7 persists fqm's named statement results as `evidence_json.official`. Stripping ELM annotations
+  // removes `localId`, and it would be easy to assume the statements go with them — so count them here
+  // rather than leave "statement results survive" as a sentence in a README that nothing checks.
+  // The count PR-7 cares about is how many named results ONE subject's evaluation yields, since that is
+  // what becomes that subject's `evidence_json.official`. Deliberately not a de-duplicated union across
+  // subjects: these measures include 9-10 libraries that reuse statement names, so any dedupe rule
+  // undercounts (138 by bare name, 150 by library-qualified name) and records a number that means
+  // something other than what it says.
+  //
+  // The MINIMUM across subjects, not the maximum: a max lets one subject with an empty payload hide
+  // behind fifty-four healthy ones, leaving the report's floor green while PR-7 would persist nothing
+  // for that subject. Subjects with no `detailedResults` at all are excluded because the population
+  // comparison already fails them ("vendored-artifact result unavailable" -> errors -> exit 1).
+  const perSubjectStatements = (output.results ?? [])
+    .filter((result) => result.detailedResults?.[0])
+    .map(
+      (result) =>
+        (result.detailedResults?.[0]?.statementResults ?? []).filter(
+          (statement) => typeof statement.statementName === "string",
+        ).length,
+    );
+  const statementResults = perSubjectStatements.length > 0 ? Math.min(...perSubjectStatements) : 0;
   return {
     artifactVersion,
+    ...(options.artifact ? { artifact: options.artifact } : {}),
     valueSetMode: "official-v1-bundle-cache",
+    namedStatementResults: statementResults,
     total: cases.length,
     changedCases: cases.filter((item) => item.differences.length > 0).length,
     errors: cases.filter((item) => item.error).length,
@@ -765,6 +815,22 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
         "",
         `Using the official v1 Bundle ValueSets as the external cache, ${run.draftDrift.changedCases}/${run.draftDrift.total} cases changed population vector; ${run.draftDrift.errors} drift errors.`,
         "",
+        ...(run.draftDrift.artifact
+          ? [
+              `Artifact proven: \`${run.draftDrift.artifact.sha256}\` ` +
+                `(${(run.draftDrift.artifact.vendoredBytes / 1e6).toFixed(1)} MB, ELM annotations ` +
+                `${
+                  run.draftDrift.artifact.strippedElmAnnotations === undefined
+                    ? "unverified"
+                    : run.draftDrift.artifact.strippedElmAnnotations
+                      ? "stripped"
+                      : "retained"
+                }). Compared on population membership ` +
+                `(${POPULATION_CODES.join("/")}) only; the artifact also returned ` +
+                `${run.draftDrift.namedStatementResults} named statement results for every subject.`,
+              "",
+            ]
+          : []),
         "| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |",
         "|---|---|---|---|---|",
       );
