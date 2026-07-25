@@ -184,9 +184,15 @@ const EXECUTOR_IMPORTERS_ALLOWLIST = [
   "standards/literal-diff.ts",
   "standards/official-cases.ts",
   "wiring/official-artifacts.ts",
+  // PR-7a. The FIRST production-path consumer: this one exists to be routed to, unlike the three above
+  // (two diagnostics and a file loader). Everything it costs — fqm's dependency tree, its memory, its
+  // cold start — now lands wherever the router runs, which is why the router is a separate PR with a
+  // flag defaulting to off. The lazy `await import` inside the package is what keeps that cost at zero
+  // until a measure is actually flipped.
+  "wiring/official-executor-adapter.ts",
   // NOT run/cli/official-cases.ts — that shell reaches fqm only through standards/official-cases.ts,
   // which is exactly the layering this list is meant to preserve.
-  // PR-7 adds "wiring/executor-router.ts" here — deliberately a conscious edit, not an open door.
+  // PR-7b adds "wiring/executor-router.ts" here — deliberately a conscious edit, not an open door.
 ];
 
 test("5/5 consumers: only the approved app layers may import @workwell/official-executor", () => {
