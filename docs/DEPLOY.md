@@ -334,6 +334,24 @@ DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> \
   pnpm resolve-valuesets --manifest Library/ecqm-update-2025-05-08
 ```
 
+> **`--official <catalogId>` — required before any measure is routed to official execution (PR-7a).**
+> The default target is a hand-kept 21-OID table, and the vendored official artifacts need more than
+> that: **CMS122 references 26 canonicals and CMS125 references 32** (35 distinct across both). The
+> official executor refuses to run a measure when any referenced value set expands to zero codes —
+> deliberately, because fqm treats an unexpandable set as *empty rather than missing*, and an empty set
+> matches nothing, so the measure would report every subject out-of-population with no error anywhere.
+> `--official` derives the target list from the artifact's own compiled ELM, so the importer and that
+> refusal cannot disagree:
+>
+> ```bash
+> cd backend-ts
+> DATABASE_URL=<neon-pooled> WORKWELL_VSAC_API_KEY=<umls-api-key> \
+>   pnpm resolve-valuesets --official cms122 --official cms125 --manifest <release-canonical>
+> ```
+>
+> Repeatable and idempotent per OID; the 23 canonicals both measures share are expanded once. Rows are
+> named from the ELM's CQL aliases rather than bare OIDs.
+
 > **Release pinning + drift detection (#295).** Without `--manifest <canonical>` (or `--expansion
 > <name>`; the two are mutually exclusive) VSAC serves **latest-active** semantics — a republish
 > silently changes our expansions and therefore the CMS122/CMS125 literal-diff results. The CLI now

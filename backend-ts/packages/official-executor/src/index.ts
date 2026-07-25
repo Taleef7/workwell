@@ -111,7 +111,16 @@ export function isExecutableMeasureBundle(bundle: unknown): bundle is MeasureBun
  * Read from the compiled ELM rather than the CQL text, so it reflects what will actually execute.
  */
 export function referencedValueSetUrls(bundle: MeasureBundle): string[] {
-  const urls = new Set<string>();
+  return referencedValueSets(bundle).map((v) => v.url);
+}
+
+/**
+ * As `referencedValueSetUrls`, but keeps the CQL alias the ELM declares alongside each canonical
+ * ("Hospice Encounter", "Diabetes"). A terminology importer wants that: without it every row it writes
+ * is named by its bare OID, and a human reading the value-set catalog has nothing to go on.
+ */
+export function referencedValueSets(bundle: MeasureBundle): Array<{ url: string; name?: string }> {
+  const byUrl = new Map<string, { url: string; name?: string }>();
   for (const entry of bundle.entry) {
     const resource = entry.resource as {
       resourceType?: string;
@@ -125,11 +134,15 @@ export function referencedValueSetUrls(bundle: MeasureBundle): string[] {
     // on an unresolvable value set anyway - so swallowing this would only trade a precise parse error
     // for an opaque failure deep inside the batch.
     const elm = JSON.parse(Buffer.from(data, "base64").toString("utf8")) as {
-      library?: { valueSets?: { def?: Array<{ id: string }> } };
+      library?: { valueSets?: { def?: Array<{ id: string; name?: string }> } };
     };
-    for (const def of elm.library?.valueSets?.def ?? []) urls.add(def.id);
+    for (const def of elm.library?.valueSets?.def ?? []) {
+      // First name wins: the same canonical is declared in several libraries, and the first is as good
+      // as any. Keeping a set keyed by url preserves the previous de-duplication exactly.
+      if (!byUrl.has(def.id)) byUrl.set(def.id, { url: def.id, ...(def.name ? { name: def.name } : {}) });
+    }
   }
-  return [...urls];
+  return [...byUrl.values()];
 }
 
 /** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...` (expanders are keyed by bare OID). */
