@@ -1,5 +1,5 @@
 /**
- * Vendored official measure artifacts (roadmap §7.3, PR-5).
+ * Vendored official measure artifacts (roadmap §7.4, PR-5).
  *
  * Reads `measures/official/<catalogId>/{bundle.json,manifest.json}` — the output of
  * `scripts/vendor-official-measure.mjs`. This is the app-side half of the split the executor package
@@ -47,6 +47,13 @@ export interface OfficialArtifact {
 
 const ARTIFACT_ROOT = new URL("../../measures/official/", import.meta.url);
 
+/**
+ * `new URL()` normalizes `..`, so an unvalidated id escapes the artifact root ("../../etc/passwd"
+ * resolves outside `measures/official/`). Harmless while every id is a literal, but PR-7 makes the id
+ * set operator-supplied via `WORKWELL_OFFICIAL_MEASURES` — validate now, while it is cheap.
+ */
+const VALID_CATALOG_ID = /^[a-z0-9]+$/;
+
 /** Parsed artifacts are cached: the files are committed and immutable for the life of the process. */
 const cache = new Map<string, OfficialArtifact | null>();
 
@@ -60,6 +67,8 @@ export function loadOfficialArtifact(catalogId: string): OfficialArtifact | null
   const cached = cache.get(catalogId);
   if (cached !== undefined) return cached;
 
+  if (!VALID_CATALOG_ID.test(catalogId)) return null;
+
   let artifact: OfficialArtifact | null = null;
   try {
     const manifest = JSON.parse(
@@ -67,7 +76,27 @@ export function loadOfficialArtifact(catalogId: string): OfficialArtifact | null
     ) as OfficialManifest;
     const bundle = JSON.parse(readFileSync(new URL(`${catalogId}/bundle.json`, ARTIFACT_ROOT), "utf8"));
     artifact = isExecutableMeasureBundle(bundle) ? { manifest, bundle } : null;
-  } catch {
+    if (!artifact) {
+      console.error(
+        `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ARTIFACT_UNUSABLE", catalogId, reason: "bundle has no pre-compiled ELM" })}`,
+      );
+    }
+  } catch (err) {
+    // "Not vendored" and "the read failed" are different facts, and caching them the same way is how a
+    // transient failure becomes permanent: PR-7 routes production measure execution through here, so a
+    // cached null would silently fall back to the authored CQL for the life of the worker — two
+    // containers could then report different results for the same measure with no signal anywhere.
+    const absent = (err as NodeJS.ErrnoException)?.code === "ENOENT";
+    if (!absent) {
+      console.error(
+        `WORKWELL_ALERT ${JSON.stringify({
+          kind: "OFFICIAL_ARTIFACT_LOAD_FAILED",
+          catalogId,
+          message: err instanceof Error ? err.message : String(err),
+        })}`,
+      );
+      return null; // deliberately NOT cached — a retry may succeed.
+    }
     artifact = null;
   }
   cache.set(catalogId, artifact);

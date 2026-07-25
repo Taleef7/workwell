@@ -155,15 +155,19 @@ export async function computeLiteralDiff(
   const runId = rows[0]?.runId ?? null;
   if (runId && cache.has(runId)) return cache.get(runId)!;
 
-  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
-  const bundle = deps.officialBundle ?? (artifact?.bundle as FhirBundle | undefined);
+  const bundle = deps.officialBundle ?? (loadOfficialArtifact(OFFICIAL_CATALOG_ID)?.bundle as FhirBundle | undefined);
   if (!bundle) throw new Error("literal-diff: official CMS122 artifact unavailable");
-  // Provenance for the report. An injected test bundle has no manifest, so fall back to the vendored
-  // one's metadata when present, and to honest placeholders when it is not.
-  const official = artifact?.manifest ?? {
-    measureName: "CMS122FHIRDiabetesAssessGT9Pct",
-    version: "unknown",
-    url: "https://madie.cms.gov/Measure/CMS122FHIRDiabetesAssessGT9Pct",
+  // Provenance is read from the Measure resource in the bundle we are ACTUALLY executing, not from the
+  // vendored manifest. When a caller injects a different bundle, the report must describe that bundle -
+  // attributing the run to the vendored artifact's name and version would be a provenance misstatement
+  // in a report whose whole purpose is provenance.
+  const measureResource = bundle.entry.find((e) => e.resource?.["resourceType"] === "Measure")?.resource as
+    | { name?: string; version?: string; url?: string }
+    | undefined;
+  const official = {
+    measureName: measureResource?.name ?? "unknown",
+    version: measureResource?.version ?? "unknown",
+    url: measureResource?.url ?? "unknown",
   };
 
   // Pre-expand the official measure's value sets from the imported VSAC rows.
