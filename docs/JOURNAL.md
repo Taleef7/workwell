@@ -57,8 +57,18 @@ duplication was precisely the drift the extraction exists to end); and `tsconfig
 sources, which previously included no package test file at all. Five doc inaccuracies corrected, incl. a
 `DISCLAIMER` string that **ships in the API response** still calling fqm "diagnostic-only", and a
 Dockerfile comment claiming fqm is a backend-ts dependency — `pnpm list --prod --depth 3` confirms it
-survives the deploy prune transitively through the workspace package. Full suite **1440 pass / 0 fail /
-14 skipped**.
+survives the deploy prune transitively through the workspace package. Full suite 1440 pass / 0 fail / 14 skipped. Two further escapes, both found by Codex and neither by me: **(a) nothing guarded who may
+import the PACKAGE** — a route or run-pipeline module could import `@workwell/official-executor` and call
+`loadCalculator()`, putting the heavy graph on a request path with all guards green; the executor-import
+allowlist was written into roadmap §7.1 and simply not implemented. **(b) the package scan read only
+`index.ts`**, so a helper module with a static fqm import, imported by `index.ts`, would load the graph at
+cold start unseen — and the `createRequire` rooted in `src/` could not resolve a dependency nested beside
+`packages/`, so the cache assertion skipped rather than ran. Now five guards: manifest, app tree, **every**
+package source file, module graph (resolving **from the package**, so the cache check runs unconditionally,
+while asserting the app cannot resolve it), and a **consumer allowlist**. Both escapes verified caught by
+planting them. The allowlist also corrected a wrong assumption of mine: `run/cli/official-cases.ts` does
+NOT import the package — it goes through `standards/official-cases.ts`, which is the layering the list
+exists to preserve. Full suite **1442 pass / 0 fail / 14 skipped**.
 
 
 ## 2026-07-24 (later still) — PR-3: evidence-first population membership (branch `feat/measure-report-ipp-generalization`)
