@@ -745,7 +745,7 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     if (run.draftDrift) {
       lines.push(
         "",
-        `### CMS122 v1.0.000 vs vendored draft v${run.draftDrift.artifactVersion}`,
+        `### CMS122 reduction check — upstream bundle vs vendored artifact v${run.draftDrift.artifactVersion}`,
         "",
         `Using the official v1 Bundle ValueSets as the external cache, ${run.draftDrift.changedCases}/${run.draftDrift.total} cases changed population vector; ${run.draftDrift.errors} drift errors.`,
         "",
