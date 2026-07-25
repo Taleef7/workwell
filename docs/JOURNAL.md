@@ -1,5 +1,35 @@
 # Journal
 
+## 2026-07-25 (evening) — PR-7c: the terminology importer reads the artifact, not a hand-kept list (branch `feat/official-valueset-import`)
+
+The smallest change that unblocks PR-9, and it exists because PR-7a's refusal exposed a list that had
+been quietly wrong for months. `pnpm resolve-valuesets` has always chosen its targets from
+`CMS122V14.valueSets` — 21 OIDs, maintained by hand. The vendored artifacts need more: **CMS122
+references 26 canonicals, CMS125 references 32**, 35 distinct across both. So the official executor
+refuses both measures on terminology today, and no amount of re-running the importer as configured would
+have fixed it.
+
+`--official <catalogId>` derives the target list from the artifact's own compiled ELM, which makes the
+importer and the executor's refusal agree *by construction* — the same ELM that decides "this measure
+cannot run without these" decides what gets fetched. A test asserts that equality for both measures
+rather than trusting it. Rows are named from the ELM's CQL aliases ("Hospice Encounter", "Diabetes")
+instead of bare OIDs, and the 23 canonicals the two measures share are expanded once.
+
+It deliberately imports *everything* referenced, including the four SupplementalDataElements sets that
+`calculateSDEs: false` never retrieves. They are cheap, and an importer that second-guesses which
+references "really" matter is precisely how the two lists drifted apart in the first place.
+
+Arithmetic worth recording because the test caught me: I asserted the union at 40 (26 + 32 − 18 shared).
+It is **35**. The 18 was a different quantity entirely — how many of CMS125's 32 happen to be covered by
+the 21 already imported — and I had carried it across from the PR-7a review into a place it did not
+belong. 23 are shared.
+
+The import itself still needs the UMLS key, which lives only as a GitHub secret, so running it stays an
+owner action. `docs/DEPLOY.md` now carries the exact command.
+
+Typecheck clean; full suite **1475 pass / 0 fail / 14 skipped**.
+
+
 ## 2026-07-25 (later still) — PR-7a: the official executor adapter, and the failure mode it refuses (branch `feat/official-executor-adapter`)
 
 Roadmap §7.2/§7.3. The adapter that runs a measure by executing the **official published artifact**
