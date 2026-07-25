@@ -415,10 +415,13 @@ export async function handleRuns(
     // period, then today, mirroring that default.
     const evaluationPeriod =
       body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    // Build the engine BEFORE claiming the run. `routedEngineForEnv` validates official-measure
+    // configuration and can throw; doing that after markRunning would leave an orphaned RUNNING run for
+    // `recoverStuckRuns` to sweep, for a failure that has nothing to do with the run.
+    const engine = await routedEngineForEnv(env);
     // A run being processed must leave the QUEUED claim path so it isn't re-handed
     // to a worker (QUEUED → RUNNING; idempotent for already-running runs).
     await runStore.markRunning(evalId);
-    const engine = await routedEngineForEnv(env);
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,

@@ -65,8 +65,9 @@ export function describeSeams(env: SeamEnv): SeamStatus[] {
     { name: "bucket-s3", active: isS3BucketConfigured(env) },
     { name: "incremental-eval", active: isIncrementalEnabled(env) },
     // The 11th seam, and the only one that changes what a measure COMPUTES rather than how or where.
-    // It belongs on the boot line for exactly that reason: "which measures did this container evaluate
-    // officially" must be answerable from a log, not inferred from a deploy config.
+    // The line reports only on/off, like every other seam; WHICH measures are routed comes from the
+    // OFFICIAL_ROUTING_MISCONFIGURED alert and the run's own evidence. On/off is still the thing worth
+    // seeing at a glance, because it is the difference between two engines.
     { name: "official-measures", active: isOfficialRoutingConfigured(env) },
   ];
 }
