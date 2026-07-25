@@ -29,7 +29,7 @@ narratives and ValueSet expansions during vendoring changes nothing either measu
 with the Codex fix that made drift fail the command, a bad `vendor:official` now fails CI instead of
 shipping quietly.
 
-### Review round — three ways this gate was quietly toothless
+### Review round — two ways this gate was quietly toothless, and one claim the runner refuted
 
 Self-review found defects of a kind only a real run surfaces, which is uncomfortable for a PR whose
 entire value proposition is *"the gate runs"*:
@@ -37,15 +37,20 @@ entire value proposition is *"the gate runs"*:
 1. **The report check would have gone red the day after every regeneration.** The harness stamps
    `**Generated:** <today>` into the report, so `git diff --quiet` on it compares a timestamp, not
    results. A gate that fails for a reason nobody caused is a gate people learn to ignore — the worst
-   possible outcome. The comparison now strips that one line, verified in both directions locally
-   (date-only change → pass; a changed result → fail).
-2. **The fetch step would have written the content where nothing looks for it.** The script defaulted
-   to `Join-Path $PSScriptRoot "..\.official-content"`. On Linux .NET treats only `/` as a separator,
-   so the backslash is a legal *filename* character and the whole string is one segment — the clone
-   would land in `scripts/"..\.official-content"` and the harness would find no cases. Multi-argument
-   `Join-Path` fixes it.
-3. **The drift check only ran for CMS122**, so PR-5's neutrality claim covered one of the two vendored
+   possible outcome. It passed on the first run only because the report had been regenerated that same
+   day. The comparison now strips that one line, verified in both directions locally (date-only change →
+   pass; a changed result → fail).
+2. **The drift check only ran for CMS122**, so PR-5's neutrality claim covered one of the two vendored
    artifacts. It now runs per measure, which is how the CMS125 `0/66` line above exists at all.
+
+The third finding was **wrong, and the runner log is what said so** — worth recording because it is the
+same failure mode as PR-5's false licensing claim, caught the same way. Review flagged
+`Join-Path $PSScriptRoot "..\.official-content"` as a Linux path bug (.NET treats only `/` as a
+separator on Unix, so the backslash is a legal filename character and the whole string is one segment).
+Plausible, and false: the first run's log reads `Cloning into '…/backend-ts/.official-content'` and the
+harness went on to run 121/121. PowerShell's filesystem provider normalizes the backslash before
+`GetFullPath` ever sees it. The multi-argument form is kept anyway — it does not depend on which layer
+normalizes — but as hardening, not as a fix for a break that never happened.
 
 Two vacuity holes closed alongside: a per-measure **case-count floor** (`REQUIRED_OFFICIAL_CASE_COUNTS`)
 so an upstream reorg that stops the sparse-checkout patterns matching cannot report a smaller green
