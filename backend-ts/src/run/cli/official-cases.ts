@@ -1,6 +1,6 @@
 /**
  * DB-less CLI orchestration for the official MADiE diagnostic harness.
- * The fqm-execution import remains in standards/official-cases.ts; this run/cli shell never imports it.
+ * fqm-execution is reached only through @workwell/official-executor; neither this shell nor any src/ file imports it.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";

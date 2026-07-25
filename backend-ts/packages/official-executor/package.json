@@ -1,0 +1,20 @@
+{
+  "name": "@workwell/official-executor",
+  "version": "0.1.0",
+  "description": "Executes OFFICIAL published eCQM artifacts (MADiE/eCQI QICore FHIR bundles) from their pre-compiled ELM via fqm-execution. The single home of the fqm-execution dependency — the package boundary IS the ADR-026 quarantine.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "fqm-execution": "1.8.5"
+  },
+  "files": [
+    "src"
+  ]
+}

@@ -7,7 +7,10 @@
  * (which is what ADR-024 found intractable under the pinned JS translator); fqm-execution executes the
  * committed ELM on the same `cql-execution` + `cql-exec-fhir` runtime this repo already uses.
  *
- * DIAGNOSTIC-ONLY (ADR-026): `fqm-execution` is imported ONLY here, and this module is reached ONLY from
+ * The fqm machinery now lives in `@workwell/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is
+ * the ADR-026 quarantine — `fqm-execution` appears in exactly one package.json, and that package's entry
+ * imports it only through a lazy `await import`. This module keeps what is WorkWell-specific: reading the
+ * vendored bundle off disk, harness-local enrichment, and the diff itself. It is still reached ONLY from
  * the `/api/measures/cms122/fidelity/diff` route — never the run pipeline, engine ingress, or worker.ts.
  * Descriptive only (ADR-008): it writes nothing and never sets an `Outcome Status`. The bundle enrichment
  * is harness-local (a copy fed to the diff harness), so WorkWell's cms122 outcomes stay byte-identical.
@@ -22,6 +25,14 @@ import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { seededTargetFor } from "../run/distribution.ts";
 import { readFileSync } from "node:fs";
+import {
+  buildValueSetCache,
+  calculateOfficial,
+  isExecutableMeasureBundle,
+  type FqmCalculate,
+  type MeasureBundle,
+  type PopulationMembership,
+} from "@workwell/official-executor";
 
 /** Provenance of the vendored official artifact (see measures/official/cms122v14/README.md). */
 export const OFFICIAL_CMS122 = {
@@ -41,14 +52,9 @@ export function loadOfficialCms122Bundle(): FhirBundle | null {
   if (bundleCache !== undefined) return bundleCache;
   try {
     const b = JSON.parse(readFileSync(BUNDLE_URL, "utf8")) as FhirBundle;
-    const libs = b.entry.filter((e) => e.resource?.resourceType === "Library");
-    const measure = b.entry.some((e) => e.resource?.resourceType === "Measure");
-    const allElm = libs.length > 0 && libs.every((l) =>
-      (l.resource.content as Array<{ contentType?: string; data?: string }> | undefined)?.some(
-        (c) => c.contentType === "application/elm+json" && !!c.data,
-      ),
-    );
-    bundleCache = measure && allElm ? b : null;
+    // "Executable" = has a Measure and EVERY Library carries pre-compiled ELM. Owned by the package,
+    // because that is the precondition for running an official artifact without translating it.
+    bundleCache = isExecutableMeasureBundle(b) ? b : null;
   } catch {
     bundleCache = null;
   }
@@ -58,53 +64,6 @@ export function loadOfficialCms122Bundle(): FhirBundle | null {
 /** True when the literal tier can be attempted (vendored bundle present + every library carries ELM). */
 export function literalDiffAvailable(): boolean {
   return loadOfficialCms122Bundle() !== null;
-}
-
-/** Distinct VSAC value-set canonicals the measure's ELM retrieves reference (across all libraries). */
-function referencedValueSets(bundle: FhirBundle): string[] {
-  const urls = new Set<string>();
-  for (const e of bundle.entry) {
-    const r = e.resource as { resourceType?: string; content?: Array<{ contentType?: string; data?: string }> };
-    if (r.resourceType !== "Library") continue;
-    const data = r.content?.find((c) => c.contentType === "application/elm+json")?.data;
-    if (!data) continue;
-    const elm = JSON.parse(Buffer.from(data, "base64").toString("utf8")) as {
-      library?: { valueSets?: { def?: Array<{ id: string }> } };
-    };
-    for (const d of elm.library?.valueSets?.def ?? []) urls.add(d.id);
-  }
-  return [...urls];
-}
-
-/**
- * Build a fqm-execution `valueSetCache`: one ValueSet per referenced canonical, expanded from the imported
- * VSAC rows via the resolver. Non-resolving sets are emitted EMPTY-but-PRESENT so fqm-execution never
- * errors on a missing value set (their retrieves simply return nothing — conservative). URL form is
- * `http://cts.nlm.nih.gov/fhir/ValueSet/<oid>`; the resolver is keyed by the bare OID.
- */
-async function buildValueSetCache(bundle: FhirBundle, resolver: ValueSetResolver): Promise<unknown[]> {
-  const urls = referencedValueSets(bundle);
-  const cache: unknown[] = [];
-  for (const url of urls) {
-    const oid = url.includes("/ValueSet/") ? url.slice(url.lastIndexOf("/ValueSet/") + "/ValueSet/".length) : url;
-    let codes: CqlCode[] = [];
-    try {
-      codes = await resolver.expand(oid);
-    } catch {
-      codes = [];
-    }
-    cache.push({
-      resourceType: "ValueSet",
-      id: oid,
-      url,
-      status: "active",
-      expansion: {
-        timestamp: "2026-01-01T00:00:00Z",
-        contains: codes.map((c) => ({ system: c.system, code: c.code })),
-      },
-    });
-  }
-  return cache;
 }
 
 /**
@@ -168,19 +127,19 @@ export interface LiteralDiffDeps {
   officialBundle?: FhirBundle;
 }
 
-type PopulationResult = { populationType: string; result: boolean };
-type FqmResult = { results?: Array<{ patientId?: string; detailedResults?: Array<{ populationResults?: PopulationResult[] }> }> };
-type FqmCalculate = (measureBundle: unknown, patientBundles: unknown[], options: unknown, valueSetCache?: unknown[]) => Promise<FqmResult>;
-
 const DISCLAIMER =
   "LITERAL execution diff: the official multi-library QICore CMS122v14 artifact (MADiE FHIR export), " +
   "executed from its PRE-COMPILED ELM via fqm-execution (no translation), per subject against WorkWell's " +
-  "authored measure. fqm-execution is a diagnostic-only dependency (ADR-026). Descriptive only — CQL " +
+  "authored measure. fqm-execution is quarantined behind the @workwell/official-executor package " +
+  "boundary and lazily imported (ADR-026 as amended). Descriptive only — CQL " +
   "Outcome Status remains the sole compliance authority (ADR-008).";
 
-/** Map the official measure's population membership to WorkWell's outcome vocabulary. */
-function officialOutcome(pr: PopulationResult[]): string {
-  const g = (t: string) => pr.find((p) => p.populationType === t)?.result === true;
+/**
+ * Map the official measure's population membership onto WorkWell's outcome vocabulary. This mapping is
+ * WorkWell policy, not measure execution, which is why it stays in the app rather than the package.
+ */
+function officialOutcome(membership: PopulationMembership): string {
+  const g = (t: string) => membership[t] === true;
   if (!g("initial-population")) return "OUT_OF_POPULATION";
   if (g("denominator-exclusion")) return "EXCLUDED";
   if (!g("denominator")) return "OUT_OF_POPULATION";
@@ -217,13 +176,10 @@ export async function computeLiteralDiff(
   const bundle = deps.officialBundle ?? loadOfficialCms122Bundle();
   if (!bundle) throw new Error("literal-diff: official CMS122 bundle unavailable");
 
-  const calculate: FqmCalculate =
-    deps.calculate ?? (await import("fqm-execution")).Calculator.calculate as unknown as FqmCalculate;
-
   // Pre-expand the official measure's value sets from the imported VSAC rows.
   const expansions: Expansions = new Map<string, CqlCode[]>();
   for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) expansions.set(oid, await deps.resolver.expand(oid));
-  const valueSetCache = await buildValueSetCache(bundle, deps.resolver);
+  const valueSetCache = await buildValueSetCache(bundle as MeasureBundle, (oid) => deps.resolver.expand(oid));
 
   const binding = MEASURE_BINDINGS["cms122"]!;
 
@@ -248,38 +204,26 @@ export async function computeLiteralDiff(
       workwellBySubject.set(row.subjectId, workwell.outcome);
     } catch {
       errored.add(row.subjectId);
-      // still push a minimal bundle so the id stays alignable; but mark as errored → ERROR row below
+      // No bundle is pushed for this subject: results are aligned by patientId, not by position, and the
+      // ERROR row below is emitted from `errored`.
     }
   }
 
-  // Execute the literal official measure over ALL patient bundles in one fqm-execution pass (ELM cached).
+  // Execute the literal official measure over ALL patient bundles in one pass (the ELM is parsed once).
   const officialBySubject = new Map<string, string>();
   try {
-    const out = await calculate(
-      bundle,
+    const membershipBySubject = await calculateOfficial({
+      bundle: bundle as MeasureBundle,
       patientBundles,
-      {
-        measurementPeriodStart: `${deps.asOf.slice(0, 4)}-01-01`,
-        measurementPeriodEnd: `${deps.asOf.slice(0, 4)}-12-31T23:59:59.999Z`,
-        calculateSDEs: false,
-        // fqm-execution 1.8.5 has no `disableHTMLGeneration` option -- it reads `calculateHTML`
-        // (default true) plus these other on-by-default flags. Disable all of them: this diff
-        // harness only consumes population membership, not HTML/coverage/RAV output, and at
-        // population scale the HTML/coverage build is wasted CPU per subject (Codex P2, #277).
-        calculateHTML: false,
-        calculateClauseCoverage: false,
-        calculateRAVs: false,
-        trustMetaProfile: false, // our bundles are plain FHIR (retrieve by base type, ignore profiles)
-        verboseCalculationResults: true,
-      },
+      period: { start: `${deps.asOf.slice(0, 4)}-01-01`, end: `${deps.asOf.slice(0, 4)}-12-31` },
       valueSetCache,
-    );
-    for (const er of out.results ?? []) {
-      const pr = er.detailedResults?.[0]?.populationResults;
-      if (er.patientId && pr) officialBySubject.set(er.patientId, officialOutcome(pr));
+      calculate: deps.calculate,
+    });
+    for (const [subjectId, membership] of membershipBySubject) {
+      officialBySubject.set(subjectId, officialOutcome(membership));
     }
   } catch (err) {
-    // A batch-level fqm failure aborts the literal tier; the route degrades to the subset path.
+    // A batch-level failure aborts the literal tier; the route degrades to the subset path.
     throw new Error(`literal-diff: fqm-execution failed — ${err instanceof Error ? err.message : String(err)}`);
   }
 
