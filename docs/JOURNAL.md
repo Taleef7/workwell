@@ -1,5 +1,54 @@
 # Journal
 
+## 2026-07-25 (night) — PR-7b: the executor router, wired and dark (branch `feat/executor-router`)
+
+`routedEngineForEnv(env)` replaces `engineForEnv(env)` at all 8 call sites — runs (3), cases, measures
+(2), compliance-simulation, scheduler. Measures named in `WORKWELL_OFFICIAL_MEASURES` evaluate through
+the official artifact; everything else is unchanged.
+
+**With the flag unset it returns the authored engine ITSELF.** Identity, not equivalence — no dispatch,
+no allocation, nothing to reason about on the path every environment is actually on. The parity test
+asserts `routed === authored` rather than comparing two engines' outputs, because identity is a fact
+where output-comparison is a claim about two code paths agreeing on the inputs someone thought to try.
+
+**Everything is validated at construction, and construction throws.** A misconfiguration must not
+survive to the first subject: by then a run is underway, outcomes are being written, and the failure
+mode of most of these mistakes is silence. So the router refuses to exist unless every named measure is
+covered by the MADiE gate, has a vendored artifact whose `catalogId` matches, has recorded numerator
+semantics, and — the invisible one — has every value set its ELM retrieves expanding to a non-empty set.
+All problems are reported at once, not the first: fixing them one redeploy at a time is how a
+five-minute configuration becomes an afternoon.
+
+`WORKWELL_OFFICIAL_MEASURES=all` is refused, because "all" is a measure name like any other and there is
+no measure called that. Every flip stays a deliberate per-measure act.
+
+**An explicit `elm`/`metaOverride` always stays authored**, even for a routed measure. The fidelity lab
+evaluates an official-*subset* measure through that seam and the Rule Builder previews generated CQL the
+same way; routing those to the official executor would silently run a different measure than the caller
+asked for.
+
+**Terminology expansion is now scoped to one run** — memoized per measure per executor instance, and the
+instance lives exactly as long as the router, which is built per run like `engineForEnv`. That is the
+middle of two bad options the adapter's review named: per-call was thousands of store reads in a
+population run, per-process would freeze the snapshot and re-introduce the stale-expansion bug
+`engine-factory.ts` documents at length. A rejected expansion is deliberately *not* cached, so one
+transient store failure doesn't become a whole run of refusals.
+
+`official-measures` joins the boot seam line as the 11th seam — and the only one that changes what a
+measure *computes* rather than how or where. Which measures a container evaluated officially must be
+answerable from a log, not inferred from a deploy config.
+
+**The boundary guard corrected me again.** I pre-emptively added the router to the fqm consumer
+allowlist; the guard failed because the router imports the *adapter*, not the package. Reverted, with
+the reason written where the next person will look.
+
+**Not yet safe to switch on**, and the module says so in its own docstring: it does not prepare bundles
+(`stampQiCoreStructure`) or batch subjects measure-major. The flag existing and the flag being safe to
+set are different things, and this delivers the first.
+
+Typecheck clean; full suite **1482 pass / 0 fail / 14 skipped**.
+
+
 ## 2026-07-25 (evening) — PR-7c: the terminology importer reads the artifact, not a hand-kept list (branch `feat/official-valueset-import`)
 
 The smallest change that unblocks PR-9, and it exists because PR-7a's refusal exposed a list that had
