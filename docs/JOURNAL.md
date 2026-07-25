@@ -10,26 +10,57 @@ still gets a green local run, and CI always pays the cost. The job also fails if
 evidence report is stale**, so `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` cannot drift from what the
 harness actually produces.
 
-**THE RULE is now enforced in code, not prose.** "No measure enters `WORKWELL_OFFICIAL_MEASURES` without
-a green gate" was a sentence in the roadmap; `official-gate.test.ts` makes it a test, in the default
-suite, with no network: the gated set must be **exactly** the vendored artifact set. Both failure
-directions are real — vendor an artifact and forget to gate it and it could be flipped to official with
-no external validation at all (precisely what the rule exists to prevent); gate one with no artifact and
-CI fails confusingly. Verified by planting an ungated `cms165/` artifact: the test fails. It also pins
-each gated measure's upstream name to its manifest (a mismatch would surface as a silent "no cases
-found" in CI) and checks the evidence report actually mentions every gated measure.
+**THE RULE is now enforced in code, not prose, in two places.** "No measure enters
+`WORKWELL_OFFICIAL_MEASURES` without a green gate" was a sentence in the roadmap.
+`official-gate.test.ts` makes half of it a test, in the default suite, with no network: the gated set
+must be **exactly** the vendored artifact set. Both failure directions are real — vendor an artifact and
+forget to gate it and it could be flipped to official with no external validation at all (precisely what
+the rule exists to prevent); gate one with no artifact and CI fails confusingly. Verified by planting an
+ungated `cms165/` artifact: the test fails. It also pins each gated measure's upstream name to its
+manifest (a mismatch would surface as a silent "no cases found" in CI). The other half is
+`ungatedOfficialMeasures()` in `wiring/official-routing.ts` — the **routing edge the rule is actually
+about**: it rejects a flag value naming a measure the gate does not cover, which is what PR-7's router
+will throw on.
 
 **PR-5's open proof is discharged.** That PR argued reduction-neutrality from mechanism and left the
-end-to-end proof to this one. Ran it: **121/121 (CMS122 55/55, CMS125 66/66)** and, from the report,
-*"0/55 cases changed population vector; 0 drift errors"* — dropping CQL source, ELM XML, narratives and
-ValueSet expansions during vendoring changes nothing the measure computes. Combined with the Codex fix
-that made drift fail the command, a bad `vendor:official` now fails CI instead of shipping quietly.
+end-to-end proof to this one. Ran it: **121/121 (CMS122 55/55, CMS125 66/66)** with
+*"0/55"* and *"0/66 cases changed population vector; 0 drift errors"* — dropping CQL source, ELM XML,
+narratives and ValueSet expansions during vendoring changes nothing either measure computes. Combined
+with the Codex fix that made drift fail the command, a bad `vendor:official` now fails CI instead of
+shipping quietly.
+
+### Review round — three ways this gate was quietly toothless
+
+Self-review found defects of a kind only a real run surfaces, which is uncomfortable for a PR whose
+entire value proposition is *"the gate runs"*:
+
+1. **The report check would have gone red the day after every regeneration.** The harness stamps
+   `**Generated:** <today>` into the report, so `git diff --quiet` on it compares a timestamp, not
+   results. A gate that fails for a reason nobody caused is a gate people learn to ignore — the worst
+   possible outcome. The comparison now strips that one line, verified in both directions locally
+   (date-only change → pass; a changed result → fail).
+2. **The fetch step would have written the content where nothing looks for it.** The script defaulted
+   to `Join-Path $PSScriptRoot "..\.official-content"`. On Linux .NET treats only `/` as a separator,
+   so the backslash is a legal *filename* character and the whole string is one segment — the clone
+   would land in `scripts/"..\.official-content"` and the harness would find no cases. Multi-argument
+   `Join-Path` fixes it.
+3. **The drift check only ran for CMS122**, so PR-5's neutrality claim covered one of the two vendored
+   artifacts. It now runs per measure, which is how the CMS125 `0/66` line above exists at all.
+
+Two vacuity holes closed alongside: a per-measure **case-count floor** (`REQUIRED_OFFICIAL_CASE_COUNTS`)
+so an upstream reorg that stops the sparse-checkout patterns matching cannot report a smaller green
+number and exit 0, and report assertions that check the *numbers* rather than whether the string
+"CMS122" appears somewhere (the renderer emits a heading per measure, so a measure with zero cases would
+have matched). Plus: `OFFICIAL_GATED_MEASURES` derived from the harness's own measure table instead of a
+parallel literal, `timeout-minutes: 20`, the pinned content cached, and the failure artifact no longer
+uploaded when the *fetch* failed — publishing the committed report as "the failing evidence" shows green
+results for a run that never happened.
 
 **Next, and now cheap:** with the gate green and the content already fetched, prove
 `--strip-elm-annotations` (measured 79% smaller — 9.8MB → 2.1MB of ELM per measure) the same way. That
 is the unlock before the remaining six measures take the image toward ~80MB.
 
-Typecheck clean; full suite **1453 pass / 0 fail / 14 skipped**.
+Typecheck clean; full suite **1454 pass / 0 fail / 14 skipped**.
 
 ## 2026-07-24 (late) — PR-5: vendored official artifacts at v1.0.000, and a licensing rule (branch `feat/vendor-official-measures`)
 

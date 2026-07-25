@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-  [string]$ContentDir = (Join-Path $PSScriptRoot "..\.official-content"),
+  # Multi-argument Join-Path, NOT "..\.official-content": on Linux .NET treats only "/" as a
+  # separator, so a backslash is a legal FILENAME character and the whole string becomes one segment -
+  # the content would land in scripts/"..\.official-content" and the gate would never find it.
+  [string]$ContentDir = (Join-Path $PSScriptRoot ".." ".official-content"),
   # Upstream revision the committed docs/OFFICIAL_TESTCASE_REPORT_2026-07.md was generated against.
   # Pass -Ref master (or another SHA) to test newer content; the committed report is only
   # reproducible at this pin.

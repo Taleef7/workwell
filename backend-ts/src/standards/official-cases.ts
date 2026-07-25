@@ -25,18 +25,6 @@ export type PopulationCode = (typeof POPULATION_CODES)[number];
 export type OfficialMeasureId = "cms122" | "cms125";
 export type PopulationCounts = Record<PopulationCode, number>;
 
-/**
- * The measures covered by the official MADiE test-case gate (roadmap §7.4 PR-6). THE RULE: a measure
- * may not enter `WORKWELL_OFFICIAL_MEASURES` until this gate is green for it, so this set must stay
- * identical to the vendored artifact set — `official-gate.test.ts` enforces that, in the default suite.
- */
-export const OFFICIAL_GATED_MEASURES: readonly OfficialMeasureId[] = ["cms122", "cms125"];
-
-/** The upstream measure name the harness locates the fetched bundle by. Pinned to the manifest. */
-export function officialMeasureName(catalogId: string): string | undefined {
-  return MEASURES[catalogId as OfficialMeasureId]?.name;
-}
-
 const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> = {
   cms122: {
     name: "CMS122FHIRDiabetesAssessGT9Pct",
@@ -47,6 +35,20 @@ const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> 
     bundleFile: "CMS125FHIRBreastCancerScreen-bundle.json",
   },
 };
+
+/**
+ * The measures covered by the official MADiE test-case gate (roadmap §7.4 PR-6). THE RULE: a measure
+ * may not enter `WORKWELL_OFFICIAL_MEASURES` until this gate is green for it, so this set must stay
+ * identical to the vendored artifact set — `official-gate.test.ts` enforces that, in the default suite.
+ */
+export const OFFICIAL_GATED_MEASURES: readonly OfficialMeasureId[] = Object.keys(
+  MEASURES,
+) as OfficialMeasureId[];
+
+/** The upstream measure name the harness locates the fetched bundle by. Pinned to the manifest. */
+export function officialMeasureName(catalogId: string): string | undefined {
+  return MEASURES[catalogId as OfficialMeasureId]?.name;
+}
 
 export const CMS122_KNOWN_BAD_EXPECTEDS = new Set([
   "ede0ee7a-18ab-4ba7-934c-23618f1270ea",
@@ -566,8 +568,10 @@ export async function runCms122DraftDrift(
   draftBundle: FhirBundle,
   options: RunDraftDriftOptions = {},
 ): Promise<Cms122DraftDrift> {
-  if (loaded.measure !== "cms122" || officialRun.measure !== "cms122") {
-    throw new Error("CMS122 draft drift requires a CMS122 official load and run");
+  if (loaded.measure !== officialRun.measure) {
+    throw new Error(
+      `reduction drift requires a matching load and run (got ${loaded.measure} vs ${officialRun.measure})`,
+    );
   }
   const calculate: FqmCalculate =
     options.calculate ?? ((await loadCalculator()) as unknown as FqmCalculate);
@@ -757,7 +761,7 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     if (run.draftDrift) {
       lines.push(
         "",
-        `### CMS122 reduction check — upstream bundle vs vendored artifact v${run.draftDrift.artifactVersion}`,
+        `### ${run.measure.toUpperCase()} reduction check — upstream bundle vs vendored artifact v${run.draftDrift.artifactVersion}`,
         "",
         `Using the official v1 Bundle ValueSets as the external cache, ${run.draftDrift.changedCases}/${run.draftDrift.total} cases changed population vector; ${run.draftDrift.errors} drift errors.`,
         "",

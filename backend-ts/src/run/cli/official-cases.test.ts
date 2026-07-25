@@ -58,6 +58,10 @@ test("main loads a selected measure without overwriting the committed combined r
     render: (_runs, metadata) => `# report\n${JSON.stringify(metadata)}`,
     sourceRevision: () => "source-sha",
     generatedDate: "2026-07-15",
+    // Since PR-6 the reduction check runs for EVERY measure, not just cms122, so even a single-measure
+    // run needs these — otherwise the real loader hunts for a vendored bundle under the fixture cwd.
+    loadDraftBundle: () => ({}) as never,
+    runDraftDrift: () => Promise.resolve({ total: 66, changedCases: 0, errors: 0 } as never),
     writeReport: (path: string, markdown: string) => {
       writes.push({ path, markdown });
     },

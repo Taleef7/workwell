@@ -33,3 +33,20 @@ export function officialMeasureIds(env: Record<string, unknown> = process.env): 
 export function isOfficialRouted(measureId: string, env: Record<string, unknown> = process.env): boolean {
   return officialMeasureIds(env).has(measureId);
 }
+
+/**
+ * THE RULE (roadmap §7.4 PR-6), enforced at the edge it is actually about: a measure may not be routed
+ * to official execution unless the official MADiE test-case gate covers it. `official-gate.test.ts`
+ * keeps the gated set equal to the vendored set; this keeps the OPERATOR from naming anything outside it.
+ *
+ * Returns the offending ids. An empty array means the configuration is legal. Callers decide how loudly
+ * to fail — PR-7's router throws at construction, because a typo'd flag that silently serves authored
+ * results while claiming to be official is precisely the failure this whole milestone exists to avoid.
+ */
+export function ungatedOfficialMeasures(
+  gatedMeasureIds: readonly string[],
+  env: Record<string, unknown> = process.env,
+): string[] {
+  const gated = new Set(gatedMeasureIds);
+  return [...officialMeasureIds(env)].filter((id) => !gated.has(id)).sort();
+}

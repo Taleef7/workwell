@@ -54,12 +54,24 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
   return { measures: measure ? [measure] : ["cms122", "cms125"], ...(contentDir ? { contentDir } : {}) };
 }
 
+/**
+ * The number of official test cases each measure MUST run. Without a floor the gate is vacuous in the
+ * partial case: if an upstream reorg stops the sparse-checkout patterns matching some case directories,
+ * the harness happily reports 12/12 green and exits 0. A shrinking deck is a broken gate, not a pass.
+ */
+export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = { cms122: 55, cms125: 66 };
+
 export function exitCodeForRuns(
   runs: Array<Pick<OfficialMeasureRun, "summary"> & Partial<Pick<OfficialMeasureRun, "draftDrift">>>,
 ): 0 | 1 {
   const officialFailed = runs.some(
     (run) => run.summary.unexpectedMismatches > 0 || run.summary.errors > 0,
   );
+  // A deck that shrank silently is a broken gate — fail rather than report a smaller green number.
+  const deckShrank = runs.some((run) => {
+    const required = REQUIRED_OFFICIAL_CASE_COUNTS[(run as { measure?: string }).measure ?? ""];
+    return required !== undefined && run.summary.total < required;
+  });
   // The reduction drift check MUST be able to fail this command. It is the only thing that proves
   // vendoring (dropping CQL, ELM XML, narratives, ValueSets) changes no population result, and PR-6
   // builds a CI gate on top of this exit code — a check that reports drift while exiting 0 would let
@@ -67,7 +79,7 @@ export function exitCodeForRuns(
   const reductionDrifted = runs.some(
     (run) => (run.draftDrift?.changedCases ?? 0) > 0 || (run.draftDrift?.errors ?? 0) > 0,
   );
-  return officialFailed || reductionDrifted ? 1 : 0;
+  return officialFailed || reductionDrifted || deckShrank ? 1 : 0;
 }
 
 function gitDirectory(contentDir: string): string {
@@ -151,14 +163,11 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       deps.log(`official-cases: loading ${measure.toUpperCase()} from ${contentDir}`);
       const loaded = deps.load(contentDir, measure);
       const run = await deps.run(loaded);
-      if (measure === "cms122") {
-        // Compares the upstream measure bundle (from the fetched content) against OUR vendored,
-        // reduced artifact at the same version. Formerly this measured drift from a stale v0.5.000
-        // draft; now that both sides are v1.0.000 it proves something better - that stripping CQL,
-        // ELM XML, narratives, and value sets during vendoring changes no population result.
-        const draftPath = resolve(deps.cwd, "measures", "official", "cms122", "bundle.json");
-        run.draftDrift = await deps.runDraftDrift(loaded, run, deps.loadDraftBundle(draftPath));
-      }
+      // Every vendored measure gets the reduction check, not just cms122: it is the ONLY thing that
+      // executes our reduced artifact against the upstream bundle, so a measure without it has its
+      // vendoring guarded by nothing but a self-consistent SHA-256 that vendor:official wrote itself.
+      const artifactPath = resolve(deps.cwd, "measures", "official", measure, "bundle.json");
+      run.draftDrift = await deps.runDraftDrift(loaded, run, deps.loadDraftBundle(artifactPath));
       runs.push(run);
     }
     const markdown = deps.render(runs, {
