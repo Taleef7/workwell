@@ -16,12 +16,16 @@ reads downstream exactly like a genuinely ineligible roster. Nothing errors, not
 are just wrong. So the adapter expands *first* and throws if any referenced set comes back empty, naming
 the OIDs and the CLI that fixes it.
 
-**That is not hypothetical — it blocks CMS125's flip today.** `pnpm resolve-valuesets` defaults to the 21
-CMS122 reference OIDs and has only ever imported those. CMS125's artifact references **32** value sets,
-none of them imported. Without the preflight, flipping cms125 would have produced a clean-looking run in
-which nobody was eligible for breast cancer screening. The adapter exports `requiredOids(artifact)` so the
-import CLI can be pointed at a vendored artifact directly — the obvious next step, and an owner action
-before PR-9.
+**That is not hypothetical — it blocks BOTH measures today.** `pnpm resolve-valuesets` defaults to the 21
+CMS122 reference OIDs and has only ever imported those. Measured against the vendored artifacts:
+**CMS122 references 26 (5 missing), CMS125 references 32 (14 missing)** — so the first draft of this
+entry, which said CMS125 was uniquely blocked and implied CMS122 was ready to flip, was wrong in both
+directions. Without the preflight, flipping either would produce a clean-looking run in which nobody was
+eligible. The refusal is also deliberately **broader than strictly necessary**: four of CMS122's five
+gaps are SupplementalDataElements value sets that `calculateSDEs: false` never retrieves. That is the
+safe direction, and the fix — import them — is cheap and correct anyway. `requiredOids(artifact)` is
+exported so the import CLI can be pointed at an artifact rather than a hand-kept OID list; wiring that is
+the obvious next step and an owner action before PR-9.
 
 **The numerator's meaning cannot be derived, so it is a reviewed table.** `official-measure-semantics.ts`
 records, per measure, whether being in the numerator is the good outcome, with the reasoning. The
@@ -61,7 +65,39 @@ The fqm boundary guard caught the new consumer immediately and made me add it to
 which is the point. This is the **first production-path** consumer of the executor package; the three
 before it were two diagnostics and a file loader.
 
-Typecheck clean; full suite **1469 pass / 0 fail / 14 skipped**.
+### Review round — the safety narrative had two holes in it
+
+Both found by review, both verified by running them, and both produce **the exact silent
+empty-population failure this adapter's whole design is organized around** — which is the uncomfortable
+part: the preflight was written to refuse that outcome, and the same outcome was reachable through two
+other doors.
+
+1. **`trustMetaProfile: true` was backwards.** The reasoning ("official artifacts retrieve by QICore
+   profile") is true of the artifact and wrong as a configuration for *our* bundles. With it on,
+   cql-exec-fhir filters every retrieve to resources whose `meta.profile` contains the exact templateId:
+   the ELM asks for `qicore-condition-problems-health-concerns` and `qicore-observation-lab`, while
+   `fhir-bundle-builder.ts` stamps `qicore-condition` and `qicore-observation-clinical-result`. Nothing
+   matches; every subject leaves the denominator. For a WebChart bundle, which carries no `meta.profile`
+   at all, the Patient retrieve *throws*. The repo's own precedent said so: `literal-diff.ts` runs this
+   same artifact over these same bundles with the default (false).
+2. **The terminology refusal wasn't airtight.** `buildValueSetCache` catches whatever the expander
+   throws and substitutes an empty expansion, and the callback recorded emptiness only on the success
+   path — so a *throwing* expander (the likeliest production trigger: a transient store read failure)
+   sailed through with no refusal. Probed it directly: `empty recorded: [] → refusal would NOT FIRE`.
+
+Four more real defects came with them. `outcomeFromPopulations` never read the **denominator**, so a
+subject in the IPP but out of the denominator was called OVERDUE and given a case, while the exporter's
+`normalizeMembership` clamps the same person out — roster and MeasureReport disagreeing about one human.
+Evidence recorded fqm's `final`, which is the enum `TRUE|FALSE|NA|UNHIT` rather than a value, and
+CMS122's root library defines *"Most Recent Glycemic Status Date"* — which `deriveWhyFlagged` matches on
+name and slices as a date, so the roster would have read **"Last completed TRUE"**; define names are now
+prefixed `official:` to defeat that anchored match. No scoring guard existed, so a `cohort` artifact
+(no numerator population) would have mapped every subject to one bucket. And my hand-rolled
+`subtractMonths` clamped where the engine's overflows, giving the two paths different measurement
+periods on a leap day — matching the engine's quirk beats improving on it when the entire purpose is
+comparability.
+
+Typecheck clean; full suite **1473 pass / 0 fail / 14 skipped**.
 
 ## 2026-07-25 (later) — PR-6a: the gate pays for itself — 86% smaller artifacts, proven neutral (branch `feat/strip-elm-annotations`)
 

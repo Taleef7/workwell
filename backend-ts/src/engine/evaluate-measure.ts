@@ -55,7 +55,7 @@ export interface OfficialEvidence {
    * which degrades the report to status-derived membership — the very thing evidence-first exporting
    * exists to prevent. A round-trip test pins the two halves together.
    */
-  populationResults: Array<{ populationType: string; result: boolean }>;
+  populationResults: Array<{ populationType: string; result: boolean; [key: string]: unknown }>;
 }
 
 export interface MeasureOutcome {
