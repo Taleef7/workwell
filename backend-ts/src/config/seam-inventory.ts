@@ -27,6 +27,7 @@ import { isSqlPushdownSelected, type MeasureExecutorEnv } from "../engine/measur
 import { isVsacConfigured, type VsacEnv } from "../engine/cql/resolve-value-set-resolver.ts";
 import { isAlertWebhookConfigured, type AlertEnv } from "../run/alert-channel.ts";
 import { isIncrementalEnabled, type IncrementalEnv } from "../run/incremental/incremental-eval.ts";
+import { isOfficialRoutingConfigured, type OfficialMeasuresEnv } from "../wiring/official-routing.ts";
 
 /** The union of every seam's env-var shape (all optional — assignable from the worker's `Env`). */
 export type SeamEnv = EmailEnv &
@@ -38,7 +39,8 @@ export type SeamEnv = EmailEnv &
   VsacEnv &
   AlertEnv &
   BucketSeamEnv &
-  IncrementalEnv;
+  IncrementalEnv &
+  OfficialMeasuresEnv;
 
 export interface SeamStatus {
   /** Short, stable, log-line-friendly seam name. */
@@ -62,6 +64,11 @@ export function describeSeams(env: SeamEnv): SeamStatus[] {
     { name: "alert-webhook", active: isAlertWebhookConfigured(env) },
     { name: "bucket-s3", active: isS3BucketConfigured(env) },
     { name: "incremental-eval", active: isIncrementalEnabled(env) },
+    // The 11th seam, and the only one that changes what a measure COMPUTES rather than how or where.
+    // The line reports only on/off, like every other seam; WHICH measures are routed comes from the
+    // OFFICIAL_ROUTING_MISCONFIGURED alert and the run's own evidence. On/off is still the thing worth
+    // seeing at a glance, because it is the difference between two engines.
+    { name: "official-measures", active: isOfficialRoutingConfigured(env) },
   ];
 }
 

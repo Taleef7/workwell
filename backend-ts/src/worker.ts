@@ -46,6 +46,7 @@ import { authorize, extractPrincipal } from "./auth/authorize.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
+import { officialRoutingProblems } from "./wiring/executor-router.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
@@ -111,6 +112,15 @@ export interface Env {
   WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY?: string;
   WORKWELL_BUCKET_S3_REGION?: string;
   WORKWELL_BUCKET_S3_ENDPOINT?: string;
+  /** #263 incremental/delta evaluation opt-in. Inert unless "true". */
+  WORKWELL_INCREMENTAL_EVAL?: string;
+  /**
+   * Per-measure official execution (PR-7b). Comma-separated catalog ids, never "all". Unset ⇒ every
+   * measure evaluates through the authored CQL, byte-identical to before. Declared here — rather than
+   * left to the optional fields of `OfficialMeasuresEnv` — because it being absent from a typed env
+   * object is exactly how it went missing from the scheduler's allowlist.
+   */
+  WORKWELL_OFFICIAL_MEASURES?: string;
 }
 
 // Memoized auth handler + JWT verifier, keyed by secret (createJwt is per-call).
@@ -342,6 +352,21 @@ function logSeamInventoryOnce(env: Env): void {
   if (isWebChartConfigured(env)) {
     const webChart = webChartConfigFromEnv(env)!;
     console.log(`[workwell] webchart live tenant: enabled (host ${new URL(webChart.baseUrl).host})`);
+  }
+  // PR-7b: BOOT-LOUD, not merely construction-time. `routedEngineForEnv` validates lazily, so a typo'd
+  // WORKWELL_OFFICIAL_MEASURES would otherwise boot clean, log `official-measures=on`, serve
+  // /actuator/health 200 (deliberately DB-free, so the 15-minute reconciler reports green) and return
+  // `internal_error` from every evaluating route — character-for-character the symptom profile of the
+  // four-day Neon outage that DEPLOY.md's "Watch the right signal" section exists because of.
+  //
+  // Alerted rather than thrown: the worker's fetch handler is not a startup hook, so throwing here
+  // would fail one arbitrary request rather than the process. The alert line is the one an operator
+  // greps for, and every affected route still refuses loudly at construction.
+  const problems = officialRoutingProblems(env);
+  if (problems.length > 0) {
+    console.error(
+      `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ROUTING_MISCONFIGURED", problems })}`,
+    );
   }
 }
 

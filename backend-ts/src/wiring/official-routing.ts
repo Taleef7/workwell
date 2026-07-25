@@ -18,6 +18,18 @@
  * Unset/blank (the demo stack and every environment today) ⇒ empty set ⇒ every read path is
  * byte-identical to before.
  */
+export interface OfficialMeasuresEnv {
+  WORKWELL_OFFICIAL_MEASURES?: string | undefined;
+}
+
+/**
+ * The seam-inventory predicate, in the shape §10 of ARCHITECTURE requires: the boot line must call the
+ * SAME function the routing decision calls, never a second parse of the same variable.
+ */
+export function isOfficialRoutingConfigured(env: OfficialMeasuresEnv): boolean {
+  return officialMeasureIds(env as Record<string, unknown>).size > 0;
+}
+
 export function officialMeasureIds(env: Record<string, unknown> = process.env): ReadonlySet<string> {
   const raw = env["WORKWELL_OFFICIAL_MEASURES"];
   if (typeof raw !== "string") return new Set();

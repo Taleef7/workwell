@@ -20,7 +20,7 @@ import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import { engineForEnv } from "../wiring/engine-factory.ts";
+import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
@@ -86,7 +86,7 @@ async function actionDeps(env: CasesEnv): Promise<CaseActionDeps & { channels: (
 }
 async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
   const s = await getStores(env);
-  const engine = await engineForEnv(env);
+  const engine = await routedEngineForEnv(env);
   return { cases: s.cases, events: s.events, outcomes: s.outcomes, runStore: s.runs, engine };
 }
 async function evidenceDeps(env: CasesEnv): Promise<EvidenceDeps> {
