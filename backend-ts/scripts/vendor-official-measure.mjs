@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Vendor an OFFICIAL published eCQM measure bundle (roadmap §7.3, PR-5).
+ * Vendor an OFFICIAL published eCQM measure bundle (roadmap §7.4, PR-5).
  *
  *   node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122
  *
@@ -16,11 +16,16 @@
  * - **Kept:** the `Measure` and its `Library` resources, each reduced to `application/elm+json` — the
  *   pre-compiled ELM is what `fqm-execution` runs, and keeping only it is what makes the artifact
  *   deployable at all.
- * - **Dropped: ValueSets.** Deliberate, and the most important rule here. Their expansions embed
- *   **AMA CPT** and SNOMED CT content, which this repo is public and Apache-2.0 licensed and must not
- *   redistribute. Terminology comes from our own VSAC import at runtime (`buildValueSetCache`), under
- *   our UMLS licence. The pre-existing vendored bundle already followed this rule; the script now makes
- *   it explicit and enforced rather than incidental.
+ * - **Dropped: ValueSet resources and their expansions.** Deliberate, and the most important rule here:
+ *   26 expansions per bundle carry thousands of AMA CPT and SNOMED CT codes, and this repo is public.
+ *   Terminology comes from our own VSAC import at runtime (`buildValueSetCache`), under our UMLS licence.
+ *
+ *   **This does NOT make the artifact free of licensed terminology, and we must not claim it does.**
+ *   The official CQL declares direct-reference codes inline, so the compiled ELM still embeds a small
+ *   number of them with their descriptions (CMS122: CPT 97802/97803/97804 plus 7 SNOMED codes). They
+ *   cannot be stripped without changing the measure. The `Measure.copyright` notice is retained
+ *   deliberately for that reason, and `measures/official/NOTICE.md` records the terms — including
+ *   NCQA's commercial-use clause, which is an owner/legal question, not an engineering one.
  * - **Dropped: test-case resources** (Patient/Condition/Encounter/MeasureReport/…). Those are the MADiE
  *   deck, fetched separately and gitignored by `fetch-official-cases.ps1`; shipping them in the deploy
  *   image would be dead weight.
@@ -61,6 +66,14 @@ function parseArgs(argv) {
   if (!args.measure || !args.catalogId) {
     throw new Error("usage: --measure <UpstreamMeasureDir> --catalog-id <cms122> [--ref <sha>] [--strip-elm-annotations]");
   }
+  // A branch name would produce an artifact nobody can reproduce; the manifest is only provenance if
+  // the ref is immutable. Fail where the mistake is made rather than in a test later.
+  if (!/^[0-9a-f]{40}$/.test(args.ref)) {
+    throw new Error(`--ref must be a full 40-character commit sha (got "${args.ref}")`);
+  }
+  if (!/^[a-z0-9]+$/.test(args.catalogId)) {
+    throw new Error(`--catalog-id must be lowercase alphanumeric (got "${args.catalogId}")`);
+  }
   return args;
 }
 
@@ -91,7 +104,13 @@ function reduceBundle(bundle, { stripElmAnnotations }) {
       resource.content = resource.content.filter((c) => c.contentType === KEPT_LIBRARY_CONTENT_TYPE);
       if (stripElmAnnotations) {
         resource.content = resource.content.map((c) => {
-          const elm = JSON.parse(Buffer.from(c.data, "base64").toString("utf8"));
+          let elm;
+          try {
+            elm = JSON.parse(Buffer.from(c.data, "base64").toString("utf8"));
+          } catch (err) {
+            const name = resource.name ?? resource.id;
+            throw new Error(`${name}: ELM payload will not parse, cannot strip annotations — ${err.message}`);
+          }
           const data = Buffer.from(JSON.stringify(stripAnnotations(elm)), "utf8").toString("base64");
           return { ...c, data };
         });
@@ -99,7 +118,10 @@ function reduceBundle(bundle, { stripElmAnnotations }) {
     }
     entry.push({ ...(original.fullUrl ? { fullUrl: original.fullUrl } : {}), resource });
   }
-  return { resourceType: "Bundle", id: bundle.id, type: bundle.type ?? "transaction", entry };
+  // "collection", not the upstream "transaction": we drop `fullUrl` and `request`, so the artifact is
+  // no longer a conformant transaction Bundle and must not pretend to be POSTable. fqm-execution reads
+  // resources by resourceType and does not care.
+  return { resourceType: "Bundle", id: bundle.id, type: "collection", entry };
 }
 
 /** Fail here, loudly, rather than deep inside fqm-execution at evaluation time. */

@@ -542,7 +542,12 @@ export interface RunDraftDriftOptions {
   calculate?: FqmCalculate;
 }
 
-/** Compare the older vendored CMS122 v0.5.000 artifact to the official v1 run using v1 ValueSets. */
+/**
+ * Compare the upstream measure bundle against OUR vendored, reduced artifact at the SAME version, using
+ * the upstream ValueSets for both. Formerly this measured drift from a stale v0.5.000 draft; since PR-5
+ * vendored v1.0.000 it proves something more useful - that dropping CQL, ELM XML, narratives and
+ * ValueSets during vendoring changes no population result.
+ */
 export async function runCms122DraftDrift(
   loaded: LoadedOfficialMeasure,
   officialRun: OfficialMeasureRun,
@@ -594,7 +599,7 @@ export async function runCms122DraftDrift(
         name: item.name,
         official,
         differences: [],
-        error: !official ? "official v1 result unavailable" : "draft v0.5 result unavailable",
+        error: !official ? "official v1 result unavailable" : "vendored-artifact result unavailable",
       };
     }
     const draft = actualPopulationCounts(populations);

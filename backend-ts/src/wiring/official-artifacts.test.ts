@@ -15,6 +15,8 @@ const vendored = readdirSync(ARTIFACT_ROOT, { withFileTypes: true })
   .map((e) => e.name);
 
 test("the expected measures are vendored", () => {
+  // Hardcoded on purpose: adding a measure should be a conscious edit here, the same way the executor
+  // import allowlist is (fqm-isolation.test.ts). A new artifact appearing unannounced is a review event.
   assert.deepEqual(vendored.sort(), ["cms122", "cms125"]);
 });
 
@@ -29,6 +31,13 @@ for (const catalogId of vendored) {
     const bytes = readFileSync(`${ARTIFACT_ROOT}${catalogId}/bundle.json`, "utf8");
     assert.equal(artifact.manifest.sha256, `sha256:${createHash("sha256").update(bytes).digest("hex")}`);
 
+    // The SHA-256 above pins manifest -> bundle BYTES. Without this, the manifest could claim any
+    // version while the bundle executes another one, and every test would still pass.
+    const measure = artifact.bundle.entry.find((e) => e.resource["resourceType"] === "Measure")!.resource;
+    assert.equal(artifact.manifest.version, measure["version"], "manifest version must match the Measure it describes");
+    assert.equal(artifact.manifest.measureName, measure["name"]);
+    assert.equal(artifact.manifest.url, measure["url"]);
+
     assert.equal(artifact.manifest.catalogId, catalogId);
     assert.match(artifact.manifest.version, /^\d+\.\d+\.\d+$/);
     assert.equal(artifact.manifest.status, "active");
@@ -36,14 +45,17 @@ for (const catalogId of vendored) {
     assert.ok(artifact.manifest.source.ref.length >= 40, "provenance must pin a full commit sha");
   });
 
-  test(`${catalogId}: bundle carries pre-compiled ELM and NO licensed terminology`, () => {
+  test(`${catalogId}: bundle carries pre-compiled ELM and no vendored ValueSet expansions`, () => {
     const artifact = loadOfficialArtifact(catalogId)!;
     const types = new Set(artifact.bundle.entry.map((e) => e.resource["resourceType"] as string));
     assert.deepEqual([...types].sort(), ["Library", "Measure"]);
 
-    // Value sets must never be vendored: their expansions embed AMA CPT and SNOMED content that this
-    // public repo cannot redistribute. Terminology comes from our own VSAC import at runtime.
-    assert.equal(types.has("ValueSet"), false, "vendoring value sets would redistribute licensed codes");
+    // ValueSet resources must never be vendored: 26 expansions per bundle carry thousands of AMA CPT
+    // and SNOMED codes. This removes the BULK of the licensed terminology, not all of it — the official
+    // CQL declares some codes inline, so the compiled ELM still embeds a few with their descriptions.
+    // measures/official/NOTICE.md records that residue and its terms; do not restate this as "no
+    // licensed terminology", which is false.
+    assert.equal(types.has("ValueSet"), false, "vendoring ValueSet expansions would redistribute code lists in bulk");
 
     const libraries = artifact.bundle.entry.filter((e) => e.resource["resourceType"] === "Library");
     assert.ok(libraries.length > 0);
@@ -59,5 +71,14 @@ for (const catalogId of vendored) {
 test("an unvendored measure is absent, not an error (the tier degrades)", () => {
   assert.equal(loadOfficialArtifact("cms165"), null);
   assert.equal(officialArtifactAvailable("cms165"), false);
-  assert.equal(loadOfficialArtifact("../../etc/passwd"), null, "a junk id must not throw");
+});
+
+test("a traversing catalogId is REJECTED, not merely absent", () => {
+  // `new URL()` normalizes `..`, so these escape measures/official/ entirely. Asserting null would
+  // pass for the wrong reason - because nothing happens to live at the traversed path. Assert the id
+  // is rejected before any filesystem access, since PR-7 makes this set operator-supplied.
+  for (const id of ["../../etc/passwd", "../../../package", "", "cms122/../../..", "CMS122", "cms 122"]) {
+    assert.equal(loadOfficialArtifact(id), null, `must reject: ${JSON.stringify(id)}`);
+    assert.equal(officialArtifactAvailable(id), false);
+  }
 });

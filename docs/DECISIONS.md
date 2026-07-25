@@ -400,6 +400,23 @@ commits (the `WebChartClient` port is unchanged).
 
 **Consequences:** The literal official CMS122v14 QICore artifact now runs as a real, subject-by-subject execution diff — no translator, no VSAC key, **no schema**. New dependency `fqm-execution@1.8.5` (owner-pre-approved for the diagnostic path via the 2026-07-09 roadmap; this ADR records the terms). Reversible: revert the PR (drop the dep + the vendored bundle + `literal-diff.ts`); the ladder degrades to subset/estimate exactly as before. **#251 is superseded/closeable.** Full suite green — 1065 pass / 1 pg-skip / 0 fail. Known bounds: literal diff is **CMS122-only**; gate attribution is population-level; the vendored measure is v0.5.000 (the 2026-reporting-year MADiE FHIR draft), not a separately-numbered "v14" export.
 
+**Amendment (2026-07-24, roadmap §7.4 PR-5) — the vendored artifact moved SOURCE REPOSITORY, not just
+version.** This ADR pinned `cqframework/ecqm-content-cms-2025 @ 30a627013f1c…`, measure
+`CMS122FHIRDiabetesAssessGreaterThan9Percent` **v0.5.000**. The artifact is now
+`cqframework/dqm-content-qicore-2025 @ ca4b4951…`, measure `CMS122FHIRDiabetesAssessGT9Pct`
+**v1.0.000** — a different repository, measure name, and canonical URL, so this is not the version bump
+it looks like. The move follows the 2026-07-24 recalibration: `dqm-content-qicore-2025` is the QI-Core
+content line that also publishes the MADiE test decks we gate on, and all eight priority measures were
+verified present there, so bundle and test deck now come from one pinned source. The fidelity-diff
+response's `officialMeasure.url` changes accordingly — a deliberate, visible API change.
+Two further corrections to this ADR's text: the vendored bundle no longer retains `text/cql` (only
+`application/elm+json` survives reduction), and the artifact lives at `measures/official/cms122/` under
+a manifest, not at `measures/official/cms122v14/` under a versioned filename. **Licensing:** the
+reduction drops all ValueSet resources and their expansions, but the compiled ELM still embeds the
+direct-reference codes the official CQL declares inline (CPT + SNOMED, with descriptions), so
+`measures/official/NOTICE.md` records those terms — including NCQA's commercial-use clause, which is an
+open owner/legal question.
+
 **Amendment (2026-07-24, roadmap §7.4 PR-4) — the quarantine is now a PACKAGE BOUNDARY.** The invariant
 was never "fqm-execution is diagnostic-only"; it was **"its heavy transitive deps must not reach the
 worker's cold-start or request path, and CQL remains the sole outcome authority."** A file allowlist was

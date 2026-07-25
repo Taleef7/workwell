@@ -1,0 +1,5 @@
+# Vendored official measure artifacts are hashed byte-for-byte by
+# src/wiring/official-artifacts.test.ts (manifest.sha256). Git's text heuristic would CRLF-convert
+# these NUL-free JSON files on a Windows checkout (core.autocrlf=true is the Git-for-Windows default),
+# changing the digest and failing the integrity guard on a fresh clone while CI stays green.
+measures/official/**/*.json -text
