@@ -26,18 +26,30 @@
  *   1. the official MADiE gate covers it (`ungatedOfficialMeasures` — THE RULE, roadmap §7.4 PR-6);
  *   2. an executable artifact is vendored, and its `catalogId` matches;
  *   3. WorkWell has recorded what its numerator means (`official-measure-semantics.ts`);
- *   4. every value set its ELM retrieves expands to a non-empty set (the preflight).
+ *   4. it is a `proportion` measure (the population mapping assumes a numerator exists); and
+ *   5. every value set its ELM retrieves expands to a non-empty set.
  *
- * (4) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
+ * (5) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
  * rather than missing*, an empty set matches nothing, and the measure then reports every subject
  * out-of-population — which reads downstream exactly like a genuinely ineligible roster.
+ *
+ * 1-4 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
+ * (5) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
+ * the first missing terminology is the one worth acting on.
+ *
+ * `worker.ts` runs 1-4 at BOOT as well, because everything here is lazy: a typo would otherwise boot
+ * clean, log `official-measures=on`, keep /actuator/health green, and 500 every evaluating route.
  *
  * ## Scope of this PR
  *
  * Ships dark. It also does NOT yet prepare bundles (`stampQiCoreStructure`, see the adapter's docstring)
  * or batch subjects measure-major, so it must not be flipped on for a population run until PR-8 wires
  * both. The flag existing and the flag being safe to set are different things, and this PR only delivers
- * the first.
+ * the first — which is why `WORKWELL_OFFICIAL_MEASURES` is deliberately absent from DEPLOY.md.
+ *
+ * Not every evaluation path is routed, and deliberately so while this is dark: the scale batch
+ * (`run/batch-evaluate-scale.ts`), the seed CLIs, the DB-less `engine/ingress/evaluate-bundle.ts` and
+ * the headless CLI all construct engines directly. PR-8/PR-9 must not assume coverage they do not have.
  */
 import type { EvaluateMeasureBinding, EvaluateMeasureInput, MeasureOutcome } from "../engine/evaluate-measure.ts";
 import type { MeasureMeta } from "../engine/cql/measure-registry.ts";
@@ -47,7 +59,12 @@ import type { VsacEnv } from "../engine/cql/resolve-value-set-resolver.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { engineForEnv } from "./engine-factory.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
-import { officialMeasureExecutor, type ExpandValueSet } from "./official-executor-adapter.ts";
+import {
+  officialMeasureExecutor,
+  oidFromValueSetUrl,
+  type ExpandValueSet,
+  type FqmCalculate,
+} from "./official-executor-adapter.ts";
 import {
   officialMeasureIds,
   ungatedOfficialMeasures,
@@ -75,8 +92,10 @@ export function storeValueSetExpander(valueSets: ValueSetStore): ExpandValueSet 
     snapshot ??= valueSets.listAll().then((rows) => {
       const byOid = new Map<string, Array<{ code: string; system: string }>>();
       for (const row of rows) {
-        // VSAC canonicals are keyed by bare OID; a row imported under a URL form still resolves.
-        const oid = row.oid.includes("/") ? row.oid.slice(row.oid.lastIndexOf("/") + 1) : row.oid;
+        // The PACKAGE's normalization, not a second one that happens to agree on VSAC canonicals:
+        // the expander is keyed by whatever `buildValueSetCache` passes in, and two rules that differ
+        // on any other URL shape is a bug waiting for the first non-VSAC canonical.
+        const oid = oidFromValueSetUrl(row.oid);
         byOid.set(oid, (row.codes ?? []).map((c) => ({ code: c.code, system: c.system })));
       }
       return byOid;
@@ -104,6 +123,17 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv): string[] {
     if (artifact.manifest.catalogId !== id) {
       problems.push(`${id}: the vendored artifact declares catalogId '${artifact.manifest.catalogId}'`);
     }
+    // Scoring was the ONE adapter refusal that fired per-subject rather than here — and the run
+    // pipeline error-isolates a per-subject throw into MISSING_DATA, so a non-proportion artifact
+    // would produce a *successful* population run in which every subject is MISSING_DATA. That is the
+    // silent-empty-population failure the terminology preflight exists to prevent, through the door
+    // next to it.
+    if (artifact.manifest.scoring !== "proportion") {
+      problems.push(
+        `${id}: scoring '${artifact.manifest.scoring}' is not supported — the population mapping ` +
+          `assumes a proportion measure (a cohort measure has no numerator at all)`,
+      );
+    }
     if (!officialMeasureSemantics(id)) {
       problems.push(
         `${id}: no recorded numerator semantics — see official-measure-semantics.ts. There is no safe ` +
@@ -119,6 +149,8 @@ export interface RoutedEngineOptions {
   expand?: ExpandValueSet;
   /** Injectable for tests; defaults to the authored CQL engine. */
   authored?: EvaluateMeasureBinding;
+  /** Injectable for tests; defaults to the real (lazily imported) fqm calculator. */
+  calculate?: FqmCalculate;
 }
 
 export async function routedEngineForEnv(
@@ -138,16 +170,20 @@ export async function routedEngineForEnv(
   }
 
   const expand = options.expand ?? storeValueSetExpander((await getStores(env)).valueSets);
-  const executor = officialMeasureExecutor({ expand });
+  const executor = officialMeasureExecutor({
+    expand,
+    ...(options.calculate ? { calculate: options.calculate } : {}),
+  });
   // Terminology, up front. Serially rather than in parallel: these hit the same snapshot and the first
   // failure is the one worth reporting, unqualified by a race.
   for (const id of official) await executor.preflight(id);
 
   return {
     async evaluate(input: RoutableInput): Promise<MeasureOutcome> {
-      // An explicit `elm`/`metaOverride` means "run THIS library" — the fidelity lab evaluating an
-      // official-subset measure, or the Rule Builder previewing generated CQL. Routing those to the
-      // official executor would silently run a different measure than the caller asked for.
+      // An explicit `elm`/`metaOverride` means "run THIS library", so honouring it is the only correct
+      // behaviour — routing it to the official executor would silently run a different measure than the
+      // caller asked for. No production caller passes either today (the fidelity lab builds its own
+      // engine directly), so this is a guard against a future caller, not a fix for a current one.
       const overridden = input.elm !== undefined || input.metaOverride !== undefined;
       return official.has(input.measureId) && !overridden
         ? executor.evaluate(input)

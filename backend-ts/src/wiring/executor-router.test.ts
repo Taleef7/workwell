@@ -13,6 +13,26 @@ import {
 } from "./executor-router.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
+import type { FqmCalculate } from "@workwell/official-executor";
+
+/** A calculator that reports one subject in every population — enough to prove routing reached fqm. */
+const fakeCalculate: FqmCalculate = async () => ({
+  results: [
+    {
+      patientId: "s1",
+      detailedResults: [
+        {
+          populationResults: [
+            { populationType: "initial-population", result: true },
+            { populationType: "denominator", result: true },
+            { populationType: "numerator", result: false },
+          ],
+          statementResults: [],
+        },
+      ],
+    },
+  ],
+});
 
 const outcome = (measure: string): MeasureOutcome => ({
   subjectId: "s1",
@@ -52,13 +72,13 @@ test("a named measure routes to the official executor; everything else stays aut
   const authored = authoredEngine();
   const routed = await routedEngineForEnv(
     { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
-    { authored, expand: async () => [{ code: "a", system: "s" }] },
+    // An injected calculator, not the real one: asserting `instanceof Error` would have passed on a
+    // MODULE_NOT_FOUND just as happily as on a real routing hit, which proves nothing about routing.
+    { authored, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
   );
 
-  const official = await routed.evaluate({ measureId: "cms122", patientBundle: {} }).catch((e) => e);
-  // It reached the official executor: the failure is fqm's, not a routing miss. (Actually executing
-  // the artifact needs the real calculator, which this test deliberately does not load.)
-  assert.ok(official instanceof Error, "the official path is exercised");
+  const official = await routed.evaluate({ measureId: "cms122", patientBundle: {} });
+  assert.equal(official.measure, "Diabetes: Glycemic Status Assessment Greater Than 9%");
   assert.deepEqual(authored.calls, [], "cms122 must NOT have reached the authored engine");
 
   const other = await routed.evaluate({ measureId: "audiogram", patientBundle: {} });
@@ -162,4 +182,51 @@ test("the store expander snapshots ONCE per instance — per run, never per proc
   // A second instance re-reads: that is what makes an operator's edit visible on the next run.
   await storeValueSetExpander(store)("2.16.1");
   assert.equal(reads, 2);
+});
+
+test("non-proportion scoring is refused at CONSTRUCTION, not per subject", async () => {
+  // It was the one adapter refusal that fired inside evaluate() — and the run pipeline error-isolates a
+  // per-subject throw into MISSING_DATA, so a cohort artifact would have produced a *successful*
+  // population run with every subject MISSING_DATA. That is the silent-empty-population failure the
+  // terminology preflight exists to prevent, reached through the door next to it.
+  const { officialRoutingProblems } = await import("./executor-router.ts");
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" });
+  assert.deepEqual(problems, [], "cms122 is a proportion measure");
+
+  // The check reads the manifest, so prove it fires by pointing it at a scoring the mapping cannot
+  // express. (Both vendored measures are proportion, so this asserts the CHECK, via the message text.)
+  const { loadOfficialArtifact } = await import("./official-artifacts.ts");
+  const artifact = loadOfficialArtifact("cms122")!;
+  assert.equal(artifact.manifest.scoring, "proportion", "if this ever changes, the guard above must fire");
+});
+
+test("the scheduler's env allowlist carries the flag — the nightly run must route like a manual one", async () => {
+  // Without this, POST /api/runs/manual evaluates cms122 officially while the nightly ALL_PROGRAMS run
+  // — the one that populates /compliance, /programs and quality_snapshots — evaluates it with the
+  // AUTHORED CQL. Two engines, two answers for one measure, latest-run-wins, `official-measures=on` on
+  // the boot line throughout. This is the THIRD instance of that bug in the same block (see #331 and
+  // #263), so it is asserted rather than left to a comment.
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  const allowlist = server.slice(server.indexOf("const schedulerEnv"), server.indexOf("const schedulerInterval"));
+  for (const key of ["WORKWELL_OFFICIAL_MEASURES", "WORKWELL_INCREMENTAL_EVAL", "WORKWELL_VSAC_API_KEY"]) {
+    assert.ok(
+      allowlist.includes(`${key}: process.env.${key}`),
+      `${key} must be threaded to schedulerTick, or the nightly run behaves differently from a manual one`,
+    );
+  }
+});
+
+test("boot reports a bad configuration loudly, because everything else about it looks healthy", async () => {
+  // A typo'd flag would otherwise boot clean, log `official-measures=on`, keep /actuator/health green
+  // (it is deliberately DB-free, so the 15-minute reconciler reports healthy) and 500 every evaluating
+  // route — the exact symptom profile of the four-day Neon outage.
+  const { readFileSync } = await import("node:fs");
+  const worker = readFileSync(new URL("../worker.ts", import.meta.url), "utf8");
+  assert.match(
+    worker,
+    /officialRoutingProblems\(env\)/,
+    "worker boot must validate official routing, not leave it to lazy construction",
+  );
+  assert.match(worker, /OFFICIAL_ROUTING_MISCONFIGURED/, "and emit a greppable WORKWELL_ALERT for it");
 });

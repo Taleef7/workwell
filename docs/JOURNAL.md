@@ -46,7 +46,44 @@ the reason written where the next person will look.
 (`stampQiCoreStructure`) or batch subjects measure-major. The flag existing and the flag being safe to
 set are different things, and this delivers the first.
 
-Typecheck clean; full suite **1482 pass / 0 fail / 14 skipped**.
+### Review round — the flag would have split the two run paths
+
+Two criticals, and the first is the third instance of one bug this repo has already documented twice.
+
+**The nightly run could never have routed officially.** `server.ts` hands `schedulerTick` an explicit
+allowlist of `process.env` keys, and `WORKWELL_OFFICIAL_MEASURES` was not in it — while every field of
+`OfficialMeasuresEnv` is optional, so it type-checked. Once flipped on, `POST /api/runs/manual` would
+evaluate cms122 officially and the nightly `ALL_PROGRAMS` run — the one that actually populates
+`/compliance`, `/programs` and `quality_snapshots` — would evaluate it with the authored CQL. Two
+engines, two answers for one measure, latest-run-wins, `official-measures=on` on the boot line
+throughout. The comments immediately above that allowlist describe the same bug happening to
+`WORKWELL_WEBCHART_PRIVATE_KEY_B64` (#331) and `WORKWELL_INCREMENTAL_EVAL` (#263). A test now asserts
+the keys are threaded, because three times is a pattern and comments have not stopped it.
+
+**Validation was construction-time, and the roadmap said boot-loud.** I had rewritten that plan item to
+match what I built, which is the "no silent scope changes" rule in reverse. `routedEngineForEnv` is
+lazy, so a typo'd flag would boot clean, log `official-measures=on`, keep `/actuator/health` green (it
+is deliberately DB-free, so the 15-minute reconciler reports healthy) and return `internal_error` from
+every evaluating route — character for character the symptom profile of the four-day Neon outage that
+DEPLOY.md's "Watch the right signal" section exists because of. Boot now runs the same validation and
+emits a greppable `WORKWELL_ALERT OFFICIAL_ROUTING_MISCONFIGURED`.
+
+Four more: **scoring** was the one adapter refusal that fired per-subject rather than at construction —
+and the run pipeline error-isolates a per-subject throw into MISSING_DATA, so a cohort artifact would
+have produced a *successful* run with every subject MISSING_DATA, the silent-empty-population failure
+again through the door next to it. The `/evaluate` route constructed the router *after* marking the run
+RUNNING, so a config error orphaned a run. The "instance lifetime is one run" claim was **false at three
+read routes** (`/simulate` is a date scrubber — one construction per drag). And "all problems reported
+at once" excluded the terminology preflight, which is serial and first-failure.
+
+Two smaller corrections worth recording because they are the same failure mode as the licensing and
+`Join-Path` claims: the `elm`/`metaOverride` escape hatch's docstring cited the fidelity lab and Rule
+Builder as callers — **neither goes through the router**, so the guard is defensive rather than
+load-bearing; and a test comment claimed it "deliberately does not load" the real calculator when it
+very much did, which meant `assert.ok(err instanceof Error)` would have passed just as happily on a
+`MODULE_NOT_FOUND` as on a real routing hit. It injects a calculator now.
+
+Typecheck clean; full suite **1486 pass / 0 fail / 14 skipped**.
 
 
 ## 2026-07-25 (evening) — PR-7c: the terminology importer reads the artifact, not a hand-kept list (branch `feat/official-valueset-import`)

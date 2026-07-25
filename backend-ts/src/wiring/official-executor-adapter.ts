@@ -87,6 +87,14 @@ import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 /** Expand one VSAC OID to its codes — the app supplies this from the imported `value_sets` rows. */
 export type ExpandValueSet = (oid: string) => Promise<ExpandedCode[]>;
 
+/**
+ * Re-exported so the ROUTER can key its expander by the same rule `buildValueSetCache` looks up by,
+ * without becoming a direct consumer of the executor package. Two normalizations that merely agree on
+ * VSAC canonicals is a bug waiting for the first canonical of another shape; a second import of the
+ * package into production wiring is a hole in the fqm quarantine. This is how to have neither.
+ */
+export { oidFromValueSetUrl, type FqmCalculate };
+
 /** An `EvaluateMeasureBinding` that can also be asked to prove a measure is runnable before a run. */
 export interface OfficialMeasureExecutor extends EvaluateMeasureBinding {
   preflight(measureId: string): Promise<void>;
@@ -278,12 +286,18 @@ export function requiredValueSets(artifact: OfficialArtifact): Array<{ oid: stri
  */
 export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMeasureExecutor {
   /**
-   * Terminology is expanded once per measure per EXECUTOR INSTANCE, and the instance's lifetime is one
-   * run (the router is built per run, exactly as `engineForEnv` is). That scoping is the point, not an
-   * implementation detail: a process-lifetime cache would freeze the value-set snapshot and re-introduce
-   * the bug `engineForEnv` documents at length — an operator's value-set edit serving stale expansions
-   * until restart. Per-call expansion was the other extreme: a 150-subject run would re-parse a 2.4MB
-   * bundle's ELM twice per subject and hit the store thousands of times.
+   * Terminology is expanded once per measure per EXECUTOR INSTANCE — and an instance lives as long as
+   * the router that built it, which is **at most** one run: per run-POST and per scheduled tick, but
+   * per HTTP request at the read routes (`/simulate`, impact-preview, `/evaluate`). Shorter is always
+   * SAFE — freshness is the property that matters — but it is not free: each construction pays a
+   * `valueSets.listAll()` and an ELM walk per routed measure, and `/simulate` is a date scrubber that
+   * fires once per drag. Worth revisiting when a read route is actually routed officially.
+   *
+   * The scoping is the point, not an implementation detail. A process-lifetime cache would freeze the
+   * value-set snapshot and re-introduce the bug `engineForEnv` documents at length — an operator's
+   * value-set edit serving stale expansions until restart. Per-CALL was the other extreme: a
+   * 150-subject run re-parsing a 2.4MB bundle's ELM twice per subject and hitting the store thousands
+   * of times.
    */
   const terminology = new Map<string, Promise<unknown[]>>();
   const cacheFor = (artifact: OfficialArtifact): Promise<unknown[]> => {
