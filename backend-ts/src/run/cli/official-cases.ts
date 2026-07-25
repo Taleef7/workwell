@@ -54,8 +54,20 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
   return { measures: measure ? [measure] : ["cms122", "cms125"], ...(contentDir ? { contentDir } : {}) };
 }
 
-export function exitCodeForRuns(runs: Array<Pick<OfficialMeasureRun, "summary">>): 0 | 1 {
-  return runs.some((run) => run.summary.unexpectedMismatches > 0 || run.summary.errors > 0) ? 1 : 0;
+export function exitCodeForRuns(
+  runs: Array<Pick<OfficialMeasureRun, "summary"> & Partial<Pick<OfficialMeasureRun, "draftDrift">>>,
+): 0 | 1 {
+  const officialFailed = runs.some(
+    (run) => run.summary.unexpectedMismatches > 0 || run.summary.errors > 0,
+  );
+  // The reduction drift check MUST be able to fail this command. It is the only thing that proves
+  // vendoring (dropping CQL, ELM XML, narratives, ValueSets) changes no population result, and PR-6
+  // builds a CI gate on top of this exit code — a check that reports drift while exiting 0 would let
+  // a broken vendored artifact through the gate that exists to catch it.
+  const reductionDrifted = runs.some(
+    (run) => (run.draftDrift?.changedCases ?? 0) > 0 || (run.draftDrift?.errors ?? 0) > 0,
+  );
+  return officialFailed || reductionDrifted ? 1 : 0;
 }
 
 function gitDirectory(contentDir: string): string {
@@ -140,13 +152,11 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       const loaded = deps.load(contentDir, measure);
       const run = await deps.run(loaded);
       if (measure === "cms122") {
-        const draftPath = resolve(
-          deps.cwd,
-          "measures",
-          "official",
-          "cms122v14",
-          "CMS122FHIR-v0.5.000-FHIR.json",
-        );
+        // Compares the upstream measure bundle (from the fetched content) against OUR vendored,
+        // reduced artifact at the same version. Formerly this measured drift from a stale v0.5.000
+        // draft; now that both sides are v1.0.000 it proves something better - that stripping CQL,
+        // ELM XML, narratives, and value sets during vendoring changes no population result.
+        const draftPath = resolve(deps.cwd, "measures", "official", "cms122", "bundle.json");
         run.draftDrift = await deps.runDraftDrift(loaded, run, deps.loadDraftBundle(draftPath));
       }
       runs.push(run);

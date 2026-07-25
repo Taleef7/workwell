@@ -1,5 +1,88 @@
 # Journal
 
+## 2026-07-24 (late) — PR-5: vendored official artifacts at v1.0.000, and a licensing rule (branch `feat/vendor-official-measures`)
+
+Roadmap §7.4 PR-5. `measures/official/<catalogId>/{bundle.json,manifest.json}`, written by
+`pnpm vendor:official`. CMS122 re-vendored **v0.5.000 → v1.0.000** and CMS125 vendored for the first
+time; `cms122v14/` deleted along with the `OFFICIAL_CMS122` constant. That hardcoding **was** the
+staleness bug — the version lived in a filename and a literal, so nothing could notice upstream had
+moved on. It now lives in a manifest, with a SHA-256 over the bytes we actually execute.
+
+**A licensing rule came out of inspecting the upstream bundles, and it binds the remaining six.** Each
+ships all 26 ValueSets with full expansions, and those expansions contain **AMA CPT** and SNOMED CT
+codes. This repo is public and Apache-2.0, so redistributing them is not on. Vendoring therefore keeps
+**only `Measure` + `Library` (`application/elm+json`)**; terminology continues to come from our own VSAC
+import at runtime, under our UMLS licence. Checking the previously-committed v0.5.000 bundle showed it
+already contained no ValueSets — the right thing was being done incidentally, and is now explicit,
+documented, and asserted by a test. 16MB raw → ~10MB vendored per measure.
+
+**The size lever is measured but deliberately not pulled.** `--strip-elm-annotations` removes ELM
+`annotation`/`locator`/`localId` for a **79% cut** (9.8MB → 2.1MB of ELM on CMS122), which matters
+because all 8 measures at the current setting is ~80MB and the deploy job-poll window has already had
+to be raised once for image growth (PR #283). It stays off until PR-6's MADiE suite proves it
+outcome-neutral: `localId` is what fqm uses for clause coverage, so this is exactly the kind of thing
+to prove rather than assume.
+
+**Two things repurposed rather than deleted.** The official-cases CLI's "draft drift" check used to
+compare the fetched bundle against our stale v0.5.000; both sides are now v1.0.000, so it proves
+something better — that stripping CQL, ELM XML, narratives and value sets changes no population result.
+And the literal-diff test asserted `version === "0.5.000"` as a literal; it now reads the manifest, so
+the test cannot re-acquire the staleness it was written to catch.
+
+**Finding for PR-7:** CMS122's official artifact declares `improvementNotation: increase`, even though
+it is the inverse measure (numerator = poor glycemic control, so a lower rate is better and eCQI
+describes it as decrease-is-improvement). The manifest records what the artifact declares rather than
+correcting it during vendoring — PR-7 owns what an exported report claims, and whether this is worth
+raising upstream the way fqm#371 was.
+
+The real-fqm end-to-end literal-diff test and the ADR-008 guard both pass against the new v1.0.000
+artifact. Typecheck clean; full suite **1448 pass / 0 fail / 14 skipped**.
+
+**Review round (PR #336) — I asserted a licensing guarantee that was false.** The claim "no licensed
+terminology is vendored" was wrong, and worse, I had enshrined it in a test name and four docs, in a
+public Apache-2.0 repo. Verified directly: the compiled ELM embeds **CPT 97802/97803/97804 with their
+AMA descriptions plus 7 SNOMED direct-reference codes** (cms125: 31 SNOMED), because the official CQL
+declares those codes inline — they cannot be stripped without changing the measure. The retained
+`Measure.copyright` carries both the AMA notice and NCQA's clause that commercial use *"including but
+not limited to vendors using or embedding the measures and specifications into any product or service
+to calculate measure results for customers"* requires NCQA approval. This is **not a regression** (the
+old v0.5.000 bundle carried the same codes), but converting an incidental state into an explicit,
+test-enforced, false guarantee is worse than saying nothing. What is actually true: **no ValueSet
+resources or expansions are vendored**, which removes the bulk (26 expansions × thousands of codes) but
+not the residue. Corrected everywhere it was asserted, and added **`measures/official/NOTICE.md`**
+recording the terms and routing the NCQA commercial-use question to the owner as the legal question it
+is, rather than an engineering one.
+
+Other fixes: **`.gitattributes`** marks the artifacts `-text` — Git's heuristic would CRLF-convert them
+on a Windows clone and break the SHA-256 integrity test while CI stayed green; **loadOfficialArtifact**
+now distinguishes ENOENT (absent, cached quietly) from a real read failure (alerted, **not** cached —
+PR-7 routes production execution through here, and a cached null would silently fall back to authored
+CQL for the life of the worker, so two containers could report different results for the same measure);
+**catalogId is validated** before any filesystem access (`new URL()` normalizes `..`, and PR-7 makes the
+id operator-supplied) with a test that asserts rejection rather than absence-of-throw; the artifact test
+now **cross-checks manifest ↔ the Measure resource** (the SHA only pinned manifest↔bytes, so a
+hand-edited version would have passed everything, and the literal-diff assertion had become a
+manifest-compared-to-itself tautology); **literal-diff provenance now reads the bundle it actually
+executes**, since an injected bundle was being reported under the vendored artifact's identity; the
+bundle is emitted as `type: "collection"` (dropping `fullUrl`/`request` makes it a non-conformant
+transaction Bundle); `--ref` must be a 40-char SHA (a branch name would produce an unreproducible
+artifact); the size warning is mirrored into `Dockerfile.dockerignore`, the file production actually
+reads; and ADR-026 records that the artifact changed **source repository**, not just version
+(`ecqm-content-cms-2025` → `dqm-content-qicore-2025`), which the "v0.5.000 → v1.0.000" framing hid.
+**Honest scope note:** outcome-neutrality of the reduction is argued from mechanism (fqm matches
+libraries by `resourceType`, reads scoring from group extensions, and never reads `fullUrl`) and proven
+end-to-end only by the drift check, which is not yet a CI gate — that is PR-6. **Codex found a third hole neither review caught:** `exitCodeForRuns` read only
+`run.summary`, so the reduction-drift check could report changed population vectors and the command
+would still **exit 0** — meaning PR-6's CI gate would have been built on a command that cannot fail for
+the one thing the drift check exists to prove. Fixed, with a test pinning both failure modes; the
+existing fixture's `changedCases: 3` was also semantically stale (it meant "expected drift from the old
+v0.5.000 draft"; now any change means our reduction altered a result) and is now 0. Codex's other two
+were already fixed in the prior commit, except that ADR-026's original body still read as current before
+a reader reached the amendment — the stale bullets now carry inline SUPERSEDED markers rather than being
+rewritten, preserving the decision record. Full suite
+**1450 pass / 0 fail / 14 skipped**.
+
+
 ## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
 
 Roadmap §7.4 PR-4. ADR-026 quarantined `fqm-execution` (axios/handlebars/moment/lodash) behind a
