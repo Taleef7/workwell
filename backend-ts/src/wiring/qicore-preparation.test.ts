@@ -24,21 +24,47 @@ const bundleWith = (...resources: Array<Record<string, unknown>>): PreparableBun
   entry: resources.map((resource) => ({ resource })),
 });
 
-test("a Condition gets the status QI-Core binds, and an anchored onset", () => {
+test("a Condition gets the status QI-Core binds - and no invented onset", () => {
   const bundle = bundleWith({ resourceType: "Condition", id: "c1" });
-  prepareForQiCore(bundle, "2026-06-01");
+  prepareForQiCore(bundle);
   const condition = bundle.entry[0]!.resource;
   assert.deepEqual(condition.clinicalStatus, {
     coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }],
   });
-  assert.equal(condition.onsetDateTime, "2023-01-01", "three years before the eval date, outside the period");
+  // An onset date is the date of a real event. CMS165 gates denominator membership on hypertension
+  // onset relative to the measurement period, so minting one here would decide who is in the measure.
+  // Measured, it also buys nothing: status alone already yields IPP=25/25 on the CMS122 artifact.
+  assert.equal(condition.onsetDateTime, undefined, "onset is never fabricated");
+});
+
+test("a REAL clinicalStatus is preserved - resolved does not silently become active", () => {
+  // The first cut overwrote unconditionally, which would have turned a corrected misdiagnosis into an
+  // active confirmed problem: that patient enters CMS122's denominator and, with no HbA1c, its
+  // numerator. The defect being fixed is an UNBINDABLE coding, so that is what the guard tests.
+  const resolved = {
+    coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "resolved" }],
+  };
+  const bundle = bundleWith({ resourceType: "Condition", clinicalStatus: resolved });
+  prepareForQiCore(bundle);
+  assert.deepEqual(bundle.entry[0]!.resource.clinicalStatus, resolved);
+});
+
+test("prepared bundles never share a mutable object", () => {
+  // Module-level constants assigned by reference would alias ONE object into every prepared bundle,
+  // so a single downstream mutation would reach all of them at once.
+  const a = bundleWith({ resourceType: "Condition" });
+  const b = bundleWith({ resourceType: "Condition" });
+  prepareForQiCore(a);
+  prepareForQiCore(b);
+  assert.notEqual(a.entry[0]!.resource.clinicalStatus, b.entry[0]!.resource.clinicalStatus);
+  assert.deepEqual(a.entry[0]!.resource.clinicalStatus, b.entry[0]!.resource.clinicalStatus);
 });
 
 test("a system-less clinicalStatus is OVERWRITTEN, not merged", () => {
   // Merging would leave the unmatched synthetic coding beside a matched one and change nothing —
   // QI-Core binds ConditionClinicalStatusCodes, and a coding with no system cannot match it.
   const bundle = bundleWith({ resourceType: "Condition", clinicalStatus: { coding: [{ code: "active" }] } });
-  prepareForQiCore(bundle, "2026-06-01");
+  prepareForQiCore(bundle);
   const coding = (bundle.entry[0]!.resource.clinicalStatus as { coding: Array<{ system?: string }> }).coding;
   assert.equal(coding.length, 1);
   assert.ok(coding[0]!.system, "the surviving coding must be the fully-qualified one");
@@ -51,7 +77,7 @@ test("data that already carries onset, category or Encounter class is left ALONE
     { resourceType: "Condition", onsetDateTime: "2019-04-04", category: [{ text: "real" }] },
     { resourceType: "Encounter", class: { code: "IMP" } },
   );
-  prepareForQiCore(bundle, "2026-06-01");
+  prepareForQiCore(bundle);
   assert.equal(bundle.entry[0]!.resource.onsetDateTime, "2019-04-04");
   assert.deepEqual(bundle.entry[0]!.resource.category, [{ text: "real" }]);
   assert.deepEqual(bundle.entry[1]!.resource.class, { code: "IMP" });
@@ -63,7 +89,7 @@ test("it normalizes structure and never touches a clinical fact", () => {
   const observation = { resourceType: "Observation", code: { coding: [{ code: "x" }] }, valueQuantity: { value: 9.5 } };
   const bundle = bundleWith(observation);
   const before = JSON.stringify(observation);
-  prepareForQiCore(bundle, "2026-06-01");
+  prepareForQiCore(bundle);
   assert.equal(JSON.stringify(bundle.entry[0]!.resource), before, "Observations are not preparable");
 });
 
@@ -72,7 +98,7 @@ test("the copying form leaves its input untouched", () => {
   // requires its outcome to be byte-identical whether or not official routing is on.
   const bundle = bundleWith({ resourceType: "Condition", id: "c1" });
   const original = JSON.stringify(bundle);
-  const prepared = preparedForQiCore(bundle, "2026-06-01");
+  const prepared = preparedForQiCore(bundle);
   assert.equal(JSON.stringify(bundle), original, "the input must not be mutated");
   assert.notEqual(JSON.stringify(prepared), original);
 });
@@ -99,7 +125,7 @@ test("WITHOUT preparation the official artifact reads the whole roster out-of-po
     subjects.map((employee) => {
       const target = seededTargetFor(EMPLOYEES, binding.rateKey, employee.externalId) ?? "MISSING_DATA";
       const bundle = buildSyntheticBundle(employee, deriveExamConfig(binding as never, target), asOf) as never;
-      return prepare ? preparedForQiCore(bundle as PreparableBundle, asOf) : bundle;
+      return prepare ? preparedForQiCore(bundle as PreparableBundle) : bundle;
     });
 
   const period = { start: "2026-01-01", end: "2026-12-31" };

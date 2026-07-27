@@ -72,6 +72,20 @@ jobs:
         with:
           submodules: recursive
       - uses: docker/setup-buildx-action@v3
+      # Same as production (ADR-036): official measure terminology is fetched at build and never
+      # committed, and the image needs it. Staging matters MORE here, not less — it is where the PR-9
+      # flip gets validated against live teatea data, so an image whose fidelity route silently
+      # degrades from `mode:"literal"` to `"subset"` would invalidate exactly that validation.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Vendor official terminology into the build context
+        working-directory: backend-ts
+        run: |
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+      - name: The committed artifact is reproducible from its pin
+        run: git diff --exit-code backend-ts/measures/official
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}

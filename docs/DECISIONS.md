@@ -26,20 +26,33 @@ Measured against the vendored CMS122 artifact over 25 synthetic subjects:
    them is the entire purpose of the shadow period.
 2. **The runtime prepares a COPY.** The authored engine may evaluate the same bundle object, and ADR-008
    requires its outcome to be byte-identical whether or not official routing is on.
-3. **Normalization, never fabrication.** It fills in FHIR structural metadata the official profiles
-   require and touches no clinical fact — no code, no value, no date of an actual event. Fields that are
-   already present (`onset`, `category`, Encounter `class`) are left alone, which is what makes it safe
-   over real WebChart data as well as synthetic. Only `clinicalStatus`/`verificationStatus` are
-   overwritten, because a system-less coding cannot match QI-Core's binding and merging would change
-   nothing.
+3. **Normalization, never fabrication**, and review tightened this twice before it held:
+   - **No invented onset.** The first cut anchored a missing `onsetDateTime` three years before the
+     evaluation date. That is a date of an actual event — exactly what this rule forbids — and CMS165, on
+     the priority list, decides denominator membership on hypertension onset relative to the measurement
+     period. Isolating the parts showed it also bought nothing: **status alone yields IPP=25/25**,
+     identical to applying everything, while onset alone yields 0/25. Removed.
+   - **`clinicalStatus`/`verificationStatus` are replaced only when nothing in them names a system.**
+     The first cut overwrote unconditionally, justified by the synthetic coding being system-less — true
+     of our corpus, false as a rule. It would have turned a `resolved`, `refuted` or `entered-in-error`
+     Condition into an active confirmed one, putting a corrected misdiagnosis into CMS122's denominator
+     and, with no HbA1c, its numerator. The defect is an unbindable coding, so that is the condition.
+
+   Everything else (`category`, Encounter `class`) is filled only when absent, so data that already
+   carries a real value is never rewritten — which is the basis for running this over WebChart data and
+   not only over the synthetic corpus.
 4. **The literal diff uses the artifact's own terminology (ADR-036), with no fallback.** It was the last
    call site still expanding from our VSAC import. A diff that expands one terminology while the runtime
    expands another forecasts a configuration that will never exist, which defeats the point of running it
    before a flip. When the sidecar is absent, `literalDiffAvailable()` reports false and the route
    degrades to the subset tier **visibly, in its `mode` field**, rather than silently swapping sources.
-5. **The deploy workflow vendors terminology into the build context.** Not doing so would have silently
-   downgraded the live stack's `mode:"literal"` to `"subset"` — a regression of a shipped capability.
-   Deliberately not fail-soft.
+5. **Both deploy workflows vendor terminology into the build context** — production and staging. Not
+   doing so would have silently downgraded the live stack's `mode:"literal"` to `"subset"`, a regression
+   of a shipped capability; staging matters more rather than less, since it is where the PR-9 flip gets
+   validated against live teatea data. Deliberately not fail-soft on a MISSING sidecar — but the fetch
+   itself retries with backoff on transport errors and 5xx, because an emergency rollback rebuilds the
+   image and a thirty-second GitHub blip must not block the fix for an unrelated incident. A 4xx at an
+   immutable pin means the path is wrong and is never retried.
 
 **Consequences.**
 
