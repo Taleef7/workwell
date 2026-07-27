@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-07-25
+**Generated:** 2026-07-27
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -108,7 +108,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 
 ### CMS122 reduction check — upstream bundle vs vendored artifact v1.0.000
 
-Using the official v1 Bundle ValueSets as the external cache, 0/55 cases changed population vector; 0 drift errors.
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/55 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 419 named statement results for every subject.
 
@@ -191,7 +191,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; ref
 
 ### CMS125 reduction check — upstream bundle vs vendored artifact v1.0.000
 
-Using the official v1 Bundle ValueSets as the external cache, 0/66 cases changed population vector; 0 drift errors.
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/66 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 423 named statement results for every subject.
 

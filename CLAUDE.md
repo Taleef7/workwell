@@ -110,12 +110,27 @@ FHIR/QI-Core column (QI-Core STU7 = US Core 7 = WebChart's exact surface), repor
 column; QDM only ever appears as a translation at the QRDA boundary. HEDIS guardrail: own spec text +
 cases only, never reproduced NCQA specs (DUA).
 
-**STATUS:** extraction **PR-1 shipped** (branch `feat/engine-boundary-severance`): `ValueSetSource`
-narrow port (engine no longer imports the 30-method `ValueSetStore`), `UnconfiguredEngine` +
-`engine-factory.ts` moved to the new **`src/wiring/`** app-composition layer (5 importers repointed),
-and the `engine/engine-boundary.test.ts` arch guard (no production engine file may import `stores/` or
-`@mieweb/*`). Zero behavior change — full suite 1408/0/14, typecheck clean. Next: PR-2 (physical
-`packages/measure-engine` extraction) per the roadmap's §7.4 sequence.
+**STATUS (2026-07-27): §7.4 PR-1 → PR-8a shipped; nothing is flipped.** `WORKWELL_OFFICIAL_MEASURES` is
+unset everywhere, so `routedEngineForEnv` returns `engineForEnv`'s own value **by identity** and every
+measure still evaluates authored CQL. Shipped: engine-boundary severance + physical
+`packages/measure-engine` extraction (PR-1/2), evidence-first MeasureReport membership (PR-3),
+`packages/official-executor` — the sole home of `fqm-execution`, reached only by lazy `await import`
+and policed by five boundary tests (PR-4), CMS122+CMS125 v1.0.000 vendored (PR-5), the **MADiE CI
+gate** — 55/55 + 66/66, and no measure may be routed without it (PR-6), ELM-annotation stripping
+(PR-6a), the official executor **adapter** (PR-7a), the **router** with construction-time validation
+(PR-7b), `--official` terminology import (PR-7c), and **one terminology authority** (PR-8a / ADR-036 —
+the artifact's OWN expansions, gitignored + fetched at build + pinned by a SHA-256 in the committed
+manifest; the reduction check now executes the runtime configuration and agrees with upstream on all
+121 cases).
+
+**Next: PR-8** — shadow period for cms122/125, plus the obligations PR-7b deferred: bundle preparation
+(`stampQiCoreStructure` — without it the whole roster reads out-of-population), measure-major batching,
+and the `logic_version` override. **Then PR-9** (the flip), which owes two build steps: fetch the
+terminology sidecar in the deploy workflow before `docker build`, and complete the VSAC-capped
+`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). The second is not
+optional bookkeeping — a capped expansion the ELM retrieves is now a **routing refusal**, so cms122 and
+cms125 cannot be flipped until it is done. It changes none of the 121 official cases, which is not the
+same as changing no patient.
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 

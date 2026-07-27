@@ -1,5 +1,96 @@
 # Journal
 
+## 2026-07-27 — PR-8a: one terminology authority (branch `feat/official-terminology-authority`)
+
+Sizing PR-8 turned up something worth stopping for: **the MADiE gate was not evidence about the runtime.**
+
+Two of my own PRs did it, each defensible alone. PR-6a stripped `ValueSet` resources out of the vendored
+`bundle.json` — a **licensing** decision, not a size one: 26 expansions carry thousands of AMA CPT and
+SNOMED CT codes and this repo is public. PR-7a then filled the hole by expanding from our imported VSAC
+`value_sets` rows at runtime. Meanwhile `official-cases.ts` kept validating against the **upstream
+bundle's own** expansions. So the gate ran one terminology and production would run another, and
+121/121 green proved nothing about the path that matters — the single thing that gate exists to do.
+
+The approved plan had already ruled it out, in as many words (§4.3): *"Runtime never mixes two
+terminology authorities."* I drifted from it and did not notice until I went looking for something else.
+
+**The wrong fix, measured and rejected.** Restoring the ValueSets to `bundle.json` costs +605 KB
+(cms122) and +464 KB (cms125) — affordable, and it would commit redistribution of licensed terminology
+from a public repo. The vendor script's own header said so; I was most of the way to recommending it
+before reading it. Fifth time this project a confident claim has been overturned by reading or running
+the thing rather than reasoning about it.
+
+**What shipped instead** — the shape §4.3 and the §8 risk table both prescribe ("public package =
+fetch-at-build"):
+
+- `vendor:official` writes the artifact's OWN expansions, at the same pinned commit as the ELM, to
+  `measures/official/<id>/terminology.json` — **gitignored**, the same fetch-not-vendor pattern
+  `.official-content/` already uses.
+- The **committed** manifest records that file's SHA-256. Bytes that are not stored are still pinned: a
+  regenerated sidecar hashes identically or is refused at load. That is what makes "fetched" as
+  trustworthy as "vendored" without redistributing anything.
+- The router expands from it, **keyed by measure, not by a flat OID map**. CMS122 and CMS125 share 23 of
+  their canonicals, so a flat map works — until two artifacts are pinned at different commits and
+  disagree about one, at which point whichever loaded first silently wins for both.
+- The reduction check now executes the **runtime configuration**: our reduced artifact plus its own
+  sidecar, built through the same `expandArtifactTerminology` the router calls, against upstream's
+  artifact and upstream's ValueSets. **0/55 and 0/66 cases changed population vector.** Calling the
+  production code path rather than re-deriving an equivalent cache is the point — an equivalent one can
+  drift, which is how this happened in the first place.
+- The report records which terminology mode ran, so a weaker check can never be read as the stronger.
+- A missing sidecar is reported as ONE build step, not as 26 expansion failures. It would otherwise
+  render as "26 of 26 value sets could not be expanded" — accurate, and it sends an operator hunting for
+  26 terminology problems instead of running one command. The refusal's remedy text was also wrong:
+  it named `pnpm resolve-valuesets`, which is now explicitly *not* what official execution uses.
+
+The fqm boundary guard caught the new module importing the executor package directly and made me route
+the one type it needs through the adapter instead — the third time that test has corrected me, and the
+third time it was right.
+
+**Side effect worth having:** PR-9 no longer waits on an owner-only UMLS import. The blocker was an
+artifact of the split, not a real dependency.
+
+**The review caught the guard that mattered most being missing.** I had written `cappedExpansions` with
+the docstring "reported at boot so a shortfall is never silent" — and zero production callers. VSAC caps
+expansions at 1000 codes; `AdvancedIllness` (`…1003.110.12.1082`) is capped at 1000 of 1997 in **both**
+bundles, and it feeds the 66+/advanced-illness DENEX in each. The empty-set preflight cannot catch that,
+because half-expanded is not empty — so a flip would have left excluded subjects in the denominator and
+scored them, with no signal anywhere. It is now a routing refusal, filtered to the sets the ELM actually
+retrieves. **cms122 and cms125 are consequently not routable today**, which is the correct answer: it
+changes none of the 121 official cases, and "changes no test case" is not "changes no patient".
+
+Six other findings from the same review, all fixed: the strongest assertions in the PR self-skipped in
+CI (the sidecar-covers-every-canonical test now runs in the `official-cases` job, which fetches);
+`runtimeTerminologyCache` collapsed three unlike causes into "sidecar not present", which could assert a
+file was missing while it sat on disk; the CLI unit tests had quietly become non-hermetic, reading the
+real 2.4 MB artifacts; `localeCompare` was deciding the byte order that the pin hashes (ICU collation
+weights `.` by locale — now code-point); and the sidecar's lookup keys are re-derived with the package's
+own `oidFromValueSetUrl` rather than the vendor script's copy of that rule.
+
+**Two more from CI and Codex, after the first push.** The CI failure was mine and was the same class of
+bug I had just fixed elsewhere: three router tests stubbed the capped-expansion check but not the
+terminology load, so they passed on a machine with the sidecar and failed on one without. The two
+working-tree-dependent stubs are now ONE object that gets spread — half-applying it is no longer
+possible — and I verified the whole suite with the sidecars physically moved aside (1493/0/17), which is
+what I should have done before pushing rather than trusting a machine that happens to have the file.
+
+Codex was right that the cache step I added was vacuous: `vendor:official` fetches unconditionally, so
+the cache would be restored and immediately overwritten while still paying both downloads. Fixed better
+than by caching the output — the script now reads the bundle out of the `.official-content` sparse
+checkout when it sits at the same pin, which CI already caches. Two ~17 MB pulls become zero,
+reproducibility is untouched (a checkout OF an immutable pin is those bytes), and a ref mismatch falls
+back to the network rather than guessing. Verified: byte-identical artifact from the cached path, and a
+bogus `--ref` correctly declines the local copy.
+
+**PR-9 obligations:** complete that capped expansion from VSAC at vendor time, and run the fetch in the
+deploy workflow before `docker build` (the image needs the sidecar). Nothing routes officially today, so
+nothing is broken meanwhile — and both omissions now fail closed at boot rather than silently, which is
+the right failure.
+
+ADR-036. `pnpm test`: **1496 pass / 0 fail / 14 skipped**; typecheck clean; `pnpm test:official-cases`
+55/55 + 66/66 with the reduction check on the runtime configuration.
+
+
 ## 2026-07-25 (night) — PR-7b: the executor router, wired and dark (branch `feat/executor-router`)
 
 `routedEngineForEnv(env)` replaces `engineForEnv(env)` at all 8 call sites — runs (3), cases, measures
