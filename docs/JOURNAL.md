@@ -1,5 +1,84 @@
 # Journal
 
+## 2026-07-27 (evening) — PR-8c: the corpus the official measures can actually answer (branch `feat/official-corpus-fidelity`)
+
+PR-8b ended with a finding and an attribution. The finding was right: with preparation alone, official
+CMS122 scored the synthetic roster IPP=25 / DENOM=25 / **NUMER=0**, and since that measure's numerator is
+*poor glycemic control*, the roster read as 100% compliant — a wrong answer shaped like good news. The
+attribution was wrong: I wrote that "our bundles carry `urn:workwell:*` codes where the official numerator
+retrieves real LOINC." They do not. The corpus has dual-stamped real codes since the 2026-07
+production-faithful promotion, and I could have checked that in one grep before writing it down.
+
+Took the corpus before the remaining PR-8 mechanics, because a shadow period run against data that cannot
+exercise the numerator compares nothing and would have to be run twice.
+
+### What was actually wrong — four things, all measured
+
+1. **12 of 24 codes were members of a value set other than the one they were registered under.** SNOMED
+   103735009 is in "Palliative Care Intervention" but not "Palliative Care Diagnosis". 385763009 is in
+   "Hospice Care Ambulatory" but not "Hospice Encounter". CPT 77067 is in no VSAC mammography set at all.
+2. **CMS125's initial population reads the `us-core-sex` extension**, not `Patient.gender`.
+3. **CMS125's numerator retrieves `[Observation: "Mammography"]`.** The corpus emitted a Procedure, and all
+   92 members of that value set are LOINC.
+4. **Conditions carried no `onsetDateTime`.** `QICoreCommon.prevalenceInterval` is not merely conservative
+   without one — it is inconsistent. CMS122's `prevalenceInterval Overlaps MP` returns true, because an
+   unbounded interval overlaps everything; CMS125's `Start(prevalenceInterval) SameOrBefore End(MP)`
+   returns null, because there is no start to compare.
+
+Defect 1 is the one worth dwelling on, because **no measure test could have caught it**.
+`bundled-ecqm-expansions.ts` supplies both the code stamped on the synthetic resource and the offline
+expansion the authored CQL resolves. A wrong code is wrong in both places at once: the authored retrieve
+still matches, every outcome is exactly as seeded, the suite is green. Internally consistent, externally
+wrong — only an outside authority can see it, and the artifact's own terminology (ADR-036) is that
+authority. That is now a test rather than a habit.
+
+Effect, per measure, across the five synthetic targets, official artifact vs the outcome the corpus was
+authored to produce:
+
+| | before | after |
+|---|---|---|
+| cms122 | 4 of 5 (EXCLUDED scored **COMPLIANT** — the DENEX never fired) | **5 of 5** |
+| cms125 | 0 of 5 (**every subject out-of-population**) | **5 of 5** |
+
+### Decisions worth naming (ADR-038)
+
+- **Dual representation, never replacement.** The mammogram is emitted as a CPT `Procedure` *and* a LOINC
+  `Observation`; the patient carries `gender` *and* `us-core-sex`. Both halves are real — an EHR that
+  performed a screening mammogram has an order record and a result. Replacing either would have moved
+  authored outcomes, which is exactly what a change whose purpose is *comparability* must not do.
+- **The corpus may author an onset; the preparation layer may not.** This qualifies ADR-037 rather than
+  contradicting it, and the distinction is whose fact it is. `qicore-preparation.ts` receives data it did
+  not create and must not invent a clinical date for it — that was a review finding on PR-8b and it was
+  correct. The corpus invents the entire patient by construction; a fictional employee with diabetes was
+  diagnosed on some fictional day, and declining to say when is not neutrality, it is an ill-formed record
+  that happens to read as absent. It also retires a workaround: `cms122.cql` still carries the comment
+  "presence-based (synthetic Conditions often lack onset periods)".
+- **One constant per value set**, enforced. Three codes were each serving two sets while being a member of
+  one, so whichever set you checked from, it looked right.
+
+### Verification
+
+- `pnpm test` — **1510 pass / 0 fail / 14 skipped**; with both terminology sidecars moved aside,
+  **1501 / 0 / 23**. Running both configurations is the discipline adopted after the PR-8a CI failure,
+  where three tests passed locally on a working tree CI did not have.
+- `pnpm test:official-cases` — **55/55 + 66/66**, with the vendored artifact and the evidence report
+  byte-unchanged.
+- Two new guards: `wiring/corpus-membership.test.ts` (every canonical code is a member of the set it is
+  registered under, no two codes share a set, the offline expansion is derived from that table) and
+  `wiring/official-corpus-outcomes.test.ts` (the official artifact scores each target as authored, the
+  authored path agrees, and the corpus is not degenerate). The last assertion is the important one: a
+  corpus scored entirely COMPLIANT looks like success at every layer that can see it.
+
+Authored outcomes are byte-identical throughout, and nothing routes officially —
+`WORKWELL_OFFICIAL_MEASURES` stays unset. One drift guard failed and was right to: `stampEnrollment`
+builds the WebChart enrollment Condition and is pinned byte-identical to the synthetic builder's, so
+adding an onset on one side only broke it. Both now carry it, which matters beyond the test — that is
+the Condition a live WebChart subject would be evaluated against.
+
+**Still open for PR-8:** generalize the standards diff past its cms122 hardcode, measure-major batching
+with a batch-level `hasRetrieveSignal`, and the `logic_version` override. **Still owed by PR-9:** the
+VSAC-capped `AdvancedIllness` expansion (1000 of 1997), which is a routing refusal today.
+
 ## 2026-07-27 (later) — PR-8b: bundle preparation, and what it revealed (branch `feat/official-bundle-preparation`)
 
 Started PR-8 by checking a claim rather than inheriting it. The router's docstring has said since PR-7b
