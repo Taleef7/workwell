@@ -101,11 +101,20 @@ export async function chooseDiffMode(
   resolver: ValueSetResolver,
   literalAvailable = false,
 ): Promise<"literal" | "subset" | "estimate"> {
+  // The literal tier's readiness is fully described by `literalDiffAvailable(measureId)` — since ADR-036
+  // it takes terminology from the artifact's OWN sidecar and never touches `value_sets`. So the VSAC
+  // probe below cannot inform it, and gating on it did two wrong things: it declined a working literal
+  // diff on any stack that never ran `pnpm resolve-valuesets` (a fresh clone, local dev), and — once
+  // PR-8d opened the tier to other measures — it declined cms125 whenever cms122's hand-kept 21 OIDs
+  // were missing, a condition with nothing to do with cms125.
+  if (literalAvailable) return "literal";
+  // Below here is the SUBSET tier's gate, which is what the probe was written for: that tier executes
+  // cms122's hand-authored official-subset CQL, which does resolve these OIDs from the store.
   const oids = CMS122_OFFICIAL_META.valueSets ?? [];
   if (oids.length === 0) return "estimate";
   const expansions = await Promise.all(oids.map((oid) => resolver.expand(oid)));
   if (!expansions.every((codes) => codes.length > 0)) return "estimate";
-  return literalAvailable ? "literal" : "subset";
+  return "subset";
 }
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
@@ -493,12 +502,17 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
     const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
     const resolver = new StoreValueSetResolver(stores.valueSets);
-    // Real execution diff only for cms122, only when there IS a completed population run (an empty
-    // latestRows must fall through to the estimate's no-run response, not render a misleading "0 of 0
-    // diverge" report — Codex P2), and only when the imported VSAC rows are present. The three-tier ladder
-    // (#258): literal (official QICore artifact via fqm-execution) → subset (ADR-024) → estimate (PR-2).
-    if (diffId === "cms122" && latestRows.length > 0) {
-      const mode = await chooseDiffMode(resolver, literalDiffAvailable());
+    // Real execution diff for ANY measure with a vendored official artifact + recorded semantics — the
+    // literal tier was gated on `diffId === "cms122"` while the roadmap called the shadow period a
+    // cms122+cms125 exercise, so cms125 silently answered with the estimate. Still only when there IS a
+    // completed population run (an empty latestRows must fall through to the estimate's no-run response,
+    // not render a misleading "0 of 0 diverge" report — Codex P2). The three-tier ladder (#258): literal
+    // (official QICore artifact via fqm-execution) → subset (ADR-024) → estimate (PR-2). The SUBSET tier
+    // remains cms122-only: it executes a hand-authored official-subset CQL that exists for that measure
+    // alone, so any other measure degrades literal → estimate.
+    const literalAvailable = literalDiffAvailable(diffId);
+    if ((diffId === "cms122" || literalAvailable) && latestRows.length > 0) {
+      const mode = await chooseDiffMode(resolver, literalAvailable);
       if (mode !== "estimate") {
         // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
         // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
@@ -513,11 +527,24 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
           try {
             return json(await computeLiteralDiff(ref, latestRows, deps));
           } catch (err) {
-            // fqm-execution fought the runtime — degrade to the subset tier rather than failing the route.
-            console.warn(`[fidelity/diff] literal tier failed, falling back to subset: ${err instanceof Error ? err.message : String(err)}`);
+            // fqm-execution fought the runtime — degrade rather than failing the route. For anything but
+            // cms122 the next rung is the ESTIMATE, not the subset: `computeExecutionDiff` executes a
+            // hand-authored official-subset CQL that exists only for cms122, so calling it for another
+            // measure would report cms122's criteria under that measure's name.
+            console.warn(
+              `[fidelity/diff] literal tier failed for ${diffId}, degrading to ` +
+                `${diffId === "cms122" ? "subset" : "estimate"}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            if (diffId !== "cms122") return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
           }
         }
-        return json(await computeExecutionDiff(ref, latestRows, deps));
+        // Defence in depth, not a reachable hole. `chooseDiffMode` returns "subset" only when
+        // `literalAvailable` is false, and the outer guard already excluded every non-cms122 measure in
+        // that case — so this branch is cms122-only by construction today. The guard stays because that
+        // reasoning spans two functions and one `if`, and the failure it prevents is reporting cms122's
+        // criteria under another measure's name. (An earlier version of this comment claimed the branch
+        // WAS reachable; it is not, and the route test below pins the invariant either way.)
+        if (diffId === "cms122") return json(await computeExecutionDiff(ref, latestRows, deps));
       }
     }
     return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));

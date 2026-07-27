@@ -432,22 +432,31 @@ Each outcome evidence payload includes:
   ships no GMI value set, so no VSAC OID is invented) — the remaining simplification for that criterion is
   terminology-only (this code filter vs the official combined "Glycemic Status Assessment" VSAC set), and
   WorkWell's own **authored** cms122 still models neither GMI nor a recency window (see Fable L15 above).
-  The diff is **CMS122-only**.
+  The SUBSET diff is **CMS122-only** (it executes a hand-authored `cms122_official.cql`), and the route
+  enforces that: any other measure degrades literal → estimate, never literal → subset.
   **(#258, 2026-07-09 — LITERAL tier SHIPPED; supersedes ADR-024's "revisit on a stable translator"
-  clause — ADR-026)** The fidelity diff now has a **three-tier ladder** — `literal → subset → estimate` —
-  surfaced by an additive `mode` field in the response. The **literal** tier executes the *actual official
-  multi-library QICore CMS122v14 artifact* (MADiE FHIR export `CMS122FHIRDiabetesAssessGreaterThan9Percent`
-  v0.5.000 *(historical — re-vendored to v1.0.000 from `dqm-content-qicore-2025` in PR-5, 2026-07-24)*, `using QICore '6.0.0'`, 8 included libraries — the exact CQL ADR-024 proved un-compilable under
-  the pinned JS translator) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the
-  bundle's `Library.content` (`application/elm+json`) — **no translation happens**. The bundle is vendored
-  with provenance under `backend-ts/measures/official/cms122/`; value sets are supplied from the imported
-  VSAC `value_sets` rows via a `valueSetCache` (no runtime VSAC key). `fqm-execution` is a **diagnostic-only**
-  dependency — imported solely by `standards/literal-diff.ts`, never the run pipeline / ingress / worker
-  (arch-tested by `fqm-isolation.test.ts`). Per-subject population membership (IPP/DENEX/NUMER) maps to the
-  outcome vocabulary with population-level gate attribution; a harness-local `stampQiCoreStructure`
-  normalizes the synthetic Conditions to QICore active/confirmed + in-past onset (fields WorkWell's cms122
-  ignores — its outcomes stay byte-identical, ADR-008 guard test). The subset tier remains the fallback when
-  the vendored bundle is absent or the literal execution fails at runtime; the estimate remains the floor.
+  clause — ADR-026. Generalized 2026-07-27, ADR-039.)** The fidelity diff has a **three-tier ladder** —
+  `literal → subset → estimate` — surfaced by an additive `mode` field in the response. The **literal**
+  tier executes the *actual official multi-library QICore artifact* of any vendored measure (MADiE FHIR
+  export, `using QICore '6.0.0'` — the exact CQL ADR-024 proved un-compilable under the pinned JS
+  translator) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the bundle's
+  `Library.content` (`application/elm+json`) — **no translation happens**. Bundles are vendored with
+  provenance under `backend-ts/measures/official/<catalogId>/` (cms122 + cms125 today); value sets come
+  from **the artifact's own terminology sidecar** (ADR-036) with no fallback to the `resolve-valuesets`
+  VSAC import. `fqm-execution` is a **diagnostic-only** dependency, declared by
+  `packages/official-executor` alone and reached through a lazy `await import` — never the run pipeline /
+  ingress / worker (arch-tested by `fqm-isolation.test.ts`).
+
+  Per-subject population membership (IPP/DENEX/DENEXCEP/NUMER) maps to the outcome vocabulary with
+  population-level gate attribution, through the fail-closed `officialMeasureSemantics` table — a measure
+  with no recorded reading of its numerator is *unavailable* for the tier rather than scored under
+  another measure's. Since ADR-039 the tier is a genuine **SHADOW of the runtime**: the same measurement
+  period (`officialMeasurementPeriod`), the same `preparedForQiCore` copy with the authored engine still
+  seeing the original bundle, the same `outcomeFromPopulations` mapping, and **no harness enrichment** —
+  that stays in the SUBSET tier, where manufactured divergence is the point. Memoized per **measure +
+  run-id**. WorkWell's own outcomes stay byte-identical (ADR-008 guard). The subset tier is the fallback
+  when cms122's vendored bundle is absent or its literal execution fails at runtime; the estimate remains
+  the floor.
 - All five HEDIS wellness measures (including `adult_immunization`) are seeded via `ensureInstanceSeeds()` when `WORKWELL_INSTANCE=ecqm` or `twh`.
 - The synthetic FHIR bundles declare QI-Core conformance: each resource carries a QI-Core `meta.profile`
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not

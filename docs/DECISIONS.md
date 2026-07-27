@@ -1,5 +1,86 @@
 # Architecture Decision Records
 
+## ADR-039: The shadow diff is a shadow of the runtime, not a study of its own
+
+**Status:** Accepted (2026-07-27). Roadmap §7.4, PR-8d. Nothing routes officially yet.
+
+**Context.** `standards/literal-diff.ts` exists to answer one question before PR-9 flips a measure: what
+will the flip do? It can only answer that if it evaluates what the runtime would evaluate. Auditing it
+against `wiring/official-executor-adapter.ts` — the thing it is supposed to forecast — found three
+divergences and one latent inversion:
+
+| | the diff did | the runtime does |
+|---|---|---|
+| measurement period | the CALENDAR YEAR (`2026-01-01 … 2026-12-31`) | the registry's rolling window (`asOf − periodMonths … asOf`) |
+| the bundle | harness-ENRICHED — VSAC codings appended plus deliberate age-out / missing-visit / hospice / GMI injection | the plain synthetic bundle |
+| preparation | `prepareForQiCore` **in place**, then WorkWell evaluated on the mutated bundle | `preparedForQiCore` on a **copy**, WorkWell sees the original |
+
+For an as-of of 2026-07-27 the two periods share barely half their days, so any difference they produced
+would have been read as a *logic* divergence. And the enrichment manufactured divergence on purpose —
+correct when the corpus could not reach the official populations at all, actively misleading once PR-8c
+fixed that (ADR-038): a shadow period that invents divergence forecasts divergence that will not happen.
+
+Separately, `officialOutcome` hardcoded `numerator ? OVERDUE : COMPLIANT`. That is **cms122's inverse
+reading** — its numerator is poor glycemic control. cms125's numerator is a completed mammogram, so the
+same code would have reported every screened woman OVERDUE and every unscreened one COMPLIANT. Latent
+only because the route gated the literal tier on `diffId === "cms122"`, which is also why the roadmap's
+"shadow period cms122/125" was not actually possible: cms125 silently answered with the estimate.
+
+**Decision.**
+
+1. **Same period, same bundle, same preparation.** `officialMeasurementPeriod(measureId, evaluationDate)`
+   is exported from the adapter and called by both. The enrichment is gone from the literal path. The
+   diff prepares a copy and hands the authored engine the original, exactly as the runtime does.
+2. **Numerator semantics come from `officialMeasureSemantics`**, the same fail-closed table the runtime
+   consults — and a measure with no recorded semantics is now *unavailable* for the literal tier rather
+   than silently mapped under another measure's reading.
+3. **Any vendored measure, not cms122.** `literalDiffAvailable(measureId)` takes an argument; the route
+   offers the literal tier to any measure with an artifact, semantics and terminology.
+4. **The SUBSET tier stays cms122-only, guarded at both its exits.** It executes a hand-authored
+   official-subset CQL that exists for cms122 alone. Only ONE exit was actually reachable for another
+   measure — the literal-failure `catch`; the `mode === "subset"` branch is unreachable by construction,
+   since `chooseDiffMode` returns "subset" only when the literal tier is unavailable, which the outer
+   guard already excludes. Review corrected an earlier claim here that both were reachable. Both are
+   guarded anyway: the reasoning spans two functions and an `if`, and the failure it prevents — cms122's
+   criteria reported under cms125's name — is the exact wrongness this ladder exists to expose.
+5. **`chooseDiffMode` no longer gates the literal tier on cms122's VSAC import.** Since ADR-036 the
+   literal path reads the artifact's own sidecar and never touches `value_sets`, so the probe could not
+   inform it — yet it declined a working literal diff on any stack that never ran `pnpm
+   resolve-valuesets`, and (once the tier opened up) declined cms125 whenever cms122's hand-kept OIDs
+   were missing. The probe remains what it was written to be: the SUBSET tier's gate.
+6. **The fidelity LAB keeps its enrichment.** `execution-diff.ts` compares authored cms122 against a
+   hand-authored subset; manufactured divergence is the point there. The distinction is what each is
+   FOR — one forecasts a production change, the other studies a modelling gap.
+
+**What review caught, because generalizing a cache is not free.**
+
+- **The memo was keyed on `runId` alone**, which was safe only while the tier was cms122-only. An
+  `ALL_PROGRAMS` run writes every measure's outcomes under ONE run id, so asking for cms122's diff and
+  then cms125's returned the *identical object* — cms122's measureId, ecqmId, subjects and provenance,
+  under cms125's URL. The same wrongness closed at the route, re-opened one layer down; the new
+  cms125-test's `__clearLiteralDiffCache()` between calls was working around it rather than exposing it.
+  Now keyed `measureId|runId`, in both diff tiers, with a regression test that does not clear.
+- **`officialOutcome` was a second copy of the runtime's mapping, and they disagreed** on the branch
+  that matters most: out of the initial population the diff said `OUT_OF_POPULATION` where the runtime
+  and both authored measures say `MISSING_DATA`. A subject the two engines fully AGREE about was
+  therefore counted as a divergence against the `initial-population` gate. Measured latent on today's
+  corpus (0 out-of-population subjects across all 100 employees, both measures) and not latent for the
+  six measures still to onboard, nor for live WebChart data. It now calls `outcomeFromPopulations` — the
+  fourth and last thing this ADR aligns.
+
+**Consequences.**
+
+- **The ADR-008 guard got stronger.** With the diff feeding the authored engine the plain bundle, it can
+  assert what it could not before: WorkWell's side of the diff equals a direct evaluation of the same
+  subject. The previous best was self-consistency across two passes — true of any deterministic
+  function, including a wrong one.
+- **The cms122 diff's numbers will change**, and should: it now reports the divergence the flip will
+  actually produce over the real corpus rather than over an enriched one. After ADR-038 that is close to
+  none, which is the honest answer and the one PR-9 needs.
+- **cms125 can enter the shadow period at all**, which the roadmap assumed it already could.
+- Full suite **1517 pass / 0 fail / 14 skipped**; **1506 / 0 / 25** with the terminology sidecars removed;
+  MADiE gate 55/55 + 66/66 with the vendored artifact and the evidence report byte-unchanged.
+
 ## ADR-038: The synthetic corpus is verified against the official artifact's own terminology
 
 **Status:** Accepted (2026-07-27). Roadmap §7.4, PR-8c. Nothing routes officially yet.

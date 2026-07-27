@@ -89,6 +89,9 @@ function attributeGate(
 // (which anchors the synthetic bundles): a report cached before a day boundary is reused after it, but
 // the run is immutable and cms122 is value-based (not recency-based), so the delta is negligible and a
 // worker redeploy clears the cache anyway.
+// Keyed on measure AND run, mirroring literal-diff. cms122-only today, so runId alone would still be
+// correct — but an ALL_PROGRAMS run gives every measure the same run id, and leaving the sibling caches
+// asymmetric is how the next measure onboarded inherits the bug that one had.
 const cache = new Map<string, ExecutionDiffReport>();
 /** @internal test hook */
 export function __clearExecutionDiffCache(): void {
@@ -101,7 +104,8 @@ export async function computeExecutionDiff(
   deps: ExecutionDiffDeps,
 ): Promise<ExecutionDiffReport> {
   const runId = rows[0]?.runId ?? null;
-  if (runId && cache.has(runId)) return cache.get(runId)!;
+  const cacheKey = runId ? `${ref.measureId}|${runId}` : null;
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)!;
 
   const expansions: Expansions = new Map<string, CqlCode[]>();
   for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) expansions.set(oid, await deps.resolver.expand(oid));
@@ -154,7 +158,7 @@ export async function computeExecutionDiff(
   };
   if (runId) {
     if (cache.size >= 16) cache.clear();
-    cache.set(runId, report);
+    cache.set(cacheKey!, report);
   }
   return report;
 }
