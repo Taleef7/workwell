@@ -1,5 +1,76 @@
 # Architecture Decision Records
 
+## ADR-037: Official execution prepares bundles for QI-Core — normalization only, never fabrication
+
+**Status:** Accepted (2026-07-27). Roadmap §7.4 PR-8. Nothing routes officially yet.
+
+**Context.** Official artifacts retrieve against QI-Core profiles, which are materially stricter than
+the plain FHIR this repo emits: a diabetes `Condition` must be an ACTIVE, CONFIRMED problem whose
+prevalence period overlaps the measurement period, and an `Encounter` is expected to carry a `class`.
+Our synthetic Conditions ship a system-less `clinicalStatus` and no `onsetDateTime`.
+
+`standards/literal-diff.ts` had a private `stampQiCoreStructure` for this, and the router's docstring
+carried "must call it, or the whole population reads out-of-population" as an unmeasured obligation.
+Measured against the vendored CMS122 artifact over 25 synthetic subjects:
+
+| bundle | IPP | DENOM | NUMER |
+|---|---|---|---|
+| raw synthetic | **0** | 0 | 0 |
+| + preparation | 25 | 25 | **0** |
+| + preparation + harness enrichment | 22 | 22 | 4 |
+
+**Decision.**
+
+1. **One preparation, used by both paths.** `wiring/qicore-preparation.ts` — the diff and the runtime
+   executor call the same function. Two implementations of this could not be compared, and comparing
+   them is the entire purpose of the shadow period.
+2. **The runtime prepares a COPY.** The authored engine may evaluate the same bundle object, and ADR-008
+   requires its outcome to be byte-identical whether or not official routing is on.
+3. **Normalization, never fabrication**, and review tightened this twice before it held:
+   - **No invented onset.** The first cut anchored a missing `onsetDateTime` three years before the
+     evaluation date. That is a date of an actual event — exactly what this rule forbids — and CMS165, on
+     the priority list, decides denominator membership on hypertension onset relative to the measurement
+     period. Isolating the parts showed it also bought nothing: **status alone yields IPP=25/25**,
+     identical to applying everything, while onset alone yields 0/25. Removed.
+   - **`clinicalStatus`/`verificationStatus` are replaced only when nothing in them names a system.**
+     The first cut overwrote unconditionally, justified by the synthetic coding being system-less — true
+     of our corpus, false as a rule. It would have turned a `resolved`, `refuted` or `entered-in-error`
+     Condition into an active confirmed one, putting a corrected misdiagnosis into CMS122's denominator
+     and, with no HbA1c, its numerator. The defect is an unbindable coding, so that is the condition.
+
+   Everything else (`category`, Encounter `class`) is filled only when absent, so data that already
+   carries a real value is never rewritten — which is the basis for running this over WebChart data and
+   not only over the synthetic corpus.
+4. **The literal diff uses the artifact's own terminology (ADR-036), with no fallback.** It was the last
+   call site still expanding from our VSAC import. A diff that expands one terminology while the runtime
+   expands another forecasts a configuration that will never exist, which defeats the point of running it
+   before a flip. When the sidecar is absent, `literalDiffAvailable()` reports false and the route
+   degrades to the subset tier **visibly, in its `mode` field**, rather than silently swapping sources.
+5. **Both deploy workflows vendor terminology into the build context** — production and staging. Not
+   doing so would have silently downgraded the live stack's `mode:"literal"` to `"subset"`, a regression
+   of a shipped capability; staging matters more rather than less, since it is where the PR-9 flip gets
+   validated against live teatea data. Deliberately not fail-soft on a MISSING sidecar — but the fetch
+   itself retries with backoff on transport errors and 5xx, because an emergency rollback rebuilds the
+   image and a thirty-second GitHub blip must not block the fix for an unrelated incident. A 4xx at an
+   immutable pin means the path is wrong and is never retried.
+
+**Consequences.**
+
+- **This does NOT make the synthetic corpus sufficient for official cms122, and that gates PR-9.** With
+  preparation alone the 25 subjects score IPP=25 / DENOM=25 / NUMER=0, and cms122's numerator is *poor
+  glycemic control* — so the roster renders as **100% compliant**. A wrong answer that looks like good
+  news is worse than an obviously broken one, and no automatic check distinguishes it from a genuinely
+  well-controlled population: `hasRetrieveSignal` passes, because retrieves DID match.
+  The gap is that our corpus carries `urn:workwell:*` codes where the official numerator retrieves real
+  LOINC. `standards/cms122-official.ts` closes it with a harness-local enrichment for the diff, and that
+  enrichment must **never** move into the runtime — synthesising clinical codes at evaluation time is
+  fabrication. The real fix is a synthetic corpus that emits real codes, which the roadmap already
+  schedules per measure at PR-10..12.
+- The shadow period (PR-8) is therefore the gate that catches this class, not a formality.
+- Descriptive only (ADR-008): preparation changes what the official artifact can see, never what CQL
+  decides. Nothing routes officially, so no current outcome changes.
+
+
 ## ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
 
 **Status:** Accepted (2026-07-27). Roadmap §4.3 called this in advance ("bundle-shipped expansions

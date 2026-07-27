@@ -58,6 +58,32 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # Official measure TERMINOLOGY is fetched at build and never committed (ADR-036): the expansions
+      # carry licensed AMA CPT / SNOMED CT content that a public repo must not redistribute, so the
+      # artifact's own value sets live in a gitignored `terminology.json` pinned by a SHA-256 in the
+      # committed manifest. The image needs it — `.dockerignore` deliberately keeps `measures/official/`
+      # and the Dockerfile COPYs the tree, so producing the file here is what puts it in the image.
+      #
+      # Without this step the fidelity route's LITERAL tier degrades to the subset tier (visibly, in its
+      # `mode` field) because terminology cannot be expanded, and PR-9's routed measures would refuse at
+      # boot. Deliberately NOT fail-soft: an image missing this is incomplete, and a deploy that hides
+      # that is how "the monitoring said green" happens.
+      #
+      # Invoked as plain `node`, not through pnpm: the script imports nothing outside node: builtins and
+      # global fetch, so this needs no install and no package manager on the deploy path.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Vendor official terminology into the build context
+        working-directory: backend-ts
+        run: |
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+      # The vendored artifact must not have changed — only the gitignored sidecar is new. A non-empty
+      # diff means the committed bundle does not match its pin, which must never reach a deploy image.
+      - name: The committed artifact is reproducible from its pin
+        run: git diff --exit-code backend-ts/measures/official
+
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}

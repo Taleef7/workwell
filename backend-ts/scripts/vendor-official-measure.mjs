@@ -102,6 +102,30 @@ function parseArgs(argv) {
 
 const sha256 = (text) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Fetch with a bounded retry on transport errors and 5xx; 4xx fails immediately (see the call site). */
+async function fetchWithRetry(url, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return await response.text();
+      if (response.status < 500) throw new Error(`unable to fetch ${url}: HTTP ${response.status}`);
+      lastError = new Error(`unable to fetch ${url}: HTTP ${response.status}`);
+    } catch (err) {
+      if (String(err.message).includes("HTTP 4")) throw err;
+      lastError = err;
+    }
+    if (attempt < attempts) {
+      const backoffMs = 1000 * 2 ** (attempt - 1);
+      console.warn(`  fetch attempt ${attempt}/${attempts} failed (${lastError.message}); retrying in ${backoffMs}ms`);
+      await sleep(backoffMs);
+    }
+  }
+  throw lastError;
+}
+
 /** Recursively drop ELM debug/provenance keys. See the warning in the header before enabling. */
 function stripAnnotations(node) {
   if (Array.isArray(node)) return node.map(stripAnnotations);
@@ -319,9 +343,11 @@ if (raw) {
 } else {
   const url = `https://raw.githubusercontent.com/${REPO}/${args.ref}/bundles/measure/${args.measure}/${args.measure}-bundle.json`;
   console.log(`fetching ${args.measure} @ ${args.ref.slice(0, 12)}`);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`unable to fetch ${url}: HTTP ${response.status}`);
-  raw = await response.text();
+  // Bounded retry. This runs on the DEPLOY path, and failing closed on a missing sidecar is right
+  // while failing closed on a transient GitHub blip is not — an emergency rollback rebuilds the image,
+  // so a 30-second outage would block the fix for an unrelated incident. A 404 is not retried: at a
+  // pinned immutable ref it means the path is wrong, and retrying cannot change that.
+  raw = await fetchWithRetry(url);
 }
 
 const upstream = JSON.parse(raw);

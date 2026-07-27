@@ -14,6 +14,13 @@ import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
 
+/**
+ * Terminology for the tests that assert MAPPING rather than terminology. Injected so the offline suite
+ * never depends on the fetched-at-build sidecar — the real one is exercised by the end-to-end test
+ * below, which self-skips without it.
+ */
+const STUB_TERMINOLOGY: unknown[] = [];
+
 // Resolver supplying the gating VSAC members (diabetes / HbA1c / office visit / hospice / palliative);
 // everything else resolves empty → an empty-but-present ValueSet in the fqm cache (no missing-VS error).
 const RESOLVER: ValueSetResolver = {
@@ -32,7 +39,9 @@ const rows = (n: number) =>
   EMPLOYEES.slice(0, n).map((e) => ({ subjectId: e.externalId, status: "MISSING_DATA", runId: "run-lit-1", runStartedAt: "2026-06-30T00:00:00Z" }));
 
 test("vendored official CMS122v14 bundle is present with pre-compiled ELM (the gate)", () => {
-  assert.equal(literalDiffAvailable(), true);
+  // `literalDiffAvailable()` is deliberately NOT asserted here: since ADR-036 it also reports whether
+  // the fetched-at-build terminology sidecar is present, which is a fact about the working tree. This
+  // test is about the COMMITTED artifact, and that must hold on any clone.
   const b = loadOfficialCms122Bundle();
   assert.ok(b);
   const libs = b!.entry.filter((e) => e.resource?.resourceType === "Library");
@@ -61,7 +70,7 @@ test("literal diff: injected calculate → per-subject mapping, gate attribution
     return Promise.resolve({ results });
   };
 
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: fakeCalculate };
+  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: fakeCalculate };
   const report = await computeLiteralDiff(CMS122V14, rows(12), deps);
 
   assert.equal(report.mode, "literal");
@@ -98,7 +107,7 @@ test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Code
       })),
     });
   };
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: spyCalculate };
+  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: spyCalculate };
   await computeLiteralDiff(CMS122V14, rows(4), deps);
   assert.ok(capturedOptions, "calculate must be invoked with an options object");
   assert.equal(capturedOptions!.calculateHTML, false, "fqm-execution 1.8.5 has no disableHTMLGeneration option — calculateHTML must be explicitly disabled");
@@ -110,7 +119,13 @@ test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Code
   assert.equal(capturedOptions!.disableHTMLGeneration, undefined, "disableHTMLGeneration is not a real fqm-execution option — must not be relied on");
 });
 
-test("literal diff: REAL fqm-execution runs the official QICore artifact end-to-end", async () => {
+test("literal diff: REAL fqm-execution runs the official QICore artifact end-to-end", {
+  // The one test here that must use the REAL terminology: it executes the actual QICore artifact, and
+  // an empty stub cache would make every retrieve match nothing — the run would "pass" while proving
+  // the opposite of what it claims. Self-skips without the fetched sidecar; CI's official-cases job
+  // has it.
+  skip: literalDiffAvailable() ? false : "run 'pnpm vendor:official' to fetch the terminology sidecar",
+}, async () => {
   __clearLiteralDiffCache();
   const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };
   // Small slice so the (real) QICore multi-library execution stays fast; ELM is cached across patients.
@@ -133,10 +148,10 @@ test("ADR-008 guard: the literal diff never changes WorkWell's cms122 outcome on
   const engine = new CqlExecutionEngine({ valueSetResolver: RESOLVER });
   const noopCalculate = (_mb: unknown, patientBundles: unknown[]) =>
     Promise.resolve({ results: (patientBundles as Array<{ entry: Array<{ resource: { resourceType?: string; id?: string } }> }>).map((pb) => ({ patientId: pb.entry.find((e) => e.resource.resourceType === "Patient")?.resource.id, detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }] })) });
-  const report = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: noopCalculate });
+  const report = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: noopCalculate });
   // Second independent pass through computeLiteralDiff (cleared cache) must match byte-for-byte.
   __clearLiteralDiffCache();
-  const again = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", calculate: noopCalculate });
+  const again = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: noopCalculate });
   assert.equal(again.subjects.length, report.subjects.length);
   for (let i = 0; i < report.subjects.length; i++) {
     const a = report.subjects[i]!;

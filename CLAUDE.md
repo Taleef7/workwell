@@ -123,14 +123,22 @@ the artifact's OWN expansions, gitignored + fetched at build + pinned by a SHA-2
 manifest; the reduction check now executes the runtime configuration and agrees with upstream on all
 121 cases).
 
-**Next: PR-8** — shadow period for cms122/125, plus the obligations PR-7b deferred: bundle preparation
-(`stampQiCoreStructure` — without it the whole roster reads out-of-population), measure-major batching,
-and the `logic_version` override. **Then PR-9** (the flip), which owes two build steps: fetch the
-terminology sidecar in the deploy workflow before `docker build`, and complete the VSAC-capped
-`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). The second is not
-optional bookkeeping — a capped expansion the ELM retrieves is now a **routing refusal**, so cms122 and
-cms125 cannot be flipped until it is done. It changes none of the 121 official cases, which is not the
-same as changing no patient.
+**PR-8b shipped (ADR-037):** one `qicore-preparation` used by both the diff and the runtime executor
+(measured — unprepared, the official artifact reads the whole roster out-of-population), the literal diff
+moved onto the artifact's own terminology with no fallback, and the deploy workflow vendors terminology
+into the build context. **It surfaced the gate for PR-9:** preparation alone renders the synthetic corpus
+as **100% compliant** for cms122 (NUMER=0, because our bundles carry `urn:workwell:*` codes where the
+official numerator retrieves real LOINC) — a wrong answer that looks like good news, which nothing
+automatic detects. Fixing it means a corpus that emits real codes, never runtime enrichment.
+
+**Next: PR-8 (remaining)** — the shadow period itself: generalize the standards diff beyond its cms122
+hardcode, measure-major batching + a batch-level `hasRetrieveSignal`, and the `logic_version` override. **Then PR-9** (the flip). It owes ONE build step now — the
+deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
+`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
+bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot
+be flipped until it is done. It changes none of the 121 official cases, which is not the same as
+changing no patient. **Plus the PR-8b finding:** the synthetic corpus must emit real codes before an
+official cms122 flip means anything on the demo stack, or the roster reads 100% compliant.
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 

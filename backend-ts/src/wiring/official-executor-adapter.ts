@@ -36,11 +36,13 @@
  *
  * ## What this does NOT yet do — PR-7b's obligations, stated so they cannot be forgotten
  *
- * - **It does not prepare the bundle.** `standards/literal-diff.ts` must call `stampQiCoreStructure`
- *   (QICore active/confirmed status, in-past onset, Encounter class) before this same artifact reads
- *   WorkWell's synthetic bundles, or "the whole population reads out-of-population". This adapter takes
- *   the bundle it is handed. Wiring that preparation — and a batch-level `hasRetrieveSignal` check,
- *   which is only meaningful across subjects — belongs with the router.
+ * - **DONE in PR-8: it prepares the bundle.** `preparedForQiCore` runs on a structural COPY before
+ *   every evaluation (QI-Core active/confirmed status, in-past onset, Encounter class). Measured
+ *   without it, an unprepared synthetic roster scores IPP=0 — a run that completes and reports
+ *   everyone MISSING_DATA. Still open: a batch-level `hasRetrieveSignal` check, which is only
+ *   meaningful across subjects and so belongs with the measure-major batching PR-8 adds to the router.
+ *   Note it would NOT catch the more dangerous case — see `qicore-preparation.ts` on why preparation
+ *   alone renders the synthetic corpus as 100% compliant for cms122.
  * - **It re-expands terminology on every call.** Fine for a dark, per-subject binding; not fine for a
  *   150-subject run, which would be ~300 ELM parses of a 2.4MB bundle and thousands of store reads on
  *   the database whose idle polling already caused a four-day outage. PR-7b batches per measure. Any
@@ -83,6 +85,7 @@ import type {
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
+import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 
 /**
  * Expand one value-set OID to its codes, for a named measure.
@@ -373,9 +376,15 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       };
 
       const valueSetCache = await cacheFor(artifact);
+      // Prepared, and on a COPY. Official artifacts retrieve against QI-Core profiles, which are
+      // stricter than the plain FHIR this repo emits — measured, an unprepared synthetic roster scores
+      // IPP=0 across the board (`qicore-preparation.ts`). The copy is what keeps ADR-008: the authored
+      // engine may evaluate this same bundle object, and its outcome must be byte-identical whether or
+      // not official routing is on.
+      const patientBundle = preparedForQiCore(input.patientBundle as PreparableBundle);
       const results = await calculateOfficialDetailed({
         bundle: artifact.bundle,
-        patientBundles: [input.patientBundle],
+        patientBundles: [patientBundle],
         period,
         valueSetCache,
         ...(deps.calculate ? { calculate: deps.calculate } : {}),
