@@ -15,7 +15,7 @@
 import type { EmployeeProfile } from "./employee-catalog.ts";
 import type { ExamConfig } from "./exam-config.ts";
 import type { MeasureBinding, SeriesAlternativeBinding } from "./measure-bindings.ts";
-import { ECQM_CANONICAL_CODES } from "../cql/bundled-ecqm-expansions.ts";
+import { ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT } from "../cql/bundled-ecqm-expansions.ts";
 
 /** Stable per-employee hash → pick one alternative dose series (Hep B Heplisav-vs-traditional). */
 function pickAlternative(binding: MeasureBinding, externalId: string): SeriesAlternativeBinding | null {
@@ -56,10 +56,44 @@ function ecqmBirthDate(evaluationDate: string, ageAtEnd: number): string {
   return `${year}-06-15`;
 }
 
+/**
+ * US Core's `us-core-sex` extension, which is what CMS125's official initial population reads.
+ *
+ * It does NOT read `Patient.gender`, and measuring that was the difference between the whole synthetic
+ * roster being in CMS125's initial population and none of it. The authored `cms125` still reads
+ * `Patient.gender`, so both are emitted; they are different FHIR elements answering different questions
+ * (administrative gender vs recorded sex), and a real US-Core patient carries both.
+ */
+const US_CORE_SEX_FEMALE = {
+  url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+  valueCode: "248152002",
+};
+
+/**
+ * How long before the evaluation date a synthetic Condition is taken to have started.
+ *
+ * Two years puts every Condition's onset before the start of any measurement period this repo evaluates,
+ * so a condition is prevalent throughout — which is what the fiction intends ("this employee has
+ * diabetes", not "was diagnosed halfway through the quarter").
+ *
+ * An onset is REQUIRED, not decorative. Official artifacts date conditions through
+ * `QICoreCommon.prevalenceInterval`, and its behaviour with a null onset is not merely
+ * conservative — it is inconsistent: CMS122's `prevalenceInterval(diabetes) Overlaps MP` returns true
+ * (an unbounded interval overlaps everything), while CMS125's `Start(prevalenceInterval(mastectomy))
+ * SameOrBefore End(MP)` returns null, because there is no start to compare. Measured: the synthetic
+ * EXCLUDED cohort was scored OVERDUE by the official CMS125 for exactly this reason.
+ *
+ * This is the corpus AUTHORING a fact about a fictional patient, which is legitimate — and the opposite
+ * of `qicore-preparation.ts` inventing an onset for data it was handed, which ADR-037 forbids. The
+ * distinction is whose fact it is.
+ */
+const CONDITION_ONSET_DAYS_BEFORE = 730;
+
 function condition(
   externalId: string,
   code: string,
   valueSet: string,
+  evaluationDate: string,
   extraCodings: Array<{ system: string; code: string; display?: string }> = [],
 ): unknown {
   return {
@@ -67,6 +101,7 @@ function condition(
     meta: { profile: [QICORE_PROFILES.Condition] },
     id: `${externalId}-${code}`,
     subject: { reference: `Patient/${externalId}` },
+    onsetDateTime: dateMinusDays(evaluationDate, CONDITION_ONSET_DAYS_BEFORE),
     clinicalStatus: { coding: [{ code: "active" }] },
     verificationStatus: {
       coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
@@ -117,13 +152,13 @@ export function buildSyntheticBundle(employee: EmployeeProfile, config: ExamConf
   ];
 
   if (config.programEnrolled) {
-    entries.push({ resource: condition(externalId, binding.enrollment.code, binding.enrollment.valueSet) });
+    entries.push({ resource: condition(externalId, binding.enrollment.code, binding.enrollment.valueSet, evaluationDate) });
   }
   if (config.hasWaiver) {
-    entries.push({ resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet) });
+    entries.push({ resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, evaluationDate) });
   }
   if (config.refused && binding.refusal) {
-    entries.push({ resource: condition(externalId, binding.refusal.code, binding.refusal.valueSet) });
+    entries.push({ resource: condition(externalId, binding.refusal.code, binding.refusal.valueSet, evaluationDate) });
   }
 
   const coding = { system: binding.event.valueSet, code: binding.event.code, display: binding.event.code };
@@ -210,7 +245,7 @@ function buildCms122Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
 
   if (config.programEnrolled) {
     entries.push({
-      resource: condition(externalId, binding.enrollment.code, binding.enrollment.valueSet, [
+      resource: condition(externalId, binding.enrollment.code, binding.enrollment.valueSet, evaluationDate, [
         ECQM_CANONICAL_CODES.diabetes,
       ]),
     });
@@ -219,7 +254,7 @@ function buildCms122Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
   if (config.hasWaiver) {
     // Map generic waiver → palliative diagnosis (DENEX) with dual coding.
     entries.push({
-      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, [
+      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, evaluationDate, [
         ECQM_CANONICAL_CODES.palliativeDx,
       ]),
     });
@@ -268,6 +303,7 @@ function buildCms125Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
         meta: { profile: [QICORE_PROFILES.Patient] },
         id: externalId,
         name: [{ text: employee.name }],
+        extension: [US_CORE_SEX_FEMALE],
         gender: "female",
         // Age 55 — in 42–74 IPP band.
         birthDate: ecqmBirthDate(evaluationDate, 55),
@@ -280,7 +316,7 @@ function buildCms125Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
   if (config.hasWaiver) {
     // Generic exclusion → bilateral mastectomy history (DENEX).
     entries.push({
-      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, [
+      resource: condition(externalId, binding.waiver.code, binding.waiver.valueSet, evaluationDate, [
         ECQM_CANONICAL_CODES.historyBilateralMastectomy,
       ]),
     });
@@ -290,6 +326,7 @@ function buildCms125Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
     // Stamp mammogram inside the official Oct-1 window (use ~180d before eval — always in-window
     // for a 12-month MP ending on evaluationDate).
     const when = dateMinusDays(evaluationDate, Math.min(config.daysSinceLastExam, 180));
+    // The PROCEDURE, carrying CPT: what WebChart records and what the authored `cms125` retrieves.
     entries.push({
       resource: {
         resourceType: "Procedure",
@@ -300,10 +337,34 @@ function buildCms125Bundle(employee: EmployeeProfile, config: ExamConfig, evalua
         code: {
           coding: [
             { system: binding.event.valueSet, code: binding.event.code, display: binding.event.code },
-            ECQM_CANONICAL_CODES.mammogram,
+            MAMMOGRAPHY_PROCEDURE_CPT,
           ],
         },
         performedDateTime: when,
+      },
+    });
+    // The RESULT, carrying LOINC: what the OFFICIAL numerator retrieves — `[Observation: "Mammography"]`
+    // through `Status.isDiagnosticStudyPerformed`, which additionally requires a `final|amended|corrected`
+    // status and an `imaging` category. Both representations are real; an EHR that performed a screening
+    // mammogram has a procedure record and a result, and the two code systems are not interchangeable
+    // (every member of VSAC's Mammography value set is LOINC). Emitting only one of them is what made the
+    // official artifact score this corpus as nobody-screened.
+    entries.push({
+      resource: {
+        resourceType: "Observation",
+        meta: { profile: [QICORE_PROFILES.Observation] },
+        id: `${externalId}-mammogram-result`,
+        status: "final",
+        category: [
+          {
+            coding: [
+              { system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" },
+            ],
+          },
+        ],
+        subject: { reference: `Patient/${externalId}` },
+        code: { coding: [ECQM_CANONICAL_CODES.mammogram] },
+        effectiveDateTime: when,
       },
     });
   }

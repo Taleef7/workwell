@@ -7,7 +7,8 @@
  * plain FHIR our synthetic corpus emits: a diabetes `Condition` must be an ACTIVE, CONFIRMED problem
  * whose prevalence period overlaps the measurement period (QICoreCommon `ToInterval`/`isActive`), and
  * an `Encounter` is expected to carry a `class`. Our Conditions ship a system-less `clinicalStatus`
- * and no `onsetDateTime`.
+ * (they carry an onset since PR-8c/ADR-038, which the numbers below predate — it does not change them:
+ * onset alone was measured at 0/25).
  *
  * Measured against the vendored CMS122 artifact over 25 synthetic subjects (2026-07-27):
  *
@@ -32,18 +33,26 @@
  * profiles require, and touches no clinical fact — no code, no value, no date of an actual event. That
  * rule cost something to keep: the first cut anchored a missing onset three years before the evaluation
  * date, which review correctly called out as fabricating exactly such a date (and CMS165, a priority
- * measure, decides denominator membership on onset timing). It was removed. The
- * synthetic corpus separately lacks the real LOINC/SNOMED codings the official numerator retrieves
- * (see `standards/cms122-official.ts`'s harness-local enrichment, and the caveat below), and closing
- * THAT gap by synthesising codes at evaluation time would be fabricating clinical data. It is not done
- * here and must not be.
+ * measure, decides denominator membership on onset timing). It was removed — and then added to the
+ * CORPUS instead, which is the distinction ADR-038 turns on: the corpus invents the whole patient, so a
+ * fictional diagnosis has a fictional date; this function receives data it did not create and must not
+ * write one for it. `engine/ingress/enrollment/roster.ts` is the same test applied on the live path and
+ * reaching the same answer.
  *
- * **The measured consequence, recorded because it gates PR-9:** with preparation alone, the same 25
- * subjects score IPP=25 / DENOM=25 / NUMER=0 — and cms122's numerator is *poor glycemic control*, so
- * that renders as **100% compliant**. A wrong answer that looks like good news is worse than an
+ * Closing a data gap by synthesising CODES at evaluation time would be the same violation, and is
+ * likewise not done here (see `standards/cms122-official.ts`'s harness-local enrichment, which is
+ * confined to the fidelity lab).
+ *
+ * **The consequence that gated PR-9, now CLOSED by PR-8c (ADR-038):** with preparation alone, the same
+ * 25 subjects scored IPP=25 / DENOM=25 / NUMER=0 — and cms122's numerator is *poor glycemic control*,
+ * so that rendered as **100% compliant**. A wrong answer that looks like good news is worse than an
  * obviously broken one, and no automatic check can distinguish it from a genuinely well-controlled
- * population. The shadow period (PR-8) is what catches it, and the real fix is a synthetic corpus that
- * emits real codes — which the roadmap already schedules per measure at PR-10..12.
+ * population. The cause recorded here originally — "the corpus lacks the real codings the official
+ * numerator retrieves" — was WRONG: the corpus had dual-stamped real codes since the production-faithful
+ * promotion. The real defects were a code-membership table that agreed with itself and not with VSAC,
+ * a missing `us-core-sex` extension, a mammogram recorded only as a Procedure, and absent Condition
+ * onsets. `wiring/corpus-membership.test.ts` and `wiring/official-corpus-outcomes.test.ts` now hold
+ * that line.
  *
  * Real WebChart data carries real codes and US Core 7 structure (= QI-Core STU7), so it needs the
  * enrichment not at all and this preparation probably only partially. Which parts remain necessary

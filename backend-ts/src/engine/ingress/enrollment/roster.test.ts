@@ -90,12 +90,27 @@ test("stampEnrollment: adds the measure's enrollment Condition for an enrolled s
 test("stampEnrollment: the stamped Condition is byte-identical to the synthetic builder's (drift guard)", () => {
   // If fhir-bundle-builder.ts's condition() shape ever drifts, this fails — the whole point is that a
   // roster-stamped bundle is indistinguishable from a synthetic enrolled bundle to the CQL engine.
+  //
+  // `onsetDateTime` is the ONE deliberate exception (ADR-038). The synthetic builder authors an onset
+  // because it invents the whole patient; the roster runs over real WebChart bundles from a roster that
+  // carries no date, so writing one would be fabrication — and would change a live subject's
+  // `data_hash` daily, defeating incremental reuse. Excepting exactly one named field keeps every other
+  // field pinned, and the two assertions below make the difference deliberate rather than accidental:
+  // silently dropping the builder's onset would fail the second.
+  const evaluationDate = "2026-06-12";
   const emp: EmployeeProfile = { externalId: "wc-1", name: "N", role: "r", site: "s", providerId: "p", tenantId: "twh" };
-  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), "2026-06-12");
-  const builtCond = conditions(built).find((c) => c.id === "wc-1-hearing-enrollment");
+  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), evaluationDate);
+  const builtCond = conditions(built).find((c) => c.id === "wc-1-hearing-enrollment") as Record<string, unknown>;
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
-  const stampedCond = conditions(stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster))[0];
-  assert.deepEqual(stampedCond, builtCond);
+  const stamped = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster, {
+    evaluationDate,
+  });
+  const stampedCond = conditions(stamped)[0] as Record<string, unknown>;
+
+  const { onsetDateTime, ...builtWithoutOnset } = builtCond;
+  assert.deepEqual(stampedCond, builtWithoutOnset);
+  assert.equal(typeof onsetDateTime, "string", "the synthetic builder must still author an onset");
+  assert.ok(!("onsetDateTime" in stampedCond), "the roster must NOT author an onset on live data");
 });
 
 test("stampEnrollment: no-op (no duplicate) on an already-enrolled synthetic bundle", () => {
