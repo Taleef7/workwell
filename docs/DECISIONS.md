@@ -1,5 +1,76 @@
 # Architecture Decision Records
 
+## ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
+
+**Status:** Accepted (2026-07-27). Roadmap §4.3 called this in advance ("bundle-shipped expansions
+PRIMARY, VSAC-patched at VENDOR time, no runtime fallback. Runtime never mixes two terminology
+authorities"); PR-6a and PR-7a drifted from it, and this ADR records the correction.
+
+**Context.** Two PRs, each locally reasonable, together split terminology into two authorities:
+
+- **PR-6a** stripped `ValueSet` resources out of the vendored `bundle.json`. That was a **licensing**
+  decision, not a size one: 26 expansions per bundle carry thousands of AMA CPT and SNOMED CT codes,
+  and this repository is public.
+- **PR-7a** then filled the resulting hole by expanding from our imported VSAC `value_sets` rows at
+  runtime.
+
+The consequence was only visible from a distance. The MADiE gate (`official-cases.ts`) validated the
+official artifact against the **upstream bundle's own** expansions, while the runtime expanded from
+**VSAC store rows** — a configuration no gate had ever executed. So 121/121 green proved nothing about
+the path production would take, which is the single thing that gate exists to do. It also made PR-9
+depend on an owner-only UMLS import, and it is the failure mode most likely to be silent: fqm treats an
+unexpandable value set as *empty rather than missing*, an empty set matches nothing, and the measure
+then reports every subject out-of-population — indistinguishable downstream from a genuinely ineligible
+roster.
+
+Restoring the ValueSets to `bundle.json` was measured (+605 KB cms122, +464 KB cms125 — affordable) and
+**rejected**: it would commit redistribution of licensed terminology from a public repo.
+
+**Decision.**
+
+1. **The artifact's own expansions are the only official terminology.** `vendor-official-measure.mjs`
+   writes them to `measures/official/<catalogId>/terminology.json` at the same pinned upstream commit as
+   the ELM. Our VSAC import (`pnpm resolve-valuesets`) serves the authored measures and the fidelity
+   lab; it has no role in official execution.
+2. **Fetched at build, never committed.** The sidecar is gitignored — the same fetch-not-vendor pattern
+   `.official-content/` already uses for the test deck. Nothing licensed enters Git.
+3. **Pinned by hash.** The **committed** `manifest.json` records the sidecar's SHA-256, so bytes that
+   are not stored are still pinned: a regenerated sidecar either hashes identically or is refused at
+   load. That is what makes "fetched" as trustworthy as "vendored" without the redistribution.
+4. **The expander is keyed by measure, not by a flat OID map.** CMS122 and CMS125 share 23 of their
+   canonicals today, so a flat map works — until two artifacts are pinned at different commits and
+   disagree about one expansion, at which point whichever loaded first silently wins for both.
+5. **The MADiE reduction check executes the runtime configuration.** It now runs our reduced artifact
+   plus its own sidecar, built through the same `expandArtifactTerminology` the router uses, against the
+   upstream bundle and upstream ValueSets. Verified 2026-07-27: **0/55 and 0/66 cases changed
+   population vector**. The report records which terminology mode ran, so a weaker check can never be
+   mistaken for the stronger one.
+6. **A missing sidecar refuses routing, and names the command that fixes it.** `officialRoutingProblems`
+   reports it as one build step rather than as 26 separate expansion failures.
+7. **A VSAC-CAPPED expansion refuses routing too.** This is the same failure one notch weaker, and the
+   empty-set guard cannot see it: it refuses on empty, and half-expanded is not empty. Review of this
+   PR found `cappedExpansions` recording caps while documenting a guard that had zero callers — so a
+   capped set would have sailed through preflight. It is now a routing problem, filtered to the sets the
+   measure's ELM actually retrieves so an unused cap cannot block a measure.
+
+**Consequences.**
+
+- A fresh clone cannot route officially until `pnpm vendor:official` has run. That is the correct
+  failure: the alternative is evaluating a measure with terminology nobody validated.
+- **PR-9 obligation:** the deploy workflow must run the fetch before `docker build`, since the image
+  needs the sidecar. Routing is off in production today, so nothing is broken meanwhile — but a flip
+  without that build step would fail closed at boot.
+- **`AdvancedIllness` blocks the flip, by design.** VSAC caps expansions at 1000 codes, and
+  `2.16.840.1.113883.3.464.1003.110.12.1082` (1000 of 1997) is capped in **both** upstream bundles,
+  where it feeds the 66+/advanced-illness denominator exclusion. It changes none of the 121 official
+  cases — that is the claim we can support, and all of it — but "changes none of the test cases" is not
+  "changes no patient", so decision 7 refuses to route either measure until it is completed from VSAC at
+  vendor time (§4.3). **cms122 and cms125 are therefore NOT routable today**, and PR-9 must do that
+  expansion, not merely remember it.
+- Descriptive only (ADR-008): terminology feeds the engine's retrieves; it never sets an `Outcome
+  Status`. Nothing routes officially yet, so no current outcome changes.
+
+
 ## ADR-035: Incremental/delta batch evaluation is a descriptive, inert-unless-configured cache (#263)
 
 **Status:** Accepted (2026-07-24). Owner-approved the `eval_state` DDL + the scope decisions in-session.

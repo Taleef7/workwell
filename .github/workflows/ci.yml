@@ -140,6 +140,28 @@ jobs:
       # The fetch script is PowerShell (it predates this job); pwsh ships on ubuntu-latest runners.
       - name: Fetch official content (pinned commit)
         run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+      # The terminology sidecar is gitignored and fetched at build (ADR-036), so without this step the
+      # gate silently drops to its weaker fallback — executing our artifact against UPSTREAM's value
+      # sets rather than the ones the runtime loads, which is the exact gap PR-8a closed. The committed
+      # report records which mode ran, so the staleness check below is what makes that non-negotiable.
+      # No separate cache: `vendor:official` reads the bundle out of the `.official-content` checkout
+      # restored above when it sits at the same pin, so this step downloads nothing. Caching the
+      # sidecars themselves would have been worse than useless — the script regenerates unconditionally,
+      # so the cache would be restored and immediately overwritten while still paying two ~17MB pulls.
+      - name: Vendor official terminology (the runtime's own expansions, same pin)
+        run: |
+          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+      # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
+      # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
+      # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
+      - name: The committed artifact is reproducible from its pin
+        run: git diff --exit-code measures/official
+      # These two assertions — that the sidecar covers every canonical the ELM retrieves, and that a
+      # capped expansion is refused — are the strongest in the PR, and they self-skip without the
+      # fetched sidecar. `pnpm test` runs in a job that has no sidecar, so this is their only gate.
+      - name: Official terminology tests (need the fetched sidecar)
+        run: pnpm exec node --import tsx --test src/wiring/official-terminology.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

@@ -61,6 +61,11 @@ test("main loads a selected measure without overwriting the committed combined r
     // Since PR-6 the reduction check runs for EVERY measure, not just cms122, so even a single-measure
     // run needs these — otherwise the real loader hunts for a vendored bundle under the fixture cwd.
     loadDraftBundle: () => ({}) as never,
+    // Stubbed like every other dep. Without it `defaultDeps` supplies the REAL one, which resolves
+    // artifacts from `import.meta.url` rather than the fake cwd — so a test whose whole design is
+    // "stub the world" would parse a 2.4MB bundle and expand 26 value sets, taking a different path
+    // on a machine that has the fetched sidecar than on one that does not.
+    runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
     runDraftDrift: () => Promise.resolve({ total: 66, changedCases: 0, errors: 0 } as never),
     writeReport: (path: string, markdown: string) => {
       writes.push({ path, markdown });
@@ -93,6 +98,7 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
     cwd: testCwd,
     load: () => fakeLoaded,
     run: () => Promise.resolve(fakeRun as never),
+    runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
     loadDraftBundle: (path) => {
       assert.equal(path, resolve(testCwd, "measures", "official", "cms122", "bundle.json"));
       return { resourceType: "Bundle", entry: [] } as never;
