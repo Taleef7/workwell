@@ -140,6 +140,19 @@ jobs:
       # The fetch script is PowerShell (it predates this job); pwsh ships on ubuntu-latest runners.
       - name: Fetch official content (pinned commit)
         run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+      # The terminology sidecar is gitignored and fetched at build (ADR-036), so without this step the
+      # gate silently drops to its weaker fallback — executing our artifact against UPSTREAM's value
+      # sets rather than the ones the runtime loads, which is the exact gap PR-8a closed. The committed
+      # report records which mode ran, so the staleness check below is what makes that non-negotiable.
+      - name: Fetch official terminology (the runtime's own expansions, same pin)
+        run: |
+          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+      # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
+      # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
+      # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
+      - name: The committed artifact is reproducible from its pin
+        run: git diff --exit-code measures/official
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

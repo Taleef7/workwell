@@ -38,5 +38,18 @@
     "rawBytes": 16786509,
     "vendoredBytes": 2418357
   },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 26,
+    "codes": 2748,
+    "truncated": [
+      {
+        "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
+        "have": 1000,
+        "declaredTotal": 1997
+      }
+    ],
+    "sha256": "sha256:6da37c2f3fb79150d720b3a8a07ec917620604e09f55357d3041906e772fe1cc"
+  },
   "sha256": "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552"
 }

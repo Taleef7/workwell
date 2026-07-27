@@ -6,14 +6,17 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  officialRoutingProblems,
-  routedEngineForEnv,
-  storeValueSetExpander,
-} from "./executor-router.ts";
+import { officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
-import type { ValueSetStore } from "../stores/value-set-store.ts";
+import type { LoadedTerminology } from "./official-terminology.ts";
 import type { FqmCalculate } from "@workwell/official-executor";
+
+/**
+ * Terminology lives in a gitignored, fetched-at-build sidecar, so whether it is present is a fact about
+ * the working tree. Every test here that is about ROUTING stubs it, so the default suite stays offline
+ * and deterministic; `official-terminology.test.ts` covers the real file when it exists.
+ */
+const terminologyPresent = (): LoadedTerminology => ({ ok: true, codesByOid: new Map() });
 
 /** A calculator that reports one subject in every population — enough to prove routing reached fqm. */
 const fakeCalculate: FqmCalculate = async () => ({
@@ -125,16 +128,29 @@ test("construction refuses every shape of misconfiguration, and says which", asy
 });
 
 test("officialRoutingProblems names the gate, the artifact, and the semantics separately", () => {
-  assert.deepEqual(officialRoutingProblems({}), [], "unset is always legal");
-  assert.deepEqual(officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122,cms125" }), []);
+  const stub = { loadTerminology: terminologyPresent };
+  assert.deepEqual(officialRoutingProblems({}, stub), [], "unset is always legal");
+  assert.deepEqual(officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122,cms125" }, stub), []);
 
   // ALL the problems, not the first: an operator fixing one at a time, learning about the next only
   // after a redeploy, is how a five-minute configuration takes an afternoon. cms130 is both ungated and
   // unvendored, and hears about both.
-  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms130" });
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms130" }, stub);
   assert.equal(problems.length, 2);
   assert.match(problems[0]!, /cms130: not covered by the official MADiE test-case gate/);
   assert.match(problems[1]!, /cms130: no executable official artifact is vendored/);
+});
+
+test("a missing terminology sidecar is a routing problem, named as a build step", async () => {
+  // The sidecar is fetched at build and gitignored, so "the build step has not run" is the single most
+  // likely reason official routing refuses on a fresh clone or in a new CI job. It must not surface as
+  // "26 of 26 value sets could not be expanded" — accurate, and it sends an operator hunting for 26
+  // terminology problems instead of running one command.
+  const problems = officialRoutingProblems(
+    { WORKWELL_OFFICIAL_MEASURES: "cms122" },
+    { loadTerminology: () => ({ ok: false, problem: "cms122: official terminology is not present" }) },
+  );
+  assert.deepEqual(problems, ["cms122: official terminology is not present"]);
 });
 
 test("terminology is preflighted at CONSTRUCTION, not at first evaluation", async () => {
@@ -147,41 +163,37 @@ test("terminology is preflighted at CONSTRUCTION, not at first evaluation", asyn
     () =>
       routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
         authored,
+        loadTerminology: terminologyPresent,
         expand: async () => {
           expandCalls += 1;
-          return []; // nothing imported — the state the live stack is in today
+          return []; // a sidecar that verified but expands nothing for this measure's OIDs
         },
       }),
-    /value sets could not be expanded[\s\S]*resolve-valuesets/,
+    /value sets could not be expanded[\s\S]*vendor:official/,
   );
   assert.ok(expandCalls > 0, "it must actually try, not just inspect the manifest");
 });
 
-test("the store expander snapshots ONCE per instance — per run, never per process", async () => {
-  // Per call would be thousands of store reads in a population run. Per process would freeze the
-  // snapshot, re-introducing the exact bug engine-factory.ts documents: an operator's value-set edit
-  // serving stale expansions until restart. The instance lives for one run, which is the middle.
-  let reads = 0;
-  const store = {
-    listAll: async () => {
-      reads += 1;
-      return [
-        { oid: "2.16.1", codes: [{ code: "a", system: "s" }] },
-        // A row imported under its URL form still resolves by bare OID.
-        { oid: "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.2", codes: [{ code: "b", system: "s" }] },
-      ];
-    },
-  } as unknown as ValueSetStore;
-
-  const expand = storeValueSetExpander(store);
-  assert.deepEqual(await expand("2.16.1"), [{ code: "a", system: "s" }]);
-  assert.deepEqual(await expand("2.16.2"), [{ code: "b", system: "s" }]);
-  assert.deepEqual(await expand("2.16.404"), [], "an unimported OID is empty, and the executor refuses");
-  assert.equal(reads, 1, "one bounded catalog read for the instance's whole lifetime");
-
-  // A second instance re-reads: that is what makes an operator's edit visible on the next run.
-  await storeValueSetExpander(store)("2.16.1");
-  assert.equal(reads, 2);
+test("the expander is keyed by MEASURE, not by a single flat OID map", async () => {
+  // 23 of CMS122's 26 canonicals are also CMS125's, so a flat map works — until two artifacts are
+  // pinned at different upstream commits and disagree about one expansion, at which point whichever
+  // loaded first silently wins for both. Terminology belongs to the artifact; so does the lookup.
+  const seen: Array<[string, string]> = [];
+  await assert.rejects(() =>
+    routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
+      authored: authoredEngine(),
+      loadTerminology: terminologyPresent,
+      expand: async (oid, catalogId) => {
+        seen.push([oid, catalogId]);
+        return [];
+      },
+    }),
+  );
+  assert.ok(seen.length > 0);
+  assert.ok(
+    seen.every(([, catalogId]) => catalogId === "cms122"),
+    "every expansion must be attributed to the measure that asked for it",
+  );
 });
 
 test("non-proportion scoring is refused at CONSTRUCTION, not per subject", async () => {

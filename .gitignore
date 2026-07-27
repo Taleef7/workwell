@@ -42,6 +42,11 @@ backend/src/test/resources/logback-test.xml
 # Downloaded official dQM bundles/test cases (fetched on demand; never vendored)
 /backend-ts/.official-content/
 
+# Official measure terminology, fetched at build (`pnpm vendor:official`) and pinned by the SHA-256 in
+# each measure's committed manifest.json. NOT committed: these expansions carry thousands of AMA CPT
+# and SNOMED CT codes, which this public repo has no licence to redistribute.
+/backend-ts/measures/official/*/terminology.json
+
 # Git worktrees (isolated workspaces — project-local)
 .worktrees/
 

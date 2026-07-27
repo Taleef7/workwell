@@ -37,6 +37,18 @@ export interface OfficialManifest {
   populations: string[];
   source: { repo: string; ref: string; path: string; rawSha256: string };
   reduction: Record<string, unknown>;
+  /**
+   * The contract for the gitignored `terminology.json` sidecar (PR-8a). Optional in the TYPE because an
+   * artifact vendored before PR-8a has no such block, and that must read as "unpinned, refuse to route"
+   * rather than as a crash — `loadOfficialTerminology` turns its absence into exactly that sentence.
+   */
+  terminology?: {
+    file: string;
+    valueSets: number;
+    codes: number;
+    truncated: Array<{ oid: string; have: number; declaredTotal: number }>;
+    sha256: string;
+  };
   sha256: string;
 }
 

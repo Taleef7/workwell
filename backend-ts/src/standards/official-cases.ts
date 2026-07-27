@@ -563,10 +563,21 @@ export interface ReductionArtifactIdentity {
   strippedElmAnnotations?: boolean;
 }
 
+/**
+ * Which terminology the reduced artifact was executed with.
+ *
+ * `vendored-terminology-sidecar` is the one that makes this check evidence about PRODUCTION: it is the
+ * artifact's own `terminology.json`, expanded through the same `expandArtifactTerminology` the router
+ * uses. `official-v1-bundle-cache` re-uses the UPSTREAM bundle's ValueSets, which proves the reduction
+ * is neutral but says nothing about the terminology the runtime would actually load — that gap is
+ * exactly what PR-8a existed to close, so it is recorded rather than assumed.
+ */
+export type DriftValueSetMode = "official-v1-bundle-cache" | "vendored-terminology-sidecar";
+
 export interface Cms122DraftDrift {
   artifactVersion: string;
   artifact?: ReductionArtifactIdentity;
-  valueSetMode: "official-v1-bundle-cache";
+  valueSetMode: DriftValueSetMode;
   /** Named statement results the VENDORED artifact produced for the WORST subject (0 if the run errored). */
   namedStatementResults: number;
   total: number;
@@ -578,6 +589,17 @@ export interface Cms122DraftDrift {
 export interface RunDraftDriftOptions {
   calculate?: FqmCalculate;
   artifact?: ReductionArtifactIdentity;
+  /**
+   * The terminology to execute the reduced artifact with. Supply the RUNTIME's — the vendored
+   * `terminology.json`, built through `expandArtifactTerminology` — and this check stops being a
+   * statement about bundle reduction alone and becomes a statement about the whole production
+   * configuration: our artifact, our terminology, against upstream's artifact and upstream's
+   * terminology, over every official test case.
+   *
+   * Omitted, it falls back to the upstream bundle's own ValueSets, which is what it did before PR-8a.
+   */
+  valueSetCache?: unknown[];
+  valueSetMode?: DriftValueSetMode;
 }
 
 /**
@@ -605,6 +627,9 @@ export async function runCms122DraftDrift(
   );
   const measure = draftBundle.entry.map((entry) => entry.resource).find((resource) => resource.resourceType === "Measure");
   const artifactVersion = typeof measure?.version === "string" ? measure.version : "unknown";
+  const valueSetCache = options.valueSetCache ?? loaded.valueSetResources;
+  const valueSetMode: DriftValueSetMode =
+    options.valueSetMode ?? (options.valueSetCache ? "vendored-terminology-sidecar" : "official-v1-bundle-cache");
 
   let output: FqmOutput;
   try {
@@ -612,7 +637,7 @@ export async function runCms122DraftDrift(
       draftBundle,
       validCases.map((item) => item.patientBundle),
       calculationOptions(loaded.measurementPeriod, officialRun.trustMetaProfile),
-      loaded.valueSetResources,
+      valueSetCache,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -620,7 +645,7 @@ export async function runCms122DraftDrift(
     return {
       artifactVersion,
       ...(options.artifact ? { artifact: options.artifact } : {}),
-      valueSetMode: "official-v1-bundle-cache",
+      valueSetMode,
       namedStatementResults: 0,
       total: cases.length,
       changedCases: 0,
@@ -678,7 +703,7 @@ export async function runCms122DraftDrift(
   return {
     artifactVersion,
     ...(options.artifact ? { artifact: options.artifact } : {}),
-    valueSetMode: "official-v1-bundle-cache",
+    valueSetMode,
     namedStatementResults: statementResults,
     total: cases.length,
     changedCases: cases.filter((item) => item.differences.length > 0).length,
@@ -813,7 +838,15 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
         "",
         `### ${run.measure.toUpperCase()} reduction check — upstream bundle vs vendored artifact v${run.draftDrift.artifactVersion}`,
         "",
-        `Using the official v1 Bundle ValueSets as the external cache, ${run.draftDrift.changedCases}/${run.draftDrift.total} cases changed population vector; ${run.draftDrift.errors} drift errors.`,
+        run.draftDrift.valueSetMode === "vendored-terminology-sidecar"
+          ? `Executed with the RUNTIME configuration — our reduced artifact plus its own vendored ` +
+            `terminology sidecar, expanded through the same code path production uses — against the ` +
+            `upstream bundle and upstream ValueSets. ${run.draftDrift.changedCases}/${run.draftDrift.total} ` +
+            `cases changed population vector; ${run.draftDrift.errors} drift errors.`
+          : `Using the official v1 Bundle ValueSets as the external cache (the terminology sidecar was ` +
+            `not present, so this run does NOT exercise the runtime's terminology — fetch it with ` +
+            `'pnpm vendor:official'). ${run.draftDrift.changedCases}/${run.draftDrift.total} cases ` +
+            `changed population vector; ${run.draftDrift.errors} drift errors.`,
         "",
         ...(run.draftDrift.artifact
           ? [
