@@ -101,11 +101,20 @@ export async function chooseDiffMode(
   resolver: ValueSetResolver,
   literalAvailable = false,
 ): Promise<"literal" | "subset" | "estimate"> {
+  // The literal tier's readiness is fully described by `literalDiffAvailable(measureId)` — since ADR-036
+  // it takes terminology from the artifact's OWN sidecar and never touches `value_sets`. So the VSAC
+  // probe below cannot inform it, and gating on it did two wrong things: it declined a working literal
+  // diff on any stack that never ran `pnpm resolve-valuesets` (a fresh clone, local dev), and — once
+  // PR-8d opened the tier to other measures — it declined cms125 whenever cms122's hand-kept 21 OIDs
+  // were missing, a condition with nothing to do with cms125.
+  if (literalAvailable) return "literal";
+  // Below here is the SUBSET tier's gate, which is what the probe was written for: that tier executes
+  // cms122's hand-authored official-subset CQL, which does resolve these OIDs from the store.
   const oids = CMS122_OFFICIAL_META.valueSets ?? [];
   if (oids.length === 0) return "estimate";
   const expansions = await Promise.all(oids.map((oid) => resolver.expand(oid)));
   if (!expansions.every((codes) => codes.length > 0)) return "estimate";
-  return literalAvailable ? "literal" : "subset";
+  return "subset";
 }
 
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
@@ -529,9 +538,12 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
             if (diffId !== "cms122") return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
           }
         }
-        // Same reason as the catch above: the subset tier is cms122-only. Reachable for another measure
-        // whenever the VSAC rows are imported but its terminology sidecar is not — mode is then "subset"
-        // without the literal tier ever being tried.
+        // Defence in depth, not a reachable hole. `chooseDiffMode` returns "subset" only when
+        // `literalAvailable` is false, and the outer guard already excluded every non-cms122 measure in
+        // that case — so this branch is cms122-only by construction today. The guard stays because that
+        // reasoning spans two functions and one `if`, and the failure it prevents is reporting cms122's
+        // criteria under another measure's name. (An earlier version of this comment claimed the branch
+        // WAS reachable; it is not, and the route test below pins the invariant either way.)
         if (diffId === "cms122") return json(await computeExecutionDiff(ref, latestRows, deps));
       }
     }

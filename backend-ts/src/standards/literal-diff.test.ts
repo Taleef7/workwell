@@ -87,9 +87,13 @@ test("literal diff: injected calculate → per-subject mapping, gate attribution
   // trap that let the vendored artifact sit at v0.5.000 while upstream had moved on (PR-5).
   assert.equal(report.officialMeasure.version, loadOfficialArtifact("cms122")?.manifest.version);
   assert.match(report.officialMeasure.version, /^\d+\.\d+\.\d+$/);
-  // Official outcomes span the mapped vocabulary.
+  // Official outcomes span the mapped vocabulary — which is now the RUNTIME's, not a diff-local one.
+  // Out-of-population reads MISSING_DATA here because that is what `outcomeFromPopulations` returns and
+  // what the authored measures say for not-in-IPP; the diff used to emit its own `OUT_OF_POPULATION`
+  // and count the resulting mismatch as a divergence the flip would never produce.
   const outs = new Set(report.subjects.map((s) => s.officialOutcome));
-  assert.ok(outs.has("OVERDUE") && outs.has("COMPLIANT") && outs.has("EXCLUDED") && outs.has("OUT_OF_POPULATION"));
+  assert.ok(outs.has("OVERDUE") && outs.has("COMPLIANT") && outs.has("EXCLUDED") && outs.has("MISSING_DATA"));
+  assert.ok(!outs.has("OUT_OF_POPULATION"), "the diff must not invent a vocabulary the runtime lacks");
   // Every divergent subject carries a non-empty, derivable gate.
   for (const s of report.subjects.filter((x) => x.diverged)) assert.ok(s.divergenceGate.length > 0);
   // Attribution vocabulary is population-level and honest.
@@ -210,11 +214,41 @@ test("cms125's numerator is NOT inverted (the mapping is per-measure)", async ()
   const calculate = (_mb: unknown, patientBundles: unknown[]) => inNumerator(patientBundles);
   const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
 
+  // Deliberately ONE cache clear, at the top. Both calls use the same runId, because that is what an
+  // ALL_PROGRAMS run produces: every measure's outcomes under one `runs.id`. Clearing between them
+  // would hide the memo-collision this also guards — see the next test.
   __clearLiteralDiffCache();
   const cms122 = await computeLiteralDiff(CMS122V14, rows(2), deps);
   assert.ok(cms122.subjects.every((s) => s.officialOutcome === "OVERDUE"), "cms122 numerator = poor control → OVERDUE");
 
-  __clearLiteralDiffCache();
   const cms125 = await computeLiteralDiff(CMS125V14, rows(2), deps);
   assert.ok(cms125.subjects.every((s) => s.officialOutcome === "COMPLIANT"), "cms125 numerator = screened → COMPLIANT");
+});
+
+test("the memo is keyed by MEASURE and run, not run alone", async () => {
+  // An ALL_PROGRAMS run writes every measure's outcomes under ONE `runs.id`, so `latestRunRows` hands
+  // both measures the same run id. Keyed on runId alone — which was safe while this tier was
+  // cms122-only — the second request returned the FIRST measure's whole report: its measureId, ecqmId,
+  // subjects and provenance, under the other measure's URL. The same "one measure's criteria under
+  // another measure's name" the route guards against, one layer down.
+  const calculate = (_mb: unknown, patientBundles: unknown[]) =>
+    Promise.resolve({
+      results: (patientBundles as Array<{ entry: Array<{ resource: { resourceType?: string; id?: string } }> }>).map((pb) => ({
+        patientId: pb.entry.find((e) => e.resource.resourceType === "Patient")?.resource.id,
+        detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }],
+      })),
+    });
+  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
+
+  __clearLiteralDiffCache();
+  const first = await computeLiteralDiff(CMS122V14, rows(2), deps);
+  const second = await computeLiteralDiff(CMS125V14, rows(2), deps);
+
+  assert.equal(first.measureId, "cms122");
+  assert.equal(second.measureId, "cms125", "the second measure was served the first measure's memoized report");
+  assert.equal(second.ecqmId, CMS125V14.ecqmId);
+  assert.notEqual(first, second);
+
+  // ...and the memo still WORKS: same measure + same run is the same object.
+  assert.equal(await computeLiteralDiff(CMS125V14, rows(2), deps), second);
 });

@@ -166,7 +166,8 @@ jobs:
           pnpm exec node --import tsx --test \
             src/wiring/official-terminology.test.ts \
             src/wiring/corpus-membership.test.ts \
-            src/wiring/official-corpus-outcomes.test.ts
+            src/wiring/official-corpus-outcomes.test.ts \
+            src/standards/literal-diff.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

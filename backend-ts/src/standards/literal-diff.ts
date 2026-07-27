@@ -55,6 +55,7 @@ import { loadOfficialTerminology, officialTerminologyExpander } from "../wiring/
 import {
   expandArtifactTerminology,
   officialMeasurementPeriod,
+  outcomeFromPopulations,
 } from "../wiring/official-executor-adapter.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "../wiring/qicore-preparation.ts";
@@ -131,20 +132,26 @@ const disclaimerFor = (ecqmId: string): string =>
   "Outcome Status remains the sole compliance authority (ADR-008)."
 
 /**
- * Map the official measure's population membership onto WorkWell's outcome vocabulary. This mapping is
- * WorkWell policy, not measure execution, which is why it stays in the app rather than the package.
+ * Map official population membership onto WorkWell's outcome vocabulary — through the RUNTIME's own
+ * function, which is the fourth and last thing PR-8d aligned.
+ *
+ * This file had its own copy, and the two disagreed on the branch that matters most. Out of the initial
+ * population, the diff said `OUT_OF_POPULATION` while the runtime says `MISSING_DATA` — and both
+ * authored measures also say `MISSING_DATA` for not-in-IPP. So a subject the two engines fully AGREE
+ * about was scored as a divergence, attributed to the `initial-population` gate, and counted in a
+ * headline claiming it diverges from the official criteria. After the flip that subject's stored status
+ * would be unchanged. That is a manufactured divergence of exactly the kind removing the enrichment was
+ * meant to stop, arriving through a different door.
+ *
+ * Latent on today's corpus (measured: 0 out-of-population subjects across all 100 employees for both
+ * measures) and NOT latent for the six measures still to be onboarded, nor for live WebChart data —
+ * where out-of-population is the normal state.
+ *
+ * The old local copy also hardcoded `numerator ? OVERDUE : COMPLIANT`, which is cms122's inverse
+ * reading; the shared function takes `numeratorMeansCompliant` from the fail-closed semantics table.
  */
 function officialOutcome(membership: PopulationMembership, numeratorMeansCompliant: boolean): string {
-  const g = (t: string) => membership[t] === true;
-  if (!g("initial-population")) return "OUT_OF_POPULATION";
-  if (g("denominator-exclusion") || g("denominator-exception")) return "EXCLUDED";
-  if (!g("denominator")) return "OUT_OF_POPULATION";
-  // `numerator ? OVERDUE : COMPLIANT` was hardcoded here, which is cms122's INVERSE reading: its
-  // numerator is poor glycemic control. Applied to cms125, whose numerator is a completed mammogram,
-  // it reported every screened woman as overdue and every unscreened one as compliant — latent only
-  // because the route never let cms125 reach this tier.
-  const inNumerator = g("numerator");
-  return inNumerator === numeratorMeansCompliant ? "COMPLIANT" : "OVERDUE";
+  return outcomeFromPopulations(membership, numeratorMeansCompliant).outcome;
 }
 
 /** Which official gate accounts for a divergence (population-level; the finer per-define attribution
@@ -153,14 +160,23 @@ function attributeGate(officialOut: string, workwellOut: string): string {
   // Population-level and measure-NEUTRAL. The names used to be cms122's clinical gates
   // ("numerator-glycemic-status"), which would have labelled a cms125 mammography divergence as a
   // glycemic one. The finer per-define attribution lives in the subset path.
-  if (officialOut === "OUT_OF_POPULATION") return "initial-population"; // age / qualifying visit / diagnosis gates WorkWell omits
+  if (officialOut === "MISSING_DATA") return "initial-population"; // age / qualifying visit / diagnosis gates WorkWell omits
   if (officialOut === "EXCLUDED" && workwellOut !== "EXCLUDED") return "denominator-exclusion"; // hospice / palliative / frailty / LTC
   if (workwellOut === "EXCLUDED" && officialOut !== "EXCLUDED") return "workwell-exclusion"; // a urn:workwell waiver the official doesn't model
   if (officialOut === "OVERDUE" || officialOut === "COMPLIANT") return "numerator";
   return "workwell-side";
 }
 
-// Keyed on runId (only the latest run is queried; terminal runs are immutable). Mirrors execution-diff.
+/**
+ * Memo of terminal runs' reports, keyed on **measure AND run**.
+ *
+ * runId alone was safe only while this tier was cms122-only, and PR-8d opening it to any vendored
+ * measure made it a correctness bug: an `ALL_PROGRAMS` run writes every measure's outcomes under ONE
+ * `runs.id`, so `latestRunRows` hands both measures the same run id. Asking for cms122's diff and then
+ * cms125's returned the *identical object* — cms122's measureId, ecqmId, subjects, headline and
+ * provenance, under cms125's URL. Precisely the "one measure's criteria reported under another
+ * measure's name" this PR closed at the route, re-opened one layer down.
+ */
 const cache = new Map<string, LiteralDiffReport>();
 /** @internal test hook */
 export function __clearLiteralDiffCache(): void {
@@ -175,7 +191,8 @@ export async function computeLiteralDiff(
   deps: LiteralDiffDeps,
 ): Promise<LiteralDiffReport> {
   const runId = rows[0]?.runId ?? null;
-  if (runId && cache.has(runId)) return cache.get(runId)!;
+  const cacheKey = runId ? `${ref.measureId}|${runId}` : null;
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)!;
 
   const catalogId = ref.measureId;
   const semantics = officialMeasureSemantics(catalogId);
@@ -325,9 +342,9 @@ export async function computeLiteralDiff(
     disclaimer: disclaimerFor(ref.ecqmId),
     officialMeasure: { name: official.measureName, version: official.version, url: official.url },
   };
-  if (runId) {
+  if (cacheKey) {
     if (cache.size >= 16) cache.clear();
-    cache.set(runId, report);
+    cache.set(cacheKey, report);
   }
   return report;
 }
