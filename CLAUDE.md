@@ -138,7 +138,11 @@ a Procedure, and Conditions carrying **no `onsetDateTime`** (which `prevalenceIn
 inconsistently, not merely conservatively). Official-vs-authored agreement across the five synthetic
 targets: **cms122 4/5 and cms125 0/5 → 5/5 and 5/5**, authored outcomes byte-identical, MADiE gate
 unchanged. Guarded by a membership contract against the vendored terminology and an outcomes-as-authored
-check that also refuses a degenerate all-one-bucket corpus.
+check that also refuses a degenerate all-one-bucket corpus (both wired into the `official-cases` CI job —
+anything reading a sidecar self-skips in the job that runs `pnpm test`). **Covers the STATIC corpus
+only:** review caught the scale generator overwriting the new LOINC mammogram Observation with CPT (fixed),
+and **real WebChart data still gets neither CMS125 fix** (no `us-core-sex`, no LOINC mammography from the
+crosswalk) — both now PR-9 blockers beside the capped `AdvancedIllness` expansion.
 
 **Next: PR-8 (remaining)** — the shadow period itself: generalize the standards diff beyond its cms122
 hardcode, measure-major batching + a batch-level `hasRetrieveSignal`, and the `logic_version` override. **Then PR-9** (the flip). It owes ONE build step now — the

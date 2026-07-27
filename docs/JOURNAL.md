@@ -16,7 +16,7 @@ exercise the numerator compares nothing and would have to be run twice.
 
 1. **12 of 24 codes were members of a value set other than the one they were registered under.** SNOMED
    103735009 is in "Palliative Care Intervention" but not "Palliative Care Diagnosis". 385763009 is in
-   "Hospice Care Ambulatory" but not "Hospice Encounter". CPT 77067 is in no VSAC mammography set at all.
+   "Hospice Care Ambulatory" but not "Hospice Encounter". CPT 77067 is not a member of the Mammography value set the official CMS125 numerator retrieves — all 92 of its members are LOINC.
 2. **CMS125's initial population reads the `us-core-sex` extension**, not `Patient.gender`.
 3. **CMS125's numerator retrieves `[Observation: "Mammography"]`.** The corpus emitted a Procedure, and all
    92 members of that value set are LOINC.
@@ -58,8 +58,8 @@ authored to produce:
 
 ### Verification
 
-- `pnpm test` — **1510 pass / 0 fail / 14 skipped**; with both terminology sidecars moved aside,
-  **1501 / 0 / 23**. Running both configurations is the discipline adopted after the PR-8a CI failure,
+- `pnpm test` — **1512 pass / 0 fail / 14 skipped**; with both terminology sidecars moved aside,
+  **1501 / 0 / 25**. Running both configurations is the discipline adopted after the PR-8a CI failure,
   where three tests passed locally on a working tree CI did not have.
 - `pnpm test:official-cases` — **55/55 + 66/66**, with the vendored artifact and the evidence report
   byte-unchanged.
@@ -68,6 +68,32 @@ authored to produce:
   `wiring/official-corpus-outcomes.test.ts` (the official artifact scores each target as authored, the
   authored path agrees, and the corpus is not degenerate). The last assertion is the important one: a
   corpus scored entirely COMPLIANT looks like success at every layer that can see it.
+
+### Review found two blockers, and reversed one of my decisions
+
+- **Both new guards were permanently skipped in CI.** They self-skip without the terminology sidecar,
+  the sidecars are gitignored, and the job that runs `pnpm test` never fetches them — so the PR whose
+  thesis is "enforced, not intended" enforced nothing. The `official-cases` job already carried a
+  comment warning about exactly this for the sibling file, and I added two more without reading it.
+  Both are now in that step.
+- **The scale generator undid the fix on its own path.** `recodeEventToReal` replaced the coding of
+  every `Procedure`/`Immunization`/`Observation` by resource TYPE, so it overwrote the new LOINC
+  mammogram `Observation` with the CPT code and put the scale population straight back out of CMS125's
+  numerator. `webChartRealisticGenerator` is the default for `seed:scale --mode evaluate` and produced
+  the live `mhn` tenant's 70,000 outcomes — so this was the same "wrong answer nothing detects" one
+  layer over. Now skips resources carrying no `urn:workwell:*` coding (there is nothing synthetic to
+  translate), and the outcomes guard runs against **both** generators.
+- **The onset I added to `stampEnrollment` was fabrication, and I had just written the rule it broke.**
+  That function runs over real WebChart bundles from a roster that carries no dates; WorkWell does not
+  know when an employee joined a program. It also changed a live subject's `data_hash` daily, defeating
+  the across-day incremental reuse (ADR-035) whose stated payoff is the WebChart tenant. Removed — and
+  nothing needed it, since official artifacts never retrieve a `urn:workwell:*` Condition. The drift
+  guard now excepts that one field and asserts the difference in both directions.
+
+Also fixed: a docstring in `qicore-preparation.ts` still asserting the cause ADR-038 says is wrong, two
+references to a test file that does not exist, a non-degeneracy assertion sitting after the comparison
+that implied it (dead code), a `!` that would throw instead of reporting with one sidecar present, and
+"CPT 77067 is in no VSAC mammography set at all" narrowed to what is actually proven.
 
 Authored outcomes are byte-identical throughout, and nothing routes officially —
 `WORKWELL_OFFICIAL_MEASURES` stays unset. One drift guard failed and was right to: `stampEnrollment`

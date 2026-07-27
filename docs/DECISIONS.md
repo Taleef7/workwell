@@ -14,7 +14,7 @@ and worse:
 
 | # | Defect | Effect |
 |---|---|---|
-| 1 | **12 of 24 codes were not members of the value set they were registered under.** SNOMED 103735009 is in "Palliative Care Intervention" but not "Palliative Care Diagnosis"; 385763009 is in "Hospice Care Ambulatory" but not "Hospice Encounter"; CPT 77067 is in no VSAC mammography set at all. | official CMS122 scored the EXCLUDED cohort **COMPLIANT** — the DENEX never fired |
+| 1 | **12 of 24 codes were not members of the value set they were registered under.** SNOMED 103735009 is in "Palliative Care Intervention" but not "Palliative Care Diagnosis"; 385763009 is in "Hospice Care Ambulatory" but not "Hospice Encounter"; CPT 77067 is not a member of the Mammography value set the official CMS125 numerator retrieves — all 92 of its members are LOINC. | official CMS122 scored the EXCLUDED cohort **COMPLIANT** — the DENEX never fired |
 | 2 | **CMS125's initial population reads the `us-core-sex` extension, not `Patient.gender`.** | official CMS125 put the **entire roster** out-of-population |
 | 3 | **CMS125's numerator retrieves `[Observation: "Mammography"]`.** The corpus emitted a Procedure, and all 92 members of that value set are LOINC. | no subject could ever reach the numerator |
 | 4 | **Conditions carried no `onsetDateTime`.** `QICoreCommon.prevalenceInterval` is not merely conservative without one, it is inconsistent: CMS122's `prevalenceInterval Overlaps MP` returns true (unbounded overlaps everything) while CMS125's `Start(prevalenceInterval) SameOrBefore End(MP)` returns null. | mastectomy DENEX never fired |
@@ -57,25 +57,49 @@ authored to produce:
    is*: `qicore-preparation.ts` receives data it did not create and must not invent a clinical date for
    it, while the corpus invents the entire patient by construction — a fictional employee with diabetes
    was diagnosed on some fictional day, and declining to say when is not neutrality, it is an
-   ill-formed record that happens to read as absent. Conditions now carry an onset 730 days before the
-   evaluation date, which also retires a documented workaround: `cms122.cql` carries the comment
-   "presence-based (synthetic Conditions often lack onset periods)".
+   ill-formed record that happens to read as absent. Synthetic Conditions now carry an onset 730 days
+   before the evaluation date, which also retires a documented workaround: `cms122.cql` carries the
+   comment "presence-based (synthetic Conditions often lack onset periods)".
+
+   **`stampEnrollment` is the counter-example, and it took review to find it.** The first cut gave the
+   same onset to the enrollment Condition that gets stamped onto REAL WebChart bundles — which fails
+   this very test: its input is a roster asserting program membership, and that roster carries no date,
+   so WorkWell does not know when an employee joined the hearing conservation program. It also cost
+   something concrete: `canonical-hash.ts` hashes the bundle AFTER stamping, so a date-derived field
+   there changes a live subject's `data_hash` every calendar day and permanently defeats the across-day
+   incremental reuse (ADR-035) whose stated payoff is exactly the WebChart tenant. Removed. Nothing
+   needed it — official artifacts retrieve VSAC-coded diagnoses, never a `urn:workwell:*`
+   program-membership Condition. The byte-identity drift guard now excepts that one named field and
+   asserts the difference in both directions, so it is deliberate rather than accidental.
 
 **Consequences.**
 
 - **Authored outcomes are byte-identical.** The corpus additions are invisible to the authored measures
   (an `Observation` is not a `Procedure`; no authored CQL reads `onset` or the sex extension), and the
-  code corrections moved the stamped code and the offline expansion together. Full suite 1510 pass / 0
-  fail / 14 skipped; 1501 / 0 / 23 with the terminology sidecars removed; MADiE gate 55/55 + 66/66 with
+  code corrections moved the stamped code and the offline expansion together. Full suite 1512 pass / 0
+  fail / 14 skipped; 1501 / 0 / 25 with the terminology sidecars removed; MADiE gate 55/55 + 66/66 with
   the vendored artifact and the evidence report byte-unchanged.
-- **The PR-9 flip is now a config change rather than a roster rewrite** for these two measures, and there
-  is a test that says so. `official-corpus-outcomes.test.ts` asserts the official artifact scores each
-  target as authored, that the authored path agrees, and — separately — that the corpus is not
-  degenerate. The last assertion is not padding: a corpus scored entirely COMPLIANT looks like good news
-  and is indistinguishable from success at every other layer.
+- **For the STATIC synthetic corpus, the PR-9 flip is now a config change rather than a roster
+  rewrite**, and there is a test that says so. `official-corpus-outcomes.test.ts` asserts the official
+  artifact scores each target as authored, that the authored path agrees, and that the corpus is not
+  degenerate.
+- **Two other data paths are NOT covered, and both are PR-9 blockers alongside the capped
+  `AdvancedIllness` expansion.** (a) The **scale generator** (`run/scale-generator.ts`,
+  `webChartRealisticGenerator` — the default for `seed:scale --mode evaluate`, which produced the live
+  `mhn` tenant) re-codes clinical events to one real code per measure; review caught it overwriting the
+  new LOINC mammogram `Observation` with the CPT, putting the whole scale population back out of
+  CMS125's numerator. Fixed here by skipping resources that carry no `urn:workwell:*` coding, but the
+  outcomes guard still only exercises `buildSyntheticBundle`. (b) **Real WebChart data** gets neither
+  CMS125 fix: `normalizeWebChartBundle` synthesizes no `us-core-sex` extension, and the crosswalk maps
+  mammography onto a `Procedure` with no LOINC — so official CMS125 over live teatea data would still
+  read out-of-population. That is an M-D question, answerable only against live data.
 - **This work moves earlier than the roadmap scheduled it.** §7.4 put per-measure corpus extension at
   PR-10..12. Running the shadow period first would have compared against data that cannot exercise the
   numerator, and then run it again.
+- **Both guards are wired into the `official-cases` CI job**, not just written. They self-skip without
+  the fetched terminology sidecar, and the job that runs `pnpm test` has no sidecar — so as first
+  written they were permanently skipped in CI while reading as covered, which review caught. Any future
+  test that loads a sidecar must be added to that step.
 - **The six remaining measures inherit the guard, not the fix.** Each still needs its own corpus data;
   what they no longer need is to rediscover that a plausible code can belong to the wrong set.
 

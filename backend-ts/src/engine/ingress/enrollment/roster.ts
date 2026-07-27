@@ -117,24 +117,29 @@ function hasEnrollmentCondition(bundle: FhirBundle, valueSet: string, code: stri
 }
 
 /**
- * The enrollment Condition — identical shape to `fhir-bundle-builder.ts`'s `condition()`, including its
- * `onsetDateTime`. A drift guard asserts the two byte-for-byte, which is what caught the onset when it
- * was added on the synthetic side only. The onset is not cosmetic here either: this is the Condition a
- * WebChart subject is evaluated against, and official artifacts date conditions through
- * `QICoreCommon.prevalenceInterval`, which yields nothing usable without a start.
+ * The enrollment Condition — the shape `fhir-bundle-builder.ts`'s `condition()` produces, with ONE
+ * deliberate difference, pinned by a drift guard: **no `onsetDateTime`**.
+ *
+ * The synthetic builder gives its Conditions an onset because it invents the entire patient, so a
+ * fictional employee with diabetes was diagnosed on some fictional day (ADR-038). This function is the
+ * other side of ADR-037's "whose fact is it" test: it runs over REAL WebChart bundles, its input is a
+ * roster asserting program membership, and that roster carries no date. WorkWell does not know when an
+ * employee joined the hearing conservation program, so writing one would be fabrication on the live
+ * path — the thing the preparation layer is forbidden from doing, done one layer earlier.
+ *
+ * Nothing needs it. Official artifacts date Conditions through `QICoreCommon.prevalenceInterval`, but
+ * they retrieve VSAC-coded diagnoses and never a `urn:workwell:*` program-membership Condition (the
+ * roster deliberately refuses to stamp cms122's diabetes dx for exactly that reason). It would also
+ * cost: `canonical-hash.ts` hashes the bundle AFTER stamping, so a date-derived field here changes a
+ * live subject's `data_hash` every calendar day and permanently defeats the across-day incremental
+ * reuse (ADR-035) whose stated payoff is the WebChart tenant.
  */
-function enrollmentCondition(
-  subjectId: string,
-  code: string,
-  valueSet: string,
-  evaluationDate: string,
-): unknown {
+function enrollmentCondition(subjectId: string, code: string, valueSet: string): unknown {
   return {
     resourceType: "Condition",
     meta: { profile: [QICORE_CONDITION] },
     id: `${subjectId}-${code}`,
     subject: { reference: `Patient/${subjectId}` },
-    onsetDateTime: `${dateMinusDays(evaluationDate, CONDITION_ONSET_DAYS_BEFORE)}T00:00:00`,
     clinicalStatus: { coding: [{ code: "active" }] },
     verificationStatus: {
       coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
@@ -142,9 +147,6 @@ function enrollmentCondition(
     code: { coding: [{ system: valueSet, code, display: code }] },
   };
 }
-
-/** Mirrors `fhir-bundle-builder.ts`'s constant of the same name — the drift guard pins them together. */
-const CONDITION_ONSET_DAYS_BEFORE = 730;
 
 /** YYYY-MM-DD of evaluationDate minus days (UTC), used to place visits inside the 12-month MP. */
 function dateMinusDays(evaluationDate: string, daysAgo: number): string {
@@ -210,7 +212,7 @@ export function stampEnrollment(
 
   const { code, valueSet } = binding.enrollment;
   if (!hasEnrollmentCondition(bundle, valueSet, code)) {
-    additions.push({ resource: enrollmentCondition(subjectId, code, valueSet, evaluationDate) });
+    additions.push({ resource: enrollmentCondition(subjectId, code, valueSet) });
   }
 
   // CMS125 production CQL IPP: female + age + qualifying visit. The roster asserts program membership;

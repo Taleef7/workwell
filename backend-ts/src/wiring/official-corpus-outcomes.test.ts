@@ -12,19 +12,21 @@
  * Before this branch, official CMS122 scored the synthetic EXCLUDED cohort as COMPLIANT and official
  * CMS125 put the entire roster out-of-population. Neither raises anything: a run completes, every
  * subject gets an outcome, and `hasRetrieveSignal` passes because retrieves *did* match. The roster just
- * quietly reads better than reality. That is why the non-degeneracy assertion below is not padding — a
- * corpus that scores 100% COMPLIANT is the single most dangerous state this pipeline can be in, and it
- * is indistinguishable from success at every other layer.
+ * quietly reads better than reality. A corpus that scores 100% COMPLIANT is the most dangerous state
+ * this pipeline can be in, precisely because it is indistinguishable from success at every other layer.
+ *
+ * The non-degeneracy assertions run BEFORE the table comparison for that reason. Review pointed out
+ * they were dead code after it — `EXPECTED` already holds three distinct values, so a passing
+ * `deepEqual` implies them. Ahead of it they still catch the realistic regression: an `EXPECTED` table
+ * someone flattened to turn a red build green.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { bundledEcqmValueSetResolver } from "../engine/cql/bundled-ecqm-expansions.ts";
-import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { directSyntheticGenerator, webChartRealisticGenerator } from "../run/scale-generator.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
@@ -61,39 +63,47 @@ const sidecarsPresent = ["cms122", "cms125"].every((id) => {
 });
 const skip = sidecarsPresent ? false : "run 'pnpm vendor:official' to fetch the terminology sidecars";
 
-const employee = (target: string): EmployeeProfile => ({
-  externalId: `corpus-${target}`,
-  name: `Corpus ${target}`,
-  role: "Technician",
-  site: "HQ",
-  providerId: "P00",
-  tenantId: "twh",
-});
+/**
+ * Both bundle sources, because covering only one is how this defect class comes back.
+ *
+ * `directSyntheticGenerator` wraps `deriveExamConfig` + `buildSyntheticBundle` — the live-tenant run
+ * path. `webChartRealisticGenerator` re-codes those bundles to real WebChart terminology and is the
+ * DEFAULT for `seed:scale --mode evaluate`, which produced the live `mhn` tenant's outcomes. Review
+ * caught it overwriting the LOINC mammogram `Observation` with the CPT code and putting the entire
+ * scale population back out of CMS125's numerator — invisible to a guard that only knew about the
+ * first source.
+ */
+const SOURCES = [directSyntheticGenerator(), webChartRealisticGenerator()];
 
-for (const [measureId, expected] of Object.entries(EXPECTED)) {
-  test(`official ${measureId} scores the synthetic corpus as authored`, { skip }, async () => {
-    const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
-    const authored = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
-    const binding = MEASURE_BINDINGS[measureId]!;
-    const actual: Record<string, string> = {};
-    const authoredOutcomes: Record<string, string> = {};
+for (const generator of SOURCES) {
+  for (const [measureId, expected] of Object.entries(EXPECTED)) {
+    test(`official ${measureId} scores the ${generator.kind} corpus as authored`, { skip }, async () => {
+      const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+      const authored = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
+      const actual: Record<string, string> = {};
+      const authoredOutcomes: Record<string, string> = {};
 
-    for (const target of Object.keys(expected) as TargetOutcome[]) {
-      const bundle = buildSyntheticBundle(employee(target), deriveExamConfig(binding, target), EVALUATION_DATE);
-      const input = { measureId, patientBundle: bundle, evaluationDate: EVALUATION_DATE };
-      actual[target] = (await executor.evaluate(input)).outcome;
-      authoredOutcomes[target] = (await authored.evaluate(input)).outcome;
-    }
+      for (const target of Object.keys(expected) as TargetOutcome[]) {
+        const bundle = generator.bundleFor(`corpus-${target}`, measureId, target, EVALUATION_DATE);
+        const input = { measureId, patientBundle: bundle, evaluationDate: EVALUATION_DATE };
+        actual[target] = (await executor.evaluate(input)).outcome;
+        authoredOutcomes[target] = (await authored.evaluate(input)).outcome;
+      }
 
-    assert.deepEqual(actual, expected);
-    // The authored path agrees on every target TODAY, which is what makes PR-9's flip a config change
-    // rather than a roster rewrite. A failure here is a finding to investigate, not necessarily a bug:
-    // the two measures are different logic and are allowed to disagree. What is not allowed is
-    // disagreeing without anyone noticing.
-    assert.deepEqual(authoredOutcomes, expected, "authored/official divergence — investigate before PR-9");
+      // Non-degeneracy, asserted BEFORE the comparison rather than after. A corpus scored entirely
+      // COMPLIANT looks like good news and is the failure this whole file exists for — but after a
+      // passing `deepEqual(actual, expected)` the check is dead code, since `expected` already holds
+      // three distinct values. Ahead of it, it still catches an `EXPECTED` table someone flattened to
+      // make a red build green, which is the realistic way this protection gets lost.
+      assert.ok(new Set(Object.values(expected)).size > 1, "the EXPECTED table is degenerate");
+      assert.ok(new Set(Object.values(actual)).size > 1, "every target scored the same — corpus is degenerate");
 
-    // Non-degeneracy. A corpus scored entirely COMPLIANT looks like good news and is the failure this
-    // whole file exists for.
-    assert.ok(new Set(Object.values(actual)).size > 1, "every target scored the same — corpus is degenerate");
-  });
+      assert.deepEqual(actual, expected);
+      // The authored path agrees on every target TODAY, which is what makes PR-9's flip a config change
+      // rather than a roster rewrite. A failure here is a finding to investigate, not necessarily a bug:
+      // the two measures are different logic and are allowed to disagree. What is not allowed is
+      // disagreeing without anyone noticing.
+      assert.deepEqual(authoredOutcomes, expected, "authored/official divergence — investigate before PR-9");
+    });
+  }
 }
