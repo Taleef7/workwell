@@ -286,13 +286,43 @@ function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJs
   };
 }
 
-const args = parseArgs(process.argv.slice(2));
-const url = `https://raw.githubusercontent.com/${REPO}/${args.ref}/bundles/measure/${args.measure}/${args.measure}-bundle.json`;
+/**
+ * Reuse the sparse clone `fetch-official-cases.ps1` already maintains, when it sits at the ref we were
+ * asked for.
+ *
+ * Same repository, same pinned commit, same file — and in CI it is already restored from a cache, so
+ * this turns two ~17 MB `raw.githubusercontent` downloads per run into zero. Reproducibility is
+ * untouched: the reproducibility check's claim is "the committed artifact is what this immutable pin
+ * produces", and a checkout OF that pin is those bytes.
+ *
+ * The ref comparison is what makes it safe. A detached checkout writes the sha straight into `.git/HEAD`,
+ * so a clone parked on a different commit — or on a branch — simply does not match and we fetch. Every
+ * failure here falls back to the network rather than guessing.
+ */
+function localUpstreamBundle(args) {
+  const contentDir = join(BACKEND_ROOT, ".official-content");
+  try {
+    if (readFileSync(join(contentDir, ".git", "HEAD"), "utf8").trim() !== args.ref) return null;
+    const path = join(contentDir, "bundles", "measure", args.measure, `${args.measure}-bundle.json`);
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
-console.log(`fetching ${args.measure} @ ${args.ref.slice(0, 12)}`);
-const response = await fetch(url);
-if (!response.ok) throw new Error(`unable to fetch ${url}: HTTP ${response.status}`);
-const raw = await response.text();
+const args = parseArgs(process.argv.slice(2));
+
+const cached = localUpstreamBundle(args);
+let raw = cached;
+if (raw) {
+  console.log(`reading ${args.measure} @ ${args.ref.slice(0, 12)} from .official-content (no download)`);
+} else {
+  const url = `https://raw.githubusercontent.com/${REPO}/${args.ref}/bundles/measure/${args.measure}/${args.measure}-bundle.json`;
+  console.log(`fetching ${args.measure} @ ${args.ref.slice(0, 12)}`);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`unable to fetch ${url}: HTTP ${response.status}`);
+  raw = await response.text();
+}
 
 const upstream = JSON.parse(raw);
 const reduced = reduceBundle(upstream, args);

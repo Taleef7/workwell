@@ -97,7 +97,7 @@ export interface RoutingCheckDeps {
    * Injectable for tests. It has to be: the terminology sidecar is FETCHED AT BUILD and gitignored, so
    * whether `cms122` is fully routable is a fact about the working tree, not about the code. The
    * default offline suite asserts the checks, not the build artifact; `official-terminology.test.ts`
-   * asserts the real file and self-skips without it, and the `official-cases` CI job — which fetches
+   * asserts the real file and self-skips without it, and the `official-cases` CI job — which vendors
    * the sidecar — runs that file explicitly for exactly this reason.
    */
   loadTerminology?: (artifact: OfficialArtifact) => LoadedTerminology;
