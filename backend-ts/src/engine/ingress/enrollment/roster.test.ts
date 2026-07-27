@@ -90,12 +90,17 @@ test("stampEnrollment: adds the measure's enrollment Condition for an enrolled s
 test("stampEnrollment: the stamped Condition is byte-identical to the synthetic builder's (drift guard)", () => {
   // If fhir-bundle-builder.ts's condition() shape ever drifts, this fails — the whole point is that a
   // roster-stamped bundle is indistinguishable from a synthetic enrolled bundle to the CQL engine.
+  // The same evaluation date goes to both sides, because the Condition now carries a date-derived
+  // `onsetDateTime`: this guard is what caught that field being added on the synthetic side only.
+  const evaluationDate = "2026-06-12";
   const emp: EmployeeProfile = { externalId: "wc-1", name: "N", role: "r", site: "s", providerId: "p", tenantId: "twh" };
-  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), "2026-06-12");
+  const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), evaluationDate);
   const builtCond = conditions(built).find((c) => c.id === "wc-1-hearing-enrollment");
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
-  const stampedCond = conditions(stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster))[0];
-  assert.deepEqual(stampedCond, builtCond);
+  const stamped = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster, {
+    evaluationDate,
+  });
+  assert.deepEqual(conditions(stamped)[0], builtCond);
 });
 
 test("stampEnrollment: no-op (no duplicate) on an already-enrolled synthetic bundle", () => {
