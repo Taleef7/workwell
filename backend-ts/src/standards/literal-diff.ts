@@ -32,6 +32,9 @@ import {
   type PopulationMembership,
 } from "@workwell/official-executor";
 import { loadOfficialArtifact, officialArtifactAvailable } from "../wiring/official-artifacts.ts";
+import { loadOfficialTerminology, officialTerminologyExpander } from "../wiring/official-terminology.ts";
+import { expandArtifactTerminology } from "../wiring/official-executor-adapter.ts";
+import { prepareForQiCore, type PreparableBundle } from "../wiring/qicore-preparation.ts";
 
 /** The catalog id whose vendored artifact this diff executes. */
 const OFFICIAL_CATALOG_ID = "cms122";
@@ -43,40 +46,19 @@ export function loadOfficialCms122Bundle(): FhirBundle | null {
   return (loadOfficialArtifact(OFFICIAL_CATALOG_ID)?.bundle as FhirBundle | undefined) ?? null;
 }
 
-/** True when the literal tier can be attempted (vendored artifact present + every library carries ELM). */
-export function literalDiffAvailable(): boolean {
-  return officialArtifactAvailable(OFFICIAL_CATALOG_ID);
-}
-
 /**
- * Harness-local QICore-structural stamping: the literal QICore measure's retrieves are stricter than
- * WorkWell's plain-FHIR cms122 — a diabetes Condition must be an ACTIVE, CONFIRMED problem whose prevalence
- * period overlaps the measurement period (QICoreCommon `ToInterval`/`isActive`), and Encounters expect a
- * `class`. Our synthetic Conditions carry a system-less `clinicalStatus` and no `onsetDateTime`, so without
- * this normalization the QICore "Has Diabetes" retrieve drops every subject and the whole population reads
- * out-of-population. This is additive/normalizing, in-place on the diff harness's OWN bundle copy — WorkWell's
- * cms122 CQL reads none of these fields, so its outcome is byte-identical (ADR-008 guard test). `asOf` (the
- * run's eval date) anchors the onset well before the measurement period.
+ * True when the literal tier can be attempted: the vendored artifact is present with ELM in every
+ * library, AND its terminology sidecar is present and matches its pin.
+ *
+ * Terminology is part of availability since ADR-036 — the artifact alone cannot execute, and the sidecar
+ * is fetched at build rather than committed, so "the build step has not run" is a normal state on a
+ * fresh clone. Reporting it here is what makes the route degrade to the subset tier instead of
+ * attempting a literal run that can only fail.
  */
-function stampQiCoreStructure(bundle: FhirBundle, asOf: string): void {
-  const clinicalActive = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }] };
-  const verifConfirmed = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }] };
-  const problemCategory = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "problem-list-item" }] };
-  const ambClass = { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" };
-  const onset = `${Number(asOf.slice(0, 4)) - 3}-01-01`; // well before the [year-01-01, year-12-31] measurement period
-  for (const e of bundle.entry) {
-    const r = e.resource as Record<string, unknown>;
-    if (r.resourceType === "Condition") {
-      // Overwrite (not merge): the synthetic clinicalStatus coding is system-less and won't match the
-      // QICore ConditionClinicalStatusCodes value; a fully-coded active/confirmed status is required.
-      r.clinicalStatus = clinicalActive;
-      r.verificationStatus = verifConfirmed;
-      if (!r.category) r.category = [problemCategory];
-      if (!r.onsetDateTime && !r.onsetPeriod) r.onsetDateTime = onset;
-    } else if (r.resourceType === "Encounter") {
-      if (!r.class) r.class = ambClass;
-    }
-  }
+export function literalDiffAvailable(): boolean {
+  if (!officialArtifactAvailable(OFFICIAL_CATALOG_ID)) return false;
+  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+  return !!artifact && loadOfficialTerminology(artifact).ok;
 }
 
 export interface LiteralDiffReport {
@@ -107,6 +89,13 @@ export interface LiteralDiffDeps {
   calculate?: FqmCalculate;
   /** Injectable bundle (tests); defaults to the vendored artifact. */
   officialBundle?: FhirBundle;
+  /**
+   * Injectable terminology (tests); defaults to the artifact's own vendored sidecar.
+   *
+   * Injectable rather than falling back to the VSAC resolver, so the offline suite stays hermetic
+   * WITHOUT production ever having a second terminology source to silently reach for.
+   */
+  valueSetCache?: unknown[];
 }
 
 const DISCLAIMER =
@@ -170,10 +159,32 @@ export async function computeLiteralDiff(
     url: measureResource?.url ?? "unknown",
   };
 
-  // Pre-expand the official measure's value sets from the imported VSAC rows.
+  // Terminology comes from the ARTIFACT'S OWN vendored sidecar (ADR-036), never from our VSAC import.
+  //
+  // This is what makes the shadow period predictive. The whole purpose of running this diff before a
+  // flip is to learn what the flip will do; if the diff expands one terminology and the runtime expands
+  // another, it forecasts a configuration that will never exist. Before PR-8a the two genuinely
+  // differed — the runtime read VSAC store rows while the MADiE gate read the upstream bundle — and
+  // this call site was the last place still on the old source.
+  //
+  // The store resolver is still used for the SUBSET tier and for WorkWell's own authored evaluation
+  // below, which is correct: those are urn:workwell measures and VSAC is their terminology.
+  // No silent fallback to the VSAC resolver when the sidecar is absent: that is precisely the two-
+  // authority split ADR-036 closed, and a diagnostic that quietly swaps terminology is worse than one
+  // that is unavailable. `literalDiffAvailable()` already reports the sidecar as part of availability,
+  // so the route declines the literal tier and degrades to subset VISIBLY, in its `mode` field.
+  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+  const valueSetCache =
+    deps.valueSetCache ??
+    (await expandArtifactTerminology(artifact!, officialTerminologyExpander(loadOfficialArtifact)));
+
+  // The harness-local enrichment reads the same expansions, so it cannot drift from what executes.
   const expansions: Expansions = new Map<string, CqlCode[]>();
-  for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) expansions.set(oid, await deps.resolver.expand(oid));
-  const valueSetCache = await buildValueSetCache(bundle as MeasureBundle, (oid) => deps.resolver.expand(oid));
+  for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) {
+    const expanded = (valueSetCache as Array<{ id?: string; url?: string; expansion?: { contains?: CqlCode[] } }>)
+      .find((vs) => vs.id === oid || String(vs.url ?? "").endsWith(oid));
+    expansions.set(oid, expanded?.expansion?.contains ?? (await deps.resolver.expand(oid)));
+  }
 
   const binding = MEASURE_BINDINGS["cms122"]!;
 
@@ -192,7 +203,7 @@ export async function computeLiteralDiff(
       const config = deriveExamConfig(binding, target);
       const base = buildSyntheticBundle(employee, config, deps.today) as unknown as FhirBundle;
       const enriched = enrichForOfficialCms122(base as never, employee, expansions, deps.today) as unknown as FhirBundle;
-      stampQiCoreStructure(enriched, deps.asOf);
+      prepareForQiCore(enriched as PreparableBundle, deps.asOf);
       patientBundles.push(enriched);
       const workwell = await deps.engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: deps.asOf });
       workwellBySubject.set(row.subjectId, workwell.outcome);

@@ -1,5 +1,63 @@
 # Architecture Decision Records
 
+## ADR-037: Official execution prepares bundles for QI-Core — normalization only, never fabrication
+
+**Status:** Accepted (2026-07-27). Roadmap §7.4 PR-8. Nothing routes officially yet.
+
+**Context.** Official artifacts retrieve against QI-Core profiles, which are materially stricter than
+the plain FHIR this repo emits: a diabetes `Condition` must be an ACTIVE, CONFIRMED problem whose
+prevalence period overlaps the measurement period, and an `Encounter` is expected to carry a `class`.
+Our synthetic Conditions ship a system-less `clinicalStatus` and no `onsetDateTime`.
+
+`standards/literal-diff.ts` had a private `stampQiCoreStructure` for this, and the router's docstring
+carried "must call it, or the whole population reads out-of-population" as an unmeasured obligation.
+Measured against the vendored CMS122 artifact over 25 synthetic subjects:
+
+| bundle | IPP | DENOM | NUMER |
+|---|---|---|---|
+| raw synthetic | **0** | 0 | 0 |
+| + preparation | 25 | 25 | **0** |
+| + preparation + harness enrichment | 22 | 22 | 4 |
+
+**Decision.**
+
+1. **One preparation, used by both paths.** `wiring/qicore-preparation.ts` — the diff and the runtime
+   executor call the same function. Two implementations of this could not be compared, and comparing
+   them is the entire purpose of the shadow period.
+2. **The runtime prepares a COPY.** The authored engine may evaluate the same bundle object, and ADR-008
+   requires its outcome to be byte-identical whether or not official routing is on.
+3. **Normalization, never fabrication.** It fills in FHIR structural metadata the official profiles
+   require and touches no clinical fact — no code, no value, no date of an actual event. Fields that are
+   already present (`onset`, `category`, Encounter `class`) are left alone, which is what makes it safe
+   over real WebChart data as well as synthetic. Only `clinicalStatus`/`verificationStatus` are
+   overwritten, because a system-less coding cannot match QI-Core's binding and merging would change
+   nothing.
+4. **The literal diff uses the artifact's own terminology (ADR-036), with no fallback.** It was the last
+   call site still expanding from our VSAC import. A diff that expands one terminology while the runtime
+   expands another forecasts a configuration that will never exist, which defeats the point of running it
+   before a flip. When the sidecar is absent, `literalDiffAvailable()` reports false and the route
+   degrades to the subset tier **visibly, in its `mode` field**, rather than silently swapping sources.
+5. **The deploy workflow vendors terminology into the build context.** Not doing so would have silently
+   downgraded the live stack's `mode:"literal"` to `"subset"` — a regression of a shipped capability.
+   Deliberately not fail-soft.
+
+**Consequences.**
+
+- **This does NOT make the synthetic corpus sufficient for official cms122, and that gates PR-9.** With
+  preparation alone the 25 subjects score IPP=25 / DENOM=25 / NUMER=0, and cms122's numerator is *poor
+  glycemic control* — so the roster renders as **100% compliant**. A wrong answer that looks like good
+  news is worse than an obviously broken one, and no automatic check distinguishes it from a genuinely
+  well-controlled population: `hasRetrieveSignal` passes, because retrieves DID match.
+  The gap is that our corpus carries `urn:workwell:*` codes where the official numerator retrieves real
+  LOINC. `standards/cms122-official.ts` closes it with a harness-local enrichment for the diff, and that
+  enrichment must **never** move into the runtime — synthesising clinical codes at evaluation time is
+  fabrication. The real fix is a synthetic corpus that emits real codes, which the roadmap already
+  schedules per measure at PR-10..12.
+- The shadow period (PR-8) is therefore the gate that catches this class, not a formality.
+- Descriptive only (ADR-008): preparation changes what the official artifact can see, never what CQL
+  decides. Nothing routes officially, so no current outcome changes.
+
+
 ## ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
 
 **Status:** Accepted (2026-07-27). Roadmap §4.3 called this in advance ("bundle-shipped expansions
