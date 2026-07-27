@@ -174,16 +174,36 @@ export async function computeLiteralDiff(
   // that is unavailable. `literalDiffAvailable()` already reports the sidecar as part of availability,
   // so the route declines the literal tier and degrades to subset VISIBLY, in its `mode` field.
   const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+  // Explicit, not a `!`. The route only reaches here when `literalDiffAvailable()` is true, but this
+  // function also accepts an INJECTED `officialBundle`, and on that path nothing guarantees a vendored
+  // artifact exists — a non-null assertion would have turned that into a TypeError from inside fqm.
+  if (!deps.valueSetCache && !artifact) {
+    throw new Error(
+      `${OFFICIAL_CATALOG_ID}: no vendored official artifact, so its terminology cannot be loaded — ` +
+        `pass deps.valueSetCache to run the literal diff against an injected bundle`,
+    );
+  }
   const valueSetCache =
     deps.valueSetCache ??
     (await expandArtifactTerminology(artifact!, officialTerminologyExpander(loadOfficialArtifact)));
 
-  // The harness-local enrichment reads the same expansions, so it cannot drift from what executes.
+  // The harness-local enrichment reads the SAME cache that executes, so the two cannot drift.
+  //
+  // No per-OID fallback to the VSAC resolver. It would be dead code today (every
+  // `CMS122_OFFICIAL_META` OID is in the sidecar) and a trap tomorrow: that list is hand-kept against
+  // the artifact's 26 ELM canonicals, so the first re-vendor that adds one would silently start
+  // enriching from a different terminology than the one being executed — the exact split ADR-036
+  // closed, reintroduced one OID at a time. An OID the cache lacks enriches with nothing, and the
+  // divergence shows up in the diff where it can be seen.
+  const cachedValueSets = valueSetCache as Array<{
+    id?: string;
+    url?: string;
+    expansion?: { contains?: CqlCode[] };
+  }>;
   const expansions: Expansions = new Map<string, CqlCode[]>();
   for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) {
-    const expanded = (valueSetCache as Array<{ id?: string; url?: string; expansion?: { contains?: CqlCode[] } }>)
-      .find((vs) => vs.id === oid || String(vs.url ?? "").endsWith(oid));
-    expansions.set(oid, expanded?.expansion?.contains ?? (await deps.resolver.expand(oid)));
+    const expanded = cachedValueSets.find((vs) => vs.id === oid || String(vs.url ?? "").endsWith(`/${oid}`));
+    expansions.set(oid, expanded?.expansion?.contains ?? []);
   }
 
   const binding = MEASURE_BINDINGS["cms122"]!;
@@ -203,7 +223,7 @@ export async function computeLiteralDiff(
       const config = deriveExamConfig(binding, target);
       const base = buildSyntheticBundle(employee, config, deps.today) as unknown as FhirBundle;
       const enriched = enrichForOfficialCms122(base as never, employee, expansions, deps.today) as unknown as FhirBundle;
-      prepareForQiCore(enriched as PreparableBundle, deps.asOf);
+      prepareForQiCore(enriched as PreparableBundle);
       patientBundles.push(enriched);
       const workwell = await deps.engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: deps.asOf });
       workwellBySubject.set(row.subjectId, workwell.outcome);

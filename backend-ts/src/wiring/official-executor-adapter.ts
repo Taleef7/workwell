@@ -381,10 +381,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       // IPP=0 across the board (`qicore-preparation.ts`). The copy is what keeps ADR-008: the authored
       // engine may evaluate this same bundle object, and its outcome must be byte-identical whether or
       // not official routing is on.
-      const patientBundle = preparedForQiCore(
-        input.patientBundle as PreparableBundle,
-        evaluationDate,
-      );
+      const patientBundle = preparedForQiCore(input.patientBundle as PreparableBundle);
       const results = await calculateOfficialDetailed({
         bundle: artifact.bundle,
         patientBundles: [patientBundle],
