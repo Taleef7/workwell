@@ -217,6 +217,31 @@ function subtractMonths(isoDate: string, months: number): string {
 }
 
 /**
+ * The measurement period an official artifact is executed over — **one definition, shared with the
+ * shadow diff**, for the same reason `qicore-preparation.ts` is shared: a diff that runs a different
+ * measurement period than the runtime does not forecast the flip, it forecasts a configuration that
+ * will never exist.
+ *
+ * They genuinely differed until PR-8d. `standards/literal-diff.ts` used the CALENDAR YEAR
+ * (`2026-01-01 … 2026-12-31`) while this adapter used the registry's rolling window
+ * (`evaluationDate − periodMonths … evaluationDate`) — so for an as-of of 2026-07-27 the two engines
+ * were being compared over periods sharing barely half their days, and every resulting difference would
+ * have been read as a LOGIC divergence.
+ *
+ * The window itself is deliberately the registry's, matching the authored path, so the shadow isolates
+ * logic rather than confounding it with a period change. Whether production should instead use the
+ * calendar measurement period an eCQM is defined on is a real question, still open for PR-9 — and now
+ * it is one edit rather than two that could drift apart.
+ */
+export function officialMeasurementPeriod(
+  measureId: string,
+  evaluationDate: string,
+): { start: string; end: string } {
+  const periodMonths = MEASURES[measureId]?.periodMonths ?? 12;
+  return { start: subtractMonths(evaluationDate, periodMonths), end: normalizePeriodEnd(evaluationDate) };
+}
+
+/**
  * Expand every value set the artifact's ELM retrieves, refusing if any comes back empty.
  *
  * Exported so PR-7b can preflight at ROUTER CONSTRUCTION — an operator who flips a measure whose
@@ -367,13 +392,9 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       }
 
       const evaluationDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
-      // Read from the SAME registry the authored path reads, rather than hardcoding 12: PR-8 compares
-      // the two engines' outcomes, and a period they disagree on would surface as a logic divergence.
-      const periodMonths = MEASURES[input.measureId]?.periodMonths ?? 12;
-      const period = {
-        start: subtractMonths(evaluationDate, periodMonths),
-        end: normalizePeriodEnd(evaluationDate),
-      };
+      // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
+      // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
+      const period = officialMeasurementPeriod(input.measureId, evaluationDate);
 
       const valueSetCache = await cacheFor(artifact);
       // Prepared, and on a COPY. Official artifacts retrieve against QI-Core profiles, which are

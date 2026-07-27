@@ -144,8 +144,14 @@ only:** review caught the scale generator overwriting the new LOINC mammogram Ob
 and **real WebChart data still gets neither CMS125 fix** (no `us-core-sex`, no LOINC mammography from the
 crosswalk) — both now PR-9 blockers beside the capped `AdvancedIllness` expansion.
 
-**Next: PR-8 (remaining)** — the shadow period itself: generalize the standards diff beyond its cms122
-hardcode, measure-major batching + a batch-level `hasRetrieveSignal`, and the `logic_version` override. **Then PR-9** (the flip). It owes ONE build step now — the
+**PR-8d shipped (ADR-039)** — the diff is generalized to any vendored measure AND made a genuine shadow
+of the runtime: it used the CALENDAR YEAR where the executor uses the registry rolling window, fed the
+artifact a harness-ENRICHED bundle (which ADR-038 made unnecessary and misleading), and prepared in place
+so WorkWell was evaluated on the mutated bundle — all three aligned behind one shared
+`officialMeasurementPeriod`. It also fixed a latent inversion: `numerator ? OVERDUE : COMPLIANT` is
+cms122 INVERSE reading and would have reported every screened woman in cms125 as overdue; now read from
+the fail-closed semantics table. **Next: PR-8 (remaining)** — measure-major batching + a batch-level
+`hasRetrieveSignal`, and the `logic_version` override. **Then PR-9** (the flip). It owes ONE build step now — the
 deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
 `AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
 bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot
