@@ -8,7 +8,7 @@
  * ## Every code here is a verified MEMBER of the official artifact's own expansion
  *
  * That property is what makes the corpus answerable by the measure CMS actually publishes, and it is
- * enforced by `official-membership.test.ts` rather than trusted. It did not hold before: an audit of this
+ * enforced by `wiring/corpus-membership.test.ts` rather than trusted. It did not hold before: an audit of this
  * file against the vendored CMS122/CMS125 terminology found **12 of 24 codes were not members of the set
  * they were registered under** — and because this file supplies BOTH the code stamped on the synthetic
  * resource AND the offline expansion the authored CQL resolves, the two agreed with each other and the
@@ -77,7 +77,7 @@ export const ECQM_CANONICAL_CODES = {
 } as const;
 
 /**
- * Which official value set each canonical code must belong to — the contract `official-membership.test.ts`
+ * Which official value set each canonical code must belong to — the contract `wiring/corpus-membership.test.ts`
  * checks. Exported so the test reads the same table the expansion is built from; a test with its own copy
  * of this mapping would pass while the expansion below used a different one.
  *

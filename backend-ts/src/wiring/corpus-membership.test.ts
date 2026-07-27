@@ -95,7 +95,10 @@ test("the mammography PROCEDURE codes stay outside the membership contract", { s
   // one, all 92 members. Pinning both halves keeps a future tidy-up from folding them into the canonical
   // table (where they would fail) or dropping them (silently breaking the authored path over real data).
   const oid = CANONICAL_CODE_VALUE_SETS.mammogram;
-  const official = expansions.get(oid)!;
+  // Not `!`. With only the cms122 sidecar fetched this test still runs (the skip needs BOTH absent),
+  // and a non-null assertion would kill it with a TypeError instead of saying what is wrong.
+  const official = expansions.get(oid);
+  assert.ok(official, `${oid} is not in the fetched terminology — vendor cms125 before trusting this`);
   const offline = await bundledEcqmValueSetResolver.expand(oid);
   for (const procedureCode of MAMMOGRAPHY_PROCEDURE_CODES) {
     assert.ok(

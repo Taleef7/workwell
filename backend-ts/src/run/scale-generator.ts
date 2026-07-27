@@ -80,12 +80,27 @@ export const REAL_EVENT_CODE: Record<string, { system: string; code: string }> =
   hepatitis_b_vaccination_series: { system: CVX, code: "189" },
 };
 
+/** True when a resource's code/vaccineCode still carries a synthetic `urn:workwell:*` coding. */
+function hasSyntheticCoding(resource: Record<string, unknown>, codeField: string): boolean {
+  const field = resource[codeField] as { coding?: Array<{ system?: unknown }> } | undefined;
+  return (field?.coding ?? []).some((c) => typeof c.system === "string" && c.system.startsWith("urn:workwell:"));
+}
+
 /**
  * Re-code the qualifying EVENT resource(s) of a synthetic bundle to the measure's real WebChart code.
  * Only the clinical events (`Procedure`/`Immunization`/`Observation`) are re-coded — the enrollment /
  * waiver / refusal `Condition`s keep their synthetic codes (the CQL reads those directly, they carry no
  * real terminology). Never mutates the input; builds new resource objects. A measure with no real code
  * (`hazwoper`) is returned unchanged.
+ *
+ * A resource that carries NO `urn:workwell:*` coding is left alone, because there is nothing synthetic
+ * about it to translate. This is load-bearing since PR-8c: the corpus emits cms125's mammogram twice —
+ * a CPT `Procedure` (what WebChart records) and a LOINC `Observation` (what the official numerator
+ * retrieves). Re-coding by resource TYPE alone overwrote the LOINC with the CPT and put the scale
+ * tenant's whole cms125 population back out of the numerator, silently — undoing on this path the exact
+ * defect PR-8c fixed on the static one. `webChartRealisticGenerator` is the default for
+ * `seed:scale --mode evaluate` and produced the live `mhn` tenant, so "silently" would have meant 70,000
+ * outcomes reading as nobody-screened after a PR-9 flip.
  */
 function recodeEventToReal(bundle: FhirBundle, measureId: string): FhirBundle {
   const real = REAL_EVENT_CODE[measureId];
@@ -95,6 +110,7 @@ function recodeEventToReal(bundle: FhirBundle, measureId: string): FhirBundle {
     const r = e.resource as Record<string, unknown> | undefined;
     if (!r || typeof r.resourceType !== "string" || !EVENT_TYPES.has(r.resourceType)) return e;
     const codeField = r.resourceType === "Immunization" ? "vaccineCode" : "code";
+    if (!hasSyntheticCoding(r, codeField)) return e;
     return { resource: { ...r, [codeField]: { coding: [{ ...real, display: real.code }] } } };
   });
   return { ...bundle, entry };
