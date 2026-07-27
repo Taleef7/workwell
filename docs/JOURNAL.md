@@ -1,5 +1,53 @@
 # Journal
 
+## 2026-07-27 (later) — PR-8b: bundle preparation, and what it revealed (branch `feat/official-bundle-preparation`)
+
+Started PR-8 by checking a claim rather than inheriting it. The router's docstring has said since PR-7b
+that without `stampQiCoreStructure` "the whole population reads out-of-population" — true, and nobody had
+ever run it. Measured against the vendored CMS122 artifact over 25 synthetic subjects:
+
+| bundle | IPP | DENOM | NUMER |
+|---|---|---|---|
+| raw synthetic | **0** | 0 | 0 |
+| + preparation | 25 | 25 | **0** |
+| + preparation + harness enrichment | 22 | 22 | 4 |
+
+The first row is the documented failure and it is real. **The second row is the one worth stopping for.**
+With preparation alone, everyone is in the denominator and nobody in the numerator — and cms122's
+numerator is *poor glycemic control*, so that renders as **100% compliant**. A wrong answer that looks
+like good news, and nothing automatic catches it: `hasRetrieveSignal` passes, because retrieves did
+match. It is strictly more dangerous than IPP=0, which at least announces itself.
+
+The cause is that our corpus carries `urn:workwell:*` codes where the official numerator retrieves real
+LOINC. The diff harness closes that with a local enrichment — and that enrichment must **never** move
+into the runtime, because synthesising clinical codes at evaluation time is fabricating findings that
+never happened. The real fix is a corpus that emits real codes, which the roadmap already schedules per
+measure. So this is now written down as the gate on PR-9 rather than a surprise during it.
+
+**What shipped:** one `wiring/qicore-preparation.ts` used by the diff AND the runtime executor — two
+implementations could not be compared, and comparing them is the whole point of the shadow period. The
+runtime prepares a COPY, so the authored outcome stays byte-identical whether or not routing is on
+(ADR-008). The rule is normalization, never fabrication: structural metadata the QI-Core profiles require,
+no code, no value, no date of a real event; fields already present are left alone, which is what makes it
+safe over WebChart data too.
+
+The literal diff was also the **last call site still expanding from our VSAC import** — PR-8a moved the
+runtime and the gate, and missed this one. Now on the artifact's own terminology with **no fallback**: a
+diff that expands different terminology than the runtime forecasts a configuration that will never exist,
+which defeats the reason for running it before a flip. When the sidecar is absent the tier is reported
+unavailable and the route degrades to subset **visibly, in `mode`**, instead of silently swapping sources.
+
+**And a regression I nearly shipped.** That change would have downgraded the LIVE stack's
+`mode:"literal"` to `"subset"`, because the deploy image had no sidecar — a shipped capability quietly
+lost. The deploy workflow now vendors terminology into the build context (plain `node`, no package
+manager on the deploy path; deliberately not fail-soft). Caught it by asking what the change does to
+production rather than only whether the tests pass.
+
+Verified in **both** configurations, which is the discipline I committed to after the last CI failure:
+with the sidecar 1502 pass / 0 fail / 14 skipped, with both sidecars physically moved aside 1497 / 0 / 19.
+Official gate 55/55 + 66/66, evidence report and vendored artifact byte-unchanged. ADR-037.
+
+
 ## 2026-07-27 — PR-8a: one terminology authority (branch `feat/official-terminology-authority`)
 
 Sizing PR-8 turned up something worth stopping for: **the MADiE gate was not evidence about the runtime.**
