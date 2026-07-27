@@ -50,17 +50,31 @@ third time it was right.
 **Side effect worth having:** PR-9 no longer waits on an owner-only UMLS import. The blocker was an
 artifact of the split, not a real dependency.
 
-**Recorded, not resolved.** VSAC caps expansions at 1000 codes, and `AdvancedIllness`
-(`…1003.110.12.1082`) is capped at 1000 of 1997 in **both** bundles — exactly the case §4.3 predicted.
-It changes none of the 121 official cases, which is the claim I can support and all of it. Completing it
-from VSAC at vendor time is an owner action before routing any measure whose result depends on that set.
+**The review caught the guard that mattered most being missing.** I had written `cappedExpansions` with
+the docstring "reported at boot so a shortfall is never silent" — and zero production callers. VSAC caps
+expansions at 1000 codes; `AdvancedIllness` (`…1003.110.12.1082`) is capped at 1000 of 1997 in **both**
+bundles, and it feeds the 66+/advanced-illness DENEX in each. The empty-set preflight cannot catch that,
+because half-expanded is not empty — so a flip would have left excluded subjects in the denominator and
+scored them, with no signal anywhere. It is now a routing refusal, filtered to the sets the ELM actually
+retrieves. **cms122 and cms125 are consequently not routable today**, which is the correct answer: it
+changes none of the 121 official cases, and "changes no test case" is not "changes no patient".
 
-**PR-9 obligations:** run the fetch in the deploy workflow before `docker build` (the image needs the
-sidecar), and complete that capped expansion. Nothing routes officially today, so nothing is broken
-meanwhile — a flip without the build step fails closed at boot, which is the right failure.
+Six other findings from the same review, all fixed: the strongest assertions in the PR self-skipped in
+CI (the sidecar-covers-every-canonical test now runs in the `official-cases` job, which fetches);
+`runtimeTerminologyCache` collapsed three unlike causes into "sidecar not present", which could assert a
+file was missing while it sat on disk; the CLI unit tests had quietly become non-hermetic, reading the
+real 2.4 MB artifacts; `localeCompare` was deciding the byte order that the pin hashes (ICU collation
+weights `.` by locale — now code-point); the sidecar's lookup keys are re-derived with the package's own
+`oidFromValueSetUrl` rather than the vendor script's copy of that rule; and the new CI fetch is cached,
+so a GitHub raw hiccup cannot redden the eCQM gate for a reason unrelated to the gate.
 
-ADR-036. `pnpm test`: **1495 pass / 0 fail / 14 skipped**; typecheck clean; `pnpm test:official-cases`
-55/55 + 66/66.
+**PR-9 obligations:** complete that capped expansion from VSAC at vendor time, and run the fetch in the
+deploy workflow before `docker build` (the image needs the sidecar). Nothing routes officially today, so
+nothing is broken meanwhile — and both omissions now fail closed at boot rather than silently, which is
+the right failure.
+
+ADR-036. `pnpm test`: **1496 pass / 0 fail / 14 skipped**; typecheck clean; `pnpm test:official-cases`
+55/55 + 66/66 with the reduction check on the runtime configuration.
 
 
 ## 2026-07-25 (night) — PR-7b: the executor router, wired and dark (branch `feat/executor-router`)

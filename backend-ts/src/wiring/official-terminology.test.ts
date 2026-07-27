@@ -18,6 +18,7 @@ import {
 } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { requiredOids } from "./official-executor-adapter.ts";
+import { officialRoutingProblems } from "./executor-router.ts";
 
 const sha = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
@@ -96,13 +97,29 @@ test("the fetched sidecar covers EVERY value set the artifact's ELM retrieves", 
   }
 });
 
-test("capped expansions are RECORDED, so a shortfall is never silent", { skip }, () => {
+test("a capped expansion the ELM RETRIEVES is surfaced; one it ignores is not", { skip }, () => {
   // VSAC caps an expansion at 1000 codes. Advanced Illness is 1997 upstream and is capped in both
-  // measures' bundles — recorded here rather than discovered later, because an under-expanded set
-  // cannot invent membership but can quietly omit a subject who belongs.
-  const capped = cappedExpansions(loadOfficialArtifact("cms122")!);
+  // measures' bundles, where it feeds a denominator exclusion — so `officialRoutingProblems` refuses
+  // on it. An under-expanded set cannot invent membership, but it can quietly omit a subject who
+  // belongs, and preflight cannot catch it: it refuses on EMPTY, and half-expanded is not empty.
+  const artifact = loadOfficialArtifact("cms122")!;
+  const capped = cappedExpansions(artifact, requiredOids(artifact));
+  assert.ok(capped.length > 0, "AdvancedIllness is capped and retrieved — if this changes, so did upstream");
   assert.ok(
     capped.every((c) => c.have < c.declaredTotal),
-    "a recorded cap must actually be short of its declared total",
+    "a surfaced cap must actually be short of its declared total",
+  );
+
+  // Filtered by what the ELM references, so a capped set the measure never retrieves cannot block it.
+  assert.deepEqual(cappedExpansions(artifact, []), []);
+});
+
+test("the routing check REFUSES a measure whose retrieved value set is capped", { skip }, () => {
+  // The finding this replaces: `cappedExpansions` existed, documented "reported at boot so a shortfall
+  // is never silent", and had zero production callers. Recording is not guarding.
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" });
+  assert.ok(
+    problems.some((p) => /expands to only \d+ of \d+ codes/.test(p)),
+    `expected a capped-expansion refusal, got: ${JSON.stringify(problems)}`,
   );
 });

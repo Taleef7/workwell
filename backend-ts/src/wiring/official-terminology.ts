@@ -32,7 +32,7 @@ import { readFileSync } from "node:fs";
 // Through the adapter, not from the package directly. Same reasoning as `oidFromValueSetUrl`: every
 // direct importer is another door to fqm-execution that the boundary test has to keep deliberately
 // open, and this module needs one type.
-import type { ExpandedCode } from "./official-executor-adapter.ts";
+import { oidFromValueSetUrl, type ExpandedCode } from "./official-executor-adapter.ts";
 import type { OfficialArtifact } from "./official-artifacts.ts";
 
 const TERMINOLOGY_ROOT = new URL("../../measures/official/", import.meta.url);
@@ -144,11 +144,16 @@ export function verifyTerminology(catalogId: string, expectedSha: string, raw: s
 
   const codesByOid = new Map<string, ExpandedCode[]>();
   for (const valueSet of parsed.valueSets) {
-    if (typeof valueSet?.oid !== "string" || !Array.isArray(valueSet.codes)) continue;
-    codesByOid.set(
-      valueSet.oid,
-      valueSet.codes.map((code) => ({ system: code.system, code: code.code })),
-    );
+    if (!Array.isArray(valueSet?.codes)) continue;
+    const codes = valueSet.codes.map((code) => ({ system: code.system, code: code.code }));
+    // Keyed by re-deriving the OID from the canonical with the PACKAGE's rule — the same
+    // `oidFromValueSetUrl` that `buildValueSetCache` will look up by — rather than trusting the `oid`
+    // the vendor script wrote with its own copy of that rule. Two normalizations that merely agree on
+    // VSAC canonicals is a bug waiting for the first canonical of another shape, and here the two
+    // sides are keys and lookups: a divergence means every lookup misses. It fails closed (the
+    // expansion refusal fires), but "fails closed" is a worse answer than "cannot diverge".
+    if (typeof valueSet.url === "string") codesByOid.set(oidFromValueSetUrl(valueSet.url), codes);
+    else if (typeof valueSet.oid === "string") codesByOid.set(valueSet.oid, codes);
   }
   return { ok: true, codesByOid };
 }
@@ -176,9 +181,25 @@ export function officialTerminologyExpander(
   };
 }
 
-/** Capped expansions the manifest recorded — reported at boot so a shortfall is never silent. */
-export function cappedExpansions(artifact: OfficialArtifact): Array<{ oid: string; have: number; declaredTotal: number }> {
-  return artifact.manifest.terminology?.truncated ?? [];
+/**
+ * Capped expansions the manifest recorded, restricted to the ones this measure's ELM actually
+ * retrieves. `officialRoutingProblems` REFUSES on a non-empty result.
+ *
+ * This is the failure one notch weaker than the empty-set case, and the more dangerous for it. VSAC
+ * caps an expansion at 1000 codes; `expandArtifactTerminology` refuses only on *empty*, so a 50%
+ * expanded set sails through preflight. `AdvancedIllness` (1000 of 1997) is exactly that, and it feeds
+ * the 66+/advanced-illness denominator exclusion in BOTH vendored measures — so routing with it capped
+ * would leave excluded subjects in the denominator and score them, producing a wrong regulatory rate
+ * with no signal anywhere. Recording it was never enough; the guard has to be able to say no.
+ *
+ * Filtered by what the ELM references so a capped set the measure never retrieves cannot block it.
+ */
+export function cappedExpansions(
+  artifact: OfficialArtifact,
+  referencedOids: string[],
+): Array<{ oid: string; have: number; declaredTotal: number }> {
+  const referenced = new Set(referencedOids);
+  return (artifact.manifest.terminology?.truncated ?? []).filter((cap) => referenced.has(cap.oid));
 }
 
 /** @internal test hook */

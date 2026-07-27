@@ -18,6 +18,13 @@ import type { FqmCalculate } from "@workwell/official-executor";
  */
 const terminologyPresent = (): LoadedTerminology => ({ ok: true, codesByOid: new Map() });
 
+/**
+ * Both vendored artifacts genuinely carry a capped expansion today (AdvancedIllness, 1000 of 1997),
+ * so the capped-expansion check correctly refuses them. Tests about a LATER check stub it out; the
+ * check itself is asserted against the real artifacts in `official-terminology.test.ts`.
+ */
+const noCaps = () => [];
+
 /** A calculator that reports one subject in every population — enough to prove routing reached fqm. */
 const fakeCalculate: FqmCalculate = async () => ({
   results: [
@@ -77,7 +84,7 @@ test("a named measure routes to the official executor; everything else stays aut
     { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
     // An injected calculator, not the real one: asserting `instanceof Error` would have passed on a
     // MODULE_NOT_FOUND just as happily as on a real routing hit, which proves nothing about routing.
-    { authored, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
+    { authored, cappedFor: noCaps, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
   );
 
   const official = await routed.evaluate({ measureId: "cms122", patientBundle: {} });
@@ -96,7 +103,7 @@ test("an explicit elm/metaOverride always stays authored, even for a routed meas
   const authored = authoredEngine();
   const routed = await routedEngineForEnv(
     { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
-    { authored, expand: async () => [{ code: "a", system: "s" }] },
+    { authored, cappedFor: noCaps, expand: async () => [{ code: "a", system: "s" }] },
   );
 
   await routed.evaluate({ measureId: "cms122", patientBundle: {}, elm: { library: {} } });
@@ -113,6 +120,7 @@ test("construction refuses every shape of misconfiguration, and says which", asy
   const build = (value: string) =>
     routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: value } as never, {
       authored,
+      cappedFor: noCaps,
       expand: async () => [{ code: "a", system: "s" }],
     });
 
@@ -130,7 +138,16 @@ test("construction refuses every shape of misconfiguration, and says which", asy
 test("officialRoutingProblems names the gate, the artifact, and the semantics separately", () => {
   const stub = { loadTerminology: terminologyPresent };
   assert.deepEqual(officialRoutingProblems({}, stub), [], "unset is always legal");
-  assert.deepEqual(officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122,cms125" }, stub), []);
+
+  // NOT asserted as an empty list: cms122 and cms125 both currently carry a REAL capped expansion
+  // (AdvancedIllness, 1000 of 1997 codes, retrieved by both ELMs), so the honest answer today is that
+  // neither is routable until PR-9 completes it from VSAC. That refusal is the point — asserting []
+  // here would have meant deleting the guard the moment it started working.
+  const vendored = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122,cms125" }, stub);
+  assert.ok(
+    vendored.every((p) => /expands to only \d+ of \d+ codes/.test(p)),
+    `the only outstanding problems should be the capped expansion: ${JSON.stringify(vendored)}`,
+  );
 
   // ALL the problems, not the first: an operator fixing one at a time, learning about the next only
   // after a redeploy, is how a five-minute configuration takes an afternoon. cms130 is both ungated and
@@ -148,7 +165,10 @@ test("a missing terminology sidecar is a routing problem, named as a build step"
   // terminology problems instead of running one command.
   const problems = officialRoutingProblems(
     { WORKWELL_OFFICIAL_MEASURES: "cms122" },
-    { loadTerminology: () => ({ ok: false, problem: "cms122: official terminology is not present" }) },
+    {
+      cappedFor: noCaps,
+      loadTerminology: () => ({ ok: false, problem: "cms122: official terminology is not present" }),
+    },
   );
   assert.deepEqual(problems, ["cms122: official terminology is not present"]);
 });
@@ -164,6 +184,7 @@ test("terminology is preflighted at CONSTRUCTION, not at first evaluation", asyn
       routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
         authored,
         loadTerminology: terminologyPresent,
+        cappedFor: noCaps,
         expand: async () => {
           expandCalls += 1;
           return []; // a sidecar that verified but expands nothing for this measure's OIDs
@@ -183,6 +204,7 @@ test("the expander is keyed by MEASURE, not by a single flat OID map", async () 
     routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
       authored: authoredEngine(),
       loadTerminology: terminologyPresent,
+      cappedFor: noCaps,
       expand: async (oid, catalogId) => {
         seen.push([oid, catalogId]);
         return [];
@@ -202,8 +224,11 @@ test("non-proportion scoring is refused at CONSTRUCTION, not per subject", async
   // population run with every subject MISSING_DATA. That is the silent-empty-population failure the
   // terminology preflight exists to prevent, reached through the door next to it.
   const { officialRoutingProblems } = await import("./executor-router.ts");
+  // Asserting the ABSENCE of a scoring problem rather than an empty list. An empty list would make
+  // this test a claim about every other check too — including the terminology ones, whose answer
+  // depends on a fetched-at-build file this suite deliberately does not have.
   const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" });
-  assert.deepEqual(problems, [], "cms122 is a proportion measure");
+  assert.ok(!problems.some((p) => /scoring/.test(p)), `cms122 is a proportion measure: ${problems}`);
 
   // The check reads the manifest, so prove it fires by pointing it at a scoring the mapping cannot
   // express. (Both vendored measures are proportion, so this asserts the CHECK, via the message text.)

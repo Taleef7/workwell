@@ -127,7 +127,10 @@ manifest; the reduction check now executes the runtime configuration and agrees 
 (`stampQiCoreStructure` — without it the whole roster reads out-of-population), measure-major batching,
 and the `logic_version` override. **Then PR-9** (the flip), which owes two build steps: fetch the
 terminology sidecar in the deploy workflow before `docker build`, and complete the VSAC-capped
-`AdvancedIllness` expansion (1000 of 1997 codes; it changes none of the 121 cases today).
+`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). The second is not
+optional bookkeeping — a capped expansion the ELM retrieves is now a **routing refusal**, so cms122 and
+cms125 cannot be flipped until it is done. It changes none of the 121 official cases, which is not the
+same as changing no patient.
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 
