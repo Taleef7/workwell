@@ -116,7 +116,24 @@ function hasEnrollmentCondition(bundle: FhirBundle, valueSet: string, code: stri
   });
 }
 
-/** The enrollment Condition — identical shape to `fhir-bundle-builder.ts`'s `condition()`. */
+/**
+ * The enrollment Condition — the shape `fhir-bundle-builder.ts`'s `condition()` produces, with ONE
+ * deliberate difference, pinned by a drift guard: **no `onsetDateTime`**.
+ *
+ * The synthetic builder gives its Conditions an onset because it invents the entire patient, so a
+ * fictional employee with diabetes was diagnosed on some fictional day (ADR-038). This function is the
+ * other side of ADR-037's "whose fact is it" test: it runs over REAL WebChart bundles, its input is a
+ * roster asserting program membership, and that roster carries no date. WorkWell does not know when an
+ * employee joined the hearing conservation program, so writing one would be fabrication on the live
+ * path — the thing the preparation layer is forbidden from doing, done one layer earlier.
+ *
+ * Nothing needs it. Official artifacts date Conditions through `QICoreCommon.prevalenceInterval`, but
+ * they retrieve VSAC-coded diagnoses and never a `urn:workwell:*` program-membership Condition (the
+ * roster deliberately refuses to stamp cms122's diabetes dx for exactly that reason). It would also
+ * cost: `canonical-hash.ts` hashes the bundle AFTER stamping, so a date-derived field here changes a
+ * live subject's `data_hash` every calendar day and permanently defeats the across-day incremental
+ * reuse (ADR-035) whose stated payoff is the WebChart tenant.
+ */
 function enrollmentCondition(subjectId: string, code: string, valueSet: string): unknown {
   return {
     resourceType: "Condition",

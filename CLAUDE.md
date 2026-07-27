@@ -126,10 +126,23 @@ manifest; the reduction check now executes the runtime configuration and agrees 
 **PR-8b shipped (ADR-037):** one `qicore-preparation` used by both the diff and the runtime executor
 (measured — unprepared, the official artifact reads the whole roster out-of-population), the literal diff
 moved onto the artifact's own terminology with no fallback, and the deploy workflow vendors terminology
-into the build context. **It surfaced the gate for PR-9:** preparation alone renders the synthetic corpus
-as **100% compliant** for cms122 (NUMER=0, because our bundles carry `urn:workwell:*` codes where the
-official numerator retrieves real LOINC) — a wrong answer that looks like good news, which nothing
-automatic detects. Fixing it means a corpus that emits real codes, never runtime enrichment.
+into the build context. It surfaced a gate — preparation alone rendered the synthetic corpus **100%
+compliant** for cms122 — which **PR-8c has now closed (ADR-038)**, taken ahead of the remaining PR-8
+mechanics because a shadow run against a corpus that cannot exercise the numerator compares nothing.
+PR-8b's stated cause was wrong: the corpus already dual-stamped real codes. The measured defects were
+**12 of 24 codes being members of a value set other than the one they were registered under** (invisible
+to every measure test, because one file supplies both the stamped code and the offline expansion the
+authored CQL resolves — so both sides agreed), CMS125's IPP reading the **`us-core-sex` extension**
+rather than `Patient.gender`, its numerator retrieving **`[Observation: Mammography]`** where we emitted
+a Procedure, and Conditions carrying **no `onsetDateTime`** (which `prevalenceInterval` handles
+inconsistently, not merely conservatively). Official-vs-authored agreement across the five synthetic
+targets: **cms122 4/5 and cms125 0/5 → 5/5 and 5/5**, authored outcomes byte-identical, MADiE gate
+unchanged. Guarded by a membership contract against the vendored terminology and an outcomes-as-authored
+check that also refuses a degenerate all-one-bucket corpus (both wired into the `official-cases` CI job —
+anything reading a sidecar self-skips in the job that runs `pnpm test`). **Covers the STATIC corpus
+only:** review caught the scale generator overwriting the new LOINC mammogram Observation with CPT (fixed),
+and **real WebChart data still gets neither CMS125 fix** (no `us-core-sex`, no LOINC mammography from the
+crosswalk) — both now PR-9 blockers beside the capped `AdvancedIllness` expansion.
 
 **Next: PR-8 (remaining)** — the shadow period itself: generalize the standards diff beyond its cms122
 hardcode, measure-major batching + a batch-level `hasRetrieveSignal`, and the `logic_version` override. **Then PR-9** (the flip). It owes ONE build step now — the
@@ -137,8 +150,7 @@ deploy-workflow terminology fetch shipped with PR-8b (production + staging): com
 `AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
 bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot
 be flipped until it is done. It changes none of the 121 official cases, which is not the same as
-changing no patient. **Plus the PR-8b finding:** the synthetic corpus must emit real codes before an
-official cms122 flip means anything on the demo stack, or the roster reads 100% compliant.
+changing no patient. (The PR-8b corpus finding is closed — see PR-8c above.)
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 

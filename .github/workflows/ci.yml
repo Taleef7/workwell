@@ -157,11 +157,16 @@ jobs:
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code measures/official
-      # These two assertions — that the sidecar covers every canonical the ELM retrieves, and that a
-      # capped expansion is refused — are the strongest in the PR, and they self-skip without the
-      # fetched sidecar. `pnpm test` runs in a job that has no sidecar, so this is their only gate.
-      - name: Official terminology tests (need the fetched sidecar)
-        run: pnpm exec node --import tsx --test src/wiring/official-terminology.test.ts
+      # Every assertion that consults the ARTIFACT'S OWN terminology self-skips without the fetched
+      # sidecar, and `pnpm test` runs in a job that has no sidecar — so this step is their only gate.
+      # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while
+      # reading as covered. That is not hypothetical: PR-8c shipped two such files and had to be told.
+      - name: Official terminology + corpus tests (need the fetched sidecar)
+        run: |
+          pnpm exec node --import tsx --test \
+            src/wiring/official-terminology.test.ts \
+            src/wiring/corpus-membership.test.ts \
+            src/wiring/official-corpus-outcomes.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases
