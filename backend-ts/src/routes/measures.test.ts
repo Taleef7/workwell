@@ -226,10 +226,23 @@ test("GET /api/measures/cms122/fidelity/diff returns a valid OutcomeDiffReport w
 
   const res = await get("/api/measures/cms122/fidelity/diff");
   assert.equal(res?.status, 200);
-  const body = (await res!.json()) as { ecqmId: string; criterionImpacts: unknown[]; totalSubjectsEvaluated: number };
+  const body = (await res!.json()) as {
+    mode?: string;
+    ecqmId: string;
+    criterionImpacts?: unknown[];
+    totalSubjectsEvaluated: number;
+  };
   assert.equal(body.ecqmId, "CMS122v14");
-  assert.ok(body.criterionImpacts.length > 0, "criterionImpacts must not be empty");
   assert.ok(body.totalSubjectsEvaluated >= 1, "at least one subject must be evaluated");
+  // Which TIER answers depends on the working tree, and deliberately so since PR-8d: with the vendored
+  // artifact's terminology sidecar fetched (`pnpm vendor:official`) the literal tier is available and
+  // wins; without it — a fresh clone, and the `backend-ts` CI job — the ladder falls to the estimate.
+  // Asserting `criterionImpacts` unconditionally made this test pass in CI and fail locally.
+  if (body.mode === "literal") {
+    assert.ok(Array.isArray((body as { subjects?: unknown[] }).subjects), "a literal report carries subjects");
+  } else {
+    assert.ok((body.criterionImpacts ?? []).length > 0, "criterionImpacts must not be empty");
+  }
 });
 
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {

@@ -1,24 +1,43 @@
 /**
- * #258 — LITERAL official-CQL execution diff for CMS122 (the highest-fidelity tier).
+ * #258 — the LITERAL official-CQL execution diff (the highest-fidelity tier), for ANY vendored measure.
  *
- * Runs the **literal, multi-library QICore CMS122v14 eCQM** — the exact official MADiE FHIR artifact
- * (`using QICore '6.0.0'`, 8 included libraries) — via MITRE's `fqm-execution` over the PRE-COMPILED ELM
- * pre-shipped in the vendored bundle's `Library.content` (`application/elm+json`). No translation happens
- * (which is what ADR-024 found intractable under the pinned JS translator); fqm-execution executes the
- * committed ELM on the same `cql-execution` + `cql-exec-fhir` runtime this repo already uses.
+ * Runs the **literal, multi-library QICore eCQM** — the exact official MADiE FHIR artifact
+ * (`using QICore '6.0.0'`) — via MITRE's `fqm-execution` over the PRE-COMPILED ELM pre-shipped in the
+ * vendored bundle's `Library.content` (`application/elm+json`). No translation happens (which is what
+ * ADR-024 found intractable under the pinned JS translator); fqm-execution executes the committed ELM on
+ * the same `cql-execution` + `cql-exec-fhir` runtime this repo already uses.
  *
- * The fqm machinery now lives in `@workwell/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is
+ * The fqm machinery lives in `@workwell/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is
  * the ADR-026 quarantine — `fqm-execution` appears in exactly one package.json, and that package's entry
  * imports it only through a lazy `await import`. This module keeps what is WorkWell-specific: reading the
- * vendored bundle off disk, harness-local enrichment, and the diff itself. It is still reached ONLY from
- * the `/api/measures/cms122/fidelity/diff` route — never the run pipeline, engine ingress, or worker.ts.
- * Descriptive only (ADR-008): it writes nothing and never sets an `Outcome Status`. The bundle enrichment
- * is harness-local (a copy fed to the diff harness), so WorkWell's cms122 outcomes stay byte-identical.
+ * vendored bundle off disk and the diff itself. Reached ONLY from the `/api/measures/:id/fidelity/diff`
+ * route — never the run pipeline, engine ingress, or worker.ts. Descriptive only (ADR-008): it writes
+ * nothing and never sets an `Outcome Status`.
+ *
+ * ## PR-8d — this became a SHADOW of the runtime rather than a study of its own
+ *
+ * The diff exists to answer one question: what will the PR-9 flip do? It can only answer that if it
+ * evaluates what the runtime would evaluate. Three things it did differently, all now aligned:
+ *
+ * 1. **The measurement period.** It used the calendar year while the executor used the registry's
+ *    rolling 12 months — barely half the same days. Both now call `officialMeasurementPeriod`.
+ * 2. **The bundle.** It fed the official artifact a harness-ENRICHED bundle: real VSAC codings appended,
+ *    plus deliberate age-out / missing-visit / hospice / GMI injection so the ladder had divergences to
+ *    attribute. That was necessary when the corpus could not reach the official populations at all, and
+ *    became actively misleading once PR-8c fixed it (ADR-038) — a shadow period that manufactures
+ *    divergence forecasts divergence that will not happen. Removed; the diff now runs the plain
+ *    synthetic bundle, prepared exactly as the runtime prepares it.
+ * 3. **Preparation in place.** It mutated the bundle and then evaluated WorkWell on the mutated copy.
+ *    The runtime prepares a COPY so the authored engine sees the original; so does this now.
+ *
+ * The subset tier (`execution-diff.ts`) keeps the enrichment, which is correct — it is the fidelity
+ * LAB, comparing authored cms122 against a hand-authored official-subset CQL, and manufactured
+ * divergence is the point there.
  */
 import type { OfficialMeasureReference } from "./reference-types.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import type { ValueSetResolver, CqlCode } from "../engine/cql/value-set-resolver.ts";
-import { CMS122_OFFICIAL_META, enrichForOfficialCms122, type Expansions } from "./cms122-official.ts";
+import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+
 import type { DiffEngine, SubjectDiff } from "./execution-diff.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
@@ -33,17 +52,19 @@ import {
 } from "@workwell/official-executor";
 import { loadOfficialArtifact, officialArtifactAvailable } from "../wiring/official-artifacts.ts";
 import { loadOfficialTerminology, officialTerminologyExpander } from "../wiring/official-terminology.ts";
-import { expandArtifactTerminology } from "../wiring/official-executor-adapter.ts";
-import { prepareForQiCore, type PreparableBundle } from "../wiring/qicore-preparation.ts";
-
-/** The catalog id whose vendored artifact this diff executes. */
-const OFFICIAL_CATALOG_ID = "cms122";
+import {
+  expandArtifactTerminology,
+  officialMeasurementPeriod,
+  outcomeFromPopulations,
+} from "../wiring/official-executor-adapter.ts";
+import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+import { preparedForQiCore, type PreparableBundle } from "../wiring/qicore-preparation.ts";
 
 type FhirBundle = { resourceType: "Bundle"; type?: string; entry: Array<{ resource: Record<string, unknown> }> };
 
-/** The vendored official artifact, or null when it is absent/unusable (→ the tier falls back). */
-export function loadOfficialCms122Bundle(): FhirBundle | null {
-  return (loadOfficialArtifact(OFFICIAL_CATALOG_ID)?.bundle as FhirBundle | undefined) ?? null;
+/** The vendored official artifact for a measure, or null when absent/unusable (→ the tier falls back). */
+export function loadOfficialMeasureBundle(measureId: string): FhirBundle | null {
+  return (loadOfficialArtifact(measureId)?.bundle as FhirBundle | undefined) ?? null;
 }
 
 /**
@@ -55,9 +76,12 @@ export function loadOfficialCms122Bundle(): FhirBundle | null {
  * fresh clone. Reporting it here is what makes the route degrade to the subset tier instead of
  * attempting a literal run that can only fail.
  */
-export function literalDiffAvailable(): boolean {
-  if (!officialArtifactAvailable(OFFICIAL_CATALOG_ID)) return false;
-  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+export function literalDiffAvailable(measureId: string): boolean {
+  if (!officialArtifactAvailable(measureId)) return false;
+  // Semantics gate availability for the same reason they gate ROUTING: without a recorded reading of
+  // what the numerator means, the mapping below would guess, and guessing inverts an inverse measure.
+  if (!officialMeasureSemantics(measureId)) return false;
+  const artifact = loadOfficialArtifact(measureId);
   return !!artifact && loadOfficialTerminology(artifact).ok;
 }
 
@@ -98,36 +122,61 @@ export interface LiteralDiffDeps {
   valueSetCache?: unknown[];
 }
 
-const DISCLAIMER =
-  "LITERAL execution diff: the official multi-library QICore CMS122v14 artifact (MADiE FHIR export), " +
+const disclaimerFor = (ecqmId: string): string =>
+  `LITERAL execution diff: the official multi-library QICore ${ecqmId} artifact (MADiE FHIR export), ` +
   "executed from its PRE-COMPILED ELM via fqm-execution (no translation), per subject against WorkWell's " +
-  "authored measure. fqm-execution is quarantined behind the @workwell/official-executor package " +
+  "authored measure, over the SAME measurement period and the SAME prepared bundle the official " +
+  "executor would use at runtime — so this forecasts the flip rather than describing a configuration " +
+  "that will never exist. fqm-execution is quarantined behind the @workwell/official-executor package " +
   "boundary and lazily imported (ADR-026 as amended). Descriptive only — CQL " +
-  "Outcome Status remains the sole compliance authority (ADR-008).";
+  "Outcome Status remains the sole compliance authority (ADR-008)."
 
 /**
- * Map the official measure's population membership onto WorkWell's outcome vocabulary. This mapping is
- * WorkWell policy, not measure execution, which is why it stays in the app rather than the package.
+ * Map official population membership onto WorkWell's outcome vocabulary — through the RUNTIME's own
+ * function, which is the fourth and last thing PR-8d aligned.
+ *
+ * This file had its own copy, and the two disagreed on the branch that matters most. Out of the initial
+ * population, the diff said `OUT_OF_POPULATION` while the runtime says `MISSING_DATA` — and both
+ * authored measures also say `MISSING_DATA` for not-in-IPP. So a subject the two engines fully AGREE
+ * about was scored as a divergence, attributed to the `initial-population` gate, and counted in a
+ * headline claiming it diverges from the official criteria. After the flip that subject's stored status
+ * would be unchanged. That is a manufactured divergence of exactly the kind removing the enrichment was
+ * meant to stop, arriving through a different door.
+ *
+ * Latent on today's corpus (measured: 0 out-of-population subjects across all 100 employees for both
+ * measures) and NOT latent for the six measures still to be onboarded, nor for live WebChart data —
+ * where out-of-population is the normal state.
+ *
+ * The old local copy also hardcoded `numerator ? OVERDUE : COMPLIANT`, which is cms122's inverse
+ * reading; the shared function takes `numeratorMeansCompliant` from the fail-closed semantics table.
  */
-function officialOutcome(membership: PopulationMembership): string {
-  const g = (t: string) => membership[t] === true;
-  if (!g("initial-population")) return "OUT_OF_POPULATION";
-  if (g("denominator-exclusion")) return "EXCLUDED";
-  if (!g("denominator")) return "OUT_OF_POPULATION";
-  return g("numerator") ? "OVERDUE" : "COMPLIANT";
+function officialOutcome(membership: PopulationMembership, numeratorMeansCompliant: boolean): string {
+  return outcomeFromPopulations(membership, numeratorMeansCompliant).outcome;
 }
 
 /** Which official gate accounts for a divergence (population-level; the finer per-define attribution
  * lives in the subset path). Derivable from population membership + WorkWell's outcome. */
 function attributeGate(officialOut: string, workwellOut: string): string {
-  if (officialOut === "OUT_OF_POPULATION") return "initial-population"; // age 18-75 / qualifying visit / diabetes — gates WorkWell omits
+  // Population-level and measure-NEUTRAL. The names used to be cms122's clinical gates
+  // ("numerator-glycemic-status"), which would have labelled a cms125 mammography divergence as a
+  // glycemic one. The finer per-define attribution lives in the subset path.
+  if (officialOut === "MISSING_DATA") return "initial-population"; // age / qualifying visit / diagnosis gates WorkWell omits
   if (officialOut === "EXCLUDED" && workwellOut !== "EXCLUDED") return "denominator-exclusion"; // hospice / palliative / frailty / LTC
   if (workwellOut === "EXCLUDED" && officialOut !== "EXCLUDED") return "workwell-exclusion"; // a urn:workwell waiver the official doesn't model
-  if (officialOut === "OVERDUE" || officialOut === "COMPLIANT") return "numerator-glycemic-status"; // HbA1c / GMI numerator
+  if (officialOut === "OVERDUE" || officialOut === "COMPLIANT") return "numerator";
   return "workwell-side";
 }
 
-// Keyed on runId (only the latest run is queried; terminal runs are immutable). Mirrors execution-diff.
+/**
+ * Memo of terminal runs' reports, keyed on **measure AND run**.
+ *
+ * runId alone was safe only while this tier was cms122-only, and PR-8d opening it to any vendored
+ * measure made it a correctness bug: an `ALL_PROGRAMS` run writes every measure's outcomes under ONE
+ * `runs.id`, so `latestRunRows` hands both measures the same run id. Asking for cms122's diff and then
+ * cms125's returned the *identical object* — cms122's measureId, ecqmId, subjects, headline and
+ * provenance, under cms125's URL. Precisely the "one measure's criteria reported under another
+ * measure's name" this PR closed at the route, re-opened one layer down.
+ */
 const cache = new Map<string, LiteralDiffReport>();
 /** @internal test hook */
 export function __clearLiteralDiffCache(): void {
@@ -142,10 +191,19 @@ export async function computeLiteralDiff(
   deps: LiteralDiffDeps,
 ): Promise<LiteralDiffReport> {
   const runId = rows[0]?.runId ?? null;
-  if (runId && cache.has(runId)) return cache.get(runId)!;
+  const cacheKey = runId ? `${ref.measureId}|${runId}` : null;
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)!;
 
-  const bundle = deps.officialBundle ?? (loadOfficialArtifact(OFFICIAL_CATALOG_ID)?.bundle as FhirBundle | undefined);
-  if (!bundle) throw new Error("literal-diff: official CMS122 artifact unavailable");
+  const catalogId = ref.measureId;
+  const semantics = officialMeasureSemantics(catalogId);
+  if (!semantics) {
+    throw new Error(
+      `literal-diff: no recorded official semantics for '${catalogId}' — refusing to guess whether its ` +
+        `numerator means compliant (see wiring/official-measure-semantics.ts)`,
+    );
+  }
+  const bundle = deps.officialBundle ?? (loadOfficialArtifact(catalogId)?.bundle as FhirBundle | undefined);
+  if (!bundle) throw new Error(`literal-diff: official ${catalogId} artifact unavailable`);
   // Provenance is read from the Measure resource in the bundle we are ACTUALLY executing, not from the
   // vendored manifest. When a caller injects a different bundle, the report must describe that bundle -
   // attributing the run to the vendored artifact's name and version would be a provenance misstatement
@@ -173,13 +231,13 @@ export async function computeLiteralDiff(
   // authority split ADR-036 closed, and a diagnostic that quietly swaps terminology is worse than one
   // that is unavailable. `literalDiffAvailable()` already reports the sidecar as part of availability,
   // so the route declines the literal tier and degrades to subset VISIBLY, in its `mode` field.
-  const artifact = loadOfficialArtifact(OFFICIAL_CATALOG_ID);
+  const artifact = loadOfficialArtifact(catalogId);
   // Explicit, not a `!`. The route only reaches here when `literalDiffAvailable()` is true, but this
   // function also accepts an INJECTED `officialBundle`, and on that path nothing guarantees a vendored
   // artifact exists — a non-null assertion would have turned that into a TypeError from inside fqm.
   if (!deps.valueSetCache && !artifact) {
     throw new Error(
-      `${OFFICIAL_CATALOG_ID}: no vendored official artifact, so its terminology cannot be loaded — ` +
+      `${catalogId}: no vendored official artifact, so its terminology cannot be loaded — ` +
         `pass deps.valueSetCache to run the literal diff against an injected bundle`,
     );
   }
@@ -187,26 +245,8 @@ export async function computeLiteralDiff(
     deps.valueSetCache ??
     (await expandArtifactTerminology(artifact!, officialTerminologyExpander(loadOfficialArtifact)));
 
-  // The harness-local enrichment reads the SAME cache that executes, so the two cannot drift.
-  //
-  // No per-OID fallback to the VSAC resolver. It would be dead code today (every
-  // `CMS122_OFFICIAL_META` OID is in the sidecar) and a trap tomorrow: that list is hand-kept against
-  // the artifact's 26 ELM canonicals, so the first re-vendor that adds one would silently start
-  // enriching from a different terminology than the one being executed — the exact split ADR-036
-  // closed, reintroduced one OID at a time. An OID the cache lacks enriches with nothing, and the
-  // divergence shows up in the diff where it can be seen.
-  const cachedValueSets = valueSetCache as Array<{
-    id?: string;
-    url?: string;
-    expansion?: { contains?: CqlCode[] };
-  }>;
-  const expansions: Expansions = new Map<string, CqlCode[]>();
-  for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) {
-    const expanded = cachedValueSets.find((vs) => vs.id === oid || String(vs.url ?? "").endsWith(`/${oid}`));
-    expansions.set(oid, expanded?.expansion?.contains ?? []);
-  }
-
-  const binding = MEASURE_BINDINGS["cms122"]!;
+  const binding = MEASURE_BINDINGS[catalogId];
+  if (!binding) throw new Error(`literal-diff: no synthetic binding for '${catalogId}'`);
 
   // Build one enriched patient bundle per subject + evaluate WorkWell's authored cms122 per subject.
   const patientBundles: FhirBundle[] = [];
@@ -222,10 +262,17 @@ export async function computeLiteralDiff(
       const target = seededTargetFor(deps.employees, binding.rateKey, row.subjectId) ?? "MISSING_DATA";
       const config = deriveExamConfig(binding, target);
       const base = buildSyntheticBundle(employee, config, deps.today) as unknown as FhirBundle;
-      const enriched = enrichForOfficialCms122(base as never, employee, expansions, deps.today) as unknown as FhirBundle;
-      prepareForQiCore(enriched as PreparableBundle);
-      patientBundles.push(enriched);
-      const workwell = await deps.engine.evaluate({ measureId: "cms122", patientBundle: enriched, evaluationDate: deps.asOf });
+      // Exactly the runtime's split: the official artifact gets a PREPARED COPY, the authored engine
+      // gets the bundle untouched. The diff used to prepare in place and then evaluate WorkWell on the
+      // mutated bundle — so it reported WorkWell's outcome on data WorkWell will never see at runtime.
+      // Harmless today (no authored CQL reads a Condition's status), but the whole claim of this file is
+      // that it forecasts the flip, and "harmless as far as I can tell" is not that.
+      patientBundles.push(preparedForQiCore(base as PreparableBundle) as unknown as FhirBundle);
+      const workwell = await deps.engine.evaluate({
+        measureId: catalogId,
+        patientBundle: base,
+        evaluationDate: deps.asOf,
+      });
       workwellBySubject.set(row.subjectId, workwell.outcome);
     } catch {
       errored.add(row.subjectId);
@@ -240,12 +287,15 @@ export async function computeLiteralDiff(
     const membershipBySubject = await calculateOfficial({
       bundle: bundle as MeasureBundle,
       patientBundles,
-      period: { start: `${deps.asOf.slice(0, 4)}-01-01`, end: `${deps.asOf.slice(0, 4)}-12-31` },
+      // The RUNTIME's period, via the shared helper. This used to be the calendar year while the
+      // executor used the registry's rolling window, so the two engines were compared over periods
+      // sharing barely half their days and any resulting difference read as a logic divergence.
+      period: officialMeasurementPeriod(catalogId, deps.asOf),
       valueSetCache,
       calculate: deps.calculate,
     });
     for (const [subjectId, membership] of membershipBySubject) {
-      officialBySubject.set(subjectId, officialOutcome(membership));
+      officialBySubject.set(subjectId, officialOutcome(membership, semantics.numeratorMeansCompliant));
     }
   } catch (err) {
     // A batch-level failure aborts the literal tier; the route degrades to the subset path.
@@ -289,12 +339,12 @@ export async function computeLiteralDiff(
       `pre-compiled ELM via fqm-execution) against ${subjects.length} subjects of the latest ${ref.measureId} ` +
       `run: ${totalDivergent} diverge from the official age/visit/exclusion/numerator criteria` +
       (totalErrors > 0 ? `; ${totalErrors} could not be evaluated (excluded from the divergence count).` : "."),
-    disclaimer: DISCLAIMER,
+    disclaimer: disclaimerFor(ref.ecqmId),
     officialMeasure: { name: official.measureName, version: official.version, url: official.url },
   };
-  if (runId) {
+  if (cacheKey) {
     if (cache.size >= 16) cache.clear();
-    cache.set(runId, report);
+    cache.set(cacheKey, report);
   }
   return report;
 }

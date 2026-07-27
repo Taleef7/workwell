@@ -1,5 +1,72 @@
 # Journal
 
+## 2026-07-27 (night) — PR-8d: the shadow diff was not shadowing anything (branch `feat/official-diff-generalization`)
+
+The remaining PR-8 list opened with "generalize the standards diff beyond its cms122 hardcode". That
+turned out to be the smaller half. Diffing `standards/literal-diff.ts` against the thing it exists to
+forecast — `wiring/official-executor-adapter.ts` — found three ways it was not forecasting it:
+
+| | the diff did | the runtime does |
+|---|---|---|
+| measurement period | the CALENDAR YEAR | the registry's rolling window |
+| the bundle | harness-ENRICHED (age-out / hospice / GMI injected) | the plain synthetic bundle |
+| preparation | in place, WorkWell then evaluated on the mutated bundle | on a COPY, WorkWell sees the original |
+
+For an as-of of 2026-07-27 those two periods share barely half their days, so anything they disagreed
+about would have been reported as a *logic* divergence. The enrichment manufactured divergence on
+purpose, which was right when the corpus could not reach the official populations at all and became
+misleading the moment PR-8c fixed that: a shadow period that invents divergence forecasts divergence
+that will not happen.
+
+### The latent inversion
+
+`officialOutcome` hardcoded `numerator ? OVERDUE : COMPLIANT`. That is cms122's reading — its numerator
+is *poor glycemic control*. cms125's numerator is a completed mammogram, so the same line would have
+reported every screened woman OVERDUE and every unscreened one COMPLIANT. It never fired because the
+route gated the literal tier on `diffId === "cms122"` — which is also why "shadow period cms122/125" was
+not actually possible: cms125 answered with the estimate and nothing said so. Now read from
+`officialMeasureSemantics`, the same fail-closed table the runtime consults, and a measure with no
+recorded semantics is *unavailable* for the tier rather than mapped under someone else's reading.
+
+### Review caught two more, and one of them was the same bug again
+
+**The memo was keyed on `runId` alone.** Safe while the tier was cms122-only; a correctness bug the
+moment it wasn't. An `ALL_PROGRAMS` run writes every measure's outcomes under ONE run id, so requesting
+cms122's diff and then cms125's returned the *identical object* — cms122's subjects and provenance under
+cms125's URL. Exactly what I had just closed at the route, re-opened one layer down. Worse, my own new
+cms125 test cleared the cache between calls, so it was working around the bug instead of exposing it.
+Now keyed `measureId|runId` in both tiers, with a regression test that does not clear.
+
+**`officialOutcome` was a second copy of the runtime's mapping, and the copies disagreed.** Out of the
+initial population the diff said `OUT_OF_POPULATION`; the runtime and both authored measures say
+`MISSING_DATA`. So a subject the two engines completely agree about was counted as a divergence,
+attributed to the `initial-population` gate, in a headline claiming it diverges from official criteria —
+a manufactured divergence arriving through a different door than the one I had just shut. Latent on
+today's corpus (measured: zero out-of-population subjects across all 100 employees for both measures),
+not latent for the six measures still to onboard or for live WebChart data. Now calls
+`outcomeFromPopulations`.
+
+Also: `chooseDiffMode` gated every measure's literal tier on **cms122's** VSAC store rows, which since
+ADR-036 the literal path does not use at all — so a working literal diff silently reported
+`mode: "estimate"` on any stack that never ran `pnpm resolve-valuesets`. And the subset tier turned out
+to have only ONE reachable entry point for another measure, not two as I first wrote; the guard stays,
+the claim is corrected.
+
+### What this bought
+
+The ADR-008 guard got stronger rather than weaker. With the diff feeding the authored engine the plain
+bundle, it can now assert the property that matters — WorkWell's side of the diff equals a direct
+evaluation of the same subject — where before the best available was self-consistency across two passes,
+which is true of any deterministic function including a wrong one.
+
+`pnpm test` **1517 pass / 0 fail / 14 skipped**, and **1506 / 0 / 25** with the terminology sidecars
+moved aside — which caught a route test that had been asserting the estimate tier unconditionally and so
+passed in CI while failing locally. `pnpm test:official-cases` 55/55 + 66/66, vendored artifact and
+evidence report byte-unchanged. ADR-039.
+
+**Still open for PR-8:** measure-major batching + a batch-level `hasRetrieveSignal`, and the
+`logic_version` override.
+
 ## 2026-07-27 (evening) — PR-8c: the corpus the official measures can actually answer (branch `feat/official-corpus-fidelity`)
 
 PR-8b ended with a finding and an attribution. The finding was right: with preparation alone, official
