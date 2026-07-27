@@ -84,8 +84,15 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 
-/** Expand one VSAC OID to its codes — the app supplies this from the imported `value_sets` rows. */
-export type ExpandValueSet = (oid: string) => Promise<ExpandedCode[]>;
+/**
+ * Expand one value-set OID to its codes, for a named measure.
+ *
+ * The `catalogId` is not decoration: terminology belongs to the ARTIFACT, and two artifacts pinned at
+ * different upstream commits may legitimately disagree about the same OID. An expander keyed only by OID
+ * has to pick one of them, silently, for both measures (roadmap §4.3 — one terminology authority, and it
+ * is the artifact's own).
+ */
+export type ExpandValueSet = (oid: string, catalogId: string) => Promise<ExpandedCode[]>;
 
 /**
  * Re-exported so the ROUTER can key its expander by the same rule `buildValueSetCache` looks up by,
@@ -93,7 +100,7 @@ export type ExpandValueSet = (oid: string) => Promise<ExpandedCode[]>;
  * VSAC canonicals is a bug waiting for the first canonical of another shape; a second import of the
  * package into production wiring is a hole in the fqm quarantine. This is how to have neither.
  */
-export { oidFromValueSetUrl, type FqmCalculate };
+export { oidFromValueSetUrl, type FqmCalculate, type ExpandedCode };
 
 /** An `EvaluateMeasureBinding` that can also be asked to prove a measure is runnable before a run. */
 export interface OfficialMeasureExecutor extends EvaluateMeasureBinding {
@@ -226,7 +233,7 @@ export async function expandArtifactTerminology(
     // test that throws from the expander and asserts the refusal still fires.
     let codes: ExpandedCode[];
     try {
-      codes = await expand(oid);
+      codes = await expand(oid, artifact.manifest.catalogId);
     } catch {
       unusable.add(oid);
       return [];
@@ -249,8 +256,9 @@ export async function expandArtifactTerminology(
     throw new Error(
       `${artifact.manifest.catalogId}: ${unusable.size} of ${referencedOids} value sets could not be ` +
         `expanded (${oids.slice(0, 5).join(", ")}${oids.length > 5 ? ", …" : ""}). Official execution ` +
-        `would report every subject out-of-population. Import them with 'pnpm resolve-valuesets' ` +
-        `before routing ${artifact.manifest.catalogId} officially.`,
+        `would report every subject out-of-population. Regenerate this measure's terminology with ` +
+        `'pnpm vendor:official' before routing ${artifact.manifest.catalogId} officially — official ` +
+        `execution uses the artifact's own expansions, NOT the 'pnpm resolve-valuesets' VSAC import.`,
     );
   }
   return cache;

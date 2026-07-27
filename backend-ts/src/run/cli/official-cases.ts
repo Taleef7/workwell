@@ -19,6 +19,35 @@ import {
   type OfficialReportMetadata,
   type ReductionArtifactIdentity,
 } from "../../standards/official-cases.ts";
+import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
+import { officialTerminologyExpander } from "../../wiring/official-terminology.ts";
+import { expandArtifactTerminology } from "../../wiring/official-executor-adapter.ts";
+
+/**
+ * Build the reduction check's terminology THE WAY THE RUNTIME DOES — same sidecar, same expander, same
+ * `expandArtifactTerminology`, same refusal.
+ *
+ * This is what makes a green gate evidence about production. Before PR-8a the check executed our
+ * reduced artifact against the UPSTREAM bundle's ValueSets, so 121/121 proved the reduction was neutral
+ * and proved nothing about the terminology the runtime would load — the runtime expanded from our VSAC
+ * import, a configuration no gate had ever run. Calling the production code path here, rather than
+ * re-deriving an equivalent cache, is the point: an equivalent one can drift.
+ *
+ * Returns `undefined` when the sidecar is absent (a fresh clone), leaving the check on its pre-PR-8a
+ * upstream-ValueSet fallback. The report records which mode ran, so a weaker check is never mistaken
+ * for the stronger one.
+ */
+async function runtimeTerminologyCache(measure: OfficialMeasureId): Promise<unknown[] | undefined> {
+  const artifact = loadOfficialArtifact(measure);
+  if (!artifact) return undefined;
+  try {
+    return await expandArtifactTerminology(artifact, officialTerminologyExpander(loadOfficialArtifact));
+  } catch {
+    // The sidecar is missing or incomplete. Not fatal here: the check still runs against upstream
+    // terminology and says so, and `officialRoutingProblems` is what refuses to ROUTE the measure.
+    return undefined;
+  }
+}
 
 export const USAGE =
   "Usage: pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]";
@@ -164,7 +193,10 @@ export interface OfficialCasesCliDeps {
     officialRun: OfficialMeasureRun,
     draftBundle: FhirBundle,
     artifact?: ReductionArtifactIdentity,
+    valueSetCache?: unknown[],
   ) => Promise<Cms122DraftDrift>;
+  /** The runtime's own terminology for a measure, or undefined when the sidecar has not been fetched. */
+  runtimeTerminology: (measure: OfficialMeasureId) => Promise<unknown[] | undefined>;
   generatedDate: string;
   writeReport: (path: string, markdown: string) => void;
   log: (message: string) => void;
@@ -180,8 +212,12 @@ function defaultDeps(): OfficialCasesCliDeps {
     sourceRevision: readContentRevision,
     loadDraftBundle: loadFhirBundleFile,
     artifactIdentity: readArtifactIdentity,
-    runDraftDrift: (loaded, officialRun, draftBundle, artifact) =>
-      runCms122DraftDrift(loaded, officialRun, draftBundle, { ...(artifact ? { artifact } : {}) }),
+    runDraftDrift: (loaded, officialRun, draftBundle, artifact, valueSetCache) =>
+      runCms122DraftDrift(loaded, officialRun, draftBundle, {
+        ...(artifact ? { artifact } : {}),
+        ...(valueSetCache ? { valueSetCache } : {}),
+      }),
+    runtimeTerminology: runtimeTerminologyCache,
     generatedDate: new Date().toISOString().slice(0, 10),
     writeReport: (path, markdown) => writeFileSync(path, markdown, "utf8"),
     log: console.log,
@@ -219,6 +255,7 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
         run,
         deps.loadDraftBundle(artifactPath),
         deps.artifactIdentity(artifactPath),
+        await deps.runtimeTerminology(measure),
       );
       runs.push(run);
     }

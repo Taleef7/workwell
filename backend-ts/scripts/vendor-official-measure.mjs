@@ -16,9 +16,15 @@
  * - **Kept:** the `Measure` and its `Library` resources, each reduced to `application/elm+json` — the
  *   pre-compiled ELM is what `fqm-execution` runs, and keeping only it is what makes the artifact
  *   deployable at all.
- * - **Dropped: ValueSet resources and their expansions.** Deliberate, and the most important rule here:
- *   26 expansions per bundle carry thousands of AMA CPT and SNOMED CT codes, and this repo is public.
- *   Terminology comes from our own VSAC import at runtime (`buildValueSetCache`), under our UMLS licence.
+ * - **Dropped from `bundle.json`, but written beside it: ValueSet expansions.** Deliberate, and the most
+ *   important rule here: 26 expansions per bundle carry thousands of AMA CPT and SNOMED CT codes, and
+ *   this repo is public, so they must never be committed. They are instead written to
+ *   `terminology.json` — **gitignored, fetched at build** — which is the artifact's OWN terminology at
+ *   the same pinned commit, and therefore the only terminology that can honestly be called official.
+ *
+ *   The committed manifest records that file's SHA-256, so the bytes are pinned even though they are
+ *   not stored: a regenerated sidecar either hashes identically or fails loudly at load. That is what
+ *   lets a public repo carry a reproducible artifact without redistributing licensed code systems.
  *
  *   **This does NOT make the artifact free of licensed terminology, and we must not claim it does.**
  *   The official CQL declares direct-reference codes inline, so the compiled ELM still embeds a small
@@ -156,13 +162,68 @@ function assertExecutable(bundle, measureName) {
   }
 }
 
+/** Flatten a FHIR expansion's `contains` tree. These two bundles are flat, but the field is recursive. */
+function flattenExpansion(contains, out = []) {
+  for (const item of contains ?? []) {
+    if (typeof item.code === "string" && typeof item.system === "string") {
+      out.push({ system: item.system, code: item.code });
+    }
+    flattenExpansion(item.contains, out);
+  }
+  return out;
+}
+
+/**
+ * The artifact's own terminology, lifted out of the upstream bundle before the ValueSets are dropped.
+ *
+ * Keyed by bare OID because that is what `buildValueSetCache` asks an expander for. `declaredTotal`
+ * is kept alongside the code count so a VSAC-capped expansion (`expansion.total` greater than the codes
+ * actually present) is a recorded fact rather than a silent shortfall — an under-expanded value set
+ * narrows a population without erroring anywhere.
+ */
+function collectTerminology(bundle, args) {
+  const valueSets = [];
+  for (const entry of bundle.entry ?? []) {
+    const resource = entry?.resource;
+    if (resource?.resourceType !== "ValueSet") continue;
+    const url = resource.url ?? resource.id;
+    const codes = flattenExpansion(resource.expansion?.contains);
+    const declaredTotal =
+      typeof resource.expansion?.total === "number" ? resource.expansion.total : codes.length;
+    valueSets.push({
+      url,
+      oid: oidFromValueSetUrl(url),
+      ...(resource.version ? { version: resource.version } : {}),
+      declaredTotal,
+      codes,
+    });
+  }
+  // Sorted so the sidecar is a deterministic function of the pinned commit: the manifest pins it by
+  // hash, and a hash that depended on upstream entry order would be reproducible only by accident.
+  valueSets.sort((a, b) => a.oid.localeCompare(b.oid));
+  return {
+    catalogId: args.catalogId,
+    source: { repo: REPO, ref: args.ref, measure: args.measure },
+    valueSets,
+  };
+}
+
+/** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...`. Mirrors the executor package. */
+function oidFromValueSetUrl(url) {
+  const marker = "/ValueSet/";
+  return url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
+}
+
 /** cqfm puts scoring and improvementNotation in group extensions, not on the Measure root. */
 function cqfmExtension(group, name) {
   const ext = (group?.extension ?? []).find((e) => String(e.url).endsWith(name));
   return ext?.valueCodeableConcept?.coding?.[0]?.code ?? ext?.valueCode ?? ext?.valueString ?? null;
 }
 
-function buildManifest(bundle, args, raw, bundleJson) {
+function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJson) {
+  const truncated = terminology.valueSets
+    .filter((v) => v.declaredTotal > v.codes.length)
+    .map((v) => ({ oid: v.oid, have: v.codes.length, declaredTotal: v.declaredTotal }));
   const measure = bundle.entry.find((e) => e.resource.resourceType === "Measure").resource;
   const group = measure.group?.[0];
   const cmsId = (measure.identifier ?? []).find((i) => String(i.system).endsWith("/cmsId"))?.value ?? null;
@@ -192,11 +253,28 @@ function buildManifest(bundle, args, raw, bundleJson) {
       libraryContentTypes: [KEPT_LIBRARY_CONTENT_TYPE],
       strippedNarratives: true,
       strippedElmAnnotations: args.stripElmAnnotations,
-      // Value sets are intentionally absent: their expansions carry AMA CPT / SNOMED content this
-      // public repo must not redistribute. Terminology is supplied at runtime from our VSAC import.
+      // Value sets are absent from bundle.json: their expansions carry AMA CPT / SNOMED content this
+      // public repo must not redistribute. They are written to the gitignored terminology sidecar
+      // instead — same commit, same codes, pinned below by hash.
       strippedValueSets: true,
       rawBytes: Buffer.byteLength(raw),
       vendoredBytes: Buffer.byteLength(bundleJson),
+    },
+    /**
+     * The sidecar's contract. It is gitignored, so this block is the ONLY committed evidence of what
+     * `terminology.json` must contain — the loader verifies the hash and refuses a mismatch, which is
+     * what makes "fetched at build" as trustworthy as "vendored" without the redistribution.
+     */
+    terminology: {
+      file: "terminology.json",
+      valueSets: terminology.valueSets.length,
+      codes: terminology.valueSets.reduce((n, v) => n + v.codes.length, 0),
+      // A capped expansion is recorded, never quietly accepted. It cannot invent membership — an
+      // under-expanded set only ever narrows a population — but it can hide a subject who belongs,
+      // so a measure whose result depends on one of these must not be routed officially until the
+      // set is completed from VSAC under our UMLS licence.
+      truncated,
+      sha256: sha256(terminologyJson),
     },
     sha256: sha256(bundleJson),
   };
@@ -210,15 +288,19 @@ const response = await fetch(url);
 if (!response.ok) throw new Error(`unable to fetch ${url}: HTTP ${response.status}`);
 const raw = await response.text();
 
-const reduced = reduceBundle(JSON.parse(raw), args);
+const upstream = JSON.parse(raw);
+const reduced = reduceBundle(upstream, args);
 assertExecutable(reduced, args.measure);
 
+const terminology = collectTerminology(upstream, args);
+const terminologyJson = `${JSON.stringify(terminology, null, 0)}\n`;
 const bundleJson = `${JSON.stringify(reduced, null, 0)}\n`;
-const manifest = buildManifest(reduced, args, raw, bundleJson);
+const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson);
 
 const outDir = join(BACKEND_ROOT, "measures", "official", args.catalogId);
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "bundle.json"), bundleJson);
+writeFileSync(join(outDir, "terminology.json"), terminologyJson);
 writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 // Decimal MB, matching the evidence report's own formatting — the two printed the same file at
@@ -229,6 +311,16 @@ console.log(`  scoring=${manifest.scoring} improvementNotation=${manifest.improv
 console.log(`  ${mb(manifest.reduction.rawBytes)} → ${mb(manifest.reduction.vendoredBytes)}` +
   ` (${(100 - (100 * manifest.reduction.vendoredBytes) / manifest.reduction.rawBytes).toFixed(0)}% smaller)` +
   `${args.stripElmAnnotations ? " [ELM annotations stripped]" : ""}`);
+console.log(
+  `  terminology: ${manifest.terminology.valueSets} value sets, ${manifest.terminology.codes} codes` +
+    ` → ${mb(Buffer.byteLength(terminologyJson))} (gitignored)`,
+);
+for (const cap of manifest.terminology.truncated) {
+  console.warn(
+    `  WARNING capped expansion ${cap.oid}: ${cap.have}/${cap.declaredTotal} codes present.` +
+      " Complete it from VSAC before routing a measure whose result depends on this set.",
+  );
+}
 console.log(`  wrote ${outDir.replace(BACKEND_ROOT, "backend-ts")}`);
 if (!existsSync(join(outDir, "README.md"))) {
   console.log(`  NOTE: no README.md in ${args.catalogId}/ — add provenance notes if this is a new measure.`);
