@@ -64,9 +64,23 @@ CI (the sidecar-covers-every-canonical test now runs in the `official-cases` job
 `runtimeTerminologyCache` collapsed three unlike causes into "sidecar not present", which could assert a
 file was missing while it sat on disk; the CLI unit tests had quietly become non-hermetic, reading the
 real 2.4 MB artifacts; `localeCompare` was deciding the byte order that the pin hashes (ICU collation
-weights `.` by locale — now code-point); the sidecar's lookup keys are re-derived with the package's own
-`oidFromValueSetUrl` rather than the vendor script's copy of that rule; and the new CI fetch is cached,
-so a GitHub raw hiccup cannot redden the eCQM gate for a reason unrelated to the gate.
+weights `.` by locale — now code-point); and the sidecar's lookup keys are re-derived with the package's
+own `oidFromValueSetUrl` rather than the vendor script's copy of that rule.
+
+**Two more from CI and Codex, after the first push.** The CI failure was mine and was the same class of
+bug I had just fixed elsewhere: three router tests stubbed the capped-expansion check but not the
+terminology load, so they passed on a machine with the sidecar and failed on one without. The two
+working-tree-dependent stubs are now ONE object that gets spread — half-applying it is no longer
+possible — and I verified the whole suite with the sidecars physically moved aside (1493/0/17), which is
+what I should have done before pushing rather than trusting a machine that happens to have the file.
+
+Codex was right that the cache step I added was vacuous: `vendor:official` fetches unconditionally, so
+the cache would be restored and immediately overwritten while still paying both downloads. Fixed better
+than by caching the output — the script now reads the bundle out of the `.official-content` sparse
+checkout when it sits at the same pin, which CI already caches. Two ~17 MB pulls become zero,
+reproducibility is untouched (a checkout OF an immutable pin is those bytes), and a ref mismatch falls
+back to the network rather than guessing. Verified: byte-identical artifact from the cached path, and a
+bogus `--ref` correctly declines the local copy.
 
 **PR-9 obligations:** complete that capped expansion from VSAC at vendor time, and run the fetch in the
 deploy workflow before `docker build` (the image needs the sidecar). Nothing routes officially today, so

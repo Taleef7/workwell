@@ -19,11 +19,21 @@ import type { FqmCalculate } from "@workwell/official-executor";
 const terminologyPresent = (): LoadedTerminology => ({ ok: true, codesByOid: new Map() });
 
 /**
- * Both vendored artifacts genuinely carry a capped expansion today (AdvancedIllness, 1000 of 1997),
- * so the capped-expansion check correctly refuses them. Tests about a LATER check stub it out; the
- * check itself is asserted against the real artifacts in `official-terminology.test.ts`.
+ * The two checks whose answer depends on the WORKING TREE rather than on the code, stubbed together
+ * as ONE object on purpose.
+ *
+ * Both vendored artifacts genuinely fail them today: the terminology sidecar is fetched at build (so a
+ * fresh clone and CI do not have it), and both carry a capped expansion (AdvancedIllness, 1000 of
+ * 1997). Any test that asserts something about a LATER check has to get past both.
+ *
+ * They are bundled because applying HALF of them is the exact bug that reached CI: three tests stubbed
+ * `cappedFor` and not `loadTerminology`, which passes on a machine with the sidecar and fails on one
+ * without. Spreading one object cannot be half-done.
  */
-const noCaps = () => [];
+const offlineChecks = {
+  loadTerminology: terminologyPresent,
+  cappedFor: () => [],
+};
 
 /** A calculator that reports one subject in every population — enough to prove routing reached fqm. */
 const fakeCalculate: FqmCalculate = async () => ({
@@ -84,7 +94,7 @@ test("a named measure routes to the official executor; everything else stays aut
     { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
     // An injected calculator, not the real one: asserting `instanceof Error` would have passed on a
     // MODULE_NOT_FOUND just as happily as on a real routing hit, which proves nothing about routing.
-    { authored, cappedFor: noCaps, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
+    { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
   );
 
   const official = await routed.evaluate({ measureId: "cms122", patientBundle: {} });
@@ -103,7 +113,7 @@ test("an explicit elm/metaOverride always stays authored, even for a routed meas
   const authored = authoredEngine();
   const routed = await routedEngineForEnv(
     { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
-    { authored, cappedFor: noCaps, expand: async () => [{ code: "a", system: "s" }] },
+    { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }] },
   );
 
   await routed.evaluate({ measureId: "cms122", patientBundle: {}, elm: { library: {} } });
@@ -120,7 +130,7 @@ test("construction refuses every shape of misconfiguration, and says which", asy
   const build = (value: string) =>
     routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: value } as never, {
       authored,
-      cappedFor: noCaps,
+      ...offlineChecks,
       expand: async () => [{ code: "a", system: "s" }],
     });
 
@@ -136,7 +146,7 @@ test("construction refuses every shape of misconfiguration, and says which", asy
 });
 
 test("officialRoutingProblems names the gate, the artifact, and the semantics separately", () => {
-  const stub = { loadTerminology: terminologyPresent };
+  const stub = { loadTerminology: terminologyPresent };  // caps deliberately NOT stubbed here
   assert.deepEqual(officialRoutingProblems({}, stub), [], "unset is always legal");
 
   // NOT asserted as an empty list: cms122 and cms125 both currently carry a REAL capped expansion
@@ -166,7 +176,7 @@ test("a missing terminology sidecar is a routing problem, named as a build step"
   const problems = officialRoutingProblems(
     { WORKWELL_OFFICIAL_MEASURES: "cms122" },
     {
-      cappedFor: noCaps,
+      ...offlineChecks,
       loadTerminology: () => ({ ok: false, problem: "cms122: official terminology is not present" }),
     },
   );
@@ -183,8 +193,7 @@ test("terminology is preflighted at CONSTRUCTION, not at first evaluation", asyn
     () =>
       routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
         authored,
-        loadTerminology: terminologyPresent,
-        cappedFor: noCaps,
+        ...offlineChecks,
         expand: async () => {
           expandCalls += 1;
           return []; // a sidecar that verified but expands nothing for this measure's OIDs
@@ -203,8 +212,7 @@ test("the expander is keyed by MEASURE, not by a single flat OID map", async () 
   await assert.rejects(() =>
     routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
       authored: authoredEngine(),
-      loadTerminology: terminologyPresent,
-      cappedFor: noCaps,
+      ...offlineChecks,
       expand: async (oid, catalogId) => {
         seen.push([oid, catalogId]);
         return [];
