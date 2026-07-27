@@ -47,6 +47,11 @@ Restoring the ValueSets to `bundle.json` was measured (+605 KB cms122, +464 KB c
    mistaken for the stronger one.
 6. **A missing sidecar refuses routing, and names the command that fixes it.** `officialRoutingProblems`
    reports it as one build step rather than as 26 separate expansion failures.
+7. **A VSAC-CAPPED expansion refuses routing too.** This is the same failure one notch weaker, and the
+   empty-set guard cannot see it: it refuses on empty, and half-expanded is not empty. Review of this
+   PR found `cappedExpansions` recording caps while documenting a guard that had zero callers — so a
+   capped set would have sailed through preflight. It is now a routing problem, filtered to the sets the
+   measure's ELM actually retrieves so an unused cap cannot block a measure.
 
 **Consequences.**
 
@@ -55,11 +60,13 @@ Restoring the ValueSets to `bundle.json` was measured (+605 KB cms122, +464 KB c
 - **PR-9 obligation:** the deploy workflow must run the fetch before `docker build`, since the image
   needs the sidecar. Routing is off in production today, so nothing is broken meanwhile — but a flip
   without that build step would fail closed at boot.
-- **Recorded shortfall:** VSAC caps an expansion at 1000 codes, and `AdvancedIllness`
-  (`2.16.840.1.113883.3.464.1003.110.12.1082`, 1000 of 1997) is capped in **both** measures' upstream
-  bundles. It changes none of the 121 official cases — which is the claim we can support, and all of
-  it. Completing it from VSAC under our UMLS licence is a vendor-time step per §4.3, and is an owner
-  action before any measure whose result depends on that set is routed.
+- **`AdvancedIllness` blocks the flip, by design.** VSAC caps expansions at 1000 codes, and
+  `2.16.840.1.113883.3.464.1003.110.12.1082` (1000 of 1997) is capped in **both** upstream bundles,
+  where it feeds the 66+/advanced-illness denominator exclusion. It changes none of the 121 official
+  cases — that is the claim we can support, and all of it — but "changes none of the test cases" is not
+  "changes no patient", so decision 7 refuses to route either measure until it is completed from VSAC at
+  vendor time (§4.3). **cms122 and cms125 are therefore NOT routable today**, and PR-9 must do that
+  expansion, not merely remember it.
 - Descriptive only (ADR-008): terminology feeds the engine's retrieves; it never sets an `Outcome
   Status`. Nothing routes officially yet, so no current outcome changes.
 

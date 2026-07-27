@@ -200,7 +200,13 @@ function collectTerminology(bundle, args) {
   }
   // Sorted so the sidecar is a deterministic function of the pinned commit: the manifest pins it by
   // hash, and a hash that depended on upstream entry order would be reproducible only by accident.
-  valueSets.sort((a, b) => a.oid.localeCompare(b.oid));
+  //
+  // Code-point comparison, NOT `localeCompare`: this ordering decides the bytes that get hashed, and
+  // ICU collation weights punctuation (`.` — every character in an OID that is not a digit) according
+  // to locale and ICU build. It happens to agree with code-point order for these OIDs on this Node,
+  // but a divergence between a dev machine and the CI runner would surface as a hash mismatch whose
+  // remedy message says "re-vendor" — which would reproduce the same mismatch.
+  valueSets.sort((a, b) => (a.oid < b.oid ? -1 : a.oid > b.oid ? 1 : 0));
   return {
     catalogId: args.catalogId,
     source: { repo: REPO, ref: args.ref, measure: args.measure },

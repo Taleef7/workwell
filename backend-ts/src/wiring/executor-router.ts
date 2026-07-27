@@ -26,18 +26,26 @@
  *   1. the official MADiE gate covers it (`ungatedOfficialMeasures` — THE RULE, roadmap §7.4 PR-6);
  *   2. an executable artifact is vendored, and its `catalogId` matches;
  *   3. WorkWell has recorded what its numerator means (`official-measure-semantics.ts`);
- *   4. it is a `proportion` measure (the population mapping assumes a numerator exists); and
- *   5. every value set its ELM retrieves expands to a non-empty set.
+ *   4. it is a `proportion` measure (the population mapping assumes a numerator exists);
+ *   5. its terminology sidecar is present and matches the pin in its manifest (ADR-036);
+ *   6. no value set its ELM retrieves is VSAC-capped (a partial expansion — see below); and
+ *   7. every value set its ELM retrieves expands to a non-empty set.
  *
- * (5) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
+ * (7) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
  * rather than missing*, an empty set matches nothing, and the measure then reports every subject
  * out-of-population — which reads downstream exactly like a genuinely ineligible roster.
  *
- * 1-4 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
- * (5) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
+ * (6) is the same failure one notch weaker, and (7) cannot catch it: half-expanded is not empty. VSAC
+ * caps expansions at 1000 codes, and the capped set in both vendored measures feeds a denominator
+ * exclusion — so routing would leave excluded subjects in the denominator and score them. **Both
+ * cms122 and cms125 currently fail this check**, deliberately: completing that expansion is a
+ * vendor-time owner action (roadmap §4.3), and until it happens neither measure may be routed.
+ *
+ * 1-6 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
+ * (7) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
  * the first missing terminology is the one worth acting on.
  *
- * `worker.ts` runs 1-4 at BOOT as well, because everything here is lazy: a typo would otherwise boot
+ * `worker.ts` runs 1-6 at BOOT as well, because everything here is lazy: a typo would otherwise boot
  * clean, log `official-measures=on`, keep /actuator/health green, and 500 every evaluating route.
  *
  * ## Scope of this PR
@@ -59,12 +67,14 @@ import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { engineForEnv } from "./engine-factory.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import {
+  cappedExpansions,
   loadOfficialTerminology,
   officialTerminologyExpander,
   type LoadedTerminology,
 } from "./official-terminology.ts";
 import {
   officialMeasureExecutor,
+  requiredOids,
   type ExpandValueSet,
   type FqmCalculate,
 } from "./official-executor-adapter.ts";
@@ -85,16 +95,24 @@ export interface RoutedEngine {
 export interface RoutingCheckDeps {
   /**
    * Injectable for tests. It has to be: the terminology sidecar is FETCHED AT BUILD and gitignored, so
-   * whether `cms122` is fully routable is a fact about the working tree, not about the code. The default
-   * offline suite asserts the checks, not the build artifact — a dev-machine-only test covers the real
-   * file (`official-terminology.test.ts`), and CI covers it in the `test:official` job that fetches.
+   * whether `cms122` is fully routable is a fact about the working tree, not about the code. The
+   * default offline suite asserts the checks, not the build artifact; `official-terminology.test.ts`
+   * asserts the real file and self-skips without it, and the `official-cases` CI job — which fetches
+   * the sidecar — runs that file explicitly for exactly this reason.
    */
   loadTerminology?: (artifact: OfficialArtifact) => LoadedTerminology;
+  /**
+   * Injectable for the same reason, and one more: both vendored artifacts currently DO carry a capped
+   * expansion, so this check legitimately refuses cms122/cms125 today. A test exercising a later check
+   * has to get past it, and stubbing it is honest where relaxing the check would not be.
+   */
+  cappedFor?: (artifact: OfficialArtifact) => Array<{ oid: string; have: number; declaredTotal: number }>;
 }
 
 /** Everything wrong with the current `WORKWELL_OFFICIAL_MEASURES`, as sentences. Empty means legal. */
 export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingCheckDeps = {}): string[] {
   const loadTerminology = deps.loadTerminology ?? loadOfficialTerminology;
+  const cappedFor = deps.cappedFor ?? ((artifact) => cappedExpansions(artifact, requiredOids(artifact)));
   const problems: string[] = [];
   for (const id of ungatedOfficialMeasures([...OFFICIAL_GATED_MEASURES], env as Record<string, unknown>)) {
     problems.push(
@@ -134,6 +152,19 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
     // them. Same reason `scoring` moved up: a precise sentence at boot beats an accurate one later.
     const terminology = loadTerminology(artifact);
     if (!terminology.ok) problems.push(terminology.problem);
+
+    // A CAPPED expansion is the failure one notch weaker than an empty one, and preflight cannot see
+    // it: `expandArtifactTerminology` refuses on empty, and a half-expanded set is not empty. VSAC caps
+    // at 1000 codes, and the capped set in both vendored measures feeds a DENEX — so routing would
+    // leave excluded subjects in the denominator and score them. Recorded-and-warned was the state
+    // this check replaces; a warning printed at vendor time is long gone by the time anyone sets the flag.
+    for (const cap of cappedFor(artifact)) {
+      problems.push(
+        `${id}: value set ${cap.oid} expands to only ${cap.have} of ${cap.declaredTotal} codes ` +
+          `(VSAC caps expansions at 1000) and this measure's ELM retrieves it. Routing would narrow ` +
+          `populations silently — complete the expansion from VSAC at vendor time first (roadmap §4.3).`,
+      );
+    }
   }
   return problems;
 }

@@ -33,19 +33,32 @@ import { expandArtifactTerminology } from "../../wiring/official-executor-adapte
  * import, a configuration no gate had ever run. Calling the production code path here, rather than
  * re-deriving an equivalent cache, is the point: an equivalent one can drift.
  *
- * Returns `undefined` when the sidecar is absent (a fresh clone), leaving the check on its pre-PR-8a
- * upstream-ValueSet fallback. The report records which mode ran, so a weaker check is never mistaken
- * for the stronger one.
+ * Yields a `reason` instead of a cache when the sidecar is absent (a fresh clone), leaving the check on
+ * its pre-PR-8a upstream-ValueSet fallback. The report records which mode ran and why, so a weaker
+ * check is never mistaken for the stronger one.
  */
-async function runtimeTerminologyCache(measure: OfficialMeasureId): Promise<unknown[] | undefined> {
+
+/** Either the runtime's terminology, or why it could not be built — never a bare undefined. */
+export interface RuntimeTerminology {
+  cache?: unknown[];
+  reason?: string;
+}
+
+async function runtimeTerminologyCache(measure: OfficialMeasureId): Promise<RuntimeTerminology> {
   const artifact = loadOfficialArtifact(measure);
-  if (!artifact) return undefined;
+  if (!artifact) return { reason: `${measure}: no vendored official artifact` };
   try {
-    return await expandArtifactTerminology(artifact, officialTerminologyExpander(loadOfficialArtifact));
-  } catch {
-    // The sidecar is missing or incomplete. Not fatal here: the check still runs against upstream
-    // terminology and says so, and `officialRoutingProblems` is what refuses to ROUTE the measure.
-    return undefined;
+    return {
+      cache: await expandArtifactTerminology(artifact, officialTerminologyExpander(loadOfficialArtifact)),
+    };
+  } catch (err) {
+    // Not fatal here — the check still runs against upstream terminology and says so, and
+    // `officialRoutingProblems` is what refuses to ROUTE the measure. But the REASON must survive:
+    // three very different causes reach this line (sidecar absent, sidecar present but hash-mismatched,
+    // sidecar verified but missing a canonical the ELM needs), and collapsing them into "not present"
+    // made the report assert a file was absent while it sat on disk — obscuring the third case, which
+    // is the exact failure this whole PR exists to make loud.
+    return { reason: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -193,10 +206,10 @@ export interface OfficialCasesCliDeps {
     officialRun: OfficialMeasureRun,
     draftBundle: FhirBundle,
     artifact?: ReductionArtifactIdentity,
-    valueSetCache?: unknown[],
+    terminology?: RuntimeTerminology,
   ) => Promise<Cms122DraftDrift>;
-  /** The runtime's own terminology for a measure, or undefined when the sidecar has not been fetched. */
-  runtimeTerminology: (measure: OfficialMeasureId) => Promise<unknown[] | undefined>;
+  /** The runtime's own terminology for a measure, or the reason it is unavailable. */
+  runtimeTerminology: (measure: OfficialMeasureId) => Promise<RuntimeTerminology>;
   generatedDate: string;
   writeReport: (path: string, markdown: string) => void;
   log: (message: string) => void;
@@ -212,10 +225,11 @@ function defaultDeps(): OfficialCasesCliDeps {
     sourceRevision: readContentRevision,
     loadDraftBundle: loadFhirBundleFile,
     artifactIdentity: readArtifactIdentity,
-    runDraftDrift: (loaded, officialRun, draftBundle, artifact, valueSetCache) =>
+    runDraftDrift: (loaded, officialRun, draftBundle, artifact, terminology) =>
       runCms122DraftDrift(loaded, officialRun, draftBundle, {
         ...(artifact ? { artifact } : {}),
-        ...(valueSetCache ? { valueSetCache } : {}),
+        ...(terminology?.cache ? { valueSetCache: terminology.cache } : {}),
+        ...(terminology?.reason ? { valueSetModeReason: terminology.reason } : {}),
       }),
     runtimeTerminology: runtimeTerminologyCache,
     generatedDate: new Date().toISOString().slice(0, 10),
@@ -250,12 +264,22 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       // executes our reduced artifact against the upstream bundle, so a measure without it has its
       // vendoring guarded by nothing but a self-consistent SHA-256 that vendor:official wrote itself.
       const artifactPath = resolve(deps.cwd, "measures", "official", measure, "bundle.json");
+      const terminology = await deps.runtimeTerminology(measure);
+      // Surfaced here as well as in the report: a downgrade means this run is NOT checking the
+      // runtime's terminology, and a developer reading the console should not have to diff a markdown
+      // file to discover that.
+      if (!terminology.cache) {
+        deps.error(
+          `official-cases: ${measure.toUpperCase()} reduction check DOWNGRADED to upstream value sets` +
+            ` — ${terminology.reason ?? "runtime terminology unavailable"}`,
+        );
+      }
       run.draftDrift = await deps.runDraftDrift(
         loaded,
         run,
         deps.loadDraftBundle(artifactPath),
         deps.artifactIdentity(artifactPath),
-        await deps.runtimeTerminology(measure),
+        terminology,
       );
       runs.push(run);
     }

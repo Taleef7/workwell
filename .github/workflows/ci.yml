@@ -144,6 +144,15 @@ jobs:
       # gate silently drops to its weaker fallback — executing our artifact against UPSTREAM's value
       # sets rather than the ones the runtime loads, which is the exact gap PR-8a closed. The committed
       # report records which mode ran, so the staleness check below is what makes that non-negotiable.
+      # Cached on the vendor script, which carries the pinned commit: the output is a pure function of
+      # an immutable ref, so a hit is always correct. Without this, two ~17MB raw.githubusercontent
+      # pulls per push turn a transient GitHub hiccup into a red eCQM gate for a reason unrelated to
+      # the gate — and a gate people learn to re-run on faith is not a gate.
+      - name: Cache official terminology
+        uses: actions/cache@v4
+        with:
+          path: backend-ts/measures/official/*/terminology.json
+          key: official-terminology-${{ hashFiles('backend-ts/scripts/vendor-official-measure.mjs') }}
       - name: Fetch official terminology (the runtime's own expansions, same pin)
         run: |
           pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
@@ -153,6 +162,11 @@ jobs:
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code measures/official
+      # These two assertions — that the sidecar covers every canonical the ELM retrieves, and that a
+      # capped expansion is refused — are the strongest in the PR, and they self-skip without the
+      # fetched sidecar. `pnpm test` runs in a job that has no sidecar, so this is their only gate.
+      - name: Official terminology tests (need the fetched sidecar)
+        run: pnpm exec node --import tsx --test src/wiring/official-terminology.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

@@ -578,6 +578,7 @@ export interface Cms122DraftDrift {
   artifactVersion: string;
   artifact?: ReductionArtifactIdentity;
   valueSetMode: DriftValueSetMode;
+  valueSetModeReason?: string;
   /** Named statement results the VENDORED artifact produced for the WORST subject (0 if the run errored). */
   namedStatementResults: number;
   total: number;
@@ -600,6 +601,13 @@ export interface RunDraftDriftOptions {
    */
   valueSetCache?: unknown[];
   valueSetMode?: DriftValueSetMode;
+  /**
+   * Why the runtime terminology was unavailable, when it was. Recorded verbatim in the report because
+   * three unlike causes reach the fallback — sidecar absent, hash mismatch, and a canonical the ELM
+   * needs but the sidecar lacks — and asserting the first one for all three made the report state a
+   * file was missing while it sat on disk.
+   */
+  valueSetModeReason?: string;
 }
 
 /**
@@ -630,6 +638,7 @@ export async function runCms122DraftDrift(
   const valueSetCache = options.valueSetCache ?? loaded.valueSetResources;
   const valueSetMode: DriftValueSetMode =
     options.valueSetMode ?? (options.valueSetCache ? "vendored-terminology-sidecar" : "official-v1-bundle-cache");
+  const modeReason = options.valueSetCache ? undefined : options.valueSetModeReason;
 
   let output: FqmOutput;
   try {
@@ -646,6 +655,7 @@ export async function runCms122DraftDrift(
       artifactVersion,
       ...(options.artifact ? { artifact: options.artifact } : {}),
       valueSetMode,
+      ...(modeReason ? { valueSetModeReason: modeReason } : {}),
       namedStatementResults: 0,
       total: cases.length,
       changedCases: 0,
@@ -704,6 +714,7 @@ export async function runCms122DraftDrift(
     artifactVersion,
     ...(options.artifact ? { artifact: options.artifact } : {}),
     valueSetMode,
+    ...(modeReason ? { valueSetModeReason: modeReason } : {}),
     namedStatementResults: statementResults,
     total: cases.length,
     changedCases: cases.filter((item) => item.differences.length > 0).length,
@@ -843,9 +854,10 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
             `terminology sidecar, expanded through the same code path production uses — against the ` +
             `upstream bundle and upstream ValueSets. ${run.draftDrift.changedCases}/${run.draftDrift.total} ` +
             `cases changed population vector; ${run.draftDrift.errors} drift errors.`
-          : `Using the official v1 Bundle ValueSets as the external cache (the terminology sidecar was ` +
-            `not present, so this run does NOT exercise the runtime's terminology — fetch it with ` +
-            `'pnpm vendor:official'). ${run.draftDrift.changedCases}/${run.draftDrift.total} cases ` +
+          : `DOWNGRADED to the official v1 Bundle ValueSets as the external cache: this run does NOT ` +
+            `exercise the runtime's terminology. Reason: ` +
+            `${escapeMarkdown(run.draftDrift.valueSetModeReason ?? "runtime terminology unavailable")}. ` +
+            `${run.draftDrift.changedCases}/${run.draftDrift.total} cases ` +
             `changed population vector; ${run.draftDrift.errors} drift errors.`,
         "",
         ...(run.draftDrift.artifact
