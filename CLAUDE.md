@@ -150,12 +150,18 @@ artifact a harness-ENRICHED bundle (which ADR-038 made unnecessary and misleadin
 so WorkWell was evaluated on the mutated bundle — all three aligned behind one shared
 `officialMeasurementPeriod`. It also fixed a latent inversion: `numerator ? OVERDUE : COMPLIANT` is
 cms122 INVERSE reading and would have reported every screened woman in cms125 as overdue; now read from
-the fail-closed semantics table. **Next: PR-8 (remaining)** — measure-major batching + a batch-level
-`hasRetrieveSignal` (performance + one safety net), and the **`logic_version` override — a correctness
-landmine, not an optimization**: `incremental-eval.ts` hashes the AUTHORED ELM, so a measure flipped to
-official would keep the same `logic_version` and the `eval_state` cache would copy authored outcomes
-forward for a measure now running the official artifact. Inert today (`WORKWELL_INCREMENTAL_EVAL` unset)
-and must land before PR-9 flips anything with incremental evaluation on. **Then PR-9** (the flip). It owes ONE build step now — the
+the fail-closed semantics table. **PR-8e shipped (ADR-040)** — the **`logic_version` override**, taken ahead of the batching because it
+was a correctness landmine rather than an optimization: `incremental-eval.ts` hashed the AUTHORED ELM, so
+a measure flipped to official would keep the same `logic_version` and the `eval_state` cache would copy
+authored outcomes forward for a measure now running the official artifact (and a re-vendor would not
+invalidate them either) — the one fingerprint input whose absence is **silent**, where every other
+degrades pessimistically. The **engine** now declares its own identity (`RoutedEngine.logicVersionFor` →
+`official-fqm:<version>:<artifactSha>:<terminologySha>`), read by the pipeline off `deps.engine` rather
+than threaded through each caller — that thread being the exact shape of the bug PR-7b's review caught.
+Flip-on/flip-off/re-vendor all invalidate by construction (disjoint prefixes), tested against the real
+engine + real SQLite `eval_state` with every other reason to re-evaluate removed. **Next: PR-8
+(remaining)** — measure-major batching + a batch-level `hasRetrieveSignal` (performance + one safety
+net). **Then PR-9** (the flip). It owes ONE build step now — the
 deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
 `AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
 bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot

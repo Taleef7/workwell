@@ -1,5 +1,165 @@
 # Journal
 
+## 2026-07-28 — PR-8 (remaining), part 1: the `logic_version` landmine (branch `feat/official-logic-version`)
+
+Took the `logic_version` override ahead of measure-major batching, because they are not the same kind of
+item. Batching is performance with one safety net attached. This one is a wrong answer waiting for two
+flags to line up:
+
+`incremental-eval.ts` decides "has this measure's logic changed?" by hashing `ELM_LIBRARIES[libraryName]`
+— the AUTHORED ELM. Route a measure to the official artifact and that ELM is still sitting there hashing
+identically, so the fingerprint says *same logic* about two engines that answer differently, and the
+`eval_state` cache copies **authored outcomes forward for a measure now running official CQL**.
+Re-vendoring the artifact wouldn't invalidate them either — nothing in the fingerprint knows it exists.
+
+What makes it worth taking first is the failure *mode*, not the probability. Every other input to that
+fingerprint degrades pessimistically: lose a value-set hash and `logic_version` changes when it needn't,
+costing a re-evaluation. This one degrades toward a wrong answer with no symptom, because a copied-forward
+outcome is indistinguishable from a computed one at every layer that could look — the run completes, the
+counts reconcile, the roster renders.
+
+Both flags are off today. That is a coincidence with a deadline, not a safety property.
+
+### The design decision worth naming
+
+The roadmap sketched it as another field threaded into `IncrementalDeps` from each caller. That is the
+exact shape of the bug PR-7b's review caught: a call site that forgot to pass the official flag, so the
+nightly run used a different engine than the manual one — in a block of code that had already documented
+that same mistake twice.
+
+So the identity hangs off the **engine** instead: `RoutedEngine.logicVersionFor(measureId)`, resolved once
+from the same artifacts the executor was built over, read by the pipeline off `deps.engine`. The logic
+identity and the thing that computes the outcome are now the same object, so they cannot disagree, and a
+future call site gets it without having to remember it. Verified the premise rather than assuming it —
+all three `RunPipelineDeps` construction sites (`routes/runs.ts` ×2, the scheduler) already build via
+`routedEngineForEnv`, and no production caller feeds an `engineForEnv` result into the pipeline.
+
+Two deviations from the sketch, both deliberate (ADR-040):
+
+- **Readable composite, not `sha256(...)`.** `official-fqm:<version>:<artifactSha>:<terminologySha>`.
+  Every input is already a digest, so re-hashing buys no collision resistance — it only makes an
+  `eval_state` row unreadable at the moment someone is asking which artifact produced it. The prefix is
+  disjoint from the authored `sha256:<hex>` space by construction, so the two can never collide however
+  the authored hash is later computed.
+- **The terminology digest is in.** The sketch had version + artifact sha. Since ADR-036 the executor
+  retrieves against the artifact's OWN expansions, fetched at build and pinned in the committed manifest —
+  so a re-fetch at a different upstream ref moves value-set membership, and outcomes, with the bundle
+  bytes unchanged. Version + sha alone would call that "same logic".
+
+### Testing the claim rather than the code
+
+The three cases that matter — flip on, flip off, re-vendor while still routed — run against the REAL CQL
+engine and a real SQLite `eval_state`, in a setup with every *other* reason to re-evaluate removed: same
+day, same subject, byte-identical bundle, terminal OVERDUE status so the clock can't force it. A baseline
+test asserts that exact setup **does** reuse. So anything that re-evaluates in the three did so because of
+`logic_version` and nothing else — which is the whole claim, since the authored ELM hashes the same before
+and after a flip. Two more: an unrouted sibling measure keeps reusing while its neighbour is routed, and
+an unchanged artifact still reuses (the identity is not a nonce).
+
+### Review found the one place the bug could still live, and a second one next door
+
+**The wiring line had no test at all.** The review proved it by deleting
+`engineLogicVersion: (measureId) => deps.engine.logicVersionFor?.(measureId)` and running the whole
+affected surface: 276 tests, all green. Both halves were covered — the router produces an identity, the
+cache honours one — and nothing asserted the pipeline joins them. That is worse than an ordinary coverage
+gap here, because the design's own argument is that collapsing N call sites into one removes the class of
+bug where a caller forgets; the collapse is right, but the surviving line is then the only place it can
+hide. Now covered at the pipeline with a real SQLite `eval_state`, asserting the persisted row's
+`logic_version`, and confirmed load-bearing by re-running the mutation: it fails that test and nothing
+else.
+
+**`next_transition_at` was still authored-only.** `commit()` called `computeNextTransition`, which keys on
+`MEASURE_BINDINGS` and reads a `"Days Since"` define out of authored evidence. Two branches would
+over-reuse an official outcome — a `PERMANENT` binding returns `null` (terminal ⇒ *unbounded* across-day
+reuse) before the boundary table is even consulted, and a `BOUNDARY_SAFE` measure would apply thresholds
+derived from the authored CQL to an official status. Neither is sound: the official measurement period is
+a rolling window (ADR-039), so the same bundle can score differently as the date moves and nothing is
+terminal. Unreachable today — both cms measures are `RECURRING` and neither is boundary-safe, so they
+already fall through to the same-day default — but that is a coincidence of classification, not a
+property. Official outcomes are now same-day-only by construction, which changes no current behaviour and
+also keeps `recomputeEvidenceAsOf` a no-op on official evidence (the delta can only ever be zero).
+
+Also fixed: a silent `if (artifact)` skip in the identity loop, which — in the one function that produces
+the identity, in a PR whose thesis is "this is the input whose absence is silent" — would have let
+`evaluate` route officially while `logicVersionFor` said "authored". Unreachable (validation already
+refused a missing artifact, and the load memoizes), and it throws now anyway.
+
+### Codex found the boundary of what the identity can promise
+
+One P2, and it is right: the identity covers the **artifact**, not the **code that runs it**. A same-day
+redeploy changing `preparedForQiCore`, `officialMeasurementPeriod`, `officialMeasureSemantics` or
+`outcomeFromPopulations` leaves official rows reusable although the adapter that produced them is gone.
+
+That property is not new — the authored side hashes ELM, never `cql-execution-engine.ts` — and it has
+always been fine there, because that engine is old and stable. The official adapter is the opposite: every
+one of those four functions moves the answer, all of them shipped or changed within the last week, and
+ADR-037 *measured* preparation alone swinging a roster from IPP=0 to IPP=25. So the same latency that made
+the original hazard worth taking early applies here too.
+
+I could not close it inside the identity. There is no build sha or package version to fold in — the worker
+reports a literal `build: "workwell-api-ts"` and `package.json` is `0.0.0` — and a hand-bumped "adapter
+contract" constant is precisely the remember-to-do-it failure this PR argued against two paragraphs
+earlier. So the cache **declines an official-routed measure entirely** rather than guessing at which
+adapter changes matter.
+
+The cost is small and worth writing down so the decision can be revisited honestly: official rows are
+already same-day-only, so the whole benefit forgone is *a second run on the same day skipping CQL* —
+across-day reuse, the actual payoff, was never available to them. Rows are still committed (provenance,
+and so re-enabling rebuilds no cache) but are write-only today. Exit condition named, not vague: a digest
+covering the adapter's output surface, or that surface settling once PR-10..12 finish the remaining six.
+
+It also cost a test honesty check. "Flipping ON re-evaluates" now passes for the *policy* reason whether or
+not the identity works, so on its own it had gone vacuous; it now asserts the committed row carries the
+artifact's identity, which is what the flip-OFF test compares against and what a re-enabled path reads.
+The old "re-vendor still reuses when unchanged" assertion is deleted rather than adjusted — it asserted
+behaviour the policy deliberately removes — and replaced by one that observes the re-vendor through the
+recorded identity.
+
+Three doc corrections, all mine: I wrote "four paths reach `finishManualRun`" when there are **three**
+`RunPipelineDeps` construction sites (the fourth `routedEngineForEnv` call is `POST /api/runs/:id/evaluate`,
+which never reaches the pipeline); DEPLOY.md advertised the incremental+official combination as safe
+without noting that **no measure can be routed today** (the capped `AdvancedIllness` expansion refuses at
+construction); and the identity's real shape has five colon-separated fields, not three, because both
+manifest digests already carry their own `sha256:` prefix. Two claims narrowed rather than defended: the
+identity tracks what the *manifest records* about the bundle (bundle bytes are not verified at load, only
+diffed in CI), and "cannot disagree" is true of the runtime object, not of the type — `Pick<…,
+"logicVersionFor">` is optional, so the compiler enforces nothing.
+
+A second review pass then found the one place the code stopped following the PR's own argument: `commit`
+re-derived "is this official?" by calling `engineLogicVersion` a *second* time, instead of reading the
+fingerprint `plan` had already handed it. Not a defect — the router builds its map once at construction, so
+the two evaluations cannot disagree — but ADR-040 §2 exists precisely to stop a fact and its consumer being
+two things that must agree. The officialness now rides on `EvaluatePlan` (`engineDeclaredLogic`) and travels
+with the fingerprint it governs. Making the field required, rather than defaulted, immediately paid for
+itself: the compiler flagged the one test that hand-built a fingerprint literal, which is the shape of
+caller that would silently get the wrong temporal bound.
+
+The same pass asked for a cross-day reuse test on the same-day bound. I did not add that one — under the
+never-reuse policy it would pass whether or not the bound exists, because `plan` declines official rows
+before reaching the temporal gate. What is testable today is the *stored* bound, so the new test asserts it
+against the authored row it would otherwise have been: same measure, same bundle, same date, same OVERDUE
+status, and the only difference is who declared the logic — official bounded to its eval date, authored
+`null`. Reverting the bound now fails three tests instead of one.
+
+### Verification
+
+- `pnpm test` — **1528 pass / 0 fail / 14 skipped**. With both terminology sidecars moved aside,
+  **1517 / 0 / 25** — the two-configuration discipline from the PR-8a CI failure; 1542 tests collected
+  either way, the delta being skips. None of the new tests depends on the gitignored sidecar (the
+  terminology digest the identity reads lives in the **committed** manifest).
+- Every new test mutation-checked, not just run: deleting the pipeline's wiring line, reverting the
+  same-day bound, dropping `terminologySha` from the identity, making `logicVersionFor` return
+  `undefined`, and disabling the never-reuse branch each fail exactly the test that claims to cover it,
+  and nothing else.
+- `pnpm test:official-cases` — **55/55 + 66/66**, evidence report byte-unchanged apart from its
+  `Generated:` line, which was reverted so the diff shows only what this PR changed.
+- `pnpm typecheck` clean. No schema change (`eval_state.logic_version` is already TEXT), no new deps,
+  nothing routes officially.
+
+**Still open for PR-8:** measure-major batching + the batch-level `hasRetrieveSignal`. **Still owed by
+PR-9:** the VSAC-capped `AdvancedIllness` expansion (a routing refusal today), and CMS125 over live
+WebChart data, which gets neither PR-8c fix.
+
 ## 2026-07-27 (night) — PR-8d: the shadow diff was not shadowing anything (branch `feat/official-diff-generalization`)
 
 The remaining PR-8 list opened with "generalize the standards diff beyond its cms122 hardcode". That

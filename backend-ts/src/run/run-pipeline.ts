@@ -18,6 +18,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import type { RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
@@ -84,7 +85,15 @@ export interface ManualRunResponse {
 export interface RunPipelineDeps {
   runStore: RunStore;
   outcomeStore: OutcomeStore;
-  engine: EvaluateMeasureBinding;
+  /**
+   * The measure engine. Every caller passes `routedEngineForEnv(env)`, which is the authored engine
+   * ITSELF while `WORKWELL_OFFICIAL_MEASURES` is unset — so the optional `logicVersionFor` below is
+   * absent on every environment today. When a measure IS routed to the official artifact, that method
+   * is how the incremental cache learns the logic it caches is no longer WorkWell's authored ELM
+   * (#263/ADR-035 + roadmap §7.4 PR-8); reading it off the engine rather than taking it as a separate
+   * dep is what makes the two structurally unable to disagree.
+   */
+  engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicVersionFor">;
   /** When present, each outcome upserts/resolves a case (idempotent). */
   caseStore?: CaseStore;
   /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
@@ -492,6 +501,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           evalDate,
           expansionActive: deps.expansionActive,
           valueSetExpansionHashes: vsExpansionHashes,
+          // Bound to THIS run's engine, so a measure routed to the official artifact cannot be
+          // fingerprinted with the authored ELM's hash and have authored outcomes copied forward
+          // (roadmap §7.4 PR-8). Absent on the authored engine ⇒ unchanged behavior.
+          engineLogicVersion: (measureId) => deps.engine.logicVersionFor?.(measureId),
         })
       : undefined;
 

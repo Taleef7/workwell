@@ -1,5 +1,135 @@
 # Architecture Decision Records
 
+## ADR-040: The engine declares the logic it runs; the incremental cache never infers it
+
+**Status:** Accepted (2026-07-28). Roadmap §7.4, PR-8 (remaining). Nothing routes officially yet.
+
+**Context.** Incremental evaluation (ADR-035) reuses a subject's prior CQL outcome when its data and its
+*logic* are unchanged. "Logic unchanged" is decided by `logic_version`, which `incremental-eval.ts`
+derives by hashing `ELM_LIBRARIES[libraryName]` — **WorkWell's authored ELM**.
+
+That derivation stops being true the moment a measure is routed to the official published artifact. The
+authored ELM is still there and still hashes identically, so the fingerprint reports "same logic" about
+two engines that answer differently, and the `eval_state` cache copies **authored outcomes forward for a
+measure now running official CQL**. Re-vendoring that artifact would not invalidate them either: nothing
+in the fingerprint knows the artifact exists.
+
+This is the one input to the fingerprint whose absence is *silent*. Every other signal degrades
+pessimistically — a missing value-set hash makes `logic_version` change when it needn't, and costs a
+re-evaluation. This one degrades toward a wrong answer that no test, log line, or alert would show,
+because a reused outcome looks exactly like a computed one.
+
+It is inert today (`WORKWELL_INCREMENTAL_EVAL` is unset everywhere, and so is
+`WORKWELL_OFFICIAL_MEASURES`), which is why it is being closed *before* PR-9 rather than after. Two
+independently-off flags is not a safety property; it is a coincidence with a deadline.
+
+**Decision.**
+
+1. **The engine declares its own logic identity.** `RoutedEngine` gains an optional
+   `logicVersionFor(measureId)`, returning the artifact's identity for a routed measure and `undefined`
+   — meaning "authored" — for everything else. The incremental cache consults it first and falls back to
+   the ELM hash unchanged.
+2. **It travels ON the engine, not beside it.** The obvious alternative is another optional field on
+   `RunPipelineDeps` passed by each caller. That is precisely the shape of the bug PR-7b's review caught:
+   a call site that forgot to pass the official flag, so the nightly run used a different engine than the
+   manual one — a mistake the same block of code had already documented twice. Hanging the identity off
+   the engine makes the logic identity and the thing that computes the outcome *the same object*, so they
+   cannot disagree, and a future call site gets it without having to remember it.
+3. **The identity is a readable composite, not a hash:**
+   `official-fqm:<version>:<artifactSha>:<terminologySha>`. The roadmap sketched `sha256(...)`; every
+   input is already a digest, so re-hashing buys no collision resistance and only makes an `eval_state`
+   row unreadable at the moment someone is asking which artifact produced it. The `official-fqm:` prefix
+   is disjoint from the authored side's `sha256:<hex>` **by construction**, so the two spaces can never
+   collide however the authored hash is later computed.
+4. **The terminology digest is part of the identity.** This is the input the roadmap's sketch omitted.
+   Since ADR-036 the executor retrieves against the artifact's *own* expansions, fetched at build and
+   pinned in the committed manifest — so re-fetching at a different upstream ref can move value-set
+   membership, and therefore outcomes, with the bundle bytes unchanged. Version + artifact sha alone
+   would call that "same logic".
+5. **An official-routed outcome is same-day-only, structurally.** `computeNextTransition` — which decides
+   how long a cached status may be reused — reasons in authored terms: it keys on `MEASURE_BINDINGS` and
+   reads a `"Days Since"` define out of authored evidence. Two of its branches would over-reuse an
+   official outcome: a binding marked `PERMANENT` returns `null` (terminal ⇒ *unbounded* across-day
+   reuse) before the boundary table is consulted, and a measure in `BOUNDARY_SAFE` would have thresholds
+   derived from the **authored** CQL applied to an **official** status. Neither is sound, because the
+   official measurement period is a rolling window (ADR-039) — the same bundle can score differently as
+   the eval date moves the period, so nothing about an official outcome is terminal on unchanged data.
+   The cache therefore bounds an official outcome to its own evaluation date. This changes nothing today
+   (cms122/cms125 are both `RECURRING` and neither is boundary-safe, so they already fall through to the
+   same-day default) — it converts that from a coincidence of how two measures happen to be classified
+   into a property of routing. It also keeps `recomputeEvidenceAsOf` a no-op on official evidence, since
+   the copy-forward delta can then only ever be zero.
+6. **And, for now, an official-routed outcome is not reused at all.** `logic_version` identifies the
+   measure *definition*, never the code that executes it — true of the authored side too, where it hashes
+   ELM rather than `cql-execution-engine.ts`, and harmless there because that engine is old and stable.
+   The official adapter is neither: `preparedForQiCore`, `officialMeasurementPeriod`,
+   `officialMeasureSemantics` and `outcomeFromPopulations` all move the answer, all shipped or changed
+   within a week, and ADR-037 *measured* preparation swinging a roster from IPP=0 to IPP=25. A same-day
+   redeploy would therefore leave rows reusable that the previous adapter produced. The identity cannot
+   close that by itself — there is no build sha or package version available at runtime to fold in
+   (`/api/version` reports a literal; `package.json` is `0.0.0`), and a hand-bumped "adapter contract"
+   constant is the remember-to-do-it failure mode decision (2) exists to avoid. So the cache declines the
+   work instead of guessing.
+
+   **What that costs, exactly.** Official rows are same-day-only by (5), so the entire benefit forgone is
+   *a second run on the same day skipping CQL*; across-day reuse — incremental evaluation's actual payoff
+   — was never available to them. Rows are still committed (they record which artifact produced the
+   outcome, and they are what a re-enabled reuse path consumes, so lifting the policy rebuilds no cache),
+   but they are **write-only today**. The exit condition is named rather than "later": either the identity
+   grows a digest covering the adapter's output-affecting surface, or that surface stops moving once
+   PR-10..12 finish onboarding the remaining six measures. Re-enabling is deleting one branch in `plan`.
+
+   The cost this does **not** avoid is the write: one `eval_state` row per routed subject per run that
+   can never be read while the policy stands, and writes are billed on the Neon stack (DEPLOY.md →
+   "Database compute cost"). That is deliberate — the warm fingerprint is what makes re-enabling a
+   one-line change rather than a cold cache — but it is an option worth paying for only while the exit is
+   near. If the policy outlives PR-12, skip the commit for official rows too.
+7. **Officialness travels ON the fingerprint, not re-derived at each use.** `plan` decides it once and
+   carries it (`EvaluatePlan.engineDeclaredLogic`) to `commit`, which governs the temporal bound in (5).
+   Asking the engine a second time would make the bound and the identity it is stored beside two
+   independent evaluations of one fact — the same coupling (2) removes between the engine and the cache,
+   reintroduced one layer down. The field is **required**, not defaulted: a caller that hand-builds a
+   fingerprint is exactly the one that would otherwise get an authored bound on an official row, and the
+   compiler should make it say which it means.
+
+**Consequences.**
+
+- Flipping a measure **on**, flipping it **off**, and **re-vendoring** it while it stays routed all
+  invalidate reuse, by construction rather than by care: the two identity spaces are disjoint, and every
+  vendor-time input is inside the official one. All three are tested against the real engine and a real
+  SQLite `eval_state`, in a setup where every *other* reason to re-evaluate has been removed (same day,
+  identical bundle, terminal status) — with a baseline test proving that setup does reuse, so the tests
+  isolate `logic_version` and nothing else.
+- Unchanged on every environment today. `WORKWELL_OFFICIAL_MEASURES` unset ⇒ `routedEngineForEnv` returns
+  the authored engine itself, which has no `logicVersionFor`, so the cache reaches the identical ELM-hash
+  path. The demo/default run loop is byte-identical.
+- **The identity tracks what the MANIFEST records about the bundle, not the bundle bytes.**
+  `loadOfficialArtifact` parses `bundle.json` without checking it against `manifest.sha256` (unlike
+  terminology, which ADR-036 verifies against its pin at load, because that sidecar is gitignored). So a
+  hand-edited `bundle.json` would execute new logic under the old identity. `bundle.json` is committed and
+  CI runs `git diff --exit-code measures/official` after re-vendoring, which is what actually closes this
+  on the normal path; the precise claim is therefore "a **re-vendored** artifact is a logic change", since
+  vendoring regenerates the manifest alongside the bundle.
+- **The compiler does not enforce the wiring; the runtime does.** `Pick<RoutedEngine, "logicVersionFor">`
+  has an optional member, so a future caller could pass an unrouted engine and typecheck. That is
+  self-correcting rather than dangerous — an unrouted engine yields authored evaluation *and* an authored
+  identity, so the two stay consistent — but "cannot disagree" is a statement about the runtime object,
+  not about the type. The pipeline's single read of `deps.engine.logicVersionFor` is covered by a test
+  that fails when that line is deleted; it is the only place this can now go wrong.
+- **Scoped to the measure, not to the input.** The router's `elm`/`metaOverride` escape evaluates a routed
+  measure with the authored engine, which `logicVersionFor` cannot see. Sound only because the two callers
+  cannot meet — the escape belongs to the fidelity lab and the Rule Builder, neither of which is a
+  population run, and the cache exists only inside `finishManualRun`. Recorded here because a future caller
+  that both overrides the library *and* caches must key on the library it asked for.
+- Descriptive only (ADR-008), unchanged: this decides *whether* to re-ask the engine, never the answer.
+
+**Alternatives rejected.** *Disable incremental evaluation whenever any measure is routed* — a blunt
+correctness fix, but it turns the two features into mutually exclusive ones exactly where their value
+overlaps (the WebChart tenant, whose fixed exam dates are what makes across-day reuse pay off, is also
+where official execution is headed). *Fold the artifact sha into the existing ELM hash* — keeps one code
+path, but produces an opaque `sha256:` that silently changes meaning depending on configuration, and
+still leaves the cache inferring routing rather than being told it.
+
 ## ADR-039: The shadow diff is a shadow of the runtime, not a study of its own
 
 **Status:** Accepted (2026-07-27). Roadmap §7.4, PR-8d. Nothing routes officially yet.

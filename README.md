@@ -22,6 +22,22 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-28 — PR-8e closed the `logic_version` landmine (ADR-040).** Incremental evaluation decided
+  "has this measure's logic changed?" by hashing WorkWell's *authored* ELM — which keeps hashing
+  identically after a measure is flipped to the official artifact. The `eval_state` cache would therefore
+  have copied **authored outcomes forward for a measure now running official CQL**, with no symptom at
+  any layer that could look. The **engine** now declares its own logic identity
+  (`RoutedEngine.logicVersionFor` → `official-fqm:<version>:<artifactSha>:<terminologySha>`), read by the
+  run pipeline off the very engine producing the outcomes, so the identity and the computation cannot
+  disagree. Flip-on, flip-off, and re-vendor-while-routed each invalidate reuse by construction. Taken
+  ahead of the batching because it is the one fingerprint input whose absence is silent — every other
+  degrades pessimistically, costing only a re-evaluation. Review then drew the boundary of what an
+  identity can promise: it names the *artifact*, not the adapter code executing it, and that adapter is
+  the youngest code in the repo (ADR-037's bundle preparation alone swung a roster from IPP=0 to IPP=25).
+  With no build sha available at runtime to fold in, the cache **declines an official-routed measure
+  entirely** rather than guess which adapter changes matter — forgoing only same-day rerun skipping,
+  since a rolling measurement period already denied them across-day reuse. Inert on every environment
+  today.
 - **2026-07-27 — official-first execution is BUILT and dark (roadmap §7.4, PRs #342–#346; ADR-036–039).**
   The machinery to run CMS's *published* artifacts verbatim is complete and gated:
   **PR-8a** made the artifact's own expansions the single terminology authority (fetched at build,
@@ -37,9 +53,8 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
   calendar year where the runtime uses a rolling window, feeding the artifact a deliberately enriched
   bundle, and carrying its own population mapping, so it was not forecasting the flip at all.
   **Nothing routes officially** — `WORKWELL_OFFICIAL_MEASURES` is unset everywhere and every measure
-  still evaluates authored CQL. Remaining before the flip (PR-9): the `logic_version` override (a
-  correctness landmine — the cache would copy *authored* outcomes forward for a measure now running
-  official), measure-major batching + a batch-level `hasRetrieveSignal`, the VSAC-capped
+  still evaluates authored CQL. Remaining before the flip (PR-9): measure-major batching + a
+  batch-level `hasRetrieveSignal`, the VSAC-capped
   `AdvancedIllness` expansion, and CMS125 over **live WebChart data** (which gets neither PR-8c fix, so
   it would still read out-of-population).
 - **2026-07-24 (later) — strategic recalibration: `docs/ROADMAP_2026-07-24.md` approved (supersedes the
