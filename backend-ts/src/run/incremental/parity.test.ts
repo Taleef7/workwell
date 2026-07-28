@@ -86,9 +86,15 @@ async function incrementalRun(
   subjectId: string,
   bundle: unknown,
   date: string,
+  engineLogicVersion?: (measureId: string) => string | undefined,
 ): Promise<{ status: string; evidence: unknown; reused: boolean }> {
   const runId = await newRunId(stores.runs);
-  const cache = new IncrementalCache({ evalState: stores.evalState, outcomes: stores.outcomes, evalDate: date });
+  const cache = new IncrementalCache({
+    evalState: stores.evalState,
+    outcomes: stores.outcomes,
+    evalDate: date,
+    ...(engineLogicVersion ? { engineLogicVersion } : {}),
+  });
   const plan = await cache.plan(measureId, subjectId, PERIOD, bundle);
   if (plan.action === "reuse") {
     await stores.outcomes.recordOutcome({ runId, subjectId, measureId, evaluationPeriod: PERIOD, status: plan.status, evidence: plan.evidence, evaluatedAt: `${date}T00:00:00.000Z` });
@@ -159,6 +165,115 @@ test("§3 a stale logic_version re-evaluates every subject for that measure", as
   await stores.evalState.upsertEvalState({ ...row, logicVersion: "sha256:STALE" });
   const run2 = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15");
   assert.equal(run2.reused, false, "logic_version mismatch ⇒ re-evaluate even same-day on identical data");
+});
+
+/**
+ * Roadmap §7.4 PR-8 — routing a measure to the OFFICIAL artifact must invalidate reuse, in both
+ * directions and on a re-vendor.
+ *
+ * These are deliberately set up so that every OTHER reason to re-evaluate is absent: same day, same
+ * subject, byte-identical bundle, and a terminal OVERDUE status (`next_transition_at = null`, so the
+ * clock can never force it). The baseline test below proves that configuration DOES reuse. Anything
+ * that re-evaluates here therefore did so because of `logic_version` and nothing else — which is the
+ * whole claim, since the authored ELM hashes identically before and after a flip.
+ */
+const OFFICIAL_V1 = "official-fqm:1.0.000:aaaa:tttt";
+const OFFICIAL_V2 = "official-fqm:1.0.000:bbbb:tttt"; // same version string, re-vendored artifact
+const declaring = (v: string | undefined) => (measureId: string) => (measureId === "audiogram" ? v : undefined);
+
+test("PR-8 baseline: with no logic change at all, this exact setup reuses", async () => {
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400); // OVERDUE ⇒ terminal
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15");
+  const again = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15");
+  assert.equal(again.reused, true, "same day, same data, terminal status ⇒ reuse (so the tests below isolate logic_version)");
+});
+
+test("PR-8 flipping a measure ON to official execution re-evaluates rather than copying authored outcomes forward", async () => {
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400);
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15"); // cached under the AUTHORED ELM hash
+  const routed = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  assert.equal(routed.reused, false, "official routing ⇒ no reuse");
+  // The reuse assertion above is now ALSO satisfied by the never-reuse-official policy, so on its own it
+  // would pass with a broken identity. This is the part that isn't vacuous: the row must record the
+  // ARTIFACT, because that is what a later authored run compares against (the test below) and what a
+  // re-enabled reuse path would read.
+  const row = (await stores.evalState.getEvalState("s1", "audiogram", PERIOD))!;
+  assert.equal(row.logicVersion, OFFICIAL_V1, "the row records the ARTIFACT's identity, not the ELM hash");
+  assert.equal(row.nextTransitionAt, "2026-06-15", "and is bounded to its own day — a rolling MP makes nothing terminal");
+});
+
+test("PR-8 an official-routed measure is not reused AT ALL — not even same-day on identical data", async () => {
+  // Codex P2: `logic_version` identifies the measure DEFINITION, not the adapter code that executes it,
+  // and that adapter is the youngest, fastest-moving code in the repo (ADR-037's preparation alone swung
+  // a roster from IPP=0 to IPP=25). Until its output-affecting surface is covered by a digest or stops
+  // moving, the cache declines rather than guesses. Same-day + identical bundle + terminal status is the
+  // configuration that reuses for every other measure — see the baseline test above.
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400);
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  const again = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  assert.equal(again.reused, false, "an unchanged artifact on the same day still re-evaluates");
+});
+
+test("PR-8 an official row is bounded to its own eval date where the identical authored row is terminal", async () => {
+  // The same-day bound (ADR-040 §5) is defence-in-depth for the day the never-reuse policy above is
+  // lifted: `computeNextTransition` reasons in AUTHORED terms and would call this row terminal, which
+  // means unbounded across-day reuse under a ROLLING measurement period where the same bundle can score
+  // differently as the date moves.
+  //
+  // Asserting it through reuse would be theatre while the policy stands — a cross-day reuse test passes
+  // whether or not the bound exists, because `plan` declines official rows before reaching the temporal
+  // gate. So assert the stored bound, against the authored row it would otherwise have been. Same
+  // measure, same bundle, same date, same OVERDUE status: the ONLY difference is who declared the logic.
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400);
+
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  const official = (await stores.evalState.getEvalState("s1", "audiogram", PERIOD))!;
+  assert.equal(official.nextTransitionAt, "2026-06-15", "an official row can never be terminal on unchanged data");
+
+  await incrementalRun(stores, "audiogram", "s2", bundle, "2026-06-15", declaring(undefined));
+  const authored = (await stores.evalState.getEvalState("s2", "audiogram", PERIOD))!;
+  assert.equal(authored.nextTransitionAt, null, "authored OVERDUE is terminal — the behaviour being deliberately NOT inherited");
+});
+
+test("PR-8 re-vendoring while routed moves the recorded identity", async () => {
+  // Observable through the committed row rather than through reuse, since official rows are not reused
+  // today. `officialLogicVersion`'s own composition (version / artifact sha / terminology sha each move
+  // it, and it is stable when they don't) is pinned in executor-router.test.ts.
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400);
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  assert.equal((await stores.evalState.getEvalState("s1", "audiogram", PERIOD))!.logicVersion, OFFICIAL_V1);
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V2));
+  assert.equal(
+    (await stores.evalState.getEvalState("s1", "audiogram", PERIOD))!.logicVersion,
+    OFFICIAL_V2,
+    "a new artifact sha at the same version string is a different identity",
+  );
+});
+
+test("PR-8 flipping a measure OFF official execution also re-evaluates", async () => {
+  const stores = await freshStores();
+  const bundle = fixedBundle("audiogram", 400);
+  await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  const authored = await incrementalRun(stores, "audiogram", "s1", bundle, "2026-06-15");
+  assert.equal(authored.reused, false, "reverting to authored CQL ⇒ different logic ⇒ re-evaluate");
+  const row = (await stores.evalState.getEvalState("s1", "audiogram", PERIOD))!;
+  assert.match(row.logicVersion, /^sha256:/, "and the row is back on the authored ELM hash");
+});
+
+test("PR-8 a measure that is NOT routed keeps reusing while a sibling measure is", async () => {
+  const stores = await freshStores();
+  const bundle = fixedBundle("tb_surveillance", 400);
+  // The engine declares an identity for audiogram only; tb_surveillance must be unaffected.
+  await incrementalRun(stores, "tb_surveillance", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  const again = await incrementalRun(stores, "tb_surveillance", "s1", bundle, "2026-06-15", declaring(OFFICIAL_V1));
+  assert.equal(again.reused, true, "an unrouted measure is fingerprinted by its authored ELM as before");
+  const row = (await stores.evalState.getEvalState("s1", "tb_surveillance", PERIOD))!;
+  assert.match(row.logicVersion, /^sha256:/);
 });
 
 test("§8 terminal statuses (OVERDUE) reuse across a long gap with date-corrected evidence", async () => {

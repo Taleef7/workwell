@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { IncrementalCache, type IncrementalDeps } from "./incremental-eval.ts";
+import { IncrementalCache, type EvaluatePlan, type IncrementalDeps } from "./incremental-eval.ts";
 import type { EvalStateStore, EvalStateRow, UpsertEvalStateInput } from "../../stores/eval-state-store.ts";
 import type { OutcomeRecord } from "../../stores/outcome-store.ts";
 
@@ -43,7 +43,9 @@ async function seed(evalState: FakeEvalState, over: Partial<IncrementalDeps>): P
   const plan = await c.plan("audiogram", "s1", PERIOD, bundle);
   assert.equal(plan.action, "evaluate"); // first time is always a miss
   // OVERDUE ⇒ terminal (next_transition_at null), so a same-config replan would reuse.
-  await c.commit("audiogram", "s1", PERIOD, "OVERDUE", "o1", { expressionResults: [] }, plan as { dataHash: string; logicVersion: string });
+  // Pass the plan through rather than rebuilding a fingerprint literal: `commit` must read the officialness
+  // `plan` decided, not a second opinion about it (review #1 on PR-8e).
+  await c.commit("audiogram", "s1", PERIOD, "OVERDUE", "o1", { expressionResults: [] }, plan as EvaluatePlan);
 }
 
 test("same config ⇒ reuse (control): a terminal row replans as a hit", async () => {

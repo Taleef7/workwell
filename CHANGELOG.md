@@ -24,6 +24,19 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
   runtime** — same measurement period, same prepared bundle, same population mapping (ADR-039).
   Descriptive only (ADR-008): CQL remains the sole compliance authority, and an official artifact *is*
   CQL. No schema change.
+- **The incremental-evaluation cache learns about official routing (PR #348; ADR-040).** Closes a
+  correctness hazard before it could fire: `logic_version` was derived by hashing WorkWell's *authored*
+  ELM, which keeps hashing identically after a measure is flipped to the official artifact — so the
+  `eval_state` cache would have copied authored outcomes forward for a measure now running official CQL,
+  and a re-vendor would not have invalidated them either. The **engine** now declares its own logic
+  identity (`RoutedEngine.logicVersionFor` → `official-fqm:<version>:<artifactSha>:<terminologySha>`),
+  read by the run pipeline off the very engine producing the outcomes so the two cannot disagree. Flip-on,
+  flip-off, and re-vendor-while-routed all invalidate reuse by construction. Two conservative bounds ride
+  with it: an official-routed outcome is same-day-only (the official measurement period is a rolling
+  window, so nothing about it is terminal on unchanged data), and — while the adapter's output-affecting
+  surface is still moving — it is **not reused at all**, since `logic_version` identifies the measure
+  definition and not the code that executes it. Inert on every environment today (both flags unset ⇒
+  byte-identical run loop); no schema change (`logic_version` is already TEXT).
 - **Option A at scale — real batch live-evaluation of the `mhn` (~120k) scale tenant (PR #252, open).** Replaces the *fabricated* scale outcomes with real, chunked, subject-major CQL evaluation (`batchEvaluateScalePopulation`) behind a pluggable `ScaleSubjectGenerator` seam; the default `webChartRealisticGenerator` routes real LOINC/CVX/CPT codes through the WebChart terminology crosswalk (13/14 measures) so the real adapter is exercised at scale. Bounded-memory, whole-batch resumable, per-subject error-isolated, audited `SCALE_POPULATION_EVALUATED`. CLI `pnpm seed:scale --mode evaluate` (default; `--mode fabricated` legacy one release; `--trim-evidence` for 120k). Reuses the `mhn|Lxx|Pxx|n` encoding so `aggregateScaleRun` + the rollup are unchanged (only outcome provenance changed). Evaluate mode **refuses over legacy fabricated `seed:scale` runs** (roll back first). Descriptive only (ADR-008/ADR-020); no schema, no new deps.
 - **E9 (#78) — `MeasureExecutor` seam (ADR-025).** Measure execution is pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`, extends `EvaluateMeasureBinding`): `fhirNativeExecutor` is the default + correctness oracle, `sqlPushdownExecutor` is an inert stub (Option B / CQL→SQL research-grade, not built), `resolveMeasureExecutor(env)` config-selects. Resolves the charter's CQL→SQL fork as a decision + seam (supersedes ADR-014). Descriptive only; no schema/deps/engine change.
 - **2026 terminology/standards currency fix** (`docs/TERMINOLOGY_AUDIT_2026-07-08.md`). A three-way verification (our impl vs MIE's WebChart dev DB vs current CDC/CMS/LOINC/VSAC/OSHA) confirmed all load-bearing codes correct (49 CMS catalog versions/MIPS IDs with **v14 = 2026**; OSHA CFR; runnable LOINC/CPT), and fixed vaccine-CVX currency on the WebChart crosswalk: full active influenza CVX set (VSAC Influenza OID `2.16.840.1.113883.3.526.3.1254`), active Td `09`/`113`/`196` replacing the inactive `139`, MMRV `94` counting toward varicella, and deleted HCPCS `G0202` marked read-only. Additive read-path only — no synthetic outcome changed.
