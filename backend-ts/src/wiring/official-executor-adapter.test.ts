@@ -461,3 +461,163 @@ test("a malformed expander still produces the DIAGNOSTIC refusal, not a raw Type
     );
   }
 });
+
+/**
+ * Measure-major batching (roadmap §7.4 PR-8).
+ *
+ * Two claims worth testing separately: that a roster costs ONE fqm call rather than N (the point of the
+ * change), and that a batch which retrieved nothing for anybody refuses rather than reporting the whole
+ * roster ineligible (the safety net batching made possible).
+ */
+const batchArtifact = (): OfficialArtifact => {
+  const base = fakeArtifact("cms125", ["2.16.1"]);
+  return { ...base, manifest: { ...base.manifest, catalogId: "cms125" } };
+};
+
+/** fqm's shape for N subjects. `retrieved: false` is the empty-retrieve catastrophe this PR guards. */
+const calculatorFor = (
+  subjectIds: string[],
+  opts: { retrieved?: boolean } = {},
+): { calculate: FqmCalculate; batchSizes: number[] } => {
+  const batchSizes: number[] = [];
+  const empty = opts.retrieved === false;
+  const calculate: FqmCalculate = async (_bundle, patients) => {
+    batchSizes.push((patients as unknown[]).length);
+    return {
+      results: subjectIds.map((patientId) => ({
+        patientId,
+        ...(empty ? {} : { evaluatedResource: [{ resourceType: "Observation" }] }),
+        detailedResults: [
+          {
+            populationResults: [
+              { populationType: IPP, result: !empty },
+              { populationType: DENOM, result: !empty },
+              { populationType: NUMER, result: !empty },
+            ],
+            statementResults: [],
+          },
+        ],
+      })),
+    };
+  };
+  return { calculate, batchSizes };
+};
+
+const batchExecutor = (calculate: FqmCalculate, over: Record<string, unknown> = {}) =>
+  officialMeasureExecutor({
+    expand: async () => [{ code: "a", system: "s" }],
+    loadArtifact: batchArtifact,
+    calculate,
+    ...over,
+  });
+
+test("PR-8: a whole roster costs ONE fqm call, not one per subject", async () => {
+  const ids = ["s1", "s2", "s3", "s4", "s5"];
+  const { calculate, batchSizes } = calculatorFor(ids);
+
+  const results = await batchExecutor(calculate).evaluateBatch(
+    "cms125",
+    ids.map((subjectId) => ({ subjectId, patientBundle: {} })),
+    "2026-07-25",
+  );
+
+  // The whole point: fqm parses the artifact's ELM per CALL, so five subjects in one call is four ELM
+  // parses of a 2.4 MB bundle saved — 149 on a real live-tenant roster.
+  assert.deepEqual(batchSizes, [5], "five subjects must arrive as ONE batch of five");
+  assert.deepEqual([...results.keys()], ids);
+  assert.equal(results.get("s3")!.outcome, "COMPLIANT");
+});
+
+test("PR-8: batched and per-subject produce the same outcome for the same subject", async () => {
+  // Batching is a performance change. If it moved an answer it would be a correctness change wearing a
+  // performance change's clothes — so assert the two paths agree rather than trusting that sharing a code
+  // path makes disagreement impossible.
+  const single = await batchExecutor(calculatorFor(["s1"]).calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: {},
+    evaluationDate: "2026-07-25",
+  });
+  const batched = await batchExecutor(calculatorFor(["s1", "s2"]).calculate).evaluateBatch(
+    "cms125",
+    [
+      { subjectId: "s1", patientBundle: {} },
+      { subjectId: "s2", patientBundle: {} },
+    ],
+    "2026-07-25",
+  );
+
+  assert.deepEqual(batched.get("s1"), single, "the same subject must evaluate identically either way");
+});
+
+test("PR-8: a batch that retrieved NOTHING for anybody refuses instead of reporting a roster ineligible", async () => {
+  // fqm does not error when every retrieve comes back empty — it returns a complete-looking result with
+  // nobody in any population, indistinguishable downstream from a genuinely ineligible roster. That is
+  // what a profile or terminology misconfiguration looks like, and it is the failure this executor could
+  // otherwise report as a successful run in which every single person is out of scope.
+  const { calculate } = calculatorFor(["s1", "s2", "s3"], { retrieved: false });
+
+  await assert.rejects(
+    batchExecutor(calculate).evaluateBatch(
+      "cms125",
+      ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: {} })),
+      "2026-07-25",
+    ),
+    /retrieved NOTHING for any of 3 subjects/,
+  );
+});
+
+test("PR-8: the retrieve check does NOT fire for a single subject — that answer is legitimate", async () => {
+  // One person with no clinical data really does retrieve nothing. This is `/simulate` and
+  // rerun-to-verify; failing them would be a false alarm on a correct result.
+  const { calculate } = calculatorFor(["s1"], { retrieved: false });
+
+  const outcome = await batchExecutor(calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: {},
+    evaluationDate: "2026-07-25",
+  });
+  assert.equal(outcome.outcome, "MISSING_DATA");
+  assert.equal(outcome.inInitialPopulation, false, "out of scope for the measure, not non-compliant");
+});
+
+test("PR-8: an empty batch is not an error, and never reaches fqm", async () => {
+  const { calculate, batchSizes } = calculatorFor([]);
+  assert.equal((await batchExecutor(calculate).evaluateBatch("cms125", [], "2026-07-25")).size, 0);
+  assert.deepEqual(batchSizes, [], "asking a calculator about nobody is how you get a confusing failure");
+});
+
+test("PR-8: every refusal still fires on the batch path — they are not single-subject guards", async () => {
+  // `evaluate` now delegates to `evaluateBatch`, so a refusal that had lived only on the old
+  // single-subject path would be gone entirely. Assert each on the path actually reached.
+  const { calculate } = calculatorFor(["s1", "s2"]);
+  const subjects = [
+    { subjectId: "s1", patientBundle: {} },
+    { subjectId: "s2", patientBundle: {} },
+  ];
+  const cohort = batchArtifact();
+
+  await assert.rejects(
+    batchExecutor(calculate, { loadArtifact: () => null }).evaluateBatch("cms125", subjects),
+    /no executable official artifact is vendored/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, { loadArtifact: () => fakeArtifact("cms122", ["2.16.1"]) }).evaluateBatch("cms125", subjects),
+    /declares catalogId 'cms122'/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, {
+      loadArtifact: () => ({ ...cohort, manifest: { ...cohort.manifest, scoring: "cohort" } }),
+    }).evaluateBatch("cms125", subjects),
+    /scoring 'cohort' is not supported/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, {
+      loadArtifact: () => ({ ...cohort, manifest: { ...cohort.manifest, catalogId: "unknownmeasure" } }),
+    }).evaluateBatch("unknownmeasure", subjects),
+    /no recorded official measure semantics/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, { expand: async () => [] }).evaluateBatch("cms125", subjects),
+    /value sets could not be expanded/,
+  );
+});

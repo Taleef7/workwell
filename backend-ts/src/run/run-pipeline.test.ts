@@ -1115,3 +1115,127 @@ test("ADR-040: an engine that declares nothing still gets the authored ELM hash,
   assert.match(row!.logicVersion, /^sha256:/, "no declared identity ⇒ unchanged authored fingerprint");
   assert.equal(row!.nextTransitionAt, null, "and OVERDUE stays terminal on the authored path");
 });
+
+/**
+ * Measure-major batching (roadmap §7.4 PR-8).
+ *
+ * The pre-pass is the part that can silently do nothing — an engine that never offers `evaluateBatch`,
+ * a Map keyed the wrong way, results quietly dropped and every subject re-evaluated per-subject anyway —
+ * so these count CALLS rather than trusting that the outcomes look right.
+ */
+interface BatchProbe {
+  engine: RunPipelineDeps["engine"];
+  batches: Array<{ measureId: string; size: number }>;
+  singles: string[];
+}
+
+/** An engine that batches `batchable` and evaluates everything else one subject at a time. */
+function batchProbe(batchable: Set<string>, opts: { failOn?: string } = {}): BatchProbe {
+  const batches: Array<{ measureId: string; size: number }> = [];
+  const singles: string[] = [];
+  const outcomeFor = (subjectId: string, measureId: string) => ({
+    subjectId,
+    measure: measureId,
+    outcome: "COMPLIANT" as const,
+    evidence: { expressionResults: [{ define: "Outcome Status", result: "COMPLIANT" }], via: "batch" },
+  });
+  return {
+    batches,
+    singles,
+    engine: {
+      async evaluate(input) {
+        singles.push(`${input.measureId}`);
+        return {
+          subjectId: "ignored",
+          measure: input.measureId,
+          outcome: "OVERDUE" as const,
+          evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }], via: "single" },
+        };
+      },
+      async evaluateBatch(measureId, subjects) {
+        if (!batchable.has(measureId)) return undefined;
+        batches.push({ measureId, size: subjects.length });
+        if (opts.failOn === measureId) {
+          throw new Error(`${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects`);
+        }
+        return new Map(subjects.map((s) => [s.subjectId, outcomeFor(s.subjectId, measureId)]));
+      },
+    },
+  };
+}
+
+async function runWithProbe(probe: BatchProbe, scope: Parameters<typeof executeManualRun>[1]) {
+  const p = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(p);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const outcomeStore = new SqliteOutcomeStore(db);
+  const deps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore,
+    engine: probe.engine,
+    employees: [employeeById("emp-001")!, employeeById("emp-002")!, employeeById("emp-003")!],
+  };
+  const res = await executeManualRun(deps, scope);
+  return { res, outcomes: await outcomeStore.listOutcomes(res.runId) };
+}
+
+test("PR-8: a batchable measure is evaluated in ONE call for the whole roster", async () => {
+  const probe = batchProbe(new Set(["audiogram"]));
+  const { res, outcomes } = await runWithProbe(probe, {
+    scopeType: "MEASURE",
+    measureId: "audiogram",
+    evaluationDate: "2026-06-15",
+  });
+
+  assert.deepEqual(probe.batches, [{ measureId: "audiogram", size: 3 }], "three subjects, one batch");
+  assert.deepEqual(probe.singles, [], "no subject may fall through to the per-subject path");
+  assert.equal(outcomes.length, 3);
+  // Persisted from the BATCH result, not re-evaluated — the two paths return deliberately different
+  // evidence here so a silent fall-through would show up as `via: "single"`.
+  assert.ok(outcomes.every((o) => (o.evidence as { via?: string }).via === "batch"));
+  assert.equal(res.compliant, 3);
+});
+
+test("PR-8: a measure with no batch path is untouched, alongside one that has it", async () => {
+  // The mixed run is the interesting one: the pre-pass must not swallow measures it cannot batch, and
+  // must not batch measures it was not offered.
+  const probe = batchProbe(new Set(["audiogram"]));
+  const { outcomes } = await runWithProbe(probe, {
+    scopeType: "EMPLOYEE",
+    employeeExternalId: "emp-001",
+    evaluationDate: "2026-06-15",
+  });
+
+  assert.deepEqual(probe.batches, [{ measureId: "audiogram", size: 1 }]);
+  assert.ok(probe.singles.length > 0, "every other runnable measure still evaluates per subject");
+  assert.ok(!probe.singles.includes("audiogram"), "the batched measure must not ALSO be evaluated singly");
+  const audiogram = outcomes.find((o) => o.measureId === "audiogram")!;
+  assert.equal((audiogram.evidence as { via?: string }).via, "batch");
+  assert.equal((outcomes.find((o) => o.measureId !== "audiogram")!.evidence as { via?: string }).via, "single");
+});
+
+test("PR-8: a failed batch fails ITS measure loudly and leaves the rest of the run intact", async () => {
+  // The owner-chosen failure mode. A batch-level refusal — notably "nothing was retrieved for anybody" —
+  // reaches the SAME per-subject isolation a single evaluation failure does: every subject of that
+  // measure gets MISSING_DATA carrying the reason, the run ends PARTIAL_FAILURE (which is what fires the
+  // #264 alert), and no other measure is affected.
+  const probe = batchProbe(new Set(["audiogram"]), { failOn: "audiogram" });
+  const { res, outcomes } = await runWithProbe(probe, {
+    scopeType: "EMPLOYEE",
+    employeeExternalId: "emp-001",
+    evaluationDate: "2026-06-15",
+  });
+
+  const audiogram = outcomes.find((o) => o.measureId === "audiogram")!;
+  assert.equal(audiogram.status, "MISSING_DATA");
+  assert.match(
+    (audiogram.evidence as { message?: string }).message ?? "",
+    /retrieved NOTHING for any of 1 subjects/,
+    "the subject's evidence must carry the batch's reason, not a generic failure",
+  );
+  assert.equal(res.status, "PARTIAL_FAILURE", "a whole measure failing must not report as a clean run");
+  assert.ok(
+    outcomes.filter((o) => o.measureId !== "audiogram").every((o) => o.status !== "MISSING_DATA"),
+    "one measure's batch failure must not contaminate the others",
+  );
+});

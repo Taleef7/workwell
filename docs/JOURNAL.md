@@ -1,5 +1,91 @@
 # Journal
 
+## 2026-07-28 (later) — PR-8 (remaining), part 2: measure-major batching + the retrieve check (branch `feat/official-measure-batching`)
+
+The last item before PR-9. Two things shipped together because the second only becomes possible once the
+first exists.
+
+**The performance half turned out to be bigger than "an optimisation".** The adapter was single-subject
+because that is the `EvaluateMeasureBinding` contract every caller uses, so each call handed fqm a batch
+of exactly one — and fqm parses the artifact's ELM per CALL. Measured on the real vendored artifacts:
+
+| | per-subject | batched | |
+|---|---|---|---|
+| cms122, N=25 | 4,249 ms (170 ms/subject) | 409 ms (16 ms/subject) | 10.4× |
+| cms125, N=25 | 4,316 ms (173 ms/subject) | 342 ms (14 ms/subject) | 12.6× |
+| cms122, N=100 | 17,145 ms (171 ms/subject) | 1,091 ms (11 ms/subject) | 15.7× |
+
+The ratio grows with the roster because the parse is fixed cost. What makes this more than a speed-up is
+the comparison it inverts: **171 ms/subject is ~2.5× SLOWER than the authored engine's ~68 ms**. Flipping
+a measure without batching would have made a live-tenant run measurably worse, and the roadmap's risk
+table had this filed as "benchmark before flip" rather than as a blocker. Batched, official execution is
+*faster* than authored.
+
+**The safety half is the one that would have been silent.** fqm does not error when every retrieve comes
+back empty — it returns a complete-looking result with nobody in any population, which downstream is
+indistinguishable from a genuinely ineligible roster. `hasRetrieveSignal` has existed in the package
+since PR-4 and is already used by the MADiE harness, but it is only meaningful ACROSS subjects, so there
+was nowhere to put it until batching existed. Now: a batch of more than one that matched nothing for
+anybody refuses.
+
+The `> 1` is load-bearing and is the owner's call. For a single subject "nothing retrieved" is a true and
+ordinary answer — that is `/simulate` and rerun-to-verify on someone with no clinical data — so applying
+it there would fail correct results. The known false positive is a roster of 2+ where genuinely nobody
+has any clinical resource; failing loudly there is still the better error, because the measure's output
+over that roster is meaningless either way.
+
+Also worth stating so it is not over-claimed: this catches **"retrieved nothing at all", not "retrieved
+the wrong thing"**. Every one of ADR-038's corpus defects — 12 of 24 codes in the wrong value set, the
+missing `us-core-sex` extension, the mammogram recorded only as a Procedure — passed `hasRetrieveSignal`
+cleanly while scoring the roster wrongly. This closes one door, and it is not the dangerous one.
+
+### Two structural decisions
+
+**A pre-pass, not a measure-major rewrite of the loop.** `finishManualRun`'s loop carries outcome
+persistence, the incremental commit, the case upsert, its audit event and the counters, all
+order-dependent and all correctness-critical. Restructuring it measure-major would put every measure's
+bundles in memory at once (150 subjects × 14 measures) to benefit the measures that are actually routed,
+of which there are currently none. The pre-pass holds one measure's bundles, drops them, and leaves the
+authored path as literally the code that ships today — `evaluateBatch` resolves `undefined` and nothing
+runs.
+
+**One method, not `canBatch()` + a call.** The `undefined` resolution IS the predicate, decided by the
+same `official` set the dispatch reads. And deliberately not inferred from `logicVersionFor(id) !==
+undefined`: "has a declared logic identity" and "can be batched" coincide today, and a coincidence relied
+on is a coincidence that breaks quietly. Same reasoning as ADR-040 §2, same reason it hangs off the
+engine rather than being threaded through `RunPipelineDeps`.
+
+`evaluate` is now a batch of one, which mattered more than expected — it means the four construction
+refusals (artifact present, catalogId match, proportion scoring, recorded semantics) live on one path
+instead of two that must agree. A test asserts each of them on the batch path specifically, because a
+refusal that had lived only on the old single-subject path would now be gone entirely.
+
+### Failure mode
+
+Owner-decided: a failed batch fails **its own measure**, not the run. Every subject of it lands
+MISSING_DATA carrying the batch's reason, the run ends PARTIAL_FAILURE — which is what fires the #264
+alert channel — and other measures complete normally. That reuses the existing per-subject isolation
+rather than inventing a failure channel, and avoids the alternative's real flaw: a FAILED run is ignored
+by every read model, so one misconfigured measure would discard thirteen good ones *and* leave the prior
+run silently authoritative.
+
+### Verification
+
+- `pnpm test` — **1539 pass / 0 fail / 14 skipped** with the terminology sidecars present;
+  **1528 / 0 / 25** with both moved aside. 1553 collected either way. `pnpm typecheck` clean.
+- Five mutations, each caught by exactly the test that claims it and nothing else: disabling the
+  pre-pass (3 tests), dropping the `> 1` guard (the single-subject test), removing the retrieve check
+  (the refusal test), making the router batch unrouted measures (the routing test), and swallowing a
+  batch failure (the isolation test).
+- Perf measured by hand with a throwaway script over the real artifacts, not asserted in the suite —
+  timing assertions are flaky and would have to be loose enough to prove nothing.
+- Nothing routes officially. `WORKWELL_OFFICIAL_MEASURES` is unset everywhere and no measure is
+  *routable* regardless: the capped `AdvancedIllness` expansion is still a construction-time refusal.
+
+**PR-8 is now complete.** Remaining before PR-9's flip: the VSAC-capped `AdvancedIllness` expansion
+(1000 of 1997 codes, an owner-run vendor step), and CMS125 over live WebChart data, which gets neither
+ADR-038 fix and would still read out-of-population.
+
 ## 2026-07-28 — PR-8 (remaining), part 1: the `logic_version` landmine (branch `feat/official-logic-version`)
 
 Took the `logic_version` override ahead of measure-major batching, because they are not the same kind of

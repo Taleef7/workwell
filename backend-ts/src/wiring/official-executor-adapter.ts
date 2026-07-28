@@ -39,16 +39,22 @@
  * - **DONE in PR-8: it prepares the bundle.** `preparedForQiCore` runs on a structural COPY before
  *   every evaluation (QI-Core active/confirmed status, in-past onset, Encounter class). Measured
  *   without it, an unprepared synthetic roster scores IPP=0 — a run that completes and reports
- *   everyone MISSING_DATA. Still open: a batch-level `hasRetrieveSignal` check, which is only
- *   meaningful across subjects and so belongs with the measure-major batching PR-8 adds to the router.
- *   Note it would NOT catch the more dangerous case — see `qicore-preparation.ts` on why preparation
- *   alone renders the synthetic corpus as 100% compliant for cms122.
- * - **It re-expands terminology on every call.** Fine for a dark, per-subject binding; not fine for a
- *   150-subject run, which would be ~300 ELM parses of a 2.4MB bundle and thousands of store reads on
- *   the database whose idle polling already caused a four-day outage. PR-7b batches per measure. Any
- *   cache must be scoped per run, not per process — `engineForEnv` deliberately rebuilds its resolver
- *   per call so operator value-set edits stay visible, and a process-lifetime memo re-introduces that
- *   fixed bug.
+ *   everyone MISSING_DATA.
+ * - **DONE in PR-8: measure-major batching + the batch-level retrieve check.** `evaluateBatch` is now
+ *   the primitive and `evaluate` is a batch of one. Measured on the real vendored artifacts: 171 ms per
+ *   subject one at a time versus 11-16 ms batched (10x at 25 subjects, 16x at 100 — the ELM parse is
+ *   per CALL, so the saving grows with the roster). Worth stating plainly, because it inverts the
+ *   comparison the roadmap worried about: unbatched official execution is ~2.5x SLOWER per subject than
+ *   the authored engine's ~68 ms, and batched it is faster.
+ *
+ *   The retrieve check rides with it, because it is only meaningful ACROSS subjects. Note it would NOT
+ *   catch the more dangerous case — see `qicore-preparation.ts` on why preparation alone renders the
+ *   synthetic corpus as 100% compliant for cms122. It catches "retrieved nothing at all", not
+ *   "retrieved the wrong thing".
+ * - **Terminology is expanded once per measure per EXECUTOR INSTANCE, not per call** (see `cacheFor`).
+ *   Any cache must stay scoped per run, not per process — `engineForEnv` deliberately rebuilds its
+ *   resolver per call so operator value-set edits stay visible, and a process-lifetime memo
+ *   re-introduces that fixed bug.
  * - **`inInitialPopulation` is computed here and dropped at persistence.** `run-pipeline.ts` stores only
  *   `outcome` and `evidence`, and MISSING_DATA opens a case — so today every out-of-IPP subject would
  *   become a case. True of the authored path too, but official routing over a live population makes the
@@ -65,7 +71,7 @@
  */
 import {
   buildValueSetCache,
-  calculateOfficialDetailed,
+  calculateOfficialWithSignal,
   normalizePeriodEnd,
   referencedValueSets,
   referencedValueSetUrls,
@@ -105,9 +111,32 @@ export type ExpandValueSet = (oid: string, catalogId: string) => Promise<Expande
  */
 export { oidFromValueSetUrl, type FqmCalculate, type ExpandedCode };
 
+/** One subject's input to a batched official evaluation. */
+export interface OfficialBatchSubject {
+  subjectId: string;
+  patientBundle: unknown;
+}
+
 /** An `EvaluateMeasureBinding` that can also be asked to prove a measure is runnable before a run. */
 export interface OfficialMeasureExecutor extends EvaluateMeasureBinding {
   preflight(measureId: string): Promise<void>;
+  /**
+   * Evaluate a whole roster for ONE measure in a single fqm pass, keyed by subject id.
+   *
+   * This is the primitive; `evaluate` is a one-subject call into it. fqm parses the artifact's ELM per
+   * CALL, not per subject, so a 150-subject measure paid 150 parses of a 2.4 MB bundle to learn what one
+   * pass answers.
+   *
+   * A subject fqm returns no detailed result for is ABSENT from the returned map rather than defaulted
+   * to something. Only the caller knows who it asked for, so only the caller can judge the omission —
+   * the run pipeline treats it as that subject's isolated evaluation failure, exactly as it treats a
+   * thrown one.
+   */
+  evaluateBatch(
+    measureId: string,
+    subjects: readonly OfficialBatchSubject[],
+    evaluationDate?: string,
+  ): Promise<Map<string, MeasureOutcome>>;
 }
 
 export interface OfficialExecutorDeps {
@@ -349,95 +378,105 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     return pending;
   };
 
-  return {
-    /**
-     * Expand a measure's terminology now rather than at first evaluation. The router calls this at
-     * construction so an operator who flips a measure whose OIDs were never imported learns it from a
-     * failed run start, not from a run that quietly reports nobody as eligible.
-     */
-    async preflight(measureId: string): Promise<void> {
-      const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
-      if (!artifact) throw new Error(`${measureId}: no executable official artifact is vendored`);
-      await cacheFor(artifact);
-    },
+  const runBatch = async (
+    measureId: string,
+    subjects: readonly OfficialBatchSubject[],
+    evaluationDate?: string,
+  ): Promise<Map<string, MeasureOutcome>> => {
+    const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
+    if (!artifact) {
+      throw new Error(`${measureId}: no executable official artifact is vendored`);
+    }
+    // The artifact and the semantics are looked up by the same key but from different places; a
+    // mismatch would run one measure under another's reading of its numerator.
+    if (artifact.manifest.catalogId !== measureId) {
+      throw new Error(`${measureId}: loaded artifact declares catalogId '${artifact.manifest.catalogId}'`);
+    }
+    // Scoring is in the refusal list for the same reason the other two are: a `cohort` or
+    // `continuous-variable` artifact has no numerator population at all, so `populations["numerator"]`
+    // is undefined, and the mapping below would silently call every subject COMPLIANT or every
+    // subject OVERDUE depending on one flag.
+    if (artifact.manifest.scoring !== "proportion") {
+      throw new Error(
+        `${measureId}: scoring '${artifact.manifest.scoring}' is not supported — the ` +
+          `population mapping assumes a proportion measure`,
+      );
+    }
+    const semantics = officialMeasureSemantics(measureId);
+    if (!semantics) {
+      throw new Error(
+        `${measureId}: no recorded official measure semantics — refusing to guess whether its ` +
+          `numerator means compliant (see official-measure-semantics.ts)`,
+      );
+    }
+    // Refusals first, then this: an empty batch is not an error, but it must not reach fqm — asking a
+    // calculator about nobody is how you get an unhelpful failure deep inside someone else's library.
+    if (subjects.length === 0) return new Map();
 
-    async evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
-      const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(input.measureId);
-      if (!artifact) {
-        throw new Error(`${input.measureId}: no executable official artifact is vendored`);
-      }
-      // The artifact and the semantics are looked up by the same key but from different places; a
-      // mismatch would run one measure under another's reading of its numerator.
-      if (artifact.manifest.catalogId !== input.measureId) {
-        throw new Error(
-          `${input.measureId}: loaded artifact declares catalogId '${artifact.manifest.catalogId}'`,
-        );
-      }
-      // Scoring is in the refusal list for the same reason the other two are: a `cohort` or
-      // `continuous-variable` artifact has no numerator population at all, so `populations["numerator"]`
-      // is undefined, and the mapping below would silently call every subject COMPLIANT or every
-      // subject OVERDUE depending on one flag.
-      if (artifact.manifest.scoring !== "proportion") {
-        throw new Error(
-          `${input.measureId}: scoring '${artifact.manifest.scoring}' is not supported — the ` +
-            `population mapping assumes a proportion measure`,
-        );
-      }
-      const semantics = officialMeasureSemantics(input.measureId);
-      if (!semantics) {
-        throw new Error(
-          `${input.measureId}: no recorded official measure semantics — refusing to guess whether its ` +
-            `numerator means compliant (see official-measure-semantics.ts)`,
-        );
-      }
+    const asOf = evaluationDate ?? new Date().toISOString().slice(0, 10);
+    // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
+    // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
+    const period = officialMeasurementPeriod(measureId, asOf);
 
-      const evaluationDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
-      // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
-      // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
-      const period = officialMeasurementPeriod(input.measureId, evaluationDate);
+    const valueSetCache = await cacheFor(artifact);
+    // Prepared, and on a COPY. Official artifacts retrieve against QI-Core profiles, which are
+    // stricter than the plain FHIR this repo emits — measured, an unprepared synthetic roster scores
+    // IPP=0 across the board (`qicore-preparation.ts`). The copy is what keeps ADR-008: the authored
+    // engine may evaluate these same bundle objects, and its outcomes must be byte-identical whether
+    // or not official routing is on.
+    const patientBundles = subjects.map((s) => preparedForQiCore(s.patientBundle as PreparableBundle));
+    const { bySubject, retrieveSignal } = await calculateOfficialWithSignal({
+      bundle: artifact.bundle,
+      patientBundles,
+      period,
+      valueSetCache,
+      ...(deps.calculate ? { calculate: deps.calculate } : {}),
+      // `trustMetaProfile` stays FALSE. The first cut set it true, reasoning that official artifacts
+      // retrieve by QICore profile — which is true of the artifact and false as a configuration for
+      // OUR bundles. With it on, cql-exec-fhir filters every retrieve to resources whose `meta.profile`
+      // contains the exact templateId canonical: the ELM asks for `qicore-condition-problems-health-
+      // concerns` and `qicore-observation-lab`, while `fhir-bundle-builder.ts` stamps `qicore-condition`
+      // and `qicore-observation-clinical-result`. Nothing matches, every subject silently leaves the
+      // denominator — the same empty-population catastrophe the terminology preflight above refuses,
+      // through a different door. For a WebChart-derived bundle (no `meta.profile` at all) it is worse:
+      // the Patient retrieve THROWS. `standards/literal-diff.ts` runs this same artifact over these
+      // same bundles with the default (false) — that is the precedent, and the honest statement of
+      // it. NOT "the 121/121 gate proves false works": the MADiE harness starts at false and RETRIES
+      // at true when no retrieve matches, so the green gate run lands on true for the profile-tagged
+      // test-case bundles. It says nothing about our own data shape either way.
+    });
 
-      const valueSetCache = await cacheFor(artifact);
-      // Prepared, and on a COPY. Official artifacts retrieve against QI-Core profiles, which are
-      // stricter than the plain FHIR this repo emits — measured, an unprepared synthetic roster scores
-      // IPP=0 across the board (`qicore-preparation.ts`). The copy is what keeps ADR-008: the authored
-      // engine may evaluate this same bundle object, and its outcome must be byte-identical whether or
-      // not official routing is on.
-      const patientBundle = preparedForQiCore(input.patientBundle as PreparableBundle);
-      const results = await calculateOfficialDetailed({
-        bundle: artifact.bundle,
-        patientBundles: [patientBundle],
-        period,
-        valueSetCache,
-        ...(deps.calculate ? { calculate: deps.calculate } : {}),
-        // `trustMetaProfile` stays FALSE. The first cut set it true, reasoning that official artifacts
-        // retrieve by QICore profile — which is true of the artifact and false as a configuration for
-        // OUR bundles. With it on, cql-exec-fhir filters every retrieve to resources whose `meta.profile`
-        // contains the exact templateId canonical: the ELM asks for `qicore-condition-problems-health-
-        // concerns` and `qicore-observation-lab`, while `fhir-bundle-builder.ts` stamps `qicore-condition`
-        // and `qicore-observation-clinical-result`. Nothing matches, every subject silently leaves the
-        // denominator — the same empty-population catastrophe the terminology preflight above refuses,
-        // through a different door. For a WebChart-derived bundle (no `meta.profile` at all) it is worse:
-        // the Patient retrieve THROWS. `standards/literal-diff.ts` runs this same artifact over these
-        // same bundles with the default (false) — that is the precedent, and the honest statement of
-        // it. NOT "the 121/121 gate proves false works": the MADiE harness starts at false and RETRIES
-        // at true when no retrieve matches, so the green gate run lands on true for the profile-tagged
-        // test-case bundles. It says nothing about our own data shape either way.
-      });
+    // The batch-level safety net (roadmap §7.4). fqm does not error when every retrieve comes back
+    // empty: it returns a complete-looking result with nobody in any population, which reads downstream
+    // exactly like a legitimately ineligible roster. That is what a profile or terminology
+    // misconfiguration looks like, and it is the one failure this executor could otherwise report as a
+    // successful run in which every single person happens to be out of scope.
+    //
+    // Checked ACROSS subjects and only for MORE THAN ONE, because for a single subject "nothing
+    // retrieved" is a true and ordinary answer — that is `/simulate` or rerun-to-verify on someone with
+    // no clinical data, and failing it would be a false alarm on a correct result. Across a roster it
+    // is not ordinary: someone in it has an Encounter. The known false positive is a roster of 2+ where
+    // genuinely nobody has any clinical resource at all; failing loudly there is still the better
+    // error, because the measure's output over that roster would be meaningless either way.
+    if (subjects.length > 1 && !retrieveSignal) {
+      throw new Error(
+        `${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects — ` +
+          `refusing to report an entire roster out-of-population. That is what a profile or terminology ` +
+          `misconfiguration looks like, not a result.`,
+      );
+    }
 
-      const [subjectId, result] = [...results][0] ?? [];
-      if (!subjectId || !result) {
-        throw new Error(`${input.measureId}: the official artifact returned no result for this subject`);
-      }
-
+    const outcomes = new Map<string, MeasureOutcome>();
+    for (const [subjectId, result] of bySubject) {
       const { outcome, inInitialPopulation } = outcomeFromPopulations(
         result.populations,
         semantics.numeratorMeansCompliant,
       );
-      return {
+      outcomes.set(subjectId, {
         subjectId,
         // The catalog's display name, matching the authored path — not the artifact's machine name
         // (`CMS122FHIRDiabetesAssessGT9Pct`), which the headless CLI would then print at a human.
-        measure: MEASURES[input.measureId]?.name ?? artifact.manifest.measureName,
+        measure: MEASURES[measureId]?.name ?? artifact.manifest.measureName,
         outcome,
         inInitialPopulation,
         evidence: {
@@ -453,7 +492,43 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
             populationResults: result.populationResults,
           },
         },
-      };
+      });
+    }
+    return outcomes;
+  };
+
+  return {
+    /**
+     * Expand a measure's terminology now rather than at first evaluation. The router calls this at
+     * construction so an operator who flips a measure whose OIDs were never imported learns it from a
+     * failed run start, not from a run that quietly reports nobody as eligible.
+     */
+    async preflight(measureId: string): Promise<void> {
+      const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
+      if (!artifact) throw new Error(`${measureId}: no executable official artifact is vendored`);
+      await cacheFor(artifact);
     },
+
+    /**
+     * One subject, expressed as a batch of one — so there is a single code path rather than two that
+     * have to be kept in agreement (the same reason the package derives `calculateOfficial` from
+     * `calculateOfficialDetailed`). This is the path `/simulate`, rerun-to-verify and the headless CLI
+     * take, and the one that must NOT apply the batch retrieve check: for a single subject, "nothing
+     * was retrieved" is a legitimate answer about that person.
+     */
+    async evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
+      const results = await runBatch(
+        input.measureId,
+        [{ subjectId: "", patientBundle: input.patientBundle }],
+        input.evaluationDate,
+      );
+      const [only] = [...results.values()];
+      if (!only) {
+        throw new Error(`${input.measureId}: the official artifact returned no result for this subject`);
+      }
+      return only;
+    },
+
+    evaluateBatch: runBatch,
   };
 }
