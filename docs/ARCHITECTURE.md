@@ -152,7 +152,14 @@ Public API actions derive audit identity from the authenticated security context
   ANY uncertainty (no row, `data_hash`/`logic_version` mismatch, a **backdated** date `evalDate <
   source_eval_date`, past `next_transition_at`, source outcome gone) falls back to a full evaluation.
   `logic_version` reflects the **engine-selected** library (base vs `expansionLibrary`) plus referenced
-  value sets' store `expansion_hash`, so a VSAC toggle/re-import or value-set edit invalidates reuse. The
+  value sets' store `expansion_hash`, so a VSAC toggle/re-import or value-set edit invalidates reuse.
+  For an **official-routed** measure the authored ELM is not the logic being executed, so the ENGINE
+  declares its own identity instead (`RoutedEngine.logicVersionFor` →
+  `official-fqm:<version>:<artifactSha>:<terminologySha>`, ADR-040), read by the pipeline off
+  `deps.engine` so the identity and the thing computing the outcome cannot disagree. Absent that, a
+  flipped measure would keep the authored ELM's hash and the cache would copy AUTHORED outcomes forward
+  for a measure now running official CQL — the one fingerprint input whose absence is silent. The two
+  identity spaces are disjoint by prefix, so flip-on, flip-off, and re-vendor all invalidate reuse. The
   `run/incremental/parity.test.ts` suite proves an incremental run is byte-identical to a full run on
   unchanged data and re-evaluates exactly when the answer could have changed. Inert unless
   `WORKWELL_INCREMENTAL_EVAL=true`; scoped to `finishManualRun` (not the scale path), so the demo/default
@@ -340,7 +347,7 @@ fails the run — Fable-H1 pattern). Run metrics on `/api/runs` already surface 
 | `vsac` | `backend-ts/src/engine/cql/resolve-value-set-resolver.ts` (`resolveValueSetResolver`, `isVsacConfigured`) + `backend-ts/src/wiring/engine-factory.ts` (`engineForEnv` key-gating) | `WORKWELL_VSAC_API_KEY` (base URL optional, defaults to the NLM FHIR terminology service) | off (local `StoreValueSetResolver` only) | 2026-07-24 | `backend-ts/src/engine/cql/resolve-value-set-resolver.test.ts`, `backend-ts/src/wiring/engine-factory.test.ts`, `backend-ts/src/engine/cql/audiogram-vsac-parity.test.ts` |
 | `alert-webhook` | `backend-ts/src/run/alert-channel.ts` (`webhookAlertChannel`, `resolveAlertChannels`, `isAlertWebhookConfigured`) | `WORKWELL_ALERT_WEBHOOK_URL` | off (console `WORKWELL_ALERT` line always-on) | 2026-07-10 | `backend-ts/src/run/alert-channel.test.ts` |
 | `bucket-s3` | `backend-ts/src/case/resolve-bucket.ts` (`resolveBucket`, `isS3BucketConfigured`) | `WORKWELL_BUCKET_S3_BUCKET` **and** `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` **and** `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` (all three; region/endpoint optional) | off (in-container `fs` BUCKET binding) — **ON on the live TWH stack since 2026-07-14** (#167/ADR-030) | 2026-07-14 | `backend-ts/src/case/resolve-bucket.test.ts` |
-| `incremental-eval` | `backend-ts/src/run/incremental/incremental-eval.ts` (`isIncrementalEnabled`, `IncrementalCache`) + wired in `run/run-pipeline.ts` `finishManualRun` | `WORKWELL_INCREMENTAL_EVAL=true` | off (every subject re-evaluated) | 2026-07-24 | `backend-ts/src/run/incremental/*.test.ts` (parity + golden) |
+| `incremental-eval` | `backend-ts/src/run/incremental/incremental-eval.ts` (`isIncrementalEnabled`, `IncrementalCache`) + wired in `run/run-pipeline.ts` `finishManualRun` | `WORKWELL_INCREMENTAL_EVAL=true` | off (every subject re-evaluated) | 2026-07-28 | `backend-ts/src/run/incremental/*.test.ts` (parity + golden; the parity suite also covers the ADR-040 official-routing interaction) |
 | `official-measures` | `backend-ts/src/wiring/official-routing.ts` (`officialMeasureIds`, `isOfficialRoutingConfigured`) + `wiring/executor-router.ts` (`routedEngineForEnv`, `officialRoutingProblems`) + `wiring/official-terminology.ts` (the artifact's own expansions — ADR-036) + `wiring/qicore-preparation.ts` (QI-Core normalization before execution — ADR-037) | `WORKWELL_OFFICIAL_MEASURES=<comma-separated catalog ids>` — never `"all"`; additionally requires each named measure's fetched-at-build `terminology.json` (`pnpm vendor:official`), else routing refuses at construction | off (every measure evaluates authored CQL; `routedEngineForEnv` returns `engineForEnv`'s own value, identically) | 2026-07-27 | `backend-ts/src/wiring/{executor-router,official-terminology}.test.ts` |
 
 The inventory itself is covered by `backend-ts/src/config/seam-inventory.test.ts` (flips each of the 11

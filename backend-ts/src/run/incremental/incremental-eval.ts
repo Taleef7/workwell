@@ -54,6 +54,25 @@ export interface IncrementalDeps {
    * no expansion, so nothing is folded and the result equals `hash(base ELM)`.
    */
   valueSetExpansionHashes?: ReadonlyMap<string, string>;
+  /**
+   * The engine's OWN logic identity for a measure it does not evaluate with WorkWell's authored ELM —
+   * i.e. `RoutedEngine.logicVersionFor`, supplied by the run pipeline from the very engine that will
+   * produce the outcomes. Returning `undefined` (or omitting this) means "authored", and the ELM hash
+   * below applies unchanged.
+   *
+   * Without it the cache is actively WRONG for an official-routed measure rather than merely
+   * pessimistic. Everything else here degrades safely: a missing signal makes `logic_version` change
+   * when it needn't, costing a re-evaluation. This one is the opposite — the authored ELM keeps
+   * hashing identically after a measure is flipped to the official artifact, so the fingerprint says
+   * "same logic" about two engines that answer differently, and the cache copies AUTHORED outcomes
+   * forward for a measure now running official CQL. It is the one input whose absence is silent.
+   *
+   * Both directions are covered by construction: flipping ON introduces an `official-fqm:` identity
+   * where an ELM hash was stored, flipping OFF restores the ELM hash where an `official-fqm:` identity
+   * was stored, and neither can equal the other (disjoint prefixes). Either way the row misses and the
+   * subject is re-evaluated.
+   */
+  engineLogicVersion?: (measureId: string) => string | undefined;
 }
 
 /** A reuse plan: copy this prior status/evidence forward instead of re-running CQL. */
@@ -100,6 +119,15 @@ export class IncrementalCache {
   private async logicVersion(measureId: string): Promise<string> {
     const cached = this.logicCache.get(measureId);
     if (cached) return cached;
+    // The engine's own identity wins outright when it has one: for an official-routed measure the
+    // authored ELM below is not the logic being executed, and hashing it would describe the wrong
+    // artifact. Nothing else is folded in — value-set membership is already inside the artifact's
+    // pinned terminology digest, and the base/expansion library selection is an authored-path concept.
+    const declared = this.deps.engineLogicVersion?.(measureId);
+    if (declared) {
+      this.logicCache.set(measureId, declared);
+      return declared;
+    }
     const meta = MEASURES[measureId];
     if (!meta) {
       const lv = await computeLogicVersion({ unknownMeasure: measureId }, []);
