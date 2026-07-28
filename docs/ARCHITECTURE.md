@@ -159,7 +159,10 @@ Public API actions derive audit identity from the authenticated security context
   `deps.engine` so the identity and the thing computing the outcome cannot disagree. Absent that, a
   flipped measure would keep the authored ELM's hash and the cache would copy AUTHORED outcomes forward
   for a measure now running official CQL — the one fingerprint input whose absence is silent. The two
-  identity spaces are disjoint by prefix, so flip-on, flip-off, and re-vendor all invalidate reuse. The
+  identity spaces are disjoint by prefix, so flip-on, flip-off, and re-vendor all invalidate reuse. A
+  routed measure is additionally **not reused at all** for now (ADR-040 §6): `logic_version` identifies
+  the measure definition, not the adapter code executing it, and that adapter is still moving — its rows
+  are written for provenance but never read, which forgoes only same-day rerun skipping. The
   `run/incremental/parity.test.ts` suite proves an incremental run is byte-identical to a full run on
   unchanged data and re-evaluates exactly when the answer could have changed. Inert unless
   `WORKWELL_INCREMENTAL_EVAL=true`; scoped to `finishManualRun` (not the scale path), so the demo/default

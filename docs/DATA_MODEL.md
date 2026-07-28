@@ -711,7 +711,12 @@ eval_state (
   `official-fqm:1.0.000:sha256:c0d99a8e…:sha256:6da37c2f…`. Such a row is additionally bounded to
   **same-day reuse** (`next_transition_at = source_eval_date`): `computeNextTransition` reasons in
   authored terms, and the official measurement period is a rolling window, so nothing about an official
-  outcome is terminal on unchanged data.
+  outcome is terminal on unchanged data. **In practice an official row is WRITE-ONLY today** — the cache
+  declines to reuse an official-routed measure at all while the adapter's output-affecting surface is
+  still moving (ADR-040 §6), since `logic_version` identifies the measure definition and not the code
+  that executes it. The rows are still written for provenance and so that re-enabling reuse rebuilds no
+  cache — a warm fingerprint bought with one billed write per routed subject per run, which is worth
+  paying only while the exit condition in ADR-040 §6 is near.
 - **A pure cache** — dropping it just makes the next run a full run; no `outcomes`/`cases`/`audit` row
   references it, which is why it is safe to add. **No FK** on `subject_id`/`measure_id` (same as
   `person_links`/`quality_snapshots`). Descriptive only — reuse decides only WHETHER to re-run CQL, never

@@ -87,6 +87,13 @@ export interface EvaluatePlan {
   action: "evaluate";
   dataHash: string;
   logicVersion: string;
+  /**
+   * Whether the ENGINE declared this measure's logic identity (i.e. it is official-routed), decided once
+   * in `plan` and carried here so `commit` reads the same fact rather than re-deriving it. It governs the
+   * temporal bound, which must agree with the identity it is stored beside — and "must agree" is exactly
+   * the shape of coupling ADR-040 §2 set out to remove, so it travels with the fingerprint instead.
+   */
+  engineDeclaredLogic: boolean;
 }
 export type Plan = ReusePlan | EvaluatePlan;
 
@@ -178,7 +185,40 @@ export class IncrementalCache {
   async plan(measureId: string, subjectId: string, period: string, bundle: unknown): Promise<Plan> {
     await this.primeMeasure(measureId, period);
     const [dataHash, logicVersion] = await Promise.all([hashBundle(bundle), this.logicVersion(measureId)]);
-    const evaluate: EvaluatePlan = { action: "evaluate", dataHash, logicVersion };
+    const engineDeclaredLogic = this.deps.engineLogicVersion?.(measureId) !== undefined;
+    const evaluate: EvaluatePlan = { action: "evaluate", dataHash, logicVersion, engineDeclaredLogic };
+
+    // An official-routed measure is never reused — a deliberate, temporary policy, not a property of the
+    // fingerprint (Codex P2 on PR-8e).
+    //
+    // `logic_version` identifies the measure DEFINITION, not the code that executes it. That has always
+    // been true (the authored side hashes ELM, never `cql-execution-engine.ts`) and has always been fine,
+    // because the authored engine is old and stable. The official adapter is neither: `preparedForQiCore`,
+    // `officialMeasurementPeriod`, `officialMeasureSemantics` and `outcomeFromPopulations` all move the
+    // answer, all shipped or changed within the last week, and one of them — preparation — was MEASURED at
+    // ADR-037 to swing the same roster from IPP=0 to IPP=25. So a same-day redeploy could leave rows
+    // reusable that were produced by the previous adapter.
+    //
+    // The identity cannot close that on its own: there is no build sha or package version available at
+    // runtime to fold in (`/api/version` reports a literal, `package.json` is 0.0.0), and a hand-bumped
+    // "adapter contract" constant is exactly the remember-to-do-it failure mode this PR argued against.
+    // So the cache declines the work instead of guessing. What that forgoes is small and bounded: official
+    // rows are same-day-only anyway (see `commit`), so the entire benefit given up is "a second run on the
+    // same day skips CQL" — while incremental evaluation's real payoff, across-day reuse, was never
+    // available to them.
+    //
+    // The exit condition is explicit rather than a vague "later": either the identity grows a digest that
+    // covers the adapter's output-affecting surface, or that surface stops moving once PR-10..12 finish
+    // onboarding the remaining six measures. Re-enabling is deleting this branch — the fingerprint below
+    // is already correct and is still committed, so no cached state has to be rebuilt for it.
+    //
+    // That commit is the one cost this policy does NOT avoid: a row is written per routed subject per run
+    // and can never be read while this stands, and on the Neon-billed stack writes are not free (DEPLOY.md
+    // → "Database compute cost"). It is deliberate — keeping the fingerprint warm is what makes re-enabling
+    // a one-line change instead of a cold cache — but it is only worth paying while the exit is near. If
+    // this branch outlives PR-12, skip the commit for official rows too rather than keep buying an option
+    // nobody is exercising.
+    if (engineDeclaredLogic) return evaluate;
 
     const row = this.byKey.get(key(subjectId, measureId, period));
     if (!row) return evaluate;
@@ -218,7 +258,7 @@ export class IncrementalCache {
     status: string,
     sourceOutcomeId: string,
     evidence: unknown,
-    fingerprint: { dataHash: string; logicVersion: string },
+    fingerprint: Pick<EvaluatePlan, "dataHash" | "logicVersion" | "engineDeclaredLogic">,
   ): Promise<void> {
     // `computeNextTransition` reasons in AUTHORED terms — it keys on `MEASURE_BINDINGS[measureId]` and
     // reads a `"Days Since"` define out of authored evidence. None of that describes an official-routed
@@ -229,12 +269,22 @@ export class IncrementalCache {
     // (ADR-039): the same bundle can score differently as the eval date moves the period, so nothing
     // about an official outcome is terminal on unchanged data.
     //
+    // (An official row is WRITE-ONLY today — `plan` declines to reuse one at all, see the policy there.
+    // It is still written, because it records which artifact produced the outcome and because it is what
+    // a re-enabled reuse path consumes, so lifting the policy needs no cache rebuild. This bound is the
+    // value that path would then want.)
+    //
     // So an official-routed outcome is same-day-only, always. That is what cms122/cms125 get today
     // anyway (both RECURRING, neither boundary-safe ⇒ the `return day` fallback), which is why this
     // changes no current behavior — it makes the safety structural instead of a coincidence of how the
     // two measures happen to be classified. It also keeps `recomputeEvidenceAsOf` a no-op for official
     // evidence, since the copy-forward delta can then only ever be zero.
-    const nextTransitionAt = this.deps.engineLogicVersion?.(measureId)
+    // Read from the fingerprint `plan` handed us, NOT by asking the engine again (review #1 on PR-8e).
+    // Re-deriving would make the bound and the identity two independent evaluations of one fact that
+    // must agree — the precise coupling ADR-040 §2 removed between the engine and the cache. They cannot
+    // disagree today (the router builds its map once at construction), which is why this is a matter of
+    // the code following the PR's own argument rather than a defect.
+    const nextTransitionAt = fingerprint.engineDeclaredLogic
       ? this.deps.evalDate.slice(0, 10)
       : computeNextTransition(measureId, status, evidence, this.deps.evalDate);
     const row = {
