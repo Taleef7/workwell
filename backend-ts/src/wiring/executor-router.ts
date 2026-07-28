@@ -120,6 +120,10 @@ export interface RoutedEngine {
    * no equivalent saving — `cql-execution` is already per-subject — so it offers no batch path and every
    * caller keeps the per-subject loop it has today.
    *
+   * `subjects` is a FACTORY, invoked only once the measure is known to be batchable. Passed eagerly, a
+   * caller would build a roster of bundles for every measure and discard the 13 of 14 that are not
+   * routed — the cost this method exists to remove, reintroduced at the call site.
+   *
    * **One method, not a `canBatch()` predicate plus a call.** Two signals about the same fact drift; the
    * `undefined` resolution IS the predicate, decided by the same `official` set the dispatch below reads.
    * For the same reason it is deliberately NOT inferred from `logicVersionFor(id) !== undefined` — "has
@@ -131,7 +135,7 @@ export interface RoutedEngine {
    */
   evaluateBatch?(
     measureId: string,
-    subjects: readonly OfficialBatchSubject[],
+    subjects: () => readonly OfficialBatchSubject[],
     evaluationDate?: string,
   ): Promise<Map<string, MeasureOutcome> | undefined>;
 }
@@ -300,11 +304,13 @@ export async function routedEngineForEnv(
     },
     async evaluateBatch(
       measureId: string,
-      subjects: readonly OfficialBatchSubject[],
+      subjects: () => readonly OfficialBatchSubject[],
       evaluationDate?: string,
     ): Promise<Map<string, MeasureOutcome> | undefined> {
+      // Refuse BEFORE calling the factory. Building a roster of bundles for a measure that turns out not
+      // to be routed is pure waste, and with 14 runnable measures it is 13/14 of the work (review #3).
       if (!official.has(measureId)) return undefined;
-      return executor.evaluateBatch(measureId, subjects, evaluationDate);
+      return executor.evaluateBatch(measureId, subjects(), evaluationDate);
     },
     async evaluate(input: RoutableInput): Promise<MeasureOutcome> {
       // An explicit `elm`/`metaOverride` means "run THIS library", so honouring it is the only correct

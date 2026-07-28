@@ -69,10 +69,53 @@ rather than inventing a failure channel, and avoids the alternative's real flaw:
 by every read model, so one misconfigured measure would discard thirteen good ones *and* leave the prior
 run silently authoritative.
 
+### Review found a real defect, and my own test was complicit
+
+**The batch results were keyed by fqm's `Patient.id`, and the pipeline looked them up by
+`employee.externalId`.** Those are equal for every synthetic subject — `fhir-bundle-builder` stamps
+`Patient.id = externalId` — and never equal for a live WebChart one, which the directory prefixes with
+its tenant (`wc|123` for `Patient.id` `123`). So on a live official run the lookup would match nothing,
+`prefetched` would stay empty, and every subject would fall through to `?? await engine.evaluate(...)`:
+one batch pass **plus** N single passes, i.e. strictly slower than not batching at all — while the INFO
+line claimed "N subjects evaluated in one official batch". The answers would still be right, so nothing
+downstream could notice. It would have bitten precisely on the population official routing exists for.
+
+The `subjectId` field was on the interface the whole time and simply never read; `evaluate` passing
+`subjectId: ""` should have been the tell. `runBatch` now correlates fqm's key back to the caller's id,
+and refuses outright when two subjects share a `Patient.id` rather than attributing one person's
+compliance to another.
+
+**My test would have passed against the broken code.** `batchProbe` returned
+`new Map(subjects.map(s => [s.subjectId, ...]))` — it modelled the contract I *intended* rather than the
+one implemented, and every adapter fixture used `subjectId === patientId`. The new test uses `wc|123`
+against `Patient.id` `123`, which is the case that actually distinguishes them. Related: fixtures passing
+`patientBundle: {}` are now realistic bundles carrying a Patient, because a bundle with no Patient is not
+an input this code will ever see and pretending otherwise is what hid the coupling.
+
+Three more, all mine:
+
+- **A failed run-log write could turn a successful batch into a failed measure.** The success INFO line
+  was awaited *inside* the try that catches evaluation failures, so a transient `run_logs` error became a
+  `batchFailure` and every subject of that measure became MISSING_DATA — with valid results sitting
+  unused in `prefetched`. An observability write must never author an outcome; the case-audit and
+  quality-snapshot writes in this same file are best-effort for exactly this reason.
+- **The subject list was built eagerly**, so the moment routing is on for one measure the pre-pass built
+  bundles for all 14 and discarded 13/14 — reintroducing at the call site the cost the method exists to
+  remove. It is a factory now, invoked only after the router confirms the measure is batchable.
+- **`if (failed)` was a truthiness test on an `unknown` rejection.** A batch rejecting with `undefined`
+  or `""` would be stored and then ignored, and each subject would fall through to a per-subject
+  evaluation — which, being a batch of one, is exempt from the retrieve check. The refusal would have
+  disabled itself. Normalized to an `Error` and tested with `.has()`.
+
+Also hoisted the batch-failure check above the incremental reuse branch. Unreachable today (ADR-040 §6
+means an official measure is never reused), but it is the difference between "wasteful" and "wrong" if
+that policy is lifted: a reused subject would never see the refusal, and the misconfiguration would go
+partially silent.
+
 ### Verification
 
-- `pnpm test` — **1539 pass / 0 fail / 14 skipped** with the terminology sidecars present;
-  **1528 / 0 / 25** with both moved aside. 1553 collected either way. `pnpm typecheck` clean.
+- `pnpm test` — **1543 pass / 0 fail / 14 skipped** with the terminology sidecars present;
+  **1532 / 0 / 25** with both moved aside. 1557 collected either way. `pnpm typecheck` clean.
 - Five mutations, each caught by exactly the test that claims it and nothing else: disabling the
   pre-pass (3 tests), dropping the `> 1` guard (the single-subject test), removing the retrieve check
   (the refusal test), making the router batch unrouted measures (the routing test), and swallowing a
