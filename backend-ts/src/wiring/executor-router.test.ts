@@ -348,3 +348,28 @@ test("an export of a PAST official run keeps its meaning after the flag is turne
   );
   assert.equal(officialMembership({ expressionResults: [] }), null, "and an authored one is not");
 });
+
+test("PR-8: evaluateBatch routes a named measure and resolves undefined for everything else", async () => {
+  const authored = authoredEngine();
+  const routed = await routedEngineForEnv(
+    { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
+    { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
+  );
+
+  const batched = await routed.evaluateBatch?.("cms122", [{ subjectId: "s1", patientBundle: {} }], "2026-07-25");
+  assert.ok(batched, "a routed measure must offer a batch path — that is the whole performance change");
+  assert.equal(batched.get("s1")?.measure, "Diabetes: Glycemic Status Assessment Greater Than 9%");
+  assert.deepEqual(authored.calls, [], "a batched official measure must NOT reach the authored engine");
+
+  // `undefined` IS the predicate. A caller that got an empty Map instead could not tell "this measure has
+  // no batch path" from "this batch legitimately produced nothing", and would skip evaluating the roster.
+  const unrouted = await routed.evaluateBatch?.("audiogram", [{ subjectId: "s1", patientBundle: {} }]);
+  assert.equal(unrouted, undefined, "an unrouted measure must fall back to the per-subject loop");
+});
+
+test("PR-8: the unset default offers NO batch path, so the pre-pass cannot engage", async () => {
+  // The authored engine is `engineForEnv`'s own object and has no `evaluateBatch`, which is what makes
+  // the pipeline's pre-pass provably dead on every environment that exists today.
+  const routed = await routedEngineForEnv({} as never, { authored: authoredEngine() });
+  assert.equal((routed as { evaluateBatch?: unknown }).evaluateBatch, undefined);
+});

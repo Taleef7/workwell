@@ -159,9 +159,19 @@ degrades pessimistically. The **engine** now declares its own identity (`RoutedE
 `official-fqm:<version>:<artifactSha>:<terminologySha>`), read by the pipeline off `deps.engine` rather
 than threaded through each caller — that thread being the exact shape of the bug PR-7b's review caught.
 Flip-on/flip-off/re-vendor all invalidate by construction (disjoint prefixes), tested against the real
-engine + real SQLite `eval_state` with every other reason to re-evaluate removed. **Next: PR-8
-(remaining)** — measure-major batching + a batch-level `hasRetrieveSignal` (performance + one safety
-net). **Then PR-9** (the flip). It owes ONE build step now — the
+engine + real SQLite `eval_state` with every other reason to re-evaluate removed. **PR-8f shipped —
+PR-8 is COMPLETE**: measure-major batching + the batch-level retrieve refusal. `evaluateBatch` is the
+executor's primitive and `evaluate` a batch of one (so the four construction refusals live on ONE path);
+measured on the real artifacts **171 ms/subject one-at-a-time vs 11–16 ms batched** (10× at N=25, 16× at
+N=100), which inverts the roadmap's "benchmark before flip" note — unbatched official execution is ~2.5×
+SLOWER per subject than authored's ~68 ms, batched it is faster. A batch of **>1** matching no retrieve
+for anybody now REFUSES rather than reporting a whole roster out-of-population (fqm's all-empty result is
+indistinguishable from a genuinely ineligible roster); `>1` because for one subject "nothing retrieved"
+is legitimate. It catches *retrieved nothing*, **not** *retrieved the wrong thing* — every ADR-038 corpus
+defect passed it. A failed batch fails ITS measure (MISSING_DATA + PARTIAL_FAILURE + the #264 alert),
+never the run. Wired as a pre-pass gated on `RoutedEngine.evaluateBatch` resolving non-`undefined` —
+absent everywhere today, so the per-subject loop is unchanged. **Next: PR-9** (the flip). It owes ONE
+build step now — the
 deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
 `AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
 bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot

@@ -50,10 +50,11 @@
  *
  * ## Scope of this PR
  *
- * Ships dark. It also does NOT yet prepare bundles (`stampQiCoreStructure`, see the adapter's docstring)
- * or batch subjects measure-major, so it must not be flipped on for a population run until PR-8 wires
- * both. The flag existing and the flag being safe to set are different things, and this PR only delivers
- * the first — which is why `WORKWELL_OFFICIAL_MEASURES` is deliberately absent from DEPLOY.md.
+ * Ships dark. Bundle preparation (ADR-037) and measure-major batching (PR-8, `evaluateBatch` below) are
+ * both wired now, so the remaining reason not to flip is the capped `AdvancedIllness` expansion in (6)
+ * — a vendor-time owner action, and a construction-time refusal until it is done. The flag existing and
+ * the flag being safe to set are still different things, which is why `WORKWELL_OFFICIAL_MEASURES`
+ * remains deliberately absent from DEPLOY.md.
  *
  * Not every evaluation path is routed, and deliberately so while this is dark: the scale batch
  * (`run/batch-evaluate-scale.ts`), the seed CLIs, the DB-less `engine/ingress/evaluate-bundle.ts` and
@@ -74,6 +75,7 @@ import {
 } from "./official-terminology.ts";
 import {
   officialMeasureExecutor,
+  type OfficialBatchSubject,
   requiredOids,
   type ExpandValueSet,
   type FqmCalculate,
@@ -108,6 +110,30 @@ export interface RoutedEngine {
    * for free instead of having to remember it.
    */
   logicVersionFor?(measureId: string): string | undefined;
+
+  /**
+   * Evaluate one measure's whole roster in a single pass, or resolve `undefined` when this measure has
+   * no batch path and the caller should evaluate per subject (roadmap §7.4 PR-8).
+   *
+   * The point is cost: fqm-execution parses the artifact's ELM per CALL, so a 150-subject official
+   * measure was paying 150 parses of a 2.4 MB bundle for one measure's answer. The authored engine has
+   * no equivalent saving — `cql-execution` is already per-subject — so it offers no batch path and every
+   * caller keeps the per-subject loop it has today.
+   *
+   * **One method, not a `canBatch()` predicate plus a call.** Two signals about the same fact drift; the
+   * `undefined` resolution IS the predicate, decided by the same `official` set the dispatch below reads.
+   * For the same reason it is deliberately NOT inferred from `logicVersionFor(id) !== undefined` — "has
+   * a declared logic identity" and "can be batched" happen to coincide today, and a coincidence relied
+   * on is a coincidence that breaks quietly.
+   *
+   * Like `logicVersionFor` it hangs off the ENGINE rather than being threaded alongside it, so a new
+   * call site gets it for free instead of having to remember it (see that method's note).
+   */
+  evaluateBatch?(
+    measureId: string,
+    subjects: readonly OfficialBatchSubject[],
+    evaluationDate?: string,
+  ): Promise<Map<string, MeasureOutcome> | undefined>;
 }
 
 /**
@@ -271,6 +297,14 @@ export async function routedEngineForEnv(
      */
     logicVersionFor(measureId: string): string | undefined {
       return logicVersions.get(measureId);
+    },
+    async evaluateBatch(
+      measureId: string,
+      subjects: readonly OfficialBatchSubject[],
+      evaluationDate?: string,
+    ): Promise<Map<string, MeasureOutcome> | undefined> {
+      if (!official.has(measureId)) return undefined;
+      return executor.evaluateBatch(measureId, subjects, evaluationDate);
     },
     async evaluate(input: RoutableInput): Promise<MeasureOutcome> {
       // An explicit `elm`/`metaOverride` means "run THIS library", so honouring it is the only correct
