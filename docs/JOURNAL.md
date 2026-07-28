@@ -31,8 +31,8 @@ So the identity hangs off the **engine** instead: `RoutedEngine.logicVersionFor(
 from the same artifacts the executor was built over, read by the pipeline off `deps.engine`. The logic
 identity and the thing that computes the outcome are now the same object, so they cannot disagree, and a
 future call site gets it without having to remember it. Verified the premise rather than assuming it —
-all four paths that reach `finishManualRun` (three in `routes/runs.ts`, one in the scheduler) already
-construct via `routedEngineForEnv`, and no production caller uses `engineForEnv` directly.
+all three `RunPipelineDeps` construction sites (`routes/runs.ts` ×2, the scheduler) already build via
+`routedEngineForEnv`, and no production caller feeds an `engineForEnv` result into the pipeline.
 
 Two deviations from the sketch, both deliberate (ADR-040):
 
@@ -56,11 +56,51 @@ test asserts that exact setup **does** reuse. So anything that re-evaluates in t
 and after a flip. Two more: an unrouted sibling measure keeps reusing while its neighbour is routed, and
 an unchanged artifact still reuses (the identity is not a nonce).
 
+### Review found the one place the bug could still live, and a second one next door
+
+**The wiring line had no test at all.** The review proved it by deleting
+`engineLogicVersion: (measureId) => deps.engine.logicVersionFor?.(measureId)` and running the whole
+affected surface: 276 tests, all green. Both halves were covered — the router produces an identity, the
+cache honours one — and nothing asserted the pipeline joins them. That is worse than an ordinary coverage
+gap here, because the design's own argument is that collapsing N call sites into one removes the class of
+bug where a caller forgets; the collapse is right, but the surviving line is then the only place it can
+hide. Now covered at the pipeline with a real SQLite `eval_state`, asserting the persisted row's
+`logic_version`, and confirmed load-bearing by re-running the mutation: it fails that test and nothing
+else.
+
+**`next_transition_at` was still authored-only.** `commit()` called `computeNextTransition`, which keys on
+`MEASURE_BINDINGS` and reads a `"Days Since"` define out of authored evidence. Two branches would
+over-reuse an official outcome — a `PERMANENT` binding returns `null` (terminal ⇒ *unbounded* across-day
+reuse) before the boundary table is even consulted, and a `BOUNDARY_SAFE` measure would apply thresholds
+derived from the authored CQL to an official status. Neither is sound: the official measurement period is
+a rolling window (ADR-039), so the same bundle can score differently as the date moves and nothing is
+terminal. Unreachable today — both cms measures are `RECURRING` and neither is boundary-safe, so they
+already fall through to the same-day default — but that is a coincidence of classification, not a
+property. Official outcomes are now same-day-only by construction, which changes no current behaviour and
+also keeps `recomputeEvidenceAsOf` a no-op on official evidence (the delta can only ever be zero).
+
+Also fixed: a silent `if (artifact)` skip in the identity loop, which — in the one function that produces
+the identity, in a PR whose thesis is "this is the input whose absence is silent" — would have let
+`evaluate` route officially while `logicVersionFor` said "authored". Unreachable (validation already
+refused a missing artifact, and the load memoizes), and it throws now anyway.
+
+Three doc corrections, all mine: I wrote "four paths reach `finishManualRun`" when there are **three**
+`RunPipelineDeps` construction sites (the fourth `routedEngineForEnv` call is `POST /api/runs/:id/evaluate`,
+which never reaches the pipeline); DEPLOY.md advertised the incremental+official combination as safe
+without noting that **no measure can be routed today** (the capped `AdvancedIllness` expansion refuses at
+construction); and the identity's real shape has five colon-separated fields, not three, because both
+manifest digests already carry their own `sha256:` prefix. Two claims narrowed rather than defended: the
+identity tracks what the *manifest records* about the bundle (bundle bytes are not verified at load, only
+diffed in CI), and "cannot disagree" is true of the runtime object, not of the type — `Pick<…,
+"logicVersionFor">` is optional, so the compiler enforces nothing.
+
 ### Verification
 
-- `pnpm test` — **1524 pass / 0 fail / 14 skipped** (was 1517/0/14; +7 = the new tests). With both
-  terminology sidecars moved aside, **1513 / 0 / 25**, exactly the predicted +7 over the prior 1506 —
-  the two-configuration discipline from the PR-8a CI failure.
+- `pnpm test` — **1526 pass / 0 fail / 14 skipped** (was 1517/0/14; +9 = the new tests). With both
+  terminology sidecars moved aside, **1515 / 0 / 25**, exactly the same +9 over the prior 1506 — the
+  two-configuration discipline from the PR-8a CI failure. None of the new tests depends on the
+  gitignored sidecar (the terminology digest the identity reads lives in the **committed** manifest),
+  verified by running `executor-router.test.ts` with both sidecars moved aside: 14/14.
 - `pnpm test:official-cases` — **55/55 + 66/66**, evidence report byte-unchanged apart from its
   `Generated:` line, which was reverted so the diff shows only what this PR changed.
 - `pnpm typecheck` clean. No schema change (`eval_state.logic_version` is already TEXT), no new deps,

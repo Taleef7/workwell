@@ -16,6 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteEvalStateStore } from "../stores/sqlite/eval-state-store-sqlite.ts";
 import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
@@ -1055,4 +1056,62 @@ test("Codex P2: an out-of-cohort EXCLUDED outcome CLOSES an EXISTING active case
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }
+});
+
+/**
+ * ADR-040 — the WIRING, at the pipeline. The unit tests either side of this line prove that the router
+ * produces an identity and that the cache honours one; only this proves the pipeline actually reads it
+ * off the engine it is evaluating with. That single line is now the only place the hazard can live, and
+ * the review that found it gone-untested demonstrated the gap by deleting it: 276 tests still passed.
+ *
+ * Uses an OVERDUE-returning engine deliberately: on the authored path OVERDUE is terminal
+ * (`next_transition_at = null`, unbounded across-day reuse), so the official row's same-day bound is
+ * visibly different rather than coincidentally equal.
+ */
+const adr040Engine = (logicVersionFor?: (m: string) => string | undefined): RunPipelineDeps["engine"] => ({
+  ...(logicVersionFor ? { logicVersionFor } : {}),
+  async evaluate() {
+    return { subjectId: "ignored", measure: "Audiogram", outcome: "OVERDUE", evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] } };
+  },
+});
+
+async function evalStateRowFor(engine: RunPipelineDeps["engine"]) {
+  const p = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(p);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const evalState = new SqliteEvalStateStore(db);
+  const d: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    engine,
+    employees: [employeeById("emp-001")!],
+    incremental: true,
+    evalState,
+  };
+  try {
+    await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-15" });
+    return await evalState.getEvalState("emp-001", "audiogram", bucketPeriodForMeasure("audiogram", "2026-06-15"));
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+}
+
+test("ADR-040: the pipeline records the ENGINE's logic identity, not the authored ELM hash", async () => {
+  const official = "official-fqm:1.0.000:sha256:aaaa:sha256:tttt";
+  const row = await evalStateRowFor(adr040Engine((m) => (m === "audiogram" ? official : undefined)));
+  assert.ok(row, "the incremental cache committed a row");
+  assert.equal(
+    row!.logicVersion,
+    official,
+    "the pipeline must read logicVersionFor off the engine it evaluated with — otherwise a measure " +
+      "running official CQL is fingerprinted with the authored ELM and its outcomes are copied forward",
+  );
+  assert.equal(row!.nextTransitionAt, "2026-06-15", "official ⇒ same-day only (the rolling MP makes nothing terminal)");
+});
+
+test("ADR-040: an engine that declares nothing still gets the authored ELM hash, and authored boundaries", async () => {
+  const row = await evalStateRowFor(adr040Engine());
+  assert.ok(row);
+  assert.match(row!.logicVersion, /^sha256:/, "no declared identity ⇒ unchanged authored fingerprint");
+  assert.equal(row!.nextTransitionAt, null, "and OVERDUE stays terminal on the authored path");
 });

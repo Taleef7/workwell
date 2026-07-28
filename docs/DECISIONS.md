@@ -46,6 +46,19 @@ independently-off flags is not a safety property; it is a coincidence with a dea
    pinned in the committed manifest — so re-fetching at a different upstream ref can move value-set
    membership, and therefore outcomes, with the bundle bytes unchanged. Version + artifact sha alone
    would call that "same logic".
+5. **An official-routed outcome is same-day-only, structurally.** `computeNextTransition` — which decides
+   how long a cached status may be reused — reasons in authored terms: it keys on `MEASURE_BINDINGS` and
+   reads a `"Days Since"` define out of authored evidence. Two of its branches would over-reuse an
+   official outcome: a binding marked `PERMANENT` returns `null` (terminal ⇒ *unbounded* across-day
+   reuse) before the boundary table is consulted, and a measure in `BOUNDARY_SAFE` would have thresholds
+   derived from the **authored** CQL applied to an **official** status. Neither is sound, because the
+   official measurement period is a rolling window (ADR-039) — the same bundle can score differently as
+   the eval date moves the period, so nothing about an official outcome is terminal on unchanged data.
+   The cache therefore bounds an official outcome to its own evaluation date. This changes nothing today
+   (cms122/cms125 are both `RECURRING` and neither is boundary-safe, so they already fall through to the
+   same-day default) — it converts that from a coincidence of how two measures happen to be classified
+   into a property of routing. It also keeps `recomputeEvidenceAsOf` a no-op on official evidence, since
+   the copy-forward delta can then only ever be zero.
 
 **Consequences.**
 
@@ -58,6 +71,19 @@ independently-off flags is not a safety property; it is a coincidence with a dea
 - Unchanged on every environment today. `WORKWELL_OFFICIAL_MEASURES` unset ⇒ `routedEngineForEnv` returns
   the authored engine itself, which has no `logicVersionFor`, so the cache reaches the identical ELM-hash
   path. The demo/default run loop is byte-identical.
+- **The identity tracks what the MANIFEST records about the bundle, not the bundle bytes.**
+  `loadOfficialArtifact` parses `bundle.json` without checking it against `manifest.sha256` (unlike
+  terminology, which ADR-036 verifies against its pin at load, because that sidecar is gitignored). So a
+  hand-edited `bundle.json` would execute new logic under the old identity. `bundle.json` is committed and
+  CI runs `git diff --exit-code measures/official` after re-vendoring, which is what actually closes this
+  on the normal path; the precise claim is therefore "a **re-vendored** artifact is a logic change", since
+  vendoring regenerates the manifest alongside the bundle.
+- **The compiler does not enforce the wiring; the runtime does.** `Pick<RoutedEngine, "logicVersionFor">`
+  has an optional member, so a future caller could pass an unrouted engine and typecheck. That is
+  self-correcting rather than dangerous — an unrouted engine yields authored evaluation *and* an authored
+  identity, so the two stay consistent — but "cannot disagree" is a statement about the runtime object,
+  not about the type. The pipeline's single read of `deps.engine.logicVersionFor` is covered by a test
+  that fails when that line is deleted; it is the only place this can now go wrong.
 - **Scoped to the measure, not to the input.** The router's `elm`/`metaOverride` escape evaluates a routed
   measure with the authored engine, which `logicVersionFor` cannot see. Sound only because the two callers
   cannot meet — the escape belongs to the fidelity lab and the Rule Builder, neither of which is a
