@@ -706,7 +706,12 @@ eval_state (
   the authored `sha256:` space by construction. The terminology digest is included because ADR-036
   expansions are fetched at build and pinned in the committed manifest, so a re-fetch can move value-set
   membership (and outcomes) with the bundle bytes unchanged. Consequence: flipping a measure on, flipping
-  it off, and re-vendoring it while routed each invalidate every cached row for that measure.
+  it off, and re-vendoring it while routed each invalidate every cached row for that measure. Both
+  manifest digests already carry their own `sha256:` prefix, so a real row reads
+  `official-fqm:1.0.000:sha256:c0d99a8e…:sha256:6da37c2f…`. Such a row is additionally bounded to
+  **same-day reuse** (`next_transition_at = source_eval_date`): `computeNextTransition` reasons in
+  authored terms, and the official measurement period is a rolling window, so nothing about an official
+  outcome is terminal on unchanged data.
 - **A pure cache** — dropping it just makes the next run a full run; no `outcomes`/`cases`/`audit` row
   references it, which is why it is safe to add. **No FK** on `subject_id`/`measure_id` (same as
   `person_links`/`quality_snapshots`). Descriptive only — reuse decides only WHETHER to re-run CQL, never

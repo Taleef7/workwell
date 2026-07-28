@@ -250,7 +250,14 @@ export async function routedEngineForEnv(
   const logicVersions = new Map<string, string>();
   for (const id of official) {
     const artifact = loadOfficialArtifact(id);
-    if (artifact) logicVersions.set(id, officialLogicVersion(artifact));
+    // Unreachable — `officialRoutingProblems` above already refused a missing artifact, and the load is
+    // memoized so the second call cannot fail where the first succeeded. It throws anyway rather than
+    // skipping, because a skip here is the precise hazard this identity exists to close: `evaluate`
+    // would still route the measure officially (it consults `official`, not this map) while
+    // `logicVersionFor` reported "authored", and the cache would record the authored ELM's hash for
+    // officially-produced outcomes. Silence is the one failure mode this file does not accept.
+    if (!artifact) throw new Error(`${id}: routing validated but the official artifact could not be loaded`);
+    logicVersions.set(id, officialLogicVersion(artifact));
   }
 
   return {

@@ -220,7 +220,23 @@ export class IncrementalCache {
     evidence: unknown,
     fingerprint: { dataHash: string; logicVersion: string },
   ): Promise<void> {
-    const nextTransitionAt = computeNextTransition(measureId, status, evidence, this.deps.evalDate);
+    // `computeNextTransition` reasons in AUTHORED terms — it keys on `MEASURE_BINDINGS[measureId]` and
+    // reads a `"Days Since"` define out of authored evidence. None of that describes an official-routed
+    // outcome, and two of its branches would actively over-reuse one: a binding marked PERMANENT returns
+    // `null` (terminal ⇒ unbounded across-day reuse) before the boundary table is even consulted, and a
+    // measure listed in BOUNDARY_SAFE would have thresholds derived from the AUTHORED CQL applied to an
+    // OFFICIAL status. Neither is sound here, because the official measurement period is a ROLLING window
+    // (ADR-039): the same bundle can score differently as the eval date moves the period, so nothing
+    // about an official outcome is terminal on unchanged data.
+    //
+    // So an official-routed outcome is same-day-only, always. That is what cms122/cms125 get today
+    // anyway (both RECURRING, neither boundary-safe ⇒ the `return day` fallback), which is why this
+    // changes no current behavior — it makes the safety structural instead of a coincidence of how the
+    // two measures happen to be classified. It also keeps `recomputeEvidenceAsOf` a no-op for official
+    // evidence, since the copy-forward delta can then only ever be zero.
+    const nextTransitionAt = this.deps.engineLogicVersion?.(measureId)
+      ? this.deps.evalDate.slice(0, 10)
+      : computeNextTransition(measureId, status, evidence, this.deps.evalDate);
     const row = {
       subjectId,
       measureId,
