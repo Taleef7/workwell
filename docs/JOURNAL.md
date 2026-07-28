@@ -84,6 +84,37 @@ the identity, in a PR whose thesis is "this is the input whose absence is silent
 `evaluate` route officially while `logicVersionFor` said "authored". Unreachable (validation already
 refused a missing artifact, and the load memoizes), and it throws now anyway.
 
+### Codex found the boundary of what the identity can promise
+
+One P2, and it is right: the identity covers the **artifact**, not the **code that runs it**. A same-day
+redeploy changing `preparedForQiCore`, `officialMeasurementPeriod`, `officialMeasureSemantics` or
+`outcomeFromPopulations` leaves official rows reusable although the adapter that produced them is gone.
+
+That property is not new — the authored side hashes ELM, never `cql-execution-engine.ts` — and it has
+always been fine there, because that engine is old and stable. The official adapter is the opposite: every
+one of those four functions moves the answer, all of them shipped or changed within the last week, and
+ADR-037 *measured* preparation alone swinging a roster from IPP=0 to IPP=25. So the same latency that made
+the original hazard worth taking early applies here too.
+
+I could not close it inside the identity. There is no build sha or package version to fold in — the worker
+reports a literal `build: "workwell-api-ts"` and `package.json` is `0.0.0` — and a hand-bumped "adapter
+contract" constant is precisely the remember-to-do-it failure this PR argued against two paragraphs
+earlier. So the cache **declines an official-routed measure entirely** rather than guessing at which
+adapter changes matter.
+
+The cost is small and worth writing down so the decision can be revisited honestly: official rows are
+already same-day-only, so the whole benefit forgone is *a second run on the same day skipping CQL* —
+across-day reuse, the actual payoff, was never available to them. Rows are still committed (provenance,
+and so re-enabling rebuilds no cache) but are write-only today. Exit condition named, not vague: a digest
+covering the adapter's output surface, or that surface settling once PR-10..12 finish the remaining six.
+
+It also cost a test honesty check. "Flipping ON re-evaluates" now passes for the *policy* reason whether or
+not the identity works, so on its own it had gone vacuous; it now asserts the committed row carries the
+artifact's identity, which is what the flip-OFF test compares against and what a re-enabled path reads.
+The old "re-vendor still reuses when unchanged" assertion is deleted rather than adjusted — it asserted
+behaviour the policy deliberately removes — and replaced by one that observes the re-vendor through the
+recorded identity.
+
 Three doc corrections, all mine: I wrote "four paths reach `finishManualRun`" when there are **three**
 `RunPipelineDeps` construction sites (the fourth `routedEngineForEnv` call is `POST /api/runs/:id/evaluate`,
 which never reaches the pipeline); DEPLOY.md advertised the incremental+official combination as safe
@@ -94,13 +125,32 @@ identity tracks what the *manifest records* about the bundle (bundle bytes are n
 diffed in CI), and "cannot disagree" is true of the runtime object, not of the type — `Pick<…,
 "logicVersionFor">` is optional, so the compiler enforces nothing.
 
+A second review pass then found the one place the code stopped following the PR's own argument: `commit`
+re-derived "is this official?" by calling `engineLogicVersion` a *second* time, instead of reading the
+fingerprint `plan` had already handed it. Not a defect — the router builds its map once at construction, so
+the two evaluations cannot disagree — but ADR-040 §2 exists precisely to stop a fact and its consumer being
+two things that must agree. The officialness now rides on `EvaluatePlan` (`engineDeclaredLogic`) and travels
+with the fingerprint it governs. Making the field required, rather than defaulted, immediately paid for
+itself: the compiler flagged the one test that hand-built a fingerprint literal, which is the shape of
+caller that would silently get the wrong temporal bound.
+
+The same pass asked for a cross-day reuse test on the same-day bound. I did not add that one — under the
+never-reuse policy it would pass whether or not the bound exists, because `plan` declines official rows
+before reaching the temporal gate. What is testable today is the *stored* bound, so the new test asserts it
+against the authored row it would otherwise have been: same measure, same bundle, same date, same OVERDUE
+status, and the only difference is who declared the logic — official bounded to its eval date, authored
+`null`. Reverting the bound now fails three tests instead of one.
+
 ### Verification
 
-- `pnpm test` — **1526 pass / 0 fail / 14 skipped** (was 1517/0/14; +9 = the new tests). With both
-  terminology sidecars moved aside, **1515 / 0 / 25**, exactly the same +9 over the prior 1506 — the
-  two-configuration discipline from the PR-8a CI failure. None of the new tests depends on the
-  gitignored sidecar (the terminology digest the identity reads lives in the **committed** manifest),
-  verified by running `executor-router.test.ts` with both sidecars moved aside: 14/14.
+- `pnpm test` — **1528 pass / 0 fail / 14 skipped**. With both terminology sidecars moved aside,
+  **1517 / 0 / 25** — the two-configuration discipline from the PR-8a CI failure; 1542 tests collected
+  either way, the delta being skips. None of the new tests depends on the gitignored sidecar (the
+  terminology digest the identity reads lives in the **committed** manifest).
+- Every new test mutation-checked, not just run: deleting the pipeline's wiring line, reverting the
+  same-day bound, dropping `terminologySha` from the identity, making `logicVersionFor` return
+  `undefined`, and disabling the never-reuse branch each fail exactly the test that claims to cover it,
+  and nothing else.
 - `pnpm test:official-cases` — **55/55 + 66/66**, evidence report byte-unchanged apart from its
   `Generated:` line, which was reverted so the diff shows only what this PR changed.
 - `pnpm typecheck` clean. No schema change (`eval_state.logic_version` is already TEXT), no new deps,

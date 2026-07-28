@@ -31,7 +31,13 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
   run pipeline off the very engine producing the outcomes, so the identity and the computation cannot
   disagree. Flip-on, flip-off, and re-vendor-while-routed each invalidate reuse by construction. Taken
   ahead of the batching because it is the one fingerprint input whose absence is silent — every other
-  degrades pessimistically, costing only a re-evaluation. Inert on every environment today.
+  degrades pessimistically, costing only a re-evaluation. Review then drew the boundary of what an
+  identity can promise: it names the *artifact*, not the adapter code executing it, and that adapter is
+  the youngest code in the repo (ADR-037's bundle preparation alone swung a roster from IPP=0 to IPP=25).
+  With no build sha available at runtime to fold in, the cache **declines an official-routed measure
+  entirely** rather than guess which adapter changes matter — forgoing only same-day rerun skipping,
+  since a rolling measurement period already denied them across-day reuse. Inert on every environment
+  today.
 - **2026-07-27 — official-first execution is BUILT and dark (roadmap §7.4, PRs #342–#346; ADR-036–039).**
   The machinery to run CMS's *published* artifacts verbatim is complete and gated:
   **PR-8a** made the artifact's own expansions the single terminology authority (fetched at build,

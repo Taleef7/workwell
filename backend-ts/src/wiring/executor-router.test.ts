@@ -122,18 +122,25 @@ test("PR-8: the engine declares the ARTIFACT's logic identity for routed measure
 });
 
 test("PR-8: the identity moves with the artifact and can never collide with an authored ELM hash", () => {
+  // Digest shapes as they really are: a manifest's `sha256` fields carry their own `sha256:` prefix, so a
+  // real identity has FIVE colon-separated fields, not four. Bare "AAA"/"TTT" would pass every assertion
+  // here while quietly misrepresenting what an `eval_state` row looks like.
   const base = {
-    manifest: { version: "1.0.000", sha256: "AAA", terminology: { sha256: "TTT" } },
+    manifest: {
+      version: "1.0.000",
+      sha256: "sha256:c0d99a8e1f2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d",
+      terminology: { sha256: "sha256:6da37c2f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7" },
+    },
   } as never as Parameters<typeof officialLogicVersion>[0];
   const of = (over: Record<string, unknown>) =>
     officialLogicVersion({ manifest: { ...(base as { manifest: object }).manifest, ...over } } as never);
 
   const original = officialLogicVersion(base);
   assert.notEqual(of({ version: "1.1.000" }), original, "a version bump is a logic change");
-  assert.notEqual(of({ sha256: "BBB" }), original, "a re-vendored bundle is a logic change");
+  assert.notEqual(of({ sha256: "sha256:1111111111111111111111111111111111111111111111111111111111111111" }), original, "a re-vendored bundle is a logic change");
   // The one the roadmap's sketch omitted: expansions are fetched at build and pinned in the manifest,
   // so a re-fetch at a different upstream ref moves value-set membership with the bundle unchanged.
-  assert.notEqual(of({ terminology: { sha256: "UUU" } }), original, "moved terminology is a logic change");
+  assert.notEqual(of({ terminology: { sha256: "sha256:2222222222222222222222222222222222222222222222222222222222222222" } }), original, "moved terminology is a logic change");
   assert.notEqual(of({ terminology: undefined }), original, "an unpinned artifact is not the same as a pinned one");
   assert.equal(officialLogicVersion(base), original, "and it is stable — not a nonce");
 

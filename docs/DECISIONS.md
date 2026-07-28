@@ -59,6 +59,38 @@ independently-off flags is not a safety property; it is a coincidence with a dea
    same-day default) — it converts that from a coincidence of how two measures happen to be classified
    into a property of routing. It also keeps `recomputeEvidenceAsOf` a no-op on official evidence, since
    the copy-forward delta can then only ever be zero.
+6. **And, for now, an official-routed outcome is not reused at all.** `logic_version` identifies the
+   measure *definition*, never the code that executes it — true of the authored side too, where it hashes
+   ELM rather than `cql-execution-engine.ts`, and harmless there because that engine is old and stable.
+   The official adapter is neither: `preparedForQiCore`, `officialMeasurementPeriod`,
+   `officialMeasureSemantics` and `outcomeFromPopulations` all move the answer, all shipped or changed
+   within a week, and ADR-037 *measured* preparation swinging a roster from IPP=0 to IPP=25. A same-day
+   redeploy would therefore leave rows reusable that the previous adapter produced. The identity cannot
+   close that by itself — there is no build sha or package version available at runtime to fold in
+   (`/api/version` reports a literal; `package.json` is `0.0.0`), and a hand-bumped "adapter contract"
+   constant is the remember-to-do-it failure mode decision (2) exists to avoid. So the cache declines the
+   work instead of guessing.
+
+   **What that costs, exactly.** Official rows are same-day-only by (5), so the entire benefit forgone is
+   *a second run on the same day skipping CQL*; across-day reuse — incremental evaluation's actual payoff
+   — was never available to them. Rows are still committed (they record which artifact produced the
+   outcome, and they are what a re-enabled reuse path consumes, so lifting the policy rebuilds no cache),
+   but they are **write-only today**. The exit condition is named rather than "later": either the identity
+   grows a digest covering the adapter's output-affecting surface, or that surface stops moving once
+   PR-10..12 finish onboarding the remaining six measures. Re-enabling is deleting one branch in `plan`.
+
+   The cost this does **not** avoid is the write: one `eval_state` row per routed subject per run that
+   can never be read while the policy stands, and writes are billed on the Neon stack (DEPLOY.md →
+   "Database compute cost"). That is deliberate — the warm fingerprint is what makes re-enabling a
+   one-line change rather than a cold cache — but it is an option worth paying for only while the exit is
+   near. If the policy outlives PR-12, skip the commit for official rows too.
+7. **Officialness travels ON the fingerprint, not re-derived at each use.** `plan` decides it once and
+   carries it (`EvaluatePlan.engineDeclaredLogic`) to `commit`, which governs the temporal bound in (5).
+   Asking the engine a second time would make the bound and the identity it is stored beside two
+   independent evaluations of one fact — the same coupling (2) removes between the engine and the cache,
+   reintroduced one layer down. The field is **required**, not defaulted: a caller that hand-builds a
+   fingerprint is exactly the one that would otherwise get an authored bound on an official row, and the
+   compiler should make it say which it means.
 
 **Consequences.**
 
