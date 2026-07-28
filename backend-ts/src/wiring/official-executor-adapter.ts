@@ -113,8 +113,25 @@ export { oidFromValueSetUrl, type FqmCalculate, type ExpandedCode };
 
 /** One subject's input to a batched official evaluation. */
 export interface OfficialBatchSubject {
+  /**
+   * The id the CALLER knows this person by, which the results are keyed back to. Deliberately not
+   * assumed equal to the bundle's `Patient.id`: the synthetic directory makes them equal, every live
+   * WebChart subject makes them differ (`wc|123` vs `123`), and a correlation that works only for the
+   * former fails silently for exactly the population official routing exists to serve.
+   */
   subjectId: string;
   patientBundle: unknown;
+}
+
+/** The `Patient.id` fqm will key this bundle's results by — the id we must correlate back FROM. */
+function patientIdOf(bundle: unknown): string | undefined {
+  const entries = (bundle as PreparableBundle | undefined)?.entry;
+  if (!Array.isArray(entries)) return undefined;
+  for (const entry of entries) {
+    const resource = entry?.resource;
+    if (resource?.["resourceType"] === "Patient" && typeof resource["id"] === "string") return resource["id"];
+  }
+  return undefined;
 }
 
 /** An `EvaluateMeasureBinding` that can also be asked to prove a measure is runnable before a run. */
@@ -128,9 +145,12 @@ export interface OfficialMeasureExecutor extends EvaluateMeasureBinding {
    * pass answers.
    *
    * A subject fqm returns no detailed result for is ABSENT from the returned map rather than defaulted
-   * to something. Only the caller knows who it asked for, so only the caller can judge the omission —
-   * the run pipeline treats it as that subject's isolated evaluation failure, exactly as it treats a
-   * thrown one.
+   * to something. Only the caller knows who it asked for, so only the caller can judge the omission. The
+   * run pipeline re-evaluates such a subject on its own — one extra call, and if fqm genuinely has
+   * nothing for them the single-subject path raises it as that subject's isolated failure. Note the
+   * consequence: a lone re-evaluation is a batch of one and so is exempt from the `> 1` retrieve check
+   * below, which is correct for a real omission and is also why the map's KEYING has to be right (a
+   * mis-keyed result looks exactly like a universal omission, and degrades silently to per-subject).
    */
   evaluateBatch(
     measureId: string,
@@ -425,6 +445,29 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     // engine may evaluate these same bundle objects, and its outcomes must be byte-identical whether
     // or not official routing is on.
     const patientBundles = subjects.map((s) => preparedForQiCore(s.patientBundle as PreparableBundle));
+
+    // fqm keys its results by the bundle's `Patient.id`, which is NOT the caller's subject id. For the
+    // synthetic directory the two coincide (`fhir-bundle-builder` stamps `Patient.id = externalId`); for
+    // a live WebChart subject they never do, because the directory prefixes the tenant (`wc|123` for
+    // `Patient.id` `123`). Returning fqm's key would therefore look correct on every synthetic test and
+    // silently match nothing for the exact population official routing is aimed at — review caught this
+    // with the caller's own map lookup. So correlate here, where both ids are in scope, and return the
+    // id the CALLER asked about.
+    const subjectIdByPatientId = new Map<string, string>();
+    for (const [i, s] of subjects.entries()) {
+      const patientId = patientIdOf(patientBundles[i]);
+      if (patientId === undefined) continue; // no Patient ⇒ fqm returns nothing for it ⇒ absent, per the contract
+      // Two subjects sharing a Patient.id would make fqm's own results ambiguous, and picking one would
+      // attribute a person's compliance to somebody else. Refuse instead — there is no safe guess.
+      const clash = subjectIdByPatientId.get(patientId);
+      if (clash !== undefined && clash !== s.subjectId) {
+        throw new Error(
+          `${measureId}: subjects '${clash}' and '${s.subjectId}' share Patient.id '${patientId}' — ` +
+            `refusing to attribute one subject's result to another`,
+        );
+      }
+      subjectIdByPatientId.set(patientId, s.subjectId);
+    }
     const { bySubject, retrieveSignal } = await calculateOfficialWithSignal({
       bundle: artifact.bundle,
       patientBundles,
@@ -467,7 +510,11 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     }
 
     const outcomes = new Map<string, MeasureOutcome>();
-    for (const [subjectId, result] of bySubject) {
+    for (const [patientId, result] of bySubject) {
+      // Back to the caller's id. A result fqm returns for a patient nobody asked about cannot be
+      // attributed and is dropped rather than guessed at.
+      const subjectId = subjectIdByPatientId.get(patientId);
+      if (subjectId === undefined) continue;
       const { outcome, inInitialPopulation } = outcomeFromPopulations(
         result.populations,
         semantics.numeratorMeansCompliant,
@@ -517,9 +564,12 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
      * was retrieved" is a legitimate answer about that person.
      */
     async evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
+      // The subject id a single evaluation reports has always been the bundle's own `Patient.id` (it
+      // came straight back from fqm), and the headless CLI prints it — so name it explicitly here rather
+      // than letting the batch correlation invent one.
       const results = await runBatch(
         input.measureId,
-        [{ subjectId: "", patientBundle: input.patientBundle }],
+        [{ subjectId: patientIdOf(input.patientBundle) ?? "", patientBundle: input.patientBundle }],
         input.evaluationDate,
       );
       const [only] = [...results.values()];

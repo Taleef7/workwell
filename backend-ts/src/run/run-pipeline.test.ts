@@ -1152,8 +1152,11 @@ function batchProbe(batchable: Set<string>, opts: { failOn?: string } = {}): Bat
           evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }], via: "single" },
         };
       },
-      async evaluateBatch(measureId, subjects) {
+      async evaluateBatch(measureId, subjectsFactory) {
+        // Refuse BEFORE invoking the factory, exactly as the real router does — otherwise this probe
+        // would pass while the pipeline built a roster of bundles for every unbatchable measure.
         if (!batchable.has(measureId)) return undefined;
+        const subjects = subjectsFactory();
         batches.push({ measureId, size: subjects.length });
         if (opts.failOn === measureId) {
           throw new Error(`${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects`);
@@ -1238,4 +1241,52 @@ test("PR-8: a failed batch fails ITS measure loudly and leaves the rest of the r
     outcomes.filter((o) => o.measureId !== "audiogram").every((o) => o.status !== "MISSING_DATA"),
     "one measure's batch failure must not contaminate the others",
   );
+});
+
+test("PR-8: a failed run-log write cannot turn a SUCCESSFUL batch into a failed measure", async () => {
+  // Review caught this: the batch's success INFO line was awaited inside the same try that catches
+  // evaluation failures, so a transient `run_logs` write error — a Neon blip, a SQLite lock — was
+  // recorded as a batch failure and every subject of that measure became MISSING_DATA, while perfectly
+  // valid results sat unused in `prefetched`. An observability write must never author an outcome; the
+  // case-audit and quality-snapshot writes in this file are best-effort for exactly this reason.
+  const probe = batchProbe(new Set(["audiogram"]));
+  const p = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(p);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const outcomeStore = new SqliteOutcomeStore(db);
+  const runStore = new SqliteRunStore(db);
+  const deps: RunPipelineDeps = {
+    // A delegating proxy, not a spread: SqliteRunStore is a class, so spreading it drops every
+    // prototype method. Fails ONLY the batch's own INFO line, so the rest of the run logs normally
+    // and this isolates the hazard instead of breaking the pipeline everywhere at once.
+    runStore: new Proxy(runStore, {
+      get(target, prop, receiver) {
+        if (prop === "appendLog") {
+          return async (runId: string, level: string, message: string) => {
+            if (message.includes("in one official batch")) throw new Error("run_logs write failed");
+            return runStore.appendLog(runId, level as never, message);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }),
+    outcomeStore,
+    engine: probe.engine,
+    employees: [employeeById("emp-001")!, employeeById("emp-002")!],
+  };
+
+  const res = await executeManualRun(deps, {
+    scopeType: "MEASURE",
+    measureId: "audiogram",
+    evaluationDate: "2026-06-15",
+  });
+  const outcomes = await outcomeStore.listOutcomes(res.runId);
+
+  assert.deepEqual(probe.batches, [{ measureId: "audiogram", size: 2 }], "the batch itself succeeded");
+  assert.ok(
+    outcomes.every((o) => o.status === "COMPLIANT"),
+    "the batch's results must be persisted — a log failure is not an evaluation failure",
+  );
+  assert.equal(res.status, "COMPLETED", "and the run is clean, not PARTIAL_FAILURE");
 });

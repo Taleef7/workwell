@@ -55,6 +55,8 @@ const fakeCalculate: FqmCalculate = async () => ({
   ],
 });
 
+const patientBundle = (id: string) => ({ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id } }] });
+
 const outcome = (measure: string): MeasureOutcome => ({
   subjectId: "s1",
   measure,
@@ -98,7 +100,7 @@ test("a named measure routes to the official executor; everything else stays aut
     { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
   );
 
-  const official = await routed.evaluate({ measureId: "cms122", patientBundle: {} });
+  const official = await routed.evaluate({ measureId: "cms122", patientBundle: patientBundle("s1") });
   assert.equal(official.measure, "Diabetes: Glycemic Status Assessment Greater Than 9%");
   assert.deepEqual(authored.calls, [], "cms122 must NOT have reached the authored engine");
 
@@ -356,14 +358,14 @@ test("PR-8: evaluateBatch routes a named measure and resolves undefined for ever
     { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }], calculate: fakeCalculate },
   );
 
-  const batched = await routed.evaluateBatch?.("cms122", [{ subjectId: "s1", patientBundle: {} }], "2026-07-25");
+  const batched = await routed.evaluateBatch?.("cms122", () => [{ subjectId: "s1", patientBundle: patientBundle("s1") }], "2026-07-25");
   assert.ok(batched, "a routed measure must offer a batch path — that is the whole performance change");
   assert.equal(batched.get("s1")?.measure, "Diabetes: Glycemic Status Assessment Greater Than 9%");
   assert.deepEqual(authored.calls, [], "a batched official measure must NOT reach the authored engine");
 
   // `undefined` IS the predicate. A caller that got an empty Map instead could not tell "this measure has
   // no batch path" from "this batch legitimately produced nothing", and would skip evaluating the roster.
-  const unrouted = await routed.evaluateBatch?.("audiogram", [{ subjectId: "s1", patientBundle: {} }]);
+  const unrouted = await routed.evaluateBatch?.("audiogram", () => { throw new Error("the factory must NOT be invoked for an unrouted measure"); });
   assert.equal(unrouted, undefined, "an unrouted measure must fall back to the per-subject loop");
 });
 
