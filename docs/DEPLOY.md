@@ -33,10 +33,48 @@ The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 ### Deployment workflow
 
 Push to `main` triggers `.github/workflows/deploy-twh-mieweb.yml` which:
-1. Builds the **TypeScript** backend image (`workwell-api-ts`, from `backend-ts/Dockerfile`, repo-root
+1. **Vendors official-measure terminology into the build context** (see below) — before any image build
+2. Builds the **TypeScript** backend image (`workwell-api-ts`, from `backend-ts/Dockerfile`, repo-root
    context + `submodules: recursive`) tagged `latest` + `sha-<SHA>`
-2. Builds the frontend image (TWH branding via build-args) pointed at `twh-api-ts.os.mieweb.org`
-3. Deploys both containers to MIE via `.github/scripts/deploy-mieweb-container.sh`
+3. Builds the frontend image (TWH branding via build-args) pointed at `twh-api-ts.os.mieweb.org`
+4. Deploys both containers to MIE via `.github/scripts/deploy-mieweb-container.sh`
+
+#### Step 1 — official terminology is FETCHED AT BUILD, not committed (ADR-036)
+
+`measures/official/<catalogId>/terminology.json` holds the value-set expansions the official CMS
+artifacts execute against. It is **gitignored on purpose**: the expansions contain VSAC/CPT-derived
+content whose redistribution in a public repo is a licensing question we do not want to answer by
+accident. So every build re-fetches it from the same pinned upstream commit the vendored bundle came
+from, and the committed manifest's SHA-256 pins the bytes:
+
+```yaml
+- uses: actions/setup-node@v4
+  with: { node-version: 24 }
+- name: Vendor official terminology into the build context
+  working-directory: backend-ts
+  run: |
+    node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+    node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+```
+
+Invoked as plain `node` — the script imports nothing outside node built-ins and global `fetch`, so this
+needs no install and no package manager on the deploy path. It retries transport errors and 5xx with
+backoff (a 30-second GitHub blip must not block an emergency **rollback**, which rebuilds the image); a
+4xx at an immutable pin means the path is wrong and is never retried.
+
+**Both the production and the staging workflow run this step.** Omitting it does not fail the build — it
+degrades behaviour silently, which is why it is written down here:
+
+| sidecar | effect |
+|---|---|
+| present | `GET /api/measures/:id/fidelity/diff` answers `mode:"literal"` (the official artifact, executed) |
+| absent | the ladder degrades to `"subset"` (cms122) or `"estimate"` (any other measure) — a **shipped capability quietly lost** |
+| absent, with `WORKWELL_OFFICIAL_MEASURES` set | official routing **refuses at construction** and the run fails loudly — the safe direction |
+
+To produce it locally: `cd backend-ts && pnpm vendor:official --measure <MADiE name> --catalog-id <id>
+--strip-elm-annotations`. CI's `official-cases` job runs the same commands and then
+`git diff --exit-code measures/official`, so the committed artifact is proven reproducible from its pin
+on every PR.
 
 The deploy script talks to the MIE Container Manager **v1 API** (`<manager-origin>/api/v1`):
 responses are wrapped in a `{"data": ...}` envelope, the create body uses `template` with
