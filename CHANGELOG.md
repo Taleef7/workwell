@@ -8,6 +8,22 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 ## [Unreleased]
 
 ### Added
+- **Official-first eCQM execution — built, gated, and dark (roadmap §7.4; PRs #333–#346; ADR-036/037/038/039).**
+  The capability to run CMS's *published* measure artifacts verbatim, rather than an authored
+  approximation, behind a per-measure router that is off everywhere (`WORKWELL_OFFICIAL_MEASURES` unset
+  ⇒ `routedEngineForEnv` returns `engineForEnv`'s own value by identity). Shipped across the arc:
+  engine-boundary severance + the physical `packages/measure-engine` extraction; evidence-first
+  MeasureReport membership; **`packages/official-executor`** as the sole home of `fqm-execution`, reached
+  only by lazy `await import` and policed by boundary tests; CMS122 + CMS125 v1.0.000 vendored; the
+  **MADiE CI gate** (55/55 + 66/66, and no measure may be routed without it); the official-executor
+  adapter and router with construction-time validation; **one terminology authority** — the artifact's
+  own expansions, gitignored, fetched at build and pinned by SHA-256 in the committed manifest
+  (ADR-036); **shared QI-Core bundle preparation**, normalization only, never fabrication (ADR-037);
+  **a corpus the official artifacts can score** — every stamped code now a verified member of the value
+  set it is registered under, enforced by test (ADR-038); and **a shadow diff that actually shadows the
+  runtime** — same measurement period, same prepared bundle, same population mapping (ADR-039).
+  Descriptive only (ADR-008): CQL remains the sole compliance authority, and an official artifact *is*
+  CQL. No schema change.
 - **Option A at scale — real batch live-evaluation of the `mhn` (~120k) scale tenant (PR #252, open).** Replaces the *fabricated* scale outcomes with real, chunked, subject-major CQL evaluation (`batchEvaluateScalePopulation`) behind a pluggable `ScaleSubjectGenerator` seam; the default `webChartRealisticGenerator` routes real LOINC/CVX/CPT codes through the WebChart terminology crosswalk (13/14 measures) so the real adapter is exercised at scale. Bounded-memory, whole-batch resumable, per-subject error-isolated, audited `SCALE_POPULATION_EVALUATED`. CLI `pnpm seed:scale --mode evaluate` (default; `--mode fabricated` legacy one release; `--trim-evidence` for 120k). Reuses the `mhn|Lxx|Pxx|n` encoding so `aggregateScaleRun` + the rollup are unchanged (only outcome provenance changed). Evaluate mode **refuses over legacy fabricated `seed:scale` runs** (roll back first). Descriptive only (ADR-008/ADR-020); no schema, no new deps.
 - **E9 (#78) — `MeasureExecutor` seam (ADR-025).** Measure execution is pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`, extends `EvaluateMeasureBinding`): `fhirNativeExecutor` is the default + correctness oracle, `sqlPushdownExecutor` is an inert stub (Option B / CQL→SQL research-grade, not built), `resolveMeasureExecutor(env)` config-selects. Resolves the charter's CQL→SQL fork as a decision + seam (supersedes ADR-014). Descriptive only; no schema/deps/engine change.
 - **2026 terminology/standards currency fix** (`docs/TERMINOLOGY_AUDIT_2026-07-08.md`). A three-way verification (our impl vs MIE's WebChart dev DB vs current CDC/CMS/LOINC/VSAC/OSHA) confirmed all load-bearing codes correct (49 CMS catalog versions/MIPS IDs with **v14 = 2026**; OSHA CFR; runnable LOINC/CPT), and fixed vaccine-CVX currency on the WebChart crosswalk: full active influenza CVX set (VSAC Influenza OID `2.16.840.1.113883.3.526.3.1254`), active Td `09`/`113`/`196` replacing the inactive `139`, MMRV `94` counting toward varicella, and deleted HCPCS `G0202` marked read-only. Additive read-path only — no synthetic outcome changed.

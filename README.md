@@ -22,6 +22,26 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-27 — official-first execution is BUILT and dark (roadmap §7.4, PRs #342–#346; ADR-036–039).**
+  The machinery to run CMS's *published* artifacts verbatim is complete and gated:
+  **PR-8a** made the artifact's own expansions the single terminology authority (fetched at build,
+  gitignored, pinned by SHA-256 — ADR-036), closing a split where the MADiE gate validated against the
+  upstream bundle while the runtime expanded from our VSAC import;
+  **PR-8b** made QI-Core bundle preparation one implementation shared by the diff and the runtime
+  (ADR-037) — measured, an unprepared roster scores **IPP=0**;
+  **PR-8c** fixed the synthetic corpus so the official artifacts can actually score it (ADR-038) —
+  **12 of 24 codes were members of a value set other than the one they were registered under**, a defect
+  no measure test could catch because one file supplies both the stamped code *and* the expansion the
+  authored CQL resolves. Official-vs-authored agreement went **cms122 4/5 and cms125 0/5 → 5/5 and 5/5**;
+  **PR-8d** made the shadow diff an actual shadow of the runtime (ADR-039) — it had been using the
+  calendar year where the runtime uses a rolling window, feeding the artifact a deliberately enriched
+  bundle, and carrying its own population mapping, so it was not forecasting the flip at all.
+  **Nothing routes officially** — `WORKWELL_OFFICIAL_MEASURES` is unset everywhere and every measure
+  still evaluates authored CQL. Remaining before the flip (PR-9): the `logic_version` override (a
+  correctness landmine — the cache would copy *authored* outcomes forward for a measure now running
+  official), measure-major batching + a batch-level `hasRetrieveSignal`, the VSAC-capped
+  `AdvancedIllness` expansion, and CMS125 over **live WebChart data** (which gets neither PR-8c fix, so
+  it would still read out-of-population).
 - **2026-07-24 (later) — strategic recalibration: `docs/ROADMAP_2026-07-24.md` approved (supersedes the
   07-09 roadmap).** MIE's quality lead redirected the eCQM strategy: **run the official published CQL
   verbatim** for official CMS measures (never reauthor), prove it the way an EHR proves it (**QRDA-I/III
