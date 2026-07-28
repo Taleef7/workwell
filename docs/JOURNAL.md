@@ -1,5 +1,75 @@
 # Journal
 
+## 2026-07-28 — PR-8 (remaining), part 1: the `logic_version` landmine (branch `feat/official-logic-version`)
+
+Took the `logic_version` override ahead of measure-major batching, because they are not the same kind of
+item. Batching is performance with one safety net attached. This one is a wrong answer waiting for two
+flags to line up:
+
+`incremental-eval.ts` decides "has this measure's logic changed?" by hashing `ELM_LIBRARIES[libraryName]`
+— the AUTHORED ELM. Route a measure to the official artifact and that ELM is still sitting there hashing
+identically, so the fingerprint says *same logic* about two engines that answer differently, and the
+`eval_state` cache copies **authored outcomes forward for a measure now running official CQL**.
+Re-vendoring the artifact wouldn't invalidate them either — nothing in the fingerprint knows it exists.
+
+What makes it worth taking first is the failure *mode*, not the probability. Every other input to that
+fingerprint degrades pessimistically: lose a value-set hash and `logic_version` changes when it needn't,
+costing a re-evaluation. This one degrades toward a wrong answer with no symptom, because a copied-forward
+outcome is indistinguishable from a computed one at every layer that could look — the run completes, the
+counts reconcile, the roster renders.
+
+Both flags are off today. That is a coincidence with a deadline, not a safety property.
+
+### The design decision worth naming
+
+The roadmap sketched it as another field threaded into `IncrementalDeps` from each caller. That is the
+exact shape of the bug PR-7b's review caught: a call site that forgot to pass the official flag, so the
+nightly run used a different engine than the manual one — in a block of code that had already documented
+that same mistake twice.
+
+So the identity hangs off the **engine** instead: `RoutedEngine.logicVersionFor(measureId)`, resolved once
+from the same artifacts the executor was built over, read by the pipeline off `deps.engine`. The logic
+identity and the thing that computes the outcome are now the same object, so they cannot disagree, and a
+future call site gets it without having to remember it. Verified the premise rather than assuming it —
+all four paths that reach `finishManualRun` (three in `routes/runs.ts`, one in the scheduler) already
+construct via `routedEngineForEnv`, and no production caller uses `engineForEnv` directly.
+
+Two deviations from the sketch, both deliberate (ADR-040):
+
+- **Readable composite, not `sha256(...)`.** `official-fqm:<version>:<artifactSha>:<terminologySha>`.
+  Every input is already a digest, so re-hashing buys no collision resistance — it only makes an
+  `eval_state` row unreadable at the moment someone is asking which artifact produced it. The prefix is
+  disjoint from the authored `sha256:<hex>` space by construction, so the two can never collide however
+  the authored hash is later computed.
+- **The terminology digest is in.** The sketch had version + artifact sha. Since ADR-036 the executor
+  retrieves against the artifact's OWN expansions, fetched at build and pinned in the committed manifest —
+  so a re-fetch at a different upstream ref moves value-set membership, and outcomes, with the bundle
+  bytes unchanged. Version + sha alone would call that "same logic".
+
+### Testing the claim rather than the code
+
+The three cases that matter — flip on, flip off, re-vendor while still routed — run against the REAL CQL
+engine and a real SQLite `eval_state`, in a setup with every *other* reason to re-evaluate removed: same
+day, same subject, byte-identical bundle, terminal OVERDUE status so the clock can't force it. A baseline
+test asserts that exact setup **does** reuse. So anything that re-evaluates in the three did so because of
+`logic_version` and nothing else — which is the whole claim, since the authored ELM hashes the same before
+and after a flip. Two more: an unrouted sibling measure keeps reusing while its neighbour is routed, and
+an unchanged artifact still reuses (the identity is not a nonce).
+
+### Verification
+
+- `pnpm test` — **1524 pass / 0 fail / 14 skipped** (was 1517/0/14; +7 = the new tests). With both
+  terminology sidecars moved aside, **1513 / 0 / 25**, exactly the predicted +7 over the prior 1506 —
+  the two-configuration discipline from the PR-8a CI failure.
+- `pnpm test:official-cases` — **55/55 + 66/66**, evidence report byte-unchanged apart from its
+  `Generated:` line, which was reverted so the diff shows only what this PR changed.
+- `pnpm typecheck` clean. No schema change (`eval_state.logic_version` is already TEXT), no new deps,
+  nothing routes officially.
+
+**Still open for PR-8:** measure-major batching + the batch-level `hasRetrieveSignal`. **Still owed by
+PR-9:** the VSAC-capped `AdvancedIllness` expansion (a routing refusal today), and CMS125 over live
+WebChart data, which gets neither PR-8c fix.
+
 ## 2026-07-27 (night) — PR-8d: the shadow diff was not shadowing anything (branch `feat/official-diff-generalization`)
 
 The remaining PR-8 list opened with "generalize the standards diff beyond its cms122 hardcode". That

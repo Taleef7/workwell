@@ -6,7 +6,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
+import { officialLogicVersion, officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
+import { loadOfficialArtifact } from "./official-artifacts.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
 import type { LoadedTerminology } from "./official-terminology.ts";
 import type { FqmCalculate } from "@workwell/official-executor";
@@ -104,6 +105,40 @@ test("a named measure routes to the official executor; everything else stays aut
   const other = await routed.evaluate({ measureId: "audiogram", patientBundle: {} });
   assert.equal(other.measure, "authored:audiogram");
   assert.deepEqual(authored.calls, ["audiogram"]);
+});
+
+test("PR-8: the engine declares the ARTIFACT's logic identity for routed measures, and nothing else", async () => {
+  const authored = authoredEngine();
+  const routed = await routedEngineForEnv(
+    { WORKWELL_OFFICIAL_MEASURES: "cms122" } as never,
+    { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }] },
+  );
+
+  const declared = routed.logicVersionFor?.("cms122");
+  assert.ok(declared, "a routed measure must declare an identity — its absence is the silent failure");
+  assert.equal(declared, officialLogicVersion(loadOfficialArtifact("cms122")!), "and it is the artifact's, computed the one way");
+  assert.equal(routed.logicVersionFor?.("audiogram"), undefined, "an unrouted measure declares nothing — it IS authored");
+  assert.equal(routed.logicVersionFor?.("nonexistent"), undefined);
+});
+
+test("PR-8: the identity moves with the artifact and can never collide with an authored ELM hash", () => {
+  const base = {
+    manifest: { version: "1.0.000", sha256: "AAA", terminology: { sha256: "TTT" } },
+  } as never as Parameters<typeof officialLogicVersion>[0];
+  const of = (over: Record<string, unknown>) =>
+    officialLogicVersion({ manifest: { ...(base as { manifest: object }).manifest, ...over } } as never);
+
+  const original = officialLogicVersion(base);
+  assert.notEqual(of({ version: "1.1.000" }), original, "a version bump is a logic change");
+  assert.notEqual(of({ sha256: "BBB" }), original, "a re-vendored bundle is a logic change");
+  // The one the roadmap's sketch omitted: expansions are fetched at build and pinned in the manifest,
+  // so a re-fetch at a different upstream ref moves value-set membership with the bundle unchanged.
+  assert.notEqual(of({ terminology: { sha256: "UUU" } }), original, "moved terminology is a logic change");
+  assert.notEqual(of({ terminology: undefined }), original, "an unpinned artifact is not the same as a pinned one");
+  assert.equal(officialLogicVersion(base), original, "and it is stable — not a nonce");
+
+  assert.ok(original.startsWith("official-fqm:"), "prefixed so it is disjoint from the authored sha256: space");
+  assert.ok(!original.startsWith("sha256:"));
 });
 
 test("an explicit elm/metaOverride always stays authored, even for a routed measure", async () => {

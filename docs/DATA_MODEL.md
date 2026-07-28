@@ -668,7 +668,8 @@ eval_state (
   measure_id         TEXT NOT NULL,
   period             TEXT NOT NULL,          -- bucketPeriodForMeasure — same key as case idempotency
   data_hash          TEXT NOT NULL,          -- sha256:<hex> of the canonicalized evaluated bundle
-  logic_version      TEXT NOT NULL,          -- sha256:<hex> of (measure ELM + referenced VS expansion hashes)
+  logic_version      TEXT NOT NULL,          -- authored: sha256:<hex> of (measure ELM + referenced VS expansion hashes)
+                                             -- official-routed: official-fqm:<version>:<artifactSha>:<terminologySha>
   next_transition_at TEXT,                   -- YYYY-MM-DD: earliest date the status can change; NULL = terminal
   last_status        TEXT NOT NULL,          -- the CQL Outcome Status to copy forward
   source_outcome_id  TEXT NOT NULL,          -- the outcomes row whose evidence is copied forward
@@ -696,6 +697,16 @@ eval_state (
   whether a value-set resolver is active) plus the store `expansion_hash` of each referenced value set —
   so a VSAC toggle/re-import or an operator value-set edit invalidates reuse for an expanding measure. On
   the demo/scoped path (inline `urn:workwell` codes, no expansion) it is exactly `hash(base ELM)`.
+- **For an OFFICIAL-ROUTED measure the ELM hash above does not apply at all** (ADR-040): the authored ELM
+  is not the logic being executed, and it keeps hashing identically after a flip — so the row would claim
+  "same logic" and the cache would copy AUTHORED outcomes forward for a measure now running the official
+  artifact. The **engine** supplies the identity instead (`RoutedEngine.logicVersionFor`, read off the
+  engine the run is using so the two cannot disagree), and it is a readable composite —
+  `official-fqm:<version>:<artifactSha>:<terminologySha>` — whose `official-fqm:` prefix is disjoint from
+  the authored `sha256:` space by construction. The terminology digest is included because ADR-036
+  expansions are fetched at build and pinned in the committed manifest, so a re-fetch can move value-set
+  membership (and outcomes) with the bundle bytes unchanged. Consequence: flipping a measure on, flipping
+  it off, and re-vendoring it while routed each invalidate every cached row for that measure.
 - **A pure cache** — dropping it just makes the next run a full run; no `outcomes`/`cases`/`audit` row
   references it, which is why it is safe to add. **No FK** on `subject_id`/`measure_id` (same as
   `person_links`/`quality_snapshots`). Descriptive only — reuse decides only WHETHER to re-run CQL, never
