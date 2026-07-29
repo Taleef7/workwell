@@ -150,15 +150,28 @@ jobs:
       # so the cache would be restored and immediately overwritten while still paying two ~17MB pulls.
       # `--complete-capped-expansions` re-expands the OIDs upstream capped at 1000 (today one:
       # AdvancedIllness, 1000 of 1997, feeding a DENEX in both measures) from VSAC at a pinned release.
-      # Without the WORKWELL_VSAC_API_KEY_VENDOR secret it warns and leaves them exactly as upstream shipped them, so
-      # this step is a no-op until the secret exists — which is deliberate, see the reproducibility
-      # step below for why the ORDER of that matters.
+      #
+      # It is passed ONLY when the credential is actually present, and that is not merely an
+      # optimization. GitHub withholds repository secrets from workflows triggered by a FORK pull
+      # request (Dependabot likewise). Passing the flag unconditionally there would regenerate the
+      # capped manifests while Git records the completed ones, and the reproducibility check below
+      # would then fail every outside contributor's PR for a reason that has nothing to do with their
+      # change. So the step reports whether it ran credentialed, and the check adapts.
       - name: Vendor official terminology (the runtime's own expansions, same pin)
+        id: vendor
         env:
           WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
         run: |
-          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
-          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+          if [ -n "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "credentialed=true" >> "$GITHUB_OUTPUT"
+            COMPLETE=--complete-capped-expansions
+          else
+            echo "credentialed=false" >> "$GITHUB_OUTPUT"
+            COMPLETE=
+            echo "::notice::No VSAC credential in this context (expected for a fork PR). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
+          fi
+          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
@@ -168,11 +181,25 @@ jobs:
       # manifests means CI now completes the capped expansion while Git still records it as capped.
       # The two land together, or this goes red on every unrelated PR — hence the message.
       - name: The committed artifact is reproducible from its pin
+        if: steps.vendor.outputs.credentialed == 'true'
         run: |
           if ! git diff --exit-code measures/official; then
             echo "::error::measures/official does not match what this pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-capped-expansions' locally with the key and commit the regenerated manifests in the same change."
             exit 1
           fi
+      # The uncredentialed half of the same check. `bundle.json` is the artifact that decides what gets
+      # EXECUTED, and completion does not touch it — only `manifest.json` (truncated/completion/the
+      # terminology digest) and the gitignored sidecar move. So an untrusted PR can still prove the
+      # committed bundle is what the pinned upstream produces; it just cannot verify the terminology
+      # half, and says so rather than reporting a pass it did not earn.
+      - name: The committed bundle is reproducible from its pin (no VSAC credential)
+        if: steps.vendor.outputs.credentialed != 'true'
+        run: |
+          if ! git diff --exit-code measures/official/*/bundle.json; then
+            echo "::error::the vendored bundle does not match what this pin produces."
+            exit 1
+          fi
+          echo "::notice::Bundle bytes verified. Terminology completion NOT verified — this context has no VSAC credential."
       # Every assertion that consults the ARTIFACT'S OWN terminology self-skips without the fetched
       # sidecar, and `pnpm test` runs in a job that has no sidecar — so this step is their only gate.
       # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while
