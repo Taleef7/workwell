@@ -61,7 +61,34 @@ the reproducibility step now says so in its own `::error::` message. The secret 
 from the runtime `WORKWELL_VSAC_API_KEY_TWH` even though both hold the same UMLS key: they serve the two
 terminology authorities ADR-036 exists to keep apart.
 
-**Owner step, and the only thing blocking the flip now:** run the two `--complete-capped-expansions`
+**Owner step executed the same day (2026-07-29, later).** Secret set, both measures re-vendored with
+the key, manifests committed. Results, in the order they were checked:
+
+- `AdvancedIllness` completed **1000 → 2000 codes** in both artifacts; `truncated` → `[]`; a `completion`
+  block records the pin. Bundle `sha256` unchanged in both, so only terminology moved.
+- **Reproducible.** Two independent vendor runs, live VSAC both times: manifests *and* sidecars
+  byte-identical. That is the property CI's `git diff --exit-code` depends on, and it was worth proving
+  against the real service rather than the stub the branch was developed against.
+- `pnpm test:official-cases` **121/121** (CMS122 55/55, CMS125 66/66, 0 unexpected, 0 errors).
+- CI's four sidecar-dependent suites **24/24**, now actually executing instead of self-skipping.
+- Full suite **1568 / 1554 pass / 0 fail / 14 skipped**. The `#256` worker-pool parity failure recorded
+  below did **not** reproduce here (8/8 in isolation, 0 fail in the full run), which supports the
+  environmental read: this host runs Node 24.
+- `officialRoutingProblems(["cms122"])` and `(["cms125"])` both return **no problems**. The refusal that
+  has blocked those two measures since PR-7b is cleared. Nothing is routed — `WORKWELL_OFFICIAL_MEASURES`
+  remains unset on every stack.
+
+**One thing did not match the plan, and it is worth keeping.** VSAC at `ecqm-fhir-update-2025` returns
+**2000 codes for an OID the bundle declares as 1997**. The completion guard only rejects an expansion
+that comes back SHORT, so 2000 passes and `truncated` empties correctly. But the gap says upstream
+captured its `expansion.total` against a slightly different terminology snapshot than the release its own
+README points at. Three extra codes widen a denominator exclusion by a hair. No official test case moved
+and the corpus-outcomes check is unchanged, so there is nothing to fix — but "our terminology is not
+identical to what the bundle declares" is exactly the kind of fact that is cheap to write down now and
+expensive to rediscover during PR-9c's before/after distribution comparison.
+
+**Superseded — the original owner step, kept for the sequencing note:** run the two
+`--complete-capped-expansions`
 commands in DEPLOY.md §"Step 1a" with the UMLS key, confirm `pnpm test:official-cases` stays 121/121
 (its own analysis already reports "Value-set-cap effects: 0 observed", so a moved case would be the
 finding rather than a failure), and commit the regenerated manifests + report alongside adding the
