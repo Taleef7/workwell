@@ -25,6 +25,16 @@ const DENEX = "denominator-exclusion";
 const DENEXCEP = "denominator-exception";
 const NUMER = "numerator";
 
+/**
+ * A bundle carrying the one resource fqm keys its results by. Not decoration: the adapter correlates
+ * fqm's `Patient.id` back to the caller's subject id, so a Patient-less bundle has no result to
+ * attribute. Real inputs always have one; `{}` never did, and using it hid that the two ids differ.
+ */
+const patientBundle = (id: string) => ({
+  resourceType: "Bundle",
+  entry: [{ resource: { resourceType: "Patient", id } }],
+});
+
 test("population -> workflow bucket, for a normal measure (numerator = the good outcome)", () => {
   const map = (p: Record<string, boolean>) => outcomeFromPopulations(p, true);
 
@@ -255,7 +265,7 @@ test("a measure with no recorded semantics is refused, not guessed at", async ()
     calculate: async () => ({ results: [] }),
   });
   await assert.rejects(
-    () => executor.evaluate({ measureId: "unknownmeasure", patientBundle: {} }),
+    () => executor.evaluate({ measureId: "unknownmeasure", patientBundle: patientBundle("patient-1") }),
     /no recorded official measure semantics/,
   );
 });
@@ -267,7 +277,7 @@ test("an unvendored measure is refused with a clear reason", async () => {
     calculate: async () => ({ results: [] }),
   });
   await assert.rejects(
-    () => executor.evaluate({ measureId: "cms122", patientBundle: {} }),
+    () => executor.evaluate({ measureId: "cms122", patientBundle: patientBundle("patient-1") }),
     /no executable official artifact is vendored/,
   );
 });
@@ -309,7 +319,7 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
 
   const outcome = await executor.evaluate({
     measureId: "cms125",
-    patientBundle: {},
+    patientBundle: patientBundle("patient-1"),
     evaluationDate: "2026-07-25",
   });
 
@@ -386,7 +396,7 @@ test("what the adapter WRITES is what the exporter READS — the two halves cann
     }),
   });
 
-  const outcome = await executor.evaluate({ measureId: "cms122", patientBundle: {} });
+  const outcome = await executor.evaluate({ measureId: "cms122", patientBundle: patientBundle("p1") });
   const membership = officialMembership(outcome.evidence);
 
   assert.ok(membership, "the exporter must be able to read the evidence the executor just wrote");
@@ -408,7 +418,7 @@ test("non-proportion scoring, and an artifact whose id does not match, are both 
       expand: async () => [{ code: "a", system: "s" }],
       loadArtifact: () => artifact,
       calculate: async () => ({ results: [] }),
-    }).evaluate({ measureId: "cms125", patientBundle: {} });
+    }).evaluate({ measureId: "cms125", patientBundle: patientBundle("patient-1") });
 
   // A cohort measure has no numerator population at all, so populations["numerator"] is undefined and
   // the mapping would call every subject COMPLIANT (or every subject OVERDUE) on one flag.
@@ -444,7 +454,7 @@ test("the measurement period is the authored engine's, quirk for quirk", async (
       return { results: [] };
     },
   });
-  await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: {}, evaluationDate: "2024-02-29" }));
+  await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: patientBundle("patient-1"), evaluationDate: "2024-02-29" }));
   assert.equal(seen[0], "2023-03-01", "non-clamping overflow, exactly as the authored engine does it");
 });
 
@@ -460,4 +470,215 @@ test("a malformed expander still produces the DIAGNOSTIC refusal, not a raw Type
       `an expander returning ${JSON.stringify(bad) ?? "undefined"} must still name the OIDs`,
     );
   }
+});
+
+/**
+ * Measure-major batching (roadmap §7.4 PR-8).
+ *
+ * Two claims worth testing separately: that a roster costs ONE fqm call rather than N (the point of the
+ * change), and that a batch which retrieved nothing for anybody refuses rather than reporting the whole
+ * roster ineligible (the safety net batching made possible).
+ */
+const batchArtifact = (): OfficialArtifact => {
+  const base = fakeArtifact("cms125", ["2.16.1"]);
+  return { ...base, manifest: { ...base.manifest, catalogId: "cms125" } };
+};
+
+/** fqm's shape for N subjects. `retrieved: false` is the empty-retrieve catastrophe this PR guards. */
+const calculatorFor = (
+  subjectIds: string[],
+  opts: { retrieved?: boolean } = {},
+): { calculate: FqmCalculate; batchSizes: number[] } => {
+  const batchSizes: number[] = [];
+  const empty = opts.retrieved === false;
+  const calculate: FqmCalculate = async (_bundle, patients) => {
+    batchSizes.push((patients as unknown[]).length);
+    return {
+      results: subjectIds.map((patientId) => ({
+        patientId,
+        ...(empty ? {} : { evaluatedResource: [{ resourceType: "Observation" }] }),
+        detailedResults: [
+          {
+            populationResults: [
+              { populationType: IPP, result: !empty },
+              { populationType: DENOM, result: !empty },
+              { populationType: NUMER, result: !empty },
+            ],
+            statementResults: [],
+          },
+        ],
+      })),
+    };
+  };
+  return { calculate, batchSizes };
+};
+
+const batchExecutor = (calculate: FqmCalculate, over: Record<string, unknown> = {}) =>
+  officialMeasureExecutor({
+    expand: async () => [{ code: "a", system: "s" }],
+    loadArtifact: batchArtifact,
+    calculate,
+    ...over,
+  });
+
+test("PR-8: a whole roster costs ONE fqm call, not one per subject", async () => {
+  const ids = ["s1", "s2", "s3", "s4", "s5"];
+  const { calculate, batchSizes } = calculatorFor(ids);
+
+  const results = await batchExecutor(calculate).evaluateBatch(
+    "cms125",
+    ids.map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+    "2026-07-25",
+  );
+
+  // The whole point: fqm parses the artifact's ELM per CALL, so five subjects in one call is four ELM
+  // parses of a 2.4 MB bundle saved — 149 on a real live-tenant roster.
+  assert.deepEqual(batchSizes, [5], "five subjects must arrive as ONE batch of five");
+  assert.deepEqual([...results.keys()], ids);
+  assert.equal(results.get("s3")!.outcome, "COMPLIANT");
+});
+
+test("PR-8: batched and per-subject produce the same outcome for the same subject", async () => {
+  // Batching is a performance change. If it moved an answer it would be a correctness change wearing a
+  // performance change's clothes — so assert the two paths agree rather than trusting that sharing a code
+  // path makes disagreement impossible.
+  const single = await batchExecutor(calculatorFor(["s1"]).calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: patientBundle("s1"),
+    evaluationDate: "2026-07-25",
+  });
+  const batched = await batchExecutor(calculatorFor(["s1", "s2"]).calculate).evaluateBatch(
+    "cms125",
+    [
+      { subjectId: "s1", patientBundle: patientBundle("s1") },
+      { subjectId: "s2", patientBundle: patientBundle("s2") },
+    ],
+    "2026-07-25",
+  );
+
+  assert.deepEqual(batched.get("s1"), single, "the same subject must evaluate identically either way");
+});
+
+test("PR-8: a batch that retrieved NOTHING for anybody refuses instead of reporting a roster ineligible", async () => {
+  // fqm does not error when every retrieve comes back empty — it returns a complete-looking result with
+  // nobody in any population, indistinguishable downstream from a genuinely ineligible roster. That is
+  // what a profile or terminology misconfiguration looks like, and it is the failure this executor could
+  // otherwise report as a successful run in which every single person is out of scope.
+  const { calculate } = calculatorFor(["s1", "s2", "s3"], { retrieved: false });
+
+  await assert.rejects(
+    batchExecutor(calculate).evaluateBatch(
+      "cms125",
+      ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+      "2026-07-25",
+    ),
+    /retrieved NOTHING for any of 3 subjects/,
+  );
+});
+
+test("PR-8: the retrieve check does NOT fire for a single subject — that answer is legitimate", async () => {
+  // One person with no clinical data really does retrieve nothing. This is `/simulate` and
+  // rerun-to-verify; failing them would be a false alarm on a correct result.
+  const { calculate } = calculatorFor(["s1"], { retrieved: false });
+
+  const outcome = await batchExecutor(calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: patientBundle("s1"),
+    evaluationDate: "2026-07-25",
+  });
+  assert.equal(outcome.outcome, "MISSING_DATA");
+  assert.equal(outcome.inInitialPopulation, false, "out of scope for the measure, not non-compliant");
+});
+
+test("PR-8: an empty batch is not an error, and never reaches fqm", async () => {
+  const { calculate, batchSizes } = calculatorFor([]);
+  assert.equal((await batchExecutor(calculate).evaluateBatch("cms125", [], "2026-07-25")).size, 0);
+  assert.deepEqual(batchSizes, [], "asking a calculator about nobody is how you get a confusing failure");
+});
+
+test("PR-8: every refusal still fires on the batch path — they are not single-subject guards", async () => {
+  // `evaluate` now delegates to `evaluateBatch`, so a refusal that had lived only on the old
+  // single-subject path would be gone entirely. Assert each on the path actually reached.
+  const { calculate } = calculatorFor(["s1", "s2"]);
+  const subjects = [
+    { subjectId: "s1", patientBundle: patientBundle("s1") },
+    { subjectId: "s2", patientBundle: patientBundle("s2") },
+  ];
+  const cohort = batchArtifact();
+
+  await assert.rejects(
+    batchExecutor(calculate, { loadArtifact: () => null }).evaluateBatch("cms125", subjects),
+    /no executable official artifact is vendored/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, { loadArtifact: () => fakeArtifact("cms122", ["2.16.1"]) }).evaluateBatch("cms125", subjects),
+    /declares catalogId 'cms122'/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, {
+      loadArtifact: () => ({ ...cohort, manifest: { ...cohort.manifest, scoring: "cohort" } }),
+    }).evaluateBatch("cms125", subjects),
+    /scoring 'cohort' is not supported/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, {
+      loadArtifact: () => ({ ...cohort, manifest: { ...cohort.manifest, catalogId: "unknownmeasure" } }),
+    }).evaluateBatch("unknownmeasure", subjects),
+    /no recorded official measure semantics/,
+  );
+  await assert.rejects(
+    batchExecutor(calculate, { expand: async () => [] }).evaluateBatch("cms125", subjects),
+    /value sets could not be expanded/,
+  );
+});
+
+test("PR-8: results come back keyed by the CALLER's subject id, not the bundle's Patient.id", async () => {
+  // Review caught this: fqm keys by `Patient.id`, and the two ids coincide for every synthetic subject
+  // (`fhir-bundle-builder` stamps `Patient.id = externalId`) but NEVER for a live WebChart one, which the
+  // directory prefixes with its tenant (`wc|123` for `Patient.id` `123`). Returning fqm's key passed every
+  // synthetic test and matched nothing for the exact population official routing is aimed at — the run
+  // would silently fall back to per-subject evaluation, i.e. strictly slower than not batching at all.
+  const { calculate } = calculatorFor(["123", "456"]); // fqm answers with PATIENT ids
+
+  const results = await batchExecutor(calculate).evaluateBatch(
+    "cms125",
+    [
+      { subjectId: "wc|123", patientBundle: patientBundle("123") },
+      { subjectId: "wc|456", patientBundle: patientBundle("456") },
+    ],
+    "2026-07-25",
+  );
+
+  assert.deepEqual([...results.keys()], ["wc|123", "wc|456"], "keyed by what the caller asked about");
+  assert.equal(results.get("wc|123")!.subjectId, "wc|123", "and the outcome carries that id too");
+});
+
+test("PR-8: two subjects sharing a Patient.id are refused, never attributed to one another", async () => {
+  // fqm's own results would be ambiguous, and picking either one reports a person's compliance under
+  // somebody else's name. There is no safe guess available here.
+  const { calculate } = calculatorFor(["dup"]);
+
+  await assert.rejects(
+    batchExecutor(calculate).evaluateBatch(
+      "cms125",
+      [
+        { subjectId: "emp-001", patientBundle: patientBundle("dup") },
+        { subjectId: "emp-002", patientBundle: patientBundle("dup") },
+      ],
+      "2026-07-25",
+    ),
+    /share Patient\.id 'dup'/,
+  );
+});
+
+test("PR-8: a single evaluation still reports the bundle's own Patient.id as its subject", async () => {
+  // The headless CLI prints this, and it came straight back from fqm before batching existed. The batch
+  // correlation must not quietly replace it with something else.
+  const { calculate } = calculatorFor(["patient-9"]);
+  const outcome = await batchExecutor(calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: patientBundle("patient-9"),
+    evaluationDate: "2026-07-25",
+  });
+  assert.equal(outcome.subjectId, "patient-9");
 });

@@ -22,6 +22,18 @@ WorkWell Measure Studio is a TypeScript + Next.js monorepo for **Total Worker He
 
 ## Status
 
+- **2026-07-28 — PR-8 is complete: measure-major batching + the batch-level retrieve refusal (PR #349).**
+  The official executor now evaluates a whole roster in one fqm pass, with `evaluate` derived from that
+  batch primitive. Measured on the real artifacts: **171 ms per subject one-at-a-time versus 11–16 ms
+  batched** (10× at 25 subjects, 16× at 100 — the ELM parse is per call). That inverts the comparison
+  the roadmap had filed as "benchmark before flip": unbatched, official execution is ~2.5× *slower* per
+  subject than the authored engine's ~68 ms; batched, it is faster. The safety net batching made
+  possible ships with it — a batch of more than one that matched **no retrieve for anybody** refuses,
+  rather than reporting an entire roster out-of-population, because fqm's all-empty result is
+  indistinguishable downstream from a genuinely ineligible roster. Scoped to `> 1`, since for one
+  subject "nothing retrieved" is a legitimate answer. Stated so it is not over-claimed: it catches
+  *retrieved nothing*, **not** *retrieved the wrong thing* — every ADR-038 corpus defect passed this
+  check while scoring the roster wrongly. Still dark; still nothing routed.
 - **2026-07-28 — PR-8e closed the `logic_version` landmine (ADR-040).** Incremental evaluation decided
   "has this measure's logic changed?" by hashing WorkWell's *authored* ELM — which keeps hashing
   identically after a measure is flipped to the official artifact. The `eval_state` cache would therefore

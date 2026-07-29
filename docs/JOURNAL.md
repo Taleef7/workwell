@@ -1,5 +1,134 @@
 # Journal
 
+## 2026-07-28 (later) — PR-8 (remaining), part 2: measure-major batching + the retrieve check (branch `feat/official-measure-batching`)
+
+The last item before PR-9. Two things shipped together because the second only becomes possible once the
+first exists.
+
+**The performance half turned out to be bigger than "an optimisation".** The adapter was single-subject
+because that is the `EvaluateMeasureBinding` contract every caller uses, so each call handed fqm a batch
+of exactly one — and fqm parses the artifact's ELM per CALL. Measured on the real vendored artifacts:
+
+| | per-subject | batched | |
+|---|---|---|---|
+| cms122, N=25 | 4,249 ms (170 ms/subject) | 409 ms (16 ms/subject) | 10.4× |
+| cms125, N=25 | 4,316 ms (173 ms/subject) | 342 ms (14 ms/subject) | 12.6× |
+| cms122, N=100 | 17,145 ms (171 ms/subject) | 1,091 ms (11 ms/subject) | 15.7× |
+
+The ratio grows with the roster because the parse is fixed cost. What makes this more than a speed-up is
+the comparison it inverts: **171 ms/subject is ~2.5× SLOWER than the authored engine's ~68 ms**. Flipping
+a measure without batching would have made a live-tenant run measurably worse, and the roadmap's risk
+table had this filed as "benchmark before flip" rather than as a blocker. Batched, official execution is
+*faster* than authored.
+
+**The safety half is the one that would have been silent.** fqm does not error when every retrieve comes
+back empty — it returns a complete-looking result with nobody in any population, which downstream is
+indistinguishable from a genuinely ineligible roster. `hasRetrieveSignal` has existed in the package
+since PR-4 and is already used by the MADiE harness, but it is only meaningful ACROSS subjects, so there
+was nowhere to put it until batching existed. Now: a batch of more than one that matched nothing for
+anybody refuses.
+
+The `> 1` is load-bearing and is the owner's call. For a single subject "nothing retrieved" is a true and
+ordinary answer — that is `/simulate` and rerun-to-verify on someone with no clinical data — so applying
+it there would fail correct results. The known false positive is a roster of 2+ where genuinely nobody
+has any clinical resource; failing loudly there is still the better error, because the measure's output
+over that roster is meaningless either way.
+
+Also worth stating so it is not over-claimed: this catches **"retrieved nothing at all", not "retrieved
+the wrong thing"**. Every one of ADR-038's corpus defects — 12 of 24 codes in the wrong value set, the
+missing `us-core-sex` extension, the mammogram recorded only as a Procedure — passed `hasRetrieveSignal`
+cleanly while scoring the roster wrongly. This closes one door, and it is not the dangerous one.
+
+### Two structural decisions
+
+**A pre-pass, not a measure-major rewrite of the loop.** `finishManualRun`'s loop carries outcome
+persistence, the incremental commit, the case upsert, its audit event and the counters, all
+order-dependent and all correctness-critical. Restructuring it measure-major would put every measure's
+bundles in memory at once (150 subjects × 14 measures) to benefit the measures that are actually routed,
+of which there are currently none. The pre-pass holds one measure's bundles, drops them, and leaves the
+authored path as literally the code that ships today — `evaluateBatch` resolves `undefined` and nothing
+runs.
+
+**One method, not `canBatch()` + a call.** The `undefined` resolution IS the predicate, decided by the
+same `official` set the dispatch reads. And deliberately not inferred from `logicVersionFor(id) !==
+undefined`: "has a declared logic identity" and "can be batched" coincide today, and a coincidence relied
+on is a coincidence that breaks quietly. Same reasoning as ADR-040 §2, same reason it hangs off the
+engine rather than being threaded through `RunPipelineDeps`.
+
+`evaluate` is now a batch of one, which mattered more than expected — it means the four construction
+refusals (artifact present, catalogId match, proportion scoring, recorded semantics) live on one path
+instead of two that must agree. A test asserts each of them on the batch path specifically, because a
+refusal that had lived only on the old single-subject path would now be gone entirely.
+
+### Failure mode
+
+Owner-decided: a failed batch fails **its own measure**, not the run. Every subject of it lands
+MISSING_DATA carrying the batch's reason, the run ends PARTIAL_FAILURE — which is what fires the #264
+alert channel — and other measures complete normally. That reuses the existing per-subject isolation
+rather than inventing a failure channel, and avoids the alternative's real flaw: a FAILED run is ignored
+by every read model, so one misconfigured measure would discard thirteen good ones *and* leave the prior
+run silently authoritative.
+
+### Review found a real defect, and my own test was complicit
+
+**The batch results were keyed by fqm's `Patient.id`, and the pipeline looked them up by
+`employee.externalId`.** Those are equal for every synthetic subject — `fhir-bundle-builder` stamps
+`Patient.id = externalId` — and never equal for a live WebChart one, which the directory prefixes with
+its tenant (`wc|123` for `Patient.id` `123`). So on a live official run the lookup would match nothing,
+`prefetched` would stay empty, and every subject would fall through to `?? await engine.evaluate(...)`:
+one batch pass **plus** N single passes, i.e. strictly slower than not batching at all — while the INFO
+line claimed "N subjects evaluated in one official batch". The answers would still be right, so nothing
+downstream could notice. It would have bitten precisely on the population official routing exists for.
+
+The `subjectId` field was on the interface the whole time and simply never read; `evaluate` passing
+`subjectId: ""` should have been the tell. `runBatch` now correlates fqm's key back to the caller's id,
+and refuses outright when two subjects share a `Patient.id` rather than attributing one person's
+compliance to another.
+
+**My test would have passed against the broken code.** `batchProbe` returned
+`new Map(subjects.map(s => [s.subjectId, ...]))` — it modelled the contract I *intended* rather than the
+one implemented, and every adapter fixture used `subjectId === patientId`. The new test uses `wc|123`
+against `Patient.id` `123`, which is the case that actually distinguishes them. Related: fixtures passing
+`patientBundle: {}` are now realistic bundles carrying a Patient, because a bundle with no Patient is not
+an input this code will ever see and pretending otherwise is what hid the coupling.
+
+Three more, all mine:
+
+- **A failed run-log write could turn a successful batch into a failed measure.** The success INFO line
+  was awaited *inside* the try that catches evaluation failures, so a transient `run_logs` error became a
+  `batchFailure` and every subject of that measure became MISSING_DATA — with valid results sitting
+  unused in `prefetched`. An observability write must never author an outcome; the case-audit and
+  quality-snapshot writes in this same file are best-effort for exactly this reason.
+- **The subject list was built eagerly**, so the moment routing is on for one measure the pre-pass built
+  bundles for all 14 and discarded 13/14 — reintroducing at the call site the cost the method exists to
+  remove. It is a factory now, invoked only after the router confirms the measure is batchable.
+- **`if (failed)` was a truthiness test on an `unknown` rejection.** A batch rejecting with `undefined`
+  or `""` would be stored and then ignored, and each subject would fall through to a per-subject
+  evaluation — which, being a batch of one, is exempt from the retrieve check. The refusal would have
+  disabled itself. Normalized to an `Error` and tested with `.has()`.
+
+Also hoisted the batch-failure check above the incremental reuse branch. Unreachable today (ADR-040 §6
+means an official measure is never reused), but it is the difference between "wasteful" and "wrong" if
+that policy is lifted: a reused subject would never see the refusal, and the misconfiguration would go
+partially silent.
+
+### Verification
+
+- `pnpm test` — **1543 pass / 0 fail / 14 skipped** with the terminology sidecars present;
+  **1532 / 0 / 25** with both moved aside. 1557 collected either way. `pnpm typecheck` clean.
+- Five mutations, each caught by exactly the test that claims it and nothing else: disabling the
+  pre-pass (3 tests), dropping the `> 1` guard (the single-subject test), removing the retrieve check
+  (the refusal test), making the router batch unrouted measures (the routing test), and swallowing a
+  batch failure (the isolation test).
+- Perf measured by hand with a throwaway script over the real artifacts, not asserted in the suite —
+  timing assertions are flaky and would have to be loose enough to prove nothing.
+- Nothing routes officially. `WORKWELL_OFFICIAL_MEASURES` is unset everywhere and no measure is
+  *routable* regardless: the capped `AdvancedIllness` expansion is still a construction-time refusal.
+
+**PR-8 is now complete.** Remaining before PR-9's flip: the VSAC-capped `AdvancedIllness` expansion
+(1000 of 1997 codes, an owner-run vendor step), and CMS125 over live WebChart data, which gets neither
+ADR-038 fix and would still read out-of-population.
+
 ## 2026-07-28 — PR-8 (remaining), part 1: the `logic_version` landmine (branch `feat/official-logic-version`)
 
 Took the `logic_version` override ahead of measure-major batching, because they are not the same kind of
