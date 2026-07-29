@@ -79,7 +79,14 @@ jobs:
       # CLOSED: no key, or VSAC unreachable after retries, and the capped codes ship exactly as
       # upstream sent them with the manifest's `truncated` entry intact — so official routing refuses
       # at construction rather than a half-expanded exclusion set quietly scoring people. That is the
-      # same direction of failure as a missing sidecar, and the reason this step is not `|| true`.
+      # reason this step is not `|| true`.
+      #
+      # Since ADR-041 committed the COMPLETED manifests, that failure no longer degrades quietly to a
+      # capped artifact: the regenerated manifest stops matching the committed one and the
+      # reproducibility gate below fails the deploy outright. So this step now couples deploys to NLM
+      # VSAC availability. Deliberate — the alternative is an image whose sidecar the runtime refuses,
+      # silently losing the literal fidelity diff — but see DEPLOY.md "Step 1a" for the consequence:
+      # rolling BACK to a pre-ADR-041 image still works during an outage, rolling forward does not.
       - name: Vendor official terminology into the build context
         working-directory: backend-ts
         env:

@@ -147,7 +147,8 @@ describe("completeCappedExpansions", () => {
   it("replaces a capped set with the full expansion and reports it", async () => {
     globalThis.fetch = async (url) => {
       calls.push({ url: String(url) });
-      return expansionPage(["e", "a", "c", "b", "d"], 5);
+      // A real full expansion is a SUPERSET of the truncated sample upstream shipped.
+      return expansionPage(["c", "upstream-2", "a", "b", "upstream-1"], 5);
     };
     const terminology = cappedTerminology();
 
@@ -159,14 +160,15 @@ describe("completeCappedExpansions", () => {
   });
 
   it("writes codes sorted by system|code and deduped, because the sidecar is pinned by hash", async () => {
-    globalThis.fetch = async () => expansionPage(["e", "a", "c", "b", "d", "a"], 5);
+    globalThis.fetch = async () =>
+      expansionPage(["c", "upstream-2", "a", "upstream-1", "b", "a"], 5);
     const terminology = cappedTerminology();
 
     await completeCappedExpansions(terminology, ARGS, KEYED);
 
     assert.deepEqual(
       terminology.valueSets[0].codes.map((c) => c.code),
-      ["a", "b", "c", "d", "e"],
+      ["a", "b", "c", "upstream-1", "upstream-2"],
       "VSAC page order is not a contract; the artifact's byte order is",
     );
   });
@@ -184,6 +186,41 @@ describe("completeCappedExpansions", () => {
       "upstream's codes survive, so `truncated` survives, so routing still refuses",
     );
     assert.match(warnings.join("\n"), /short of the 5 the bundle declares/);
+  });
+
+  it("REJECTS an expansion padded with duplicates to the declared total", async () => {
+    // Raw length clears the bar; distinct length does not. Comparing before dedupe would write a set
+    // that is short after all — the exact outcome the short-expansion guard exists to prevent.
+    globalThis.fetch = async () =>
+      expansionPage(["upstream-1", "upstream-2", "a", "b", "a"], 5);
+    const terminology = cappedTerminology();
+
+    const completed = await completeCappedExpansions(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, [], "nothing is reported as completed");
+    assert.deepEqual(
+      terminology.valueSets[0].codes.map((c) => c.code),
+      ["upstream-1", "upstream-2"],
+      "upstream's codes survive, so `truncated` survives, so routing still refuses",
+    );
+    assert.match(warnings.join("\n"), /4 distinct codes .* short of the 5/);
+  });
+
+  it("REJECTS an expansion of the right size that does not contain upstream's codes", async () => {
+    // A count cannot distinguish "the full version of this set" from "a different set that happens to
+    // be bigger" — which is what a wrong release pin looks like from here.
+    globalThis.fetch = async () => expansionPage(["a", "b", "c", "d", "e"], 5);
+    const terminology = cappedTerminology();
+
+    const completed = await completeCappedExpansions(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, [], "nothing is reported as completed");
+    assert.deepEqual(
+      terminology.valueSets[0].codes.map((c) => c.code),
+      ["upstream-1", "upstream-2"],
+      "upstream's codes survive, so `truncated` survives, so routing still refuses",
+    );
+    assert.match(warnings.join("\n"), /missing 2 of the 2 codes upstream shipped/);
   });
 
   it("leaves everything alone and warns when the key is absent", async () => {

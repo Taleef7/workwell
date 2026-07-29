@@ -215,6 +215,28 @@ test("officialRoutingProblems names the gate, the artifact, and the semantics se
   assert.match(problems[1]!, /cms130: no executable official artifact is vendored/);
 });
 
+// The assertion above is deliberately state-tolerant, which means that since ADR-041 completed the
+// expansions it passes VACUOUSLY: `cappedFor` returns [] for both real artifacts, so deleting the
+// capped-expansion loop from `officialRoutingProblems` would leave this file green. That is the same
+// shape as the ADR-036 finding this repo already caught once — `cappedExpansions` was documented as a
+// guard while having no production caller — so the guard gets a test that does not depend on what the
+// vendored artifacts happen to contain today.
+test("a capped expansion the ELM retrieves REFUSES routing, whatever the real artifacts hold", () => {
+  const capped = {
+    ...offlineChecks,
+    cappedFor: () => [{ oid: "2.16.840.1.113883.3.464.1003.110.12.1082", have: 1000, declaredTotal: 1997 }],
+  };
+
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" }, capped);
+
+  assert.equal(problems.length, 1, `exactly the capped-expansion problem: ${JSON.stringify(problems)}`);
+  const [problem = ""] = problems;
+  assert.match(problem, /expands to only 1000 of 1997 codes/);
+  // The remedy has to be in the message. A warning printed at vendor time is long gone by the time
+  // someone sets the flag and hits this.
+  assert.match(problem, /--complete-capped-expansions/);
+});
+
 test("a missing terminology sidecar is a routing problem, named as a build step", async () => {
   // The sidecar is fetched at build and gitignored, so "the build step has not run" is the single most
   // likely reason official routing refuses on a fresh clone or in a new CI job. It must not surface as

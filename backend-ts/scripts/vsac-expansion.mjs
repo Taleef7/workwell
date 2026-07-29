@@ -23,9 +23,14 @@
  *
  * Every failure path here leaves upstream's codes exactly as shipped, so the manifest's `truncated`
  * entry survives and routing keeps refusing. There is no path that produces a set which *looks*
- * complete and is not — including the non-obvious one: a VSAC expansion that comes back SHORT is
- * rejected outright rather than merged, because swapping upstream's 1000 codes for a different,
- * still-incomplete 800 is a narrowing dressed as a fix.
+ * complete and is not. Two of those paths are not obvious:
+ *
+ * - An expansion that comes back SHORT is rejected rather than merged, because swapping upstream's
+ *   1000 codes for a different, still-incomplete 800 is a narrowing dressed as a fix. The comparison
+ *   is made AFTER dedupe, so a response padded with duplicates cannot clear it and then shrink.
+ * - An expansion of the right SIZE that does not CONTAIN upstream's shipped codes is also rejected.
+ *   A count cannot tell "the full version of this set" from "a different set that happens to be
+ *   bigger", and the difference is a wrong release pin scoring real patients.
  */
 
 /** NLM's FHIR terminology service — the same host `engine/cql/vsac-client.ts` expands against. */
@@ -160,15 +165,34 @@ export async function completeCappedExpansions(terminology, args, env = process.
       console.warn(`  WARNING could not complete ${valueSet.oid} from VSAC: ${err.message}`);
       continue;
     }
-    if (expanded.codes.length < valueSet.declaredTotal) {
+    // Canonicalize BEFORE comparing. Comparing the raw page total would let a response carrying
+    // duplicate system|code pairs clear the bar and then dedupe below the declared total — replacing
+    // upstream's codes with a set that is short after all, which is the one outcome this guard exists
+    // to prevent.
+    const canonical = canonicalize(expanded.codes);
+    if (canonical.length < valueSet.declaredTotal) {
       console.warn(
-        `  WARNING VSAC returned ${expanded.codes.length} codes for ${valueSet.oid}, short of the` +
+        `  WARNING VSAC returned ${canonical.length} distinct codes for ${valueSet.oid}, short of the` +
           ` ${valueSet.declaredTotal} the bundle declares — keeping upstream's ${had} rather than` +
           " swapping in a differently-incomplete set. Routing will refuse.",
       );
       continue;
     }
-    valueSet.codes = canonicalize(expanded.codes);
+    // A count says nothing about identity. Upstream shipped a real (if truncated) sample of this value
+    // set, so the full expansion must CONTAIN it; if it does not, the pinned release is not the one the
+    // bundle was built against and we would be silently substituting a different set of the right size.
+    const present = new Set(canonical.map((c) => `${c.system}|${c.code}`));
+    const missing = valueSet.codes.filter((c) => !present.has(`${c.system}|${c.code}`));
+    if (missing.length > 0) {
+      console.warn(
+        `  WARNING VSAC's expansion of ${valueSet.oid} is missing ${missing.length} of the ${had} codes` +
+          " upstream shipped (e.g. " +
+          `${missing[0].system}|${missing[0].code}) — the pinned release does not look like the one this` +
+          " bundle was built against. Keeping upstream's codes. Routing will refuse.",
+      );
+      continue;
+    }
+    valueSet.codes = canonical;
     completed.push({
       oid: valueSet.oid,
       had,
