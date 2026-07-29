@@ -86,10 +86,14 @@ period against). Only the capped OIDs are re-expanded — today one, two request
 > exists to keep those two terminology authorities apart; one secret name would invite exactly the
 > conflation it forbids.
 
-> **⚠ Landing order (this WILL turn CI red if done backwards).** CI runs the same command and then
-> `git diff --exit-code measures/official`. Adding the secret without also committing the re-vendored
-> manifests means CI completes the expansion while Git still records it as capped, and that check fails
-> on every unrelated PR. **Add the secret and commit the regenerated manifests in the same change:**
+> **⚠ Landing order (this WILL turn CI red — and BLOCK DEPLOYS — if done backwards).** CI runs the same
+> command and then `git diff --exit-code measures/official`. Adding the secret without also committing
+> the re-vendored manifests means CI completes the expansion while Git still records it as capped, and
+> that check fails on every unrelated PR. **Both deploy workflows carry the same gate** (`git diff
+> --exit-code backend-ts/measures/official`), so the next push to `main` fails its deploy too and the
+> live stack stops updating until the manifests land — fail-closed, but it is a production-visible
+> outage of the deploy path, not just a red check. **Add the secret and commit the regenerated manifests
+> in the same change:**
 >
 > ```bash
 > cd backend-ts
