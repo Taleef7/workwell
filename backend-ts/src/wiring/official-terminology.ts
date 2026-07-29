@@ -1,5 +1,5 @@
 /**
- * The OFFICIAL terminology for a vendored measure artifact (roadmap §4.3, §7.4 PR-8a).
+ * The OFFICIAL terminology for a vendored measure artifact (roadmap §7.3, §7.4 PR-8a).
  *
  * ## Why this exists — the gap it closes
  *

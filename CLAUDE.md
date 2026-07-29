@@ -170,13 +170,34 @@ indistinguishable from a genuinely ineligible roster); `>1` because for one subj
 is legitimate. It catches *retrieved nothing*, **not** *retrieved the wrong thing* — every ADR-038 corpus
 defect passed it. A failed batch fails ITS measure (MISSING_DATA + PARTIAL_FAILURE + the #264 alert),
 never the run. Wired as a pre-pass gated on `RoutedEngine.evaluateBatch` resolving non-`undefined` —
-absent everywhere today, so the per-subject loop is unchanged. **Next: PR-9** (the flip). It owes ONE
-build step now — the
-deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
-`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
-bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot
-be flipped until it is done. It changes none of the 121 official cases, which is not the same as
-changing no patient. (The PR-8b corpus finding is closed — see PR-8c above.)
+absent everywhere today, so the per-subject loop is unchanged.
+
+**PR-9a shipped (ADR-041) — the capped `AdvancedIllness` expansion is now completable at vendor time.**
+`vendor:official --complete-capped-expansions` re-expands the OIDs upstream capped (today one:
+…1003.110.12.1082, 1000 of 1997, feeding a DENEX in both measures) from VSAC, pinned to
+`Library/ecqm-fhir-update-2025` — the release the upstream content repo itself names, and the one CVU+
+validates the 2026 period against. **Research corrected the stated cause:** the cap is not "VSAC caps at
+1000" but *upstream policy* — the content repo's README says its value sets are limited to expansions of
+1000 because full ones need an NLM licence — so there was never an upstream issue to file, and VSAC's
+`$expand` has supported `offset`/`count` all along (`vsac-client.ts` has paged it since #295). Verified
+against a stub VSAC: 2043 → 3040 codes, `truncated` → `[]`, codes written sorted despite descending
+input, and **two runs produce the same `terminology.sha256`** so CI's reproducibility check stays honest.
+Every failure path (no flag, no key, VSAC down, **or a VSAC expansion that comes back SHORT**) leaves
+upstream's codes untouched so routing keeps refusing — a differently-incomplete set is the one outcome
+worse than staying capped. **Inert until the secret exists**, deliberately: the no-flag path is
+byte-identical to the committed artifacts. **OWNER STEP, and the only thing now blocking the flip** —
+add the `WORKWELL_VSAC_API_KEY_VENDOR` secret **and** commit the re-vendored manifests *in the same
+change* (DEPLOY.md §"Step 1a"); adding the secret alone turns CI red on every unrelated PR, and the
+reproducibility step now says so in its own error. Expect `test:official-cases` to stay 121/121 (its own
+analysis reports "Value-set-cap effects: 0 observed"); a moved case is the finding, not a failure.
+**Still ahead of the flip:** PR-9b (a construction-time refusal when official routing and the WebChart
+seam are both configured, plus the live-path official gate that does not exist today — **not one test on
+the live WebChart path evaluates anything through an official artifact**) and PR-9c (the flip itself, on
+the demo/production stack only). Measured while planning: the committed dev-DB corpus carries **0
+Conditions, 0 Encounters, no Patient `extension`, and no `Observation.category`** across 56 patients, so
+official *CMS122* would read out-of-population over live data too — the WebChart gap is wider than the
+two recorded CMS125 items and is M-D-sized. Production leaves every `WORKWELL_WEBCHART_*` unset, so it
+gates staging only. (The PR-8b corpus finding is closed — see PR-8c above.)
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 

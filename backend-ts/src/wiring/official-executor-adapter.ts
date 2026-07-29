@@ -98,7 +98,7 @@ import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.t
  *
  * The `catalogId` is not decoration: terminology belongs to the ARTIFACT, and two artifacts pinned at
  * different upstream commits may legitimately disagree about the same OID. An expander keyed only by OID
- * has to pick one of them, silently, for both measures (roadmap §4.3 — one terminology authority, and it
+ * has to pick one of them, silently, for both measures (roadmap §7.3 — one terminology authority, and it
  * is the artifact's own).
  */
 export type ExpandValueSet = (oid: string, catalogId: string) => Promise<ExpandedCode[]>;

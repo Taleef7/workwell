@@ -74,11 +74,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # `--complete-capped-expansions` re-expands the OIDs upstream capped at 1000 (today one:
+      # AdvancedIllness, feeding a DENEX in both measures) from VSAC at a pinned release. It fails
+      # CLOSED: no key, or VSAC unreachable after retries, and the capped codes ship exactly as
+      # upstream sent them with the manifest's `truncated` entry intact — so official routing refuses
+      # at construction rather than a half-expanded exclusion set quietly scoring people. That is the
+      # same direction of failure as a missing sidecar, and the reason this step is not `|| true`.
       - name: Vendor official terminology into the build context
         working-directory: backend-ts
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
         run: |
-          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
-          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
       # The vendored artifact must not have changed — only the gitignored sidecar is new. A non-empty
       # diff means the committed bundle does not match its pin, which must never reach a deploy image.
       - name: The committed artifact is reproducible from its pin
