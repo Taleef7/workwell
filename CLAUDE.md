@@ -186,11 +186,20 @@ input, and **two runs produce the same `terminology.sha256`** so CI's reproducib
 Every failure path (no flag, no key, VSAC down, **or a VSAC expansion that comes back SHORT**) leaves
 upstream's codes untouched so routing keeps refusing — a differently-incomplete set is the one outcome
 worse than staying capped. **Inert until the secret exists**, deliberately: the no-flag path is
-byte-identical to the committed artifacts. **OWNER STEP, and the only thing now blocking the flip** —
-add the `WORKWELL_VSAC_API_KEY_VENDOR` secret **and** commit the re-vendored manifests *in the same
-change* (DEPLOY.md §"Step 1a"); adding the secret alone turns CI red on every unrelated PR, and the
-reproducibility step now says so in its own error. Expect `test:official-cases` to stay 121/121 (its own
-analysis reports "Value-set-cap effects: 0 observed"); a moved case is the finding, not a failure.
+byte-identical to the committed artifacts. **OWNER STEP DONE 2026-07-29** — the
+`WORKWELL_VSAC_API_KEY_VENDOR` secret is set and the re-vendored manifests are committed in the same
+change (DEPLOY.md §"Step 1a"). `AdvancedIllness` is now **2000 codes in both artifacts**, `truncated` is
+`[]`, and **`officialRoutingProblems(["cms122"])` and `(["cms125"])` both return no problems — the two
+measures are ROUTABLE.** Nothing is routed: `WORKWELL_OFFICIAL_MEASURES` is still unset everywhere.
+`test:official-cases` stayed **121/121** (55/55 + 66/66, 0 unexpected, 0 errors) and CI's four
+sidecar-dependent suites pass against the completed expansion, including the corpus-outcomes check.
+Two independent vendor runs against live VSAC produced **byte-identical manifests and sidecars**, so
+CI's reproducibility gate holds. **One observation recorded rather than smoothed over:** VSAC at the
+pinned release returns **2000 codes where the bundle declares 1997**. The guard only rejects a SHORT
+expansion, so this passes; it means upstream's `expansion.total` was captured against a slightly earlier
+terminology snapshot than `ecqm-fhir-update-2025`. Three extra codes in a DENEX widen an exclusion
+slightly, and no official case moved — but it is a real difference between our terminology and the
+bundle's own declaration, and PR-9c's before/after distribution snapshot is where it would show up.
 **Still ahead of the flip:** PR-9b (a construction-time refusal when official routing and the WebChart
 seam are both configured, plus the live-path official gate that does not exist today — **not one test on
 the live WebChart path evaluates anything through an official artifact**) and PR-9c (the flip itself, on
