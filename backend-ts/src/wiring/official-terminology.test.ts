@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   cappedExpansions,
   loadOfficialTerminology,
@@ -97,29 +98,81 @@ test("the fetched sidecar covers EVERY value set the artifact's ELM retrieves", 
   }
 });
 
-test("a capped expansion the ELM RETRIEVES is surfaced; one it ignores is not", { skip }, () => {
-  // VSAC caps an expansion at 1000 codes. Advanced Illness is 1997 upstream and is capped in both
-  // measures' bundles, where it feeds a denominator exclusion — so `officialRoutingProblems` refuses
-  // on it. An under-expanded set cannot invent membership, but it can quietly omit a subject who
-  // belongs, and preflight cannot catch it: it refuses on EMPTY, and half-expanded is not empty.
-  const artifact = loadOfficialArtifact("cms122")!;
-  const capped = cappedExpansions(artifact, requiredOids(artifact));
-  assert.ok(capped.length > 0, "AdvancedIllness is capped and retrieved — if this changes, so did upstream");
-  assert.ok(
-    capped.every((c) => c.have < c.declaredTotal),
-    "a surfaced cap must actually be short of its declared total",
-  );
+test("a capped expansion the ELM RETRIEVES is surfaced; one it ignores is not", () => {
+  // Driven by a SYNTHETIC manifest, not by the real artifact, and that is the point. This used to
+  // assert `capped.length > 0` against cms122 — true only while AdvancedIllness was still capped, so
+  // the guard was scheduled to be deleted by its own fix. The mechanism is what needs pinning: a cap
+  // the ELM retrieves must surface, a cap it never touches must not, and nothing else may.
+  const artifact = {
+    manifest: {
+      terminology: {
+        truncated: [
+          { oid: "2.16.retrieved", have: 1000, declaredTotal: 1997 },
+          { oid: "2.16.ignored", have: 1000, declaredTotal: 1200 },
+        ],
+      },
+    },
+  } as never;
 
-  // Filtered by what the ELM references, so a capped set the measure never retrieves cannot block it.
-  assert.deepEqual(cappedExpansions(artifact, []), []);
+  assert.deepEqual(cappedExpansions(artifact, ["2.16.retrieved"]), [
+    { oid: "2.16.retrieved", have: 1000, declaredTotal: 1997 },
+  ]);
+  assert.deepEqual(cappedExpansions(artifact, []), [], "a cap the measure never retrieves cannot block it");
+  assert.deepEqual(cappedExpansions({ manifest: { terminology: { truncated: [] } } } as never, ["x"]), []);
 });
 
-test("the routing check REFUSES a measure whose retrieved value set is capped", { skip }, () => {
-  // The finding this replaces: `cappedExpansions` existed, documented "reported at boot so a shortfall
-  // is never silent", and had zero production callers. Recording is not guarding.
-  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" });
-  assert.ok(
-    problems.some((p) => /expands to only \d+ of \d+ codes/.test(p)),
-    `expected a capped-expansion refusal, got: ${JSON.stringify(problems)}`,
-  );
+test("the manifest's caps, the sidecar's own shortfalls, and the routing decision all agree", { skip }, () => {
+  // Written to hold in BOTH states, because the artifact moves between them: capped as upstream ships
+  // it (upstream limits every expansion to 1000 — its README says so), and complete once
+  // `--complete-capped-expansions` has re-expanded the shortfall from VSAC at the pinned release.
+  //
+  // Asserting one state would mean the test tells the truth for exactly one of them. What must hold
+  // either way is that the three things cannot disagree — and the dangerous disagreement is precise:
+  // a manifest claiming `truncated: []` over a sidecar that is still short would clear the routing
+  // refusal while the exclusion set stays half-expanded, which is the failure the refusal exists for.
+  for (const catalogId of ["cms122", "cms125"]) {
+    const artifact = loadOfficialArtifact(catalogId)!;
+    const recorded = artifact.manifest.terminology?.truncated ?? [];
+
+    // The sidecar carries each value set's own `declaredTotal`, so it can be checked against the
+    // manifest rather than trusted alongside it.
+    const raw = JSON.parse(
+      readFileSync(new URL(`../../measures/official/${catalogId}/terminology.json`, import.meta.url), "utf8"),
+    ) as { valueSets: Array<{ oid: string; declaredTotal: number; codes: unknown[] }> };
+    const short = raw.valueSets
+      .filter((v) => v.declaredTotal > v.codes.length)
+      .map((v) => v.oid)
+      .sort();
+
+    assert.deepEqual(
+      recorded.map((c) => c.oid).sort(),
+      short,
+      `${catalogId}: the manifest's caps must be exactly the sidecar's shortfalls — a manifest that ` +
+        "claims complete over a short sidecar would clear the routing refusal on a lie",
+    );
+    assert.ok(
+      recorded.every((c) => c.have < c.declaredTotal),
+      "a surfaced cap must actually be short of its declared total",
+    );
+
+    // And the routing decision follows from that, in whichever state we are in.
+    const retrieved = cappedExpansions(artifact, requiredOids(artifact));
+    const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: catalogId }).filter((p) =>
+      /expands to only \d+ of \d+ codes/.test(p),
+    );
+    assert.equal(
+      problems.length,
+      retrieved.length,
+      `${catalogId}: one refusal per retrieved cap, no more and no fewer — got ${JSON.stringify(problems)}`,
+    );
+
+    // Completion is not silent: an artifact with no caps left must say where the codes came from.
+    if (recorded.length === 0 && artifact.manifest.terminology?.completion) {
+      assert.match(
+        artifact.manifest.terminology.completion.manifest,
+        /^http:\/\/cts\.nlm\.nih\.gov\/fhir\/Library\//,
+        "an unpinned completion is not reproducible, so it is not provenance",
+      );
+    }
+  }
 });

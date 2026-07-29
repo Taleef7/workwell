@@ -39,7 +39,7 @@
  * caps expansions at 1000 codes, and the capped set in both vendored measures feeds a denominator
  * exclusion — so routing would leave excluded subjects in the denominator and score them. **Both
  * cms122 and cms125 currently fail this check**, deliberately: completing that expansion is a
- * vendor-time owner action (roadmap §4.3), and until it happens neither measure may be routed.
+ * vendor-time owner action (roadmap §7.3), and until it happens neither measure may be routed.
  *
  * 1-6 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
  * (7) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
@@ -223,15 +223,19 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
     if (!terminology.ok) problems.push(terminology.problem);
 
     // A CAPPED expansion is the failure one notch weaker than an empty one, and preflight cannot see
-    // it: `expandArtifactTerminology` refuses on empty, and a half-expanded set is not empty. VSAC caps
-    // at 1000 codes, and the capped set in both vendored measures feeds a DENEX — so routing would
-    // leave excluded subjects in the denominator and score them. Recorded-and-warned was the state
-    // this check replaces; a warning printed at vendor time is long gone by the time anyone sets the flag.
+    // it: `expandArtifactTerminology` refuses on empty, and a half-expanded set is not empty. UPSTREAM
+    // caps every expansion it ships at 1000 codes (its README says so — full ones need an NLM licence,
+    // so this is policy rather than a defect), and the capped set in both vendored measures feeds a
+    // DENEX — so routing would leave excluded subjects in the denominator and score them.
+    // Recorded-and-warned was the state this check replaces; a warning printed at vendor time is long
+    // gone by the time anyone sets the flag. The remedy is now one command, so it is named here.
     for (const cap of cappedFor(artifact)) {
       problems.push(
         `${id}: value set ${cap.oid} expands to only ${cap.have} of ${cap.declaredTotal} codes ` +
-          `(VSAC caps expansions at 1000) and this measure's ELM retrieves it. Routing would narrow ` +
-          `populations silently — complete the expansion from VSAC at vendor time first (roadmap §4.3).`,
+          `(upstream caps its shipped expansions at 1000) and this measure's ELM retrieves it. Routing ` +
+          `would narrow populations silently — re-vendor with ` +
+          `\`pnpm vendor:official --measure <name> --catalog-id ${id} --strip-elm-annotations ` +
+          `--complete-capped-expansions\` and WORKWELL_VSAC_API_KEY set (ADR-041, DEPLOY.md "Step 1a").`,
       );
     }
   }
@@ -265,7 +269,7 @@ export async function routedEngineForEnv(
 
   // The artifact's OWN terminology, at the commit its ELM came from — never our VSAC import. That is
   // what makes the MADiE gate evidence about this path rather than about a configuration nothing runs
-  // (roadmap §4.3; the split is documented at length in official-terminology.ts).
+  // (roadmap §7.3; the split is documented at length in official-terminology.ts).
   const expand = options.expand ?? officialTerminologyExpander(loadOfficialArtifact);
   const executor = officialMeasureExecutor({
     expand,
