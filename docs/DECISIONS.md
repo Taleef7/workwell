@@ -51,8 +51,14 @@ writes DB rows the official executor must never read.
    keeps refusing. There is no path that yields a set which *looks* complete and is not: `truncated` is
    recomputed from the codes actually present after completion, by the same comparison as before.
 
-6. **A VSAC expansion that comes back SHORT of the declared total is rejected outright rather than
-   merged.** This is the non-obvious one and the reason it is written down. Merging a shorter, different
+6. **A VSAC expansion that comes back SHORT of the declared total, or that does not CONTAIN upstream's
+   shipped codes, is rejected outright rather than merged.** These are the non-obvious ones and the
+   reason they are written down. The short comparison is made AFTER dedupe, so a response padded with
+   duplicate `system|code` pairs cannot clear the bar and then shrink below it — comparing the raw page
+   total was the original mistake, caught in review. The containment check exists because a count cannot
+   distinguish "the full version of this set" from "a different set that happens to be bigger", and that
+   difference is a wrong release pin scoring real patients; it is also what empirically confirms the pin,
+   since VSAC's 2000 codes do contain all 1000 upstream shipped. Merging a shorter, different
    set would swap upstream's 1000 codes for someone else's 800 — a narrowing dressed as a fix, and the
    only outcome worse than staying capped. Staying capped is loud; a wrong 800 is not.
 
@@ -79,7 +85,11 @@ writes DB rows the official executor must never read.
   `assert.ok(capped.length > 0)` is only true while the blocker is unfixed. The mechanism is now pinned
   against a synthetic manifest (never vacuous, never state-dependent), and the real artifacts are checked
   for the invariant that holds in *both* states: the manifest's caps, the sidecar's own shortfalls, and
-  the routing decision agree. That last one is a new guard, and it is the one that matters — a manifest
+  the routing decision agree. Review caught that this covered `cappedExpansions` the HELPER while leaving
+  `officialRoutingProblems` the GUARD vacuous — with both artifacts now complete, deleting its
+  capped-expansion loop left the suite green. A test stubbing `cappedFor` non-empty now pins the refusal
+  itself, verified by mutation; without it this would have repeated the ADR-036 decision-7 finding
+  (recorded, documented as a guard, and never actually exercised). That last one is a new guard, and it is the one that matters — a manifest
   claiming `truncated: []` over a still-short sidecar would clear the refusal on a lie.
 - The paging loop is a second implementation of `httpVsacClient`'s, deliberately. The vendor script runs
   as plain `node` on the deploy path with no install and no build step, which is what makes the deploy's

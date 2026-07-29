@@ -170,6 +170,8 @@ jobs:
             COMPLETE=
             echo "::notice::No VSAC credential in this context (expected for a fork PR). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
           fi
+          # $COMPLETE is deliberately UNQUOTED: it is either one flag or nothing, and quoting it passes
+          # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
           pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
@@ -199,7 +201,7 @@ jobs:
             echo "::error::the vendored bundle does not match what this pin produces."
             exit 1
           fi
-          echo "::notice::Bundle bytes verified. Terminology completion NOT verified — this context has no VSAC credential."
+          echo "::notice::Bundle bytes verified. manifest.json and terminology completion NOT verified — this context has no VSAC credential, so the manifest is regenerated uncompleted and cannot be compared. The credentialed run on merge covers both."
       # Every assertion that consults the ARTIFACT'S OWN terminology self-skips without the fetched
       # sidecar, and `pnpm test` runs in a job that has no sidecar — so this step is their only gate.
       # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while

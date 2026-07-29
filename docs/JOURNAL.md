@@ -32,6 +32,15 @@ obvious, and the reason it is in the ADR: **a VSAC expansion that comes back SHO
 is rejected rather than merged.** Merging it would swap upstream's 1000 codes for a different,
 still-incomplete 800 — a narrowing dressed as a fix. Staying capped is loud; a wrong 800 is not.
 
+**Review tightened both of those, and the first was a real hole rather than a wording quibble.** The
+short check compared the RAW page total against `declaredTotal` while `canonicalize` deduped
+afterwards, so a response padded with duplicate `system|code` pairs could clear the bar and then shrink
+below it — replacing upstream's codes with a set that was short after all, which is precisely what the
+guard exists to prevent. It compares distinct codes now. Second, a count cannot tell "the full version
+of this set" from "a different set that happens to be bigger", so the completed expansion must now also
+CONTAIN every code upstream shipped; that is the check that would catch a wrong release pin, and it is
+also what settles the 2000-vs-1997 question below empirically — VSAC's 2000 do contain all 1000.
+
 **Verified before the docs were written, which is the part that made it worth doing this way:**
 
 - The no-flag path is **byte-identical** to the committed artifacts (`git diff --exit-code

@@ -35,11 +35,14 @@
  * rather than missing*, an empty set matches nothing, and the measure then reports every subject
  * out-of-population — which reads downstream exactly like a genuinely ineligible roster.
  *
- * (6) is the same failure one notch weaker, and (7) cannot catch it: half-expanded is not empty. VSAC
- * caps expansions at 1000 codes, and the capped set in both vendored measures feeds a denominator
- * exclusion — so routing would leave excluded subjects in the denominator and score them. **Both
- * cms122 and cms125 currently fail this check**, deliberately: completing that expansion is a
- * vendor-time owner action (roadmap §7.3), and until it happens neither measure may be routed.
+ * (6) is the same failure one notch weaker, and (7) cannot catch it: half-expanded is not empty. The
+ * cap is UPSTREAM POLICY rather than a VSAC limit — the content repo ships every expansion truncated
+ * at 1000 because full ones need an NLM licence — and the capped set in both vendored measures feeds a
+ * denominator exclusion, so routing would leave excluded subjects in the denominator and score them.
+ * **Both cms122 and cms125 failed this check until ADR-041**, deliberately; `vendor:official
+ * --complete-capped-expansions` (roadmap §7.3) now completes the shortfall from VSAC at vendor time and
+ * both pass. The check stays live and tested: a re-vendor without the credential reinstates the refusal
+ * rather than shipping a narrowed exclusion.
  *
  * 1-6 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
  * (7) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
@@ -50,9 +53,11 @@
  *
  * ## Scope of this PR
  *
- * Ships dark. Bundle preparation (ADR-037) and measure-major batching (PR-8, `evaluateBatch` below) are
- * both wired now, so the remaining reason not to flip is the capped `AdvancedIllness` expansion in (6)
- * — a vendor-time owner action, and a construction-time refusal until it is done. The flag existing and
+ * Ships dark. Bundle preparation (ADR-037), measure-major batching (PR-8, `evaluateBatch` below) and
+ * the capped `AdvancedIllness` expansion in (6) (ADR-041) are all done, so cms122 and cms125 are now
+ * ROUTABLE — which is not the same as routed. What remains before the flip is PR-9b: official routing
+ * and the WebChart seam are not yet safe to configure together, because WebChart-derived data carries
+ * neither the Conditions nor the Encounters an official Initial Population reads. The flag existing and
  * the flag being safe to set are still different things, which is why `WORKWELL_OFFICIAL_MEASURES`
  * remains deliberately absent from DEPLOY.md.
  *
@@ -171,9 +176,10 @@ export interface RoutingCheckDeps {
    */
   loadTerminology?: (artifact: OfficialArtifact) => LoadedTerminology;
   /**
-   * Injectable for the same reason, and one more: both vendored artifacts currently DO carry a capped
-   * expansion, so this check legitimately refuses cms122/cms125 today. A test exercising a later check
-   * has to get past it, and stubbing it is honest where relaxing the check would not be.
+   * Injectable for the same reason, and one more: since ADR-041 neither vendored artifact carries a
+   * capped expansion, so a test that only ever saw the real ones would assert nothing here. Stubbing it
+   * NON-empty is what proves the refusal still fires; stubbing it empty is what lets a test reach a
+   * later check. Both are honest where relaxing the check would not be.
    */
   cappedFor?: (artifact: OfficialArtifact) => Array<{ oid: string; have: number; declaredTotal: number }>;
 }
