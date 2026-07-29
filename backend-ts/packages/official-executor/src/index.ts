@@ -321,6 +321,30 @@ export interface OfficialSubjectResult {
 export async function calculateOfficialDetailed(
   input: OfficialCalculationInput,
 ): Promise<Map<string, OfficialSubjectResult>> {
+  return (await calculateOfficialWithSignal(input)).bySubject;
+}
+
+/** Per-subject results plus the one fact about the batch that no individual result carries. */
+export interface OfficialBatchResult {
+  bySubject: Map<string, OfficialSubjectResult>;
+  /**
+   * `hasRetrieveSignal` over the WHOLE batch (see that function). Surfaced here because it is the only
+   * thing the raw fqm output says that the per-subject map cannot: an empty population is a legitimate
+   * per-subject answer, so a caller can only judge it by looking across subjects — and by then the raw
+   * output is gone. Deciding what to DO about it needs to know how many subjects were asked for, which
+   * is the caller's business, not this package's.
+   */
+  retrieveSignal: boolean;
+}
+
+/**
+ * The richest entry: everything `calculateOfficialDetailed` returns, plus whether any retrieve matched
+ * anywhere in the batch. The other two entries are derived from this one so a caller that needs both
+ * never runs the measure twice.
+ */
+export async function calculateOfficialWithSignal(
+  input: OfficialCalculationInput,
+): Promise<OfficialBatchResult> {
   const calculate = input.calculate ?? (await loadCalculator());
   const output = await calculate(
     input.bundle,
@@ -339,7 +363,7 @@ export async function calculateOfficialDetailed(
       });
     }
   }
-  return bySubject;
+  return { bySubject, retrieveSignal: hasRetrieveSignal(output) };
 }
 
 /**

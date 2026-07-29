@@ -17,7 +17,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
 import type { RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
@@ -93,7 +93,7 @@ export interface RunPipelineDeps {
    * (#263/ADR-035 + roadmap §7.4 PR-8); reading it off the engine rather than taking it as a separate
    * dep is what makes the two structurally unable to disagree.
    */
-  engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicVersionFor">;
+  engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicVersionFor" | "evaluateBatch">;
   /** When present, each outcome upserts/resolves a case (idempotent). */
   caseStore?: CaseStore;
   /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
@@ -162,6 +162,17 @@ interface WorkItem {
   measureId: string;
   target?: TargetOutcome;
   liveBundle?: unknown;
+}
+
+/**
+ * The FHIR bundle a work item is evaluated against — extracted so the measure-major pre-pass and the
+ * per-item loop cannot build it two subtly different ways. Deterministic in its inputs, which is what
+ * makes building it twice for a batched measure merely wasteful rather than a source of divergence.
+ */
+function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string): unknown {
+  return item.liveBundle !== undefined
+    ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
+    : buildSyntheticBundle(item.employee, deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target!), evalDate);
 }
 
 export interface LivePopulationDescriptor {
@@ -527,14 +538,76 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     }
   }
 
-  for (const item of items) {
-    const bundle = item.liveBundle !== undefined
-      ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
-      : buildSyntheticBundle(
-          item.employee,
-          deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target!),
+  // Roadmap §7.4 PR-8 — measure-major batching, as a PRE-PASS rather than a rewrite of the loop below.
+  //
+  // fqm-execution parses an artifact's ELM per CALL, so an officially-routed measure was paying one parse
+  // of a 2.4 MB bundle PER SUBJECT. `engine.evaluateBatch` resolves `undefined` for anything it cannot
+  // batch — every measure today — in which case nothing here runs and the loop is the code that ships now.
+  //
+  // A pre-pass, because the loop carries outcome persistence, the incremental commit, the case upsert, its
+  // audit event and the counters, all order-dependent. Restructuring it measure-major would hold every
+  // measure's bundles in memory at once (150 subjects × 14 measures) to benefit the measures that are
+  // routed, of which there are currently none. This holds ONE measure's bundles and drops them.
+  //
+  // Bundles are therefore built twice for a batched measure — here and in the loop, where the incremental
+  // fingerprint needs one. Deterministic and cheap beside an ELM parse; noted rather than optimised.
+  //
+  // No interaction with the incremental cache today: ADR-040 §6 means an official-routed measure is never
+  // reused, so this cannot evaluate a subject the cache would have skipped. If that policy is lifted, the
+  // pre-pass would evaluate some subjects whose result then goes unused — wasteful, never wrong.
+  const prefetched = new Map<string, MeasureOutcome>();
+  const batchFailure = new Map<string, Error>();
+  if (deps.engine.evaluateBatch) {
+    for (const measureId of new Set(items.map((i) => i.measureId))) {
+      const forMeasure = items.filter((i) => i.measureId === measureId);
+      let batched = false;
+      try {
+        // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
+        // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
+        // discard 13/14 of them the moment official routing is on for one measure (review #3).
+        const results = await deps.engine.evaluateBatch(
+          measureId,
+          () =>
+            forMeasure.map((item) => ({
+              subjectId: item.employee.externalId,
+              patientBundle: bundleFor(item, liveRoster, evalDate),
+            })),
           evalDate,
         );
+        if (!results) continue; // not batchable — the loop evaluates it per subject, unchanged
+        batched = true;
+        for (const item of forMeasure) {
+          const outcome = results.get(item.employee.externalId);
+          if (outcome) prefetched.set(`${item.employee.externalId}|${measureId}`, outcome);
+        }
+      } catch (err) {
+        // Never abort the run (runtime invariant). The failure is recorded against the MEASURE and
+        // re-thrown per subject in the loop, so it lands in the existing per-subject isolation —
+        // MISSING_DATA carrying this message, `failures++`, run PARTIAL_FAILURE, and therefore the #264
+        // alert. That is the loud outcome the batch retrieve check exists to produce, and it costs no new
+        // failure channel. Other measures are unaffected. Normalized to an Error so the loop can test
+        // PRESENCE rather than truthiness — a rejection with a falsy value would otherwise be stored and
+        // then silently ignored, disabling the very refusal this exists for (review #4).
+        batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
+        await deps.runStore
+          .appendLog(run.id, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
+          .catch(() => {});
+      }
+      // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
+      // caught above and recorded as a batch failure — turning a successful evaluation, whose results are
+      // already in `prefetched`, into a whole measure's worth of MISSING_DATA. An observability write must
+      // never author an outcome (review #2); the same reason the case-audit and quality-snapshot writes in
+      // this file are best-effort.
+      if (batched) {
+        await deps.runStore
+          .appendLog(run.id, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
+          .catch(() => {});
+      }
+    }
+  }
+
+  for (const item of items) {
+    const bundle = bundleFor(item, liveRoster, evalDate);
     // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
     // day-math is current, but the persisted evaluation_period is bucketed to the measure's
     // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
@@ -561,14 +634,26 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       : null;
     let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
     let evaluationFailed = false;
-    if (plan?.action === "reuse") {
+    // A failed batch outranks a cache hit. Unreachable today — ADR-040 §6 means an official-routed
+    // measure is never reused, so a measure that could fail a batch never produces a `reuse` plan — but
+    // the ordering is the difference between "wasteful" and "wrong" if that policy is lifted: a reused
+    // subject would otherwise never see the refusal, and a profile/terminology misconfiguration would go
+    // partially silent, which is precisely what the refusal exists to prevent (review #5).
+    const batchFailed = batchFailure.has(item.measureId);
+    if (plan?.action === "reuse" && !batchFailed) {
       status = plan.status;
       evidence = plan.evidence;
       evaluatedNow = false;
       skipped++;
     } else {
       try {
-        const result = await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate });
+        // A measure whose whole roster was evaluated in one official batch above is read from there. A
+        // batch that FAILED re-throws here, once per subject, so a batch-level refusal (notably "nothing
+        // was retrieved for anybody") reaches exactly the isolation a single subject's failure does.
+        if (batchFailed) throw batchFailure.get(item.measureId)!;
+        const result =
+          prefetched.get(`${item.employee.externalId}|${item.measureId}`) ??
+          (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
         status = result.outcome;
         evidence = result.evidence;
       } catch (err) {

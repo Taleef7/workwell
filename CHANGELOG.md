@@ -37,6 +37,25 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
   surface is still moving — it is **not reused at all**, since `logic_version` identifies the measure
   definition and not the code that executes it. Inert on every environment today (both flags unset ⇒
   byte-identical run loop); no schema change (`logic_version` is already TEXT).
+- **Measure-major batching for official execution, and the batch-level retrieve refusal (PR #349).**
+  Completes PR-8. The official executor's primitive is now `evaluateBatch` — a whole roster in one fqm
+  pass — with `evaluate` derived from it as a batch of one, so the four construction refusals live on one
+  path rather than two that must agree. Measured on the real vendored artifacts: **171 ms per subject
+  one-at-a-time versus 11–16 ms batched** (10× at 25 subjects, 16× at 100, since the ELM parse is per
+  call and amortises). That inverts a comparison worth stating: unbatched, official execution is ~2.5×
+  *slower* per subject than the authored engine's ~68 ms; batched, it is faster. Riding with it, the
+  safety net batching made possible: a batch of more than one that matched **no retrieve for anybody**
+  now refuses, instead of reporting an entire roster out-of-population — fqm returns a complete-looking
+  all-empty result that is indistinguishable downstream from a genuinely ineligible roster. Scoped to
+  `> 1` because for a single subject "nothing retrieved" is a legitimate answer. It catches *retrieved
+  nothing*, **not** *retrieved the wrong thing* — every ADR-038 corpus defect passed this check while
+  scoring the roster wrongly. A failed batch fails its own measure (MISSING_DATA carrying the reason,
+  run PARTIAL_FAILURE, #264 alert) and leaves other measures intact. Wired as a pre-pass in
+  `finishManualRun` gated on `RoutedEngine.evaluateBatch` resolving non-`undefined` — absent on every
+  environment today, so the per-subject loop is unchanged. Results are keyed back to the CALLER's subject
+  id rather than fqm's `Patient.id`: the two coincide for every synthetic subject and never for a live
+  WebChart one (`wc|123` vs `123`), so keying by fqm's would have silently degraded to per-subject
+  evaluation for exactly the population this is aimed at. No schema change, no new deps.
 - **Option A at scale — real batch live-evaluation of the `mhn` (~120k) scale tenant (PR #252, open).** Replaces the *fabricated* scale outcomes with real, chunked, subject-major CQL evaluation (`batchEvaluateScalePopulation`) behind a pluggable `ScaleSubjectGenerator` seam; the default `webChartRealisticGenerator` routes real LOINC/CVX/CPT codes through the WebChart terminology crosswalk (13/14 measures) so the real adapter is exercised at scale. Bounded-memory, whole-batch resumable, per-subject error-isolated, audited `SCALE_POPULATION_EVALUATED`. CLI `pnpm seed:scale --mode evaluate` (default; `--mode fabricated` legacy one release; `--trim-evidence` for 120k). Reuses the `mhn|Lxx|Pxx|n` encoding so `aggregateScaleRun` + the rollup are unchanged (only outcome provenance changed). Evaluate mode **refuses over legacy fabricated `seed:scale` runs** (roll back first). Descriptive only (ADR-008/ADR-020); no schema, no new deps.
 - **E9 (#78) — `MeasureExecutor` seam (ADR-025).** Measure execution is pluggable behind one port (`backend-ts/src/engine/measure-executor.ts`, extends `EvaluateMeasureBinding`): `fhirNativeExecutor` is the default + correctness oracle, `sqlPushdownExecutor` is an inert stub (Option B / CQL→SQL research-grade, not built), `resolveMeasureExecutor(env)` config-selects. Resolves the charter's CQL→SQL fork as a decision + seam (supersedes ADR-014). Descriptive only; no schema/deps/engine change.
 - **2026 terminology/standards currency fix** (`docs/TERMINOLOGY_AUDIT_2026-07-08.md`). A three-way verification (our impl vs MIE's WebChart dev DB vs current CDC/CMS/LOINC/VSAC/OSHA) confirmed all load-bearing codes correct (49 CMS catalog versions/MIPS IDs with **v14 = 2026**; OSHA CFR; runnable LOINC/CPT), and fixed vaccine-CVX currency on the WebChart crosswalk: full active influenza CVX set (VSAC Influenza OID `2.16.840.1.113883.3.526.3.1254`), active Td `09`/`113`/`196` replacing the inactive `139`, MMRV `94` counting toward varicella, and deleted HCPCS `G0202` marked read-only. Additive read-path only — no synthetic outcome changed.
