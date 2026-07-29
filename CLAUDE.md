@@ -112,8 +112,9 @@ cases only, never reproduced NCQA specs (DUA).
 
 **STATUS (2026-07-27): §7.4 PR-1 → PR-8a shipped; nothing is flipped.** `WORKWELL_OFFICIAL_MEASURES` is
 unset everywhere, so `routedEngineForEnv` returns `engineForEnv`'s own value **by identity** and every
-measure still evaluates authored CQL. Shipped: engine-boundary severance + physical
-`packages/measure-engine` extraction (PR-1/2), evidence-first MeasureReport membership (PR-3),
+measure still evaluates authored CQL. Shipped: engine-boundary severance (PR-1 — the containment test
+that freezes the boundary; the physical `packages/measure-engine` extraction is **PR-2, resequenced
+2026-07-24 to land with M-C** and NOT shipped), evidence-first MeasureReport membership (PR-3),
 `packages/official-executor` — the sole home of `fqm-execution`, reached only by lazy `await import`
 and policed by five boundary tests (PR-4), CMS122+CMS125 v1.0.000 vendored (PR-5), the **MADiE CI
 gate** — 55/55 + 66/66, and no measure may be routed without it (PR-6), ELM-annotation stripping
