@@ -340,11 +340,34 @@ SYNTHETIC roster (what the demo/production stack evaluates) cms122 and cms125 bo
 and agree with authored; over WebChart data cms125 admits 4/56 agreeing on all 56, cms122 admits 0/56 and
 reports INCONCLUSIVE (data gap, not divergence) — ADR-043 decision 6 confirmed by measurement.
 
-**Still ahead:** PR-9c itself (**cms122 + cms125**, on the demo/production stack) — which is a **workflow
-edit**, since `deploy-twh-mieweb.yml` has no `WORKWELL_OFFICIAL_MEASURES` key and recreates the container,
-so a hand-set value is wiped. Production leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging
-only. **Still open:** the LIVE third-party path gets neither fix (both mapping sites sit upstream of the
-live FHIR transport; `normalizeWebChartBundle` is untouched by design), and Cypress CVU+ has not run.
+**PR-9c SHIPPED (ADR-045) — M-A IS COMPLETE. `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` is set on
+`deploy-twh-mieweb.yml`, so those two measures now evaluate CMS's published QI-Core artifacts on
+demo/production.** Set in the WORKFLOW, not on the container: `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
+array and the deploy deletes-and-recreates, so a hand-set value is wiped — which makes the flip a reviewed,
+revertable change rather than an operator action. **Decided on measurement, not assumption:** both measures
+admit **5/5** corpus subjects to the official initial population and agree with authored on every one
+(evidence committed at `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md`). cms122 went too — ADR-043
+decision 6 — because this stack carries **zero** `WORKWELL_WEBCHART_*` and evaluates the synthetic roster
+where it scores normally; its WebChart blindness constrains STAGING, not this flip. **The flip is INERT on
+this stack's data** (no roster row changes) and that is the expected result; the value is that official
+execution runs in production at all.
+
+**New guard, because nothing validated the string that actually ships:** `official-flip-config.test.ts`
+parses `WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and asserts every id is MADiE-gated,
+vendored, proportion-scored and routing-clean. Split deliberately — a pure structural half that always
+runs, plus a sidecar half wired into CI's `official-cases` job, because one combined test would self-skip
+in `pnpm test` and read as covered. It does NOT pin *which* measures are flipped (that would guard only
+"you changed what you changed"). **A misconfiguration does NOT refuse at boot** — the throw is at engine
+construction, per request, while the DB-free `/actuator/health` stays 200, so grep the logs for
+`OFFICIAL_ROUTING_MISCONFIGURED`; a green container is not evidence. `WORKWELL_SCHEDULER_ENABLED=true`
+here, so the nightly ALL_PROGRAMS run exercises the flip unprompted. Rollback = remove the line + redeploy
+(ADR-040 makes `eval_state` invalidate by construction).
+
+**Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
+deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
+nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
+`normalizeWebChartBundle` untouched by design); and **Cypress CVU+ has not run** — it remains the
+verification bar.
 
 ---
 
