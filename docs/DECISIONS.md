@@ -51,7 +51,21 @@ authored and not official; a LOINC Observation clears official and not authored;
    no command, no tooling and no artifact. That is the vacuous-guard shape this branch has now been pulled
    up on three times. The CLI evaluates a measure both ways over the same bundles and reports the before/
    after distribution, the official IPP count, and every subject whose roster row would change.
-5. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
+5. **The snapshot reads the CONFIGURED TENANT, not a fixture.** *(Corrected 2026-07-30 after review.)* The
+   first version's `--source webchart` always loaded the committed 56-patient sample, so the command
+   DEPLOY.md sends an operator to for "confirm a non-zero initial population against the tenant's own
+   data" could not see a tenant at all — a tenant whose live mapping still omits `us-core-sex` would have
+   received a healthy verdict computed from our frozen fixture (Codex, #355). A gate that cannot see the
+   thing it gates is the exact failure this tool exists to stop. `--source live` now reads
+   `WORKWELL_WEBCHART_*` over the real ingress path and **refuses loudly when the seam is unset** rather
+   than falling back; the frozen sample is `--source fixture`, named so nobody reaches it by accident.
+6. **The official side is evaluated batch-then-fallback, exactly as a run evaluates it.** `evaluateBatch`
+   omits a subject it returned nothing for and the run pipeline re-evaluates each one individually; a
+   snapshot that skipped that step would not forecast the run it claims to forecast, and a roster whose
+   omitted subjects DO qualify could report zero-in-IPP and earn a spurious DO-NOT-FLIP. Also review
+   (#355) — and the same incomplete-roster mistake ADR-043 decision 2 records, which suggests "did you
+   model the omission fallback?" belongs on the checklist for anything reading `evaluateBatch`.
+7. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
    supports is the one ADR-043 established a machine cannot make from shape alone. What it *can* do is
    compute the comparison a human needs: `authoredActionable > 0 && officialInIpp === 0` means the cohort
    is not the explanation. Where both engines find nobody it reports **INCONCLUSIVE** rather than picking
