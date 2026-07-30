@@ -11,7 +11,7 @@
 
 ## Titles (newest first)
 
-- ADR-043: A routed measure that can see nobody is refused — and cms122 therefore leaves the flip list
+- ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
 - ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
 - ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
 - ADR-040: The engine declares the logic it runs; the incremental cache never infers it

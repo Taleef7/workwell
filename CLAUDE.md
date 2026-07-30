@@ -276,24 +276,35 @@ Encounter), so this is not purely EHR-sourced membership, and with 52 of 56 outc
 subjects carry discriminating signal** — the oracle is our own authored engine, not external truth. Cypress
 CVU+ remains the verification bar and has not run.
 
-**The PR-9c precondition is DISCHARGED (ADR-043), and it changed the flip's scope.** `evaluateBatch` now
-refuses a batch of `outcomes.size > 1` in which **nobody entered the initial population** — the conjunct
-PR-8f's retrieve check provably cannot see (official CMS125 matched 236 LOINC Observations and still put all
-56 subjects out of the IPP; `retrieveSignal` was true throughout). Keyed on `outcomes.size`, not
-`subjects.length`, so it cannot fire on the deliberate per-subject-omission retry path. It does not try to
-distinguish "the data lacks an element the IPP reads" from "nobody qualifies" — from inside it cannot, and
-both mean routing that measure over that data produces nothing. So ADR-042's live-tenant limit is now
-enforced: a third-party WebChart server with no `us-core-sex` fails the MEASURE (MISSING_DATA +
-`PARTIAL_FAILURE` + the #264 alert) instead of publishing a quietly empty roster. Proven on the real
-artifacts, not just a stub: stripping the extension from the committed fixture trips it, and authored over
-the same bundles is unaffected. **`cms122` is OUT of the flip list** — official cms122 over WebChart data is
-refused (zero Conditions in the seed; cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` because its
-"enrollment" is a diabetes *diagnosis* the roster must never fabricate), and it would previously have
-contributed 56 silent MISSING_DATA rows while appearing to run. Nothing is lost — authored is equally blind,
-so routing it changes no roster row. It becomes flippable when ingest supplies diagnoses (M-D), signalled by
-`devdb-official-eval.test.ts`'s cms122 test flipping from a refusal to a distribution. **What the guard does
-NOT catch:** an IPP that IS satisfied while the numerator reads the wrong shape — the open mammography gap,
-where official reports a screened woman OVERDUE and the guard is silent.
+**The PR-9c precondition is DISCHARGED (ADR-043) — as an OBSERVATION, not a refusal, and it changed the
+flip's scope.** The hazard: a whole roster out of the official initial population is silent, and PR-8f's
+retrieve check provably cannot see it (official CMS125 matched 236 LOINC Observations on real WebChart data
+and still put all 56 subjects out of the IPP; `retrieveSignal` was true throughout). **First cut refused
+inside `evaluateBatch`; review killed it and was right.** For a site-scoped CMS125 run over an all-male
+cohort zero-in-IPP is the CORRECT answer, and a batch failure replaces every subject's
+`official.populationResults` evidence — what MeasureReport/QRDA read (ADR-031) — with an `evaluationError`,
+marks the run `PARTIAL_FAILURE` and alerts. Decisively: **cohort composition varies by run**, so "stop
+routing this measure" is not a remedy an operator can apply. So the executor reports honestly, the run
+pipeline emits a **`WARN`** naming both causes, the run still reports `COMPLETED` with evidence intact, and
+`undefined` membership means UNKNOWN (the authored engine never sets `inInitialPopulation`, so treating
+absent as false would WARN on every batched authored measure). **Enforcement lives at the FLIP GATE**
+(`devdb-official-eval.test.ts` + a **written pre-flip checklist**, now in `DEPLOY.md` §"Flipping a measure to
+official execution" — confirm a non-zero initial population against the tenant's own data; the ADR first
+named that checklist without one existing, and the `WORKWELL_OFFICIAL_MEASURES` env row was missing from
+DEPLOY.md entirely). That is the only place the two causes can be told apart — when authored finds four
+actionable women in the same bundles official finds nobody in, "this cohort is ineligible" is demonstrably
+false. Not available at runtime at acceptable cost — it would mean running both engines for every subject of a
+measure meant to replace one (`literal-diff.ts` does it as a diagnostic, not per run). **cms122's
+routability is STACK-DEPENDENT, and it STAYS in the flip list** (a first draft of ADR-043 removed it; review
+caught that as wrong). Official cms122 over **WebChart** data puts all 56 out of the IPP — zero Conditions in
+the seed, and cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` because its "enrollment" is a
+diabetes *diagnosis* the roster must never fabricate — but **PR-9c flips the demo/production stack, which
+has NO WebChart seam** (`deploy-twh-mieweb.yml` carries zero `WORKWELL_WEBCHART_*`, verified), so it
+evaluates the SYNTHETIC roster where official cms122 scores across all five corpus targets and agrees with
+authored. The finding is therefore about **staging** (11 `WORKWELL_WEBCHART_*`): routing official cms122
+there produces nothing useful, and the WARN says so each run. **What none of this catches:** an IPP that IS
+satisfied while the numerator reads the wrong shape — the open mammography gap, where official reports a
+screened woman OVERDUE and nothing fires.
 
 **Still ahead of the flip:** dual-stamping mammography in the WebChart crosswalk (closes the false-OVERDUE,
 and it is CMS125's own numerator — so effectively a prerequisite, not a follow-up), then PR-9c itself

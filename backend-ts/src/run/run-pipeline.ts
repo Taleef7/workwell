@@ -557,6 +557,16 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // pre-pass would evaluate some subjects whose result then goes unused — wasteful, never wrong.
   const prefetched = new Map<string, MeasureOutcome>();
   const batchFailure = new Map<string, Error>();
+  /**
+   * Measures whose whole roster came back out of the initial population (ADR-043).
+   *
+   * Carried out to the run MESSAGE, not left in `run_logs` alone. Review's point: this PR exists because
+   * the failure was invisible, and a WARN in a table nobody opens without drilling into a run detail page
+   * is a thin discharge. The message is what the run list and the POST response show. It deliberately does
+   * NOT touch `failures`, so the terminal stays COMPLETED and the #264 alert stays silent — a
+   * zero-denominator run is valid.
+   */
+  const emptyIppMeasures: string[] = [];
   if (deps.engine.evaluateBatch) {
     for (const measureId of new Set(items.map((i) => i.measureId))) {
       const forMeasure = items.filter((i) => i.measureId === measureId);
@@ -602,6 +612,54 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         await deps.runStore
           .appendLog(run.id, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
           .catch(() => {});
+
+        // A whole roster out of the initial population, surfaced (ADR-043). This is the hazard ADR-042
+        // consequence 5 could only warn about in prose: a live WebChart tenant whose Patients carry no
+        // `us-core-sex` has every subject fall out of official CMS125's IPP, the run completes, and the
+        // roster reads exactly like a legitimately ineligible cohort. Measured, and NOT catchable by
+        // PR-8f's retrieve refusal — official CMS125 matched 236 LOINC Observations on real WebChart data
+        // and still put all 56 subjects out of the IPP, so `retrieveSignal` was true throughout.
+        //
+        // A WARN, deliberately NOT a failure. The first version of this refused inside the adapter, and
+        // review (Codex P1) showed that converts a VALID result into corruption: for a site-scoped CMS125
+        // run over an all-male cohort, zero-in-IPP is the correct answer, and a batch failure would
+        // replace every subject's `official.populationResults` evidence — the blob MeasureReport/QRDA read
+        // (ADR-031) — with an `evaluationError`, mark the run PARTIAL_FAILURE, and fire the #264 alert.
+        // A zero-denominator MeasureReport is a legitimate reportable artifact, not an engine failure.
+        //
+        // The decisive argument is that cohort composition VARIES BY RUN, so "stop routing this measure"
+        // is not a remedy an operator can apply. And the two causes — data missing an element the IPP
+        // reads, versus nobody qualifying — are indistinguishable from here. A check that cannot tell
+        // them apart must not destroy the benign one. Enforcement therefore lives at the FLIP gate
+        // (`devdb-official-eval.test.ts` + DEPLOY.md §"Flipping a measure to official execution"), where a
+        // human compares against the authored engine over known data; runtime's job is only to stop being
+        // silent.
+        //
+        // `> 1` because for one subject out-of-IPP is ordinary (`/simulate` on someone out of the age
+        // band), and keyed on what came BACK rather than what was asked: a subject fqm returned nothing
+        // for is absent by contract and re-evaluated alone.
+        // Only outcomes that actually REPORT membership are reasoned about. `inInitialPopulation` is
+        // optional on `MeasureOutcome` and the authored engine never sets it, so `undefined` means
+        // "unknown", not "out of population" — treating the two alike would WARN on every batched authored
+        // measure the day one becomes batchable. That is not hypothetical: `run-pipeline.test.ts`'s batch
+        // probe returns outcomes without the field, which is what surfaced it.
+        const known = forMeasure
+          .map((item) => prefetched.get(`${item.employee.externalId}|${measureId}`))
+          .filter((o): o is MeasureOutcome => o !== undefined && o.inInitialPopulation !== undefined);
+        if (known.length > 1 && !known.some((o) => o.inInitialPopulation)) {
+          emptyIppMeasures.push(measureId);
+          await deps.runStore
+            .appendLog(
+              run.id,
+              "WARN",
+              `${measureId}: not one of ${known.length} subjects entered the official initial ` +
+                `population, though retrieves did match. Either this cohort genuinely has nobody ` +
+                `eligible, or the data lacks a structural element the measure's initial population ` +
+                `reads — for a WebChart source see docs/WEBCHART_FHIR_MAPPING.md §3.1 (the us-core-sex ` +
+                `extension is the known case). Outcomes are reported as computed.`,
+            )
+            .catch(() => {});
+        }
       }
     }
   }
@@ -882,7 +940,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   const runMessage =
     `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
     (incremental ? ` ${items.length - skipped} re-evaluated, ${skipped} reused-unchanged (#263).` : "") +
-    (failures > 0 ? ` ${failures} evaluation failure(s).` : "");
+    (failures > 0 ? ` ${failures} evaluation failure(s).` : "") +
+    (emptyIppMeasures.length > 0
+      ? ` WARNING: nobody entered the official initial population for ${emptyIppMeasures.join(", ")} — ` +
+        `either this cohort has nobody eligible, or the data lacks an element the measure reads (ADR-043).`
+      : "");
   const alert = alertForTerminalRun({
     status: terminalStatus,
     runId: run.id,

@@ -585,47 +585,37 @@ test("PR-8: a batch that retrieved NOTHING for anybody refuses instead of report
   );
 });
 
-test("PR-9c precondition: retrieves matched but NOBODY entered the IPP — refuse", async () => {
-  // The failure the PR-8 retrieve check provably cannot see, and the one ADR-042 could only assert in
-  // prose. Measured on real WebChart data: official CMS125 matched 236 LOINC Observations (so
-  // `retrieveSignal` was true) and still put all 56 subjects out of the initial population, because the
-  // IPP also reads a `us-core-sex` extension the mapping did not emit. Downstream that is a run that
-  // completes with every subject MISSING_DATA — indistinguishable from a legitimately ineligible roster.
+test("ADR-043: a whole roster out of the IPP is REPORTED, not refused — a zero-denominator run is valid", async () => {
+  // This is the shape PR-8f's retrieve check cannot see (retrieves matched; the IPP conjunct did not), and
+  // measured on real WebChart data it is exactly what happened: 236 LOINC Observations found, all 56
+  // subjects out of official CMS125's initial population for want of a `us-core-sex` extension.
+  //
+  // The first cut REFUSED here. Review (Codex P1) showed that destroys a valid result: for a site-scoped
+  // CMS125 run over an all-male cohort, zero-in-IPP is the correct answer, and a batch failure would
+  // replace every subject's `official.populationResults` evidence with an `evaluationError`, mark the run
+  // PARTIAL_FAILURE and alert — recurring, because cohort composition varies by run, so "stop routing
+  // this measure" is not a remedy an operator can apply. The executor cannot distinguish the two causes,
+  // so it must not destroy the benign one. Surfacing it is the run pipeline's job (a WARN), and enforcing
+  // it is the flip gate's.
   const { calculate } = calculatorFor(["s1", "s2", "s3"], { retrieved: true, inIpp: false });
 
-  await assert.rejects(
-    batchExecutor(calculate).evaluateBatch(
-      "cms125",
-      ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
-      "2026-07-25",
-    ),
-    (err: Error) => {
-      assert.match(err.message, /not one of 3 subjects entered the official initial population/);
-      assert.match(err.message, /though retrieves did match/, "must not be mistaken for the retrieve check");
-      assert.match(err.message, /us-core-sex/, "name the known cause so the message is actionable");
-      return true;
-    },
+  const results = await batchExecutor(calculate).evaluateBatch(
+    "cms125",
+    ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+    "2026-07-25",
   );
+
+  assert.equal(results.size, 3, "every subject must still come back");
+  for (const id of ["s1", "s2", "s3"]) {
+    assert.equal(results.get(id)!.inInitialPopulation, false);
+    assert.equal(results.get(id)!.outcome, "MISSING_DATA", "out of scope, not non-compliant");
+    // The regulatory evidence must SURVIVE. This is what a refusal would have thrown away.
+    assert.ok(results.get(id)!.evidence?.official, `${id} keeps its official populationResults evidence`);
+  }
 });
 
-test("PR-9c precondition: ONE subject out of the IPP is legitimate, not a refusal", async () => {
-  // `/simulate` on somebody outside the age band. Failing that would be a false alarm on a correct answer
-  // — the same reason the retrieve check is `> 1`.
-  const { calculate } = calculatorFor(["s1"], { retrieved: true, inIpp: false });
-
-  const outcome = await batchExecutor(calculate).evaluate({
-    measureId: "cms125",
-    patientBundle: patientBundle("s1"),
-    evaluationDate: "2026-07-25",
-  });
-  assert.equal(outcome.outcome, "MISSING_DATA");
-  assert.equal(outcome.inInitialPopulation, false);
-});
-
-test("PR-9c precondition: ONE subject in the IPP is enough — a mostly-ineligible roster is a real answer", async () => {
-  // The check must not become "most subjects must qualify". A roster where one person is in the initial
-  // population and the rest are not is the ordinary shape of a screening measure, and refusing it would
-  // make the guard useless the moment it mattered.
+test("ADR-043: one subject in the IPP and the rest out is an ordinary screening roster", async () => {
+  // Guards against the check ever being re-tightened into "most subjects must qualify".
   const calculate: FqmCalculate = async (_bundle, patients) => ({
     results: (patients as Array<{ entry: Array<{ resource: { id: string } }> }>).map((b, i) => ({
       patientId: b.entry[0]!.resource.id,
