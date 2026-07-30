@@ -1,5 +1,52 @@
 # Journal
 
+## 2026-07-30 (later still) — M-A wave 2: three more measures onboarded, three refused (branch `feat/official-measures-wave2`)
+
+Vendoring all six remaining priority measures took minutes. Deciding which could be **onboarded** took the
+gate, and it disqualified half of them — for three different reasons, which is the useful part.
+
+| measure | MADiE | outcome |
+|---|---|---|
+| CMS2 depression screening | **36/36** | onboarded |
+| CMS68 current medications | **19/19** | onboarded |
+| CMS951 kidney health eval | **55/55** | onboarded |
+| CMS138 tobacco screening | **0/47, 47 errors** | refused — a value set will not expand |
+| CMS130 colorectal screening | not run | capped expansion, needs the VSAC key |
+| CMS165 controlling high BP | not run | **two** capped expansions, needs the key |
+
+**CMS138 is the one worth dwelling on.** It vendors cleanly, loads cleanly, and produces 47 errors out of
+47 cases: value set …3.526.3.1278 cannot be expanded from the artifact's own terminology, so official
+execution would report every subject out-of-population. That is precisely the silent-empty-population
+failure this whole line of work has been building guards against — and here the gate caught it before it
+could become a config. There is no version of "ship it and watch".
+
+**CMS130 and CMS165 are absent from the tree rather than committed capped.** Both need
+`--complete-capped-expansions` with `WORKWELL_VSAC_API_KEY_VENDOR`, which exists only as a GitHub secret —
+I can read that it exists, not what it is. Committing a capped artifact would put a permanently-unroutable
+measure in the tree whose manifest CI would rewrite the moment it joined the vendor list. Owner step,
+narrow and stated (task #10).
+
+**Three things silently stopped meaning "the full gate" the moment a third measure existed**, and I only
+found them by running it: `parseArgs` defaulted to a hardcoded `["cms122","cms125"]` and rejected anything
+else; the sparse checkout fetched two measures' cases; and the committed-report predicate was
+`measures.length === 2`. That last one is the dangerous one — a full five-measure run would have written
+**nothing**, and CI's staleness check would then have compared it against a two-measure file. All three now
+derive from `OFFICIAL_GATED_MEASURES`, and `OfficialMeasureId` is `keyof typeof MEASURES` rather than a
+hand-maintained union that had to be edited in a second place.
+
+**One guard fired exactly as designed and I want to record that it was right.** `official-artifacts.test.ts`
+hardcodes the vendored list with the comment *"adding a measure should be a conscious edit here… a new
+artifact appearing unannounced is a review event."* It failed my run. That is the guard doing its job, and
+updating it is the conscious edit it demands.
+
+**Routable is not routed.** These three have no authored counterpart, so `flip-snapshot`'s
+authored-vs-official comparison — what every flip so far has been judged on — cannot run for them, and the
+roster/catalog still assume an authored measure exists. What replaces that oracle is the question the next
+flip has to answer, not one to hand-wave now.
+
+Gate is now **231/231** across five measures. Verified: typecheck clean; 1622 tests / 1608 pass / 0 fail /
+14 skipped; 54/54 workflow run-blocks parse.
+
 ## 2026-07-30 (later) — the reporting trio, and cms122 joins the flip (branch `feat/official-reporting-trio`)
 
 PR-9c shipped cms125 alone because review found cms122 would emit a self-contradictory MeasureReport. This

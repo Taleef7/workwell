@@ -22,10 +22,9 @@ export const POPULATION_CODES = [
   "numerator",
 ] as const;
 export type PopulationCode = (typeof POPULATION_CODES)[number];
-export type OfficialMeasureId = "cms122" | "cms125";
 export type PopulationCounts = Record<PopulationCode, number>;
 
-const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> = {
+const MEASURES = {
   cms122: {
     name: "CMS122FHIRDiabetesAssessGT9Pct",
     bundleFile: "CMS122FHIRDiabetesAssessGT9Pct-bundle.json",
@@ -34,7 +33,26 @@ const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> 
     name: "CMS125FHIRBreastCancerScreen",
     bundleFile: "CMS125FHIRBreastCancerScreen-bundle.json",
   },
+  cms2: {
+    name: "CMS2FHIRPCSDepScreenAndFollowUp",
+    bundleFile: "CMS2FHIRPCSDepScreenAndFollowUp-bundle.json",
+  },
+  cms68: {
+    name: "CMS68FHIRDocumentationCurrentMeds",
+    bundleFile: "CMS68FHIRDocumentationCurrentMeds-bundle.json",
+  },
+  cms951: {
+    name: "CMS951FHIRKidneyHealthEval",
+    bundleFile: "CMS951FHIRKidneyHealthEval-bundle.json",
+  },
 };
+
+/**
+ * Derived from the map rather than hand-listed, so adding a measure cannot leave the two out of step —
+ * the previous union had to be edited in a second place and a mismatch was a compile error at best and a
+ * silently ungated measure at worst.
+ */
+export type OfficialMeasureId = keyof typeof MEASURES;
 
 /**
  * The measures covered by the official MADiE test-case gate (roadmap §7.4 PR-6). THE RULE: a measure

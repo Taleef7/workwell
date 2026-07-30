@@ -41,6 +41,27 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
       "the failure. The artifact's improvementNotation says 'increase', which contradicts eCQI's own " +
       "description of the measure; the artifact is not followed here.",
   },
+  cms2: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "Numerator = screened for depression with an age-appropriate standardized tool on or within 14 " +
+      "days before the encounter AND, if positive, a follow-up plan documented on the date of the " +
+      "positive screen. Being in it is the care being delivered.",
+  },
+  cms68: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "Numerator = the eligible clinician attested to documenting the patient's current medications " +
+      "using all immediate resources available on the encounter date. Being in it is the documentation " +
+      "having happened.",
+  },
+  cms951: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "Numerator = received a kidney health evaluation during the measurement period (an eGFR AND a " +
+      "uACR, or an eGFR with urine albumin and urine creatinine). Being in it is the evaluation having " +
+      "been done.",
+  },
   cms125: {
     numeratorMeansCompliant: true,
     rationale:

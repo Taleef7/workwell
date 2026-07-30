@@ -17,8 +17,14 @@ $repo = "https://github.com/cqframework/dqm-content-qicore-2025.git"
 $paths = @(
   "bundles/measure/CMS122FHIRDiabetesAssessGT9Pct",
   "bundles/measure/CMS125FHIRBreastCancerScreen",
+  "bundles/measure/CMS2FHIRPCSDepScreenAndFollowUp",
+  "bundles/measure/CMS68FHIRDocumentationCurrentMeds",
+  "bundles/measure/CMS951FHIRKidneyHealthEval",
   "input/tests/measure/CMS122FHIRDiabetesAssessGT9Pct",
-  "input/tests/measure/CMS125FHIRBreastCancerScreen"
+  "input/tests/measure/CMS125FHIRBreastCancerScreen",
+  "input/tests/measure/CMS2FHIRPCSDepScreenAndFollowUp",
+  "input/tests/measure/CMS68FHIRDocumentationCurrentMeds",
+  "input/tests/measure/CMS951FHIRKidneyHealthEval"
 )
 $ContentDir = [System.IO.Path]::GetFullPath($ContentDir)
 
@@ -49,4 +55,4 @@ if ($LASTEXITCODE -ne 0) { throw "Unable to checkout pinned revision ${Ref}" }
 
 $revision = git -C $ContentDir rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw "Unable to resolve official content revision" }
-Write-Host "Official CMS122/CMS125 content ready at $ContentDir ($revision)"
+Write-Host "Official measure content ready at $ContentDir ($revision) — $($paths.Count / 2) measures"

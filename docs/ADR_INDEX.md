@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 - ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 - ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 - ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
