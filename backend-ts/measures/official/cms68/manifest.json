@@ -1,0 +1,49 @@
+{
+  "catalogId": "cms68",
+  "measureName": "CMS68FHIRDocumentationCurrentMeds",
+  "version": "1.0.000",
+  "cmsId": "68FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS68FHIRDocumentationCurrentMeds",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "Encounter",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "numerator",
+    "denominator-exception"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS68FHIRDocumentationCurrentMeds/CMS68FHIRDocumentationCurrentMeds-bundle.json",
+    "rawSha256": "sha256:f18a24553f6dd2d0c6dea26a0b2b753b8907a391b99c9adbea9accd9b031b249"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 10836420,
+    "vendoredBytes": 1672213
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 5,
+    "codes": 319,
+    "truncated": [],
+    "sha256": "sha256:91f35409eeeeefb3355535dbd2e6dd6b9cd31be5f4463fc1efe7f4786b40148f"
+  },
+  "sha256": "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970"
+}

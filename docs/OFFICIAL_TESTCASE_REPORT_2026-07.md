@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-07-29
+**Generated:** 2026-07-30
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -26,6 +26,9 @@ The fetch script sparse-checks out only the two measure bundles and two test-cas
 |---|---:|---:|---:|---:|---:|---:|
 | CMS122 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
 | CMS125 | 66 | 66 (100.0%) | 0 | 66 (100.0%) | 0 | 0 |
+| CMS2 | 36 | 36 (100.0%) | 0 | 36 (100.0%) | 0 | 0 |
+| CMS68 | 19 | 19 (100.0%) | 0 | 19 (100.0%) | 0 | 0 |
+| CMS951 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
 
 † CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.
 
@@ -39,6 +42,9 @@ The fetch script sparse-checks out only the two measure bundles and two test-cas
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
 - **CMS125:** trustMetaProfile=false (first pass; no retry); 32/32 Bundle ValueSets carry expansions; 1 expansion(s) report more total codes than are present; fqm warnings=0.
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
+- **CMS2:** trustMetaProfile=false (first pass; no retry); 15/15 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
+- **CMS68:** trustMetaProfile=false (first pass; no retry); 5/5 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
+- **CMS951:** trustMetaProfile=false (first pass; no retry); 26/26 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 
 ## Investigated findings
 
@@ -194,6 +200,167 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; ref
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/66 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 423 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS2 — CMS2FHIRPCSDepScreenAndFollowUp
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 36/36; reference-adjusted pass 36/36.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | Result |
+|---|---|---:|---:|---:|---:|---|
+| DENEXCEPPass AdolescentMedicalReasonForNoDepressionScreenAge17 | `0e463fc3-d1bf-4e19-882b-fad6342aa668` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPPass AdultMedicalReasonForNoDepressionScreenAge18 | `12786a64-c20e-4542-a4c0-bf3129d6a9e0` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass AdultHistoryOfBipolarActive | `15ad723f-b561-4cdd-9a11-7e6619780459` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| IPPFail 11yoDepressionScreening | `1eaf0b86-afe8-488c-8f32-6321ecfe0fca` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass 17yoPositiveAdultDepressionScreeningandFollowUp | `28bf1260-965f-4682-b427-2c2a2084312a` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 12yoPosAdolDepScreenandFollowUpProcedure | `2ee18ee0-f67a-4694-8411-fda20e6d108d` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 12yoPosAdolDepScreenandFUPrescripWI2DAfterEndOfEnc | `328248a7-33d6-4923-a99a-a56ec88c515e` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENOMPass AdultDepressionScreening | `39c99530-08b9-4ed2-bac7-6a59c1e1ad71` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass 17yoNegativeAdolescentDepressionScreening | `3ce2c72d-d347-4fde-82cf-dc9992c73aad` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 17yoPositiveAdolescentDepressionScreeningandFollowUp | `4149c02e-ee5c-4b8d-a4ee-425dfa2460e7` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 12yoPosAdolDepScreenandFollowUpReferral | `41664f5f-5280-4b5b-a9f1-289a412dbc18` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENEXCEPPass AdultPatientReasonForNoDepressionScreenAge17 | `41df0dbe-ae84-4496-b355-320ff8707a85` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENOMPass AdultPhysicalTherapyEvaluation | `4a1f1d8c-0de8-4819-a0a3-28f6caaf6265` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPPass AdolescentPatientReasonForNoDepressionScreenAge12 | `6078e73e-3265-4022-ae63-216c096b6246` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPPass AdultPatientReasonForNoDepressionScreenAge18 | `6aaff09e-4a7b-4efa-93f8-13033e95c230` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPFail AdultPtReasonForNoDepScreenandDepScreenAWeekAgo | `6f17c306-5df4-431a-8364-d44ab5bad34a` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass AdultHistoryOfBipolarRelapse | `6f3808b3-69a2-4080-9529-8582b4d5c5d5` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass AdultHistoryOfBipolarRecurrence | `7009a1c3-93a8-4028-b42a-0bd9953f6ebb` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| NUMERPass PosAdultDepScreeandFUWithin2DAfterEndOfEnc | `75a5223a-3a62-418a-bcc6-4522cfe71726` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass PositiveAdultDepressionScreeningandFollowUp | `82134291-214a-4e6e-9969-9ccb6df412f0` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENOMPass AdultTelephoneVisit | `86761769-1b1b-44c1-81cb-3f034a6a0bc2` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPPass AdolescentPatientReasonForNoDepressionScreenAge17 | `86ca7528-efcb-44ed-9203-6f21f37f4332` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPFail AdolPtReasonForNoDepScreenandHadDepScreenAWeekAgo | `a09d5edf-2c0a-4b39-86bf-312109f357c0` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass NegativeAdultDepressionScreening | `a7ad97c4-9769-4630-8ad7-8cf354384aa1` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERFail 12yoPosAdolDepScreenandFUPrescript3DAfterEndOfEnc | `bc433eb4-fba6-45e0-a24b-de907e551556` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENOMFail 11yoDepressionScreening11yr11mo30days | `be498e62-5ef2-47fa-8127-dfc5a7eb6ac9` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass AdolsecentHistoryOfBipolarRemission | `cf76e904-95bd-445d-8384-62be012b76f6` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXCEPPass AdolescentMedicalReasonForNoDepressionScreenAge12 | `d0ba1182-26fa-4cfa-9f91-960503b7fe53` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail PosAdultDepScreenandFU3DAfterEndOfEnc | `d1fc6b6d-025e-446b-a941-e62a76217e28` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass 17yoPositiveAdultDepressionScreeningandMedsActive | `d2cde80b-5a6c-48e9-b38a-de938f019096` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 12yoPosAdolDepScreenandFollowUpPrescription | `d5f7630a-6fcf-4cfc-ba20-dfd5ee88af9a` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENEXPass AdultHistoryOfBipolarRemission | `e1b6a53f-c856-41c2-b1fe-ec50d3f23333` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| NUMERPass 17yoNegativeAdultDepressionScreening | `f256f4bb-e5ad-4e93-bee7-7237b1fa275a` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENEXCEPPass AdultMedicalReasonForNoDepressionScreenAge17 | `f29e2786-fade-4dca-b14d-7037a34ef498` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass 12yoNegativeAdolescentDepressionScreening | `fa943373-f62b-4494-8c9a-fb17e9b9a2bd` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass 17yoPositiveAdolescentDepressionScreeningandMedsActive | `ff6f7416-7e1d-4712-b4f5-aab79b2a7c01` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+
+### CMS2 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/36 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec` (2.3 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 396 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS68 — CMS68FHIRDocumentationCurrentMeds
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 19/19; reference-adjusted pass 19/19.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | Result |
+|---|---|---:|---:|---:|---:|---|
+| IPPDENOMFail EncAfterMP | `0111c1a9-1590-40d6-8023-0e3bd45d493e` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass EncFinishedProcedureCompleted | `12626e98-67c8-4f3d-bac5-dbb5d57f58c8` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| IPPDENOMFail Encounter1MinAfterMPEnds | `14943c8d-1551-4449-b244-f3381a6f4e28` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPDENOMFail EncOverlapsMP | `25938d1a-7785-4453-9574-01ccb82cb3e8` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPDENOMPass EncMPStatusFinished | `33c3042b-b935-456f-b22b-f3f55cf56cdc` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass EncEndsLastDayMPAt2359Doc1stMinEnc | `37daa71d-a2a5-4807-8ee1-93417424ffee` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENEXCEPFail MedNoDocStatusRejectedNoReason | `3d42d9f8-0381-4562-94b7-314fcd27fae5` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXCEPFail MedNoDocStatusNotDone | `4ce081ec-bc42-44c6-bfbb-ad853903e3d1` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPDENOMPass EncMPStatusFinishedDuringMP | `60ad5deb-5c36-4ba3-bdee-9390f7ffdf6e` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPDENOMFail EncBeforeMP | `6bffc7ce-d4ac-42e2-9fd0-48b58e45d502` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail MedsNoDocStatusNotValid | `6f04cfd6-8557-4eff-84cb-9d3ed094dc4b` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPDENOMFail EncStatusNotFinished | `8b704351-4052-4207-8f69-e259ca15bf62` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass Enc1stDayMPAt0000 | `9ada2736-229a-40d4-b026-2bdec85c6d02` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass EncEndsLastDayMPAt2359DocLastMinEnc | `b6b76d56-4dd6-4394-98e3-97dbd3236675` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERFail MedsNoDocBeforeEncPeriod | `d1f4cbfc-1f86-408b-a65d-50250a4dd148` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPDENOMFail Encounter1MinBeforeMPBegins | `db7bf97d-edaf-41c9-bf02-81a3f31db686` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail MedsNoDocAfterEncPeriod | `ebea0fbe-8ab4-43a2-8bfa-5117bb8d56a9` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPDENOMFail NoQualifyingEnc | `f254d721-854c-4b26-9d14-e6052c341501` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXCEPPass MedNoDocStatusRejectedWithReasonCode | `f2e2e1c0-9e35-4592-9579-72a236cb2f56` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+
+### CMS68 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/19 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970` (1.7 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 356 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS951 — CMS951FHIRKidneyHealthEval
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; reference-adjusted pass 55/55.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | Result |
+|---|---|---:|---:|---:|---:|---|
+| DENEXPass WithCKDStage5WithConfirmedVerificationStatus | `0085aa08-74cc-47f3-bf08-2aadd6263ee3` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass PalliativeCareAssessment | `023b65d6-0b68-4b1f-b276-f500e4b77ed2` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENOMPass DiabetesDxLastDayOfPriorYear | `0ce4362d-60f0-41af-8d47-c61f76d025a4` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PerformHospAmb | `1127bc95-bf52-4921-b02a-de0902780191` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| NUMERPass EdgeAge75Jan1 | `1d012d11-4b38-4bdc-bd27-e7d8bcc88c89` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENEXPass HospEncoLastDayOfMP | `1e8e8baf-0c27-42b2-93ad-5426418552c7` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENOMFail DiabetesDxAfterMP | `277e15ec-f1a0-4a6e-a8d9-856c0a4fa4f0` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DischargeHomeHosp | `2a7112e7-5937-4288-9271-cdc2d7e5eaa4` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass DischargeFacilityHosp | `3f860c8e-e5fc-4843-ac4e-acb8e63471f3` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| SDEAll SDE | `3ffdeac6-20b1-4af9-9da4-36ac2d234001` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass OrderPalliativeHospCare | `40e0c576-25c4-41fc-854a-116db99f1a65` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass PerformPalliativeHospCare | `4354fbec-b63a-46ce-8465-ec82710ea1c6` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXFail WithCKDStage5WithRefutedVerificationStatus | `51e9e9aa-edcc-46f4-8472-24f377014ad4` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass OfficeVisitEGFRAndUACR | `52988c36-5e85-4818-9baa-983a3e27281a` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENOMFail DiabetesAbated | `53abb201-a2ef-4966-9102-8fab192aa008` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMFail AgeLessThan18EncoDiabetes | `54c38c8f-1e1b-41a7-a2fe-9ee285a923bc` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass EncounterPerfHospCare | `55c5c208-190b-4f90-bdbb-0c02332df772` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENOMPass DiabetesOverlapsMPWithConfirmedVerificationStatus | `56063388-7942-4a1d-8568-2d805d31ad30` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail SingleUCLab | `5aa9e5eb-adeb-4779-a4d3-5b731411e141` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PerformHospCareMinDataSet | `61c9b47c-2223-4e45-b83b-eee21f031cad` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass OrderHospCareAmb | `77620fcb-7a0a-4015-89cc-c32bd8681c13` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass ESRDDxFirstDayOfMP | `7921acb6-7c9a-4c78-bdf1-a8e1ec2c7023` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| NUMERPass AnnualWelllnessEGFRAndUACR | `7e7c41ee-7704-419c-937b-72d10c76f99a` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| IPFail DiabetesDxFirstDayOfMP | `80cbaf27-f12e-47b7-a875-59b068294036` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMPass Age20 | `8ca88661-f12a-4b24-98e8-93183e8e2472` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail KidneyPanelPerformedNoValue | `8cfb2747-a46d-4348-9e21-5ef3417e524a` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass HomeServiceEGFRAndUACR | `8e10675e-b991-4327-9514-6feb9d385b7f` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass EstimatedGlomerularWithOverlappingUCandUALabs | `94f26954-f280-4596-8bd3-e77ca79c1f41` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass OutpatientEGFRAndUACR | `95ee3081-b973-4bd2-8b86-5b46bd664905` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass OfficeVisitEGFRAndUACRWithUndetectableResults | `9821f4e3-39db-4f45-8da3-eed161841bd2` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| NUMERPass AnnualWelllnessEGFRWithUAlbuminAndUCreatine | `9f3b1077-d99c-4714-a88d-8aecc667fe57` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENOMFail DiabetesEncoOver75 | `a2cf34eb-1f20-426f-bfce-53599a178b71` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMPass DiabetesOverlapsMP | `a7284289-8784-48d9-a342-7d851085efb7` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENOMPass EdgeAge75Jan1 | `a9536c98-3157-4443-bfe1-ef4e585360be` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass EdgeAge18Jan1 | `ac7a62b6-a440-4d4c-849d-0ce05743109c` | 1/1 | 1/1 | 0/0 | 1/1 | PASS |
+| DENOMPass MultipleEncounterDiagnosis | `ae52c591-1a71-4090-aeeb-2dd758f63ce4` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceCareDiagnosis | `b1e68658-d64f-4ca4-a4ee-89c64e4536fa` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass WithCKDStage5 | `b49e5ec9-8a2d-4ed4-acae-9e13e21d67f2` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass EncounterPerfPalliativeCare | `b6ac3dd1-ff55-4152-be9a-153cad2ba2a2` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass EndStageRenalHospiceAllVisits | `b998e967-eb53-426b-a3a9-8226939efdb6` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXFail CKDStage5OutofMP | `c13a82b6-fb44-4fc7-befd-d762b9fafa97` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail DiabetesOverlapsMPWithRefutedVerificationStatus | `d237bdfc-567a-4b8a-b3df-a7282cda354b` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail SingleUALab | `d4340928-bbc6-4c24-8888-9f12e5cbefad` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail DischargeHomeHospDayBeforeMP | `d4a593b2-d485-4bfa-a8b1-a401bdbf8d23` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass DiagnosisPalliativeCare | `d7e37bcf-d13b-4415-82ac-a51b5c83151c` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENOMFail PreventativeCareVisitAfterMP | `e4ad8ac6-e4c4-4e9f-acbb-4e345c8a84ad` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMFail NoEncounter | `ebbf9c22-fb8c-498b-a261-11d177d10e45` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DiagnosisEncounterPalliativeCare | `ebd7d1d0-a663-47da-8802-9088ad9d80a0` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENOMPass AnnualWellnessVisitDuringMP | `ed17f9e5-1200-49e3-a4fc-1c188d8932dc` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENOMFail OfficeVisitB4MP | `ef8cde66-ab81-4a37-8cc2-6b390182b7ac` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMFail EncounterOutofMP | `f2b74f6e-1b67-49ca-b9b1-bb6752287935` | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENOMPass EdgeAge18Jan1 | `f4d1182a-1c06-4c62-a0be-1f994c4343b3` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail SingleUACRLab | `f8c48a84-406c-44b7-b79e-b7a5f9d15b31` | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass EndStageRenal | `fa02a22e-e0c5-49ef-8955-2e581ca12ca5` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+| DENEXPass EndStageRenalHospice | `ff43a29d-e740-44ba-9452-63d1ba2b0709` | 1/1 | 1/1 | 1/1 | 0/0 | PASS |
+
+### CMS951 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/55 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae` (2.0 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 392 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|

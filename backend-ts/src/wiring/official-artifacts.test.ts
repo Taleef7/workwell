@@ -17,7 +17,10 @@ const vendored = readdirSync(ARTIFACT_ROOT, { withFileTypes: true })
 test("the expected measures are vendored", () => {
   // Hardcoded on purpose: adding a measure should be a conscious edit here, the same way the executor
   // import allowlist is (fqm-isolation.test.ts). A new artifact appearing unannounced is a review event.
-  assert.deepEqual(vendored.sort(), ["cms122", "cms125"]);
+  // ADR-047 onboarded cms2/cms68/cms951 (MADiE 36/36, 19/19, 55/55). NOT here on purpose: cms138 scores
+  // 0/47 because one value set will not expand, and cms130/cms165 have capped expansions needing the
+  // VSAC key — so they are absent from the tree rather than committed unroutable.
+  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms2", "cms68", "cms951"]);
 });
 
 for (const catalogId of vendored) {
