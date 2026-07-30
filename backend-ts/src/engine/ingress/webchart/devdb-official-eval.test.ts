@@ -16,11 +16,17 @@
  * with its measured cause — so a shift is either progress or a regression, and both are deliberate rather
  * than discovered later from a roster that quietly reads differently.
  *
- * That framing matters because the failure this guards is invisible everywhere else. When official CMS125
+ * That framing matters because the failure this guards WAS invisible everywhere else. When official CMS125
  * put this entire roster out of its initial population, a run completed, 56 outcomes were written, and no
- * check anywhere noticed. PR-8f's batch retrieve refusal cannot see it either — it catches "retrieved
- * nothing at all", and these retrieves match plenty (236 LOINC observations); they simply did not match
- * the conjunct that decides membership. Confirmed here by the batch returning all 56 subjects.
+ * check anywhere noticed. PR-8f's batch retrieve refusal cannot see it — it catches "retrieved nothing at
+ * all", and these retrieves match plenty (236 LOINC observations); they simply did not match the conjunct
+ * that decides membership.
+ *
+ * **That silence is now closed.** The adapter refuses a batch of >1 in which nobody entered the initial
+ * population (ADR-042 consequence 5 / the PR-9c precondition), so the two tests below that used to assert
+ * "56 MISSING_DATA" assert a refusal instead. The refusal cannot distinguish "the data lacks an element
+ * the IPP reads" from "nobody qualifies" — and does not try to, because both mean routing that measure
+ * over that data produces nothing.
  *
  * ## What was measured (2026-07-30, EVAL 2024-06-01, official MP 2023-06-01 .. 2024-06-01)
  *
@@ -42,13 +48,14 @@
  * a **false OVERDUE on the first real screening**. Read "one fix, not four" as scoped to the initial
  * population; it is not a statement that the other gaps are retired.
  *
- * **cms122 — official and authored BOTH return MISSING_DATA for all 56**, so there is no divergence to
- * gate and routing it changes nothing over this data. The seed carries zero Conditions and cms122 is
- * deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis*, a
- * clinical fact the roster must never fabricate), so neither engine can see a denominator. A data gap
- * that blocks both paths equally — an M-D ingest question, not a flip risk. Recorded so that when the
- * WebChart path starts supplying diagnoses, whichever engine produces outcomes first does so against a
- * written expectation.
+ * **cms122 — official is now REFUSED over this data, and authored returns MISSING_DATA for all 56.** The
+ * seed carries zero Conditions and cms122 is deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its
+ * "enrollment" is a diabetes *diagnosis*, a clinical fact the roster must never fabricate), so neither
+ * engine can see a denominator. **This changes the flip plan:** the roadmap's PR-9 flips "cms122+cms125"
+ * together, and cms122 would have contributed 56 silent MISSING_DATA rows while appearing to run. It must
+ * stay out of the flip list until the WebChart path supplies diagnoses — at which point the test below
+ * flips from a refusal to a distribution, which is the signal that it has become flippable. Nothing is
+ * lost by excluding it: the authored path is equally blind, so routing it would change no roster row.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -81,9 +88,6 @@ const EVAL = "2024-06-01";
  * change the day the measure is routed, and what it changes from and to.
  */
 const EXPECTED: Record<string, { official: Record<string, number>; divergence: Record<string, string> }> = {
-  // Both engines blind for the same reason — no Conditions in the seed, and the roster may not invent a
-  // diabetes diagnosis. When ingest starts supplying diagnoses this is the expectation to revisit.
-  cms122: { official: { MISSING_DATA: 56 }, divergence: {} },
   cms125: { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} },
 };
 
@@ -238,28 +242,64 @@ test("official cms125 finds the same four actionable subjects the authored engin
  * This is also the historical record: 56 MISSING_DATA is exactly what official CMS125 produced over this
  * fixture before the mapping was fixed.
  */
-test("cms125: strip us-core-sex and official collapses out-of-population — the whole cause", { skip }, async () => {
-  const stripped = (await liveBundles("cms125")).map((bundle) => {
+/** The same live path with `us-core-sex` removed — the pre-fix state, and the third-party-server state. */
+async function strippedOfSex(): Promise<unknown[]> {
+  return (await liveBundles("cms125")).map((bundle) => {
     const b = clone(bundle);
     for (const r of resources(b)) {
       if (r["resourceType"] !== "Patient") continue;
       const exts = (r["extension"] as Array<Record<string, unknown>>) ?? [];
-      r["extension"] = exts.filter((e) => !String(e["url"]).endsWith("/us-core-sex"));
+      r["extension"] = exts.filter((e) => e["url"] !== US_CORE_SEX_URL);
     }
     return b;
   });
+}
 
-  const official = await officialOutcomes("cms125", stripped);
-  assert.deepEqual(
-    distribution(official),
-    { MISSING_DATA: 56 },
-    "without us-core-sex, official cms125 should put the whole roster out of its initial population",
+test("cms125: strip us-core-sex and the batch REFUSES — the cause, and the guard that now catches it", { skip }, async () => {
+  // Before the IPP refusal shipped this produced 56 MISSING_DATA: a run that completes, writes 56
+  // outcomes, and reads exactly like a legitimately ineligible roster. That silent state is what
+  // ADR-042 consequence 5 could only warn about in prose, because both mapping fixes sit upstream of the
+  // live FHIR transport — a third-party WebChart server supplying no extension lands here.
+  //
+  // This is the end-to-end proof of the guard on the REAL artifacts: the adapter's unit tests use a
+  // stubbed calculator, which can show the refusal fires but not that this data trips it.
+  await assert.rejects(
+    officialOutcomes("cms125", await strippedOfSex()),
+    (err: Error) => {
+      assert.match(err.message, /not one of 56 subjects entered the official initial population/);
+      assert.match(err.message, /though retrieves did match/, "PR-8's retrieve check cannot see this");
+      return true;
+    },
   );
 
   // And the authored engine is UNAFFECTED — it reads `Patient.gender`. This is what makes the two
-  // elements worth emitting separately rather than treating one as a substitute for the other.
-  const authored = await authoredOutcomes("cms125", stripped);
+  // elements worth emitting separately rather than treating one as a substitute for the other, and it is
+  // why the refusal above is about official routing rather than about this roster being unusable.
+  const authored = await authoredOutcomes("cms125", await strippedOfSex());
   assert.deepEqual(distribution(authored), { MISSING_DATA: 52, OVERDUE: 4 });
+});
+
+test("cms122 over real WebChart data is REFUSED — it must not be in the PR-9c flip list", { skip }, async () => {
+  // Recorded as a hard expectation because it changes the flip plan. The roadmap's PR-9 flips
+  // "cms122+cms125" together, and before this guard official cms122 over WebChart data produced 56
+  // MISSING_DATA silently — a measure contributing nothing while looking like it ran. It cannot see
+  // anybody: the seed carries zero Conditions and cms122 is deliberately outside
+  // `ROSTER_ELIGIBLE_MEASURES`, since its "enrollment" is a diabetes *diagnosis* the roster must never
+  // fabricate. The authored path is equally blind, so nothing is lost by not routing it.
+  //
+  // This is the guard's intended behaviour, not a false positive: whether the cause is a missing mapping
+  // or a genuinely ineligible roster, a measure that can see nobody should not be routed over that data.
+  // When the WebChart path starts supplying diagnoses, this test flips to a distribution — and that is
+  // the signal that cms122 has become flippable.
+  await assert.rejects(
+    officialOutcomes("cms122", await liveBundles("cms122")),
+    /cms122: not one of 56 subjects entered the official initial population/,
+  );
+
+  // The authored engine agrees there is nobody to score — so this is a DATA gap (M-D ingest), not an
+  // official-vs-authored divergence, and routing cms122 would change no roster row today.
+  const authored = await authoredOutcomes("cms122", await liveBundles("cms122"));
+  assert.deepEqual(distribution(authored), { MISSING_DATA: 56 });
 });
 
 /**

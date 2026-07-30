@@ -484,13 +484,22 @@ const batchArtifact = (): OfficialArtifact => {
   return { ...base, manifest: { ...base.manifest, catalogId: "cms125" } };
 };
 
-/** fqm's shape for N subjects. `retrieved: false` is the empty-retrieve catastrophe this PR guards. */
+/**
+ * fqm's shape for N subjects.
+ *
+ * `retrieved: false` is the empty-retrieve catastrophe PR-8 guards. `inIpp: false` is the DIFFERENT one
+ * PR-9c's precondition guards, and the pair has to be expressible independently: retrieves matching while
+ * nobody enters the initial population is exactly what real WebChart data did (236 LOINC Observations
+ * found, all 56 subjects out of CMS125's IPP for want of a `us-core-sex` extension). A harness that could
+ * only turn both off at once would make that case untestable.
+ */
 const calculatorFor = (
   subjectIds: string[],
-  opts: { retrieved?: boolean } = {},
+  opts: { retrieved?: boolean; inIpp?: boolean } = {},
 ): { calculate: FqmCalculate; batchSizes: number[] } => {
   const batchSizes: number[] = [];
   const empty = opts.retrieved === false;
+  const inIpp = opts.inIpp ?? !empty;
   const calculate: FqmCalculate = async (_bundle, patients) => {
     batchSizes.push((patients as unknown[]).length);
     return {
@@ -500,9 +509,9 @@ const calculatorFor = (
         detailedResults: [
           {
             populationResults: [
-              { populationType: IPP, result: !empty },
-              { populationType: DENOM, result: !empty },
-              { populationType: NUMER, result: !empty },
+              { populationType: IPP, result: inIpp },
+              { populationType: DENOM, result: inIpp },
+              { populationType: NUMER, result: inIpp },
             ],
             statementResults: [],
           },
@@ -574,6 +583,74 @@ test("PR-8: a batch that retrieved NOTHING for anybody refuses instead of report
     ),
     /retrieved NOTHING for any of 3 subjects/,
   );
+});
+
+test("PR-9c precondition: retrieves matched but NOBODY entered the IPP — refuse", async () => {
+  // The failure the PR-8 retrieve check provably cannot see, and the one ADR-042 could only assert in
+  // prose. Measured on real WebChart data: official CMS125 matched 236 LOINC Observations (so
+  // `retrieveSignal` was true) and still put all 56 subjects out of the initial population, because the
+  // IPP also reads a `us-core-sex` extension the mapping did not emit. Downstream that is a run that
+  // completes with every subject MISSING_DATA — indistinguishable from a legitimately ineligible roster.
+  const { calculate } = calculatorFor(["s1", "s2", "s3"], { retrieved: true, inIpp: false });
+
+  await assert.rejects(
+    batchExecutor(calculate).evaluateBatch(
+      "cms125",
+      ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+      "2026-07-25",
+    ),
+    (err: Error) => {
+      assert.match(err.message, /not one of 3 subjects entered the official initial population/);
+      assert.match(err.message, /though retrieves did match/, "must not be mistaken for the retrieve check");
+      assert.match(err.message, /us-core-sex/, "name the known cause so the message is actionable");
+      return true;
+    },
+  );
+});
+
+test("PR-9c precondition: ONE subject out of the IPP is legitimate, not a refusal", async () => {
+  // `/simulate` on somebody outside the age band. Failing that would be a false alarm on a correct answer
+  // — the same reason the retrieve check is `> 1`.
+  const { calculate } = calculatorFor(["s1"], { retrieved: true, inIpp: false });
+
+  const outcome = await batchExecutor(calculate).evaluate({
+    measureId: "cms125",
+    patientBundle: patientBundle("s1"),
+    evaluationDate: "2026-07-25",
+  });
+  assert.equal(outcome.outcome, "MISSING_DATA");
+  assert.equal(outcome.inInitialPopulation, false);
+});
+
+test("PR-9c precondition: ONE subject in the IPP is enough — a mostly-ineligible roster is a real answer", async () => {
+  // The check must not become "most subjects must qualify". A roster where one person is in the initial
+  // population and the rest are not is the ordinary shape of a screening measure, and refusing it would
+  // make the guard useless the moment it mattered.
+  const calculate: FqmCalculate = async (_bundle, patients) => ({
+    results: (patients as Array<{ entry: Array<{ resource: { id: string } }> }>).map((b, i) => ({
+      patientId: b.entry[0]!.resource.id,
+      evaluatedResource: [{ resourceType: "Observation" }],
+      detailedResults: [
+        {
+          populationResults: [
+            { populationType: IPP, result: i === 0 },
+            { populationType: DENOM, result: i === 0 },
+            { populationType: NUMER, result: false },
+          ],
+          statementResults: [],
+        },
+      ],
+    })),
+  });
+
+  const results = await batchExecutor(calculate).evaluateBatch(
+    "cms125",
+    ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+    "2026-07-25",
+  );
+  assert.equal(results.size, 3);
+  assert.equal(results.get("s1")!.inInitialPopulation, true);
+  assert.equal(results.get("s2")!.inInitialPopulation, false);
 });
 
 test("PR-8: the retrieve check does NOT fire for a single subject — that answer is legitimate", async () => {

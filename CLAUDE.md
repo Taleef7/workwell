@@ -276,9 +276,30 @@ Encounter), so this is not purely EHR-sourced membership, and with 52 of 56 outc
 subjects carry discriminating signal** — the oracle is our own authored engine, not external truth. Cypress
 CVU+ remains the verification bar and has not run.
 
-**Still ahead of the flip:** PR-9c (the flip itself, on the demo/production stack only) plus its
-precondition above. Production leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging only.
-(The PR-8b corpus finding is closed — see PR-8c above.)
+**The PR-9c precondition is DISCHARGED (ADR-043), and it changed the flip's scope.** `evaluateBatch` now
+refuses a batch of `outcomes.size > 1` in which **nobody entered the initial population** — the conjunct
+PR-8f's retrieve check provably cannot see (official CMS125 matched 236 LOINC Observations and still put all
+56 subjects out of the IPP; `retrieveSignal` was true throughout). Keyed on `outcomes.size`, not
+`subjects.length`, so it cannot fire on the deliberate per-subject-omission retry path. It does not try to
+distinguish "the data lacks an element the IPP reads" from "nobody qualifies" — from inside it cannot, and
+both mean routing that measure over that data produces nothing. So ADR-042's live-tenant limit is now
+enforced: a third-party WebChart server with no `us-core-sex` fails the MEASURE (MISSING_DATA +
+`PARTIAL_FAILURE` + the #264 alert) instead of publishing a quietly empty roster. Proven on the real
+artifacts, not just a stub: stripping the extension from the committed fixture trips it, and authored over
+the same bundles is unaffected. **`cms122` is OUT of the flip list** — official cms122 over WebChart data is
+refused (zero Conditions in the seed; cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` because its
+"enrollment" is a diabetes *diagnosis* the roster must never fabricate), and it would previously have
+contributed 56 silent MISSING_DATA rows while appearing to run. Nothing is lost — authored is equally blind,
+so routing it changes no roster row. It becomes flippable when ingest supplies diagnoses (M-D), signalled by
+`devdb-official-eval.test.ts`'s cms122 test flipping from a refusal to a distribution. **What the guard does
+NOT catch:** an IPP that IS satisfied while the numerator reads the wrong shape — the open mammography gap,
+where official reports a screened woman OVERDUE and the guard is silent.
+
+**Still ahead of the flip:** dual-stamping mammography in the WebChart crosswalk (closes the false-OVERDUE,
+and it is CMS125's own numerator — so effectively a prerequisite, not a follow-up), then PR-9c itself
+(**cms125 only**, on the demo/production stack, with the before/after distribution snapshot). Production
+leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging only. (The PR-8b corpus finding is
+closed — see PR-8c above.)
 
 ---
 
