@@ -53,6 +53,19 @@ absent from `DECISIONS.md`; noted in `ADR_INDEX.md` so 033 is not reused. Also h
 tradeoff: `ADR_INDEX.md` will go stale the moment ADR-042 lands (regeneration command is in its
 header, `DECISIONS.md` remains authoritative), and `DATA_MODEL.md` is now two files to keep in sync.
 
+**Codex review caught a defect the extraction itself introduced (P2).** `LOCKED_DECISIONS.md` §5 told
+every session that CMS122 is "vendored at stale v0.5.000 (CMS125 not vendored)" and that official-first
+"needs per-measure routing" — all superseded by PR-5/7a/7b/9a. Inside `ROADMAP_2026-07-24.md` that text
+was plainly a **dated audit**; extracting it into an always-loaded file whose preamble says these are
+"things a session must not silently contradict" **promoted stale observations to standing rules**, which is
+the reverse of the intent. Fixed by splitting the file's authority: §4 (owner decisions) is binding, §5 is
+labelled a dated snapshot where **the code wins on disagreement**, and each superseded bullet carries an
+inline `SINCE` note. Two needed one — the official-path bullet (every deficiency now closed; cms122 and
+cms125 are ROUTABLE, and still nothing is routed) and the engine-extractability bullet (PR-2 resequenced to
+M-C, so `backend-ts/packages/` holds only `official-executor/`). Both verified against the tree, not
+assumed. The general lesson worth keeping: **moving text into an always-loaded file changes its status**,
+and dated findings need to say so louder once they are always in context.
+
 ## 2026-07-29 — PR-9a: completing the capped `AdvancedIllness` expansion (branch `feat/official-terminology-completion`)
 
 The one build step PR-9 owed. `officialRoutingProblems` refuses cms122 and cms125 today because both

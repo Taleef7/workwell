@@ -14,7 +14,17 @@
 3. Packaging = **pnpm workspace now, neutral scope `@workwell/*`**, pitch Doug on `@mieweb/*` later.
 4. Authored cms122/125 subsets **retire from the catalog into the fidelity/Standards lab** post-flip.
 
-## 5. Key audit facts (verified 2026-07-24)
+## 5. Key audit facts (verified 2026-07-24 — a DATED SNAPSHOT, not a live constraint)
+
+> **§4 above is binding; this section is not.** These are the findings that *motivated* the plan, recorded
+> as of 2026-07-24. Work since then has superseded some of them, and each such bullet carries an inline
+> **SINCE** note. A stale finding here is not something a session must avoid contradicting — where this
+> section and the code disagree, **the code wins.** Verify against the tree before relying on any bullet.
+>
+> This distinction matters because of where the text came from: inside `ROADMAP_2026-07-24.md` it was
+> plainly a dated audit. Extracting it into an always-loaded file whose preamble says "must not silently
+> contradict" promoted stale observations to standing rules, which is the opposite of the intent
+> (Codex review of PR #351).
 
 - **Engine extractability:** `src/engine/` had exactly 4 app-layer couplings — `engine-factory.ts`'s
   `getStores` value import (app wiring), two type-only imports of the 30-method `ValueSetStore` (engine
@@ -27,10 +37,23 @@
   `@cqframework/cql/cql-to-elm` in `cql/cql-translator.ts` (the ELM Explorer, reached from
   `routes/measures.ts`; §7.1 keeps it in the app) and `node:fs`/`node:path`/`node:url` in the four
   `*-cli.ts` entrypoints. Both are pinned by the boundary test's allowlist, so neither can spread.
+  > **SINCE (2026-07-24, same day):** PR-2 — the physical `packages/measure-engine` extraction — was
+  > **resequenced to land with M-C** and has NOT shipped. `backend-ts/packages/` today contains only
+  > `official-executor/`. The debt described above is therefore still in the tree, still allowlisted, and
+  > still PR-2's job — just later than this bullet implies.
 - **Official-path machinery exists** (literal-diff + official-cases over fqm-execution, 121/121 MADiE
   green) but is CMS122-hardcoded, vendored at stale v0.5.000 (CMS125 not vendored), and ADR-026-fenced
   diagnostic-only. `MeasureExecutor` seam is clean but env-global; official-first needs per-measure
   routing. MeasureReport D1/D2 were already fixed (PR #294/ADR-031) — PR-3 below only generalizes.
+  > **SINCE (2026-07-30): every deficiency in this bullet is closed.** Both CMS122 and CMS125 are vendored
+  > at **v1.0.000** (PR-5), the executor **adapter** (PR-7a) and the **per-measure router** with
+  > construction-time validation (PR-7b) shipped, PR-3 generalized MeasureReport membership, and the
+  > capped `AdvancedIllness` expansion is completed (PR-9a / ADR-041) so
+  > `officialRoutingProblems(["cms122"])` and `(["cms125"])` both return **no problems** — the two measures
+  > are ROUTABLE. What has NOT changed: **nothing is routed.** `WORKWELL_OFFICIAL_MEASURES` is unset
+  > everywhere, so `routedEngineForEnv` returns `engineForEnv`'s value by identity and every measure still
+  > evaluates authored CQL. Current state: the ADR-036..041 run in `docs/DECISIONS.md` (newest first) and
+  > the Current Focus block in `CLAUDE.md`.
 - **QRDA-I does not exist anywhere**; QRDA-III is a stub. Cypress + CVU+ are open source
   (github.com/projectcypress/cypress), Docker-runnable; projecttacoma/cqm-reports (Ruby) is the QRDA-I
   reference implementation (spec reference only, not a dependency).
