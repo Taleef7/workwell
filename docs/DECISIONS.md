@@ -1,5 +1,62 @@
 # Architecture Decision Records
 
+## ADR-043: A routed measure that can see nobody is refused — and cms122 therefore leaves the flip list
+
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the PR-9c precondition). Nothing routes officially yet.
+
+**Context.** ADR-042 consequence 5 recorded a limit it could only assert in prose: both `us-core-sex` mapping
+fixes sit upstream of the live FHIR transport, so a third-party WebChart FHIR server still supplies no
+extension and its whole roster reads out-of-population for official CMS125 — silently, as 100% MISSING_DATA
+rather than an error. `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly
+where official routing and a live seam can coexist.
+
+PR-8f's batch retrieve refusal cannot catch this, and that is measured rather than argued: official CMS125
+matched **236 LOINC Observations** on the WebChart fixture and still put all 56 subjects out of the initial
+population, because the IPP also reads the extension. `retrieveSignal` was true throughout. The refusal
+catches *retrieved nothing at all*; this is *retrieved the wrong thing*, which ADR-038 already established it
+is blind to.
+
+**Decision.**
+
+1. **`evaluateBatch` refuses a batch in which nobody entered the initial population.** Same shape as the
+   retrieve check, one conjunct further in.
+2. **Keyed on `outcomes.size > 1`, not `subjects.length`.** A subject fqm returned nothing for is
+   deliberately *absent* from the result map so the run pipeline can re-evaluate it alone. Testing the
+   request size would fire on that omission path and convert a recoverable per-subject retry into a whole
+   measure's failure.
+3. **`> 1` for the same reason as the retrieve check.** For one person, "not in the initial population" is
+   an ordinary correct answer — `/simulate` on somebody outside the age band. Across a roster it is not.
+4. **The refusal does not try to distinguish its two causes**, because from inside it cannot: either the data
+   lacks a structural element the IPP reads, or nobody genuinely qualifies. Both mean routing that measure
+   over that data produces nothing, so **a measure that can see nobody is a configuration error whichever it
+   is**. The message names both, and points at `WEBCHART_FHIR_MAPPING.md` §3.1 for the known case.
+5. **cms122 is removed from the PR-9c flip list.** This is the consequence that changes a plan rather than
+   adding a check. The roadmap's PR-9 flips "cms122+cms125" together; the guard shows official cms122 over
+   WebChart data is refused, because the dev seed carries **zero Conditions** and cms122 is deliberately
+   outside `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis* the roster must never
+   fabricate). Before this guard it would have contributed 56 silent MISSING_DATA rows while appearing to
+   run. **Nothing is lost:** the authored path is equally blind, so routing it would change no roster row.
+   It becomes flippable when the WebChart path supplies diagnoses (M-D) — signalled by
+   `devdb-official-eval.test.ts`'s cms122 test flipping from a refusal to a distribution.
+
+**Consequences.**
+
+- The ADR-042 residual limit is now **enforced** rather than documented. A live third-party WebChart tenant
+  routed for official CMS125 fails the *measure* (MISSING_DATA + `PARTIAL_FAILURE` + the #264 alert, via the
+  run pipeline's existing batch-failure channel) instead of publishing a quietly empty roster.
+- **The failure is per-measure, never per-run.** The run pipeline already isolates a batch failure to its own
+  measure and re-throws per subject; no new failure channel was added.
+- **A known false positive, stated plainly:** a roster of 2+ where nobody genuinely qualifies now fails
+  loudly every run. That is deliberate — it is the same trade the retrieve check makes — and the remedy is to
+  stop routing that measure over that data, which is the correct action anyway.
+- **What this does NOT catch:** a measure whose IPP is satisfied but whose *numerator* reads the wrong shape.
+  That is the open mammography gap (ADR-042 consequence 3), where official reports a screened woman OVERDUE
+  — the guard sees subjects in the population and is silent. Dual-stamping the crosswalk remains outstanding.
+- Proven end-to-end on the real artifacts, not only against a stubbed calculator: stripping `us-core-sex`
+  from the committed fixture trips the refusal, and the authored path over the same bundles is unaffected
+  (52 MISSING_DATA / 4 OVERDUE), which is what makes this a statement about official routing rather than
+  about the roster being unusable.
+
 ## ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (PR-9b). Nothing routes officially yet.
