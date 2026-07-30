@@ -116,10 +116,14 @@ fixed and generalizes to one it did not. The limit is now stated in `WEBCHART_FH
 tenant integrator will see it, and enforcing it is recorded as a **PR-9c precondition** rather than assumed
 away.
 
-**Follow-ups deliberately not in this PR:** `docs/ADR_INDEX.md` needs the ADR-042 line and CLAUDE.md's
-Current Focus needs the PR-9b status — both files are being rewritten by the unmerged context-diet PR
-(#351), and ADR_INDEX does not exist on `main` yet. Editing them here would guarantee a conflict for no
-benefit.
+**The two always-loaded doc updates were sequenced behind #351, and are now in.** `docs/ADR_INDEX.md` did
+not exist on `main` until the context-diet PR merged, and both PRs rewrote CLAUDE.md, so editing either
+earlier would have guaranteed a conflict for no benefit. With #351 merged (`1c0b47f`) this branch was
+rebased — one expected `JOURNAL.md` conflict, both entries kept newest-first — and the follow-ups landed:
+the ADR-042 line in `ADR_INDEX.md`, and a rewritten PR-9b block in CLAUDE.md's Current Focus that carries
+the measured numbers, **both open gaps** (the numerator's false-OVERDUE and the live third-party path), and
+the PR-9c precondition. The old text there described the refusal that measurement retired, so leaving it
+would have pointed the next session at work that should not be done.
 
 ## 2026-07-29 (later) — context diet: the always-loaded doc set, and the second rule set that had drifted
 
