@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-07-30 (later) — the reporting trio, and cms122 joins the flip (branch `feat/official-reporting-trio`)
+
+PR-9c shipped cms125 alone because review found cms122 would emit a self-contradictory MeasureReport. This
+discharges that, and cms122 is now routed too.
+
+**The obligation was written in the codebase, in the file that had to honour it.** `measure-report.ts` has
+said since PR-3: *"the measure that flips MUST switch all three together — canonical, improvementNotation,
+and membership."* PR-3 made membership evidence-first and left the other two static. For cms122 that is not
+cosmetic: its official numerator is **poor glycemic control**, so `increase` asserts higher-is-better about
+a numerator counting harm — ~120 → ~27 on the 150-employee directory — and QRDA III has no notation element
+at all, so there the inverted count would have shipped unmarked.
+
+**All three now derive from the outcome's own `evidence.official`.** Deliberately not from the env flag:
+a report describes the run it was built from, and a run's provenance does not change because someone later
+flips a flag. Asking `WORKWELL_OFFICIAL_MEASURES` at export time would relabel every historical export the
+day the config moves — the same reasoning `aggregateCountsForRun` already applied to counts, now applied to
+the label as well.
+
+Three details worth keeping:
+
+- **The notation comes from `OFFICIAL_MEASURE_SEMANTICS`, not the artifact.** cms122's own artifact says
+  `increase`, contradicting eCQI's description of the measure; the semantics table records that
+  human-reviewed decision with its rationale. A routed measure with no recorded semantics alerts rather
+  than guessing — guessing one way reports every failure as compliant.
+- **The canonical is claimed only for the artifact that produced the outcome.** A re-vendor between run and
+  export moves the sha, and the report falls back to a version-qualified urn. Labelling an old report with
+  a new canonical asserts a provenance that never existed.
+- **QRDA III got the measure IDENTITY, not a new element.** It has no notation field by design — a receiver
+  derives direction from the measure identity — so emitting `urn:workwell:measure|cms122` over CMS's
+  poor-control numerator was the actual defect. The counts were already right.
+
+**The old guard could not have caught any of this**, and that is the reusable lesson: its fixtures carried
+no official evidence, so it only ever exercised the authored path and passed while asserting
+`"COMPLIANT is WorkWell's numerator"`. A test whose fixtures cannot reach the branch it names is the same
+vacuous shape as a test that self-skips. The replacement builds a real summary report from a synthetic
+official outcome for **every measure the workflows ship** and asserts the notation matches the semantics —
+so cms122's exclusion was enforced by the guard, and its inclusion now is too. Mutation-checked: breaking
+the derivation fails three tests across two files.
+
+Verified: typecheck clean; **1612 tests / 1598 pass / 0 fail / 14 skipped**; 54/54 workflow run-blocks parse.
+
 ## 2026-07-30 (PR-9c) — the flip: CMS125 now runs CMS's published artifact (branch `feat/official-flip-pr9c`)
 
 Everything since ADR-036 was building toward one line in a workflow file. It is set:

@@ -8,7 +8,12 @@
  */
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
-import { countPopulations, type PopulationCounts } from "./measure-report.ts";
+import {
+  countPopulations,
+  officialReportIdentity,
+  type PopulationCounts,
+  type OfficialReportIdentity,
+} from "./measure-report.ts";
 
 const LOINC = "2.16.840.1.113883.6.1";
 const ACT = "2.16.840.1.113883.5.4";
@@ -34,11 +39,27 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
 ];
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
-  return buildQrda3DocumentFromCounts(run, measureId, countPopulations(outcomes, measureId));
+  const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
+  return buildQrda3DocumentFromCounts(run, measureId, countPopulations(outcomes, measureId), official);
 }
 
 /** QRDA III from pre-aggregated proportion counts (the bounded Fable H4 path). */
-export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, c: PopulationCounts): string {
+export function buildQrda3DocumentFromCounts(
+  run: RunRecord,
+  measureId: string,
+  c: PopulationCounts,
+  /**
+   * The official artifact these counts came from, when they did (ADR-046).
+   *
+   * QRDA III has **no `improvementNotation` element** — a receiver derives the direction from the
+   * measure identity, which is exactly why identity is the fix here rather than a new element. Emitting
+   * `urn:workwell:measure|cms122` over counts whose numerator is CMS's *poor glycemic control* tells a
+   * receiver to interpret an inverse measure as WorkWell's compliance-oriented one. The counts were
+   * already correct (`aggregateCountsForRun` reads provenance from the RUN, not the current flag); the
+   * label was not.
+   */
+  official: OfficialReportIdentity | null = null,
+): string {
   const counts: Record<string, number> = {
     IPOP: c.ipp, DENOM: c.denom, DENEX: c.denex, NUMER: c.numer, DENEXCEP: c.denexcep,
   };
@@ -77,7 +98,7 @@ export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, 
   <templateId root="2.16.840.1.113883.10.20.27.1.2" extension="2017-06-01"/>
   <id root="${crypto.randomUUID()}"/>
   <code code="55184-6" codeSystem="${LOINC}" codeSystemName="LOINC" displayName="Quality Reporting Document Architecture Calculated Summary Report"/>
-  <title>WorkWell QRDA Category III — ${esc(measureId)}</title>
+  <title>WorkWell QRDA Category III — ${esc(measureId)}${official ? ` (official ${esc(official.ecqmId ?? measureId)} v${esc(official.version ?? "?")})` : ""}</title>
   <effectiveTime value="${now}"/>
   <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
   <languageCode code="en-US"/>
@@ -95,7 +116,10 @@ export function buildQrda3DocumentFromCounts(run: RunRecord, measureId: string, 
               <statusCode code="completed"/>
               <reference typeCode="REFR">
                 <externalDocument classCode="DOC" moodCode="EVN">
-                  <id root="urn:workwell:measure" extension="${esc(measureId)}"/>
+                  ${official
+                    ? `<id root="2.16.840.1.113883.4.738" extension="${esc(official.ecqmId ?? measureId)}"/>
+                  <versionNumber value="${esc(official.version ?? "")}"/>`
+                    : `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`}
                 </externalDocument>
               </reference>
               <component>

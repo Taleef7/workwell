@@ -9,6 +9,8 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
 const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improvement-notation";
@@ -239,21 +241,81 @@ export function populationCountsFromStatus(counts: OutcomeStatusCount[], measure
   }, zeroCounts());
 }
 
-// WorkWell's numerator is compliance-oriented (including inverted CMS122 logic), so this MUST remain
-// the WorkWell canonical. Switching to an official CMS canonical is forbidden unless the numerator
-// orientation and improvementNotation are changed together to match that official Measure.
-//
-// PR-3 NOTE — this coupling is now a PR-7 OBLIGATION, not just a prohibition. Evidence-first membership
-// means an official-routed outcome's numerator is the OFFICIAL one (for cms122: poor glycemic control),
-// while `measureCanonical`/`improvementNotation` below still emit the WorkWell canonical and
-// `increase`. A report that declares higher-is-better over a poor-control numerator is
-// self-contradictory, so the measure that flips MUST switch all three together — canonical,
-// improvementNotation, and membership — sourced from the vendored official manifest (PR-5). Today no
-// outcome carries official evidence, so the trio is still consistent; the guard test below pins that.
-const measureCanonical = (measureId: string): string => `urn:workwell:measure:${measureId}`;
+/**
+ * The identity of the official artifact an outcome was scored by, or `null` for an authored outcome.
+ *
+ * Read from the OUTCOME, never from the environment. A report describes the run it is built from, and a
+ * run's provenance does not change because someone later flipped a flag or re-vendored an artifact — so
+ * asking `WORKWELL_OFFICIAL_MEASURES` here would mislabel every historical export the day the config
+ * moves. The adapter persists `{ecqmId, version, engine, artifactSha256}` beside `populationResults`
+ * precisely so this is answerable from the record (ADR-031).
+ */
+export interface OfficialReportIdentity {
+  ecqmId?: string;
+  version?: string;
+  artifactSha256?: string;
+}
 
-const improvementNotation = (measureId: string): "increase" | "decrease" =>
-  MEASURE_BINDINGS[measureId]?.improvementNotation ?? "increase";
+export function officialReportIdentity(evidence: unknown): OfficialReportIdentity | null {
+  const official = (evidence as { official?: Record<string, unknown> } | null | undefined)?.official;
+  if (!official || typeof official !== "object") return null;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  return {
+    ...(str(official.ecqmId) ? { ecqmId: str(official.ecqmId) } : {}),
+    ...(str(official.version) ? { version: str(official.version) } : {}),
+    ...(str(official.artifactSha256) ? { artifactSha256: str(official.artifactSha256) } : {}),
+  };
+}
+
+/**
+ * THE TRIO (ADR-046, discharging the PR-7 obligation this file has carried since PR-3).
+ *
+ * The prohibition used to read: WorkWell's numerator is compliance-oriented (including inverted CMS122
+ * logic), so the canonical MUST stay WorkWell's — switching to an official CMS canonical is forbidden
+ * *unless the numerator orientation and improvementNotation change together*. Evidence-first membership
+ * (PR-3) made an official-routed outcome's numerator the OFFICIAL one, which turned that prohibition
+ * into an obligation: **canonical, improvementNotation and membership must switch together or the
+ * report contradicts itself.**
+ *
+ * For cms122 the contradiction is not cosmetic. Its official numerator is *poor glycemic control* — being
+ * in it is the failure — so a report that also declares `improvementNotation: increase` says
+ * higher-is-better about a numerator counting harm. On the 150-employee directory the numerator moves
+ * ~120 → ~27, and QRDA III carries no notation element at all, so the inverted count would ship with
+ * nothing marking it. Review of #356 caught that PR-9c was the flip that had to discharge this and had
+ * not; cms122 was held out of that flip for exactly this reason.
+ *
+ * All three now derive from the same place — the outcome's own official evidence — so they cannot
+ * disagree by construction.
+ */
+const measureCanonical = (measureId: string, official: OfficialReportIdentity | null): string => {
+  if (!official) return `urn:workwell:measure:${measureId}`;
+  const artifact = loadOfficialArtifact(measureId);
+  // Only claim CMS's canonical for the artifact that ACTUALLY produced this outcome. A re-vendor between
+  // the run and the export changes the sha; labelling the old report with the new canonical would assert
+  // a provenance that never existed. Falling back to a version-qualified urn is less pretty and true.
+  if (artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256)) {
+    return artifact.manifest.url;
+  }
+  return `urn:workwell:measure:${measureId}:official:${official.version ?? "unknown"}`;
+};
+
+const improvementNotation = (
+  measureId: string,
+  official: OfficialReportIdentity | null,
+): "increase" | "decrease" => {
+  if (official) {
+    // Sourced from the human-reviewed semantics table, NOT from the artifact's own
+    // `improvementNotation` — for cms122 the artifact says `increase`, which contradicts eCQI's own
+    // description of the measure, and `official-measure-semantics.ts` records that decision with its
+    // rationale. There is no safe default here: guessing one way reports every failure as compliant.
+    const semantics = officialMeasureSemantics(measureId);
+    if (semantics) return semantics.numeratorMeansCompliant ? "increase" : "decrease";
+    // A routed measure with no recorded semantics cannot be scored honestly. The router refuses this at
+    // construction, so reaching it means the refusal was bypassed — say so rather than guess.
+    alertUnreadableOfficialEvidence(`no recorded numerator semantics for routed measure '${measureId}'`, null);
+  }
+  return MEASURE_BINDINGS[measureId]?.improvementNotation ?? "increase";
+};
 
 const REPORTER_ID = "workwell-measure-studio";
 const reportMetadata = (generatedAt: string) => ({
@@ -281,7 +343,12 @@ export function buildSummaryMeasureReport(
   outcomes: OutcomeRecord[],
   generatedAt: string,
 ): MeasureReport {
-  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId), generatedAt);
+  // Derive the artifact identity from the outcomes themselves — the same source the counts come from,
+  // so the label and the numbers cannot describe different measures. Any row that carries it is
+  // decisive: a run evaluates one measure with one engine, and a run where some subjects errored still
+  // names the artifact the rest were scored by (ADR-046).
+  const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
+  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId), generatedAt, official);
 }
 
 /** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
@@ -290,6 +357,12 @@ export function buildSummaryMeasureReportFromCounts(
   measureId: string,
   c: PopulationCounts,
   generatedAt: string,
+  /**
+   * The official artifact these counts came from, when they did. Explicit rather than inferred because
+   * counts carry no evidence: the aggregate/scale path reduces STATUS buckets, which are authored
+   * semantics by construction (`populationCountsFromStatus` says so), so its caller passes nothing.
+   */
+  official: OfficialReportIdentity | null = null,
 ): MeasureReport {
   const group: MeasureReport["group"][number] = { population: populations(c) };
   // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
@@ -301,9 +374,9 @@ export function buildSummaryMeasureReportFromCounts(
     ...reportMetadata(generatedAt),
     status: "complete",
     type: "summary",
-    measure: measureCanonical(measureId),
+    measure: measureCanonical(measureId, official),
     period: { start: run.measurementPeriodStart, end: run.measurementPeriodEnd },
-    improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId) }] },
+    improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
     group: [group],
   };
 }
@@ -327,16 +400,17 @@ export function buildIndividualMeasureReport(
   generatedAt: string,
 ): MeasureReport {
   const c = asCounts(membershipFor(outcome, measureId));
+  const official = officialReportIdentity(outcome.evidence);
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
     status: "complete",
     type: "individual",
-    measure: measureCanonical(measureId),
+    measure: measureCanonical(measureId, official),
     // subjectId is the employee external id (used as the Patient ref); fhir_patient_id linkage is deferred (spec §7).
     subject: { reference: `Patient/${outcome.subjectId}` },
     period: { start: run.measurementPeriodStart, end: run.measurementPeriodEnd },
-    improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId) }] },
+    improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
     group: [{ population: populations(c) }],
   };
 }

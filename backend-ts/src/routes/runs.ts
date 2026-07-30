@@ -51,6 +51,8 @@ import {
   officialMembership,
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
+  officialReportIdentity,
+  type OfficialReportIdentity,
   countPopulations,
   populationCountsFromStatus,
 } from "../fhir/measure-report.ts";
@@ -172,7 +174,7 @@ async function aggregateCountsForRun(
   runId: string,
   measureId: string,
   env: RunsEnv,
-): Promise<{ counts: PopulationCounts } | { error: Response }> {
+): Promise<{ counts: PopulationCounts; official: OfficialReportIdentity | null } | { error: Response }> {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
   // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
   // now means that turning the flag off — the documented rollback — silently reinterprets every
@@ -186,7 +188,7 @@ async function aggregateCountsForRun(
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
   const official = routedNow || (await runProducedOfficialEvidence(os, runId));
   if (!official) {
-    return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId) };
+    return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId), official: null };
   }
   const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);
   if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
@@ -202,7 +204,12 @@ async function aggregateCountsForRun(
       ),
     };
   }
-  return { counts: countPopulations(await os.listOutcomes(runId), measureId) };
+  const rows = await os.listOutcomes(runId);
+  // The artifact identity travels with the counts so BOTH exporters describe the same measure. Read off
+  // the first row that carries it — a run evaluates one measure with one engine, so any row is decisive,
+  // and a run where only some rows errored still names the artifact the rest were scored by (ADR-046).
+  const identity = rows.map((r) => officialReportIdentity(r.evidence)).find((i) => i !== null) ?? null;
+  return { counts: countPopulations(rows, measureId), official: identity };
 }
 
 
@@ -514,7 +521,7 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
-    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts), {
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts, aggregate.official), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -550,7 +557,7 @@ export async function handleRuns(
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
       if ("error" in aggregate) return aggregate.error;
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt));
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official));
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
     // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.

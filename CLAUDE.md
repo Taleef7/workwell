@@ -340,18 +340,20 @@ SYNTHETIC roster (what the demo/production stack evaluates) cms122 and cms125 bo
 and agree with authored; over WebChart data cms125 admits 4/56 agreeing on all 56, cms122 admits 0/56 and
 reports INCONCLUSIVE (data gap, not divergence) — ADR-043 decision 6 confirmed by measurement.
 
-**PR-9c SHIPPED (ADR-045) — `WORKWELL_OFFICIAL_MEASURES="cms125"` is set on BOTH `deploy-twh-mieweb.yml`
-and `reconcile-twh-mieweb.yml`, so CMS125 now evaluates CMS's published QI-Core artifact on
-demo/production. M-A is complete for cms125; cms122 is BLOCKED on its reporting trio (below).** Set in the WORKFLOW, not on the container: `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
+**PR-9c + ADR-046 SHIPPED — `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` is set on BOTH
+`deploy-twh-mieweb.yml` and `reconcile-twh-mieweb.yml`, so BOTH measures now evaluate CMS's published
+QI-Core artifacts on demo/production. M-A is COMPLETE for the two vendored measures.** Set in the WORKFLOW, not on the container: `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
 array and the deploy deletes-and-recreates, so a hand-set value is wiped — which makes the flip a reviewed,
 revertable change rather than an operator action. **Decided on measurement:** cms125 admits **5/5** corpus subjects
 to the official initial population and agrees with authored on every one (evidence at
 `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md` — note that is FIVE PROBES, not the 150-employee roster;
-the roster figure is derived, not measured). **cms122 is NOT flipped**: its official numerator means
-FAILURE while `improvementNotation` still says `increase` and QRDA III has no notation field at all, so
-routing it would ship a self-contradictory MeasureReport (~120→~27). `measure-report.ts:246-252` had
-pre-declared that trio as a PR-7 obligation; discharging it is the next PR, and
-`official-flip-config.test.ts` refuses to let cms122 ship until then. **The flip is INERT on this stack's
+the roster figure is derived, not measured). **cms122 joined it once ADR-046 discharged the reporting trio** — its official numerator means FAILURE
+(poor glycemic control), so its MeasureReport now declares `decrease` and CMS's canonical, and its QRDA III
+carries the official eCQM identity rather than `urn:workwell:measure|cms122`. All three derive from the
+outcome's own `evidence.official`, never from the env flag, so a historical export cannot be relabelled by a
+later config change; a re-vendor that moves the artifact sha falls back to a version-qualified urn rather
+than claiming a canonical the run never used. `official-flip-config.test.ts` asserts the BUILT REPORT for
+every shipped measure. **The flip is INERT on this stack's
 data** (no roster row changes) — the value is that official execution runs in production at all.
 
 **New guard, because nothing validated the string that actually ships:** `official-flip-config.test.ts`
