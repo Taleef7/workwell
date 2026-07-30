@@ -21,6 +21,7 @@ import type { ShimDb } from "./db.ts";
 import {
   capabilityStatement,
   observationToFhir,
+  mammographyObservationFor,
   patIdFromSubjectId,
   patientToFhir,
   procedureToFhir,
@@ -127,7 +128,15 @@ async function handleClinicalSearch(
   }
   if (type === "Observation") {
     const rows = await deps.db.observationsForPatient(patId);
-    sendJson(res, 200, searchsetBundle(rows.map((row, i) => observationToFhir(row, i + 1))));
+    // Mammography is dual-stamped (ADR-044): a screening-mammogram PROCEDURE row also surfaces here as a
+    // LOINC `Observation` with `category ~ imaging`, because that is the only shape the official CMS125
+    // numerator retrieves. Served from this endpoint rather than /Procedure because the FHIR type is what
+    // the client composes on — the /Procedure response is unchanged, so the authored engine sees exactly
+    // what it saw before.
+    const derived = (await deps.db.proceduresForPatient(patId))
+      .map((row, i) => mammographyObservationFor(row, i + 1))
+      .filter((r): r is NonNullable<typeof r> => r !== undefined);
+    sendJson(res, 200, searchsetBundle([...rows.map((row, i) => observationToFhir(row, i + 1)), ...derived]));
     return;
   }
   if (type === "Procedure") {

@@ -153,6 +153,35 @@ WHERE oc.loinc_num IS NOT NULL;
 > **Open item — sparse coding.** In the dev seed only **1** `patient_procedures` row has a real CPT
 > (`G0202`, mammogram screening) across 99 rows; the rest are blank-coded. Confirm production density.
 
+#### Mammography is DUAL-STAMPED (ADR-044) — read this before adding another derived resource
+
+A screening-mammogram procedure row emits **two** resources: the CPT/HCPCS `Procedure` above, and a LOINC
+`Observation` (`24606-6`) carrying `status = final` and `category ~ imaging`, served from `/Observation`.
+`/Procedure` is unchanged.
+
+**Why.** The two engines retrieve different resource types for the same clinical fact — authored
+`cms125.cql` reads `[Procedure: "Mammography"]` (CPT/HCPCS), official CMS125 reads
+`isDiagnosticStudyPerformed([Observation: "Mammography"])` over a value set of **92 LOINC codes with no
+CPT and no HCPCS in it**, and additionally requires `category ~ imaging`. Emitting only the Procedure made
+official report an **already-screened woman as OVERDUE**, which `case-logic.ts` escalates to a HIGH-priority
+"escalate mammogram follow-up immediately". A LOINC Observation *without* the category changes nothing,
+which is the trap in the obvious fix.
+
+**Why this is normalization and not fabrication (ADR-037).** One real recorded event is expressed in the
+two vocabularies the two engines read. No event is invented. Three properties keep that true, and each is
+tested — break any one and this becomes fabrication:
+
+1. **Derived strictly from a real row.** No procedure row ⇒ no Observation. The date is the procedure's own.
+2. **An explicit allowlist, not a category sweep.** Only codes meaning "a screening mammogram was
+   performed" (`77067`, legacy `G0202`) dual-stamp, so an unrelated CPT can never mint a diagnostic study.
+3. **Non-inflating — and this is the limit worth knowing.** Both numerators are `exists(...)`, so one event
+   in two vocabularies is still one event. **This pattern is NOT safe for a counting measure** (a "how many
+   screenings" measure would double-count), nor for one that reasons over `Observation` cardinality. Any
+   future dual-stamp must re-check this property against the measure that consumes it.
+
+Both mapping sites carry it — `wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate
+`backend-ts/scripts/webchart-devdb-export.ts` — mirroring §3.1's `us-core-sex`.
+
 ### 3.7 Immunization ← **NO dedicated CVX table — must be traced**
 There is no `immunizations` table. The only vaccine-adjacent table is `encounter_order_forecast` (19
 rows). Administered vaccines in WebChart are modeled as **orders** (`encounter_orders`/`order_list`) or
