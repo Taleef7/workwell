@@ -245,7 +245,7 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Current focus
 
-Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. The machinery is complete and **dark** — nothing is routed yet, and the flag is unset in every environment.
+Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS125 is live on the demo/production stack** (2026-07-30); every other measure and every other environment still evaluates the authored CQL. CMS122 is routable but held back until its MeasureReport `improvementNotation` matches its official numerator — a self-contradictory report is worse than a delayed one.
 
 What remains before the first flip, and the verification bar it has to clear, is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–044 in [`docs/DECISIONS.md`](docs/DECISIONS.md). Cypress **CVU+** is the verification bar and has not yet run.
 

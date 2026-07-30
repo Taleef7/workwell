@@ -284,7 +284,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 **Demo claim that is honest:**
 
-> We evaluate CMS122v14 and CMS125v14 — the 2026 eCQI Eligible Clinician measures (MIPS 001 / 112) — with production CQL aligned to official population criteria. We can show structural fidelity (and for CMS122, a literal official package comparison). We do not claim full MAT multi-library submission packages or 2027 v15 until we cut over.
+> We evaluate CMS122v14 and CMS125v14 — the 2026 eCQI Eligible Clinician measures (MIPS 001 / 112) — with production CQL aligned to official population criteria — and, for **CMS125 on the demo/production stack since 2026-07-30**, replaced outright by CMS's published QI-Core artifact (PR-9c / ADR-045). We can show structural fidelity (and for CMS122, a literal official package comparison). We do not claim full MAT multi-library submission packages or 2027 v15 until we cut over.
 
 **Remaining accuracy work:** Phase 2 DENEX (LTC/frailty); optional CMS125 literal ELM; annual roll-forward to v15/2027 when product targets that year.
 

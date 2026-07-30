@@ -1,5 +1,107 @@
 # Journal
 
+## 2026-07-30 (PR-9c) — the flip: CMS125 now runs CMS's published artifact (branch `feat/official-flip-pr9c`)
+
+Everything since ADR-036 was building toward one line in a workflow file. It is set:
+`WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` on `deploy-twh-mieweb.yml`. **M-A is complete.**
+
+**What made it decidable rather than a leap.** Two things, both from the last two PRs. ADR-044 closed the
+mammography numerator gap — the last known way official could contradict authored on data this stack
+holds. And `flip-snapshot` turned checklist step 2 from prose into a number: both measures admit **5 of 5**
+corpus subjects to the official initial population and agree with authored on every one, across
+COMPLIANT/OVERDUE/EXCLUDED. The evidence is committed at `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md`
+rather than pasted into a PR comment, so the numbers this was approved on outlive the approval.
+
+**cms122 goes too, and that is ADR-043 decision 6 paying off.** An earlier draft had removed it for
+reading out-of-population over WebChart data. It does — but `deploy-twh-mieweb.yml` carries zero
+`WORKWELL_WEBCHART_*`, so this stack evaluates the synthetic roster where cms122 scores normally. The
+finding constrained staging, not the flip, and measuring both stacks separately is what kept a correct
+measure from being dropped on a true observation about a different environment.
+
+**The new guard is the interesting part.** Every check in this area validated a configuration a test
+passed in; nothing validated the string that actually reaches production. So a future edit adding
+`cms130` before it is vendored would deploy green, satisfy `/actuator/health` (deliberately DB-free, so it
+answers 200 regardless), keep the self-heal reconciler quiet — and 500 every evaluating route, because
+official routing refuses at engine construction, **per request**. `official-flip-config.test.ts` now parses
+`WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and asserts everything named is gated, vendored,
+proportion-scored and routing-clean. Mutation-checked: adding `cms130` fails it with the reason.
+
+Split in two on purpose — the structural half is pure and always runs, the terminology half needs the
+gitignored sidecar and is wired into CI's `official-cases` job. One combined test would have self-skipped
+in `pnpm test` and read as covered, which is the defect class this branch has now been pulled up on four
+times. I also deliberately did NOT pin *which* measures are flipped: that would make every future flip a
+two-file change guarded by a test that only says "you changed what you changed".
+
+**Verified the boring thing that would have been embarrassing:** the flag is added inside a `jq` program
+in a single-quoted shell string, and I wrote `#` comments around it. jq does support comments — but I ran
+the extracted program rather than assuming, and confirmed it still emits all 18 env entries with the new
+one among them.
+
+**The flip is inert on this stack's data**, and that is the expected result. No roster row changes. The
+value is that official execution is running in production at all — the precondition for the remaining six
+priority measures, and for saying WorkWell *executes* published eCQMs rather than reimplementing them.
+
+Post-deploy checks are written into the evidence doc, and the first one matters most: **grep for
+`OFFICIAL_ROUTING_MISCONFIGURED`**, because a green container is not evidence here. The nightly scheduler
+is on, so the first scheduled ALL_PROGRAMS run will exercise the flip without anyone triggering it.
+
+**Then my own reviewer found two BLOCKERS, and the first is the most embarrassing thing in this session.**
+
+**The deploy step was a bash syntax error.** I put a comment inside the `jq` program — which lives in a
+single-quoted shell string — and wrote `CMS's` and `WorkWell's`. The first apostrophe closes the quote.
+I had "verified" the change by extracting the jq program and running it standalone, which bypasses the
+shell quoting entirely: the program was always fine, the string containing it was not. `bash -n` on the
+extracted run-block says `unexpected EOF while looking for matching '`.
+
+What makes it worse than a red build: `build-backend-ts` would have succeeded and pushed a new `:latest`,
+the deploy step would have died *before* the delete/recreate so the live container survived on the old
+image — and then the 15-minute self-heal reconciler, which I had *just* taught to carry the flag, would
+have recreated it from the new `:latest` and delivered the flip unattended while the deploy pipeline was
+red. The exact silent-delivery class this PR exists to prevent, built by the two fixes interacting.
+Nothing could have caught it: deploy workflows only run on push to main, and my new config test passed
+3/3 because it validates the semantics of a line the shell would never execute.
+`.github/scripts/workflow-run-blocks.test.sh` now `bash -n`s all 54 run-blocks in CI. Its own first
+version reported "all parse" after checking **zero** — so it has a minimum-block floor now, which then
+immediately earned its keep by catching that the extractor emitted Windows-style paths bash could not stat.
+
+**cms122 is OUT of the flip, and the reason is in the codebase in writing.** `measure-report.ts:246-252`
+says: *"the measure that flips MUST switch all three together — canonical, improvementNotation, and
+membership."* cms122's official numerator means **failure** (HbA1c > 9%), but `measure-bindings.ts` still
+declares `improvementNotation: "increase"`. Routing it would emit a MeasureReport claiming higher-is-better
+over a poor-control numerator — ~120 → ~27 on the 150-employee directory — and QRDA III carries no
+notation field at all, so the inverted count ships unmarked. The guard test that "pinned" this only ever
+exercised the authored path, so it could not fail when official evidence arrived. cms125's trio is already
+consistent, so it goes alone; `official-flip-config.test.ts` now refuses any measure whose official
+numerator means failure while its notation says `increase`, which is what excludes cms122 — enforced,
+not remembered.
+
+I also had to correct the evidence doc: it claimed 35 tests where CI now runs 38, and said "the corpus
+this stack evaluates" when the corpus is five probes and the stack evaluates 150 employees. The
+conclusion (inert) survives — the roster figure is derivable because both paths call the same
+`deriveExamConfig`/`buildSyntheticBundle` and cms125's bundle hardcodes everything that matters — but
+"derived" and "measured" are not the same word and the doc now says which it is.
+
+**Codex found the one that would have undone the whole thing.** `reconcile-twh-mieweb.yml` — the self-heal
+that recreates twh-api-ts from `:latest` when the container goes down — builds its OWN mirrored env array,
+and it did not carry `WORKWELL_OFFICIAL_MEASURES`. So the first health event after this flip would have
+silently reverted both measures to authored CQL: container healthy, image unchanged, no signal anywhere.
+The flip would have lasted exactly until the next incident. Fixed, and the guard now asserts the two
+workflows ship the same *value* — not merely that both mention the flag, because a reconciler with a
+different subset would flip measures on or off during an incident nobody initiated. Mutation-checked by
+deleting the line.
+
+It also caught that my new routability assertion would have gone red on **every fork and Dependabot PR**:
+those contexts get no VSAC secret, so CI deliberately re-vendors without `--complete-capped-expansions`,
+and `officialRoutingProblems` refuses a capped expansion by design. The capped class is now excused
+exactly when the tree is actually capped; every other class is asserted always. A guard that fails
+outside contributors for a condition unrelated to their change trains people to ignore it, which is the
+same disease as a guard that cannot fire.
+
+Still not done: the authored cms122/125 subsets retire to the fidelity lab next (locked decision #4,
+deliberately not in the same change that starts the flip), and **Cypress CVU+ has still not run** — it
+remains the verification bar.
+
+
 ## 2026-07-30 (later still) — the mammography numerator, and giving the flip gate a command (branch `feat/webchart-mammography-dual-stamp`)
 
 The last thing standing between here and PR-9c was the numerator gap ADR-042 recorded and ADR-043 could not

@@ -1,5 +1,118 @@
 # Architecture Decision Records
 
+## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
+
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c. **cms125 now evaluates CMS's published QI-Core
+artifact on the demo/production stack.** cms122 is routable and agrees with authored, but is held back
+until its reporting trio is discharged (decision 1) — so M-A is complete for one of its two ready
+measures, not both.
+
+**Context.** Everything since ADR-036 built toward one configuration change. The machinery was complete
+and dark: artifacts vendored at v1.0.000, terminology pinned by SHA-256 and completed from VSAC, a
+per-measure router with construction-time validation, measure-major batching, an engine-declared
+`logic_version`, and a MADiE gate at 121/121. `WORKWELL_OFFICIAL_MEASURES` was unset everywhere, so
+`routedEngineForEnv` returned the authored engine *by identity* and no measure had ever been routed.
+
+Two things made the flip decidable rather than a leap. The **mammography numerator gap** closed
+(ADR-044), which was the last known way official could contradict authored on data this stack holds. And
+`pnpm flip-snapshot` turned "confirm a non-zero initial population" from a prose instruction into a
+measurement: both measures admit **5 of 5** corpus subjects to the official initial population and agree
+with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
+
+**Decision.**
+
+1. **Flip cms125 ONLY.** *(Narrowed from "cms122 + cms125" after review, #356.)* cms122 is routable, and
+   ADR-043 decision 6 correctly established that its stack-dependent WebChart blindness does not bind
+   here — `deploy-twh-mieweb.yml` carries **no** `WORKWELL_WEBCHART_*`, so this stack evaluates the
+   synthetic roster where cms122 scores across all five corpus targets. A **different** blocker stops it:
+   its official numerator means **failure** (`numeratorMeansCompliant: false` — HbA1c > 9% or no
+   assessment), while `measure-bindings.ts` still declares `improvementNotation: "increase"` and
+   `measure-report.ts` still emits the WorkWell canonical. `measure-report.ts:246-252` had already written
+   this down as a **PR-7 obligation** — "the measure that flips MUST switch all three together" — and
+   PR-9c was the flip that had to discharge it and did not. Routing cms122 would ship a MeasureReport
+   declaring higher-is-better over a poor-control numerator (~120 → ~27 on the 150-employee directory),
+   and QRDA III carries **no** `improvementNotation` field at all, so the inverted count would go out
+   unmarked. cms125's trio is already consistent, so it flips alone; cms122 follows once the trio is
+   discharged. **Enforced, not remembered:** `official-flip-config.test.ts` fails if a measure whose
+   official numerator means failure is shipped with `increase`. Staging is unchanged.
+2. **The flag is set in the WORKFLOW, not on the container.** `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
+   array and the deploy deletes-and-recreates the container, so a hand-set value is wiped on the next
+   deploy. This makes the flip a reviewed, merged, revertable change rather than an operator action —
+   which is the right shape for something that changes what the compliance engine *is*.
+3. **A test reads what the workflow ships and refuses an unroutable configuration.** Every existing check
+   validated a configuration passed in by a test; nothing validated the string that reaches production.
+   `official-flip-config.test.ts` parses `WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and
+   asserts every id named is MADiE-gated, vendored, proportion-scored, and — with the sidecar — produces
+   no `officialRoutingProblems` at all.
+4. **That test is split in two, deliberately.** The structural half is pure and always runs; the
+   terminology half needs the gitignored sidecar, self-skips without it, and is wired into CI's
+   `official-cases` job. A single test would have self-skipped in `pnpm test` and read as covered — the
+   defect class this branch has been pulled up on four times (#350, #352, #354, #355).
+5. **The reconciler ships the SAME value, and a test asserts it does.** *(Added after review, #356.)*
+   `reconcile-twh-mieweb.yml` recreates twh-api-ts from `:latest` on a health event, using its own
+   mirrored env array. It did not carry `WORKWELL_OFFICIAL_MEASURES`, so the **first self-heal after this
+   flip would have silently reverted both measures to authored CQL** — container healthy, image
+   unchanged, no signal at any layer. The two workflows must agree on the *value*, not merely both
+   mention the flag: a reconciler shipping a different subset would flip measures on or off during an
+   incident nobody initiated.
+6. **The routability assertion excuses capped expansions when — and only when — the tree is capped.**
+   Fork and Dependabot PRs get no VSAC secret, so CI deliberately re-vendors without
+   `--complete-capped-expansions` and the working-tree artifacts become capped. `officialRoutingProblems`
+   refuses a capped expansion by design (ADR-041), so an unconditional assertion would have failed every
+   outside contributor's PR for a condition unrelated to their change. Every other problem class is
+   asserted always; the credentialed run on merge covers the capped class for real.
+7. **Every workflow `run:` block is syntax-checked in CI.** *(Added after review, #356 — this PR shipped
+   a broken production deploy step and nothing could see it.)* The flag was added inside a `jq` program
+   that lives in a **single-quoted shell string**, and the surrounding comment contained apostrophes
+   (`CMS's`, `WorkWell's`). The first one CLOSED the quote and turned the whole step into a bash syntax
+   error. Deploy workflows only run on push to `main`, so no PR check could catch it; the new
+   `official-flip-config.test.ts` passed 3/3 because it validates the *semantics* of a line the shell
+   would never execute; and verifying by extracting the jq program and running it standalone — which is
+   what was done — bypasses the shell quoting entirely. The program was always fine; the string
+   containing it was not.
+
+   The second-order effect is why this warranted a guard rather than a fix. `build-backend-ts` would have
+   succeeded and pushed a new `:latest`; the deploy step would have died *before* the delete/recreate, so
+   the live container survives on the old image; and then the 15-minute self-heal reconciler — which now
+   carries the flag and parses cleanly — would have recreated it from the new `:latest`, **delivering the
+   flip unattended through a path nobody reviewed as the delivery mechanism, while the deploy pipeline was
+   red.** Exactly the silent-delivery class this PR exists to prevent.
+   `.github/scripts/workflow-run-blocks.test.sh` now `bash -n`s all 54 run-blocks in the `deploy-helper`
+   CI job. It carries a minimum-block floor, because its own first version reported "all parse" after
+   checking **zero**.
+8. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
+   future flip a two-file change guarded by a test that only says "you changed what you changed". The
+   property that matters is that whatever is shipped is **routable**.
+
+**Consequences.**
+
+- **The flip is inert on this stack's data, and that is the expected result, not a disappointment.** No
+  roster row changes. The value is that official execution is now *running in production* — the
+  precondition for onboarding the remaining six priority measures, and for any claim that WorkWell
+  executes published eCQMs rather than reimplementing them.
+- **A misconfiguration does NOT refuse at boot.** The throw is at engine construction, per request, while
+  the deliberately DB-free `/actuator/health` keeps answering 200 — so the container reads green, the
+  self-heal reconciler stays quiet, and every evaluating route 500s. `worker.ts` logs
+  `OFFICIAL_ROUTING_MISCONFIGURED` on the first request; that log line is the signal, and the post-deploy
+  checklist says to grep for it rather than trust the health probe.
+- **The nightly scheduler exercises this without anyone asking.** `WORKWELL_SCHEDULER_ENABLED=true` on
+  this stack, so the first scheduled `ALL_PROGRAMS` run after the deploy evaluates both measures
+  officially. Verification cannot wait for someone to click a button.
+- **Deploys are now coupled to NLM VSAC availability** for these two measures — already true since
+  ADR-041, but it bites harder now: the vendor step fails closed, the reproducibility gate fails the
+  deploy, and rolling *forward* during a VSAC outage is blocked (rolling back to a pre-ADR-041 image
+  still works). DEPLOY.md "Step 1a" records this.
+- **Rollback is one line and a redeploy.** `logic_version` carries the artifact identity (ADR-040), so
+  flip-on, flip-off and re-vendor each invalidate `eval_state` by construction — no manual cache `DELETE`,
+  and no possibility of serving an authored outcome for a routed measure.
+- **The authored cms125 subset is now dead weight in the catalog** and retires to the fidelity lab per
+  locked owner decision #4 — after the flip is observed running, not in the change that starts it. The
+  authored cms122 subset is still LIVE and must stay until cms122 itself flips.
+- **What this does not establish.** The oracle is our own authored engine, so agreement means the flip
+  changes nothing for this data — not that either engine is correct. The external check remains the MADiE
+  gate, which runs over CMS's test patients rather than ours. **Cypress CVU+ has not run** and stays the
+  verification bar (M-B).
+
 ## ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the numerator prerequisite to PR-9c). Nothing routes

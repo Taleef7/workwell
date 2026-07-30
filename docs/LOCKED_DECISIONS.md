@@ -50,10 +50,18 @@
   > construction-time validation (PR-7b) shipped, PR-3 generalized MeasureReport membership, and the
   > capped `AdvancedIllness` expansion is completed (PR-9a / ADR-041) so
   > `officialRoutingProblems(["cms122"])` and `(["cms125"])` both return **no problems** — the two measures
-  > are ROUTABLE. What has NOT changed: **nothing is routed.** `WORKWELL_OFFICIAL_MEASURES` is unset
-  > everywhere, so `routedEngineForEnv` returns `engineForEnv`'s value by identity and every measure still
-  > evaluates authored CQL. Current state: the ADR-036..041 run in `docs/DECISIONS.md` (newest first) and
-  > the Current Focus block in `CLAUDE.md`.
+  > are ROUTABLE.
+  >
+  > **SINCE (2026-07-30, PR-9c / ADR-045): cms125 IS ROUTED on demo/production.**
+  > `deploy-twh-mieweb.yml` and `reconcile-twh-mieweb.yml` both set `WORKWELL_OFFICIAL_MEASURES="cms125"`.
+  > **cms122 is deliberately NOT routed** — its official numerator means failure while
+  > `improvementNotation` still says `increase`, so routing it would emit a self-contradictory
+  > MeasureReport (test-enforced). Every OTHER environment —
+  > staging included — still leaves the variable unset, so there `routedEngineForEnv` returns
+  > `engineForEnv`'s value by identity and every measure evaluates authored CQL. The flip is **inert on
+  > this stack's data** (no roster row changes; cms125 5/5 in the official initial population and
+  > agreeing with authored across the corpus — `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md`). Current state: the
+  > ADR-036..045 run in `docs/DECISIONS.md` (newest first) and the Current Focus block in `CLAUDE.md`.
 - **QRDA-I does not exist anywhere**; QRDA-III is a stub. Cypress + CVU+ are open source
   (github.com/projectcypress/cypress), Docker-runnable; projecttacoma/cqm-reports (Ruby) is the QRDA-I
   reference implementation (spec reference only, not a dependency).
