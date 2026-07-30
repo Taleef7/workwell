@@ -1135,10 +1135,15 @@ interface BatchProbe {
  * `ipp` models what the OFFICIAL adapter reports and the authored engine does not: `undefined` leaves the
  * field off entirely (the authored shape), `false` reports every subject out of the initial population
  * (ADR-043's WARN condition), `true` reports them in it.
+ *
+ * `omit` models the executor's documented per-subject omission — fqm returned nothing for that subject, so
+ * it is deliberately ABSENT from the batch result and the pipeline re-evaluates it alone. `singleIpp` is
+ * what that individual fallback then reports. Together they reproduce the two orderings Codex flagged on
+ * #354, which the batch-time version of this check got wrong in both directions.
  */
 function batchProbe(
   batchable: Set<string>,
-  opts: { failOn?: string; ipp?: boolean } = {},
+  opts: { failOn?: string; ipp?: boolean; omit?: Set<string>; singleIpp?: boolean } = {},
 ): BatchProbe {
   const batches: Array<{ measureId: string; size: number }> = [];
   const singles: string[] = [];
@@ -1159,6 +1164,7 @@ function batchProbe(
           subjectId: "ignored",
           measure: input.measureId,
           outcome: "OVERDUE" as const,
+          ...(opts.singleIpp === undefined ? {} : { inInitialPopulation: opts.singleIpp }),
           evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }], via: "single" },
         };
       },
@@ -1171,7 +1177,11 @@ function batchProbe(
         if (opts.failOn === measureId) {
           throw new Error(`${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects`);
         }
-        return new Map(subjects.map((s) => [s.subjectId, outcomeFor(s.subjectId, measureId)]));
+        return new Map(
+          subjects
+            .filter((s) => !opts.omit?.has(s.subjectId))
+            .map((s) => [s.subjectId, outcomeFor(s.subjectId, measureId)]),
+        );
       },
     },
   };
@@ -1233,6 +1243,41 @@ test("ADR-043: a whole roster out of the initial population WARNs — and the ru
 test("ADR-043: no WARN when somebody IS in the initial population", async () => {
   const { logs } = await runWithProbe(batchProbe(new Set(["audiogram"]), { ipp: true }), MEASURE_SCOPE);
   assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "an eligible roster must not be flagged");
+});
+
+test("ADR-043: an OMITTED subject who lands in the IPP silences the WARN (no false positive)", async () => {
+  // Codex #354, direction one. The batch returns two out-of-IPP outcomes and omits emp-003; the pipeline
+  // re-evaluates emp-003 alone and it IS in the initial population. Concluding at batch time — off
+  // `prefetched`, before the fallback ran — saw only the two and warned about a roster that has an
+  // eligible subject in it. The roster is not complete until the loop is.
+  const probe = batchProbe(new Set(["audiogram"]), {
+    ipp: false,
+    omit: new Set(["emp-003"]),
+    singleIpp: true,
+  });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  assert.deepEqual(probe.singles, ["audiogram"], "the omitted subject must actually take the fallback path");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "somebody IS in the population — no warning");
+  assert.ok(!/initial population/.test(res.message), "and nothing leaks into the run message");
+});
+
+test("ADR-043: omitted subjects who all land OUT of the IPP still trigger the WARN (no false negative)", async () => {
+  // Codex #354, direction two — the quieter half. The batch returns ONE out-of-IPP outcome and omits the
+  // other two, which then evaluate out individually as well. Concluding at batch time saw a sample of one,
+  // failed its own `> 1` guard, and stayed silent on a roster where nobody qualified — the exact silence
+  // this ADR exists to end.
+  const probe = batchProbe(new Set(["audiogram"]), {
+    ipp: false,
+    omit: new Set(["emp-002", "emp-003"]),
+    singleIpp: false,
+  });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  const warn = logs.find((l) => l.level === "WARN" && IPP_WARN.test(l.message));
+  assert.ok(warn, "all three subjects are out of the population — this must warn");
+  assert.match(warn!.message, /not one of 3 subjects/, "and count the WHOLE roster, not just the batched part");
+  assert.match(res.message, /nobody entered the official initial population for audiogram/);
 });
 
 test("ADR-043: an outcome with NO membership field is 'unknown', never 'out of population'", async () => {

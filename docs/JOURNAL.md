@@ -66,6 +66,27 @@ reads the wrong shape. That is the mammography gap — official reports a screen
 *are* in the population, and nothing fires. Dual-stamping the crosswalk is next, and since CMS125's numerator
 is what is being flipped it is closer to a prerequisite than a follow-up.
 
+**Codex found two more, and one of them was the check reading an incomplete roster.** The WARN concluded in
+the batch pre-pass, off `prefetched` alone — but a subject the executor returns nothing for is *absent by
+contract* and re-evaluated individually **later**, so the pre-pass judges a roster that is not finished yet.
+Wrong in both directions: two out-of-IPP outcomes plus one omission warned even when the omitted subject
+landed squarely in the population, and one out-of-IPP outcome plus two omissions stayed **silent** because
+the sample failed its own `> 1` guard — the exact silence this ADR exists to end. Membership is a property of
+the finished roster, so it now reads the final per-subject outcomes after the loop. Both directions are
+pinned, and both fail against the pre-pass version (mutation-checked, not assumed). A bonus from moving it:
+the check no longer depends on the batch path at all, so an official measure evaluated one subject at a time
+is covered too.
+
+**The second was my own overclaim, and it is the more embarrassing kind.** I wrote — in the code comment, in
+the ADR, and in the PR — that carrying the warning into the run *message* meant "the run list and the POST
+response show it." It does not. `RunRecord` has no message column, neither read model carries one, and every
+`ALL_PROGRAMS`/`SITE` run — plus a `MEASURE` run on a WebChart-configured stack, *precisely* the
+configuration this warning exists for — goes through `scheduleAsyncRun`, which answers with `RUNNING` and
+discards the finishing response. So the message reaches the synchronous path only; elsewhere the warning
+lives in `run_logs`, reachable via the run's log timeline but not on the list. I wrote a visibility claim
+without checking the read models, in a PR whose whole subject is a failure that was invisible. Corrected
+rather than quietly narrowed; persisting it needs a `runs` column and schema is owner-owned.
+
 **Closing a gap this ADR opened in itself.** Moving enforcement to "the flip gate" makes the ADR only as
 strong as that gate, and half of it did not exist: the test is real and CI-wired, but the "pre-flip checklist
 step" was a phrase in the ADR and nowhere else — and `WORKWELL_OFFICIAL_MEASURES` had **no row at all** in
