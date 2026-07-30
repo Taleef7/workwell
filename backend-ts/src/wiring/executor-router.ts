@@ -163,8 +163,18 @@ export interface RoutedEngine {
  */
 export function officialLogicVersion(artifact: OfficialArtifact): string {
   const { version, sha256, terminology } = artifact.manifest;
-  return `official-fqm:${version}:${sha256}:${terminology?.sha256 ?? "unpinned"}`;
+  return `${OFFICIAL_LOGIC_VERSION_PREFIX}${version}:${sha256}:${terminology?.sha256 ?? "unpinned"}`;
 }
+
+/**
+ * The prefix that marks a logic identity as an official artifact's rather than the authored ELM's.
+ *
+ * Exported because it is now READ as well as written: the run pipeline asks `logicVersionFor` whether a
+ * measure is officially routed before applying an official-only check (ADR-043). Kept as one constant so
+ * the producer above and that consumer cannot drift — a silent drift would make the check inert, which
+ * is the failure mode it exists to prevent.
+ */
+export const OFFICIAL_LOGIC_VERSION_PREFIX = "official-fqm:";
 
 export interface RoutingCheckDeps {
   /**
