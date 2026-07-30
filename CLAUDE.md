@@ -139,7 +139,7 @@ FHIR/QI-Core column (QI-Core STU7 = US Core 7 = WebChart's exact surface), repor
 column; QDM only ever appears as a translation at the QRDA boundary. HEDIS guardrail: own spec text +
 cases only, never reproduced NCQA specs (DUA).
 
-**STATUS (2026-07-27): §7.4 PR-1 → PR-8a shipped; nothing is flipped.** `WORKWELL_OFFICIAL_MEASURES` is
+**STATUS (2026-07-27 — SUPERSEDED by PR-9c/ADR-045 on 2026-07-30, which routed cms125; read this paragraph as history): §7.4 PR-1 → PR-8a shipped; nothing is flipped.** `WORKWELL_OFFICIAL_MEASURES` is
 unset everywhere, so `routedEngineForEnv` returns `engineForEnv`'s own value **by identity** and every
 measure still evaluates authored CQL. Shipped: engine-boundary severance (PR-1 — the containment test
 that freezes the boundary; the physical `packages/measure-engine` extraction is **PR-2, resequenced
@@ -219,7 +219,7 @@ byte-identical to the committed artifacts. **OWNER STEP DONE 2026-07-29** — th
 `WORKWELL_VSAC_API_KEY_VENDOR` secret is set and the re-vendored manifests are committed in the same
 change (DEPLOY.md §"Step 1a"). `AdvancedIllness` is now **2000 codes in both artifacts**, `truncated` is
 `[]`, and **`officialRoutingProblems(["cms122"])` and `(["cms125"])` both return no problems — the two
-measures are ROUTABLE.** Nothing is routed: `WORKWELL_OFFICIAL_MEASURES` is still unset everywhere.
+measures are ROUTABLE.** (As of that date nothing was routed; **cms125 was routed on 2026-07-30** — PR-9c / ADR-045.)
 `test:official-cases` stayed **121/121** (55/55 + 66/66, 0 unexpected, 0 errors) and CI's four
 sidecar-dependent suites pass against the completed expansion, including the corpus-outcomes check.
 Two independent vendor runs against live VSAC produced **byte-identical manifests and sidecars**, so
@@ -340,17 +340,19 @@ SYNTHETIC roster (what the demo/production stack evaluates) cms122 and cms125 bo
 and agree with authored; over WebChart data cms125 admits 4/56 agreeing on all 56, cms122 admits 0/56 and
 reports INCONCLUSIVE (data gap, not divergence) — ADR-043 decision 6 confirmed by measurement.
 
-**PR-9c SHIPPED (ADR-045) — M-A IS COMPLETE. `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` is set on
-`deploy-twh-mieweb.yml`, so those two measures now evaluate CMS's published QI-Core artifacts on
-demo/production.** Set in the WORKFLOW, not on the container: `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
+**PR-9c SHIPPED (ADR-045) — `WORKWELL_OFFICIAL_MEASURES="cms125"` is set on BOTH `deploy-twh-mieweb.yml`
+and `reconcile-twh-mieweb.yml`, so CMS125 now evaluates CMS's published QI-Core artifact on
+demo/production. M-A is complete for cms125; cms122 is BLOCKED on its reporting trio (below).** Set in the WORKFLOW, not on the container: `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
 array and the deploy deletes-and-recreates, so a hand-set value is wiped — which makes the flip a reviewed,
-revertable change rather than an operator action. **Decided on measurement, not assumption:** both measures
-admit **5/5** corpus subjects to the official initial population and agree with authored on every one
-(evidence committed at `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md`). cms122 went too — ADR-043
-decision 6 — because this stack carries **zero** `WORKWELL_WEBCHART_*` and evaluates the synthetic roster
-where it scores normally; its WebChart blindness constrains STAGING, not this flip. **The flip is INERT on
-this stack's data** (no roster row changes) and that is the expected result; the value is that official
-execution runs in production at all.
+revertable change rather than an operator action. **Decided on measurement:** cms125 admits **5/5** corpus subjects
+to the official initial population and agrees with authored on every one (evidence at
+`docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md` — note that is FIVE PROBES, not the 150-employee roster;
+the roster figure is derived, not measured). **cms122 is NOT flipped**: its official numerator means
+FAILURE while `improvementNotation` still says `increase` and QRDA III has no notation field at all, so
+routing it would ship a self-contradictory MeasureReport (~120→~27). `measure-report.ts:246-252` had
+pre-declared that trio as a PR-7 obligation; discharging it is the next PR, and
+`official-flip-config.test.ts` refuses to let cms122 ship until then. **The flip is INERT on this stack's
+data** (no roster row changes) — the value is that official execution runs in production at all.
 
 **New guard, because nothing validated the string that actually ships:** `official-flip-config.test.ts`
 parses `WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and asserts every id is MADiE-gated,

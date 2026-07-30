@@ -52,6 +52,11 @@ DEQM `meta.profile`, and the structural/not-validator-verified posture above is 
 
 ## E14 — standards fidelity (authored measure vs official eCQM spec)
 
+>  **SUPERSEDED IN PART (2026-07-30, PR-9c / ADR-045):** on the **demo/production stack**, `cms125` no
+>  longer evaluates hand-authored CQL at all — it runs CMS's **published QI-Core artifact** verbatim
+>  (`WORKWELL_OFFICIAL_MEASURES="cms125"`). `cms122` still evaluates authored CQL everywhere, and both
+>  measures still do on every other environment. The paragraph below describes that authored form.
+
 WorkWell's eCQM measures (`cms122`, `cms125`) are hand-authored, **simplified** CQL (local value sets,
 WorkWell-specific defines, gist-level logic). E14 (#186) makes the **officially published** measure
 definition the reference and produces a **documented structural fidelity diff** of WorkWell's authored
@@ -71,7 +76,7 @@ version against it:
   Read-only, authenticated, read-time, **no schema**.
 - **Conformance level:** **structural / definitional (descriptive)**. It documents exactly where the
   authored measure diverges *in definition* from the official spec; it does **not** execute the official
-  CQL. **Official-CQL execution + an evaluated-outcome diff is deferred to E14 PR-2**, behind the existing
+  CQL. **Official-CQL execution is no longer deferred — it SHIPPED** (ADR-026 → ADR-045; `cms125` is routed on demo/production since 2026-07-30). The sentence below describes the E14-era plan and is kept for history. Behind the existing
   E3.2 (#90) `ValueSetResolver` seam (with frozen QPP code lists as a no-VSAC expansion source). The report
   is advisory — CQL `Outcome Status` remains the sole compliance authority (ADR-008/ADR-018).
 

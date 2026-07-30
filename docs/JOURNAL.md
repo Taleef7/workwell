@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-07-30 (PR-9c) — the flip: cms122 and cms125 now run CMS's published artifacts (branch `feat/official-flip-pr9c`)
+## 2026-07-30 (PR-9c) — the flip: CMS125 now runs CMS's published artifact (branch `feat/official-flip-pr9c`)
 
 Everything since ADR-036 was building toward one line in a workflow file. It is set:
 `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` on `deploy-twh-mieweb.yml`. **M-A is complete.**
@@ -44,6 +44,42 @@ priority measures, and for saying WorkWell *executes* published eCQMs rather tha
 Post-deploy checks are written into the evidence doc, and the first one matters most: **grep for
 `OFFICIAL_ROUTING_MISCONFIGURED`**, because a green container is not evidence here. The nightly scheduler
 is on, so the first scheduled ALL_PROGRAMS run will exercise the flip without anyone triggering it.
+
+**Then my own reviewer found two BLOCKERS, and the first is the most embarrassing thing in this session.**
+
+**The deploy step was a bash syntax error.** I put a comment inside the `jq` program — which lives in a
+single-quoted shell string — and wrote `CMS's` and `WorkWell's`. The first apostrophe closes the quote.
+I had "verified" the change by extracting the jq program and running it standalone, which bypasses the
+shell quoting entirely: the program was always fine, the string containing it was not. `bash -n` on the
+extracted run-block says `unexpected EOF while looking for matching '`.
+
+What makes it worse than a red build: `build-backend-ts` would have succeeded and pushed a new `:latest`,
+the deploy step would have died *before* the delete/recreate so the live container survived on the old
+image — and then the 15-minute self-heal reconciler, which I had *just* taught to carry the flag, would
+have recreated it from the new `:latest` and delivered the flip unattended while the deploy pipeline was
+red. The exact silent-delivery class this PR exists to prevent, built by the two fixes interacting.
+Nothing could have caught it: deploy workflows only run on push to main, and my new config test passed
+3/3 because it validates the semantics of a line the shell would never execute.
+`.github/scripts/workflow-run-blocks.test.sh` now `bash -n`s all 54 run-blocks in CI. Its own first
+version reported "all parse" after checking **zero** — so it has a minimum-block floor now, which then
+immediately earned its keep by catching that the extractor emitted Windows-style paths bash could not stat.
+
+**cms122 is OUT of the flip, and the reason is in the codebase in writing.** `measure-report.ts:246-252`
+says: *"the measure that flips MUST switch all three together — canonical, improvementNotation, and
+membership."* cms122's official numerator means **failure** (HbA1c > 9%), but `measure-bindings.ts` still
+declares `improvementNotation: "increase"`. Routing it would emit a MeasureReport claiming higher-is-better
+over a poor-control numerator — ~120 → ~27 on the 150-employee directory — and QRDA III carries no
+notation field at all, so the inverted count ships unmarked. The guard test that "pinned" this only ever
+exercised the authored path, so it could not fail when official evidence arrived. cms125's trio is already
+consistent, so it goes alone; `official-flip-config.test.ts` now refuses any measure whose official
+numerator means failure while its notation says `increase`, which is what excludes cms122 — enforced,
+not remembered.
+
+I also had to correct the evidence doc: it claimed 35 tests where CI now runs 38, and said "the corpus
+this stack evaluates" when the corpus is five probes and the stack evaluates 150 employees. The
+conclusion (inert) survives — the roster figure is derivable because both paths call the same
+`deriveExamConfig`/`buildSyntheticBundle` and cms125's bundle hardcodes everything that matters — but
+"derived" and "measured" are not the same word and the doc now says which it is.
 
 **Codex found the one that would have undone the whole thing.** `reconcile-twh-mieweb.yml` — the self-heal
 that recreates twh-api-ts from `:latest` when the container goes down — builds its OWN mirrored env array,

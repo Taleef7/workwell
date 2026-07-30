@@ -38,6 +38,8 @@ import { officialRoutingProblems } from "./executor-router.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { loadOfficialTerminology } from "./official-terminology.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
+import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 
 const WORKFLOWS = ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml", "reconcile-twh-mieweb.yml"] as const;
 
@@ -64,8 +66,25 @@ function shippedMeasures(workflow: string): string[] | null {
   const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
   const yaml = readFileSync(path, "utf8");
   const match = yaml.match(/\{key:\s*"WORKWELL_OFFICIAL_MEASURES",\s*value:\s*"([^"]*)"\}/);
-  if (!match) return null;
-  return match[1]!.split(",").map((s) => s.trim()).filter(Boolean);
+  if (match) return match[1]!.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // `null` means "this workflow does not route officially", which every test below treats as legal —
+  // so a regex that MISSED a present flag would make all of them pass vacuously. Review (#356) measured
+  // that hole: `{ key: … }` with inner spaces, jq single-quoted strings, `value: $official_measures`
+  // (the `--arg` style every secret in these files uses), or a swapped key/value order all returned
+  // null and sailed through. The literal appears exactly once per workflow when the flag is set, so its
+  // presence is a cheap, reliable discriminator between "absent" and "my pattern is stale".
+  //
+  // `\bkey:` excludes this very sentence and the surrounding prose comments, which mention the name
+  // without setting it.
+  if (/\bkey:\s*"WORKWELL_OFFICIAL_MEASURES"/.test(yaml)) {
+    throw new Error(
+      `${workflow} sets WORKWELL_OFFICIAL_MEASURES but this test's pattern did not match it. The guard ` +
+        `is stale, not the workflow — fix the pattern rather than letting every assertion below pass ` +
+        `vacuously.`,
+    );
+  }
+  return null;
 }
 
 test("PR-9c: every officially-routed measure a deploy workflow ships is gated and vendored", () => {
@@ -91,6 +110,41 @@ test("PR-9c: every officially-routed measure a deploy workflow ships is gated an
         artifact!.manifest.scoring,
         "proportion",
         `${id}: the population mapping assumes a proportion measure`,
+      );
+    }
+  }
+});
+
+test("PR-9c: a routed measure's REPORTING trio is self-consistent — numerator, notation, membership", () => {
+  // The obligation `measure-report.ts` wrote down and PR-9c was the change that had to discharge it:
+  //
+  //   "Evidence-first membership means an official-routed outcome's numerator is the OFFICIAL one (for
+  //    cms122: poor glycemic control), while measureCanonical/improvementNotation still emit the
+  //    WorkWell canonical and `increase`. A report that declares higher-is-better over a poor-control
+  //    numerator is SELF-CONTRADICTORY, so the measure that flips MUST switch all three together."
+  //
+  // That guard test pinned only the authored path (its fixtures carry no official evidence), so it
+  // could not fail when official evidence arrived. Review (#356) caught the gap: routing cms122 would
+  // have shipped a MeasureReport whose numerator counts poor control while `improvementNotation` still
+  // said `increase` — and QRDA III carries no `improvementNotation` field at all, so the inverted count
+  // would go out with no marker whatsoever. Magnitude on the 150-employee directory: ~120 → ~27.
+  //
+  // Enforced rather than remembered. cms122 is excluded from the flip BECAUSE this fails for it, not
+  // because someone recalled a note; when the trio is discharged, this stops objecting on its own.
+  for (const workflow of WORKFLOWS) {
+    for (const id of shippedMeasures(workflow) ?? []) {
+      const semantics = OFFICIAL_MEASURE_SEMANTICS[id];
+      assert.ok(semantics, `${id}: no recorded official numerator semantics — it cannot be routed`);
+      const notation = MEASURE_BINDINGS[id]?.improvementNotation ?? "increase";
+      const expected = semantics!.numeratorMeansCompliant ? "increase" : "decrease";
+      assert.equal(
+        notation,
+        expected,
+        `${workflow} routes '${id}', whose OFFICIAL numerator means ` +
+          `${semantics!.numeratorMeansCompliant ? "compliance" : "FAILURE"} — so MeasureReport must declare ` +
+          `improvementNotation '${expected}', not '${notation}'. Routing it would emit a self-contradictory ` +
+          `report (and QRDA III would carry the inverted count with no notation field at all). Discharge ` +
+          `the canonical/notation/membership trio in measure-report.ts before routing this measure.`,
       );
     }
   }
