@@ -69,10 +69,40 @@ this and had not — which is why cms122 was held back and cms125 flipped alone.
   status buckets, which are authored semantics by construction; its caller passes no identity. That path
   is `seed:scale` demo data, never official-routed, and `aggregateCountsForRun` routes official runs to
   the per-subject path instead.
-- **Not addressed here:** the case-detail **CQL Evidence Explorer** still shows four
-  `official:<population>` booleans instead of authored clinical defines for a routed measure, and the
-  **fidelity/Standards tab** still compares authored-vs-official for a measure whose stored outcomes are
-  already official. Both are UI-surface work, tracked separately.
+- **Four consumer surfaces were saying the wrong thing about a routed cms122 patient, and are fixed
+  here** *(added after review, #357 — the original consequences list called these "UI-surface work,
+  tracked separately", which understated two of them badly).*
+  - **The CQL Evidence Explorer inverted the colours.** Its `INTERNAL_DEFINES` hide-list matches the
+    capitalised authored names exactly, and official defines are `official:numerator` — lowercase and
+    prefixed — so the prefix chosen to make them *honest* is what defeated the filter. Rendered through
+    the generic true/false chips, a cms122 patient in the numerator got a **green ✓ true** under a
+    heading reading "Why Flagged". Green meant "this patient's diabetes is uncontrolled". Population
+    membership is neither good news nor bad news, so it now renders on its own path as a neutral
+    **in / not in** chip with the population spelled out.
+  - **The MCP `explain_outcome` tool asserted a recency finding that cms122 does not compute.** The
+    sentence was unconditional concatenation, so a routed outcome produced *"their last qualifying exam
+    was unknown date (unknown days ago), which exceeds the 365-day compliance window"* — no recency rule
+    exists, no window was exceeded, and the 365 came from the authored binding. Asserted to an external
+    client, labelled deterministic, no human in the loop, and the only path rather than a fallback. The
+    clause is now conditional, and official outcomes state population membership instead.
+  - **The outcomes CSV stamped the authored library version.** `measureVersion` answers "what computed
+    this", and the CSV is what people mail around; it read `2.0.0` for rows CMS122FHIR **v1.0.000**
+    produced. It now reads `evidence.official.version` when present — the same evidence-first rule this
+    ADR applies to MeasureReport and QRDA. The **cases** CSV still shows the authored version and says so
+    in a comment: a case row carries no evidence, and it is an operational worklist keyed on `lastRunId`.
+  - **The catalog described cms125 as "women 50–74".** Both the authored subset and the official IPP are
+    **42–74**. Pre-existing, but it is the Studio Spec-tab copy an operator reads beside outcomes the
+    artifact now produces.
+- **Genuinely still deferred:** the **fidelity/Standards tab**. Verified NOT vacuous — `routes/measures.ts`
+  constructs its own `CqlExecutionEngine`, so it still runs the authored engine and the comparison is
+  real. What is stale is `literal-diff.ts`'s disclaimer, which says the diff "forecasts the flip rather
+  than describing a configuration that will never exist"; the flip has happened, so it now forecasts the
+  present. Wording only.
+- **One low-severity item recorded rather than fixed:** `case-detail-read-model.ts`'s unanchored
+  `/waiver|exemption|exclusion|contraindication/i` matches `official:denominator-exclusion`, mapping DENEX
+  to `waiver_status: "active"`. For cms122/cms125 that DENEX genuinely is hospice/palliative/mastectomy,
+  so the result is roughly correct — but the adapter's safety comment reads as an exhaustive argument
+  about which matchers the `official:` prefix avoids, and it is not exhaustive.
 
 ## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 
