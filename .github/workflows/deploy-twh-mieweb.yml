@@ -204,6 +204,22 @@ jobs:
           if [ "$db_url" != "$DATABASE_URL" ]; then
             echo "Normalized DATABASE_URL: stripped 'jdbc:' prefix for node-postgres (value not logged)."
           fi
+          # PR-9c / ADR-045 — THE FLIP. WORKWELL_OFFICIAL_MEASURES below routes cms122 and cms125 to
+          # CMS's published QI-Core artifacts instead of WorkWell's authored CQL. Set HERE rather than on
+          # the container because the deploy deletes-and-recreates it, so a hand-set value is wiped — and
+          # mirrored in reconcile-twh-mieweb.yml, which recreates the same container on a health event
+          # (official-flip-config.test.ts asserts the pair agrees).
+          #
+          # Safe on THIS stack because it carries zero WORKWELL_WEBCHART_*, so it evaluates the synthetic
+          # roster. Evidence: docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md.
+          #
+          # Rollback is removing that line and redeploying; logic_version carries the artifact's identity
+          # (ADR-040), so flip-on/flip-off/re-vendor each invalidate eval_state by construction. A missing
+          # terminology sidecar makes official routing REFUSE at engine construction — per request, not at
+          # boot, so grep the logs for OFFICIAL_ROUTING_MISCONFIGURED; /actuator/health stays 200.
+          #
+          # This prose lives OUTSIDE the jq program deliberately: that program is a single-quoted shell
+          # string, and one apostrophe inside it closes the quote and breaks the whole step (review #356).
           {
             echo 'json<<EOF'
             jq -nc \
@@ -229,6 +245,10 @@ jobs:
                 {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
+                # PR-9c / ADR-045 — THE FLIP. See the note above this jq invocation.
+                # NO APOSTROPHES BELOW THIS LINE: everything here is inside a single-quoted shell
+                # string, and one apostrophe closes it (review, #356).
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms125"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
