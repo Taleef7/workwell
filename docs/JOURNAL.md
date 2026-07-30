@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-07-30 (later) — the PR-9c precondition: a measure that can see nobody is refused (branch `feat/official-ipp-refusal`)
+
+ADR-042 shipped with a limit it could only assert in prose: both `us-core-sex` mapping fixes sit upstream of
+the live FHIR transport, so a third-party WebChart FHIR server still supplies no extension and its whole
+roster reads out-of-population for official CMS125 — **silently**, as 100% MISSING_DATA rather than an error.
+`deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly where official routing
+and a live seam coexist. Review's point was that decision 3 had generalized from the configuration the PR
+fixed to one it did not. This closes it.
+
+**The guard.** `evaluateBatch` now refuses a batch in which nobody entered the initial population — the same
+shape as PR-8f's retrieve check, one conjunct further in. Two details are load-bearing:
+
+- **Keyed on `outcomes.size > 1`, not `subjects.length`.** A subject fqm returned nothing for is
+  deliberately *absent* from the result map so the run pipeline can re-evaluate it alone. Testing the
+  request size would fire on that omission path and turn a recoverable per-subject retry into a whole
+  measure's failure. This was the one thing I had to get right rather than notice later.
+- **`> 1`, as with retrieves.** For one person, "not in the initial population" is an ordinary correct
+  answer — `/simulate` on somebody outside the age band.
+
+**It does not try to distinguish its two causes,** because from inside it cannot: either the data lacks a
+structural element the IPP reads, or nobody genuinely qualifies. Both mean routing that measure over that
+data produces nothing, so a measure that can see nobody is a configuration error whichever it is. The
+message says so and points at `WEBCHART_FHIR_MAPPING.md` §3.1 for the known case. The accepted false
+positive — a roster of 2+ where nobody genuinely qualifies now fails loudly every run — is the same trade
+the retrieve check already makes.
+
+**Writing the test proved PR-8f's blindness rather than assuming it.** The existing harness could only turn
+retrieves and IPP membership off *together*, which would have made the real case untestable: on WebChart data
+official CMS125 matched **236 LOINC Observations** and still put all 56 subjects out of the IPP —
+`retrieveSignal` true throughout. The harness now takes `retrieved` and `inIpp` independently.
+
+**The consequence that changes a plan: `cms122` is OUT of the PR-9c flip list.** Running the new guard
+against the real artifacts failed *two* tests, and only one was the one I was aiming at. The second was
+official cms122 over the WebChart fixture — refused, because the dev seed carries **zero Conditions** and
+cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis* the
+roster must never fabricate). The roadmap's PR-9 flips "cms122+cms125" together; before this guard cms122
+would have contributed **56 silent MISSING_DATA rows while appearing to run**. Nothing is lost by excluding
+it — the authored path is equally blind, so routing it changes no roster row — and it becomes flippable when
+ingest supplies diagnoses, signalled by that test flipping from a refusal to a distribution. That is the
+second time this week that running a check produced a better finding than the check was designed for.
+
+**What the guard does NOT catch,** stated because the gap is live: an IPP that IS satisfied while the
+numerator reads the wrong shape. That is the mammography gap — official reports a screened woman OVERDUE,
+subjects ARE in the population, and the guard is silent. Dual-stamping the crosswalk is next, and since
+CMS125's numerator is the thing being flipped it is closer to a prerequisite than a follow-up.
+
+Verified: typecheck clean, **1584 tests / 1570 pass / 0 fail / 14 skipped** (up 3), adapter suite 30/30, and
+the two official suites that use single-subject `evaluate` (`official-corpus-outcomes`, `literal-diff`) are
+untouched by a `> 1` guard — checked rather than assumed.
+
 ## 2026-07-30 — PR-9b: what the official artifacts make of REAL WebChart data (branch `feat/official-webchart-baseline`)
 
 PR-9a made cms122 and cms125 routable. This step was supposed to add a construction-time refusal — throw
