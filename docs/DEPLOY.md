@@ -191,10 +191,14 @@ Per measure, per stack:
    command (ADR-044):
 
    ```bash
-   # the stack you are flipping decides --source: a stack with NO WORKWELL_WEBCHART_* evaluates the
+   # The stack you are flipping decides --source. A stack with NO WORKWELL_WEBCHART_* evaluates the
    # SYNTHETIC roster and never sees WebChart data.
    pnpm flip-snapshot --measure cms125 --measure cms122 --source synthetic --eval <YYYY-MM-DD>
-   pnpm flip-snapshot --measure cms125 --source webchart --eval <YYYY-MM-DD>   # WebChart-configured stacks
+
+   # WebChart-configured stacks: `live` reads THE TENANT via WORKWELL_WEBCHART_*, over the real ingress
+   # path. This is the only source that answers "is the initial population non-zero for MY data".
+   WORKWELL_WEBCHART_BASE_URL=… WORKWELL_WEBCHART_CLIENT_ID=… WORKWELL_WEBCHART_PRIVATE_KEY_B64=… \
+     pnpm flip-snapshot --measure cms125 --source live --eval <YYYY-MM-DD>
    ```
 
    It evaluates each measure through **both** engines over the same bundles and reports the before/after
@@ -210,6 +214,12 @@ Per measure, per stack:
    It gates nothing and exits 0 regardless — deliberately. The judgement is the one ADR-043 established a
    machine cannot make from shape alone; the command computes the comparison, a human draws the conclusion.
    **Do not wire it into CI as pass/fail.**
+
+   > **`--source fixture` is NOT a substitute for `live`.** It reads the committed 56-patient dev-DB
+   > sample, which is frozen data and says nothing about a tenant. `--source live` refuses loudly rather
+   > than falling back to it, because a silent fallback is exactly how this step would hand you a healthy
+   > verdict computed from our sample while your tenant's roster falls out of the official initial
+   > population.
 
 3. **Check the numerator, not just membership.** Being in the population is not agreement. The mammography
    case is the worked example (ADR-044): the crosswalk emits a CPT `Procedure`, the official artifact

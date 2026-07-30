@@ -70,6 +70,46 @@ const tally = (values: Iterable<string>): Record<string, number> => {
 };
 
 /**
+ * The official side, evaluated EXACTLY as a run would evaluate it — batch, then per-subject fallback.
+ *
+ * The batch primitive deliberately OMITS a subject it returned nothing for, and `run-pipeline.ts`
+ * re-evaluates each such subject individually before persisting. A snapshot that skipped that step would
+ * not be a forecast of the run it claims to forecast: the omitted subjects would be missing from the
+ * distribution and from the initial-population count, so a roster whose omitted subjects DO qualify could
+ * report zero-in-IPP and earn a spurious DO-NOT-FLIP. Caught by Codex on #355 — the same
+ * incomplete-roster mistake as #354's, which is a strong hint that "did you model the fallback?" belongs
+ * on the checklist for anything reading `evaluateBatch`.
+ */
+export interface BatchAndSingle {
+  evaluateBatch(
+    measureId: string,
+    subjects: readonly OfficialBatchSubject[],
+    evaluationDate?: string,
+  ): Promise<Map<string, MeasureOutcome>>;
+  evaluate(input: { measureId: string; patientBundle: unknown; evaluationDate?: string }): Promise<MeasureOutcome>;
+}
+
+export async function evaluateLikeTheRunPipeline(
+  executor: BatchAndSingle,
+  measureId: string,
+  subjects: readonly SnapshotSubject[],
+  batch: readonly OfficialBatchSubject[],
+  evaluationDate: string,
+): Promise<Map<string, MeasureOutcome>> {
+  const official = await executor.evaluateBatch(measureId, batch, evaluationDate);
+  for (const { subjectId, bundle } of subjects) {
+    if (official.has(subjectId)) continue;
+    try {
+      official.set(subjectId, await executor.evaluate({ measureId, patientBundle: bundle, evaluationDate }));
+    } catch {
+      // The run pipeline persists MISSING_DATA + an `evaluationError` here rather than failing the run.
+      // Leaving the subject absent lets the caller report it as such instead of inventing an outcome.
+    }
+  }
+  return official;
+}
+
+/**
  * Evaluate one measure both ways over the same bundles.
  *
  * The official side goes through `evaluateBatch` because that is what the run pipeline uses (PR-8f), so
@@ -96,12 +136,11 @@ export async function snapshotMeasure(
     authoredActionable: [...authored.values()].filter((s) => ACTIONABLE.has(s)).length,
   };
 
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
   let official: Map<string, MeasureOutcome>;
   try {
     const batch: OfficialBatchSubject[] = subjects.map((s) => ({ subjectId: s.subjectId, patientBundle: s.bundle }));
-    official = await officialMeasureExecutor({
-      expand: officialTerminologyExpander(loadOfficialArtifact),
-    }).evaluateBatch(measureId, batch, evaluationDate);
+    official = await evaluateLikeTheRunPipeline(executor, measureId, subjects, batch, evaluationDate);
   } catch (err) {
     return {
       ...base,
@@ -115,9 +154,9 @@ export async function snapshotMeasure(
   const divergence: Record<string, string> = {};
   for (const [subjectId, before] of authored) {
     const after = official.get(subjectId)?.outcome;
-    // An omitted subject is a real observation, not a gap to paper over: the executor omits a subject it
-    // returned nothing for, and the run pipeline re-evaluates it alone. Naming it beats dropping it.
-    if (after === undefined) divergence[subjectId] = `${before} → (not returned)`;
+    // Only reachable if the per-subject fallback ALSO failed for this subject; the run pipeline would
+    // persist MISSING_DATA with an `evaluationError` there, so naming it beats dropping it silently.
+    if (after === undefined) divergence[subjectId] = `${before} → (evaluation failed)`;
     else if (after !== before) divergence[subjectId] = `${before} → ${after}`;
   }
 
