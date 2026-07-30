@@ -1,5 +1,124 @@
 # Journal
 
+## 2026-07-29 — PR-9a: completing the capped `AdvancedIllness` expansion (branch `feat/official-terminology-completion`)
+
+The one build step PR-9 owed. `officialRoutingProblems` refuses cms122 and cms125 today because both
+artifacts carry `AdvancedIllness` at **1000 of a declared 1997 codes**, retrieved by both ELMs, feeding
+the 66+/advanced-illness DENEX in each. Nothing else stands between them and the flip.
+
+**The first thing worth recording is what the research changed.** The cap had been carried as "VSAC caps
+expansions at 1000" — in the routing refusal's own error message, in ADR-036, in the roadmap. That is not
+where it comes from. `cqframework/dqm-content-qicore-2025`'s README says it outright: *"The value sets in
+this repository are limited to expansions of 1000"*, because full expansions require an NLM licence. It
+is **upstream policy, deliberate, and not a defect** — so there was never an upstream issue to file here,
+and no version of this that gets fixed by waiting. Meanwhile VSAC's published `OperationDefinition` for
+`$expand` does list `offset` and `count`, and `engine/cql/vsac-client.ts` has been paging them correctly
+since #295. The capability was never missing. What was missing was a bridge between the two terminology
+paths — and ADR-036 forbids the runtime having one, which is exactly right and is why this belongs at
+vendor time.
+
+**Shipped:** `vendor:official --complete-capped-expansions`. It re-expands only the OIDs upstream
+actually capped (today one, two requests per measure — this is not an import), pinned to
+`Library/ecqm-fhir-update-2025`: the release the upstream content repo itself names as its terminology
+package, and the same eCQM release CVU+ validates the 2026 reporting period against, so M-A and M-B stay
+on one terminology story rather than two. Completed codes are sorted `system|code` and deduped before
+they are written, because the sidecar is pinned by hash and therefore its byte order *is* the artifact;
+VSAC's page order is not a contract. Recorded in the manifest as a `completion` block naming the release,
+because re-expanding at a different pin is a different artifact.
+
+**Every failure path leaves upstream's codes exactly as shipped** — no flag, no key, VSAC unreachable
+after the bounded retry — so `truncated` survives and routing keeps refusing. The one that is not
+obvious, and the reason it is in the ADR: **a VSAC expansion that comes back SHORT of the declared total
+is rejected rather than merged.** Merging it would swap upstream's 1000 codes for a different,
+still-incomplete 800 — a narrowing dressed as a fix. Staying capped is loud; a wrong 800 is not.
+
+**Review tightened both of those, and the first was a real hole rather than a wording quibble.** The
+short check compared the RAW page total against `declaredTotal` while `canonicalize` deduped
+afterwards, so a response padded with duplicate `system|code` pairs could clear the bar and then shrink
+below it — replacing upstream's codes with a set that was short after all, which is precisely what the
+guard exists to prevent. It compares distinct codes now. Second, a count cannot tell "the full version
+of this set" from "a different set that happens to be bigger", so the completed expansion must now also
+CONTAIN every code upstream shipped; that is the check that would catch a wrong release pin, and it is
+also what settles the 2000-vs-1997 question below empirically — VSAC's 2000 do contain all 1000.
+
+**Verified before the docs were written, which is the part that made it worth doing this way:**
+
+- The no-flag path is **byte-identical** to the committed artifacts (`git diff --exit-code
+  measures/official` green after re-vendoring both measures), so this lands as a genuine no-op.
+- Against a stub VSAC serving 1997 codes in DESCENDING order across two pages: cms125 went 2043 → 3040
+  codes, `truncated` → `[]`, the `completion` block appeared, and the written codes came out ascending —
+  the sort is real, not incidental. Two consecutive runs produced the **same `terminology.sha256`**, so
+  CI's reproducibility check stays an honest check rather than a coin flip.
+- 11 new tests in `scripts/vsac-expansion.test.mjs` (the `test` glob now covers `scripts/**/*.test.mjs`).
+  They are mostly failure directions: short-expansion rejected, no-key/no-flag/VSAC-down all leave the
+  codes alone, a 4xx is not retried, a response with no `expansion` is refused rather than read as zero
+  codes, and offset advances by the page's own length so a short page still terminates.
+
+**Two tests had to stop asserting the blocker exists.** `official-terminology.test.ts` asserted
+`cappedExpansions(cms122).length > 0` — true only while the cap is unfixed, i.e. a guard scheduled for
+deletion by its own fix. The mechanism now runs against a synthetic manifest (never vacuous, never
+state-dependent), and the real artifacts are checked for the invariant that holds in **both** states:
+the manifest's caps, the sidecar's own `declaredTotal` shortfalls, and the routing decision all agree.
+That last comparison is new, and it is the one that matters — a manifest claiming `truncated: []` over a
+still-short sidecar would clear the refusal on a lie, and nothing looked for that before.
+
+**Landing order is load-bearing and the sequencing is the risk, not the code.** CI runs the same vendor
+command and then `git diff --exit-code measures/official`. Adding the `WORKWELL_VSAC_API_KEY_VENDOR`
+secret **without** committing the re-vendored manifests means CI completes the expansion while Git still
+records it as capped — red on every unrelated PR. The secret and the regenerated manifests land together;
+the reproducibility step now says so in its own `::error::` message. The secret is deliberately distinct
+from the runtime `WORKWELL_VSAC_API_KEY_TWH` even though both hold the same UMLS key: they serve the two
+terminology authorities ADR-036 exists to keep apart.
+
+**Owner step executed the same day (2026-07-29, later).** Secret set, both measures re-vendored with
+the key, manifests committed. Results, in the order they were checked:
+
+- `AdvancedIllness` completed **1000 → 2000 codes** in both artifacts; `truncated` → `[]`; a `completion`
+  block records the pin. Bundle `sha256` unchanged in both, so only terminology moved.
+- **Reproducible.** Two independent vendor runs, live VSAC both times: manifests *and* sidecars
+  byte-identical. That is the property CI's `git diff --exit-code` depends on, and it was worth proving
+  against the real service rather than the stub the branch was developed against.
+- `pnpm test:official-cases` **121/121** (CMS122 55/55, CMS125 66/66, 0 unexpected, 0 errors).
+- CI's four sidecar-dependent suites **24/24**, now actually executing instead of self-skipping.
+- Full suite **1568 / 1554 pass / 0 fail / 14 skipped**. The `#256` worker-pool parity failure recorded
+  below did **not** reproduce here (8/8 in isolation, 0 fail in the full run), which supports the
+  environmental read: this host runs Node 24.
+- `officialRoutingProblems(["cms122"])` and `(["cms125"])` both return **no problems**. The refusal that
+  has blocked those two measures since PR-7b is cleared. Nothing is routed — `WORKWELL_OFFICIAL_MEASURES`
+  remains unset on every stack.
+
+**One thing did not match the plan, and it is worth keeping.** VSAC at `ecqm-fhir-update-2025` returns
+**2000 codes for an OID the bundle declares as 1997**. The completion guard only rejects an expansion
+that comes back SHORT, so 2000 passes and `truncated` empties correctly. But the gap says upstream
+captured its `expansion.total` against a slightly different terminology snapshot than the release its own
+README points at. Three extra codes widen a denominator exclusion by a hair. No official test case moved
+and the corpus-outcomes check is unchanged, so there is nothing to fix — but "our terminology is not
+identical to what the bundle declares" is exactly the kind of fact that is cheap to write down now and
+expensive to rediscover during PR-9c's before/after distribution comparison.
+
+**Superseded — the original owner step, kept for the sequencing note:** run the two
+`--complete-capped-expansions`
+commands in DEPLOY.md §"Step 1a" with the UMLS key, confirm `pnpm test:official-cases` stays 121/121
+(its own analysis already reports "Value-set-cap effects: 0 observed", so a moved case would be the
+finding rather than a failure), and commit the regenerated manifests + report alongside adding the
+secret. Completing the expansion moves `manifest.terminology.sha256` and therefore `officialLogicVersion`
+(ADR-040), invalidating cached `eval_state` rows for those measures — designed behaviour; the terminology
+digest is in that identity for exactly this case.
+
+**Verification:** typecheck clean; `pnpm test` **1553 pass / 1 fail / 14 skipped**. The one failure is
+`PARITY (#256): --workers 2 produces the identical outcome set as --workers 1` — and it is **not this
+branch**: it reproduces identically on a clean `main` tree with these changes stashed. Its shape is worth
+recording because it looks alarming and is not — the workers *ran* (`evaluated ~6/6 subjects (2
+workers)`) but every subject error-isolated to MISSING_DATA, i.e. in-worker evaluation threw rather than
+the pool crashing. Most likely the `tsx` loader hook not reaching `node:worker_threads` on this
+container's Node 22; CI runs Node 24, where the suite is green on `main`. Filed here rather than fixed
+because it is environmental to the dev container and orthogonal to terminology vendoring — but if it ever
+shows up on a CI runner it is a real correctness bug in the scale path, not a flake.
+
+ADR-041 records the decisions. Still nothing routed: `WORKWELL_OFFICIAL_MEASURES` remains unset
+everywhere, and PR-9b (the WebChart × official-routing refusal, and the live-path official gate that does
+not exist yet) is next.
+
 ## 2026-07-28 (later) — PR-8 (remaining), part 2: measure-major batching + the retrieve check (branch `feat/official-measure-batching`)
 
 The last item before PR-9. Two things shipped together because the second only becomes possible once the
@@ -520,7 +639,7 @@ SNOMED CT codes and this repo is public. PR-7a then filled the hole by expanding
 bundle's own** expansions. So the gate ran one terminology and production would run another, and
 121/121 green proved nothing about the path that matters — the single thing that gate exists to do.
 
-The approved plan had already ruled it out, in as many words (§4.3): *"Runtime never mixes two
+The approved plan had already ruled it out, in as many words (§7.3): *"Runtime never mixes two
 terminology authorities."* I drifted from it and did not notice until I went looking for something else.
 
 **The wrong fix, measured and rejected.** Restoring the ValueSets to `bundle.json` costs +605 KB
@@ -529,7 +648,7 @@ from a public repo. The vendor script's own header said so; I was most of the wa
 before reading it. Fifth time this project a confident claim has been overturned by reading or running
 the thing rather than reasoning about it.
 
-**What shipped instead** — the shape §4.3 and the §8 risk table both prescribe ("public package =
+**What shipped instead** — the shape §7.3 and the §8 risk table both prescribe ("public package =
 fetch-at-build"):
 
 - `vendor:official` writes the artifact's OWN expansions, at the same pinned commit as the ELM, to

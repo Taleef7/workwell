@@ -1,5 +1,5 @@
 /**
- * The OFFICIAL terminology for a vendored measure artifact (roadmap §4.3, §7.4 PR-8a).
+ * The OFFICIAL terminology for a vendored measure artifact (roadmap §7.3, §7.4 PR-8a).
  *
  * ## Why this exists — the gap it closes
  *
@@ -185,9 +185,11 @@ export function officialTerminologyExpander(
  * Capped expansions the manifest recorded, restricted to the ones this measure's ELM actually
  * retrieves. `officialRoutingProblems` REFUSES on a non-empty result.
  *
- * This is the failure one notch weaker than the empty-set case, and the more dangerous for it. VSAC
- * caps an expansion at 1000 codes; `expandArtifactTerminology` refuses only on *empty*, so a 50%
- * expanded set sails through preflight. `AdvancedIllness` (1000 of 1997) is exactly that, and it feeds
+ * This is the failure one notch weaker than the empty-set case, and the more dangerous for it. Upstream
+ * ships every expansion truncated at 1000 codes as a matter of licensing policy, not because VSAC is
+ * limited; `expandArtifactTerminology` refuses only on *empty*, so a 50%
+ * expanded set sails through preflight. `AdvancedIllness` was exactly that (1000 of 1997) until ADR-041
+ * completed it at vendor time, and it feeds
  * the 66+/advanced-illness denominator exclusion in BOTH vendored measures — so routing with it capped
  * would leave excluded subjects in the denominator and score them, producing a wrong regulatory rate
  * with no signal anywhere. Recording it was never enough; the guard has to be able to say no.

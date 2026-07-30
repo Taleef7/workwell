@@ -52,15 +52,76 @@ from, and the committed manifest's SHA-256 pins the bytes:
   with: { node-version: 24 }
 - name: Vendor official terminology into the build context
   working-directory: backend-ts
+  env:
+    WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
   run: |
-    node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
-    node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations
+    node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+    node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
 ```
 
 Invoked as plain `node` — the script imports nothing outside node built-ins and global `fetch`, so this
 needs no install and no package manager on the deploy path. It retries transport errors and 5xx with
 backoff (a 30-second GitHub blip must not block an emergency **rollback**, which rebuilds the image); a
 4xx at an immutable pin means the path is wrong and is never retried.
+
+#### Step 1a — `--complete-capped-expansions`: the VSAC-capped `AdvancedIllness` set (ADR-041)
+
+Upstream limits every expansion it ships to 1000 codes (its README says so; full expansions need an NLM
+licence). One of them matters: `AdvancedIllness` (`2.16.840.1.113883.3.464.1003.110.12.1082`) is **1000
+of a declared 1997** in both bundles and feeds the 66+/advanced-illness denominator exclusion in each.
+A capped exclusion set does not error — it narrows a population silently — so
+`officialRoutingProblems` **refuses to route any measure whose ELM retrieves one**. This flag completes
+the shortfall from VSAC at vendor time, paging `offset`/`count` against the release the upstream content
+itself names (`Library/ecqm-fhir-update-2025`, the same eCQM release CVU+ validates the 2026 reporting
+period against). Only the capped OIDs are re-expanded — today one, two requests per measure.
+
+| `WORKWELL_VSAC_API_KEY_VENDOR` | effect |
+|---|---|
+| set, VSAC reachable | the shortfall is completed, `truncated` empties, and `manifest.terminology.completion` records the release the codes came from. **The normal path.** |
+| set, VSAC unreachable or refusing | the script warns and leaves upstream's capped codes, so the regenerated manifest no longer matches the committed one and **the deploy FAILS at the reproducibility gate below.** No image is built |
+| unset | identical to the row above — capped codes, mismatched manifest, **deploy fails** |
+
+> **⚠ Since the completed manifests were committed, a deploy needs VSAC.** Before ADR-041 the committed
+> manifests recorded the capped expansion, so a missing key was a no-op and the deploy proceeded. That is
+> no longer true: the committed manifests only reproduce with a working key against a reachable NLM
+> service, and both deploy workflows run `git diff --exit-code backend-ts/measures/official` immediately
+> afterwards. **An NLM outage now blocks production deploys.** That is fail-closed rather than
+> fail-quiet — the alternative is shipping an image whose sidecar the runtime would refuse, silently
+> degrading the literal fidelity diff — but it is a real new coupling and it has one sharp edge worth
+> knowing before you need it:
+>
+> **Rolling back still works. Rolling forward during a VSAC outage does not.** Redeploying a pre-ADR-041
+> SHA is unaffected (those manifests are the capped ones, and that revision's workflow does not pass the
+> flag). Redeploying any post-ADR-041 SHA while NLM is down will fail. If you need to ship during an
+> outage, roll back to a pre-ADR-041 image rather than fighting the gate.
+
+> **This is a different secret from `WORKWELL_VSAC_API_KEY_TWH`, deliberately, even though both hold the
+> same UMLS key.** The `_TWH` one is *runtime* — it drives the authored engine's live VSAC resolver
+> (ADR-023). `_VENDOR` is *build-time* — it vendors the official artifact's own expansions. ADR-036
+> exists to keep those two terminology authorities apart; one secret name would invite exactly the
+> conflation it forbids.
+
+> **⚠ Landing order (this WILL turn CI red — and BLOCK DEPLOYS — if done backwards).** CI runs the same
+> command and then `git diff --exit-code measures/official`. Adding the secret without also committing
+> the re-vendored manifests means CI completes the expansion while Git still records it as capped, and
+> that check fails on every unrelated PR. **Both deploy workflows carry the same gate** (`git diff
+> --exit-code backend-ts/measures/official`), so the next push to `main` fails its deploy too and the
+> live stack stops updating until the manifests land — fail-closed, but it is a production-visible
+> outage of the deploy path, not just a red check. **Add the secret and commit the regenerated manifests
+> in the same change:**
+>
+> ```bash
+> cd backend-ts
+> WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
+>   --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+> WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
+>   --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+> git diff measures/official          # terminology.sha256 moves; truncated → []; completion block appears
+> pnpm test:official-cases            # expect 121/121 unchanged, then commit the regenerated report
+> ```
+>
+> Completing the expansion changes `manifest.terminology.sha256` and therefore `officialLogicVersion`
+> (ADR-040), which invalidates cached `eval_state` rows for those measures. That is designed behaviour.
 
 **Both the production and the staging workflow run this step.** Omitting it does not fail the build — it
 degrades behaviour silently, which is why it is written down here:
@@ -109,6 +170,7 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 | `DATABASE_URL_TWH` | Neon pooled connection string for TWH instance |
 | `OPENAI_API_KEY` | AI services (Draft Spec, Explain Why Flagged) |
 | `WORKWELL_AUTH_JWT_SECRET_TWH` | JWT signing secret for TWH instance |
+| `WORKWELL_VSAC_API_KEY_VENDOR` | **Build-time** UMLS key used by `vendor:official --complete-capped-expansions` (ADR-041). Read by CI *and* both deploy workflows. Optional — unset means capped expansions ship as upstream sent them and official routing refuses. Distinct from the runtime `WORKWELL_VSAC_API_KEY_TWH`; see Step 1a above |
 
 The deploy workflow maps these `*_TWH` GitHub secrets onto the backend container's runtime
 environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
@@ -610,7 +672,7 @@ shows all services `Up`).
 | `WORKWELL_IMMZ_ICE_BASE_URL` | Backend | Base URL of a self-hosted **ICE** sidecar (ADR-029), e.g. `http://ice:8080/opencds-decision-support-service`. **Selects the real ICE forecaster on its own** — a self-hosted sidecar has no API key. **Inert unless set — the demo stack leaves it unset** (the simulated forecaster serves; behavior is byte-identical). See "Immunization forecasting (ICE sidecar)" below. |
 | `WORKWELL_IMMZ_ICE_API_KEY` | Backend | Optional bearer token, only if ICE is fronted by an authenticating proxy. It **never selects** the seam by itself. |
 | `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
-| `WORKWELL_INCREMENTAL_EVAL` | Backend | Optional `"true"` to enable incremental/delta batch evaluation (#263/ADR-035): a population run reuses a subject's prior CQL outcome (copy-forward) when its data + logic are unchanged and its status can't have moved, instead of re-running the ~68 ms CQL. **Inert unless `"true"`** — the demo stack leaves it unset, so no `eval_state` row is written and the run loop is byte-identical. Descriptive only (ADR-008): reuse never authors a status. Reversible cache — `DELETE FROM eval_state`. The boot seam line reports `incremental-eval=on|off`. Safe alongside official routing since ADR-040, **when that becomes reachable** (no measure can be routed today — the capped `AdvancedIllness` expansion is a construction-time refusal, roadmap §4.3): an official-routed measure is **not reused at all** while its adapter is still changing, so a flip needs no manual `DELETE` and cannot serve an outcome the previous adapter produced. Such a measure's rows are still written, carrying the ARTIFACT's identity (`official-fqm:<version>:<artifactSha>:<terminologySha>`) rather than the authored ELM hash, so flipping on, flipping off, or re-vendoring is self-invalidating whenever reuse is re-enabled. Most useful once the WebChart live tenant is on (real data, fixed exam dates), where across-day reuse pays off; the synthetic tenants regenerate bundles per date, so it saves only same-day reruns for them. |
+| `WORKWELL_INCREMENTAL_EVAL` | Backend | Optional `"true"` to enable incremental/delta batch evaluation (#263/ADR-035): a population run reuses a subject's prior CQL outcome (copy-forward) when its data + logic are unchanged and its status can't have moved, instead of re-running the ~68 ms CQL. **Inert unless `"true"`** — the demo stack leaves it unset, so no `eval_state` row is written and the run loop is byte-identical. Descriptive only (ADR-008): reuse never authors a status. Reversible cache — `DELETE FROM eval_state`. The boot seam line reports `incremental-eval=on|off`. Safe alongside official routing since ADR-040, **when that becomes reachable** (cms122 and cms125 are routable since ADR-041 completed the capped `AdvancedIllness` expansion, but nothing is routed — `WORKWELL_OFFICIAL_MEASURES` is unset everywhere): an official-routed measure is **not reused at all** while its adapter is still changing, so a flip needs no manual `DELETE` and cannot serve an outcome the previous adapter produced. Such a measure's rows are still written, carrying the ARTIFACT's identity (`official-fqm:<version>:<artifactSha>:<terminologySha>`) rather than the authored ELM hash, so flipping on, flipping off, or re-vendoring is self-invalidating whenever reuse is re-enabled. Most useful once the WebChart live tenant is on (real data, fixed exam dates), where across-day reuse pays off; the synthetic tenants regenerate bundles per date, so it saves only same-day reruns for them. |
 | `WORKWELL_BUCKET_S3_BUCKET` | Backend | Durable evidence bucket name (#167/ADR-030). Selects the S3-backed evidence bucket **only together with** the key id + secret below (all three required; inert otherwise — evidence falls back to the in-container `fs` BUCKET binding). **Set on the live TWH stack since 2026-07-14** (`workwell-twh-evidence`). |
 | `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` | Backend | Access key id for the evidence bucket (from the `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` GitHub secret; least-privilege IAM user `workwell-twh-app`). |
 | `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` | Backend | Secret access key for the evidence bucket (from the `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secret). |

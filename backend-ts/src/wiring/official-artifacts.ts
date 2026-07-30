@@ -47,6 +47,22 @@ export interface OfficialManifest {
     valueSets: number;
     codes: number;
     truncated: Array<{ oid: string; have: number; declaredTotal: number }>;
+    /**
+     * Present only when `vendor:official --complete-capped-expansions` actually replaced a shortfall
+     * upstream shipped (PR-9). Optional in the TYPE because an artifact vendored without the flag —
+     * or one vendored before it existed — has no such block, and that must read as "nothing was
+     * completed" rather than as a crash.
+     *
+     * The `manifest` field is the VSAC release the codes came from, and it is load-bearing rather
+     * than decorative: re-expanding at a different release yields different codes, a different
+     * terminology digest, and therefore a different `officialLogicVersion`. Recording it is what
+     * makes the completion reproducible instead of merely repeatable.
+     */
+    completion?: {
+      source: string;
+      manifest: string;
+      valueSets: Array<{ oid: string; had: number; now: number; declaredTotal: number }>;
+    };
     sha256: string;
   };
   sha256: string;

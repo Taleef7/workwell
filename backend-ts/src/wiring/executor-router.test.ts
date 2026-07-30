@@ -193,14 +193,17 @@ test("officialRoutingProblems names the gate, the artifact, and the semantics se
   const stub = { loadTerminology: terminologyPresent };  // caps deliberately NOT stubbed here
   assert.deepEqual(officialRoutingProblems({}, stub), [], "unset is always legal");
 
-  // NOT asserted as an empty list: cms122 and cms125 both currently carry a REAL capped expansion
-  // (AdvancedIllness, 1000 of 1997 codes, retrieved by both ELMs), so the honest answer today is that
-  // neither is routable until PR-9 completes it from VSAC. That refusal is the point — asserting []
-  // here would have meant deleting the guard the moment it started working.
+  // NOT asserted as an empty list, and NOT asserted as non-empty either. Both vendored artifacts
+  // carry a REAL capped expansion as upstream ships them (AdvancedIllness, 1000 of 1997 codes,
+  // retrieved by both ELMs), so today neither is routable — and once `vendor:official
+  // --complete-capped-expansions` has run against a re-vendored artifact, both are. What must hold in
+  // either state is that a capped expansion is the ONLY thing still standing between these two
+  // measures and routing: any other problem here is a regression in an earlier check.
   const vendored = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122,cms125" }, stub);
-  assert.ok(
-    vendored.every((p) => /expands to only \d+ of \d+ codes/.test(p)),
-    `the only outstanding problems should be the capped expansion: ${JSON.stringify(vendored)}`,
+  assert.deepEqual(
+    vendored.filter((p) => !/expands to only \d+ of \d+ codes/.test(p)),
+    [],
+    `the only outstanding problems should be capped expansions: ${JSON.stringify(vendored)}`,
   );
 
   // ALL the problems, not the first: an operator fixing one at a time, learning about the next only
@@ -210,6 +213,28 @@ test("officialRoutingProblems names the gate, the artifact, and the semantics se
   assert.equal(problems.length, 2);
   assert.match(problems[0]!, /cms130: not covered by the official MADiE test-case gate/);
   assert.match(problems[1]!, /cms130: no executable official artifact is vendored/);
+});
+
+// The assertion above is deliberately state-tolerant, which means that since ADR-041 completed the
+// expansions it passes VACUOUSLY: `cappedFor` returns [] for both real artifacts, so deleting the
+// capped-expansion loop from `officialRoutingProblems` would leave this file green. That is the same
+// shape as the ADR-036 finding this repo already caught once — `cappedExpansions` was documented as a
+// guard while having no production caller — so the guard gets a test that does not depend on what the
+// vendored artifacts happen to contain today.
+test("a capped expansion the ELM retrieves REFUSES routing, whatever the real artifacts hold", () => {
+  const capped = {
+    ...offlineChecks,
+    cappedFor: () => [{ oid: "2.16.840.1.113883.3.464.1003.110.12.1082", have: 1000, declaredTotal: 1997 }],
+  };
+
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" }, capped);
+
+  assert.equal(problems.length, 1, `exactly the capped-expansion problem: ${JSON.stringify(problems)}`);
+  const [problem = ""] = problems;
+  assert.match(problem, /expands to only 1000 of 1997 codes/);
+  // The remedy has to be in the message. A warning printed at vendor time is long gone by the time
+  // someone sets the flag and hits this.
+  assert.match(problem, /--complete-capped-expansions/);
 });
 
 test("a missing terminology sidecar is a routing problem, named as a build step", async () => {
