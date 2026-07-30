@@ -287,7 +287,15 @@ marks the run `PARTIAL_FAILURE` and alerts. Decisively: **cohort composition var
 routing this measure" is not a remedy an operator can apply. So the executor reports honestly, the run
 pipeline emits a **`WARN`** naming both causes, the run still reports `COMPLETED` with evidence intact, and
 `undefined` membership means UNKNOWN (the authored engine never sets `inInitialPopulation`, so treating
-absent as false would WARN on every batched authored measure). **Enforcement lives at the FLIP GATE**
+absent as false would WARN on every batched authored measure). The WARN reads the **final per-subject
+outcomes after the evaluation loop**, not the batch pre-pass — review (#354) showed a pre-pass conclusion
+judges an INCOMPLETE roster, since an omitted subject is re-evaluated individually later, and is wrong both
+ways (warns when the omitted subject is in the population; stays silent when the batched sample is 1). It is
+therefore no longer gated on the batch path. **Its reach is narrower than first claimed:** the run *message*
+is returned on the SYNCHRONOUS response only — every `ALL_PROGRAMS`/`SITE` run, and a `MEASURE` run on a
+WebChart-configured stack (the very configuration this exists for), goes through `scheduleAsyncRun` and
+discards it; `RunRecord` has no message column and neither read model carries one, so there the warning is
+`run_logs` + the run's log timeline, not the run list. Persisting it needs an owner-owned `runs` column. **Enforcement lives at the FLIP GATE**
 (`devdb-official-eval.test.ts` + a **written pre-flip checklist**, now in `DEPLOY.md` §"Flipping a measure to
 official execution" — confirm a non-zero initial population against the tenant's own data; the ADR first
 named that checklist without one existing, and the `WORKWELL_OFFICIAL_MEASURES` env row was missing from

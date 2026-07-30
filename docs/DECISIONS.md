@@ -35,9 +35,22 @@ false positive recurs and whose prescribed fix does not exist is worse than the 
    roster out of the IPP, evidence intact. The two causes — data missing an element the IPP reads, versus
    nobody qualifying — are indistinguishable from inside the executor, and a check that cannot tell them
    apart must not destroy the benign one.
-2. **The run pipeline surfaces it as a `WARN`**, in the batch pre-pass beside the existing INFO line, naming
-   both possible causes and pointing at `WEBCHART_FHIR_MAPPING.md` §3.1 for the known one. Best-effort, like
-   every other observability write there: an observability write must never author an outcome.
+2. **The run pipeline surfaces it as a `WARN`**, naming both possible causes and pointing at
+   `WEBCHART_FHIR_MAPPING.md` §3.1 for the known one. Best-effort, like every other observability write
+   there: an observability write must never author an outcome.
+
+   **Read AFTER the evaluation loop, from the final per-subject outcomes — not in the batch pre-pass.**
+   *(Corrected 2026-07-30; the first version concluded in the pre-pass, off the prefetched map alone.)* A
+   subject the executor returns nothing for is deliberately absent from the batch result and is
+   re-evaluated individually later in the loop, so a pre-pass conclusion judges an **incomplete roster**
+   and is wrong in both directions: a batch of two out-of-IPP outcomes plus one omission warns even when
+   the omitted subject then lands squarely in the population, and one out-of-IPP outcome plus two
+   omissions stays silent because the sample size failed its own `> 1` guard — the exact silence this ADR
+   exists to end. Membership is a property of the finished roster, so it is decided where the roster is
+   finished. Both directions are pinned as tests that fail against the pre-pass version.
+
+   A consequence of moving it: the check is **no longer gated on the batch path**. An official measure
+   evaluated one subject at a time reports membership just the same, and the hazard is identical.
 3. **`undefined` membership means UNKNOWN, not out-of-population.** `inInitialPopulation` is optional on
    `MeasureOutcome` and the authored engine never sets it, so only outcomes that actually report membership
    are reasoned about. Treating absent as false would WARN on every batched authored measure the day one
@@ -79,6 +92,16 @@ false positive recurs and whose prescribed fix does not exist is worse than the 
 - **A `WARN` is weaker than the #264 alert**, which fires only on `FAILED`/`PARTIAL_FAILURE` terminals. That
   is the price of not corrupting valid runs. If a stronger non-failing signal is wanted later, the right
   shape is a run-summary warning count, not a terminal change.
+- **How far the warning actually reaches, stated exactly — the first version overclaimed it** (Codex, #354).
+  It is echoed into the run **message**, but that message is returned on the **synchronous** response only.
+  Every `ALL_PROGRAMS` and `SITE` run, and a `MEASURE` run on a WebChart-configured stack — *precisely the
+  configuration this warning exists for* — goes through `scheduleAsyncRun`, which answers the POST with the
+  `RUNNING` response and discards the finishing one. `RunRecord` has no message column and neither
+  `RunListItem` nor `RunSummary` carries a message, so the polling UI shows only `COMPLETED`. For those runs
+  the warning lives in `run_logs`, which **is** reachable (`GET /api/runs/:id/logs`, and the runs page
+  fetches it for the selected run) but only as a timeline entry an operator opens — not on the run list.
+  So "no longer silent" is accurate; "visible on the run list" was not. Persisting it onto the run needs a
+  `runs` column, and **schema is owner-owned** — recorded here as a follow-up rather than smuggled in.
 - **A PARTIAL collapse is not caught, and that is the more likely live failure.** The check is
   all-or-nothing: one subject in the initial population silences it entirely (deliberately — a
   mostly-ineligible roster is the ordinary shape of a screening measure, and tested as such). But the
